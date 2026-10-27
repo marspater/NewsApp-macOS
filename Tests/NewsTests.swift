@@ -1,5 +1,4 @@
-// NewsTests.swift
-
+import AppIntents
 import CryptoKit
 import Darwin
 import Foundation
@@ -8,6 +7,7 @@ import NaturalLanguage
 import Network
 import SQLite3
 import UniformTypeIdentifiers
+import UserNotifications
 import WebKit
 
 #if canImport(FoundationModels)
@@ -63,7 +63,9 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
-func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String, file: String = #file, line: Int = #line) {
+func assertEqual<T: Equatable>(
+    _ actual: T, _ expected: T, _ message: String = "", file: String = #file, line: Int = #line
+) {
     if actual != expected {
         print("❌ ASSERTION FAILED: \(message)")
         print("   Expected: \(expected)")
@@ -73,7 +75,7 @@ func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String, fi
     }
 }
 
-func assertTrue(_ condition: Bool, _ message: String, file: String = #file, line: Int = #line) {
+func assertTrue(_ condition: Bool, _ message: String = "", file: String = #file, line: Int = #line) {
     if !condition {
         print("❌ ASSERTION FAILED: \(message) (expected true, got false)")
         print("   Location: \(file):\(line)")
@@ -81,7 +83,7 @@ func assertTrue(_ condition: Bool, _ message: String, file: String = #file, line
     }
 }
 
-func assertFalse(_ condition: Bool, _ message: String, file: String = #file, line: Int = #line) {
+func assertFalse(_ condition: Bool, _ message: String = "", file: String = #file, line: Int = #line) {
     if condition {
         print("❌ ASSERTION FAILED: \(message) (expected false, got true)")
         print("   Location: \(file):\(line)")
@@ -356,6 +358,12 @@ struct NewsTests {
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--notification-priority-live"),
+            CommandLine.arguments.count > index + 2
+        {
+            try measureLivePriority(path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--images-live"), CommandLine.arguments.count > index + 2 {
             try await measureLiveImages(
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
@@ -562,6 +570,10 @@ struct NewsTests {
                 verdictsOnly: CommandLine.arguments.contains("--verdicts-only"))
             return
         }
+        if CommandLine.arguments.contains("--export-categories") {
+            try await exportCategorySample()
+            return
+        }
         if CommandLine.arguments.contains("--event-corpus") {
             guard let path = ProcessInfo.processInfo.environment["NEWS_EVENT_CORPUS"] else {
                 print("❌ Set NEWS_EVENT_CORPUS to a labeled event corpus JSON file")
@@ -641,6 +653,7 @@ struct NewsTests {
             try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
             try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
             try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
+            testOverviewVerifierControls()
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
@@ -716,6 +729,7 @@ struct NewsTests {
         try await testUserMuting()
         try await testTensionMethodology()
         try await testWorldTension()
+        testWorldTensionSmoothing()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         testReaderExtractionFidelity(fixtureRoot: fixtureRoot)
@@ -750,6 +764,7 @@ struct NewsTests {
         try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
         try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
         try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
+        testOverviewVerifierControls()
         try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
         try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
         try await testOverviewTimeline(fixtureHost: fixtureHost)
@@ -798,6 +813,16 @@ struct NewsTests {
         await testDesignSystemAndArticleFilter()
         await testDistributionAndEntitlementsIntegrity()
         await testStrictSemVerAndReleaseSecurity()
+        await testUpdateCheckerThrottleWithClock()
+        await testUpdateCheckerVersionComparisonAndErrors()
+        await testUpdateCheckerAdversarialEdgeCases()
+        await testNewsURLParserAndSchemeRouting()
+        await testAppIntentsExecutionAndValidation()
+        await testAppShortcutsProviderDeclarations()
+        try await testSpotlightSavedStoriesIndexing()
+        await testNotificationActionsAndRouting()
+        await testMenuBarExtraSettingsAndUnreadCount()
+        await EpicNE2ETests.run()
         await testNotificationModeTriageAndGrammar()
         await testCompletionOnce()
         try await testSocketNetworkBoundary()
@@ -817,6 +842,8 @@ struct NewsTests {
         await testInteractiveAnalysisCancellation()
         try await testGranularCacheClearingAndRetention()
         await testNotificationServiceErrorLogging()
+        try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot)
+        try await testNotificationLanesAcrossRefreshes(fixtureRoot: fixtureRoot)
         await testArticleStoreErrorResilience()
         await testSystemErrorHardeningAndResilience()
         await testFeedArticleWrapContextNavigation()
@@ -1108,7 +1135,7 @@ struct NewsTests {
         let shrinkPath = directory.appendingPathComponent("shrink.sqlite3").path
         let shrinkDB = DatabaseEngine(path: shrinkPath)
         try await shrinkDB.open()
-        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "27", "New database opens at schema v26")
+        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "27", "New database opens at schema v27")
         assertEqual(value(shrinkPath, "PRAGMA auto_vacuum;"), "2", "New database uses incremental auto_vacuum (2)")
 
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -1575,7 +1602,7 @@ struct NewsTests {
         // Overview generation & cached lookup (#104, #153)
         let eventArticles = Array(archive.prefix(3))
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
         for i in 0..<10 {
             let start = ProcessInfo.processInfo.systemUptime
             let doc = await coordinator.requestOverview(
@@ -1923,7 +1950,7 @@ struct NewsTests {
                 node.isReaderExcluded, excluded, "Cached exclusion regex preserves token boundaries and case matching")
         }
         let topic = await ArticleClassifier.shared.classify(
-            title: "NASA launches space telescope", description: "Astronomy mission", allowFoundationModels: false)
+            title: "NASA launches space telescope", description: "Astronomy mission")
         assertEqual(topic.category, "Science", "Cheap ingestion classification works without generative inference")
         let pipeline = ContentExtractionPipeline.shared
         assertEqual(
@@ -2471,6 +2498,15 @@ struct NewsTests {
                     if case .blocked = result { return true }
                     return false
                 }(), "Injected DNS cannot bypass hostname/literal guards")
+        }
+        for (host, address) in [("93.184.216.34", "93.184.216.34"), ("[2606:4700::1111]", "2606:4700::1111")] {
+            let result = IPAddressValidator.validateHost(
+                host,
+                resolver: { _ in
+                    assertTrue(false, "Public literals never depend on host DNS or configured address families")
+                    return .unresolvable(reason: "No IPv4 interface configured")
+                })
+            assertEqual(result, .allowed(ips: [address]), "A public literal pins itself without resolution")
         }
 
         // 1. Literal IPv4 Loopback & Private
@@ -3523,12 +3559,13 @@ struct NewsTests {
         assertEqual(manager.articles.count, 1, "Collected articles are published while triage is still running")
         assertEqual(manager.feedStatuses[feed], .idle, "The feed reports a finished refresh")
         let second = Task { await manager.fetchFeedsAsync() }  // Cmd-R during triage
-        await eventually("A refresh requested during triage collects again") { await gate.arrivals == 2 }
-        assertEqual(await counter.value, 2, "Cmd-R is not coalesced onto follow-up work")
-        assertEqual(manager.articles.count, 2, "Cmd-R publishes new articles immediately")
+        await eventually("A refresh requested during triage collects again") { await counter.value == 2 }
+        await eventually("Cmd-R publishes new articles immediately") { manager.articles.count == 2 }
+        assertEqual(await gate.arrivals, 1, "Its notification pass waits for the one in progress (#665)")
         await gate.open()
         await first.value
         await second.value
+        assertEqual(await gate.arrivals, 2, "Then its notification pass runs")
         manager.stopBackgroundWork()
 
         // Background classification stops under Low Power Mode or thermal pressure, and otherwise runs through the shared queue.
@@ -3921,6 +3958,24 @@ struct NewsTests {
             "Each covering topic is reported")
         assertEqual(MuteRules(sources: rules.sources, topics: rules.topics), rules, "Stored rules restore unchanged")
 
+        // A topic set mutes its fixed phrases with one switch (#590); whole words keep "Dubai" and "aid" visible.
+        let aiSet = MuteTopicSet.artificialIntelligence.id
+        var sets = MuteRules()
+        assertTrue(sets.addTopicSet(aiSet), "A known topic set switches on")
+        assertFalse(sets.addTopicSet(aiSet), "A topic set switches on once")
+        assertFalse(sets.addTopicSet("unknown-set"), "Unknown sets are ignored")
+        assertFalse(sets.isEmpty, "A switched-on set is a muting rule")
+        assertTrue(
+            sets.mutesTopic(title: "OpenAI says its agents disabled their own safety monitors", description: ""),
+            "A set phrase matches as a whole word in the headline")
+        assertTrue(sets.mutesTopic(title: "Firms rush to adopt A.I. tools", description: ""), "A.I. matches")
+        assertFalse(sets.mutesTopic(title: "Dubai aid flight lands in Gaza", description: ""), "Dubai and aid stay")
+        assertFalse(sets.mutesTopic(title: "Claudette reopens", description: "Said the mayor"), "Longer words stay")
+        assertEqual(sets.matchedTopicSets(title: "AI startup raises funds", description: ""), [aiSet], "Sets report")
+        assertEqual(MuteRules(topicSets: sets.topicSets), sets, "Stored sets restore unchanged")
+        sets.removeTopicSet(aiSet)
+        assertTrue(sets.isEmpty, "Switching a set off removes every phrase")
+
         // SQLite applies muting before LIMIT and reports what it hid.
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -3971,6 +4026,17 @@ struct NewsTests {
         assertEqual(ruleCounts.sources, ["example.com": 2], "Settings count the stories each source rule covers")
         assertEqual(
             ruleCounts.topics, ["Climate change": 1, "art": 1], "Settings count the stories each topic rule covers")
+        try await db.upsertArticles([
+            story(7, "https://other.org/7", "OpenAI agents disabled monitors"),
+            story(8, "https://other.org/8", "Dubai aid flight lands", "AIDS research funded"),
+        ])
+        let aiMuting = MuteRules(topicSets: [aiSet])
+        assertEqual(
+            try await db.mutedArticleCount(muting: aiMuting), 1, "SQLite hides a set's stories by whole words only")
+        assertEqual(
+            try await db.fetchArticles(limit: nil, muting: aiMuting).count, stories.count + 1,
+            "The SQLite and Swift paths agree on what a set hides")
+        assertEqual(try await db.mutedRuleCounts(aiMuting).topicSets, [aiSet: 1], "Settings count a set's stories")
         await db.close()
 
         // Rules persist with the reader's settings; Unmute All clears them.
@@ -3986,6 +4052,11 @@ struct NewsTests {
         assertEqual(AppSettings(defaults: defaults).muteRules, settings.muteRules, "Muting persists across launches")
         settings.unmuteTopic("Election")
         assertEqual(AppSettings(defaults: defaults).muteRules.topics, [], "Unmuting a topic is stored")
+        settings.setTopicSet(aiSet, muted: true)
+        assertEqual(AppSettings(defaults: defaults).muteRules.topicSets, [aiSet], "A switched-on set is stored")
+        settings.setTopicSet(aiSet, muted: false)
+        assertEqual(AppSettings(defaults: defaults).muteRules.topicSets, [], "Switching a set off is stored")
+        settings.setTopicSet(aiSet, muted: true)
         settings.clearMuting()
         assertTrue(AppSettings(defaults: defaults).muteRules.isEmpty, "Unmute All clears the stored rules")
 
@@ -4005,6 +4076,62 @@ struct NewsTests {
         assertEqual(notified, [stories[3].title], "Only unmuted new stories notify")
         assertEqual(manager.articles.count, 2, "Muted stories are still stored")
         manager.stopBackgroundWork()
+    }
+
+    /// Methodology v3 (#585): the shown reading is the 7-day weighted average of accepted assessments plus momentum;
+    /// estimates are shown as they are and never enter the average.
+    static func testWorldTensionSmoothing() {
+        print("  - Testing World Tension methodology v3: 7-day average, momentum and estimate exclusion (#585)...")
+        let day0 = TensionMethodology.day(containing: Date(timeIntervalSince1970: 1_780_000_000)).start
+        func reading(_ offset: Int, _ score: Int, estimate: Bool = false) -> WorldTensionReading {
+            WorldTensionReading(
+                evaluatedAt: day0.addingTimeInterval(Double(offset) * 86400 + 3600), inputHash: "hash-\(offset)",
+                modelGeneration: "generation",
+                headlines: [WorldTensionHeadline(id: "C1", title: "Airstrikes hit the port", publisher: "Panel")],
+                assessment: WorldTensionAssessment(
+                    score: score, summary: String(repeating: "s", count: 30), reasons: [],
+                    isEstimate: estimate ? true : nil))
+        }
+        func shown(_ history: [WorldTensionReading], day offset: Int) -> Int? {
+            WorldTensionSmoothing.displayed(history).first { $0.id == day0.addingTimeInterval(Double(offset) * 86400) }?
+                .assessment.score
+        }
+        let single = [reading(0, 40)]
+        assertEqual(shown(single, day: 0), 40, "One assessment is its own reading")
+        assertEqual(
+            WorldTensionSmoothing.displayed(single)[0].assessment.assessedScore, nil,
+            "The assessed score is noted only when the reading differs")
+        // 10, 20, 30 on consecutive days: 0.25 × 30 + 0.75 × (0.25 × 20 + 0.75 × 10) = 16.875 → 17, two rises +6.
+        let rising = [reading(0, 10), reading(1, 20), reading(2, 30)]
+        assertEqual(shown(rising, day: 2), 23, "The weighted average plus 3 per consecutive rise")
+        assertEqual(shown(rising, day: 1), 16, "12.5 rounds away from zero to 13, plus one rise")
+        assertEqual(
+            WorldTensionSmoothing.displayed(rising)[2].assessment.assessedScore, 30,
+            "Today's own assessment travels with the blended reading")
+        let surge = (0...5).map { reading($0, 10 + $0 * 15) }
+        assertEqual(
+            shown(surge, day: 5) ?? 0, Int((WorldTensionSmoothing.displayedScore(for: surge[5], in: surge))),
+            "displayedScore and displayed agree")
+        var average = 10.0
+        for score in [25.0, 40.0, 55.0, 70.0, 85.0] { average = 0.25 * score + 0.75 * average }
+        assertEqual(shown(surge, day: 5), Int(average.rounded()) + 9, "Momentum is capped at 9")
+        let gapped = [reading(0, 90), reading(8, 20)]
+        assertEqual(shown(gapped, day: 8), 20, "A reading older than the window does not carry over")
+        let broken = [reading(0, 10), reading(1, 20), reading(3, 30)]
+        let brokenAverage: Double = 0.25 * 30 + 0.75 * (0.25 * 20 + 0.75 * 10)
+        assertEqual(
+            shown(broken, day: 3), Int(brokenAverage.rounded()),
+            "A missing day breaks the rise streak but not the average"
+        )
+        let withEstimate = [reading(0, 10), reading(1, 90, estimate: true), reading(2, 30)]
+        assertEqual(shown(withEstimate, day: 1), 90, "An estimate is shown as it is")
+        let estimateAverage: Double = 0.25 * 30 + 0.75 * 10
+        assertEqual(
+            shown(withEstimate, day: 2), Int(estimateAverage.rounded()),
+            "An estimate never enters the average and is not a rise")
+        assertEqual(
+            WorldTensionSmoothing.displayed(withEstimate)[1].assessment.assessedScore, nil,
+            "An estimate keeps no assessed score")
     }
 
     static func testWorldTension() async throws {
@@ -4096,16 +4223,34 @@ struct NewsTests {
         assertTrue(WorldTensionService.isSoftNews("Premier League title race tightens"), "Sport is soft")
         assertFalse(WorldTensionService.isSoftNews("Missile strikes hit port as talks stall"), "Conflict is hard news")
         let estimateInput = [
-            WorldTensionHeadline(id: "C1", title: "Airstrikes intensify along the front line", publisher: "Panel"),
+            WorldTensionHeadline(id: "C1", title: "Airstrikes intensified along the front line", publisher: "Panel"),
             WorldTensionHeadline(id: "C2", title: "Central bank holds rates", publisher: "Panel"),
             WorldTensionHeadline(id: "C3", title: "Floods displace villagers", publisher: "Panel"),
         ]
-        let estimate = WorldTensionAssessment.estimate(current: estimateInput)
+        let estimateNow = Date(timeIntervalSince1970: 1_780_000_000)
+        let estimateWindow = DateInterval(start: estimateNow.addingTimeInterval(-86400), end: estimateNow)
+        // Every panel feed reports, so coverage is sufficient; feeds beyond the three headlines repeat the rates story.
+        let estimateRows = TensionMethodology.v1.panel.enumerated().map { index, member in
+            let own = index < estimateInput.count
+            return TensionCorpusRow(
+                article: FeedArticle(
+                    title: own ? estimateInput[index].title : "Central bank holds rates",
+                    link: "https://example.com/estimate/\(index)", guid: "estimate-\(index)", description: "",
+                    pubDate: estimateNow.addingTimeInterval(-3600), source: "Panel \(index)"),
+                feedURL: member.url, eventID: own ? "estimate-event-\(index)" : "rates")
+        }
+        let estimateDay = TensionDayAssessor.assess(
+            day: estimateWindow, rows: estimateRows, now: estimateNow, includingHeadlines: true)
+        let estimate = WorldTensionAssessment.estimate(current: estimateInput, day: estimateDay, rows: estimateRows)
         assertEqual(estimate?.isEstimate, true, "Keyword estimates are labelled")
         assertEqual(estimate?.drivers, ["C1", "C3"], "Estimate drivers rank conflict above disaster")
         assertTrue(
             estimate?.isValid(headlines: estimateInput) == true, "Keyword estimates satisfy the reading contract")
-        assertTrue((estimate?.score ?? 0) > 20, "Conflict cues raise the estimate above the floor")
+        // Escalating airstrikes 10 × 1.3 × 0.85 plus floods 6 × 0.85: raw 16.15, index 100 × (1 − e^(−16.15 / 25)).
+        assertEqual(estimate?.score, 48, "The estimate is the calibrated v1 day index of the classified events")
+        assertTrue(
+            estimate?.lead.map { $0.contains("armed conflict") && $0.contains("disaster") } ?? false,
+            "The lead names the scoring event types, strongest first")
         let driverHeadlines = [
             WorldTensionHeadline(id: "C1", title: "Peace talks resume", publisher: "Panel"),
             WorldTensionHeadline(id: "C2", title: "Airstrikes hit the port", publisher: "Panel"),
@@ -4179,6 +4324,19 @@ struct NewsTests {
             database: database, now: now, aiEnabled: true, collectionEnabled: true)
         assertEqual(unavailableDay.last?.assessment.isEstimate, true, "An unavailable model shows a keyword estimate")
         assertEqual(try await database.worldTensionHistory(), [], "Keyword estimates are never saved")
+        // The estimate is the calibrated v1 day score over the panel's unique events (#544): peace talks carry no
+        // event type, so the day reads 0.
+        let panelURLs = TensionMethodology.v1.panel.map(\.url)
+        func calibratedDayScore(at date: Date) async throws -> Int {
+            let window = DateInterval(start: date.addingTimeInterval(-86400), end: date)
+            let rows = try await database.tensionCorpus(day: window, feedURLs: panelURLs)
+            let day = TensionDayAssessor.assess(day: window, rows: rows, now: date, includingHeadlines: true)
+            return Int((TensionCalibrator.scoreDay(assessment: day).calibratedIndex ?? 0).rounded())
+        }
+        assertEqual(unavailableDay.last?.assessment.score, 0, "Peace talks alone score 0 under the calibrated weights")
+        assertEqual(
+            unavailableDay.last?.assessment.score, try await calibratedDayScore(at: now),
+            "The estimate equals the calibrated day score the history would compute")
         assertFalse(
             unavailableDay.last?.headlines.contains { $0.title == soft.title } ?? true,
             "Soft news is left out of the panel headlines")
@@ -4209,6 +4367,19 @@ struct NewsTests {
         assertTrue(
             refreshed.last?.headlines.contains { $0.title == escalation.title } ?? false,
             "The refreshed estimate reads the new headlines")
+        // One armed-conflict event from one region: 10 × 0.85 raw, 100 × (1 − e^(−8.5 / 25)) ≈ 29 on the index.
+        assertEqual(
+            refreshed.last?.assessment.score, 29, "A missile strike scores the calibrated armed-conflict weight")
+        assertEqual(
+            refreshed.last?.assessment.score, try await calibratedDayScore(at: now.addingTimeInterval(1800)),
+            "The refreshed estimate still equals the calibrated day score")
+        assertEqual(
+            refreshed.last?.assessment.drivers,
+            refreshed.last?.headlines.filter { $0.title == escalation.title }.map(\.id),
+            "The scoring event's headline is the only driver")
+        assertTrue(
+            refreshed.last?.assessment.reasons.contains { $0.explanation.hasPrefix("1 of ") } ?? false,
+            "The scope reason counts scoring events among the day's unique events")
         let model = NewsTextModel { prompt, _ in
             assertFalse(
                 prompt.contains(unrelated.title), "Unrelated prior events are excluded from the novelty baseline")
@@ -8430,6 +8601,75 @@ struct NewsTests {
     }
 
     /// Opt-in protected publisher requests on an already rated, temporary library backup.
+    /// How often the priority rule (#665) fires on a library backup: for each event, the first visible story, created in
+    /// the last 14 days, that qualifies with the publishers its event had when that story arrived. Read-only.
+    static func measureLivePriority(path: String, output: String) throws {
+        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
+        guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
+        else {
+            throw NSError(
+                domain: "LivePriority", code: 1, userInfo: [NSLocalizedDescriptionKey: "Use a temporary library backup"]
+            )
+        }
+        var connection: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &connection, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            throw NSError(domain: "LivePriority", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cannot open \(path)"])
+        }
+        defer { sqlite3_close(connection) }
+        let now =
+            ProcessInfo.processInfo.environment["NEWS_PRIORITY_NOW"].flatMap(TimeInterval.init)
+            ?? Date().timeIntervalSince1970
+        let query = """
+            SELECT a.id, a.title, coalesce(a.description, ''), a.created_at, m.event_id,
+                (SELECT count(DISTINCT b.source) FROM event_members n JOIN articles b ON b.id = n.article_id
+                 WHERE n.event_id = m.event_id AND b.created_at <= a.created_at)
+            FROM articles a JOIN event_members m ON m.article_id = a.id
+            WHERE a.created_at >= ? AND a.created_at <= ?
+                AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)
+            ORDER BY a.created_at;
+            """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(connection, query, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(domain: "LivePriority", code: 3, userInfo: [NSLocalizedDescriptionKey: "Query failed"])
+        }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_double(statement, 1, now - 14 * 86400)
+        sqlite3_bind_double(statement, 2, now)
+        func text(_ column: Int32) -> String {
+            sqlite3_column_text(statement, column).map { String(cString: $0) } ?? ""
+        }
+        var first: [String: (day: String, title: String, score: Double, publishers: Int)] = [:]
+        var stories = 0
+        var days = Set<String>()
+        let dayFormat = DateFormatter()
+        dayFormat.dateFormat = "yyyy-MM-dd"
+        while sqlite3_step(statement) == SQLITE_ROW {
+            stories += 1
+            let created = Date(timeIntervalSince1970: sqlite3_column_double(statement, 3))
+            days.insert(dayFormat.string(from: created))
+            let event = text(4)
+            guard first[event] == nil else { continue }
+            let title = text(1)
+            let publishers = Int(sqlite3_column_int(statement, 5))
+            let score = NotificationService.shared.computeImportance(title: title, description: text(2))
+            if NotificationService.isPriority(title: title, score: score, publishers: publishers) {
+                first[event] = (dayFormat.string(from: created), title, score, publishers)
+            }
+        }
+        var lines = [
+            "Priority keys (#665) over 14 days: \(first.count), from \(stories) clustered stories on \(days.count) days with ingestion"
+        ]
+        for day in days.sorted() {
+            let keys = first.values.filter { $0.day == day }.sorted { $0.score > $1.score }
+            lines.append("\(day): \(keys.count)")
+            for key in keys {
+                lines.append("  - \(String(format: "%.2f", key.score)), \(key.publishers) publishers: \(key.title)")
+            }
+        }
+        try (lines.joined(separator: "\n") + "\n").write(toFile: output, atomically: true, encoding: .utf8)
+        print(lines.joined(separator: "\n"))
+    }
+
     static func measureLiveImages(path: String, output: String) async throws {
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
         guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
@@ -8941,7 +9181,7 @@ struct NewsTests {
         let evidenceCoordinator: OverviewGenerationCoordinator? =
             environment["NEWS_OVERVIEWS_EXTRACT"] == "1"
             ? OverviewGenerationCoordinator(
-                store: evidenceStore, allowsModel: { true },
+                store: evidenceStore,
                 extractText: { link in
                     let outcome = await ContentExtractionPipeline.shared.extractArticleWithIdentity(from: link).outcome
                     await fetches.add(Task.isCancelled ? "cutAtDeadline" : outcome.kindName)
@@ -9013,11 +9253,8 @@ struct NewsTests {
                 evidence: evidence)
         }
         if let harsh = active.first(where: { ($0.title + $0.description).lowercased().contains("killed") }) {
-            let classification = await ArticleClassifier(textModel: measuredModel).classify(
-                title: harsh.title, description: harsh.description)
             let analysis = try await ArticleAnalyzer(textModel: measuredModel).analyze(
                 title: harsh.title, content: harsh.fullContent ?? harsh.description)
-            report["sensitiveClassificationUsedModel"] = classification.evidence.contains("foundation_model") ? 1 : 0
             report["sensitiveAnalysisUsedModel"] = analysis.modelIdentifier == "apple.foundation-model" ? 1 : 0
             try encoder.encode(analysis).write(to: directory.appendingPathComponent("analysis-private.json"))
         }
@@ -9511,6 +9748,19 @@ struct NewsTests {
         assertTrue(
             try await db.storyImages(for: ["e1", "e2", "down", "plain"]).isEmpty,
             "Site defaults stay cleared regardless of lookup order")
+
+        // #595: a pictured member only on a World Tension panel feed is hidden from lists, so the listed member of
+        // its event is still looked up.
+        let panelURL = TensionMethodology.v1.panel[8].url
+        _ = try await db.upsertArticles([story("g1", "One")], feedUrl: "https://example.com/subscribed.xml")
+        _ = try await db.upsertArticles([story("g2", "Panel", image: "https://cdn.example/g.jpg")], feedUrl: panelURL)
+        _ = try await db.createEvent(memberArticleIDs: ["g1", "g2"], at: now)
+        let unscoped = try await db.imagelessStoryRows(activeSince: now.addingTimeInterval(-86_400), limit: 20)
+        assertFalse(unscoped.contains { $0.id == "g1" }, "Without collection feeds every member counts")
+        await db.setCollectionOnlyFeedURLs([panelURL])
+        let scoped = try await db.imagelessStoryRows(activeSince: now.addingTimeInterval(-86_400), limit: 20)
+        assertTrue(scoped.contains { $0.id == "g1" }, "A hidden member's image does not skip the listed story")
+        assertFalse(scoped.contains { $0.id == "g2" }, "The hidden member itself is never looked up")
         await db.close()
         try await testStoryImageIndexMigration(fixtureRoot: fixtureRoot)
     }
@@ -9653,6 +9903,10 @@ struct NewsTests {
             source: original.source, fullContent: "Rolledbackbodytoken")
         let body = String(
             repeating: "Controlled publisher prose describes research and independent observations. ", count: 110)
+        // The measured run keeps the audited workload. The regression run clusters 150 rows (one batch of 100 commits,
+        // 50 stay pending at cancel) and parses 100 items, which still cancel mid-work. Ingestion keeps 20,000 rows:
+        // the wait is for the page cache to spill, which takes the same time at any batch size; 4,000 rows commit first.
+        let measuring = CommandLine.arguments.contains("--active-work-cancellation")
         // Exceed the native page-cache spill threshold so WAL growth occurs before COMMIT.
         let batch =
             [changed]
@@ -9663,7 +9917,7 @@ struct NewsTests {
                     guid: "cancel-insert-\(index)", description: "Controlled report \(index)", pubDate: now,
                     source: "Publisher", fullContent: body)
             }
-        let sampleCount = CommandLine.arguments.contains("--active-work-cancellation") ? 5 : 1
+        let sampleCount = measuring ? 5 : 1
         var samples: [String: [Double]] = [:]
         for _ in 0..<sampleCount {
             assertEqual(
@@ -9717,7 +9971,7 @@ struct NewsTests {
 
         let clustering = DatabaseEngine(path: directory.appendingPathComponent("clustering.sqlite3").path)
         try await clustering.open()
-        let articles = (0..<400).map { index in
+        let articles = (0..<(measuring ? 400 : 150)).map { index in
             FeedArticle(
                 storedID: "cancel-cluster-\(index)", title: "Research observatory reports measurement \(index)",
                 link: "https://cancel.example/cluster/\(index)", guid: "cancel-cluster-\(index)",
@@ -9747,16 +10001,17 @@ struct NewsTests {
             await eventually("Clustering commits real progress before cancellation") {
                 let count = try? await clustering.pendingEventMatchRows(
                     activeSince: now.addingTimeInterval(-72 * 3600),
-                    matcherVersion: EventMatcher.version, limit: 400
+                    matcherVersion: EventMatcher.version, limit: articles.count
                 ).count
-                return count.map { $0 < 400 } ?? false
+                return count.map { $0 < articles.count } ?? false
             }
             let remaining = try await clustering.pendingEventMatchRows(
                 activeSince: now.addingTimeInterval(-72 * 3600),
-                matcherVersion: EventMatcher.version, limit: 400
+                matcherVersion: EventMatcher.version, limit: articles.count
             ).count
             assertTrue(
-                remaining > 0 && remaining < 400, "Clustering has completed some work and still has pending rows")
+                remaining > 0 && remaining < articles.count,
+                "Clustering has completed some work and still has pending rows")
             assertEqual(done.count, 0, "Clustering is active when cancelled")
             pendingAtCancel.append(remaining)
             let start = ProcessInfo.processInfo.systemUptime
@@ -9765,7 +10020,8 @@ struct NewsTests {
             let (cancelled, end) = await work.value
             assertTrue(cancelled, "Active clustering reports CancellationError")
             samples["clustering", default: []].append((end - start) * 1000)
-            assertEqual(try await clustering.counts().total, 400, "Cancellation never deletes source articles")
+            assertEqual(
+                try await clustering.counts().total, articles.count, "Cancellation never deletes source articles")
             assertTrue(
                 try await clustering.isRead(articleId: articles[0].id), "Clustering cancellation preserves read state")
             assertTrue(
@@ -9787,7 +10043,8 @@ struct NewsTests {
         // Feed parsing extracts every item's HTML; a cancelled refresh must not finish that work or keep its result.
         let paragraph =
             "<p>Controlled publisher prose describes <em>research</em> and independent observations in detail.</p>"
-        let items = (0..<500).map { index in
+        let itemCount = measuring ? 500 : 100
+        let items = (0..<itemCount).map { index in
             "<item><title>Parsed report \(index)</title><link>https://cancel.example/parse/\(index)</link><guid>parse-\(index)</guid>"
                 + "<description>Report \(index)</description><content:encoded><![CDATA[<h2>Section</h2>"
                 + String(repeating: paragraph, count: 15) + "]]></content:encoded></item>"
@@ -9797,7 +10054,8 @@ struct NewsTests {
                 + "<channel><title>Publisher</title>" + items + "</channel></rss>").utf8)
         let fullStart = ProcessInfo.processInfo.systemUptime
         assertEqual(
-            FeedXMLParser(data: feedData, feedURL: feed).parse().count, 500, "The uncancelled fixture parses every item"
+            FeedXMLParser(data: feedData, feedURL: feed).parse().count, itemCount,
+            "The uncancelled fixture parses every item"
         )
         let fullParse = ProcessInfo.processInfo.systemUptime - fullStart
         assertTrue(fullParse > 0.1, "The parsing fixture runs long enough to cancel mid-feed")
@@ -9837,7 +10095,8 @@ struct NewsTests {
             "samples_ms": samples, "samples_per_operation": sampleCount, "ingestion_batch_rows": batch.count,
             "ingestion_body_characters": body.count, "wal_spill_threshold_bytes": 1_048_576,
             "clustering_library_rows": articles.count, "clustering_pending_at_cancel": pendingAtCancel,
-            "parsing_feed_items": 500, "parsing_feed_bytes": feedData.count, "parsing_uncancelled_ms": fullParse * 1000,
+            "parsing_feed_items": itemCount, "parsing_feed_bytes": feedData.count,
+            "parsing_uncancelled_ms": fullParse * 1000,
             "sqlite_version": String(cString: sqlite3_libversion()),
         ]
         print(
@@ -10740,8 +10999,8 @@ struct NewsTests {
         ]
         assertEqual(
             FiniteBriefing(candidates: ranked, readIDs: [], now: now, priorities: priority).articles.map(\.id),
-            ["stored", "major"],
-            "Major stored importance precedes coverage; one publisher cannot occupy the briefing")
+            ["covered", "minor"],
+            "Coverage precedes recency when importance is removed; one publisher cannot occupy the briefing")
 
         let personalized = [
             article("general", age: 0, source: "General", category: "World"),
@@ -10754,8 +11013,20 @@ struct NewsTests {
             interests: ["science": 3])
         assertEqual(
             personalizedBriefing.articles.first?.id, "duplicate-event",
-            "Interest breaks neutral-importance and coverage ties before recency")
+            "Interest breaks coverage ties before recency")
         assertEqual(personalizedBriefing.articles.count, 2, "One event cannot consume two briefing slots")
+
+        // Direct unit tests for FiniteBriefing.rank contract
+        let r1 = FiniteBriefing.rank(
+            priority: .init(sourceCount: 3), interest: 0, sourceCount: 0, categoryCount: 0)
+        let r2 = FiniteBriefing.rank(
+            priority: .init(sourceCount: 1), interest: 5, sourceCount: 0, categoryCount: 0)
+        assertTrue(r2.lexicographicallyPrecedes(r1), "Source coverage precedes interest")
+        let r3 = FiniteBriefing.rank(
+            priority: .init(sourceCount: 2), interest: 3, sourceCount: 1, categoryCount: 1)
+        assertEqual(
+            r3, [2, 3, -2, -1],
+            "Rank vector formula matches [sourceCount, interest, -(sources + categories), -sources]")
 
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -10771,6 +11042,318 @@ struct NewsTests {
             "SQLite filters the exact window and read state before selection")
         assertEqual(
             try await db.fetchArticles(limit: nil).count, candidates.count, "The briefing leaves archive access intact")
+
+        // Test non-destructive briefing interests reset
+        let testNow = Date(timeIntervalSince1970: 1_700_000_000)
+        let interestsDb = DatabaseEngine(path: ":memory:")
+        try await interestsDb.open()
+        let testArticles = [
+            article("int-tech", age: 0, category: "Technology"),
+            article("int-science", age: 0, category: "Science"),
+            article("int-politics", age: 0, category: "Politics"),
+            article("int-old", age: 0, category: "Business"),
+        ]
+        _ = try await interestsDb.upsertArticles(testArticles)
+
+        let tenDaysAgo = testNow.addingTimeInterval(-10 * 86400)
+        try await interestsDb.markRead(articleId: "int-tech", isRead: true)
+        _ = try await interestsDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tenDaysAgo.timeIntervalSince1970), .text("int-tech")])
+
+        let twoDaysAgo = testNow.addingTimeInterval(-2 * 86400)
+        try await interestsDb.markRead(articleId: "int-science", isRead: true)
+        _ = try await interestsDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(twoDaysAgo.timeIntervalSince1970), .text("int-science")])
+
+        let oneDayAgo = testNow.addingTimeInterval(-1 * 86400)
+        try await interestsDb.setSaved(articleId: "int-politics", isSaved: true)
+        _ = try await interestsDb.eventRows(
+            "UPDATE article_state SET saved_at = ? WHERE article_id = ?;",
+            [.real(oneDayAgo.timeIntervalSince1970), .text("int-politics")])
+
+        let thirtyFiveDaysAgo = testNow.addingTimeInterval(-35 * 86400)
+        try await interestsDb.markRead(articleId: "int-old", isRead: true)
+        _ = try await interestsDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(thirtyFiveDaysAgo.timeIntervalSince1970), .text("int-old")])
+
+        // 1. Without resetAt: respects 30-day window (excludes 35-day-old article)
+        let defaultInterests = try await interestsDb.briefingInterests(now: testNow)
+        assertEqual(defaultInterests["technology"], 1, "Read tech story within 30 days scores 1")
+        assertEqual(defaultInterests["science"], 1, "Read science story within 30 days scores 1")
+        assertEqual(defaultInterests["politics"], 3, "Saved politics story within 30 days scores 3")
+        assertTrue(defaultInterests["business"] == nil, "Business story older than 30 days excluded")
+
+        // 2. With resetAt = 5 days ago: excludes tech (10 days ago), keeps science (2 days ago) and politics (1 day ago)
+        let reset5DaysAgo = testNow.addingTimeInterval(-5 * 86400)
+        let resetInterests = try await interestsDb.briefingInterests(now: testNow, resetAt: reset5DaysAgo)
+        assertTrue(resetInterests["technology"] == nil, "Tech story read before reset cutoff is excluded")
+        assertEqual(resetInterests["science"], 1, "Science story read after reset cutoff is retained")
+        assertEqual(resetInterests["politics"], 3, "Politics story saved after reset cutoff is retained")
+
+        // 3. With resetAt = testNow: interests are completely cleared
+        let clearedInterests = try await interestsDb.briefingInterests(now: testNow, resetAt: testNow)
+        assertTrue(clearedInterests.isEmpty, "Resetting to now produces zero inferred interests")
+
+        // 4. Non-destructive assertion: read markers and bookmarks remain intact
+        assertTrue(
+            try await interestsDb.isRead(articleId: "int-tech"),
+            "Read status preserved after interests reset")
+        assertTrue(
+            try await interestsDb.isRead(articleId: "int-science"),
+            "Read status preserved after interests reset")
+        assertTrue(
+            try await interestsDb.isSaved(articleId: "int-politics"),
+            "Saved status preserved after interests reset")
+
+        try await testAdversarialDatabaseInterestsReset()
+    }
+
+    @MainActor
+    static func testAdversarialDatabaseInterestsReset() async throws {
+        print("  - Adversarial empirical challenge: briefingInterests boundary values & SQLite integrity...")
+        let testNow = Date(timeIntervalSince1970: 1_750_000_000)
+
+        func makeTestArticle(id: String, category: String, age: TimeInterval = 0) -> FeedArticle {
+            FeedArticle(
+                storedID: id,
+                title: "Test Article \(id)",
+                link: "https://example.com/test/\(id)",
+                guid: id,
+                description: "Description \(id)",
+                pubDate: testNow.addingTimeInterval(-age),
+                source: "Test Source",
+                category: category
+            )
+        }
+
+        // Test 1: Empty Database
+        let emptyDb = DatabaseEngine(path: ":memory:")
+        try await emptyDb.open()
+        let empty1 = try await emptyDb.briefingInterests(now: testNow, resetAt: nil)
+        assertTrue(empty1.isEmpty, "Empty database returns empty interests with nil resetAt")
+        let empty2 = try await emptyDb.briefingInterests(now: testNow, resetAt: testNow)
+        assertTrue(empty2.isEmpty, "Empty database returns empty interests with resetAt = now")
+        let empty3 = try await emptyDb.briefingInterests(now: testNow, resetAt: testNow.addingTimeInterval(86400))
+        assertTrue(empty3.isEmpty, "Empty database returns empty interests with future resetAt")
+        await emptyDb.close()
+
+        // Test 2: Cutoff Boundary Values (Future, Exactly 30 Days, 40 Days, Exactly Now)
+        let boundaryDb = DatabaseEngine(path: ":memory:")
+        try await boundaryDb.open()
+
+        let artAt30d = makeTestArticle(id: "b-exact-30d", category: "Technology")
+        let artOlder30d = makeTestArticle(id: "b-older-30d", category: "Technology")
+        let artNewer30d = makeTestArticle(id: "b-newer-30d", category: "Technology")
+        let artAt35d = makeTestArticle(id: "b-35d", category: "Business")
+        let artAt45d = makeTestArticle(id: "b-45d", category: "Business")
+        let artAt10d = makeTestArticle(id: "b-10d", category: "Science")
+        let artAt1d = makeTestArticle(id: "b-1d", category: "World")
+        let artAtNow = makeTestArticle(id: "b-now", category: "Politics")
+
+        _ = try await boundaryDb.upsertArticles([
+            artAt30d, artOlder30d, artNewer30d, artAt35d, artAt45d, artAt10d, artAt1d, artAtNow,
+        ])
+
+        let thirtyDaysSeconds = 30.0 * 86400.0
+        let tExact30d = testNow.addingTimeInterval(-thirtyDaysSeconds)
+        let tOlder30d = testNow.addingTimeInterval(-thirtyDaysSeconds - 2.0)
+        let tNewer30d = testNow.addingTimeInterval(-thirtyDaysSeconds + 2.0)
+        let t35d = testNow.addingTimeInterval(-35.0 * 86400.0)
+        let t45d = testNow.addingTimeInterval(-45.0 * 86400.0)
+        let t10d = testNow.addingTimeInterval(-10.0 * 86400.0)
+        let t1d = testNow.addingTimeInterval(-1.0 * 86400.0)
+        let tNow = testNow
+
+        // Set read/saved timestamps in article_state
+        try await boundaryDb.markRead(articleId: "b-exact-30d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tExact30d.timeIntervalSince1970), .text("b-exact-30d")])
+
+        try await boundaryDb.markRead(articleId: "b-older-30d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tOlder30d.timeIntervalSince1970), .text("b-older-30d")])
+
+        try await boundaryDb.markRead(articleId: "b-newer-30d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tNewer30d.timeIntervalSince1970), .text("b-newer-30d")])
+
+        try await boundaryDb.markRead(articleId: "b-35d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(t35d.timeIntervalSince1970), .text("b-35d")])
+
+        try await boundaryDb.markRead(articleId: "b-45d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(t45d.timeIntervalSince1970), .text("b-45d")])
+
+        try await boundaryDb.markRead(articleId: "b-10d", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(t10d.timeIntervalSince1970), .text("b-10d")])
+
+        try await boundaryDb.setSaved(articleId: "b-1d", isSaved: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET saved_at = ? WHERE article_id = ?;",
+            [.real(t1d.timeIntervalSince1970), .text("b-1d")])
+
+        try await boundaryDb.markRead(articleId: "b-now", isRead: true)
+        _ = try await boundaryDb.eventRows(
+            "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+            [.real(tNow.timeIntervalSince1970), .text("b-now")])
+
+        // 2a. Boundary: resetAt exactly 30 days ago (resetAt == thirtyDaysAgo)
+        // Technology should include exact-30d (1 pt) + newer-30d (1 pt) = 2 pts. Older-30d is excluded.
+        let interests30d = try await boundaryDb.briefingInterests(now: testNow, resetAt: tExact30d)
+        assertEqual(
+            interests30d["technology"], 2,
+            "Exact 30-day cutoff includes interaction at exact boundary and newer, excludes older")
+
+        // 2b. Boundary: resetAt 40 days ago (resetAt < thirtyDaysAgo)
+        // Even though resetAt is 40 days ago, 30-day window max(thirtyDaysAgo, resetAt) must prevail.
+        // Therefore, b-35d and b-45d (Business) must NOT appear in interests.
+        let t40d = testNow.addingTimeInterval(-40.0 * 86400.0)
+        let interests40d = try await boundaryDb.briefingInterests(now: testNow, resetAt: t40d)
+        assertTrue(interests40d["business"] == nil, "resetAt 40 days ago cannot bypass 30-day maximum lookback")
+        assertEqual(interests40d["technology"], 2, "Technology interactions within 30 days still scored")
+        assertEqual(interests40d["science"], 1, "Science 10d interaction scored")
+        assertEqual(interests40d["world"], 3, "World 1d saved interaction scored 3")
+
+        // 2c. Boundary: resetAt in the future (resetAt > now)
+        let tFuture = testNow.addingTimeInterval(3600)
+        let interestsFuture = try await boundaryDb.briefingInterests(now: testNow, resetAt: tFuture)
+        assertTrue(interestsFuture.isEmpty, "Future resetAt produces empty interests dictionary without error")
+
+        // 2d. Boundary: resetAt == now
+        // An interaction with read_at strictly before now is excluded.
+        let interestsNow = try await boundaryDb.briefingInterests(now: testNow, resetAt: testNow)
+        assertTrue(
+            interestsNow["technology"] == nil,
+            "Technology interactions prior to now excluded when resetAt == now")
+        assertTrue(
+            interestsNow["science"] == nil,
+            "Science interactions prior to now excluded when resetAt == now")
+        assertTrue(
+            interestsNow["world"] == nil,
+            "World interactions prior to now excluded when resetAt == now")
+
+        // Call with resetAt strictly after the latest interaction:
+        let interestsAfterAll = try await boundaryDb.briefingInterests(
+            now: testNow, resetAt: testNow.addingTimeInterval(0.001))
+        assertTrue(interestsAfterAll.isEmpty, "Resetting after all interactions produces completely empty interests")
+
+        // Test 3: Exactly 200 interaction records
+        let limitDb = DatabaseEngine(path: ":memory:")
+        try await limitDb.open()
+
+        var articles200: [FeedArticle] = []
+        for i in 0..<100 {
+            articles200.append(makeTestArticle(id: "tech-200-\(i)", category: "Technology"))
+        }
+        for i in 0..<100 {
+            articles200.append(makeTestArticle(id: "sci-200-\(i)", category: "Science"))
+        }
+        _ = try await limitDb.upsertArticles(articles200)
+
+        for i in 0..<100 {
+            let artId = "tech-200-\(i)"
+            try await limitDb.markRead(articleId: artId, isRead: true)
+            let stamp = testNow.addingTimeInterval(-Double(i + 1) * 3600.0)
+            _ = try await limitDb.eventRows(
+                "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+                [.real(stamp.timeIntervalSince1970), .text(artId)])
+        }
+        for i in 0..<100 {
+            let artId = "sci-200-\(i)"
+            try await limitDb.setSaved(articleId: artId, isSaved: true)
+            let stamp = testNow.addingTimeInterval(-Double(i + 1) * 3600.0)
+            _ = try await limitDb.eventRows(
+                "UPDATE article_state SET saved_at = ? WHERE article_id = ?;",
+                [.real(stamp.timeIntervalSince1970), .text(artId)])
+        }
+
+        let interests200 = try await limitDb.briefingInterests(now: testNow)
+        assertEqual(interests200["technology"], 100, "Exactly 100 read articles score 100 points")
+        assertEqual(interests200["science"], 300, "Exactly 100 saved articles score 300 points")
+
+        // Test 4: >200 records (e.g., 250 records testing recency DESC and LIMIT 200 truncation)
+        // Add 50 Business articles that were read 20 days ago (older than the 200 Tech & Science articles)
+        var articles50Extra: [FeedArticle] = []
+        for i in 0..<50 {
+            articles50Extra.append(makeTestArticle(id: "biz-extra-\(i)", category: "Business"))
+        }
+        _ = try await limitDb.upsertArticles(articles50Extra)
+        for i in 0..<50 {
+            let artId = "biz-extra-\(i)"
+            try await limitDb.markRead(articleId: artId, isRead: true)
+            let oldStamp = testNow.addingTimeInterval(-20.0 * 86400.0 - Double(i))
+            _ = try await limitDb.eventRows(
+                "UPDATE article_state SET read_at = ? WHERE article_id = ?;",
+                [.real(oldStamp.timeIntervalSince1970), .text(artId)])
+        }
+
+        // Total interactions in limitDb = 250.
+        // Because briefingInterests has LIMIT 200 ORDER BY interaction DESC,
+        // the 200 newest (100 Tech + 100 Science) should consume all 200 slots.
+        // The 50 older Business articles must be truncated out!
+        let interests250 = try await limitDb.briefingInterests(now: testNow)
+        assertEqual(interests250["technology"], 100, "Top 200 keeps all recent Technology reads")
+        assertEqual(interests250["science"], 300, "Top 200 keeps all recent Science saves")
+        assertTrue(interests250["business"] == nil, "50 older interactions truncated by LIMIT 200 clause")
+
+        // Test 5: 100% User Data Integrity in SQLite article_state
+        struct ArticleStateRow: Equatable {
+            let articleId: String
+            let isRead: String
+            let readAt: String
+            let isSaved: String
+            let savedAt: String
+        }
+
+        func queryArticleStates(engine: DatabaseEngine) async throws -> [ArticleStateRow] {
+            let sql = """
+                SELECT article_id, coalesce(is_read, '0'), coalesce(read_at, 'null'),
+                       coalesce(is_saved, '0'), coalesce(saved_at, 'null')
+                FROM article_state ORDER BY article_id;
+                """
+            let rows = try await engine.eventRows(sql)
+            return rows.map { r in
+                ArticleStateRow(
+                    articleId: r[0] ?? "",
+                    isRead: r[1] ?? "",
+                    readAt: r[2] ?? "",
+                    isSaved: r[3] ?? "",
+                    savedAt: r[4] ?? ""
+                )
+            }
+        }
+
+        let stateSnapshotBefore = try await queryArticleStates(engine: boundaryDb)
+        assertTrue(!stateSnapshotBefore.isEmpty, "article_state is populated before reset tests")
+
+        // Call briefingInterests with many different resetAt values repeatedly
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: testNow)
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: tFuture)
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: t1d)
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: t40d)
+        _ = try await boundaryDb.briefingInterests(now: testNow, resetAt: nil)
+
+        let stateSnapshotAfter = try await queryArticleStates(engine: boundaryDb)
+        assertEqual(
+            stateSnapshotBefore.count, stateSnapshotAfter.count,
+            "article_state row count is 100% unchanged after resetAt calls")
+        assertEqual(
+            stateSnapshotBefore, stateSnapshotAfter,
+            "Every single field of article_state (is_read, read_at, is_saved, saved_at) is 100% bit-for-bit preserved")
+
+        await boundaryDb.close()
+        await limitDb.close()
     }
 
     @MainActor
@@ -10895,7 +11478,7 @@ struct NewsTests {
             "Saved publisher bodies survive cache purging")
         // Unit tests never reach the live on-device model.
         let coordinator = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: .unavailable)
+            store: store, queue: EnrichmentQueue(store: store))
         let cachedOverview = await coordinator.requestOverview(
             eventID: event.id, eventTitle: "Harbor bridge",
             membershipVersion: event.membershipVersion,
@@ -12766,6 +13349,69 @@ struct NewsTests {
         return copy
     }
 
+    /// Writes a sample of stored stories for the topic-classifier audit (#546) to `NEWS_EVENT_OUTPUT/categories.csv`:
+    /// id, headline, summary, publisher, the publisher's own category, the category the deterministic classifier
+    /// assigns now and the one stored in the library. `NEWS_SNAPSHOT_DB` is a library copy (a file inside an app
+    /// container is refused). `NEWS_CATEGORY_SAMPLE` sets the size (default 200) and `NEWS_CATEGORY_SEED` the fixed
+    /// pseudo-random order, so the same sample is drawn before and after a rule change; `NEWS_CATEGORY_IDS`, a file
+    /// with one story id per line, exports exactly those stories instead, whatever their age. The file carries
+    /// headlines, so it goes to the private directory only and is never overwritten; labels are kept beside it, never
+    /// in the repository.
+    static func exportCategorySample() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"] else {
+            throw StoryCorpus.Failure.invalid("--export-categories needs NEWS_SNAPSHOT_DB and NEWS_EVENT_OUTPUT")
+        }
+        guard !snapshot.contains("/Library/Containers/") else {
+            throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
+        }
+        let size = Int(environment["NEWS_CATEGORY_SAMPLE"] ?? "") ?? 200
+        let seed = environment["NEWS_CATEGORY_SEED"] ?? "546"
+        let wanted = try environment["NEWS_CATEGORY_IDS"].map {
+            try String(contentsOfFile: $0, encoding: .utf8).split(whereSeparator: \.isNewline).map(String.init)
+        }
+        let file = try StoryCorpus.privateDirectory(output).appendingPathComponent("categories.csv")
+        let db = DatabaseEngine(path: snapshot)
+        try await db.open()
+        let rows = try await db.eventRows(
+            """
+            SELECT a.id, a.title, coalesce(a.description, ''), a.source, coalesce(a.category, ''), a.content,
+                coalesce(e.category, '')
+            FROM articles a LEFT JOIN article_enrichment e ON e.article_id = a.id
+            WHERE a.published_at >= ? ORDER BY a.id;
+            """,
+            // A listed sample is exported whatever its age, so it can be measured again on a later day.
+            [.real(wanted == nil ? Date().addingTimeInterval(-14 * 86400).timeIntervalSince1970 : 0)])
+        await db.close()
+        // A fixed pseudo-random order (FNV-1a of the seed and the id), then the first `size` rows.
+        func order(_ id: String) -> UInt64 {
+            (seed + id).utf8.reduce(14_695_981_039_346_656_037) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+        }
+        func quoted(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        let selected: [[String?]]
+        if let wanted {
+            let byID = Dictionary(rows.compactMap { row in row[0].map { ($0, row) } }, uniquingKeysWith: { a, _ in a })
+            selected = wanted.compactMap { byID[$0] }
+        } else {
+            selected = Array(rows.sorted { order($0[0] ?? "") < order($1[0] ?? "") }.prefix(size))
+        }
+        var lines = ["id,title,summary,publisher,publisher_category,assigned,stored"]
+        for row in selected {
+            let title = row[1] ?? ""
+            let description = row[2] ?? ""
+            let assigned =
+                NaturalLanguageTopicClassifier.classifyContent(title: title, description: description, text: row[5])?
+                .category ?? NewsCategory.world.rawValue
+            lines.append(
+                [row[0] ?? "", title, description, row[3] ?? "", row[4] ?? "", assigned, row[6] ?? ""].map(quoted)
+                    .joined(separator: ","))
+        }
+        try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
+        print(
+            "    exported \(selected.count) of \(rows.count) stories \(wanted == nil ? "from the last 14 days" : "listed") for the category audit (#546)"
+        )
+    }
+
     /// Mines labelled pairs for the pair model (#525) from copies of real libraries into `NEWS_EVENT_OUTPUT/pairs.csv`.
     /// `NEWS_SNAPSHOT_DB` lists the copies, colon-separated; a file inside an app container is refused, so the live
     /// library is never opened. Rows follow the three-way contract of `script/training/train_pair_model.py` (#627):
@@ -13625,6 +14271,1139 @@ struct NewsTests {
     }
 
     @MainActor
+    static func testUpdateCheckerThrottleWithClock() async {
+        print("  - Testing UpdateChecker 6-Hour Throttle Advancement with TestClock...")
+
+        let baseEpoch = Date(timeIntervalSince1970: 1_700_000_000)
+        let testClock = TestClock(baseEpoch)
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let testClient = mockHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var networkRequestCount = 0
+        let makeReleasePayload: (String) -> Data = { versionTag in
+            let payload = GitHubReleasePayload(
+                tagName: versionTag,
+                name: "Release \(versionTag)",
+                htmlUrl: "https://github.com/marspater/NewsApp-macOS/releases/tag/\(versionTag)",
+                body: "Release notes for \(versionTag)",
+                publishedAt: nil
+            )
+            return try! JSONEncoder().encode(payload)
+        }
+
+        let checker = UpdateChecker(
+            httpClient: testClient,
+            now: { testClock.now },
+            currentAppVersion: "2.0.0"
+        )
+
+        // 1. Initial check updates lastCheckDate
+        assertTrue(checker.lastCheckDate == nil, "Initial checker has nil lastCheckDate")
+        MockURLProtocol.requestHandler = { request in
+            networkRequestCount += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                makeReleasePayload("v2.0.0")
+            )
+        }
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 1, "Initial automatic check executes network request")
+        assertEqual(checker.lastCheckDate, baseEpoch, "Initial check sets lastCheckDate to clock.now")
+        assertFalse(checker.updateAvailable, "v2.0.0 matches currentAppVersion 2.0.0 -> no update")
+        assertEqual(checker.statusMessage, "NewsApp is up to date (v2.0.0)", "Status confirms up to date")
+
+        // 2. Check at +5h59m is skipped (throttled)
+        testClock.advance(by: (5 * 3600) + (59 * 60))  // +21,540s
+        MockURLProtocol.requestHandler = { _ in
+            assertTrue(false, "Throttled automatic check within 6 hours must not make network request")
+            throw URLError(.cancelled)
+        }
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 1, "Network request count remains 1 (skipped)")
+        assertEqual(checker.lastCheckDate, baseEpoch, "lastCheckDate remains baseEpoch when throttled")
+
+        // 3. User-initiated check at +5h59m executes immediately
+        let userCheckTime = testClock.now
+        MockURLProtocol.requestHandler = { request in
+            networkRequestCount += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                makeReleasePayload("v2.0.0")
+            )
+        }
+        await checker.checkForUpdates(userInitiated: true)
+        assertEqual(networkRequestCount, 2, "User-initiated check bypasses 6-hour throttle")
+        assertEqual(checker.lastCheckDate, userCheckTime, "User check updates lastCheckDate to current time")
+
+        // 4. Automatic check at +6h01m executes
+        testClock.advance(by: (6 * 3600) + 60)  // +21,660s past userCheckTime
+        let nextCheckTime = testClock.now
+        MockURLProtocol.requestHandler = { request in
+            networkRequestCount += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                makeReleasePayload("v2.0.0")
+            )
+        }
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 3, "Automatic check after 6h01m executes network request")
+        assertEqual(checker.lastCheckDate, nextCheckTime, "lastCheckDate updates to new check time")
+
+        // 5. Automatic check when update is available updates state non-modally
+        testClock.advance(by: (6 * 3600) + 1)
+        let updateCheckTime = testClock.now
+        MockURLProtocol.requestHandler = { request in
+            networkRequestCount += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                makeReleasePayload("v2.1.0")
+            )
+        }
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 4, "Automatic check after 6h executes network request")
+        assertEqual(checker.lastCheckDate, updateCheckTime, "lastCheckDate updates on successful update detection")
+        assertTrue(checker.updateAvailable, "Automatic check detects newer release v2.1.0")
+        assertEqual(checker.latestVersionString, "v2.1.0", "Latest version string set")
+        assertEqual(checker.statusMessage, "Version v2.1.0 available", "Status indicates version available")
+        assertEqual(
+            checker.verifiedReleaseURL?.absoluteString,
+            "https://github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0", "Release URL verified")
+    }
+
+    @MainActor
+    static func testUpdateCheckerVersionComparisonAndErrors() async {
+        print("  - Testing UpdateChecker Version Comparison Against Release 2.0.0 & Error States...")
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let testClient = mockHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        let basePayload = { (tag: String, url: String) in
+            GitHubReleasePayload(
+                tagName: tag,
+                name: "Release \(tag)",
+                htmlUrl: url,
+                body: "Release notes for \(tag)",
+                publishedAt: "2026-10-25T12:00:00Z"
+            )
+        }
+
+        // 1. Local 2.0.0 vs Remote 2.0.0 -> Up to date (updateAvailable == false)
+        do {
+            let payload = basePayload("2.0.0", "https://github.com/marspater/NewsApp-macOS/releases/tag/2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Local 2.0.0 vs Remote 2.0.0 must report up to date")
+            assertEqual(checker.statusMessage, "NewsApp is up to date (v2.0.0)", "Status confirms up to date")
+            assertTrue(checker.verifiedReleaseURL == nil, "Release URL is nil when up to date")
+            assertTrue(checker.latestVersionString == nil, "Version string is nil when up to date")
+        }
+
+        // 1b. Local 2.0.0 vs Remote v2.0.0 (with 'v' prefix) -> Up to date
+        do {
+            let payload = basePayload("v2.0.0", "https://github.com/marspater/NewsApp-macOS/releases/tag/v2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Local 2.0.0 vs Remote v2.0.0 must report up to date")
+            assertEqual(
+                checker.statusMessage, "NewsApp is up to date (v2.0.0)", "Status confirms up to date for v2.0.0")
+        }
+
+        // 2. Local 1.9.0 vs Remote 2.0.0 -> Update available (updateAvailable == true)
+        do {
+            let payload = basePayload("2.0.0", "https://github.com/marspater/NewsApp-macOS/releases/tag/2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "1.9.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertTrue(checker.updateAvailable, "Local 1.9.0 vs Remote 2.0.0 must report update available")
+            assertEqual(checker.latestVersionString, "2.0.0", "Latest version is 2.0.0")
+            assertEqual(checker.releaseNotes, "Release notes for 2.0.0", "Release notes captured")
+            assertEqual(
+                checker.verifiedReleaseURL?.absoluteString,
+                "https://github.com/marspater/NewsApp-macOS/releases/tag/2.0.0", "Release URL matches")
+            assertEqual(checker.statusMessage, "Version 2.0.0 available", "Status message indicates update")
+        }
+
+        // 2b. Local 1.9.9 vs Remote v2.0.0 -> Update available
+        do {
+            let payload = basePayload("v2.0.0", "https://github.com/marspater/NewsApp-macOS/releases/tag/v2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "1.9.9")
+            await checker.checkForUpdates(userInitiated: true)
+            assertTrue(checker.updateAvailable, "Local 1.9.9 vs Remote v2.0.0 must report update available")
+            assertEqual(checker.latestVersionString, "v2.0.0", "Latest version is v2.0.0")
+            assertEqual(
+                checker.statusMessage, "Version v2.0.0 available", "Status message indicates update for v2.0.0")
+        }
+
+        // 3. Local 2.1.0 vs Remote 2.0.0 -> Up to date (updateAvailable == false)
+        do {
+            let payload = basePayload("2.0.0", "https://github.com/marspater/NewsApp-macOS/releases/tag/2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.1.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Local 2.1.0 vs Remote 2.0.0 must report up to date")
+            assertEqual(
+                checker.statusMessage, "NewsApp is up to date (v2.1.0)", "Status confirms up to date for 2.1.0")
+            assertTrue(checker.verifiedReleaseURL == nil, "Release URL is nil when 2.1.0 is up to date")
+        }
+
+        // 3b. Local 2.0.1 vs Remote 2.0.0 -> Up to date (updateAvailable == false)
+        do {
+            let payload = basePayload("2.0.0", "https://github.com/marspater/NewsApp-macOS/releases/tag/2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.1")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Local 2.0.1 vs Remote 2.0.0 must report up to date")
+            assertEqual(
+                checker.statusMessage, "NewsApp is up to date (v2.0.1)", "Status confirms up to date for 2.0.1")
+        }
+
+        // 4. Remote Invalid SemVer Tags (Leading zeros, non-conforming formats)
+        let invalidTags = [
+            "02.0.0",  // leading zero in major
+            "2.00.0",  // leading zero in minor
+            "2.0.01",  // leading zero in patch
+            "001.002.003",  // leading zeros in all parts
+            "release-2.0.0",  // non-conforming prefix
+            "v2.0",  // missing patch
+            "2",  // single integer
+            "v2.0.0-beta",  // non-numeric suffix
+            "2.0.0-rc1",  // prerelease string
+            "foo",  // arbitrary string
+            "2..0",  // empty component
+        ]
+
+        for invalidTag in invalidTags {
+            let payload = basePayload(
+                invalidTag, "https://github.com/marspater/NewsApp-macOS/releases/tag/\(invalidTag)")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "1.9.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(
+                checker.updateAvailable, "Invalid remote tag '\(invalidTag)' must not flag update available")
+            assertEqual(checker.statusMessage, "No valid updates found", "Status indicates no valid updates")
+            assertTrue(checker.latestVersionString == nil, "Latest version is nil for invalid SemVer")
+            assertTrue(checker.verifiedReleaseURL == nil, "Release URL is nil for invalid SemVer")
+        }
+
+        // 5. Local Invalid SemVer (Configuration error)
+        do {
+            let payload = basePayload("2.0.0", "https://github.com/marspater/NewsApp-macOS/releases/tag/2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0-beta")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Invalid local version must not flag update available")
+            assertEqual(
+                checker.statusMessage, "App version configuration error",
+                "Status indicates configuration error for invalid local version")
+        }
+
+        // 6. Network Failure State: HTTP 404 (No published release available)
+        do {
+            MockURLProtocol.requestHandler = { request in
+                (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "404 response must not flag update available")
+            assertEqual(
+                checker.statusMessage, "No published release is available to compare.",
+                "Status indicates 404 missing release")
+            assertTrue(checker.lastCheckDate != nil, "404 updates lastCheckDate to throttle retries")
+        }
+
+        // 7. Network Failure State: HTTP 500 / 503
+        do {
+            MockURLProtocol.requestHandler = { request in
+                (HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!, Data())
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "503 response must not flag update available")
+            assertEqual(
+                checker.statusMessage, "Update check failed (HTTP 503)", "Status indicates HTTP 503")
+        }
+
+        // 8. Network Failure State: Payload > 1MB via Content-Length header
+        do {
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json", "Content-Length": "1048577"])!,
+                    Data()
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Oversized Content-Length must not flag update available")
+            assertEqual(
+                checker.statusMessage, "Unable to check for updates",
+                "Status indicates oversized response rejected")
+        }
+
+        // 8b. Network Failure State: Payload > 1MB via streaming body
+        do {
+            let oversizedData = Data(repeating: 0x20, count: 1024 * 1024 + 1)
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    oversizedData
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Oversized stream must not flag update available")
+            assertEqual(
+                checker.statusMessage, "Unable to check for updates",
+                "Status indicates oversized stream rejected")
+        }
+
+        // 9. Network Failure State: Timeout
+        do {
+            MockURLProtocol.requestHandler = { _ in
+                throw URLError(.timedOut)
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Timeout must not flag update available")
+            assertEqual(
+                checker.statusMessage, "Unable to check for updates", "Status indicates timeout")
+        }
+
+        // 10. Content-Type Mismatch: Non-JSON response
+        do {
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "text/html"])!,
+                    Data("<html>Portal</html>".utf8)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "2.0.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "HTML content type must be rejected")
+            assertEqual(
+                checker.statusMessage, "Invalid response content type", "Status indicates HTML rejected")
+        }
+
+        // 11. Untrusted Release URL Security
+        do {
+            let maliciousPayload = basePayload("2.0.0", "https://malicious.example.com/releases/tag/2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(maliciousPayload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "1.9.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Untrusted release URL must not be accepted")
+            assertEqual(
+                checker.statusMessage, "Received untrusted release URL",
+                "Status indicates untrusted release URL rejected")
+            assertTrue(checker.verifiedReleaseURL == nil, "Untrusted release URL is not stored")
+        }
+
+        // 12. State Cleanup on Failure: Stale availability reset
+        do {
+            let payload = basePayload("2.0.0", "https://github.com/marspater/NewsApp-macOS/releases/tag/2.0.0")
+            MockURLProtocol.requestHandler = { request in
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: 200, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!,
+                    try! JSONEncoder().encode(payload)
+                )
+            }
+            let checker = UpdateChecker(httpClient: testClient, currentAppVersion: "1.9.0")
+            await checker.checkForUpdates(userInitiated: true)
+            assertTrue(checker.updateAvailable, "Initial check finds update available")
+
+            MockURLProtocol.requestHandler = { _ in throw URLError(.timedOut) }
+            await checker.checkForUpdates(userInitiated: true)
+            assertFalse(checker.updateAvailable, "Failed subsequent check clears updateAvailable")
+            assertTrue(checker.verifiedReleaseURL == nil, "Release URL cleared after failure")
+            assertTrue(
+                checker.latestVersionString == nil, "Latest version cleared after failure")
+        }
+    }
+
+    @MainActor
+    static func testUpdateCheckerAdversarialEdgeCases() async {
+        print("  - Testing UpdateChecker Adversarial Edge Cases (Time Leaps, Concurrency, Loops)...")
+
+        let baseEpoch = Date(timeIntervalSince1970: 1_700_000_000)
+        let testClock = TestClock(baseEpoch)
+
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let testClient = mockHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+
+        var networkRequestCount = 0
+        let makeReleasePayload: (String) -> Data = { versionTag in
+            let payload = GitHubReleasePayload(
+                tagName: versionTag,
+                name: "Release \(versionTag)",
+                htmlUrl: "https://github.com/marspater/NewsApp-macOS/releases/tag/\(versionTag)",
+                body: "Release notes for \(versionTag)",
+                publishedAt: nil
+            )
+            return try! JSONEncoder().encode(payload)
+        }
+
+        MockURLProtocol.requestHandler = { request in
+            networkRequestCount += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                makeReleasePayload("v2.0.0")
+            )
+        }
+
+        let checker = UpdateChecker(
+            httpClient: testClient,
+            now: { testClock.now },
+            currentAppVersion: "2.0.0"
+        )
+
+        // Baseline initial check
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 1, "Baseline automatic check succeeds")
+        assertEqual(checker.lastCheckDate, baseEpoch, "lastCheckDate is set to baseEpoch")
+
+        // ====================================================================
+        // 1. Time Leaps Backwards (DST rollback, clock drift, NTP adjustments)
+        // ====================================================================
+
+        // 1a. Clock drifts 1 hour backwards (DST rollback)
+        testClock.advance(by: -3600)
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 1, "Automatic check is throttled during 1-hour backward DST drift")
+        assertEqual(checker.lastCheckDate, baseEpoch, "lastCheckDate remains unchanged during backward drift")
+
+        // Clock advances to 6h01m past baseEpoch (+25261s from current -1h time)
+        testClock.advance(by: 3600 + 21601)
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 2, "Automatic check executes once clock advances past 6-hour threshold")
+
+        // 1b. Severe backward leap (30 days in the past)
+        testClock.advance(by: -(30 * 86400))
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 2, "Automatic check is throttled during large backward leap")
+
+        // User manual check bypasses throttle and resynchronizes lastCheckDate to rolled-back clock
+        let rolledBackTime = testClock.now
+        await checker.checkForUpdates(userInitiated: true)
+        assertEqual(networkRequestCount, 3, "User-initiated check executes and resets lastCheckDate")
+        assertEqual(checker.lastCheckDate, rolledBackTime, "lastCheckDate matches current rolled-back clock")
+
+        // Check within 6 hours of new rolled-back time is throttled
+        testClock.advance(by: 3600)
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 3, "Subsequent check is throttled relative to resynchronized clock")
+
+        // ====================================================================
+        // 2. Time Leaps Far Forward (30 days, 10 years)
+        // ====================================================================
+
+        // 2a. Leap 30 days forward
+        testClock.advance(by: 30 * 86400)
+        let forward30Time = testClock.now
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 4, "Automatic check executes after 30-day forward leap")
+        assertEqual(checker.lastCheckDate, forward30Time, "lastCheckDate updates to 30-day future date")
+
+        // Check 1 minute later is throttled
+        testClock.advance(by: 60)
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 4, "Check 1 minute after 30-day leap is throttled")
+
+        // 2b. Leap 10 years forward
+        testClock.advance(by: 10 * 365 * 86400)
+        let forward10yTime = testClock.now
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 5, "Automatic check executes after 10-year leap without overflow")
+        assertEqual(checker.lastCheckDate, forward10yTime, "lastCheckDate updates to 10-year future date")
+
+        // ====================================================================
+        // 3. Rapid Successive Checks
+        // ====================================================================
+
+        let countBeforeLoop = networkRequestCount
+        for _ in 0..<100 {
+            await checker.checkForUpdates(userInitiated: false)
+        }
+        assertEqual(networkRequestCount, countBeforeLoop, "Rapid automatic checks in tight loop are 100% throttled")
+
+        for _ in 0..<5 {
+            await checker.checkForUpdates(userInitiated: true)
+        }
+        assertEqual(networkRequestCount, countBeforeLoop + 5, "Rapid sequential manual checks bypass throttle")
+
+        // ====================================================================
+        // 4. Concurrent Checks & In-Flight Gate Deduplication
+        // ====================================================================
+
+        testClock.advance(by: 7 * 3600)  // Expire throttle
+        let gateSemaphore = DispatchSemaphore(value: 0)
+
+        MockURLProtocol.requestHandler = { request in
+            _ = gateSemaphore.wait(timeout: .now() + 5.0)
+            networkRequestCount += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                makeReleasePayload("v2.1.0")
+            )
+        }
+
+        // Launch background check task
+        let inFlightTask = Task { @MainActor in
+            await checker.checkForUpdates(userInitiated: false)
+        }
+
+        // Wait until task is suspended waiting on gateSemaphore
+        for _ in 0..<100 {
+            if checker.isChecking { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        assertTrue(checker.isChecking, "isChecking is true while in-flight network call is pending")
+        assertEqual(checker.statusMessage, "Checking for updates...", "statusMessage indicates checking in-flight")
+
+        // Concurrent automatic check while in-flight returns immediately without duplicate network call
+        await checker.checkForUpdates(userInitiated: false)
+
+        // Concurrent user-initiated check while in-flight also returns immediately
+        await checker.checkForUpdates(userInitiated: true)
+
+        // Release the network mock
+        gateSemaphore.signal()
+        _ = await inFlightTask.value
+
+        assertFalse(checker.isChecking, "isChecking is false after in-flight check completes")
+        assertTrue(checker.updateAvailable, "Update detected by in-flight check")
+        assertEqual(
+            networkRequestCount, countBeforeLoop + 6, "In-flight deduplication prevented duplicate network calls")
+
+        // ====================================================================
+        // 5. Immediate Foregrounding Loops
+        // ====================================================================
+
+        testClock.advance(by: 7 * 3600)  // Expire throttle
+        MockURLProtocol.requestHandler = { request in
+            networkRequestCount += 1
+            return (
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                makeReleasePayload("v2.1.0")
+            )
+        }
+
+        // Simulate 20 foreground events fired concurrently
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<20 {
+                group.addTask { @MainActor in
+                    await checker.checkForUpdates(userInitiated: false)
+                }
+            }
+        }
+        assertEqual(
+            networkRequestCount, countBeforeLoop + 7,
+            "20 concurrent foregrounding events produce exactly 1 network request")
+    }
+
+    @MainActor
+    static func testNewsURLParserAndSchemeRouting() async {
+        print("  - Testing NewsURLParser URL Schemes, Insecure HTTP Gating, and Deep Linking...")
+
+        // 1. Standard feed:// scheme normalizes to https://
+        let u1 = URL(string: "feed://example.com/rss.xml")!
+        let d1 = NewsURLParser.parse(url: u1, allowInsecureHTTP: false)
+        assertEqual(
+            d1, .addFeed(url: URL(string: "https://example.com/rss.xml")!),
+            "Standard feed:// normalizes to https://")
+
+        // 2. feed:https:// scheme
+        let u2 = URL(string: "feed:https://example.com/feed.atom")!
+        let d2 = NewsURLParser.parse(url: u2, allowInsecureHTTP: false)
+        assertEqual(
+            d2, .addFeed(url: URL(string: "https://example.com/feed.atom")!),
+            "feed:https:// normalizes cleanly")
+
+        // 3. feed://https:// double-slash composite scheme
+        let u3 = URL(string: "feed://https://example.com/feed.atom")!
+        let d3 = NewsURLParser.parse(url: u3, allowInsecureHTTP: false)
+        assertEqual(
+            d3, .addFeed(url: URL(string: "https://example.com/feed.atom")!),
+            "feed://https:// normalizes cleanly")
+
+        // 4. Insecure HTTP upgrade when allowInsecureHTTP is false
+        let u4 = URL(string: "feed:http://insecure.example.com/rss")!
+        let d4 = NewsURLParser.parse(url: u4, allowInsecureHTTP: false)
+        assertEqual(
+            d4, .addFeed(url: URL(string: "https://insecure.example.com/rss")!),
+            "feed:http:// upgraded to https:// when insecure HTTP disallowed")
+
+        let u4b = URL(string: "feed://http://insecure.example.com/rss")!
+        let d4b = NewsURLParser.parse(url: u4b, allowInsecureHTTP: false)
+        assertEqual(
+            d4b, .addFeed(url: URL(string: "https://insecure.example.com/rss")!),
+            "feed://http:// upgraded to https:// when insecure HTTP disallowed")
+
+        // 5. Insecure HTTP preserved when allowInsecureHTTP is true
+        let u5 = URL(string: "feed:http://insecure.example.com/rss")!
+        let d5 = NewsURLParser.parse(url: u5, allowInsecureHTTP: true)
+        assertEqual(
+            d5, .addFeed(url: URL(string: "http://insecure.example.com/rss")!),
+            "feed:http:// preserved when insecure HTTP allowed")
+
+        let u5b = URL(string: "feed://http://insecure.example.com/rss")!
+        let d5b = NewsURLParser.parse(url: u5b, allowInsecureHTTP: true)
+        assertEqual(
+            d5b, .addFeed(url: URL(string: "http://insecure.example.com/rss")!),
+            "feed://http:// preserved when insecure HTTP allowed")
+
+        // 6. Slashed feeds retain meaningful trailing slash
+        let u6 = URL(string: "feed://example.com/feed/")!
+        let d6 = NewsURLParser.parse(url: u6, allowInsecureHTTP: false)
+        assertEqual(
+            d6, .addFeed(url: URL(string: "https://example.com/feed/")!),
+            "Meaningful trailing slash preserved")
+
+        // 7. Feeds with custom ports
+        let u7 = URL(string: "feed://example.com:8080/feed.xml")!
+        let d7 = NewsURLParser.parse(url: u7, allowInsecureHTTP: false)
+        assertEqual(
+            d7, .addFeed(url: URL(string: "https://example.com:8080/feed.xml")!),
+            "Port 8080 preserved in normalized feed URL")
+
+        // 8. Story deep linking: news://story/<id>
+        let u8 = URL(string: "news://story/story-uuid-1234")!
+        let d8 = NewsURLParser.parse(url: u8, allowInsecureHTTP: false)
+        assertEqual(
+            d8, .story(id: "story-uuid-1234"),
+            "news://story/<id> extracts story ID")
+
+        // 9. Story deep linking with trailing slash
+        let u9 = URL(string: "news://story/story-uuid-5678/")!
+        let d9 = NewsURLParser.parse(url: u9, allowInsecureHTTP: false)
+        assertEqual(
+            d9, .story(id: "story-uuid-5678"),
+            "Trailing slash trimmed from story ID")
+
+        // 10. Story deep linking with percent encoding
+        let u10 = URL(string: "news://story/story%20id%20with%20spaces")!
+        let d10 = NewsURLParser.parse(url: u10, allowInsecureHTTP: false)
+        assertEqual(
+            d10, .story(id: "story id with spaces"),
+            "Percent-encoded story ID decoded")
+
+        // 11. Malformed and empty feeds safely rejected
+        assertEqual(NewsURLParser.parse(urlString: "feed:", allowInsecureHTTP: false), nil, "Bare feed: rejected")
+        assertEqual(NewsURLParser.parse(urlString: "feed://", allowInsecureHTTP: false), nil, "Bare feed:// rejected")
+        assertEqual(NewsURLParser.parse(urlString: "feed:///", allowInsecureHTTP: false), nil, "Bare feed:/// rejected")
+        assertEqual(
+            NewsURLParser.parse(urlString: "feed://   ", allowInsecureHTTP: false), nil, "Whitespace feed rejected")
+
+        // 12. Disallowed protocols rejected
+        assertEqual(
+            NewsURLParser.parse(urlString: "feed:javascript:alert(1)", allowInsecureHTTP: false), nil,
+            "javascript: rejected")
+        assertEqual(
+            NewsURLParser.parse(urlString: "feed:file:///etc/passwd", allowInsecureHTTP: false), nil, "file: rejected")
+        assertEqual(
+            NewsURLParser.parse(urlString: "feed://ftp://example.com/feed", allowInsecureHTTP: false), nil,
+            "ftp: rejected")
+        assertEqual(
+            NewsURLParser.parse(urlString: "feed:data:text/html,bad", allowInsecureHTTP: false), nil, "data: rejected")
+
+        // 13. Malformed news URLs rejected
+        assertEqual(
+            NewsURLParser.parse(urlString: "news://story", allowInsecureHTTP: false), nil, "Missing ID rejected")
+        assertEqual(
+            NewsURLParser.parse(urlString: "news://story/", allowInsecureHTTP: false), nil, "Slash with no ID rejected")
+        assertEqual(
+            NewsURLParser.parse(urlString: "news://article/123", allowInsecureHTTP: false), nil,
+            "Wrong host 'article' rejected")
+        assertEqual(
+            NewsURLParser.parse(urlString: "news://settings/account", allowInsecureHTTP: false), nil,
+            "Wrong host 'settings' rejected")
+
+        // 14. Unrelated schemes rejected
+        assertEqual(
+            NewsURLParser.parse(urlString: "https://example.com/rss", allowInsecureHTTP: false), nil,
+            "Direct https scheme rejected by parser")
+        assertEqual(
+            NewsURLParser.parse(urlString: "http://example.com/rss", allowInsecureHTTP: false), nil,
+            "Direct http scheme rejected by parser")
+        assertEqual(NewsURLParser.parse(urlString: "", allowInsecureHTTP: false), nil, "Empty string rejected")
+
+        // 15. Duplicate feed prevention
+        let suiteName = testDefaultsSuite("test.url.duplicate.prevention")
+        let tempDefaults = UserDefaults(suiteName: suiteName)!
+        defer { removeTestDefaults(suiteName) }
+        let settings = AppSettings(defaults: tempDefaults)
+
+        let addResult1 = settings.addFeed(url: "https://example.com/rss.xml")
+        assertEqual(addResult1, "https://example.com/rss.xml", "First feed subscription succeeds")
+        assertTrue(settings.hasFeed("https://example.com/rss.xml"), "Settings reports hasFeed as true")
+
+        let addResult2 = settings.addFeed(url: "https://example.com/rss.xml")
+        assertEqual(addResult2, nil, "Duplicate subscription attempt returns nil")
+
+        let addResult3 = settings.addFeed(url: "https://example.com/rss.xml/")
+        assertEqual(addResult3, nil, "Duplicate subscription attempt with slash variant returns nil")
+    }
+
+    @MainActor
+    static func testAppIntentsExecutionAndValidation() async {
+        print("  - Testing App Intents Execution, Validation, Gating and Resolution...")
+
+        // 1. RefreshFeedsIntent: verify title, openAppWhenRun, isolated execution and dialog
+        assertEqual(RefreshFeedsIntent.title, "Refresh Feeds", "RefreshFeedsIntent title is 'Refresh Feeds'")
+        assertFalse(RefreshFeedsIntent.openAppWhenRun, "RefreshFeedsIntent does not open app")
+
+        let refreshSuite = testDefaultsSuite("test.intent.refresh")
+        let refreshDefaults = UserDefaults(suiteName: refreshSuite)!
+        defer { removeTestDefaults(refreshSuite) }
+        let refreshSettings = AppSettings(defaults: refreshDefaults)
+        let refreshStore = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await refreshStore.initialize()
+        let refreshFeedManager = FeedManager(settings: refreshSettings, store: refreshStore, schedulesRefresh: false)
+
+        let refreshIntent = RefreshFeedsIntent(feedManager: refreshFeedManager)
+        do {
+            let result = try await refreshIntent.perform()
+            let dialogText = extractDialogText(from: result)
+            assertTrue(
+                dialogText != nil && dialogText!.contains("Feeds refreshed successfully"),
+                "RefreshFeedsIntent returns confirmation dialog")
+        } catch {
+            assertTrue(false, "RefreshFeedsIntent perform threw: \(error)")
+        }
+
+        // Test RefreshFeedsIntent via IntentDependencyResolver
+        IntentDependencyResolver.feedManagerOverride = refreshFeedManager
+        defer { IntentDependencyResolver.feedManagerOverride = nil }
+        let defaultRefreshIntent = RefreshFeedsIntent()
+        do {
+            let result = try await defaultRefreshIntent.perform()
+            let dialogText = extractDialogText(from: result)
+            assertTrue(
+                dialogText != nil && dialogText!.contains("Feeds refreshed successfully"),
+                "Default RefreshFeedsIntent uses IntentDependencyResolver")
+        } catch {
+            assertTrue(false, "Default RefreshFeedsIntent perform threw: \(error)")
+        }
+
+        // 2. AddFeedIntent: parameters, validation, duplicate prevention, and insecure HTTP gating
+        assertEqual(AddFeedIntent.title, "Add Feed", "AddFeedIntent title is 'Add Feed'")
+        assertFalse(AddFeedIntent.openAppWhenRun, "AddFeedIntent does not open app")
+
+        let addSuite = testDefaultsSuite("test.intent.addfeed")
+        let addDefaults = UserDefaults(suiteName: addSuite)!
+        defer { removeTestDefaults(addSuite) }
+        let addSettings = AppSettings(defaults: addDefaults)
+
+        // Valid feed URL with default settings (allowInsecureHTTP = false)
+        let validURL = URL(string: "https://example.com/rss.xml")!
+        let addIntent1 = AddFeedIntent(url: validURL, appSettings: addSettings)
+        do {
+            let res1 = try await addIntent1.perform()
+            assertEqual(res1.value, true, "AddFeedIntent with valid URL returns true")
+            assertTrue(addSettings.hasFeed("https://example.com/rss.xml"), "Feed is registered in AppSettings")
+            let dialog1 = extractDialogText(from: res1)
+            assertTrue(
+                dialog1 != nil && dialog1!.contains("Subscribed to feed"),
+                "AddFeedIntent returns subscription dialog")
+        } catch {
+            assertTrue(false, "AddFeedIntent 1 threw: \(error)")
+        }
+
+        // Duplicate subscription rejection
+        let addIntentDup = AddFeedIntent(url: validURL, appSettings: addSettings)
+        do {
+            let resDup = try await addIntentDup.perform()
+            assertEqual(resDup.value, false, "Duplicate subscription returns false")
+            let dialogDup = extractDialogText(from: resDup)
+            assertTrue(
+                dialogDup != nil && dialogDup!.contains("Could not subscribe"),
+                "Duplicate subscription returns failure dialog")
+        } catch {
+            assertTrue(false, "AddFeedIntent duplicate threw: \(error)")
+        }
+
+        // Trailing slash variant is recognized as duplicate
+        let slashURL = URL(string: "https://example.com/rss.xml/")!
+        let addIntentSlash = AddFeedIntent(url: slashURL, appSettings: addSettings)
+        do {
+            let resSlash = try await addIntentSlash.perform()
+            assertEqual(resSlash.value, false, "Trailing slash duplicate returns false")
+        } catch {
+            assertTrue(false, "AddFeedIntent trailing slash threw: \(error)")
+        }
+
+        // Insecure HTTP URL upgraded when allowInsecureHTTP is false
+        let httpURL = URL(string: "http://insecure-feed.org/feed.xml")!
+        let addIntentHTTP = AddFeedIntent(url: httpURL, appSettings: addSettings)
+        do {
+            let resHTTP = try await addIntentHTTP.perform()
+            assertEqual(resHTTP.value, true, "HTTP feed subscription succeeds via HTTPS upgrade")
+            assertTrue(addSettings.hasFeed("https://insecure-feed.org/feed.xml"), "Feed was upgraded to HTTPS")
+            assertFalse(addSettings.hasFeed("http://insecure-feed.org/feed.xml"), "HTTP URL was not preserved")
+        } catch {
+            assertTrue(false, "AddFeedIntent HTTP upgrade threw: \(error)")
+        }
+
+        // Insecure HTTP URL preserved when allowInsecureHTTP is true
+        let insecureSuite = testDefaultsSuite("test.intent.insecure")
+        let insecureDefaults = UserDefaults(suiteName: insecureSuite)!
+        defer { removeTestDefaults(insecureSuite) }
+        let insecureSettings = AppSettings(defaults: insecureDefaults)
+        insecureSettings.setAllowInsecureHTTP(true)
+
+        let plainHTTPURL = URL(string: "http://plain-http.org/feed.xml")!
+        let addIntentPlain = AddFeedIntent(url: plainHTTPURL, appSettings: insecureSettings)
+        do {
+            let resPlain = try await addIntentPlain.perform()
+            assertEqual(resPlain.value, true, "Plain HTTP feed subscription succeeds when allowed")
+            assertTrue(insecureSettings.hasFeed("http://plain-http.org/feed.xml"), "Plain HTTP URL preserved")
+        } catch {
+            assertTrue(false, "AddFeedIntent plain HTTP threw: \(error)")
+        }
+
+        // Invalid scheme / unparseable URL returns false
+        let invalidURL = URL(string: "file:///etc/passwd")!
+        let addIntentInvalid = AddFeedIntent(url: invalidURL, appSettings: addSettings)
+        do {
+            let resInvalid = try await addIntentInvalid.perform()
+            assertEqual(resInvalid.value, false, "file:// URL scheme rejected")
+        } catch {
+            assertTrue(false, "AddFeedIntent invalid threw: \(error)")
+        }
+
+        // AddFeedIntent via IntentDependencyResolver
+        IntentDependencyResolver.appSettingsOverride = addSettings
+        defer { IntentDependencyResolver.appSettingsOverride = nil }
+        let resolverFeedURL = URL(string: "https://resolver-test.com/feed.xml")!
+        let resolverAddIntent = AddFeedIntent(url: resolverFeedURL)
+        do {
+            let resResolver = try await resolverAddIntent.perform()
+            assertEqual(resResolver.value, true, "AddFeedIntent uses IntentDependencyResolver appSettingsOverride")
+            assertTrue(addSettings.hasFeed("https://resolver-test.com/feed.xml"), "Feed registered via resolver")
+        } catch {
+            assertTrue(false, "AddFeedIntent resolver threw: \(error)")
+        }
+
+        // 3. OpenSectionIntent: AppSection enumeration and navigation routing
+        assertEqual(OpenSectionIntent.title, "Open Section", "OpenSectionIntent title is 'Open Section'")
+        assertTrue(OpenSectionIntent.openAppWhenRun, "OpenSectionIntent opens app in foreground")
+
+        let sections: [AppSection] = [.today, .unread, .briefing, .savedStories]
+        for section in sections {
+            var routedSection: AppSection?
+            let openIntent = OpenSectionIntent(section: section) { s in
+                routedSection = s
+            }
+            do {
+                _ = try await openIntent.perform()
+                assertEqual(routedSection, section, "OpenSectionIntent routes to \(section.rawValue)")
+            } catch {
+                assertTrue(false, "OpenSectionIntent for \(section) threw: \(error)")
+            }
+        }
+
+        // OpenSectionIntent via IntentDependencyResolver.sectionNavigationHandler
+        var ambientRouted: AppSection?
+        IntentDependencyResolver.sectionNavigationHandler = { s in
+            ambientRouted = s
+        }
+        defer { IntentDependencyResolver.sectionNavigationHandler = nil }
+        let ambientOpenIntent = OpenSectionIntent(section: .briefing)
+        do {
+            _ = try await ambientOpenIntent.perform()
+            assertEqual(ambientRouted, .briefing, "OpenSectionIntent routes through IntentDependencyResolver")
+        } catch {
+            assertTrue(false, "Ambient OpenSectionIntent threw: \(error)")
+        }
+
+        // 4. MarkAllAsReadIntent: unread count clearing, idempotency, and dialog
+        assertEqual(MarkAllAsReadIntent.title, "Mark All as Read", "MarkAllAsReadIntent title is 'Mark All as Read'")
+        assertFalse(MarkAllAsReadIntent.openAppWhenRun, "MarkAllAsReadIntent does not open app")
+
+        let markStore = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await markStore.initialize()
+        let sample1 = FeedArticle(
+            title: "Story 1", link: "https://example.com/1", guid: "g1", description: "D1", pubDate: Date(),
+            source: "Publisher")
+        let sample2 = FeedArticle(
+            title: "Story 2", link: "https://example.com/2", guid: "g2", description: "D2", pubDate: Date(),
+            source: "Publisher")
+        await markStore.batchUpsert(articles: [sample1, sample2])
+        assertEqual(markStore.unreadCount, 2, "2 unread stories before MarkAllAsReadIntent")
+
+        let markIntent = MarkAllAsReadIntent(articleStore: markStore)
+        do {
+            let resMark = try await markIntent.perform()
+            assertEqual(markStore.unreadCount, 0, "Unread count is 0 after MarkAllAsReadIntent")
+            let dialogMark = extractDialogText(from: resMark)
+            assertTrue(
+                dialogMark != nil && dialogMark!.contains("All stories marked as read"),
+                "MarkAllAsReadIntent returns confirmation dialog")
+        } catch {
+            assertTrue(false, "MarkAllAsReadIntent perform threw: \(error)")
+        }
+
+        // Idempotent execution when unread is already 0
+        do {
+            let resMark2 = try await markIntent.perform()
+            assertEqual(markStore.unreadCount, 0, "Unread count remains 0 on repeat MarkAllAsReadIntent")
+            let dialogMark2 = extractDialogText(from: resMark2)
+            assertTrue(
+                dialogMark2 != nil && dialogMark2!.contains("All stories marked as read"),
+                "Confirmation dialog returned on idempotent run")
+        } catch {
+            assertTrue(false, "MarkAllAsReadIntent repeat threw: \(error)")
+        }
+
+        // MarkAllAsReadIntent via IntentDependencyResolver
+        IntentDependencyResolver.articleStoreOverride = markStore
+        defer { IntentDependencyResolver.articleStoreOverride = nil }
+        let ambientMarkIntent = MarkAllAsReadIntent()
+        do {
+            let resAmbientMark = try await ambientMarkIntent.perform()
+            let dialogAmbient = extractDialogText(from: resAmbientMark)
+            assertTrue(
+                dialogAmbient != nil && dialogAmbient!.contains("All stories marked as read"),
+                "Ambient MarkAllAsReadIntent succeeds via resolver")
+        } catch {
+            assertTrue(false, "Ambient MarkAllAsReadIntent threw: \(error)")
+        }
+
+        // 5. NewBriefingIntent: edition reset and dialog
+        assertEqual(NewBriefingIntent.title, "New Briefing", "NewBriefingIntent title is 'New Briefing'")
+        assertFalse(NewBriefingIntent.openAppWhenRun, "NewBriefingIntent does not open app")
+
+        var customResetTriggered = false
+        let customBriefingIntent = NewBriefingIntent(resetAction: {
+            customResetTriggered = true
+        })
+        do {
+            let resBriefing = try await customBriefingIntent.perform()
+            assertTrue(customResetTriggered, "NewBriefingIntent custom reset action executed")
+            let dialogBriefing = extractDialogText(from: resBriefing)
+            assertTrue(
+                dialogBriefing != nil && dialogBriefing!.contains("New briefing generated"),
+                "NewBriefingIntent dialog confirms generation")
+        } catch {
+            assertTrue(false, "NewBriefingIntent custom action threw: \(error)")
+        }
+
+        // Default NewBriefingIntent resets UserDefaults
+        let defaultBriefingIntent = NewBriefingIntent()
+        do {
+            let resDefaultBriefing = try await defaultBriefingIntent.perform()
+            assertTrue(
+                UserDefaults.standard.double(forKey: "briefingEditionSelectedAt") > 0,
+                "briefingEditionSelectedAt timestamp updated in UserDefaults")
+            assertEqual(
+                UserDefaults.standard.string(forKey: "briefingEditionArticleIDs"), "",
+                "briefingEditionArticleIDs cleared in UserDefaults")
+            let dialogDefault = extractDialogText(from: resDefaultBriefing)
+            assertTrue(
+                dialogDefault != nil && dialogDefault!.contains("New briefing generated"),
+                "NewBriefingIntent default execution dialog")
+        } catch {
+            assertTrue(false, "Default NewBriefingIntent threw: \(error)")
+        }
+    }
+
+    private static func extractDialogText(from result: some IntentResult) -> String? {
+        let mirror = Mirror(reflecting: result)
+        for child in mirror.children where child.label == "dialog" {
+            let desc = String(describing: child.value)
+            if desc.starts(with: "nil") || desc == "Optional(nil)" { return nil }
+            return desc
+        }
+        return nil
+    }
+
+    private static func shortcutMetadata(from shortcut: AppShortcut) -> (
+        shortTitle: String, systemImage: String, phrases: [String]
+    ) {
+        let mirror = Mirror(reflecting: shortcut)
+        var title = ""
+        var image = ""
+        var phrases: [String] = []
+        for child in mirror.children {
+            if child.label == "shortTitle" {
+                title = String(describing: child.value)
+            } else if child.label == "systemImageName" {
+                if let opt = child.value as? String? {
+                    image = opt ?? ""
+                }
+            } else if child.label == "basePhraseTemplates" {
+                if let list = child.value as? [String] {
+                    phrases = list
+                }
+            }
+        }
+        return (title, image, phrases)
+    }
+
+    @MainActor
+    static func testAppShortcutsProviderDeclarations() async {
+        print("  - Testing NewsShortcuts AppShortcutsProvider Declarations & Terminology...")
+
+        // 1. Shortcut tile color
+        assertEqual(NewsShortcuts.shortcutTileColor, .navy, "NewsShortcuts tile color is navy")
+
+        // 2. Exactly 5 shortcuts
+        let shortcuts = NewsShortcuts.appShortcuts
+        assertEqual(shortcuts.count, 5, "NewsShortcuts defines exactly 5 App Shortcuts")
+
+        // 3. Inspect each shortcut declaration
+        let refreshMeta = shortcutMetadata(from: shortcuts[0])
+        assertTrue(refreshMeta.shortTitle.contains("Refresh Feeds"), "Shortcut 0 shortTitle contains 'Refresh Feeds'")
+        assertEqual(refreshMeta.systemImage, "arrow.clockwise", "Shortcut 0 icon is arrow.clockwise")
+        assertTrue(refreshMeta.phrases.contains("Refresh ${applicationName}"), "Shortcut 0 contains refresh phrase")
+
+        let addFeedMeta = shortcutMetadata(from: shortcuts[1])
+        assertTrue(addFeedMeta.shortTitle.contains("Add Feed"), "Shortcut 1 shortTitle contains 'Add Feed'")
+        assertEqual(addFeedMeta.systemImage, "plus", "Shortcut 1 icon is plus")
+
+        let openSectionMeta = shortcutMetadata(from: shortcuts[2])
+        assertTrue(openSectionMeta.shortTitle.contains("Open Section"), "Shortcut 2 shortTitle contains 'Open Section'")
+        assertEqual(openSectionMeta.systemImage, "sidebar.left", "Shortcut 2 icon is sidebar.left")
+
+        let markReadMeta = shortcutMetadata(from: shortcuts[3])
+        assertTrue(
+            markReadMeta.shortTitle.contains("Mark All as Read"), "Shortcut 3 shortTitle contains 'Mark All as Read'")
+        assertEqual(markReadMeta.systemImage, "checkmark.circle", "Shortcut 3 icon is checkmark.circle")
+
+        let newBriefingMeta = shortcutMetadata(from: shortcuts[4])
+        assertTrue(newBriefingMeta.shortTitle.contains("New Briefing"), "Shortcut 4 shortTitle contains 'New Briefing'")
+        assertEqual(newBriefingMeta.systemImage, "text.book.closed", "Shortcut 4 icon is text.book.closed")
+
+        // 4. Terminology review: ensure strictly 'story'/'stories' and never 'article' in shortcut titles and phrases
+        for (idx, shortcut) in shortcuts.enumerated() {
+            let meta = shortcutMetadata(from: shortcut)
+            assertFalse(
+                meta.shortTitle.lowercased().contains("article"),
+                "Shortcut [\(idx)] title '\(meta.shortTitle)' must not contain 'article'"
+            )
+            for phrase in meta.phrases {
+                assertFalse(
+                    phrase.lowercased().contains("article"),
+                    "Shortcut [\(idx)] phrase '\(phrase)' must not contain 'article'"
+                )
+            }
+        }
+    }
+
+    @MainActor
     static func testNotificationModeTriageAndGrammar() async {
         print("  - Testing NotificationMode Triage, Privacy & Singular/Plural Grammar...")
 
@@ -13691,6 +15470,29 @@ struct NewsTests {
         assertEqual(settingsB.notificationMode, AppSettings.NotificationMode.minimal, "Mode should update to .minimal")
         assertEqual(
             tempDefaultsB.string(forKey: AppSettings.notificationModeKey), "minimal", "Key should update to minimal")
+
+        // Starred feeds persist and go with an unsubscribed feed (#588).
+        settingsB.feedURLs = ["https://example.com/feed"]
+        settingsB.setFeedStarred("https://example.com/feed", true)
+        assertEqual(
+            AppSettings(defaults: tempDefaultsB).starredFeedURLs, ["https://example.com/feed"], "A star is stored")
+        settingsB.setFeedStarred("https://example.com/feed", false)
+        assertTrue(AppSettings(defaults: tempDefaultsB).starredFeedURLs.isEmpty, "Unstarring is stored")
+        settingsB.setFeedStarred("https://example.com/feed", true)
+        settingsB.removeFeed(url: "https://example.com/feed")
+        assertTrue(settingsB.starredFeedURLs.isEmpty, "Unsubscribing removes the star")
+
+        // At most three feeds are starred: a fourth star is refused, not swapped in (#588).
+        let capped = (1...4).map { "https://cap\($0).invalid/feed" }
+        for url in capped.prefix(3) { assertTrue(settingsB.setFeedStarred(url, true), "Stars up to the limit") }
+        assertFalse(settingsB.setFeedStarred(capped[3], true), "A fourth star is refused")
+        assertEqual(settingsB.starredFeedURLs, Set(capped.prefix(3)), "The three stars stay; none is replaced")
+        assertEqual(
+            AppSettings(defaults: tempDefaultsB).starredFeedURLs, Set(capped.prefix(3)),
+            "The refused star is not stored")
+        assertTrue(settingsB.setFeedStarred(capped[0], true), "Re-starring a starred feed at the limit is fine")
+        settingsB.setFeedStarred(capped[0], false)
+        assertTrue(settingsB.setFeedStarred(capped[3], true), "Unstarring frees a place")
     }
 
     actor FeedDeliveryGate {
@@ -14055,7 +15857,21 @@ struct NewsTests {
     {
         let endpoint = try await proxy.port()
         let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: endpoint)!, using: .tcp)
-        client.start(queue: .global())
+        // A loopback connect can fail with EADDRINUSE when parallel runs churn ephemeral ports. NWConnection
+        // then parks in .waiting and never completes a send, so surface that state instead of hanging.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = SocketObservation()
+            client.stateUpdateHandler = { state in
+                switch state {
+                case .ready: if once.claim() { continuation.resume() }
+                case .waiting(let error), .failed(let error): if once.claim() { continuation.resume(throwing: error) }
+                case .cancelled: if once.claim() { continuation.resume(throwing: CancellationError()) }
+                default: break
+                }
+            }
+            client.start(queue: .global())
+        }
+        client.stateUpdateHandler = nil
         try await socketSend(client, Data([5, 1, 0]))
         assertEqual(try await socketRead(client, count: 2), Data([5, 0]), "SOCKS greeting succeeds")
         let hostBytes = Data(host.utf8)
@@ -14896,8 +16712,7 @@ struct NewsTests {
         let rssResult = await classifier.classify(
             title: "Generic Headline With No Clues",
             description: "Some description here",
-            rssCategory: "Technology",
-            allowFoundationModels: false
+            rssCategory: "Technology"
         )
         assertEqual(rssResult.category, "Technology", "RSS hint should determine category")
         assertTrue(rssResult.confidence >= 0.90, "RSS hint should provide >= 0.90 confidence")
@@ -14907,8 +16722,7 @@ struct NewsTests {
         let techResult = await classifier.classify(
             title: "Apple Announces M-Series Silicon Processor With Neural Acceleration",
             description: "Novel semiconductor architecture speeds machine learning and developer workflows",
-            rssCategory: nil,
-            allowFoundationModels: false
+            rssCategory: nil
         )
         assertEqual(techResult.category, "Technology", "Strong tech keywords must classify as Technology")
         assertTrue(techResult.confidence >= 0.70, "Confidence should exceed 0.70")
@@ -14918,8 +16732,7 @@ struct NewsTests {
         let genericResult = await classifier.classify(
             title: "Unspecified Developments Reported",
             description: "Updates will follow as events occur",
-            rssCategory: nil,
-            allowFoundationModels: false
+            rssCategory: nil
         )
         assertTrue(!genericResult.category.isEmpty, "Default category must be assigned")
     }
@@ -15007,8 +16820,7 @@ struct NewsTests {
             let result = await ArticleClassifier.shared.classify(
                 title: item.title,
                 description: item.description,
-                rssCategory: nil,
-                allowFoundationModels: false
+                rssCategory: nil
             )
             if result.category == item.expectedCategory.rawValue {
                 correctCount += 1
@@ -15081,12 +16893,9 @@ struct NewsTests {
             await reply.during?()
             return reply.outcome
         }
-        func coordinator(_ model: NewsTextModel = refusing, deadline: Duration = .seconds(4))
-            -> OverviewGenerationCoordinator
-        {
+        func coordinator(deadline: Duration = .seconds(4)) -> OverviewGenerationCoordinator {
             OverviewGenerationCoordinator(
-                store: store, queue: EnrichmentQueue(store: store), textModel: model, allowsModel: { true },
-                allowsEnergy: { true },
+                store: store, queue: EnrichmentQueue(store: store), allowsEnergy: { true },
                 extractText: extractor, extractionDeadline: deadline)
         }
         func stored(_ id: String) async throws -> FeedArticle? {
@@ -15095,25 +16904,16 @@ struct NewsTests {
 
         // Extracted text replaces the summary before the inputs are fixed, and invalidates an older overview.
         _ = try await database.upsertArticles([a, b])
-        let plain = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: refusing, allowsModel: { true })
+        let plain = OverviewGenerationCoordinator(store: store, queue: EnrichmentQueue(store: store))
         let before = await plain.requestOverview(
             eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
         assertTrue(before != nil, "Without an extractor the summary overview is stored")
         await pages.set(a.link, success(page("Publisher A")))
         await pages.set(b.link, success(page("Publisher B")))
-        let prompts = TestCounter()
-        let recording = NewsTextModel { prompt, _ in
-            if prompt.contains("Return plain text only:"), prompt.contains("two damaged support cables") {
-                await prompts.increment()
-            }
-            return "I refuse"
-        }
-        let extracting = coordinator(recording)
+        let extracting = coordinator()
         let after = await extracting.requestOverview(
             eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
         assertEqual(try await stored(a.id)?.fullContent, page("Publisher A"), "Accepted publisher text is stored")
-        assertEqual(await prompts.value, 0, "Publisher extraction never schedules model prose")
         assertTrue(after?.inputTextHash != before?.inputTextHash, "Extracted text gives the overview new inputs")
         assertEqual(
             try await database.fetchEventOverview(eventID: "evidence")?.id, after?.id,
@@ -15121,7 +16921,6 @@ struct NewsTests {
         let again = await extracting.requestOverview(
             eventID: "evidence", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [a, b])
         assertEqual(again?.id, after?.id, "Copies from before extraction still hit the stored overview")
-        assertEqual(await prompts.value, 0, "The stored excerpt overview is reused without a model")
         assertEqual(await log.count(a.link), 1, "Stored text is never fetched again")
 
         // The reader's own article is left to the reader.
@@ -15232,8 +17031,7 @@ struct NewsTests {
         _ = try await database.upsertArticles([u, v])
         await pages.set(u.link, success(page("Publisher U")))
         let gated = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: refusing, allowsModel: { false },
-            allowsEnergy: { false },
+            store: store, queue: EnrichmentQueue(store: store), allowsEnergy: { false },
             extractText: extractor)
         _ = await gated.requestOverview(
             eventID: "gated", eventTitle: "Harbor bridge", membershipVersion: 1, articles: [u, v])
@@ -15283,14 +17081,9 @@ struct NewsTests {
     static func testPlainTextGeneration(fixtureHost: String) async throws {
         print("  - Testing Plain Text Generation, Support Gates and Refusal Fallbacks...")
         testModelErrorMapping()
-        assertTrue(ArticleTextAnswer.classification("World|0.91") != nil, "Fixed category text parses")
-        for bad in ["World|NaN", "World|1.1", "Unknown|0.9", "World|0.9|extra", "I refuse"] {
-            assertEqual(ArticleTextAnswer.classification(bad)?.category, nil, "Malformed classification is rejected")
-        }
-        let model = NewsTextModel { _, _ in "World|0.91" }
-        let classified = await ArticleClassifier(textModel: model).classify(
-            title: "A developing report", description: "Reported developments")
-        assertEqual(classified.evidence, ["foundation_model"], "Classifier uses the plain-text model answer")
+        let classified = await ArticleClassifier().classify(
+            title: "Airstrikes hit the port", description: "Reported developments")
+        assertEqual(classified.category, "World", "Ingestion classification is deterministic; no model stage remains")
         let text =
             "The bridge reopened after engineers completed repairs. Traffic resumed | during the morning. The council approved the repairs."
         let analysisModel = NewsTextModel { _, _ in
@@ -15313,6 +17106,21 @@ struct NewsTests {
             fallbackAnalysis.modelIdentifier, "apple.natural-language.fallback",
             "A refusal keeps source-based extraction")
         assertEqual(fallbackAnalysis.analysisVersion, 3, "A Mac without the model keeps its extractive summary")
+        // Non-English text never reaches the model and keeps a final extractive summary (#550).
+        let german =
+            "Die Brücke wurde nach Abschluss der Reparaturen wieder geöffnet. Der Verkehr rollte am Morgen wieder an. "
+            + "Der Stadtrat hatte die Reparaturen im Frühjahr genehmigt, nachdem Ingenieure Risse im Beton gefunden hatten."
+        let germanAnalysis = try await ArticleAnalyzer(
+            textModel: NewsTextModel { _, _ in
+                assertTrue(false, "Non-English text is not sent to the on-device model")
+                throw NewsTextModel.TemporarilyUnavailable()
+            }
+        ).analyze(title: "Brücke wieder geöffnet", content: german)
+        assertEqual(
+            germanAnalysis.modelIdentifier, "apple.natural-language.fallback", "German text gets the extractive summary"
+        )
+        assertEqual(germanAnalysis.analysisVersion, 3, "… as a final summary, not a provisional one")
+        assertFalse(germanAnalysis.summary.isEmpty, "The extractive summary covers the German text")
         let waitingAnalysis = try await ArticleAnalyzer(
             textModel: NewsTextModel { _, _ in throw NewsTextModel.TemporarilyUnavailable() }
         )
@@ -15492,46 +17300,30 @@ struct NewsTests {
             OverviewClaimVerifier.verifyOverview(stale, passages: passages, articles: [article1, article2])
                 .isFullyVerified,
             "Citation fingerprint must match the current publisher passage")
-        let selected = OverviewPassageSelector().selectPassages(
-            from: [article1, article2], budget: OverviewTokenBudget()
-        ).passages
-        let firstID = "P\(selected.firstIndex(where: { $0.articleID == article1.id })! + 1)"
-        let secondID = "P\(selected.firstIndex(where: { $0.articleID == article2.id })! + 1)"
-        let selectedAnswer = answer.replacingOccurrences(of: "|P1|", with: "|first|").replacingOccurrences(
-            of: "|P2|", with: "|\(secondID)|"
-        ).replacingOccurrences(of: "|first|", with: "|\(firstID)|")
-        let requests = TestCounter()
-        let coordinatedModel = NewsTextModel { prompt, _ in
-            await requests.increment()
-            if prompt.contains("Return plain text only:") { return selectedAnswer }
-            return prompt.contains("Engineers destroyed the bridge.") ? "NO" : "YES"
-        }
         let database = DatabaseEngine(path: ":memory:")
         try await database.open()
         _ = try await database.upsertArticles([article1, article2])
         let store = ArticleStore(database: database)
         let coordinator = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { true })
+            store: store, queue: EnrichmentQueue(store: store))
         let coordinated = await coordinator.requestOverview(
             eventID: "plain", eventTitle: "Bridge reopening", membershipVersion: 1, articles: [article1, article2])
         assertEqual(coordinated?.summary, "", "Production requests omit generated prose")
         assertEqual(coordinated?.kind, .fallbackExcerpts, "Production requests use publisher excerpts")
-        assertEqual(await requests.value, 0, "Production overview generation never calls the model")
         let persisted = try await database.fetchEventOverview(eventID: "plain")
         assertEqual(persisted?.id, coordinated?.id, "SQLite stores the generated excerpt document")
         assertEqual(persisted?.summary, "", "SQLite preserves the empty summary")
         assertTrue(!(persisted?.facts.isEmpty ?? true), "SQLite retains publisher facts and citations")
         let blocked = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), textModel: coordinatedModel, allowsModel: { false })
+            store: store, queue: EnrichmentQueue(store: store))
         let aiOff = await blocked.requestOverview(
             eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
-        assertEqual(await requests.value, 0, "AI-disabled requests make no model calls")
         assertEqual(
             try await database.fetchEventOverview(eventID: "blocked")?.isStale(currentMembershipVersion: 1), false,
-            "AI-disabled publisher excerpts are final")
+            "Publisher excerpts are final")
         let reused = await coordinator.requestOverview(
             eventID: "blocked", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
-        assertEqual(reused?.id, aiOff?.id, "Enabling AI reuses the same final excerpts")
+        assertEqual(reused?.id, aiOff?.id, "Another coordinator reuses the same final excerpts")
 
         let legacy = EventOverviewDocument(
             eventID: "legacy",
@@ -15560,7 +17352,7 @@ struct NewsTests {
         await eventually("Held jobs fill the excerpt queue") { await queue.activeJobCount() == 3 }
         let checks = TestCounter()
         let shared = OverviewGenerationCoordinator(
-            store: store, queue: queue, textModel: coordinatedModel,
+            store: store, queue: queue,
             allowsEnergy: {
                 await checks.increment()
                 return true
@@ -15585,7 +17377,6 @@ struct NewsTests {
         assertTrue(joined != nil, "Cancelling warmup preserves the reader's shared generation")
         assertEqual(joined?.summary, "", "The joined generation returns excerpts")
         for holder in holders { _ = await holder.value }
-        assertEqual(await requests.value, 0, "The shared generation also makes no model calls")
         // A macOS update can replace the on-device model: stored overviews and summaries regenerate with the new one.
         let summary = ArticleAnalysis(
             summary: "The bridge reopened.", keyPoints: ["Traffic resumed."], entities: [], category: "World",
@@ -15826,11 +17617,14 @@ struct NewsTests {
 
         // 3. Importance computation range [0.0, 1.0]
         assertEqual(
-            NotificationService.breakingSignalCount(in: "Studies show diesel bodies replacement"), 0,
+            NotificationService.breakingSignalWeight(in: "Studies show diesel bodies replacement"), 0,
             "Signal words match whole words only")
         assertEqual(
-            NotificationService.breakingSignalCount(in: "Man dies in attack, police say"), 2,
-            "Whole-word signals still count")
+            NotificationService.breakingSignalWeight(in: "Man dies in attack, police say"), 2,
+            "Whole-word breaking signals weigh a point each")
+        assertEqual(
+            NotificationService.breakingSignalWeight(in: "President announces the company launches a fund"), 1.5,
+            "Announcement and office-holder words weigh half (#545)")
         let score = service.computeImportance(
             title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
@@ -15842,22 +17636,556 @@ struct NewsTests {
                 pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Publisher \(id)")
         }
         let quiet = report(1, "Council meets on Tuesday")
-        let loud = report(2, "Breaking: explosion kills dozens, president declares emergency")
+        let loud = report(
+            2,
+            "Breaking: explosion kills dozens in Paris, London, Berlin, Madrid, Rome, Vienna, Lisbon and Dublin; emergency declared"
+        )
         let third = report(3, "Explosion reported downtown")
         let single = report(4, "Local library extends opening hours")
         let events = [quiet.id: "event-a", loud.id: "event-a", third.id: "event-a"]
         let chosen = await NotificationService.representatives(of: [quiet, loud, third, single], events: events)
-        assertEqual(chosen.map(\.id), [loud.id, single.id], "One report per event, the strongest, then the single")
+        assertEqual(
+            chosen.map(\.article.id), [loud.id, single.id], "One report per event, the strongest, then the single")
         let alone = await NotificationService.representatives(of: [quiet, single], events: [:])
-        assertEqual(alone.map(\.id), [quiet.id, single.id], "Without events every story stands alone in order")
+        assertEqual(alone.map(\.article.id), [quiet.id, single.id], "Without events every story stands alone in order")
 
         // 4. Robust dispatching (no crashes across all 3 notification tiers)
         let sampleArticle = FeedArticle(
             title: "Urgent Update", link: "https://example.com/urgent", guid: "sample-guid",
             description: "Details follow", pubDate: Date(), source: "Wire Service")
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .minimal)
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .privacy)
-        await service.triageAndNotify(newArticles: [sampleArticle], mode: .full)
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .minimal))
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .privacy))
+        await service.triageAndNotify(newArticles: [sampleArticle], delivery: .init(mode: .full))
+
+        // 5. Banners arrive one at a time, a pause apart, threaded per story (#587): two new reports of one event are
+        // one banner; three events are three spaced banners with their own threads. A breaking story is an active
+        // alert with sound; a lesser one is passive and silent.
+        struct Posted: Sendable {
+            let at = ContinuousClock.now
+            let thread: String
+            let active: Bool
+            let sound: Bool
+            let body: String
+            let category: String
+            init(_ request: UNNotificationRequest) {
+                thread = request.content.threadIdentifier
+                active = request.content.interruptionLevel == .active
+                sound = request.content.sound != nil
+                body = request.content.body
+                category = request.content.categoryIdentifier
+            }
+        }
+        actor Recorder {
+            var posted: [Posted] = []
+            func record(_ item: Posted) { posted.append(item) }
+        }
+        let recorder = Recorder()
+        let spaced = NotificationService(post: { await recorder.record(Posted($0)) }, spacing: .milliseconds(60))
+        // Three signal words and six named places put a score at 0.75 before sentiment, so these are breaking
+        // whatever the sentiment tagger says.
+        let fourth = report(
+            5,
+            "Earthquake kills hundreds in Tokyo, Osaka, Kyoto, Nagoya, Sapporo, Kobe and Sendai; emergency declared as crisis deepens"
+        )
+        let fifth = report(
+            6,
+            "Explosion at a refinery in Houston, Dallas, Austin, Denver, Phoenix, Tucson and Boise, dozens killed; urgent evacuation"
+        )
+        let pairEvents = [quiet.id: "event-a", loud.id: "event-a", fourth.id: "event-b", fifth.id: "event-c"]
+        await spaced.triageAndNotify(
+            newArticles: [quiet, loud, fourth, fifth], delivery: .init(mode: .full, events: pairEvents))
+        let posted = await recorder.posted
+        assertEqual(posted.count, 3, "Two reports of one event and two other events are three banners")
+        assertEqual(
+            Set(posted.map(\.thread)), ["event-a", "event-b", "event-c"], "Each banner is threaded under its event")
+        assertTrue(
+            zip(posted, posted.dropFirst()).allSatisfy { $1.at - $0.at >= .milliseconds(60) },
+            "Banners of one refresh are posted at least the spacing apart")
+        assertTrue(posted.allSatisfy { $0.active && $0.sound }, "Breaking stories are active alerts with sound")
+        assertTrue(
+            posted.allSatisfy { $0.category == NotificationActionIdentifier.category },
+            "A story's banner carries Save, Mark as Read and Open (#560)")
+        let quietRecorder = Recorder()
+        let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
+        await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
+        assertTrue(
+            (await quietRecorder.posted).allSatisfy { !$0.active && !$0.sound },
+            "A story below the breaking score is passive and silent when it notifies")
+        let minimalRecorder = Recorder()
+        let minimal = NotificationService(post: { await minimalRecorder.record(Posted($0)) }, spacing: .zero)
+        await minimal.triageAndNotify(
+            newArticles: [quiet, loud, third, single], delivery: .init(mode: .minimal, events: events))
+        assertEqual(
+            (await minimalRecorder.posted).first?.body, "2 new articles across 2 sources",
+            "Summary modes count one report per event too")
+        assertEqual((await minimalRecorder.posted).first?.category, "", "A summary banner has no story actions")
+
+        // 6. Normal lane (#588, #665): of 100 new stories, three are breaking, every fourth is Technology (a top
+        // interest) and every tenth event has three publishers. At most five normal banners in the rolling hour.
+        var seeded: [(article: FeedArticle, score: Double)] = []
+        var seededEvents: [String: String] = [:]
+        var publishers: [String: Int] = [:]
+        for index in 0..<100 {
+            var article = report(100 + index, "Story \(index)")
+            article.category = ["Technology", "Food", "Travel", "Sports"][index % 4]
+            article.identityFeedURL = "https://other.invalid/feed"
+            seededEvents[article.id] = "seeded-\(index)"
+            publishers["seeded-\(index)"] = index % 10 == 0 ? 3 : 1
+            seeded.append((article, index < 3 ? 0.7 : 0.3))
+        }
+        var delivery = NotificationDelivery(mode: .full, events: seededEvents)
+        delivery.publishers = publishers
+        delivery.interests = NotificationService.topInterests(["technology": 9, "politics": 4, "world": 2, "food": 1])
+        assertEqual(
+            NotificationService.rankedInterests(["technology": 9, "politics": 4, "world": 2, "food": 1]),
+            ["technology", "politics", "world"], "The top three interests by weight")
+        func planned(_ delivery: NotificationDelivery, pending: [String: [(article: FeedArticle, score: Double)]] = [:])
+            -> [String]
+        {
+            NotificationService.plan(new: seeded, pending: pending, delivery: delivery).banners.map {
+                $0.article?.title ?? NotificationService.groupedBody($0)
+            }
+        }
+        assertEqual(
+            planned(delivery), ["Story 0", "Story 1", "Story 2", "Story 20", "Story 40"],
+            "Breaking stories and top-interest stories with three publishers notify, strongest first, five at most")
+        delivery.ledger.normalLastHour = 3
+        assertEqual(planned(delivery), ["Story 0", "Story 1"], "The rolling hour's earlier banners use the allowance")
+        delivery.ledger.normalLastHour = 5
+        assertTrue(planned(delivery).isEmpty, "A full hour posts no normal banner")
+        delivery.ledger.normalLastHour = 0
+        delivery.interests = []
+        assertEqual(
+            planned(delivery), ["Story 0", "Story 1", "Story 2"], "Without interests only breaking stories notify")
+
+        // 7. Repeated events (#545, #665): an event announced today stays quiet while its lead headline is the one
+        // announced, unless it rises to a higher lane; a new lead headline notifies again.
+        delivery.leadTitles = ["seeded-1": "Story 1 lead"]
+        delivery.ledger.announced = [
+            "seeded-1": .init(leadKey: EventFeedSummary.titleKey("Story 1 lead"), lane: .normal)
+        ]
+        assertEqual(planned(delivery), ["Story 0", "Story 2"], "A second report of an announced event does not notify")
+        delivery.ledger.announced["seeded-1"]?.leadKey = EventFeedSummary.titleKey("An earlier lead")
+        assertEqual(planned(delivery), ["Story 0", "Story 1", "Story 2"], "A changed lead headline notifies again")
+
+        // 8. Starred lane: one banner per feed and 20 minutes, standing for every pending story (#665).
+        let starredFeed = "https://starred.invalid/feed"
+        func starredStory(_ index: Int, event: String? = nil) -> (article: FeedArticle, score: Double) {
+            var article = FeedArticle(
+                title: "Starred \(index)", link: "https://notify.invalid/\(500 + index)", guid: "notify-\(500 + index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Starred Daily")
+            article.identityFeedURL = starredFeed
+            if let event { delivery.events[article.id] = event }
+            return (article, 0.3)
+        }
+        delivery.starredFeedURLs = [starredFeed]
+        delivery.ledger.announced = [:]
+        let one = [starredFeed: [starredStory(1)]]
+        assertTrue(planned(delivery, pending: one).contains("Starred 1"), "One pending story is an individual banner")
+        let burst = (0..<20).map { starredStory($0) }
+        let grouped = NotificationService.plan(new: seeded, pending: [starredFeed: burst], delivery: delivery).banners
+            .filter { $0.lane == .starred }
+        assertEqual(grouped.count, 1, "Twenty stories from a starred feed are one banner, not twenty")
+        assertEqual(grouped.first?.title, "Starred Daily", "A grouped starred banner is titled with the feed")
+        assertEqual(grouped.first?.thread, "starred-\(starredFeed)", "Grouped starred banners share a feed thread")
+        assertTrue(
+            grouped.first.map(NotificationService.groupedBody)?.hasPrefix("20 new stories\nStarred ") == true,
+            "The grouped body counts the stories, then two headlines")
+        delivery.ledger.lastStarred[starredFeed] = delivery.now.addingTimeInterval(-10 * 60)
+        assertFalse(planned(delivery, pending: one).contains("Starred 1"), "Within 20 minutes the feed stays pending")
+        delivery.ledger.lastStarred[starredFeed] = delivery.now.addingTimeInterval(-21 * 60)
+        assertTrue(planned(delivery, pending: one).contains("Starred 1"), "After 20 minutes its pending stories post")
+        delivery.starredFeedURLs = []
+        assertFalse(planned(delivery, pending: one).contains("Starred 1"), "Unstarring stops the feed's banners")
+        delivery.starredFeedURLs = [starredFeed]
+
+        // B: an event announced only as normal rises to starred; one announced as starred posts no individual banner,
+        // but its story still counts in the feed's next group.
+        let risen = [starredFeed: [starredStory(30, event: "known")]]
+        delivery.ledger.announced = ["known": .init(leadKey: EventFeedSummary.titleKey("Starred 30"), lane: .normal)]
+        assertTrue(planned(delivery, pending: risen).contains("Starred 30"), "Normal → starred notifies")
+        delivery.ledger.announced["known"]?.lane = .starred
+        assertFalse(planned(delivery, pending: risen).contains("Starred 30"), "A starred event does not repeat")
+        let mixed = NotificationService.plan(
+            new: seeded, pending: [starredFeed: [starredStory(30, event: "known"), starredStory(31)]],
+            delivery: delivery
+        ).banners.filter { $0.lane == .starred }
+        assertEqual(mixed.first?.count, 2, "N counts the announced event's story as well")
+        assertEqual(mixed.first?.headlines.first, "Starred 31", "Headlines prefer the unannounced story")
+        delivery.ledger.announced = [:]
+
+        // 9. Priority lane: exceptional news, the highest lane, coalesced in bursts and never silenced.
+        assertTrue(
+            NotificationService.isPriority(title: "Earthquake kills hundreds", score: 0.8, publishers: 4),
+            "A full-weight signal, a high score and four publishers are priority")
+        assertFalse(
+            NotificationService.isPriority(title: "Earthquake kills hundreds", score: 0.8, publishers: 3),
+            "Three publishers are not enough")
+        assertFalse(
+            NotificationService.isPriority(title: "President announces a fund", score: 0.9, publishers: 6),
+            "Half-weight words never make priority")
+        var majors: [(article: FeedArticle, score: Double)] = []
+        for index in 0..<5 {
+            let article = report(700 + index, "Explosion \(index)")
+            delivery.events[article.id] = "major-\(index)"
+            delivery.publishers["major-\(index)"] = 5
+            majors.append((article, 0.9 - Double(index) / 100))
+        }
+        var priority = NotificationService.plan(new: majors, pending: [:], delivery: delivery)
+        assertEqual(
+            priority.banners.map { $0.article?.title ?? NotificationService.groupedBody($0) },
+            ["Explosion 0", "Explosion 1", "Explosion 2", "2 more major stories\nExplosion 3\nExplosion 4"],
+            "A priority burst posts three banners, then one grouped banner")
+        assertTrue(priority.banners.allSatisfy { $0.lane == .priority && $0.sound }, "Priority banners sound")
+        delivery.ledger.priorityLastHalfHour = 3
+        delivery.ledger.priorityGroupLastHalfHour = true
+        priority = NotificationService.plan(new: majors, pending: [:], delivery: delivery)
+        assertTrue(priority.banners.isEmpty, "Past both limits nothing posts now")
+        assertEqual(priority.queued.map(\.event), (0..<5).map { "major-\($0)" }, "Every key waits; none is silenced")
+        delivery.ledger.priorityGroupLastHalfHour = false
+        delivery.ledger.priorityQueue = priority.queued
+        priority = NotificationService.plan(new: [], pending: [:], delivery: delivery)
+        assertEqual(priority.banners.map(\.count), [5], "The waiting keys arrive in the next grouped banner")
+        assertEqual(
+            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []), Set((0..<5).map { "major-\($0)" }),
+            "The grouped banner announces every waiting key")
+        delivery.ledger.priorityLastHalfHour = 0
+        delivery.ledger.priorityQueue = []
+
+        // A higher lane wins: an event that is priority and has a starred report posts one priority banner.
+        var starredMajor = majors[0].article
+        starredMajor.identityFeedURL = starredFeed
+        delivery.events[starredMajor.id] = "major-0"
+        let both = NotificationService.plan(
+            new: [majors[0], (starredMajor, 0.3)], pending: [starredFeed: [(starredMajor, 0.3)]], delivery: delivery)
+        assertEqual(
+            both.banners.map(\.lane), [.priority], "The same event qualifying twice posts once, in the higher lane")
+        let together = NotificationService.plan(
+            new: seeded + [majors[1]], pending: [starredFeed: [starredStory(40), starredStory(41)]], delivery: delivery)
+        assertEqual(
+            together.banners.map(\.lane), [.priority, .starred, .normal, .normal, .normal],
+            "Simultaneous arrivals post priority, then the starred group, then normal stories")
+
+        // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
+        let rising = report(800, "Explosion levels block")
+        delivery.events[rising.id] = "rising"
+        delivery.publishers["rising"] = 3
+        delivery.leadTitles["rising"] = rising.title
+        let first = NotificationService.plan(new: [(rising, 0.9)], pending: [:], delivery: delivery).banners
+        assertEqual(first.map(\.lane), [.normal], "Three publishers: a normal banner")
+        let lead = EventFeedSummary.titleKey(rising.title)
+        delivery.ledger.announced["rising"] = .init(leadKey: lead, lane: .normal)
+        delivery.publishers["rising"] = 4
+        let follow = report(801, "Explosion toll rises")
+        delivery.events[follow.id] = "rising"
+        assertEqual(
+            NotificationService.plan(new: [(follow, 0.9)], pending: [:], delivery: delivery).banners.map(\.lane),
+            [.priority], "The fourth publisher raises the event to one priority banner")
+        delivery.ledger.announced["rising"]?.lane = .priority
+        let later = report(802, "Explosion inquiry")
+        delivery.events[later.id] = "rising"
+        assertTrue(
+            NotificationService.plan(new: [(later, 0.9)], pending: [:], delivery: delivery).banners.isEmpty,
+            "An event announced as priority never posts a third banner")
+
+        // Storage (#545, #665): the ledger reads what was recorded, keeps the highest lane, clamps a clock set back and
+        // prunes old rows.
+        do {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            let opener = report(300, "Lead report opens the event")
+            let joiner = report(301, "Later report joins the event")
+            try await db.upsertArticles([opener, joiner])
+            let event = try await db.createEvent(memberArticleIDs: [opener.id])
+            _ = try await db.addArticles([joiner.id], toEvent: event.id)
+            assertEqual(
+                try await db.eventLeadTitles([event.id]), [event.id: opener.title],
+                "The lead story is the one that opened the event, not the newest member")
+            let now = Date(timeIntervalSince1970: 1_700_000_000)
+            let key = EventFeedSummary.titleKey(opener.title)
+            try await db.recordNotification(
+                PlannedBanner(
+                    lane: .priority, grouped: false, thread: event.id, sound: true, announces: [event.id: key]),
+                at: now)
+            try await db.recordNotification(
+                PlannedBanner(
+                    lane: .normal, grouped: false, thread: event.id, sound: false, announces: [event.id: key]),
+                at: now)
+            try await db.recordNotification(
+                PlannedBanner(lane: .starred, grouped: true, count: 4, feedURL: starredFeed, thread: "s", sound: false),
+                at: now)
+            try await db.queuePriority(
+                [QueuedPriority(event: "waiting", title: "W", score: 0.8, leadKey: "w")], at: now)
+            var ledger = try await db.notificationLedger(now: now.addingTimeInterval(60))
+            assertEqual(ledger.announced[event.id], .init(leadKey: key, lane: .priority), "The highest lane is kept")
+            assertEqual(ledger.normalLastHour, 1, "Normal banners count in the rolling hour")
+            assertEqual(ledger.priorityLastHalfHour, 1, "Individual priority banners count in the half hour")
+            assertEqual(ledger.lastStarred[starredFeed], now, "The feed's last starred banner is kept")
+            assertEqual(ledger.priorityQueue.map(\.event), ["waiting"], "Waiting priority keys are read back")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(3601))
+            assertEqual(ledger.normalLastHour, 0, "The hour rolls")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(-7200))
+            assertEqual(ledger.normalLastHour, 1, "A clock set back clamps the later rows to now")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(-7200 + 3601))
+            assertEqual(ledger.normalLastHour, 0, "So the window lasts at most its length from the change")
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(2 * 86400))
+            assertTrue(
+                ledger.announced.isEmpty && ledger.priorityQueue.isEmpty, "A day later nothing is announced or waiting")
+            try await db.recordNotification(
+                PlannedBanner(lane: .normal, grouped: false, thread: "x", sound: false),
+                at: now.addingTimeInterval(8 * 86400))
+            ledger = try await db.notificationLedger(now: now.addingTimeInterval(8 * 86400))
+            assertTrue(ledger.lastStarred.isEmpty, "Rows older than a week are pruned")
+            await db.close()
+        } catch {
+            assertTrue(false, "Notification delivery storage failed: \(error)")
+        }
+    }
+
+    /// Notification lanes through `FeedManager` (#665): the normal limit rolls across refreshes and a relaunch, delivery
+    /// never removes a story, starring a feed brings up no backlog, and a starred burst is one banner.
+    @MainActor
+    static func testNotificationLanesAcrossRefreshes(fixtureRoot: URL) async throws {
+        print("  - Testing notification lanes across refreshes and relaunch...")
+        // Three full-weight signal words and six named places: each is breaking, and alone it is never priority.
+        let headlines = [
+            "Breaking: earthquake in Tokyo, Osaka, Kyoto, Nagoya, Sapporo and Kobe; emergency declared",
+            "Breaking: explosion in Houston, Dallas, Austin, Denver, Phoenix and Tucson; emergency declared",
+            "Breaking: attack in Paris, Lyon, Marseille, Nice, Lille and Bordeaux; emergency declared",
+            "Breaking: crisis in Lagos, Abuja, Kano, Ibadan, Accra and Lome; emergency declared",
+            "Breaking: mayors arrested in Madrid, Seville, Valencia, Bilbao, Malaga and Zaragoza; emergency session",
+            "Breaking: dozens killed in Lima, Quito, Bogota, Caracas, Santiago and Montevideo; emergency declared",
+            "Breaking: minister resigns in Cairo, Alexandria, Giza, Luxor, Aswan and Suez; emergency session",
+            "Breaking: cars recalled in Berlin, Munich, Hamburg, Cologne, Frankfurt and Stuttgart; emergency checks",
+            "Breaking: governors indicted in Sydney, Melbourne, Brisbane, Perth, Adelaide and Hobart; emergency sitting",
+        ]
+        let start = Date()
+        func story(_ id: String, _ title: String, source: String) -> FeedArticle {
+            FeedArticle(
+                title: title, link: fixtureRoot.appendingPathComponent("lanes/\(id)").absoluteString, guid: id,
+                description: "", pubDate: start, source: source)
+        }
+        let loud = headlines.indices.map { story("loud-\($0)", headlines[$0], source: "Wire \($0)") }
+        let plainFeed = fixtureRoot.appendingPathComponent("lanes-plain").absoluteString
+        let starredFeed = fixtureRoot.appendingPathComponent("lanes-starred").absoluteString
+        let suite = testDefaultsSuite("test.notification.lanes")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = [plainFeed, starredFeed]
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.notificationMode = .full
+        struct Posted: Sendable {
+            let title: String
+            let body: String
+            let thread: String
+            let category: String
+        }
+        actor Recorder {
+            var posted: [Posted] = []
+            func record(_ request: UNNotificationRequest) {
+                posted.append(
+                    Posted(
+                        title: request.content.title, body: request.content.body,
+                        thread: request.content.threadIdentifier, category: request.content.categoryIdentifier))
+            }
+        }
+        let recorder = Recorder()
+        let service = NotificationService(post: { await recorder.record($0) }, spacing: .zero)
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("lanes-\(UUID().uuidString).sqlite3")
+            .path
+        defer {
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+        }
+        var store = ArticleStore(database: DatabaseEngine(path: path))
+        await store.initialize()
+        // A refresh without a clock reads the real one at the pass, as the app does, after its stories are stored. It
+        // returns the titles of the stories its banners covered (#584).
+        @discardableResult
+        func refresh(plain: [FeedArticle] = [], starred: [FeedArticle] = [], at clock: Date? = nil) async -> Set<String>
+        {
+            let manager = FeedManager(
+                settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in urls.map { ($0, $0 == starredFeed ? starred : plain, nil, nil) } },
+                notifyBatch: { articles, delivery in
+                    await service.triageAndNotify(newArticles: articles, delivery: delivery)
+                }, imageFinder: .unavailable, now: { clock ?? Date() })
+            await manager.fetchFeedsAsync()
+            manager.stopBackgroundWork()
+            return Set(store.articles.filter { manager.notifiedStoryIDs.contains($0.id) }.map(\.title))
+        }
+
+        // The normal limit rolls: five of six post, a refresh 30 minutes later after a relaunch posts none, and one 61
+        // minutes after the first posts again.
+        let firstNotified = await refresh(plain: Array(loud.prefix(6)), at: start)
+        assertEqual(await recorder.posted.count, 5, "Five normal banners in the first hour")
+        assertEqual(firstNotified.count, 5, "The five posted stories count as notified, the sixth does not")
+        assertTrue(firstNotified.isSubset(of: Set(headlines.prefix(6))), "Only this refresh's stories are notified")
+        await store.database.close()
+        store = ArticleStore(database: DatabaseEngine(path: path))
+        await store.initialize()
+        await refresh(plain: Array(loud[6...7]), at: start.addingTimeInterval(30 * 60))
+        assertEqual(await recorder.posted.count, 5, "Thirty minutes later, after a relaunch, the hour is still full")
+        await refresh(plain: [loud[8]], at: start.addingTimeInterval(61 * 60))
+        assertEqual(await recorder.posted.count, 6, "Sixty-one minutes after the first banners, one posts again")
+        let stored = Set(try await store.database.fetchArticles(limit: nil).map(\.title))
+        assertTrue(Set(headlines).isSubset(of: stored), "Every story is stored, notified or not")
+        assertTrue(
+            Set(headlines).isSubset(of: Set(store.articles.map(\.title))), "Every story stays in the reader's feed")
+
+        // Starring a feed brings up none of its backlog; its next new story notifies, and a burst 21 minutes later is
+        // one grouped banner.
+        let backlog = (0..<5).map {
+            story("backlog-\($0)", "Starred column \($0) on garden design", source: "Starred Daily")
+        }
+        await refresh(starred: backlog)
+        let before = await recorder.posted.count
+        assertTrue(settings.setFeedStarred(starredFeed, true), "The feed is starred")
+        await refresh(plain: [story("quiet", "Library extends opening hours", source: "Town Paper")])
+        assertEqual(await recorder.posted.count, before, "Starring a feed posts nothing for its backlog")
+        await refresh(
+            starred: backlog + [story("fresh", "Starred column on winter bulbs", source: "Starred Daily")])
+        let single = await recorder.posted.dropFirst(before)
+        assertEqual(single.map(\.title), ["Starred Daily"], "The feed's first new story is one starred banner")
+        assertEqual(
+            single.map(\.category), [NotificationActionIdentifier.category],
+            "A starred story's banner has story actions")
+        let burst = (0..<20).map { story("burst-\($0)", "Starred note \($0) about orchards", source: "Starred Daily") }
+        let burstNotified = await refresh(starred: burst, at: Date().addingTimeInterval(21 * 60))
+        assertEqual(burstNotified, Set(burst.map(\.title)), "A grouped banner's stories all count as notified")
+        let grouped = await recorder.posted.dropFirst(before + 1)
+        assertEqual(grouped.count, 1, "Twenty new starred stories are one banner: \(grouped.map(\.body))")
+        assertEqual(grouped.first?.thread, "starred-\(starredFeed)", "The burst is threaded under the feed")
+        assertTrue(
+            grouped.first?.body.hasPrefix("20 new stories\n") == true,
+            "The burst counts every story: \(grouped.first?.body ?? "")")
+        assertEqual(grouped.first?.category, "", "A grouped banner has no story actions")
+        await store.database.close()
+    }
+
+    /// Cross-refresh dedupe through `FeedManager` (#545): the first refresh announces an event; a report that joins it
+    /// in the next refresh posts no second banner; once the recorded lead headline differs, a new report notifies.
+    @MainActor
+    static func testNotificationDedupeAcrossRefreshes(fixtureRoot: URL) async throws {
+        print("  - Testing notification dedupe across refreshes...")
+        let now = Date()
+        func report(_ id: String, _ title: String, hoursAgo: Double, source: String) -> FeedArticle {
+            FeedArticle(
+                title: title, link: fixtureRoot.appendingPathComponent("dedupe/\(id)").absoluteString, guid: id,
+                description:
+                    "The disaster agency AFAD said buildings collapsed in Malatya, Ankara and Istanbul after the earthquake struck eastern Turkey.",
+                pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        // Three signal words and the named places make every report breaking, so only the dedupe keeps one quiet.
+        let quake = [
+            report(
+                "d1", "Breaking: earthquake strikes Malatya in eastern Turkey, emergency declared", hoursAgo: 3,
+                source: "Wire One"),
+            report(
+                "d2", "Breaking: Malatya earthquake, emergency declared as AFAD says buildings collapsed",
+                hoursAgo: 2.5,
+                source: "Daily Two"),
+            report(
+                "d3", "Breaking: rescuers search collapsed buildings after Malatya earthquake, emergency declared",
+                hoursAgo: 2, source: "Herald Three"),
+            report(
+                "d4", "Breaking: eastern Turkey earthquake, emergency declared as buildings collapse in Malatya",
+                hoursAgo: 1.5, source: "Courier Four"),
+        ]
+        let feeds = (1...4).map { fixtureRoot.appendingPathComponent("dedupe-feed-\($0)").absoluteString }
+        let suite = testDefaultsSuite("test.notification.dedupe")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        settings.feedURLs = feeds
+        settings.aiEnabled = false
+        settings.notificationsEnabled = true
+        settings.notificationMode = .full
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        actor Recorder {
+            var threads: [String] = []
+            func record(_ thread: String) { threads.append(thread) }
+        }
+        let recorder = Recorder()
+        let service = NotificationService(
+            post: { await recorder.record($0.content.threadIdentifier) }, spacing: .zero)
+        // Each refresh is a manager over the same library whose feeds carry the first `count` reports, one per feed.
+        func refresh(_ count: Int) async {
+            let manager = FeedManager(
+                settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in
+                    urls.map { url in
+                        let index = feeds.firstIndex(of: url) ?? count
+                        return (url, index < count ? [quake[index]] : [], nil, nil)
+                    }
+                },
+                notifyBatch: { articles, delivery in
+                    await service.triageAndNotify(newArticles: articles, delivery: delivery)
+                }, imageFinder: .unavailable)
+            await manager.fetchFeedsAsync()
+            manager.stopBackgroundWork()
+        }
+
+        await refresh(2)
+        let first = await recorder.threads
+        assertEqual(first.count, 1, "Two reports of one new event are one banner: \(first)")
+        let ids = store.articles.map(\.id)
+        let event = try await store.database.eventIDs(forArticles: ids)
+        assertEqual(Set(event.values).count, 1, "The first refresh groups both reports into one event: \(event)")
+
+        await refresh(3)
+        let joined = try await store.database.eventIDs(forArticles: store.articles.map(\.id))
+        assertEqual(Set(joined.values).count, 1, "The third report joins the announced event: \(joined)")
+        assertEqual(await recorder.threads, first, "A report joining an event announced today posts no second banner")
+
+        guard let announced = joined.values.first else { return }
+        try await store.database.recordNotification(
+            PlannedBanner(
+                lane: .normal, grouped: false, thread: announced, sound: false,
+                announces: [announced: EventFeedSummary.titleKey("An earlier lead headline")]), at: Date())
+        await refresh(4)
+        assertEqual(
+            await recorder.threads, first + [announced], "A new report notifies once the lead headline changed")
+        await store.database.close()
+
+        // A merge never makes an announced story new again: the absorbed event's announcement and waiting priority key
+        // move to the event it joined, keyed to that event's lead headline, so its next report stays quiet.
+        let merges = DatabaseEngine(path: ":memory:")
+        try await merges.open()
+        let lead = report("m1", "Dam bursts near Mosul as floodwater reaches villages", hoursAgo: 4, source: "Wire One")
+        let fragment = report("m2", "Breaking: Mosul dam failure, emergency declared", hoursAgo: 3, source: "Daily Two")
+        let waiting = report("m3", "Breaking: Mosul flood toll rises, emergency declared", hoursAgo: 2, source: "Post")
+        let later = report("m4", "Breaking: Mosul evacuations widen, emergency declared", hoursAgo: 1, source: "Times")
+        _ = try await merges.upsertArticles([lead, fragment, waiting, later])
+        let survivor = try await merges.createEvent(memberArticleIDs: [lead.id]).id
+        let absorbed = try await merges.createEvent(memberArticleIDs: [fragment.id]).id
+        let queued = try await merges.createEvent(memberArticleIDs: [waiting.id]).id
+        try await merges.recordNotification(
+            PlannedBanner(
+                lane: .priority, grouped: false, thread: absorbed, sound: true,
+                announces: [absorbed: EventFeedSummary.titleKey(fragment.title)]), at: now)
+        let stale = QueuedPriority(event: queued, title: waiting.title, score: 0.8, leadKey: "old", story: waiting.id)
+        try await merges.queuePriority([stale], at: now)
+        _ = try await merges.mergeEvents(absorbed, into: survivor)
+        _ = try await merges.mergeEvents(queued, into: survivor)
+        let ledger = try await merges.notificationLedger(now: now)
+        let leadKey = EventFeedSummary.titleKey(lead.title)
+        assertEqual(
+            ledger.announced, [survivor: .init(leadKey: leadKey, lane: .priority)],
+            "The survivor inherits the absorbed announcement and its lane, under its own lead headline")
+        assertEqual(
+            ledger.priorityQueue,
+            [QueuedPriority(event: survivor, title: waiting.title, score: 0.8, leadKey: leadKey, story: waiting.id)],
+            "A waiting priority key moves to the survivor with its story")
+        let quiet = NotificationService.plan(
+            new: [(article: later, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(
+                mode: .full, events: [later.id: survivor], publishers: [survivor: 2],
+                leadTitles: [survivor: lead.title], now: now, ledger: ledger))
+        assertTrue(quiet.banners.isEmpty, "A breaking report of the merged event posts no second banner")
+        await merges.close()
     }
 
     @MainActor
@@ -15948,7 +18276,7 @@ struct NewsTests {
         let failingDb = DatabaseEngine(path: ":memory:")
         let failingStore = ArticleStore(database: failingDb)
         let coordinator = OverviewGenerationCoordinator(
-            store: failingStore, queue: EnrichmentQueue(store: failingStore), textModel: .unavailable)
+            store: failingStore, queue: EnrichmentQueue(store: failingStore))
         await failingDb.close()
         let result = await coordinator.requestOverview(
             eventID: "err-event", eventTitle: "Error Event", membershipVersion: 1,
@@ -16699,6 +19027,30 @@ struct NewsTests {
         assertEqual(continued.document?.isComplete, false, "A Guardian-style Continue reading… link marks a teaser")
         let whole = pipeline.extractFromHTML(body, baseUrl: "https://news.example/story/")
         assertEqual(whole.document?.isComplete, true, "Three full paragraphs without a trailing link are complete")
+        // The Verge: three paragraphs over 600 characters that end "… Read the full story at The Verge." (#586). The
+        // completeness rule does not override the closing line, and the same body trailing off in an ellipsis is a
+        // teaser too; a sentence that merely says "read more" is not.
+        let verge = pipeline.extractFromHTML(
+            body.replacingOccurrences(
+                of: "</p>", with: "… Read the full story at The Verge.</p>", options: .backwards,
+                range: body.range(of: "</p>", options: .backwards)),
+            baseUrl: "https://www.theverge.com/story/")
+        assertEqual(verge.document?.isComplete, false, "A Verge teaser closing with the publisher line is incomplete")
+        assertEqual(verge.document?.hasCompleteArticleBody, false, "The reader fetches The Verge page")
+        let trailing = pipeline.extractFromHTML(
+            body.replacingOccurrences(
+                of: "</p>", with: "…</p>", options: .backwards, range: body.range(of: "</p>", options: .backwards)),
+            baseUrl: "https://news.example/story/")
+        assertEqual(trailing.document?.isComplete, false, "A last paragraph trailing off in an ellipsis is a teaser")
+        let mention = pipeline.extractFromHTML(
+            body.replacingOccurrences(
+                of: "</p>", with: " Those who want detail can read more in the report.</p>", options: .backwards,
+                range: body.range(of: "</p>", options: .backwards)),
+            baseUrl: "https://news.example/story/")
+        assertEqual(mention.document?.isComplete, true, "A sentence that merely says \"read more\" is not a teaser")
+        assertTrue(ReaderDocument.closesAsTeaser("Read more on Ars Technica"), "Read more on <publisher>")
+        assertTrue(ReaderDocument.closesAsTeaser("Continue reading at Engadget…"), "Continue reading at <publisher>")
+        assertFalse(ReaderDocument.closesAsTeaser("The minister said she would read more before deciding."), "Prose")
     }
 
     static func testExtractionOutcomeDiagnostics() async {
@@ -16771,6 +19123,107 @@ struct NewsTests {
         assertEqual(
             NewsCategory.match(from: "International global foreign diplomat summit"), .world,
             "Diplomacy resolves to world")
+
+        // Misfiles measured on a labelled 200-story library sample (#546, audit of 24 October 2026).
+        // No result is World, as every caller reads it (`news_topic`, `ArticleClassifier`).
+        func content(_ title: String, _ description: String = "", text: String? = nil) -> String {
+            NaturalLanguageTopicClassifier.classifyContent(title: title, description: description, text: text)?
+                .category ?? NewsCategory.world.rawValue
+        }
+        assertEqual(
+            content("Drone strike on Abyei market near Sudan-South Sudan border kills 150"), "World",
+            "A marketplace is not the stock market")
+        assertEqual(content("Half a million Palestinians lose food aid"), "World", "Food aid is not Food")
+        assertEqual(content("Toulouse v Troyes Ligue 1 game postponed"), "Sports", "A league name is a Sports cue")
+        assertEqual(
+            content("Watkins-inspired Al-Hilal end Al-Ittihad's unbeaten run in Saudi Clasico"), "Sports",
+            "World loses a tie: a Saudi derby is Sports")
+        assertEqual(
+            content("Macron takes aim at Trump for using France riots for election gain"), "World",
+            "A foreign place in the headline outranks election cues")
+        assertEqual(
+            content("Trump praises man who punched protester at rally in South Carolina"), "Politics",
+            "National politics stays Politics")
+        assertEqual(
+            content("New White House press secretary says China lacked proper toilets"), "Politics",
+            "A domestic cue keeps Politics despite a foreign name")
+        assertEqual(content("Kenya confirms four new Ebola cases, bringing total to seven"), "Health", "Ebola")
+        assertEqual(
+            content("Comcast loses more customers, claims other ISPs' cheap prices are irrational"), "Business",
+            "Customers and prices are Business")
+        assertEqual(content("Pikmin 4 is $20 off ahead of its Nintendo Switch 2 update"), "Technology", "Games")
+        assertEqual(content("Deforestation in Brazil's Amazon falls to all-time low"), "Science", "Environment")
+        assertEqual(content("Apple Music has a new logo"), "Technology", "Apple stays a technology cue")
+        assertEqual(content("Grandma's apple pie recipe wins the county bake-off"), "Food", "Apple alone is no cue")
+        assertEqual(content("Apple's iPhone sales rise"), "Technology", "The possessive names the company")
+        // Second pass (#546, 26 October): place and leader names count half, new topic cues; measured on the same
+        // sample and on a fresh 200-story draw.
+        assertEqual(
+            content(
+                "Kenya confirms new Ebola cases as Congo outbreak spreads",
+                "The first infections passed on inside Kenya, officials in Nairobi and Kampala said."), "Health",
+            "A place says where, Ebola says what")
+        assertEqual(
+            content(
+                "Omani label takes its ballerina heels to Paris",
+                "The footwear label showed its new collection during Paris Fashion Week."), "Fashion",
+            "Paris is where, footwear is what")
+        assertEqual(
+            content(
+                "UN warns El Nino could be strongest on record",
+                "The UN's aid chief says the humanitarian system cannot cope alone."), "Science",
+            "An international body is an actor, El Nino the topic")
+        assertEqual(
+            content(
+                "Trump's losing battle with green energy",
+                "The war and the AI boom strengthen the case for clean power, despite the president's efforts."),
+            "Politics", "President is no World cue")
+        assertEqual(
+            content(
+                "Casualties feared as multi-storey building collapses in Nairobi",
+                "The building came down in a densely populated business and residential area."), "World",
+            "A building collapse is world news, not Business")
+        assertEqual(
+            content("Fuel dealers urge consumers to avoid panic buying", "Dealers say pricing remains an issue."),
+            "Business", "Consumers are a Business cue")
+        assertEqual(
+            content(
+                "Lee Chang Dong ponders the ethics of the camera",
+                "His seventh feature film is inspired by true events.",
+                text: "The film follows a factory worker; the director shot the feature film in Seoul."),
+            "Entertainment", "A feature film outweighs the camera")
+        assertEqual(
+            content(
+                "Australian politician who was hit by car has lost both legs",
+                "She is receiving treatment in a Melbourne hospital."), "World",
+            "An attack on a foreign politician is World")
+        assertEqual(
+            content("Canadian diplomats advised to avoid appearing with midterm candidates"), "World",
+            "Foreign diplomats outrank a midterm cue")
+        assertEqual(
+            content("Tangier's timeless trattoria enters a new era", "The reinvention of a much-loved hang-out."),
+            "Food", "A trattoria is Food")
+        assertEqual(
+            content(
+                "Review: Crystal Lake drags at first, then hits a vein", "The prequel series is based on Jason's mom.",
+                text: "Peacock series Crystal Lake doesn't feel like a Friday the 13th movie at first."),
+            "Entertainment", "A prequel series is Entertainment")
+        assertEqual(
+            content(
+                "Why an old role-playing game still has thousands of active players",
+                "The single-player RPG is just OK, but players don't mind."), "Technology", "An RPG is a game")
+        assertEqual(
+            content(
+                "Derron prepares to defend her Dubai title", "She faces a field of 20 professional triathletes.",
+                text: "Derron won the triathlon in Dubai last year."), "Sports", "Triathlon is Sports")
+        assertEqual(
+            content(
+                "Why is the UK at the forefront of AI-driven job cuts?",
+                "AI-linked job losses in the UK run at twice the rate of the US and Germany."), "Technology",
+            "AI job cuts in the UK are Technology")
+        assertEqual(
+            content("DJI's vlogging camera is a good deal at under $400"), "Technology",
+            "A camera deal stays Technology")
     }
 
     @MainActor
@@ -17869,7 +20322,7 @@ struct NewsTests {
         _ = try await db.upsertArticles(articles)
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 
         // 1. Generate on request for the visible event
         let overviewV1 = await coordinator.requestOverview(
@@ -17978,7 +20431,7 @@ struct NewsTests {
         _ = try await db.upsertArticles(articles)
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 
         // Fill the bounded queue so requests stay in flight until the gate opens.
         let hold = OpenGate()
@@ -18744,38 +21197,95 @@ struct NewsTests {
             plainFact.failures.isEmpty,
             "Ordinary reported fact without attribution wrapper passes verifier with zero failures")
         assertEqual(plainFact.audit.status, .supported, "Ordinary reported fact is supported by auditor")
+    }
 
-        // 6. Failure behavior: never store failed retelling as finished overview; show verified excerpts and source list
-        let fallbackDoc = OverviewClaimVerifier.createFallbackOverview(
-            from: numOverview,
-            passages: passages,
-            articles: articles,
-            report: numReport
-        )
-        assertEqual(fallbackDoc.kind, OverviewKind.fallbackExcerpts, "Fallback overview kind is fallbackExcerpts")
-        assertFalse(fallbackDoc.kind == OverviewKind.synthesized, "Failed retelling is never kept as synthesized")
-        assertEqual(
-            fallbackDoc.facts.count, 2, "Fallback retains only the 2 verified facts, dropping the failed numeric claim")
+    /// #547: ten verifier controls, five wrong claims and five valid ones, accepted only when both deterministic gates
+    /// of a drafted sentence (the verifier, then `auditClaim`) pass. The six kinds named in the 10 October review
+    /// (renamed speaker, actor taken for speaker, reporting verb inside a quotation, arrest for summons; unrelated
+    /// speech elsewhere in the sentence, a word inside another word) plus four ordinary controls.
+    static func testOverviewVerifierControls() {
+        print("  - Testing the ten overview verifier controls (#547)...")
+        let article = FeedArticle(
+            storedID: "art-ctrl", title: "Controls", link: "https://example.com/controls", guid: "art-ctrl",
+            description: "", pubDate: Date(), source: "Control Wire")
+        func accepted(_ claim: String, _ passageText: String) -> Bool {
+            let passage = EvidencePassage(id: "pass-ctrl", articleID: "art-ctrl", text: passageText, ordinal: 1)
+            let citation = OverviewCitation(
+                id: passage.id, articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: passage.text)
+            let fact = OverviewFact(id: "f-ctrl", text: claim, citationIDs: [passage.id])
+            let document = OverviewComposer.composeOverview(
+                eventID: "event-ctrl", eventTitle: "Controls",
+                verifiedFacts: [
+                    PassageAnchoredFact(
+                        id: "f-ctrl", statement: claim, passageID: passage.id, quote: passage.text,
+                        articleID: article.id)
+                ], passages: [passage], articles: [article])
+            let verified = OverviewClaimVerifier.verifyOverview(document, passages: [passage], articles: [article])
+            let audit = OverviewQualityAuditor.auditClaim(fact, citations: [passage.id: citation], passages: [passage])
+            return verified.isFullyVerified && audit.isSupported
+        }
+        let tariffs =
+            "Ontario Premier Doug Ford met Prime Minister Mark Carney in Ottawa on Monday. Ford said the tariffs would cost Ontario 100,000 jobs."
+        let convoy = "The Israeli military said Hamas fighters attacked an aid convoy near Rafah on Tuesday."
+        let pokrovsk =
+            "Ukraine's army chief visited the front on Monday. \"We will not give up Pokrovsk,\" the commander said, \"whatever it costs.\""
+        let summons = "Prosecutors summoned former minister Ivan Petrov for questioning on Wednesday."
+        let evacuation = "Firefighters evacuated 140 residents from the valley on Sunday."
+        let drones =
+            "Air defences shot down 45 of 50 drones overnight, while Kyiv Mayor Vitali Klitschko said debris fell on two districts."
+        let ban = "The Supreme Court reinstated the export ban on Tuesday after a two-week suspension."
+        let ministry =
+            "According to the health ministry, 1,200 people were treated in hospitals during the heatwave in July 2026."
+
+        let controls: [(name: String, claim: String, passage: String, expected: Bool)] = [
+            ("renamed speaker", "Carney said the tariffs would cost Ontario 100,000 jobs.", tariffs, false),
+            (
+                "actor taken for speaker", "Hamas said its fighters attacked an aid convoy near Rafah on Tuesday.",
+                convoy, false
+            ),
+            (
+                "reporting verb inside a quotation",
+                "Ukraine \"will not give up Pokrovsk, the commander said,\" whatever it costs.", pokrovsk, false
+            ),
+            ("arrest for summons", "Prosecutors arrested former minister Ivan Petrov on Wednesday.", summons, false),
+            (
+                "number inside a number", "Firefighters evacuated 14 residents from the valley on Sunday.", evacuation,
+                false
+            ),
+            ("unrelated speech in the sentence", "Air defences shot down 45 of 50 drones overnight.", drones, true),
+            ("word inside a word", "The Supreme Court reinstated the export ban on Tuesday.", ban, true),
+            ("speaker kept", "Ford said the tariffs would cost Ontario 100,000 jobs.", tariffs, true),
+            (
+                "according to",
+                "According to the health ministry, 1,200 people were treated in hospitals during the heatwave.",
+                ministry, true
+            ),
+            ("plain fact", "Prosecutors summoned former minister Ivan Petrov for questioning.", summons, true),
+        ]
+        let mismatches = controls.filter { accepted($0.claim, $0.passage) != $0.expected }.map(\.name)
+        assertEqual(mismatches, [], "All ten verifier controls match")
+        // A quoted assessment copied without its quotation marks or speaker reads as fact (#547 claim review).
+        let election =
+            "\"These are the first elections since Vucic came to power in 2012 that are competitive,\" political scientist Dusan Spasojevic told DW."
+        assertFalse(
+            accepted("These are the first elections since Vucic came to power in 2012 that are competitive.", election),
+            "A quotation restated as fact is rejected")
         assertTrue(
-            fallbackDoc.summary.contains("Verified Excerpts"), "Fallback summary header indicates verified excerpts")
-        assertTrue(fallbackDoc.summary.contains("Sources"), "Fallback summary lists sources")
-
-        // 7. Safe persistence via DatabaseEngine: recordVerifiedOverview never stores failed synthesized overview
-        let dbEngine = DatabaseEngine(path: ":memory:")
-        try await dbEngine.open()
-        _ = try await dbEngine.upsertArticles(articles)
-        let savedOutcome = try await dbEngine.recordVerifiedOverview(
-            numOverview, passages: passages, articles: articles)
-        assertTrue(savedOutcome.saved, "Overview saved safely")
-        assertEqual(
-            savedOutcome.document.kind, OverviewKind.fallbackExcerpts,
-            "DatabaseEngine stored fallbackExcerpts, not synthesized")
-
-        let fetched = try await dbEngine.fetchEventOverview(eventID: "event-num")
-        assertTrue(fetched != nil, "Fetched overview exists in database")
-        assertEqual(
-            fetched?.kind, OverviewKind.fallbackExcerpts,
-            "Stored overview in database is fallbackExcerpts, not a failed retelling")
+            accepted(
+                "Political scientist Dusan Spasojevic said these are the first elections since Vucic came to power in 2012 that are competitive.",
+                election), "The same words with their speaker are accepted")
+        let metStatement =
+            "In a statement, a Metropolitan police spokesperson said: \u{201C}Following a review of our records, we have confirmed that in January 2019 we received a letter."
+        assertFalse(
+            accepted(
+                "Following a review of our records, we have confirmed that in January 2019 we received a letter.",
+                metStatement),
+            "First-person speech without quotation marks or speaker is rejected")
+        assertTrue(
+            accepted(
+                "The US envoy received a letter in January 2019.", "The US envoy received a letter in January 2019."),
+            "\"US\" is not a first-person pronoun")
     }
 
     static func testOverviewTimeline(fixtureHost: String) async throws {
@@ -19143,7 +21653,7 @@ struct NewsTests {
 
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
-        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, textModel: .unavailable)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 
         // 1. Initially, no event exists and no overview exists for art1
         let initialSummaries = try await store.eventFeedSummaries(for: [art1.id])
@@ -19750,6 +22260,148 @@ struct NewsTests {
                 "The figures were published at noon. Mayor Elena Rostova says the evacuation routes are open again.",
                 "Mayor Elena Rostova", "the evacuation routes are open again"
             ),
+            // A sentence closed by its attribution, without quotation marks (#547).
+            (
+                "Russia launched 50 drones and 10 missiles at Kyiv overnight, the Ukrainian air force said.",
+                "Ukrainian air force", "Russia launched 50 drones and 10 missiles at Kyiv overnight"
+            ),
+            (
+                "Debris fell on two districts of the capital, said Mayor Vitali Klitschko.", "Mayor Vitali Klitschko",
+                "Debris fell on two districts of the capital"
+            ),
+            (
+                "At least 1,200 people were treated in hospitals, according to the Gaza health ministry.",
+                "Gaza health ministry", "At least 1,200 people were treated in hospitals"
+            ),
+            (
+                "The talks would resume next week, Kremlin spokesman Dmitry Peskov told reporters on Monday.",
+                "Kremlin spokesman Dmitry Peskov", "The talks would resume next week"
+            ),
+            (
+                "A ceasefire will begin in Oleshky on October 29, the White House said on Friday (October 23, 2026).",
+                "White House", "A ceasefire will begin in Oleshky on October 29"
+            ),
+            (
+                "Security was stepped up at malls across Jordan, the US embassy in Amman said on Saturday, as authorities searched for the gunmen.",
+                "US embassy in Amman", "Security was stepped up at malls across Jordan"
+            ),
+            (
+                "Kenya has recorded a second Ebola death, the health ministry said late on Friday, adding that she had died.",
+                "health ministry", "Kenya has recorded a second Ebola death"
+            ),
+            (
+                "Police estimated the load was worth 3.48 trillion rupiah, about 192 million U.S. dollars, Suyudi said.",
+                "Suyudi", "Police estimated the load was worth 3.48 trillion rupiah, about 192 million U.S. dollars"
+            ),
+            (
+                "\"We are not satisfied with the offer,\" said student representative Nathanael Combary, president of the group.",
+                "student representative Nathanael Combary", "We are not satisfied with the offer,"
+            ),
+            // A bare institution is the speaker, never the nearby place (#547).
+            (
+                "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
+                "police", "an incident led to withdrawals"
+            ),
+            (
+                "The 12-year-old girl was seriously wounded but stable, the mayor of La Verrière, Nicolas Dainville, told AFP.",
+                "Nicolas Dainville", "The 12-year-old girl was seriously wounded but stable"
+            ),
+            // Second #547 pass: acronyms, appositives, present-tense verbs, quantities, initialisms, decimals, aliases.
+            (
+                "\"Science gives us hope,\" WHO chief Tedros Adhanom Ghebreyesus said on X.",
+                "WHO chief Tedros Adhanom Ghebreyesus", "Science gives us hope,"
+            ),
+            (
+                "\"We found that we needed to include some exotic physics,\" Jorge Hernández-Bernal, a planetary scientist at the Sorbonne, said in a press release.",
+                "Jorge Hernández-Bernal", "We found that we needed to include some exotic physics,"
+            ),
+            (
+                "\"We are not satisfied with the offer,\" says student representative Nathanael Combary.",
+                "student representative Nathanael Combary", "We are not satisfied with the offer,"
+            ),
+            (
+                "Interior Minister Laurent Nuñez said as many as 70,000 officers will be deployed nationwide.",
+                "Interior Minister Laurent Nuñez", "as many as 70,000 officers will be deployed nationwide"
+            ),
+            (
+                "First-time voter Naama Bitterman, 18, said at Saturday's rally that she was confident the bloc would win.",
+                "First-time voter Naama Bitterman", "she was confident the bloc would win"
+            ),
+            ("Golan told me: \"I'm optimistic about the vote.\"", "Golan", "I'm optimistic about the vote."),
+            (
+                "The United States could strike Iran as soon as this weekend, a U.S. envoy said Friday (October 24, 2026), after mounting threats.",
+                "U.S. envoy", "The United States could strike Iran as soon as this weekend"
+            ),
+            (
+                "Melania Trump has secured a ceasefire that will begin on Oct. 29, the White House said on Friday.",
+                "White House", "Melania Trump has secured a ceasefire that will begin on Oct. 29"
+            ),
+            (
+                "The Conservative-Lib Dem coalition government said in 2013 it estimated hosting in London had cost £8.9bn.",
+                "Conservative-Lib Dem coalition government", "it estimated hosting in London had cost £8.9bn"
+            ),
+            (
+                "According to the United Nations Educational, Scientific and Cultural Organization, UNESCO, nearly 95 percent of campuses have been damaged.",
+                "United Nations Educational, Scientific and Cultural Organization, UNESCO",
+                "nearly 95 percent of campuses have been damaged"
+            ),
+            (
+                "The woman did not visit Congo and is believed to have contracted the virus in Uganda, Switzerland's Federal Department of Foreign Affairs, or FDFA, told The Associated Press on Friday.",
+                "Switzerland's Federal Department of Foreign Affairs",
+                "The woman did not visit Congo and is believed to have contracted the virus in Uganda"
+            ),
+            (
+                "The Ebola victim who died on Friday evening was a direct contact of the index patient, the ministry said.",
+                "ministry", "The Ebola victim who died on Friday evening was a direct contact of the index patient"
+            ),
+            (
+                "All schools have been told to close on Friday because of the high winds, the Government of Jersey said.",
+                "Government of Jersey", "All schools have been told to close on Friday because of the high winds"
+            ),
+            (
+                "At the Copacabana rally – which Rio's City Hall said attracted about 1.1 million people – activists unfurled a banner.",
+                "Rio's City Hall", "attracted about 1.1 million people"
+            ),
+            (
+                "Trump said Rubio — who is the son of Cuban immigrants — was \"deep into negotiations with Cuba\" this week.",
+                "Trump",
+                "Rubio — who is the son of Cuban immigrants — was \"deep into negotiations with Cuba\" this week"
+            ),
+            // Orchestrator review of the final rows (#547): another party's figure, a few quoted words.
+            (
+                "The government said 410,000 took place in protests across France while organisers put the figure at nearly 800,000.",
+                "government", "410,000 took place in protests across France"
+            ),
+            (
+                "Lethal plots by Tehran against American citizens have reached “advanced stages,” a senior intelligence official in the Trump administration warned.",
+                "senior intelligence official in the Trump administration",
+                "Lethal plots by Tehran against American citizens have reached “advanced stages,”"
+            ),
+            (
+                "The damage was estimated \"at hundreds of millions euros\", France's Chambers of Commerce and Industry (CCI) said.",
+                "France's Chambers of Commerce and Industry",
+                "The damage was estimated \"at hundreds of millions euros\""
+            ),
+            (
+                "Chadema put the death toll at about 2,000, a figure the UN said it could not verify amid the shutdown.",
+                "UN", "it could not verify amid the shutdown"
+            ),
+            (
+                "PARIS: The clash with Lyon has been moved from Sunday to Monday evening, the French soccer league said on Friday.",
+                "French soccer league", "The clash with Lyon has been moved from Sunday to Monday evening"
+            ),
+            (
+                "The hunger strike will begin on Monday at the prison, said Mr. Nshala.", "Mr. Nshala",
+                "The hunger strike will begin on Monday at the prison"
+            ),
+            (
+                "Kenya has recorded a second Ebola death, the health ministry said the woman had developed symptoms in quarantine.",
+                "health ministry", "the woman had developed symptoms in quarantine"
+            ),
+            (
+                "Earlier this week, the Canadian prime minister, Mark Carney, said American tariffs hurt both American and Canadian households.",
+                "Canadian prime minister, Mark Carney", "American tariffs hurt both American and Canadian households"
+            ),
         ] {
             let extracted = reported(text)
             assertEqual(extracted.map(\.participant), [participant], "Reported speech names its speaker")
@@ -19796,7 +22448,6 @@ struct NewsTests {
             "The Death Penalty Information Center, which publishes data and analysis on capital punishment in the United States, said Pike was the first inmate to survive after being injected with lethal doses of execution drugs.",
             "Trump, who waged war with Iran and has yet to broker peace in Ukraine, said on Wednesday that he should win.",
             "First reported by the Palm Beach Post, an attorney who represents the golf course said Trump is offering.",
-            "At a base in southeast England housing US operations, police said an incident led to withdrawals.",
             "A poll showed that 68% of Jewish Israelis said that the events were central.",
             "A witness told The Associated Press, a day after the kingdom said an attack occurred.",
             "Counter Terrorism Policing London is investigating and commander Helen Flanagan said officers were not linking it.",
@@ -19805,11 +22456,58 @@ struct NewsTests {
             "While the interior ministry said that 256,000 people protested nationwide, organisers put the figure higher.",
             "Ahmad Mobeen, principal economist at S&P Global Market Intelligence, said earlier this year.",
             "El Nino will intensify before peaking, the United Nations said Thursday, warning it could be among the strongest.",
+            "The bridge reopened to traffic after six weeks, officials said.",
+            "The bridge reopened to traffic after six weeks, he said.",
+            "Authorities said 2,500 police officers are patrolling the streets of the capital.",
+            "More than 3,700 homes were still without electricity on Saturday morning, according to the National Grid map.",
+            "Many say their anger shows no sign of fading after the protests across the country.",
+            "According to posts on Reddit about the affected units, the issue appears to be happening at a similar spot.",
         ] {
             assertTrue(
                 reported(text).isEmpty,
-                "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded")
+                "Nearby places, passive/clause fragments, poll subjects and time phrases are excluded: \(text)")
         }
+        assertFalse(
+            reported(
+                "\u{201C}Albanians have woken up,\u{201D} said protester Daniel Tahiri, who called it a \u{201C}dictatorship with the clothes of democracy.\u{201D} Another protester, Orgeta Likaj, said people wanted change."
+            ).contains { $0.participant.contains("Likaj") && $0.position.contains("dictatorship") },
+            "A quotation that ends its sentence is not given to the next sentence's speaker")
+        assertEqual(
+            reported(
+                "Executive Producer Elizabeth White told The Guardian in the past, \"the amount of plankton and things\" would have stopped a shot."
+            )
+            .first?.position, "\"the amount of plankton and things\" would have stopped a shot",
+            "A quoted fragment after its speaker runs to the end of its sentence, without the speaker's own words")
+        assertFalse(
+            reported(
+                "\"We have received intelligence that Iran increased its efforts,\" Mr. Clayton said in a memo sent to Secretary of State Marco Rubio, according to a U.S. official."
+            ).contains { $0.participant == "U.S. official" }, "A report of a report is not the reporter's position")
+        assertFalse(
+            reported(
+                "A fire alarm went off at the building on Friday, police said in a statement. Firefighters who went to the scene could see the flames."
+            ).contains { $0.position.contains("could see the flames") },
+            "A tag's channel does not reach into the next sentence")
+        // A merged voice cites the passage its position comes from first.
+        let ownPassage = EvidencePassage(
+            id: "pass_own", articleID: "art_persp_1",
+            text: "\"Iran has substantially increased efforts to target US personnel,\" Clayton wrote to the secretary."
+        )
+        let otherPassage = EvidencePassage(
+            id: "pass_other", articleID: "art_persp_1",
+            text: "\"Iran has substantially increased efforts to target U.S. personnel,\" Mr. Clayton said in a memo.")
+        let mergedVoice = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [ownPassage, otherPassage], articles: [article1],
+            existingCitations: [
+                "c_z": OverviewCitation(
+                    id: "c_z", articleID: "art_persp_1", passageID: ownPassage.id,
+                    passageFingerprint: ownPassage.fingerprint, quote: ownPassage.text),
+                "c_a": OverviewCitation(
+                    id: "c_a", articleID: "art_persp_1", passageID: otherPassage.id,
+                    passageFingerprint: otherPassage.fingerprint, quote: otherPassage.text),
+            ])
+        assertEqual(mergedVoice.count, 1, "A repeated statement of one speaker is one voice")
+        assertEqual(
+            mergedVoice.first?.citationIDs.first, "c_z", "A merged voice cites its position's own passage first")
     }
 
     static func testThematicAngleFromExistingFacts(fixtureHost: String = "example.com") async throws {
@@ -20190,5 +22888,207 @@ struct NewsTests {
         // 5. OverviewGenerationCoordinator activeExtractions safety & memory cache bounding
         let coord = OverviewGenerationCoordinator.shared
         await coord.clearCache()
+    }
+
+    // MARK: - Epic N (#559, #560, #561) System Integration Unit Tests
+
+    @MainActor
+    static func testSpotlightSavedStoriesIndexing() async throws {
+        print("  - Testing Spotlight indexing of saved stories (#559)...")
+        let mockIndexer = MockSpotlightIndexer()
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: mockIndexer)
+        await store.initialize()
+        let savedManager = SavedStoriesManager(articleStore: store)
+
+        let pubDate = Date(timeIntervalSince1970: 1_730_000_000)
+        let article = FeedArticle(
+            storedID: "spotlight-unit-1",
+            title: "Breakthrough in Fusion Energy",
+            link: "https://example.com/fusion-1",
+            guid: "spotlight-unit-1",
+            description: "Scientists achieved sustained net energy gain.",
+            pubDate: pubDate,
+            source: "Science Daily"
+        )
+        await store.batchUpsert(articles: [article], feedUrl: "https://example.com/rss")
+
+        // 1. Saving a story indexes CSSearchableItem with title, publisher, summary, date, and news://story/<id>
+        savedManager.save(article)
+        await savedManager.waitForPendingChanges()
+
+        let item = await mockIndexer.item(for: "spotlight-unit-1")
+        assertTrue(item != nil, "Saving a story indexes a CSSearchableItem (#559)")
+        assertEqual(
+            item?.domainIdentifier, "com.marspater.news.saved-stories",
+            "Spotlight item uses saved-stories domain (#559)"
+        )
+        assertEqual(item?.attributeSet.title, "Breakthrough in Fusion Energy", "Spotlight item preserves title")
+        assertEqual(item?.attributeSet.publishers, ["Science Daily"], "Spotlight item preserves publisher")
+        assertEqual(
+            item?.attributeSet.contentDescription,
+            "Scientists achieved sustained net energy gain.",
+            "Spotlight item preserves summary"
+        )
+        assertEqual(item?.attributeSet.contentCreationDate, pubDate, "Spotlight item preserves publication date")
+        assertEqual(
+            item?.attributeSet.contentURL?.absoluteString,
+            "news://story/spotlight-unit-1",
+            "Spotlight item links to news://story/<id> (#559)"
+        )
+
+        // 2. Clear All Caches preserves saved-story Spotlight items
+        try await store.clearAllDatabaseCache()
+        let preserved = await mockIndexer.contains(id: "spotlight-unit-1")
+        assertTrue(preserved, "Clear All Caches preserves saved-story Spotlight items (#559)")
+
+        // 3. Unsaving removes the CSSearchableItem
+        savedManager.remove(article)
+        await savedManager.waitForPendingChanges()
+        let afterRemove = await mockIndexer.contains(id: "spotlight-unit-1")
+        assertFalse(afterRemove, "Unsaving a story removes its CSSearchableItem (#559)")
+
+        // 4. Library reset / removeAllSavedStories clears the Spotlight domain
+        savedManager.save(article)
+        await savedManager.waitForPendingChanges()
+        assertTrue(await mockIndexer.contains(id: "spotlight-unit-1"), "Re-saved story is indexed again")
+        savedManager.removeAll()
+        await savedManager.waitForPendingChanges()
+        assertEqual(await mockIndexer.getIndexedCount(), 0, "Removing all saved stories purges Spotlight domain (#559)")
+        await db.close()
+    }
+
+    @MainActor
+    static func testNotificationActionsAndRouting() async {
+        print("  - Testing Notification actions and routing (#560)...")
+        let category = NotificationActionIdentifier.makeCategory()
+        assertEqual(category.identifier, "ARTICLE_ACTIONS", "Category identifier is ARTICLE_ACTIONS (#560)")
+        assertEqual(category.actions.map(\.identifier), ["SAVE_ACTION", "MARK_READ_ACTION", "OPEN_ACTION"])
+        assertEqual(category.actions.map(\.title), ["Save", "Mark as Read", "Open"])
+        assertTrue(category.actions[2].options.contains(.foreground), "Open action brings app to foreground")
+
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let readManager = ReadManager(articleStore: store)
+        let savedManager = SavedStoriesManager(articleStore: store)
+
+        let article = FeedArticle(
+            storedID: "notif-story-1",
+            title: "Mars Sample Return Update",
+            link: "https://example.com/mars-1",
+            guid: "notif-story-1",
+            description: "Orbiter rendezvous confirmed.",
+            pubDate: Date(),
+            source: "Space Wire"
+        )
+        await store.batchUpsert(articles: [article], feedUrl: "https://example.com/rss")
+
+        // 1. SAVE_ACTION saves the story
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.save,
+            userInfo: ["articleID": article.id, "articleLink": article.link],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        await savedManager.waitForPendingChanges()
+        assertTrue(savedManager.isSaved(article), "SAVE_ACTION routes to SavedStoriesManager (#560)")
+
+        // 2. MARK_READ_ACTION marks the story as read
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.markRead,
+            userInfo: ["articleID": article.id, "articleLink": article.link],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        await readManager.waitForPendingChanges()
+        assertTrue(readManager.isRead(article.id), "MARK_READ_ACTION routes to ReadManager (#560)")
+
+        // 3. OPEN_ACTION activates app and sets pendingNavigation
+        var activated = false
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.open,
+            userInfo: ["articleID": article.id, "articleLink": article.link],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: { activated = true }
+        )
+        assertTrue(activated, "OPEN_ACTION activates the application (#560)")
+        assertEqual(store.pendingNavigation?.articleID, article.id, "OPEN_ACTION sets pendingNavigation articleID")
+        assertEqual(store.pendingNavigation?.link, article.link, "OPEN_ACTION sets pendingNavigation link")
+
+        // 4. Fallback by articleLink when articleID is missing
+        store.pendingNavigation = nil
+        await NotificationActionRouter.route(
+            actionIdentifier: UNNotificationDefaultActionIdentifier,
+            userInfo: ["articleLink": article.link],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        assertEqual(store.pendingNavigation?.link, article.link, "Default action falls back to articleLink")
+
+        // 5. Missing userInfo is ignored safely
+        store.pendingNavigation = nil
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.open,
+            userInfo: [:],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        assertTrue(store.pendingNavigation == nil, "Empty userInfo is ignored safely")
+        await db.close()
+    }
+
+    @MainActor
+    static func testMenuBarExtraSettingsAndUnreadCount() async {
+        print("  - Testing Menu Bar Extra preference and unread count source (#561)...")
+        let suite = testDefaultsSuite("test.menubar-extra")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+
+        let settings = AppSettings(defaults: defaults)
+        assertFalse(settings.showsMenuBarExtra, "Show in Menu Bar is off by default (#561)")
+
+        settings.setShowsMenuBarExtra(true)
+        assertTrue(settings.showsMenuBarExtra, "setShowsMenuBarExtra(true) updates published property")
+        assertTrue(
+            defaults.bool(forKey: AppSettings.showsMenuBarExtraKey),
+            "Show in Menu Bar preference persists in UserDefaults (#561)"
+        )
+
+        let reloaded = AppSettings(defaults: defaults)
+        assertTrue(reloaded.showsMenuBarExtra, "Reloaded AppSettings restores Show in Menu Bar preference")
+
+        reloaded.setShowsMenuBarExtra(false)
+        assertFalse(reloaded.showsMenuBarExtra, "setShowsMenuBarExtra(false) disables Menu Bar Extra")
+
+        // Verify unreadCount source matches ArticleStore.unreadCount
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let readManager = ReadManager(articleStore: store)
+        let a1 = FeedArticle(
+            storedID: "mb-1", title: "Unread 1", link: "https://example.com/mb1",
+            guid: "mb-1", description: "", pubDate: Date(), source: "Source"
+        )
+        let a2 = FeedArticle(
+            storedID: "mb-2", title: "Unread 2", link: "https://example.com/mb2",
+            guid: "mb-2", description: "", pubDate: Date(), source: "Source"
+        )
+        await store.batchUpsert(articles: [a1, a2], feedUrl: "https://example.com/rss")
+        assertEqual(store.unreadCount, 2, "ArticleStore.unreadCount reflects 2 unread stories")
+        readManager.markAsRead("mb-1")
+        await readManager.waitForPendingChanges()
+        assertEqual(store.unreadCount, 1, "ArticleStore.unreadCount decrements to 1 when story is marked read")
+        await db.close()
     }
 }
