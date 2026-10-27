@@ -40,9 +40,9 @@ import csv
 import dataclasses
 import hashlib
 import json
-import platform
 import math
 import pathlib
+import platform
 import re
 import struct
 import sys
@@ -52,7 +52,6 @@ import zlib
 import coremltools as ct
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from wordpiece import MAX_LENGTH, Tokenizer, require
 import numpy as np
 import torch
 from transformers import (
@@ -61,6 +60,7 @@ from transformers import (
     BertModel,
     get_linear_schedule_with_warmup,
 )
+from wordpiece import MAX_LENGTH, Tokenizer, require
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BATCH = 32  # training batch size, both stages
@@ -80,6 +80,11 @@ class Stage:
     rate: float
     frozen: int = 0
     smoothing: float = SMOOTHING
+
+
+# Mars's 25 October configuration (#624, #627): stage 2 with the lower layers frozen, stage 1 over every layer.
+LIBRARY_STAGE = Stage(3, 1.5e-5, FROZEN_LAYERS)
+PRETRAIN_STAGE = Stage(2, 3e-5)
 
 
 def private_file(value):
@@ -437,8 +442,7 @@ def sharpen_gdelt(rows, tokenizer, device, batch=256):
     return rows, sharpened
 
 
-def train(rows, library=Stage(3, 1.5e-5, FROZEN_LAYERS), pretrain=None, pretraining=Stage(2, 3e-5), init=None,
-          out=None):
+def train(rows, library=LIBRARY_STAGE, pretrain=None, pretraining=PRETRAIN_STAGE, init=None, out=None):
     """Stage 1 on the public pretraining pairs when given (#624; saved as `pretrain-state.pt` in `out`), or the
     state `init`, then stage 2 on the library pairs with the lower layers frozen (#627)."""
     torch.manual_seed(525)
