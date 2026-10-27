@@ -535,8 +535,9 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// a country or a common name alone linked unrelated stories in 35 of 56 reviewed related-act rows.
     var storyLinkAnchors = 2
     /// The pair model reads the time gap and whether both reports come from one publisher as plain words in front of
-    /// each text (#626); off to evaluate a model trained without the prefix.
-    var pairModelPrefix = true
+    /// each text (#626). Off: the shipped model was trained without the prefix, and the prefixed candidates added false
+    /// merges on tune (docs/audits/2026-10-24-pair-model-pretraining.md). On to evaluate a model trained with it.
+    var pairModelPrefix = false
     static let standard = EventMatchPolicy()
 }
 
