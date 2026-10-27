@@ -12592,12 +12592,71 @@ struct NewsTests {
         return lines.count - 1
     }
 
+    /// Re-clusters a copy of a library from scratch at the current matcher, in the order the stories arrived (#627), so
+    /// its events and stories (`story_id`) are the ones this build would make: events, memberships, match state and
+    /// pair decisions are cleared (corrections stay), every story is marked processed, and a clock walks the
+    /// publication dates in 6 h steps, reopening the stories published by each step for one clustering pass at that
+    /// time. Returns the copy, made in `directory`.
+    static func reclusteredLibraryCopy(_ path: String, in directory: URL) async throws -> String {
+        let copy = directory.appendingPathComponent(UUID().uuidString + ".sqlite3").path
+        try FileManager.default.copyItem(atPath: path, toPath: copy)
+        let db = DatabaseEngine(path: copy)
+        try await db.open()
+        for table in [
+            "event_overview_citations", "event_overviews", "event_state", "event_members", "event_match_state",
+            "pair_assessments", "events",
+        ] {
+            try await db.eventRows("DELETE FROM \(table);")
+        }
+        let date = DatabaseEngine.articleDateOrder
+        try await db.eventRows(
+            "INSERT INTO event_match_state SELECT id, ?, 0 FROM articles;", [.integer(EventMatcher.version)])
+        let dates = try await db.eventRows("SELECT DISTINCT \(date) FROM articles a ORDER BY 1;")
+            .compactMap { $0.first.flatMap { $0 }.flatMap(Double.init) }
+        let policy = StoryCorpus.policyFromEnvironment()
+        var total = EventClusteringReport()
+        var steps = 0
+        var previous = -Double.infinity
+        var index = 0
+        while index < dates.count {
+            let clock = max(dates[index], previous + 6 * 3600)
+            try await db.eventRows(
+                "DELETE FROM event_match_state WHERE article_id IN "
+                    + "(SELECT id FROM articles a WHERE \(date) > ? AND \(date) <= ?);",
+                [.real(previous), .real(clock)])
+            var passes = 0
+            repeat {
+                let report = try await EventClusterer.run(
+                    in: db, matchPolicy: policy, now: Date(timeIntervalSince1970: clock), allowsEnergy: true,
+                    pairProbability: StoryCorpus.pairProbabilityFromEnvironment())
+                total.processed += report.processed
+                total.created += report.created
+                total.merged += report.merged
+                passes += 1
+                if report.processed == 0 || passes >= 20 { break }
+            } while true
+            steps += 1
+            previous = clock
+            while index < dates.count, dates[index] <= clock { index += 1 }
+        }
+        let stories = try await db.eventRows(
+            "SELECT count(DISTINCT coalesce(story_id, id)), count(*) FROM events WHERE merged_into IS NULL;"
+        ).first
+        await db.close()
+        print(
+            "    re-clustered \(URL(fileURLWithPath: path).lastPathComponent) at matcher v\(EventMatcher.version): "
+                + "\(steps) steps, processed \(total.processed), created \(total.created), merged \(total.merged); "
+                + "\(stories?[1] ?? "0") events in \(stories?[0] ?? "0") stories")
+        return copy
+    }
+
     /// Mines labelled pairs for the pair model (#525) from copies of real libraries into `NEWS_EVENT_OUTPUT/pairs.csv`.
     /// `NEWS_SNAPSHOT_DB` lists the copies, colon-separated; a file inside an app container is refused, so the live
     /// library is never opened. Rows follow the three-way contract of `script/training/train_pair_model.py` (#627):
     /// `label` 0 different, 1 related, 2 same; `marginal` empty, or the classes whose summed probability is the target.
-    /// Positives (2): two English reports from different publishers in one stored event that the current rules match
-    /// directly, unless the stored decision was the pair model's alone (#627: 21% of those were false in the #551
+    /// Each copy is first re-clustered from scratch by this build (`reclusteredLibraryCopy`), so events and stories
+    /// are current. Positives (2): two English reports from different publishers in one event that the current rules
+    /// match directly, unless the recorded decision was the pair model's alone (#627: 21% of those were false in the #551
     /// review; a reader verdict or a reviewed label brings such a pair back). Negatives: two reports sharing a specific
     /// name or place 36 h to 7 days apart, which the matcher's window keeps apart by definition (0, marginal `01`: not
     /// one occurrence, possibly a later act of one story); never act-class negatives. Same-day negatives (0, weight 2):
@@ -12653,11 +12712,15 @@ struct NewsTests {
         var excluded = 0
         var holdoutExcluded = 0
         var verdicts = 0
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
         for path in snapshots.split(separator: ":").map(String.init) {
             guard !path.contains("/Library/Containers/") else {
                 throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
             }
-            let db = DatabaseEngine(path: path)
+            // Mined pairs come from this build's events and stories, not the ones stored by an older matcher.
+            let db = DatabaseEngine(path: verdictsOnly ? path : try await reclusteredLibraryCopy(path, in: scratch))
             try await db.open()
             var rows: [Row] = []
             let articles = try await db.eventRows(
