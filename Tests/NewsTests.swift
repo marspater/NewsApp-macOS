@@ -1086,7 +1086,7 @@ struct NewsTests {
         let shrinkPath = directory.appendingPathComponent("shrink.sqlite3").path
         let shrinkDB = DatabaseEngine(path: shrinkPath)
         try await shrinkDB.open()
-        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "27", "New database opens at schema v26")
+        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "27", "New database opens at schema v27")
         assertEqual(value(shrinkPath, "PRAGMA auto_vacuum;"), "2", "New database uses incremental auto_vacuum (2)")
 
         let now = Date(timeIntervalSince1970: 1_800_000_000)
