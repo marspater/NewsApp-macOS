@@ -194,7 +194,7 @@ enum StoryCorpus {
         if environment["NEWS_COMPATIBLE_REQUIRES_MATCH"] == "1" { policy.compatibleRequiresMatch = true }
         if let value = environment["NEWS_COMPATIBLE_SHARE"].flatMap(Double.init) { policy.compatibleShare = value }
         if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
-        if environment["NEWS_PAIR_PREFIX"] == "0" { policy.pairModelPrefix = false }
+        if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
         return policy
     }
 
