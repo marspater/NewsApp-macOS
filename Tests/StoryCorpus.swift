@@ -127,6 +127,13 @@ enum StoryCorpus {
     static func eventMemberships(articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil) async throws
         -> [String: String]
     {
+        try await memberships(articles: articles, onPass: onPass).mapValues(\.event)
+    }
+
+    /// The same replay with each item's story card as well (#581): its event's story, else the item alone.
+    static func memberships(articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil) async throws
+        -> [String: (event: String, story: String)]
+    {
         let items = articles.sorted { ($0.pubDate, $0.id) < ($1.pubDate, $1.id) }
         guard var clock = items.first?.pubDate else { return [:] }
         let db = DatabaseEngine(path: ":memory:")
@@ -155,15 +162,17 @@ enum StoryCorpus {
                 clock = clock.addingTimeInterval(6 * 3600)
                 if index < items.count, items[index].pubDate > clock { clock = items[index].pubDate }
             }
-            var result: [String: String] = [:]
+            var result: [String: (event: String, story: String)] = [:]
             for item in items {
                 let resolved = try await db.resolvedArticleID(for: item)
-                var event = try await db.eventID(forArticle: resolved)
+                let event = try await db.eventID(forArticle: resolved)
+                var story = "document:" + resolved
+                if let event { story = "story:" + (try await db.storyID(forEvent: event) ?? event) }
                 // NEWS_SCORE_STORIES=1 (#627) scores stories instead of events: two events of one story count as one.
-                if ProcessInfo.processInfo.environment["NEWS_SCORE_STORIES"] == "1", let id = event {
-                    event = try await db.storyID(forEvent: id)
-                }
-                result[item.id] = event.map { "event:" + $0 } ?? "document:" + resolved
+                let scoresStories = ProcessInfo.processInfo.environment["NEWS_SCORE_STORIES"] == "1"
+                result[item.id] = (
+                    scoresStories ? story : (event.map { "event:" + $0 } ?? "document:" + resolved), story
+                )
             }
             await db.close()
             return result
@@ -219,6 +228,11 @@ enum StoryCorpus {
         if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
         if let value = environment["NEWS_STORY_MODEL"].flatMap(Double.init) { policy.storyModelThreshold = value }
         if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
+        // The semantic veto and rescue cutoffs (#628), swept when the sentence encoder changes.
+        if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init) { policy.semanticVetoThreshold = value }
+        if let value = environment["NEWS_SEMANTIC_RESCUE"].flatMap(Double.init) {
+            policy.semanticMatchThreshold = value
+        }
         return policy
     }
 

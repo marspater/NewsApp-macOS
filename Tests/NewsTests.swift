@@ -422,6 +422,7 @@ struct NewsTests {
         }
         if CommandLine.arguments.contains("--matcher-regressions") {
             try await testMatcherRegressionCorpus()
+            try await testStoryRegressionCorpus()
             return
         }
         if CommandLine.arguments.contains("--embedding-vectors") {
@@ -678,6 +679,7 @@ struct NewsTests {
             try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
             try await testMatcherRegressionCorpus()
+            try await testStoryRegressionCorpus()
             try testCapturedFingerprintReview()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
@@ -788,6 +790,7 @@ struct NewsTests {
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
         try await testMatcherRegressionCorpus()
+        try await testStoryRegressionCorpus()
         try testCapturedFingerprintReview()
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
@@ -11657,6 +11660,64 @@ struct NewsTests {
                 + "--last 10m")
     }
 
+    /// Authored story regressions (#581): the known story failures as synthetic families, asserted exactly at both levels,
+    /// which reports share an event and which share a story card. A pair in `knownGaps` is asserted the other way round
+    /// from its label, so a fix that closes a gap fails here until the gap is taken off the list.
+    static func testStoryRegressionCorpus() async throws {
+        print("  - Testing the authored story regressions: events and story cards (#581)...")
+        struct Fixture: Decodable {
+            struct Item: Decodable {
+                let id: String, title: String, description: String?, source: String, published: Date
+                let event: String?, story: String?
+            }
+            struct Gaps: Decodable { let events: [[String]], stories: [[String]] }
+            let articles: [Item]
+            let knownGaps: Gaps
+        }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let fixture = try decoder.decode(
+            Fixture.self,
+            from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/story-corpus/story-regressions-v1.json")))
+        let items = fixture.articles.sorted { ($0.published, $0.id) < ($1.published, $1.id) }
+        let memberships = try await StoryCorpus.memberships(
+            articles: items.map {
+                FeedArticle(
+                    storedID: $0.id, title: $0.title, link: "https://story-regressions.invalid/\($0.id)", guid: $0.id,
+                    description: $0.description ?? "", pubDate: $0.published, source: $0.source)
+            })
+        func key(_ a: String, _ b: String) -> String { a < b ? a + "+" + b : b + "+" + a }
+        let eventGaps = Set(fixture.knownGaps.events.map { key($0[0], $0[1]) })
+        let storyGaps = Set(fixture.knownGaps.stories.map { key($0[0], $0[1]) })
+        // NEWS_ENERGY=0 (#534): the rules-only replay holds every match for a pass with energy, so only links are checked.
+        let rulesOnly = ProcessInfo.processInfo.environment["NEWS_ENERGY"] == "0"
+        var failures: [String] = []
+        var linked = (events: 0, stories: 0)
+        for i in items.indices {
+            for j in items.indices where j > i {
+                let (a, b) = (items[i], items[j])
+                let pair = key(a.id, b.id)
+                let event = a.event != nil && a.event == b.event
+                let story = (a.story ?? a.event).map { $0 == (b.story ?? b.event) } ?? false
+                let predictedEvent = memberships[a.id]?.event == memberships[b.id]?.event
+                let predictedStory = memberships[a.id]?.story == memberships[b.id]?.story
+                if predictedEvent { linked.events += 1 }
+                if predictedStory { linked.stories += 1 }
+                if predictedEvent != (event != eventGaps.contains(pair)), predictedEvent || !rulesOnly {
+                    failures.append("event \(pair) \(predictedEvent ? "linked" : "apart")")
+                }
+                if predictedStory != (story != storyGaps.contains(pair)), predictedStory || !rulesOnly {
+                    failures.append("story \(pair) \(predictedStory ? "linked" : "apart")")
+                }
+            }
+        }
+        print(
+            "    story regressions v\(EventMatcher.version): \(linked.events) event pairs, \(linked.stories) story pairs;"
+                + " known gaps \(eventGaps.count) event, \(storyGaps.count) story")
+        print("    unexpected: \(failures.isEmpty ? "none" : failures.joined(separator: ", "))")
+        assertTrue(failures.isEmpty, "Authored story regressions changed (\(failures.count) pairs)")
+    }
+
     static func testMatcherRegressionCorpus() async throws {
         print("  - Testing the authored matcher regression corpus (#506)...")
         struct Fixture: Decodable {
@@ -11678,7 +11739,11 @@ struct NewsTests {
                 storedID: $0.id, title: $0.title, link: "https://matcher-regressions.invalid/\($0.id)", guid: $0.id,
                 description: $0.description ?? "", pubDate: $0.published, source: $0.source)
         }
-        let memberships = try await StoryCorpus.eventMemberships(articles: articles)
+        // NEWS_ENERGY=0 replays Low Power Mode (#534): a fresh replay has no stored vectors, so every rule match waits for
+        // a pass with energy and the true-positive floor cannot hold; the false-pair ceiling still applies.
+        let rulesOnly = ProcessInfo.processInfo.environment["NEWS_ENERGY"] == "0"
+        var deferred = 0
+        let memberships = try await StoryCorpus.eventMemberships(articles: articles) { deferred += $0.deferred }
         var metrics = EventCorpusMetrics()
         var falsePairs: [String] = []
         var missedPairs: [String] = []
@@ -11696,8 +11761,11 @@ struct NewsTests {
         print("    matcher regressions v\(EventMatcher.version): \(metrics.line)")
         print("    false pairs: \(falsePairs.isEmpty ? "none" : falsePairs.joined(separator: ", "))")
         print("    missed pairs: \(missedPairs.isEmpty ? "none" : missedPairs.joined(separator: ", "))")
+        if rulesOnly {
+            print("    rules only (NEWS_ENERGY=0): \(deferred) rows deferred to a pass with energy; no floor")
+        }
         assertTrue(
-            metrics.truePositives >= fixture.expected.minimumTruePositives,
+            rulesOnly || metrics.truePositives >= fixture.expected.minimumTruePositives,
             "Authored corpus true positives fell below the recorded floor (\(metrics.truePositives))")
         assertTrue(
             metrics.falsePositives <= fixture.expected.maximumFalsePositives,
