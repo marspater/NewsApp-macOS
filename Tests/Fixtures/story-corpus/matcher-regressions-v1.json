@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "note": "Authored English regression corpus for EventClusterer (#506). Not acceptance evidence: the private holdout (#509) is the gate. Families sit five days apart so the candidate window isolates them; negatives are deliberately inside the window. 'expected' is the CI ratchet. Recorded on matcher v8 by hosted CI run 40068841897: TP 21 / FP 2 / FN 3 (false pairs f08-a+f08-d and f08-b+f08-d, the resignation joining the execution aftermath). Recorded on the act-class matcher (#522; v10, since #519 took v9 for the semantic rescue) by hosted CI run 40081886073 and again after merging #519: TP 22 / FP 0 / FN 2; no false pairs, f08-c+f08-d recovered; missed pairs f03-a+f03-c and f03-b+f03-c (a 20 h later 'Rescuers search rubble after …' report whose primary clause names an act); unchanged on matcher v11 with the pair model (#525).",
+  "note": "Authored English regression corpus for EventClusterer (#506). Not acceptance evidence: the private holdout (#509) is the gate. Families sit five days apart so the candidate window isolates them; negatives are deliberately inside the window. 'expected' is the CI ratchet. Recorded on matcher v8 by hosted CI run 40068841897: TP 21 / FP 2 / FN 3 (false pairs f08-a+f08-d and f08-b+f08-d, the resignation joining the execution aftermath). Recorded on the act-class matcher (#522; v10, since #519 took v9 for the semantic rescue) by hosted CI run 40081886073 and again after merging #519: TP 22 / FP 0 / FN 2; no false pairs, f08-c+f08-d recovered; missed pairs f03-a+f03-c and f03-b+f03-c (a 20 h later 'Rescuers search rubble after …' report whose primary clause names an act); unchanged on matcher v11 with the pair model (#525). Family f16 (#688) adds a same-publisher dated series (2Minute Daily), the morning and evening editions of one bulletin and a strike date written both ways: matcher v12 merged both series pairs (TP 23 / FP 2); v13 keeps them apart, TP 23 / FP 0 / FN 2.",
   "expected": {
-    "minimumTruePositives": 22,
+    "minimumTruePositives": 23,
     "maximumFalsePositives": 0
   },
   "articles": [
@@ -391,6 +391,57 @@
       "description": "President Zelensky signed a decree on Friday mobilising 50,000 additional soldiers, his office said, as Russian attacks continued in the east.",
       "source": "Herald Three",
       "published": "2026-12-10T13:00:00Z"
+    },
+    {
+      "id": "f16-a",
+      "title": "Rotterdam dockworkers to strike on December 20, union says",
+      "description": "The FNV union said dockworkers at the port of Rotterdam would walk out on December 20 over pay, halting container traffic at Europe's largest port.",
+      "source": "Wire One",
+      "published": "2026-12-15T08:00:00Z",
+      "event": "f16-strike"
+    },
+    {
+      "id": "f16-b",
+      "title": "Rotterdam port faces 20 December walkout as pay talks fail",
+      "description": "Dock workers in Rotterdam will strike on 20 December after pay talks with port employers collapsed, the FNV union said.",
+      "source": "Daily Two",
+      "published": "2026-12-15T10:00:00Z",
+      "event": "f16-strike"
+    },
+    {
+      "id": "f16-c",
+      "title": "Rotterdam union calls second port strike for December 27",
+      "description": "The FNV union said it would call a second strike at the port of Rotterdam on December 27 if employers do not improve their pay offer.",
+      "source": "Herald Three",
+      "published": "2026-12-15T16:00:00Z"
+    },
+    {
+      "id": "f16-d",
+      "title": "2Minute Daily: December 15, 2026 – Rotterdam strike date, rail fares",
+      "description": "Listen to a recap of the top stories of the day from 2Minute Tech. 2Minute Daily is available in every podcast app.",
+      "source": "2Minute Tech",
+      "published": "2026-12-15T18:00:00Z"
+    },
+    {
+      "id": "f16-e",
+      "title": "2Minute Daily: December 16, 2026 – Port pay talks, budget vote",
+      "description": "Listen to a recap of the top stories of the day from 2Minute Tech. 2Minute Daily is available in every podcast app.",
+      "source": "2Minute Tech",
+      "published": "2026-12-16T18:00:00Z"
+    },
+    {
+      "id": "f16-f",
+      "title": "Latest news bulletin | December 15th, 2026 – Morning",
+      "description": "Catch up with the most important stories from around Europe and beyond this December 15th, 2026 - latest news, business, politics, culture.",
+      "source": "Bulletin Six",
+      "published": "2026-12-15T07:00:00Z"
+    },
+    {
+      "id": "f16-g",
+      "title": "Latest news bulletin | December 15th, 2026 – Evening",
+      "description": "Catch up with the most important stories from around Europe and beyond this December 15th, 2026 - latest news, business, politics, culture.",
+      "source": "Bulletin Six",
+      "published": "2026-12-15T17:00:00Z"
     }
   ]
 }
