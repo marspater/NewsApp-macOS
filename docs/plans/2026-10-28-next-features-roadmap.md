@@ -97,7 +97,7 @@ Empowers readers to capture private insights, track evolving news revisions, and
 
 | # | Issue | Scope | Acceptance | Effort | Pri | Dependencies |
 |---|---|---|---|---|---|---|
-| V1 (#711) | Local Private Annotations and User Notes | Reader text selection popover to highlight (⌘Y) with semantic tint and attach private notes; persisted in `user_notes` SQLite table; collapsible annotations inspector (⌥⌘I); Library "Notes & Highlights" view. | Highlight persists across re-extracts; notes searchable in FTS5; inspector toggles cleanly; DESIGN.md compliance. | M | P1 | Blocked by J3 (schema migration v27) and Q2 (#594) |
+| V1 (#711) | Local Private Annotations and User Notes | Reader text selection popover to highlight (⌘Y) with semantic tint and attach private notes; persisted in `user_notes` SQLite table; collapsible annotations inspector (⌥⌘I); Library "Notes & Highlights" view. | Highlight persists across re-extracts; notes searchable in FTS5; inspector toggles cleanly; DESIGN.md compliance. | M | P1 | J3 (#536) and Q2 (#594) done; takes the next free schema version (v28 as of 28 Oct: #631 took v27) |
 | V2 (#712) | Story Evolution and Live Publisher Diffing | Visual diff view in reader for articles with multiple `PublisherContentRevision` records; highlights additions in soft tint and shows retractions. | Header update pill shows revision count; diff highlights changes clearly without layout jumps; verified on multi-revision fixtures. | M | P2 | Blocked by Q2/Q5 and Reader v11 pipeline |
 | V3 (#713) | Curated Knowledge Export (Obsidian, Apple Notes, Markdown, EPUB) | Frontmatter Markdown export for Obsidian/Bear, "Add to Apple Notes" via native sharing, daily Briefing digest generator, and offline .epub compilation. | Export valid UTF-8 Markdown with YAML frontmatter, cited quotes, and user notes; EPUB opens cleanly in Apple Books. | M | P2 | Blocked by O4 (#565) and V1 |
 
@@ -147,7 +147,7 @@ The following items were brainstormed and reviewed by Mars on 28 October 2026, w
    - **W1 (#715, Publisher Health Inspector):** Diagnostic transparency in Settings › Subscriptions as v2 storage and first-run milestones stabilize.
 3. **Horizon 2 (Discovery & Active Reading - Post v2 Foundations):**
    - **U2 (#708, Hybrid Semantic Search):** Lands after M18 News bi-encoder and K1 throughput pass.
-   - **V1 (#711, Local Annotations & `user_notes`):** Lands with SQLite v27 schema migration.
+   - **V1 (#711, Local Annotations & `user_notes`):** Lands with the next free schema migration (v28 as of 28 Oct; v27 is the story layer, #631).
    - **U3 (#709, Smart Binders):** Dynamic topic streams in sidebar.
    - **V2 (#712, Story Evolution):** Visual diffing of publisher revisions.
    - **V3 (#713, Curated Knowledge Export):** Markdown frontmatter and EPUB compilation.
