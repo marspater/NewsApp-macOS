@@ -57,7 +57,7 @@ Release and engineering hygiene
 
 ## 2. Plan — programs and issues
 
-The original seven programs (J–P) each have a GitHub epic with sub-issues and a milestone. **Program S was added on 25 October 2026 as a separately parked, future-facing Epic**; it is not a release gate. **Program T was added on 26 October 2026; since 27 October it is blocked by M's story layer (#581) only.** Every implementation issue lands as one PR with `./test.sh`, `script/format.sh --check`, a staged `./build.sh`, a CHANGELOG line and board move; UI PRs carry the DESIGN.md checklist. No AI attribution lines in commits or PRs. Effort S < 1 day, M 1–3 days, L > 3 days.
+The original seven programs (J–P) each have a GitHub epic with sub-issues and a milestone. **Program S was added on 25 October 2026 as a separately parked, future-facing Epic**; it is not a release gate. **Program T was added on 26 October 2026; since 27 October it is blocked by M's story layer (#581) only.** **Programs U–X were added on 28 October 2026 as the post-v2 feature roadmap (`docs/plans/2026-10-28-next-features-roadmap.md`), bounded by dependencies on v2 development.** Every implementation issue lands as one PR with `./test.sh`, `script/format.sh --check`, a staged `./build.sh`, a CHANGELOG line and board move; UI PRs carry the DESIGN.md checklist. No AI attribution lines in commits or PRs. Effort S < 1 day, M 1–3 days, L > 3 days.
 
 ### J · Robustness and data safety (epic #571, milestone J)
 
@@ -174,6 +174,22 @@ Shared acceptance for all four (in #669): sections absent without valid data, st
 - [x] Create #669 with sub-issues #670–#673 and record the blocked-by dependencies on #574 and #573.
 - [x] Narrow #669's blocker to #581 and correct the schema reservation: #545 took no version, so v28 is free (27 October 2026).
 - [x] Add #669–#673 to GitHub Project #2 with Status = Backlog and Priority = P2.
+
+### U–X · Post-v2 feature roadmap (epics #706, #710, #714, #719, milestones U–X; added 28 October 2026)
+
+Full scope, acceptance criteria, dependency bounds to v2 development, and sub-issues #707–#709, #711–#713, #715–#718, #720–#723 are recorded in [docs/plans/2026-10-28-next-features-roadmap.md](2026-10-28-next-features-roadmap.md).
+
+- **Epic U (#706, milestone U):** Advanced Discovery and Search (U1 #707 Quick Look spacebar peek, U2 #708 hybrid semantic search, U3 #709 smart binders).
+- **Epic V (#710, milestone V):** Active Reading and Knowledge Synthesis (V1 #711 local annotations/`user_notes`, V2 #712 story evolution diffing, V3 #713 curated knowledge export).
+- **Epic W (#714, milestone W):** Deep Editorial Intelligence and Perspectives (W1 #715 publisher health inspector, W2 #716 on-device entity dossiers, W3 #717 multi-perspective dual-reader, W4 #718 interactive global hotspot map).
+- **Epic X (#719, milestone X, PARKED):** Desktop and System Presence (X1 #720 shared container, X2 #721 Briefing hero widget, X3 #722 World Tension widget, X4 #723 breaking stories widget). Strictly blocked on completion of v2 and Epics U, V, and W.
+
+**Board setup checklist**
+- [x] Create milestones 21–24 (U, V, W, X).
+- [x] Create epics #706, #710, #714, #719 with sub-issues #707–#709, #711–#713, #715–#718, #720–#723.
+- [x] Link sub-issues via GitHub native sub-issues hierarchy.
+- [x] Add all 18 issues to GitHub Project #2 with Status = Backlog and Priority set (P1 for U1, U2, V1, W1; P2 for remainder).
+
 
 ## 3. Order
 
