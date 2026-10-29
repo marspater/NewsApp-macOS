@@ -1,0 +1,1 @@
+- Stories from an uncatalogued publisher now match the same headline across its bare and www-prefixed hostnames.
