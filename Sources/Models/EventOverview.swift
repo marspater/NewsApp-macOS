@@ -290,6 +290,10 @@ public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
         case introduction, timeline, perspectives, industryImpact, thematicAngle, coverageSentiment
     }
 
+    /// Decodes evidence sections, defaulting absent or null timeline, perspective, and industry-impact
+    /// arrays to empty. Other absent or null fields, including the introduction, remain nil.
+    ///
+    /// - Throws: Errors from the decoder, including malformed section values or an incompatible container.
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.introduction = try container.decodeIfPresent([OverviewFact].self, forKey: .introduction)
@@ -305,6 +309,10 @@ public struct OverviewEvidenceSections: Codable, Hashable, Sendable {
         )
     }
 
+    /// Encodes populated sections, omitting empty timeline, perspective, and industry-impact arrays and
+    /// nil optional fields. A present, empty introduction array is retained.
+    ///
+    /// - Throws: Errors propagated by the encoder while writing the sections.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(introduction, forKey: .introduction)

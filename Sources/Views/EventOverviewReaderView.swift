@@ -63,31 +63,38 @@ struct EventOverviewReaderView: View {
     // MARK: - Layout Metrics & Bounds
     nonisolated static let horizontalPageInset = AppLayout.pageInset
 
+    /// Returns the reading measure in points for the text scale, capping width growth at scale 1.3.
     nonisolated static func readingColumnMaxWidth(for scale: CGFloat) -> CGFloat {
         AppLayout.readingColumnMaxWidth(for: scale)
     }
 
     // MARK: - Contrast & Color Scalers
+    /// Uses the shared separator stroke, strengthened for Increase Contrast.
     nonisolated static func borderStrokeColor(for contrast: ColorSchemeContrast) -> Color {
         AppColor.border(for: contrast)
     }
 
+    /// Returns divider opacity: 0.60 with Increase Contrast, otherwise 0.20.
     nonisolated static func dividerOpacity(for contrast: ColorSchemeContrast) -> Double {
         contrast == .increased ? 0.60 : 0.20
     }
 
+    /// Shows a 0.60-opacity pill outline with Increase Contrast; otherwise hides it.
     nonisolated static func pillBorderOpacity(for contrast: ColorSchemeContrast) -> Double {
         contrast == .increased ? 0.60 : 0.0
     }
 
+    /// Returns pill fill opacity: 0.22 with Increase Contrast, otherwise 0.12.
     nonisolated static func pillBackgroundOpacity(for contrast: ColorSchemeContrast) -> Double {
         contrast == .increased ? 0.22 : 0.12
     }
 
+    /// Promotes secondary text to the primary text color with Increase Contrast.
     nonisolated static func secondaryTextColor(for contrast: ColorSchemeContrast) -> Color {
         contrast == .increased ? AppColor.primaryText : AppColor.secondaryText
     }
 
+    /// Uses the shared metadata color, promoted to secondary text with Increase Contrast.
     nonisolated static func tertiaryTextColor(for contrast: ColorSchemeContrast) -> Color {
         AppColor.tertiaryText(for: contrast)
     }
@@ -105,11 +112,14 @@ struct EventOverviewReaderView: View {
     }
 
     // MARK: - Animation Policy
+    /// Returns nil when Reduce Motion is enabled; otherwise uses the shared navigation animation.
     nonisolated static func readerAnimation(reduceMotion: Bool) -> Animation? {
         reduceMotion ? nil : AppMotion.navigation
     }
 
     // MARK: - Citation Resolution Helper
+    /// Finds the first member matching by article ID, then nonempty URL, title, or case-insensitive
+    /// source or publisher name, in that priority order. Returns nil when none matches.
     nonisolated static func matchingArticle(for citation: OverviewCitation, in memberArticles: [FeedArticle])
         -> FeedArticle?
     {
@@ -142,25 +152,32 @@ struct EventOverviewReaderView: View {
     }
 
     // MARK: - Sparse Section Filtering
+    /// Reports whether the summary contains text beyond whitespace and newlines.
     nonisolated static func hasSummaryContent(_ summary: String) -> Bool {
         !summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Requires an image with a nonblank URL string; does not validate the URL or load the image.
     nonisolated static func hasLeadImageContent(_ leadImage: OverviewLeadImage?) -> Bool {
         guard let leadImage = leadImage else { return false }
         return !leadImage.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Keeps facts with nonblank text in input order, without checking their citations.
     nonisolated static func filterValidFacts(_ facts: [OverviewFact]) -> [OverviewFact] {
         facts.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
+    /// Keeps items with nonblank summaries in input order, including items without dates.
     nonisolated static func filterValidTimeline(_ timeline: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
         timeline.filter {
             !$0.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
+    /// Orders non-planned items before plans, then sorts each group by event date or publication date,
+    /// earliest first. Undated items follow dated ones; ties favor an event date over a publication-only
+    /// date, then preserve input order. Display date text does not affect ordering.
     nonisolated static func sortTimelineItems(_ items: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
         items.enumerated().sorted { left, right in
             let a = left.element
@@ -181,6 +198,7 @@ struct EventOverviewReaderView: View {
         }.map(\.element)
     }
 
+    /// Keeps perspectives with both a nonblank participant and position, preserving input order.
     nonisolated static func filterValidPerspectives(_ perspectives: [OverviewPerspective]) -> [OverviewPerspective] {
         perspectives.filter {
             !$0.participant.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -188,6 +206,8 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Keeps items with both a nonblank industry and implication, preserving input order;
+    /// does not verify industry names or citations.
     nonisolated static func filterValidIndustryImpact(_ impact: [OverviewIndustryImpact]) -> [OverviewIndustryImpact] {
         impact.filter {
             !$0.industry.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -195,6 +215,7 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Requires an angle with a nonblank title, summary, or fact; citations alone do not count.
     nonisolated static func hasThematicAngleContent(_ angle: OverviewThematicAngle?) -> Bool {
         guard let angle = angle else { return false }
         let title = angle.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -240,6 +261,7 @@ struct EventOverviewReaderView: View {
     }
 
     // MARK: - VoiceOver Accessibility Labels
+    /// Combines already formatted update time and story and publisher counts into one VoiceOver label.
     nonisolated static func headerMetadataAccessibilityLabel(
         formattedUpdateTime: String,
         articleCountText: String,
@@ -248,6 +270,7 @@ struct EventOverviewReaderView: View {
         "Updated \(formattedUpdateTime), \(articleCountText), \(publisherCountText)"
     }
 
+    /// Uses a nonblank caption or "Event lead image", appending a nonblank credit when available.
     nonisolated static func leadImageAccessibilityLabel(_ leadImage: OverviewLeadImage) -> String {
         let caption = leadImage.caption?.trimmingCharacters(in: .whitespacesAndNewlines)
         let credit = leadImage.credit?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -263,18 +286,23 @@ struct EventOverviewReaderView: View {
         return parts.joined(separator: ". ")
     }
 
+    /// Combines the source name and quoted passage into one VoiceOver label.
     nonisolated static func citationAccessibilityLabel(sourceName: String, quote: String) -> String {
         "Citation from \(sourceName): \(quote)"
     }
 
+    /// Labels the action that opens a publication in the reader, including its title and source.
     nonisolated static func readArticleAccessibilityLabel(title: String, source: String) -> String {
         "Read \(title) from \(source) in Source publication mode"
     }
 
+    /// Labels the action that opens the original publication, including its title and source.
     nonisolated static func openWebArticleAccessibilityLabel(title: String, source: String) -> String {
         "Open original publication: \(title) on \(source)"
     }
 
+    /// Combines the trimmed takeaway with publisher attribution, falling back to nonempty citation source
+    /// names. Returns the trimmed takeaway alone when no attribution is available.
     nonisolated static func highlightAccessibilityLabel(
         takeaway: String, publisher: String?, citations: [OverviewCitation] = []
     ) -> String {
@@ -290,6 +318,8 @@ struct EventOverviewReaderView: View {
         return trimmed
     }
 
+    /// Combines the trimmed participant and position with the supplied source attribution, falling back
+    /// to nonempty citation source names when the source is absent or empty.
     nonisolated static func perspectiveAccessibilityLabel(
         participant: String, position: String, source: String?, citations: [OverviewCitation] = []
     ) -> String {
@@ -308,6 +338,7 @@ struct EventOverviewReaderView: View {
         return parts.joined(separator: ". ")
     }
 
+    /// Combines the industry and trimmed implication, appending nonempty citation source names when present.
     nonisolated static func industryImpactAccessibilityLabel(
         industry: String, implication: String, citations: [OverviewCitation] = []
     ) -> String {
@@ -320,6 +351,8 @@ struct EventOverviewReaderView: View {
         return "\(industry): \(trimmed)"
     }
 
+    /// Prefers a nonblank wire source as "via … syndicate", then a publisher as "via …", or returns nil.
+    /// Trims surrounding whitespace and removes one existing lowercase "via " prefix.
     nonisolated static func formatPerspectiveSource(wire: String?, publisher: String?) -> String? {
         if let wire = wire?.trimmingCharacters(in: .whitespacesAndNewlines), !wire.isEmpty {
             let cleanWire = wire.hasPrefix("via ") ? String(wire.dropFirst(4)) : wire
@@ -332,6 +365,8 @@ struct EventOverviewReaderView: View {
         return nil
     }
 
+    /// Combines date text (or a formatted publication date), planned status, summary, and citation sources.
+    /// Prefixes dates with "Reported" when there is no event date; omits the date when neither fallback exists.
     nonisolated static func timelineItemAccessibilityLabel(
         item: OverviewTimelineItem, citations: [OverviewCitation] = []
     ) -> String {
@@ -613,6 +648,8 @@ struct EventOverviewReaderView: View {
         Self.citedSources(citationIDs, citations: overview.citations, memberArticles: memberArticles)
     }
 
+    /// Returns the first available attribution in citation order, preferring each citation's nonblank
+    /// source name over its matching member article's publisher name, or nil when none is available.
     private func factPublisher(_ fact: OverviewFact) -> String? {
         for citID in fact.citationIDs {
             if let citation = overview.citations[citID] {
@@ -629,6 +666,7 @@ struct EventOverviewReaderView: View {
 
     // MARK: - Section 4: Key Facts
 
+    /// Groups content beneath a level-two accessibility heading using shared overview spacing.
     private func overviewSection<Content: View>(
         title: String,
         @ViewBuilder content: () -> Content
@@ -655,6 +693,7 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Displays the takeaway with publisher attribution and citation pills when available.
     @ViewBuilder
     private func highlightContent(
         fact: OverviewFact,
@@ -690,6 +729,7 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Displays a bulleted takeaway as one accessibility element with actions to open its cited sources.
     @ViewBuilder
     private func highlightRow(_ fact: OverviewFact) -> some View {
         let publisher = factPublisher(fact)
@@ -1014,6 +1054,8 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Displays one timeline entry with its rail segment and source-opening accessibility actions.
+    /// `isFirst` and `isLast` mark the endpoints of the displayed timeline.
     @ViewBuilder
     private func timelineRow(_ item: OverviewTimelineItem, isFirst: Bool, isLast: Bool) -> some View {
         let citations = item.citationIDs.compactMap { overview.citations[$0] }
@@ -1030,6 +1072,8 @@ struct EventOverviewReaderView: View {
         .accessibilityActions { citationAccessibilityActions(sources) }
     }
 
+    /// Draws the temporal marker and rail, omitting the incoming segment for the first item and
+    /// the outgoing segment for the last item.
     private func timelineRailNode(item: OverviewTimelineItem, isFirst: Bool, isLast: Bool) -> some View {
         VStack(spacing: 0) {
             if !isFirst {
@@ -1054,6 +1098,7 @@ struct EventOverviewReaderView: View {
         .frame(width: AppLayout.timelineRailWidth)
     }
 
+    /// Uses a diamond for plans, an outlined circle without an event date, and a filled circle otherwise.
     @ViewBuilder
     private func timelineMarker(for item: OverviewTimelineItem) -> some View {
         if item.isFuturePlan {
@@ -1077,6 +1122,8 @@ struct EventOverviewReaderView: View {
         .padding(.bottom, isLast ? 0 : AppSpacing.md)
     }
 
+    /// Displays event date text when supplied, otherwise a reported date for items without an event date.
+    /// Adds the Plan badge for planned items and a separate publication date for dated events.
     @ViewBuilder
     private func timelineDateRow(_ item: OverviewTimelineItem) -> some View {
         let hasDateText = !item.dateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1135,6 +1182,7 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Displays participant and position with source attribution and citation pills when available.
     @ViewBuilder
     private func perspectiveContent(
         _ perspective: OverviewPerspective,
@@ -1175,6 +1223,8 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Groups a viewpoint and attribution into one accessibility element with source-opening actions;
+    /// omits the divider after the last displayed perspective.
     @ViewBuilder
     private func perspectiveRow(_ perspective: OverviewPerspective) -> some View {
         let source = Self.formatPerspectiveSource(
@@ -1218,6 +1268,7 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Displays the industry tag, implication, and any available citation pills.
     @ViewBuilder
     private func industryImpactContent(
         _ item: OverviewIndustryImpact,
@@ -1250,6 +1301,8 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// Groups an implication into one accessibility element with source-opening actions;
+    /// omits the divider after the last displayed impact.
     @ViewBuilder
     private func industryImpactRow(_ item: OverviewIndustryImpact) -> some View {
         let citations = item.citationIDs.compactMap { overview.citations[$0] }
@@ -1325,6 +1378,7 @@ struct EventOverviewReaderView: View {
 // MARK: - Timeline Diamond Shape
 
 struct DiamondShape: Shape {
+    /// Returns a closed diamond joining the midpoints of the supplied rectangle's edges.
     func path(in rect: CGRect) -> Path {
         var path = Path()
         path.move(to: CGPoint(x: rect.midX, y: rect.minY))

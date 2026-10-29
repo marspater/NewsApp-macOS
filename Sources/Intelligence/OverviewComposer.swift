@@ -424,6 +424,9 @@ public struct OverviewComposer: Sendable {
         """
     }
 
+    /// Removes positions matching excluded sentences after trimming and lowercasing, or with word-set
+    /// overlap (intersection over union) of at least 0.7. Preserves order and does not deduplicate positions
+    /// against each other; positions without words remain unless they match an excluded string.
     static func deduplicatePerspectives(
         _ perspectives: [OverviewPerspective],
         against excludeSentences: [String]
@@ -449,6 +452,9 @@ public struct OverviewComposer: Sendable {
         }
     }
 
+    /// Removes implications matching excluded sentences after trimming and lowercasing, or with alphanumeric
+    /// word-set overlap (intersection over union) of at least 0.6. Also drops implications without words;
+    /// retains the remaining items in input order without comparing them to each other.
     static func deduplicateIndustryImpact(
         _ impact: [OverviewIndustryImpact],
         against excludeSentences: [String]
@@ -491,6 +497,7 @@ public struct OverviewComposer: Sendable {
         }
 
         /// The synthesized overview: model introduction and facts, the fallback's other sections and citations.
+        /// Drops fallback perspectives and industry impacts that repeat the model sentences.
         func document(replacing fallback: EventOverviewDocument) -> EventOverviewDocument {
             let modelSentences = (introduction + facts).map(\.text)
             let dedupedPerspectives = OverviewComposer.deduplicatePerspectives(

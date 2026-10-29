@@ -177,6 +177,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         var coveredIndustries = Set<StandardIndustry>()
     }
 
+    /// Normalizes excluded sentences for exact matching and returns their nonempty alphanumeric word sets.
     private static func buildExclusions(
         from excludeSentences: Set<String>
     ) -> (strings: Set<String>, wordsList: [Set<String>]) {
@@ -189,6 +190,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return (excludeStrings, excludeWordsList)
     }
 
+    /// Indexes citations by passage ID, keeping the first encountered citation when a passage has several.
     private static func buildPassageCitationMap(
         from existingCitations: [String: OverviewCitation]
     ) -> [String: OverviewCitation] {
@@ -199,6 +201,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return passageToCitation
     }
 
+    /// Returns a verified implication and its new sentence citation for an uncovered industry, or nil.
+    /// `resultIndex` supplies the identifiers for the proposed item and citation.
     private static func evaluateCandidateSentence(
         _ sentence: String,
         context: PassageContext,
@@ -244,6 +248,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return CandidateMatch(impact: candidateImpact, citation: sentenceCitation, industry: industry)
     }
 
+    /// Uses existing passage citation metadata when present, otherwise the matching article metadata.
+    /// `citations` is keyed by passage ID.
     private static func sourceMetadata(
         for passage: EvidencePassage,
         article: FeedArticle,
@@ -258,6 +264,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
             )
     }
 
+    /// Appends eligible, verified sentences and their citations to `state`, stopping at four total items
+    /// and keeping at most one item per industry across all processed passages.
     private static func processPassageSentences(
         context: PassageContext,
         exclusions: (strings: Set<String>, wordsList: [Set<String>]),
@@ -287,7 +295,17 @@ struct OverviewIndustryImpactExtractor: Sendable {
         }
     }
 
-    /// Extracts structured Industry Impact entries from evidence passages.
+    /// Returns at most four verified implications, one per industry, in passage and sentence order,
+    /// together with newly created sentence citations. Passages without a matching article are skipped;
+    /// sentences must contain 8–60 whitespace-separated words and pass the eligibility and claim checks.
+    ///
+    /// - Parameters:
+    ///   - passages: Evidence to search for stated implications.
+    ///   - articles: Source articles; the first article wins when IDs repeat.
+    ///   - existingCitations: Citations keyed by citation ID, used for source metadata when available.
+    ///   - excludeSentences: Text to omit, including normalized exact matches and alphanumeric word-set
+    ///     overlap (intersection over union) of at least 0.6.
+    /// - Returns: Empty item and citation arrays when no candidate qualifies.
     static func extractIndustryImpact(
         passages: [EvidencePassage],
         articles: [FeedArticle],
@@ -309,6 +327,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return ExtractedIndustryImpact(items: state.results, citations: state.citations)
     }
 
+    /// Returns trimmed sentences with 8–60 whitespace-separated words, inclusive, in source order.
     private static func extractCandidateSentences(from text: String) -> [String] {
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = text
@@ -323,6 +342,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return sentences
     }
 
+    /// Splits on non-alphanumeric characters, discarding empty tokens and preserving case.
     private static func wordsSet(from text: String) -> Set<String> {
         Set(text.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty })
     }
@@ -336,6 +356,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
         }
     }
 
+    /// Checks business implication cues in lowercased text and its word set; ignores singular "order"
+    /// when it appears only in "in order to", "in order that", or "in order for".
     private static func hasImplication(text: String, words: Set<String>) -> Bool {
         for cue in implicationCues {
             if cue == "order" {
@@ -357,6 +379,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return false
     }
 
+    /// Reports whether the article title or sentence contains one of the sports exclusion cues.
     private static func isSportsContent(article: FeedArticle, sentence: String) -> Bool {
         let text = "\(article.title) \(sentence)".lowercased()
         let words = wordsSet(from: text)
@@ -374,6 +397,9 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return phrases.contains(where: { text.contains($0) })
     }
 
+    /// Requires an implication cue and rejects excluded text or text flagged as sports, a forecast,
+    /// or investment advice.
+    /// Exclusions use normalized strings and word sets; word-set overlap of at least 0.6 is a duplicate.
     private static func isEligibleSentence(
         _ sentence: String,
         article: FeedArticle,
@@ -413,6 +439,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return true
     }
 
+    /// Returns the first industry in taxonomy order whose cue matches the lowercased text and word set.
     private static func identifyIndustry(for text: String, words: Set<String>) -> StandardIndustry? {
         for industry in StandardIndustry.allCases {
             for cue in industry.cues where matchesCue(cue, in: text, words: words) {
@@ -422,7 +449,9 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return nil
     }
 
-    /// Verifies that an industry impact implication is valid and grounded in its cited passage.
+    /// Checks a nonblank implication with an exact standard industry name against every listed citation.
+    /// Returns false for missing citations or passages, or any failed claim check. Missing articles use
+    /// citation metadata as a fallback; duplicate passage and article IDs use the first entry.
     static func validateIndustryImpact(
         _ impact: OverviewIndustryImpact,
         against citations: [String: OverviewCitation],
@@ -453,6 +482,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return true
     }
 
+    /// Returns whether the implication passes the overview claim verifier for this citation and passage.
     private static func validateIndustryImpact(
         _ impact: OverviewIndustryImpact,
         citation: OverviewCitation,
