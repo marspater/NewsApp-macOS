@@ -1417,7 +1417,8 @@ struct NewsTests {
         let file = try StoryCorpus.privateDirectory(output).appendingPathComponent("embedding-vectors.json")
         let data = try JSONSerialization.data(
             withJSONObject: byID.mapValues { $0.map(Double.init) }, options: [.sortedKeys])
-        try StoryCorpus.writePrivate(data, to: file, replacing: true)
+        // An existing dump is the reference of a comparison, so it is never overwritten; use another directory.
+        try StoryCorpus.writePrivate(data, to: file, replacing: false)
         print(
             String(
                 format: "    embedded %d of %d texts in %.0f ms -> %@", byID.count, texts.count, elapsed * 1000,
