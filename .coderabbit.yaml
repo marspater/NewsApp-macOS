@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  auto_review:
+    # Stacked PRs target feature branches (e.g. mars/m-581-*), not only main.
+    base_branches:
+      - ".*"
