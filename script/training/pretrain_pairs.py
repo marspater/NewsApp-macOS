@@ -26,12 +26,14 @@ import argparse
 import csv
 import hashlib
 import html
+import http.client
 import io
 import json
 import os
 import pathlib
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -75,8 +77,25 @@ def fetch(url, timeout=120, limit=None):
     require(url.startswith((GDELT, ZENODO, ARCHIVE)), f'Refusing to open {url}')
     # The scheme and host are checked above, so the custom-scheme concern of B310 does not apply.
     request = urllib.request.Request(url, headers={'User-Agent': 'NewsApp-pretrain/1.0 (research; see #623)'})
-    with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
-        return response.read(limit) if limit else response.read()
+    try:
+        with OPENER.open(request, timeout=timeout) as response:  # nosec B310
+            return response.read(limit) if limit else response.read()
+    except http.client.IncompleteRead as error:
+        # A truncated body is a connection failure like any other, so every caller's OSError handling covers it.
+        raise ConnectionError(f'incomplete read from {url}') from error
+
+
+class SourceRedirects(urllib.request.HTTPRedirectHandler):
+    """Redirects stay on the three sources' https hosts; anything else is refused as a connection error."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith(SOURCE_ORIGINS):
+            raise urllib.error.URLError(f'refusing a redirect to {newurl}')
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+SOURCE_ORIGINS = ('https://data.gdeltproject.org/', 'https://zenodo.org/', 'https://web.archive.org/')
+OPENER = urllib.request.build_opener(SourceRedirects())
 
 
 def order(a, b):
@@ -123,10 +142,15 @@ def names_in(headline):
 
 
 class Writer:
+    """Rows go to a `.part` file that `close` publishes under the final name, so an interrupted build leaves no
+    header-only CSV that would block the next run; the link step fails if the final file appeared meanwhile."""
+
     def __init__(self, path, tokenizer):
         require(not path.exists(), f'{path} exists; remove it to rebuild')
-        self.handle = path.open('w', newline='', encoding='utf-8')
-        os.chmod(path, 0o600)
+        self.path = path
+        self.part = path.with_name(f'{path.name}.{os.getpid()}.part')  # one partial file per build
+        self.handle = self.part.open('w', newline='', encoding='utf-8')
+        os.chmod(self.part, 0o600)
         self.csv = csv.writer(self.handle)  # nosemgrep: python.lang.security.use-defusedcsv.use-defusedcsv
         self.csv.writerow(HEADER)
         self.tokenizer = tokenizer
@@ -145,6 +169,8 @@ class Writer:
 
     def close(self):
         self.handle.close()
+        os.link(self.part, self.path)
+        self.part.unlink()
 
 
 # --- WCEP-10 ---------------------------------------------------------------------------------------------------------
@@ -295,11 +321,14 @@ def gdelt_rows(slots, cache):
     return events, mentions, titles
 
 
+FRONT_PAGE = re.compile(r'(home|news)\b', re.IGNORECASE)  # a site's front page, not "Newsom" or "Homeowners"
+
+
 def gdelt_title(event_id, mentions, titles):
     """A usable headline of one event with its host: four words or more and not a site's front page."""
     for url in mentions.get(event_id, []):
         title = titles.get(url)
-        if title and len(title.split()) >= 4 and not title.lower().startswith(('home', 'news')):
+        if title and len(title.split()) >= 4 and not FRONT_PAGE.match(title):
             return title, host(url)
     return None
 
@@ -348,9 +377,12 @@ def build_gdelt(events, mentions, titles, writer, cap):
 
 # --- SemEval-2022 Task 8 ----------------------------------------------------------------------------------------------
 
+SEMEVAL_CSVS = ('semeval-2022_task8_train-data_batch.csv', 'final_eval_data.csv')
+
+
 def semeval_pairs(cache):
     """English-English pairs with their overall similarity, from the Zenodo training and evaluation CSVs."""
-    for name in ('semeval-2022_task8_train-data_batch.csv', 'final_eval_data.csv'):
+    for name in SEMEVAL_CSVS:
         target = cache / name
         if not target.exists():
             target.write_bytes(fetch(ZENODO + name + '/content'))
@@ -395,8 +427,11 @@ def archived_page(url, cache, attempts=3):
     else:
         return None
     target.parent.mkdir(exist_ok=True)
-    target.write_text(json.dumps(result))
-    os.chmod(target, 0o600)
+    # Written beside the target and moved into place, so an interrupted write never leaves a half file to parse.
+    partial = target.with_name(f'{key}.{os.getpid()}.{threading.get_ident()}.tmp')
+    partial.write_text(json.dumps(result))
+    os.chmod(partial, 0o600)
+    os.replace(partial, target)
     return result
 
 
@@ -412,7 +447,7 @@ def semeval_label(overall):
 def build_semeval(pairs, writer, page, workers=FETCH_WORKERS):
     """Labelled pairs whose two pages are available; pages are fetched a few at a time."""
     pairs = [pair for pair in pairs if semeval_label(pair[3]) is not None]
-    urls = [url for pair in pairs for url in pair[1:3]]
+    urls = sorted({url for pair in pairs for url in pair[1:3]})  # one fetch per page, however many pairs cite it
     with ThreadPoolExecutor(max_workers=workers) as pool:
         pages = dict(zip(urls, pool.map(page, urls), strict=True))
     written = 0
@@ -532,6 +567,9 @@ def run_gdelt(args, out, tokenizer):
 def run_semeval(args, out, tokenizer):
     cache = out / 'semeval'
     cache.mkdir(exist_ok=True)
+    if args.cached_only:  # nothing is fetched, the Zenodo CSVs included
+        for name in SEMEVAL_CSVS:
+            require((cache / name).exists(), f'--cached-only needs {name} under {cache}')
     writer = Writer(out / 'semeval-pairs.csv', tokenizer)
     attempts = 0 if args.cached_only else 3  # --cached-only: a stopped fetch's pages are used, nothing is fetched
     written = build_semeval(semeval_pairs(cache), writer, lambda url: archived_page(url, cache, attempts))
