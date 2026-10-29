@@ -189,7 +189,8 @@ enum EventClusterer {
                 // model may have confirmed a borderline pair: such pairs stay open and are decided again later.
                 let unvetted =
                     pair.embeddingCosine == nil && pair.neuralEligible && pair.conflict == nil
-                    && pair.sharedSpecificAnchors >= 1
+                    && (pair.sharedSpecificAnchors >= 1
+                        || (matchPolicy.anchorlessModelCosine.isFinite && pair.sharedAnchors == 0))
                 if unvetted || EventMatcher.needsPairModel(pair) {
                     deferredCurrentRow = true
                     if pair.isMatch { pair = EventMatcher.unvetted(pair) }

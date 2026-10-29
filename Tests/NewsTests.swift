@@ -12368,7 +12368,8 @@ struct NewsTests {
                         if let va = vectorCache[items[i].id], let vb = vectorCache[items[j].id] {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
-                        let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let pair = EventMatcher.assess(
+                            a, b, policy: StoryCorpus.policyFromEnvironment(), embeddingSimilarity: similarity)
                         let pairModel =
                             EventMatcher.needsPairModel(pair)
                             ? await PairScorer.shared.probability(
