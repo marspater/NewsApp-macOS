@@ -77,11 +77,24 @@ def fetch(url, timeout=120, limit=None):
     # The scheme and host are checked above, so the custom-scheme concern of B310 does not apply.
     request = urllib.request.Request(url, headers={'User-Agent': 'NewsApp-pretrain/1.0 (research; see #623)'})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
+        with OPENER.open(request, timeout=timeout) as response:  # nosec B310
             return response.read(limit) if limit else response.read()
     except http.client.IncompleteRead as error:
         # A truncated body is a connection failure like any other, so every caller's OSError handling covers it.
         raise ConnectionError(f'incomplete read from {url}') from error
+
+
+class SourceRedirects(urllib.request.HTTPRedirectHandler):
+    """Redirects stay on the three sources' https hosts; anything else is refused as a connection error."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith(SOURCE_ORIGINS):
+            raise urllib.error.URLError(f'refusing a redirect to {newurl}')
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+SOURCE_ORIGINS = ('https://data.gdeltproject.org/', 'https://zenodo.org/', 'https://web.archive.org/')
+OPENER = urllib.request.build_opener(SourceRedirects())
 
 
 def order(a, b):
@@ -126,7 +139,7 @@ class Writer:
     def __init__(self, path, tokenizer):
         require(not path.exists(), f'{path} exists; remove it to rebuild')
         self.path = path
-        self.part = path.with_name(path.name + '.part')
+        self.part = path.with_name(f'{path.name}.{os.getpid()}.part')  # one partial file per build
         self.handle = self.part.open('w', newline='', encoding='utf-8')
         os.chmod(self.part, 0o600)
         self.csv = csv.writer(self.handle)
