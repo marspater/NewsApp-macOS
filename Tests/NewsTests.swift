@@ -11740,16 +11740,12 @@ struct NewsTests {
         assertEqual(summaries.first?.seenVersion, 2, "Seen versions add up")
         assertFalse(summaries.first?.hasSubstantiveUpdate ?? true, "Nothing new since the reader looked")
         try await db.upsertArticles([
-            story(5, "Protesters fill Ljubljana streets again after parliament ousts Novak", hours: 6.5)
+            story(5, "Thousands protest in central Ljubljana after parliament votes to oust Novak", hours: 6.5)
         ])
         _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(60))
         summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
-        if try await db.eventID(forArticle: try await db.resolvedArticleID(for: stories[0])) != nil,
-            (summaries.first?.members.count ?? 0) == 5
-        {
-            assertTrue(
-                summaries.first?.hasSubstantiveUpdate ?? false, "A report that joined after the look is an update")
-        }
+        assertEqual(summaries.first?.members.count, 5, "The late protest report joins the story")
+        assertTrue(summaries.first?.hasSubstantiveUpdate ?? false, "A report that joined after the look is an update")
         // "Not the Same Event" through the story: the protest report leaves its own event, not the lead's.
         let separated = try await db.separateArticle(ids[2], fromEvent: storyID ?? "")
         assertEqual(separated.id, protest, "The article leaves the event that held it")
@@ -11779,6 +11775,12 @@ struct NewsTests {
             assertTrue(
                 try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
                 "An exclusion across the events vetoes the story link")
+            // A story id naming an event that pruning removed is cleared with it.
+            try await apart.eventRows("UPDATE events SET story_id = 'pruned-lead' WHERE id = ?;", [.text(protestApart)])
+            try await apart.pruneEmptyEvents()
+            assertEqual(
+                try await apart.eventRows("SELECT story_id FROM events WHERE id = ?;", [.text(protestApart)]).first?[0],
+                nil, "A dangling story id is cleared when its lead event is gone")
         }
         await apart.close()
         await db.close()
@@ -12817,10 +12819,13 @@ struct NewsTests {
         let byStory = Dictionary(grouping: recent.filter { $0.event != nil }) { storyOf[$0.event ?? ""] ?? "" }
         let storySources = byStory.mapValues { Set($0.map(\.source)).count }
         let multiStory = recent.filter { ($0.event.flatMap { storySources[storyOf[$0] ?? ""] } ?? 0) >= 2 }.count
-        let joinedStories = byStory.filter { Set($0.value.compactMap(\.event)).count >= 2 }
+        // Events per story over every event, not only those with reports in the audit window.
+        let eventsOf = Dictionary(grouping: storyOf.keys) { storyOf[$0] ?? "" }.mapValues(\.count)
+        let joinedStories = byStory.filter { (eventsOf[$0.key] ?? 0) >= 2 }
         if let output = ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"] {
-            // One line per story that joins two or more events: each event's earliest headline, for the group review.
-            var lines = ["story_id,events,members,acts"]
+            // One line per story that joins two or more events: each event's earliest headline within the window,
+            // for the group review.
+            var lines = ["story_id,events,recent_members,recent_acts"]
             for (story, rows) in joinedStories.sorted(by: { $0.key < $1.key }) {
                 let acts = Dictionary(grouping: rows) { $0.event ?? "" }.values
                     .compactMap { group in
@@ -12829,7 +12834,7 @@ struct NewsTests {
                     .sorted()
                 lines.append(
                     [
-                        story, String(acts.count), String(rows.count),
+                        story, String(eventsOf[story] ?? acts.count), String(rows.count),
                         "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
                     ]
                     .joined(separator: ","))

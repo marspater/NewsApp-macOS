@@ -451,9 +451,16 @@ enum EventClusterer {
                 events.map { event in
                     (event.id, event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors) })
                 }, uniquingKeysWith: { a, _ in a })
-            let common = try await database.commonStoryTerms(
-                allAnchors.values.reduce(into: Set<String>()) { $0.formUnion($1) }, before: now,
-                share: EventStoryRelation.commonActorShare)
+            // `commonStoryTerms` classifies at most 64 names per call, so the union is checked in sorted chunks;
+            // a common name past a single cutoff would otherwise stay in the anchor sets and count as shared.
+            let union = allAnchors.values.reduce(into: Set<String>()) { $0.formUnion($1) }.sorted()
+            var common = Set<String>()
+            for start in stride(from: 0, to: union.count, by: 64) {
+                common.formUnion(
+                    try await database.commonStoryTerms(
+                        Set(union[start..<min(start + 64, union.count)]), before: now,
+                        share: EventStoryRelation.commonActorShare))
+            }
             let anchorsOf = allAnchors.mapValues { $0.subtracting(common) }
             var eventsByAnchor: [String: Set<String>] = [:]
             for (id, anchors) in anchorsOf {
