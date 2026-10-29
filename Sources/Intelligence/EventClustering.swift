@@ -745,7 +745,7 @@ enum EventClusterer {
         await store()
         // The story pass reads every active event and lone report (#581). It runs when the pass processed a report
         // or changed an event, once per launch, and after a reader verdict; otherwise an unchanged archive stays
-        // at zero work.
+        // at zero work. Skipped work remains pending until a pass with energy completes it.
         let storiesStale: Bool
         if let lastStoryPass = await database.lastStoryPass {
             storiesStale = (try await database.newestVerdict() ?? .distantPast) >= lastStoryPass
@@ -753,9 +753,13 @@ enum EventClusterer {
             storiesStale = true
         }
         // Without energy there are no vectors, and the story pass would detach attachments it cannot re-check.
-        if allowsEnergy, report.processed > 0 || !report.changedEvents.isEmpty || storiesStale {
-            report.changedEvents.formUnion(try await linkStories())
-            await database.recordStoryPass(at: now)
+        let storiesPending = await database.storyPassPending
+        if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale || storiesPending {
+            await database.deferStoryPass()
+            if allowsEnergy {
+                report.changedEvents.formUnion(try await linkStories())
+                await database.recordStoryPass(at: now)
+            }
         }
         return report
     }

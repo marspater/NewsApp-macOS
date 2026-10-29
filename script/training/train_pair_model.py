@@ -26,7 +26,7 @@ Pairs CSV contract (#627), written by `./test.sh --export-pairs`, `pretrain_pair
 `label` is a class id as the #551 review protocol labels a pair: 0 different (another story, or the same kind of
 occurrence elsewhere or at another time), 1 related (another act of the same story), 2 same (one occurrence reported
 twice). `marginal` is empty for an exact label, or the class ids (digits) whose summed probability is the target of a
-partial label: `12` one story, same or related (reserved; `pretrain_pairs.py` writes WCEP-10 pairs as exact `1`);
+partial label: `12` one story, same or related (`pretrain_pairs.py` writes WCEP-10 positives as label `1`, marginal `12`);
 `01` not one occurrence (GDELT hard
 negatives, far-apart library negatives, "Not the Same Event" verdicts: none of them says the two reports are different
 stories). Reviewed `different` labels and clean same-day negatives stay exact `different`. `label` is then one of those
@@ -595,11 +595,11 @@ def main(argv):
         print('\n'.join(sweep(predict(model.to(device), tensors(Tokenizer(), held), device), [r[0] for r in held])))
         return
     pretrain = [r for path in args.pretrain for r in read_pairs(path, cap=args.pretrain_cap)]
+    out = pathlib.Path(args.out)  # OUT_DIR is the operator's own output directory, named on the command line
+    out.mkdir(parents=True, exist_ok=True)  # NOSONAR
     trained, tok, held_out, report = train(
         rows, Stage(args.epochs, args.rate, args.frozen, args.smoothing), pretrain or None,
         Stage(args.pretrain_epochs, 3e-5), args.init, args.out)
-    out = pathlib.Path(args.out)  # OUT_DIR is the operator's own output directory, named on the command line
-    out.mkdir(parents=True, exist_ok=True)  # NOSONAR
     torch.save(trained.state_dict(), out / STATE)
     export(trained, tok, held_out, args.out)
     metadata = {

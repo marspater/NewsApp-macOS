@@ -21,8 +21,15 @@ actor DatabaseEngine {
     private var collectionOnlyFeedURLs: [String] = []
     /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
     private(set) var lastStoryPass: Date?
+    /// Story work skipped or interrupted since the last completed pass; retried when energy permits.
+    private(set) var storyPassPending = false
 
-    func recordStoryPass(at date: Date) { lastStoryPass = date }
+    func deferStoryPass() { storyPassPending = true }
+
+    func recordStoryPass(at date: Date) {
+        lastStoryPass = date
+        storyPassPending = false
+    }
     private(set) var healthNotice: String?
 
     func databaseHealthNotice() -> String? {

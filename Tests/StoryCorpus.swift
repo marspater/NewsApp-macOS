@@ -124,10 +124,11 @@ enum StoryCorpus {
 
     /// Replays only the caller's selected split through real ingestion, candidate generation and clustering.
     /// Resolved single documents share a membership even when they have no multi-document event.
-    static func eventMemberships(articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil) async throws
-        -> [String: String]
-    {
-        try await memberships(articles: articles, onPass: onPass).mapValues(\.event)
+    /// Evaluation commands may select story cards; event-level tests keep the default event memberships.
+    static func eventMemberships(
+        articles: [FeedArticle], scoreStories: Bool = false, onPass: ((EventClusteringReport) -> Void)? = nil
+    ) async throws -> [String: String] {
+        try await memberships(articles: articles, onPass: onPass).mapValues { scoreStories ? $0.story : $0.event }
     }
 
     /// The same replay with each item's story card as well (#581): its event's story, else the item alone.
@@ -201,6 +202,7 @@ enum StoryCorpus {
         }
         guard environment["NEWS_PAIR_RULE"] == "story" else { return score }
         return { @Sendable a, b in
+            guard await candidate.isAvailable else { preconditionFailure("NEWS_PAIR_MODEL_PATH \(path) cannot score") }
             guard let p = await candidate.probabilities(a, b) else { return nil }
             return p.same > p.related && 1 - p.same - p.related <= 0.10 ? p.same + p.related : 0
         }

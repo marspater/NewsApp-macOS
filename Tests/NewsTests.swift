@@ -11939,14 +11939,32 @@ struct NewsTests {
             csv.contains("\n0,\"v:") && csv.contains("\n2,\"v:") && csv.contains(",5,01"),
             "An exclusion is not one occurrence (0, marginal 01), an inclusion is same (2)")
         // A library-holdout article (#579) never leaves as a training row, verdicts included.
+        let otherPath = directory.appendingPathComponent("other.sqlite3").path
+        let otherDB = DatabaseEngine(path: otherPath)
+        try await otherDB.open()
+        let other = story(4, "Astronomers discover a distant galaxy", hours: 2)
+        try await otherDB.upsertArticles([other])
+        let otherID = try await otherDB.resolvedArticleID(for: other)
+        await otherDB.close()
         let heldOut = directory.appendingPathComponent("holdout-protest.json")
-        try JSONSerialization.data(withJSONObject: [["a": ids[2], "b": "elsewhere", "label": "different"]])
+        try JSONSerialization.data(withJSONObject: [["a": ids[2], "b": otherID, "label": "different"]])
             .write(to: heldOut)
         let held = directory.appendingPathComponent("held")
         try FileManager.default.createDirectory(
             at: held, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        do {
+            try await exportTrainingPairs(
+                snapshots: path, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
+                verdictsOnly: true)
+            assertTrue(false, "An unresolved holdout ID must fail the export")
+        } catch StoryCorpus.Failure.invalid(let message) {
+            assertTrue(message.contains("do not resolve 1 library holdout IDs"), "Missing holdout IDs are reported")
+        }
+        assertFalse(
+            FileManager.default.fileExists(atPath: held.appendingPathComponent("verdicts.csv").path),
+            "An incomplete holdout title set never writes training rows")
         try await exportTrainingPairs(
-            snapshots: path, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
+            snapshots: path + ":" + otherPath, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
             verdictsOnly: true)
         let heldCSV = try String(contentsOf: held.appendingPathComponent("verdicts.csv"), encoding: .utf8)
         assertEqual(
@@ -12049,6 +12067,25 @@ struct NewsTests {
         assertEqual(
             try await apart.storyID(forEvent: voteApart), try await apart.storyID(forEvent: protestApart),
             "Linked before the exclusion")
+        // A low-energy pass can finish every report while leaving only the story work pending.
+        let lastStoryPass = await apart.lastStoryPass
+        try await apart.upsertArticles([story(9, "Astronomers discover a distant galaxy", hours: 6)])
+        let withoutEnergy = try await EventClusterer.run(
+            in: apart, now: now.addingTimeInterval(30), allowsEnergy: false)
+        assertEqual(withoutEnergy.processed, 1, "Low energy finishes the unrelated report")
+        assertEqual(withoutEnergy.deferred, 0, "No report is deferred in the story-only retry fixture")
+        assertTrue(await apart.storyPassPending, "Skipped story work remains pending")
+        let idleWithoutEnergy = try await EventClusterer.run(
+            in: apart, now: now.addingTimeInterval(40), allowsEnergy: false)
+        assertEqual(idleWithoutEnergy.processed, 0, "The next pass has no reports to process")
+        assertEqual(await apart.lastStoryPass, lastStoryPass, "Low energy leaves the last completed story pass intact")
+        let resumedAt = now.addingTimeInterval(60)
+        let resumed = try await EventClusterer.run(in: apart, now: resumedAt, allowsEnergy: true)
+        assertEqual(resumed.processed, 0, "Story work resumes with no pending reports")
+        assertEqual(await apart.lastStoryPass, resumedAt, "The pending story pass completes when energy returns")
+        assertFalse(await apart.storyPassPending, "Completed story work clears the pending marker")
+        _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(90), allowsEnergy: true)
+        assertEqual(await apart.lastStoryPass, resumedAt, "An unchanged library does not repeat completed story work")
         // A reader's exclusion between one vote report and one protest report, both staying in their events.
         let (low, high) = apartIDs[0] < apartIDs[2] ? (apartIDs[0], apartIDs[2]) : (apartIDs[2], apartIDs[0])
         try await apart.eventRows(
@@ -12505,7 +12542,9 @@ struct NewsTests {
         // a pass with energy and the true-positive floor cannot hold; the false-pair ceiling still applies.
         let rulesOnly = ProcessInfo.processInfo.environment["NEWS_ENERGY"] == "0"
         var deferred = 0
-        let memberships = try await StoryCorpus.eventMemberships(articles: articles) { deferred += $0.deferred }
+        let memberships = try await StoryCorpus.eventMemberships(
+            articles: articles, scoreStories: ProcessInfo.processInfo.environment["NEWS_SCORE_STORIES"] == "1"
+        ) { deferred += $0.deferred }
         var metrics = EventCorpusMetrics()
         var falsePairs: [String] = []
         var missedPairs: [String] = []
@@ -12535,6 +12574,21 @@ struct NewsTests {
     }
 
     static func testEventCorpusHarness(fixtureRoot: URL) async throws {
+        // A pinned holdout window includes both boundaries and excludes later snapshot reports.
+        let windowDB = DatabaseEngine(path: ":memory:")
+        try await windowDB.open()
+        let pinned = Date(timeIntervalSince1970: 1_700_000_000)
+        let windowArticles = [-3 * 86_400 - 1, -3 * 86_400, 0, 1].enumerated().map { index, offset in
+            FeedArticle(
+                storedID: "window-\(index)", title: "Window report \(index)", link: "https://window.invalid/\(index)",
+                guid: "window-\(index)", description: "", pubDate: pinned.addingTimeInterval(Double(offset)),
+                source: "Corpus")
+        }
+        try await windowDB.upsertArticles(windowArticles)
+        let window = try await recentLibraryRows(windowDB, now: pinned)
+        assertEqual(window.newest, pinned, "The pinned clock is independent of the snapshot's newest report")
+        assertEqual(window.rows.map(\.id), ["window-1", "window-2"], "Recent totals use the closed pinned window")
+        await windowDB.close()
         // One refresh-sized batch must not bypass production's article budget in the evaluator.
         let batchDate = Date(timeIntervalSince1970: 1_700_000_000)
         let oversized = (0..<2_001).map { index in
@@ -12922,7 +12976,9 @@ struct NewsTests {
                     description: item.description ?? "", pubDate: item.published, source: item.source)
             }
             var passes: [[String: Int]] = []
-            let memberships = try await StoryCorpus.eventMemberships(articles: articles) { report in
+            let memberships = try await StoryCorpus.eventMemberships(
+                articles: articles, scoreStories: ProcessInfo.processInfo.environment["NEWS_SCORE_STORIES"] == "1"
+            ) { report in
                 passes.append([
                     "processed": report.processed, "joined": report.joined, "created": report.created,
                     "merged": report.merged, "conflicts": report.conflicts,
@@ -13121,22 +13177,29 @@ struct NewsTests {
         let id: String, title: String, description: String, source: String, date: Date, event: String?
     }
 
-    /// Stories published in the last three days of a library copy (relative to its newest story), with their live event.
-    static func recentLibraryRows(_ db: DatabaseEngine) async throws -> (rows: [LibraryRow], newest: Date) {
-        let newest =
-            try await db.eventRows(
-                "SELECT max(published_at) FROM articles WHERE published_at < ?;",
-                [.real(Date().timeIntervalSince1970 + 86_400)]
-            ).first?.first.flatMap { $0 }.flatMap(Double.init) ?? Date().timeIntervalSince1970
+    /// Stories in the three days ending at `now` (by default the copy's newest story), with their live event.
+    static func recentLibraryRows(
+        _ db: DatabaseEngine, now: Date? = nil
+    ) async throws -> (rows: [LibraryRow], newest: Date) {
+        let newest: TimeInterval
+        if let now {
+            newest = now.timeIntervalSince1970
+        } else {
+            newest =
+                try await db.eventRows(
+                    "SELECT max(published_at) FROM articles WHERE published_at < ?;",
+                    [.real(Date().timeIntervalSince1970 + 86_400)]
+                ).first?.first.flatMap { $0 }.flatMap(Double.init) ?? Date().timeIntervalSince1970
+        }
         let rows = try await db.eventRows(
             """
             SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at, e.id
             FROM articles a
             LEFT JOIN event_members m ON m.article_id = a.id
             LEFT JOIN events e ON e.id = m.event_id AND e.merged_into IS NULL
-            WHERE a.published_at >= ? AND \(DatabaseEngine.visibleArticle)
+            WHERE a.published_at >= ? AND a.published_at <= ? AND \(DatabaseEngine.visibleArticle)
             ORDER BY a.published_at, a.id;
-            """, [.real(newest - 3 * 86_400)]
+            """, [.real(newest - 3 * 86_400), .real(newest)]
         ).compactMap { row -> LibraryRow? in
             guard let id = row[0], let title = row[1], let published = row[4].flatMap(Double.init) else { return nil }
             return LibraryRow(
@@ -13273,10 +13336,9 @@ struct NewsTests {
             try await db.eventRows("DELETE FROM \(table);")
         }
         // NEWS_HOLDOUT_NOW=<epoch> pins the clock to when the holdout was drawn, for a copy taken later (#688).
-        var newest = try await recentLibraryRows(db).newest
-        if let pinned = ProcessInfo.processInfo.environment["NEWS_HOLDOUT_NOW"].flatMap({ TimeInterval($0) }) {
-            newest = Date(timeIntervalSince1970: pinned)
-        }
+        let pinned = ProcessInfo.processInfo.environment["NEWS_HOLDOUT_NOW"].flatMap { TimeInterval($0) }
+            .map { Date(timeIntervalSince1970: $0) }
+        let newest = try await recentLibraryRows(db, now: pinned).newest
         let policy = StoryCorpus.policyFromEnvironment()
         let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
         let candidate = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL_PATH"]
@@ -13356,7 +13418,7 @@ struct NewsTests {
         let precision = truePairs + falsePairs == 0 ? 0 : Double(truePairs) / Double(truePairs + falsePairs)
         let recall = truePairs + missed == 0 ? 0 : Double(truePairs) / Double(truePairs + missed)
         // Story-level view: recent stories shown in an event with two or more publishers, and in a story (#581).
-        let recent = try await recentLibraryRows(db).rows
+        let recent = try await recentLibraryRows(db, now: newest).rows
         let sources = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }
             .mapValues { Set($0.map(\.source)).count }
         let multi = recent.filter { ($0.event.flatMap { sources[$0] } ?? 0) >= 2 }.count
@@ -13753,15 +13815,22 @@ struct NewsTests {
         // Every copy of a holdout headline is left out, whichever snapshot holds it and under whichever id: the titles
         // are collected from all snapshots first.
         var holdoutTitles = Set<String>()
+        var unresolvedHoldoutIDs = holdoutIDs
         for path in snapshots.split(separator: ":").map(String.init) where !holdoutIDs.isEmpty {
             let copy = scratch.appendingPathComponent("titles-\(UUID().uuidString).sqlite3").path
             try FileManager.default.copyItem(atPath: path, toPath: copy)
             let db = DatabaseEngine(path: copy)
             try await db.open()
             for row in try await db.eventRows("SELECT id, title FROM articles;") {
-                if let id = row[0], let title = row[1], holdoutIDs.contains(id) { holdoutTitles.insert(key(title)) }
+                if let id = row[0], let title = row[1], holdoutIDs.contains(id) {
+                    holdoutTitles.insert(key(title))
+                    unresolvedHoldoutIDs.remove(id)
+                }
             }
             await db.close()
+        }
+        guard unresolvedHoldoutIDs.isEmpty else {
+            throw StoryCorpus.Failure.invalid("Snapshots do not resolve \(unresolvedHoldoutIDs.count) library holdout IDs")
         }
         for path in snapshots.split(separator: ":").map(String.init) {
             guard !path.contains("/Library/Containers/") else {
