@@ -1486,10 +1486,12 @@ actor DatabaseEngine {
 
     /// The stored story of the same publisher with the same folded headline, published within
     /// `publisherTitleWindow` (#583). The publisher's stories of that window are read and compared in Swift, so no alias
-    /// row and no schema change are needed; the oldest such story wins when several exist.
+    /// row and no schema change are needed. The lookup uses the publisher name the upsert stores as `source`. Two
+    /// stored stories with that headline (a pair the window kept apart) make the target ambiguous, and the item stays a
+    /// story of its own.
     private func publisherTitleTarget(_ article: FeedArticle) throws -> String? {
         guard article.pubDate != DateParser.unknownDate,
-            let key = ArticleIdentity.publisherTitleKey(title: article.title, source: article.source)
+            let key = ArticleIdentity.publisherTitleKey(title: article.title, source: article.publisherName)
         else { return nil }
         var statement: OpaquePointer?
         let sql = """
@@ -1505,18 +1507,19 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(statement) }
         let published = article.pubDate.timeIntervalSince1970
-        sqlite3_bind_text(statement, 1, article.source, -1, Self.sqliteTransient)
+        sqlite3_bind_text(statement, 1, article.publisherName, -1, Self.sqliteTransient)
         sqlite3_bind_double(statement, 2, published - ArticleIdentity.publisherTitleWindow)
         sqlite3_bind_double(statement, 3, published + ArticleIdentity.publisherTitleWindow)
+        var matches: [String] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = sqlite3_column_text(statement, 0), let title = sqlite3_column_text(statement, 1) else {
                 continue
             }
-            if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.source) == key {
-                return String(cString: id)
+            if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.publisherName) == key {
+                matches.append(String(cString: id))
             }
         }
-        return nil
+        return matches.count == 1 ? matches.first : nil
     }
 
     private func publisherTextTarget(_ article: FeedArticle) throws -> String? {

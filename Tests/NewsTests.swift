@@ -469,49 +469,66 @@ struct NewsTests {
         if CommandLine.arguments.contains("--duplicate-replay") {
             // Local (#583): every same-publisher, same-headline pair of the last seven days of a library copy, re-ingested
             // into a fresh store as two feed items; prints how many pairs become one story and how many stay two.
-            guard let snapshot = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] else {
+            guard let snapshotPath = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] else {
                 throw StoryCorpus.Failure.invalid("--duplicate-replay needs NEWS_SNAPSHOT_DB")
             }
+            // Resolved first, so a link outside the container cannot point the replay at the live library.
+            let snapshot = URL(fileURLWithPath: snapshotPath).resolvingSymlinksInPath().path
             guard !snapshot.contains("/Library/Containers/") else {
                 throw StoryCorpus.Failure.invalid("Replay a copy of the library, never the live file")
             }
             let source = DatabaseEngine(path: snapshot)
             try await source.open()
-            let rows = try await source.eventRows(
+            // Every article of the last seven days; the pairs are formed with the resolver's own folded key, so
+            // punctuation and diacritics fold as in production and both sides of a pair lie inside the window.
+            let articles = try await source.eventRows(
                 """
-                SELECT a.title, a.source, a.guid, a.canonical_url, a.published_at, b.guid, b.canonical_url, b.published_at
-                FROM articles a JOIN articles b
-                    ON a.source = b.source AND lower(a.title) = lower(b.title) AND a.id < b.id
-                WHERE a.published_at > (SELECT max(published_at) FROM articles) - 7 * 86400;
+                SELECT title, source, guid, canonical_url, published_at, id FROM articles
+                WHERE published_at > (SELECT max(published_at) FROM articles) - 7 * 86400
+                ORDER BY published_at, id;
                 """)
             await source.close()
+            var byKey: [String: [[String?]]] = [:]
+            for row in articles {
+                guard let title = row[0], let publisher = row[1],
+                    let key = ArticleIdentity.publisherTitleKey(title: title, source: publisher)
+                else { continue }
+                byKey[key, default: []].append(row)
+            }
+            var pairs = 0
             var merged = 0
             var apart = 0
-            for row in rows {
-                guard let title = row[0], let publisher = row[1], let first = row[4].flatMap(Double.init),
-                    let second = row[7].flatMap(Double.init)
-                else { continue }
-                let fresh = DatabaseEngine(path: ":memory:")
-                try await fresh.open()
-                let a = FeedArticle(
-                    title: title, link: row[3] ?? "", guid: row[2], description: "",
-                    pubDate: Date(timeIntervalSince1970: first), source: publisher)
-                let b = FeedArticle(
-                    title: title, link: row[6] ?? "", guid: row[5], description: "",
-                    pubDate: Date(timeIntervalSince1970: second), source: publisher)
-                try await fresh.upsertArticles([a])
-                try await fresh.upsertArticles([b])
-                let one = try await fresh.resolvedArticleID(for: a) == (try await fresh.resolvedArticleID(for: b))
-                await fresh.close()
-                if one { merged += 1 } else { apart += 1 }
-                print(
-                    String(
-                        format: "      %@ %.1fh %@: %@", one ? "one story " : "two stories", abs(second - first) / 3600,
-                        publisher, title))
+            for group in byKey.values.sorted(by: { ($0.first?[5] ?? "") < ($1.first?[5] ?? "") })
+            where group.count >= 2 {
+                for i in group.indices {
+                    for j in group.indices where j > i {
+                        let (x, y) = (group[i], group[j])
+                        guard let title = x[0], let publisher = x[1], let first = x[4].flatMap(Double.init),
+                            let second = y[4].flatMap(Double.init)
+                        else { continue }
+                        pairs += 1
+                        let fresh = DatabaseEngine(path: ":memory:")
+                        try await fresh.open()
+                        let a = FeedArticle(
+                            title: title, link: x[3] ?? "", guid: x[2], description: "",
+                            pubDate: Date(timeIntervalSince1970: first), source: publisher)
+                        let b = FeedArticle(
+                            title: y[0] ?? title, link: y[3] ?? "", guid: y[2], description: "",
+                            pubDate: Date(timeIntervalSince1970: second), source: publisher)
+                        try await fresh.upsertArticles([a])
+                        try await fresh.upsertArticles([b])
+                        let one =
+                            try await fresh.resolvedArticleID(for: a) == (try await fresh.resolvedArticleID(for: b))
+                        await fresh.close()
+                        if one { merged += 1 } else { apart += 1 }
+                        print(
+                            String(
+                                format: "      %@ %.1fh %@: %@", one ? "one story " : "two stories",
+                                abs(second - first) / 3600, publisher, title))
+                    }
+                }
             }
-            print(
-                "    duplicate replay: \(rows.count) same-publisher pairs, \(merged) become one story, \(apart) stay two"
-            )
+            print("    duplicate replay: \(pairs) same-publisher pairs, \(merged) become one story, \(apart) stay two")
             return
         }
         if CommandLine.arguments.contains("--library-holdout") {
