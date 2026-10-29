@@ -73,6 +73,17 @@ def main(argv=None):
 
 # --- reviewed labels as training rows (#625) ---------------------------------------------------------------------
 
+def read_labels(labels):
+    """`index label` lines of a labels file as {index: label}; other lines are ignored."""
+    verdicts = {}
+    with labels.open(encoding='utf-8') as handle:
+        for line in handle:
+            parts = line.split()
+            if len(parts) == 2 and parts[0].isdigit():
+                verdicts[int(parts[0])] = parts[1]
+    return verdicts
+
+
 def export_labels(export, kind, labels, snapshot, out):
     """Writes the labelled rows of one class as weighted training rows (`--export-pairs` shape, weight 5): `same`
     is 1, `related` and `different` are 0. Texts come from the library copy (read-only), the pieces from the app's
@@ -86,12 +97,7 @@ def export_labels(export, kind, labels, snapshot, out):
     with export.open(newline='', encoding='utf-8') as handle:
         rows = [row for row in csv.DictReader(handle) if CLASSES[kind](row)]
     rows.sort(key=order)
-    verdicts = {}
-    with labels.open(encoding='utf-8') as handle:
-        for line in handle:
-            parts = line.split()
-            if len(parts) == 2 and parts[0].isdigit():
-                verdicts[int(parts[0])] = parts[1]
+    verdicts = read_labels(labels)
     # The copy is opened read-only by a validated path: a regular .sqlite3 file outside any app container.
     copy = pathlib.Path(snapshot).expanduser().resolve()
     if not copy.is_file() or copy.suffix != '.sqlite3' or '/Library/Containers/' in str(copy):
