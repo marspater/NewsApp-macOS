@@ -1,0 +1,7 @@
+#!/bin/bash
+set -e
+
+# Strip AI/agent attribution lines (co-author trailers, "Generated with", session IDs and links).
+msg="$1"
+grep -viE 'co-authored-by:.*(claude|anthropic|codex|openai|chatgpt|copilot|gemini|cursor|devin|aider)|generated (with|by) .*(claude|codex|copilot|gemini|cursor|chatgpt|anthropic|openai)|🤖|claude\.ai/code|chatgpt\.com/codex|(claude|codex|agent)[ _-]?session[ _-]?id' "$msg" > "$msg.tmp" || true
+mv "$msg.tmp" "$msg"
