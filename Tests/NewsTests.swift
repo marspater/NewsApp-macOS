@@ -13329,7 +13329,9 @@ struct NewsTests {
                 for (n, i) in sample.enumerated() {
                     for j in sample[(n + 1)...] where rows[i].source != rows[j].source {
                         guard let a = rows[i].event, let b = rows[j].event, a != b, (eventSizes[a] ?? 0) >= 2,
-                            (eventSizes[b] ?? 0) >= 2, abs(rows[i].date.timeIntervalSince(rows[j].date)) <= 36 * 3600
+                            (eventSizes[b] ?? 0) >= 2, rows[i].date != DateParser.unknownDate,
+                            rows[j].date != DateParser.unknownDate,
+                            abs(rows[i].date.timeIntervalSince(rows[j].date)) <= 36 * 3600
                         else { continue }
                         sameDay.insert(i < j ? [i, j] : [j, i])
                     }
