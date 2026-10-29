@@ -629,20 +629,64 @@ struct EventOverviewReaderView: View {
 
     // MARK: - Section 4: Key Facts
 
-    private var keyFactsSection: some View {
+    private func overviewSection<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Highlights")
+            Text(title)
                 .font(AppTypography.overviewFont(.section, scale: textScale))
                 .foregroundStyle(AppColor.primaryText)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h2)
 
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                ForEach(validFacts) { fact in
-                    highlightRow(fact)
-                }
+                content()
             }
             .padding(.vertical, AppSpacing.xxs)
+        }
+    }
+
+    private var keyFactsSection: some View {
+        overviewSection(title: "Highlights") {
+            ForEach(validFacts) { fact in
+                highlightRow(fact)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func highlightContent(
+        fact: OverviewFact,
+        publisher: String?,
+        citations: [OverviewCitation]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            Text(fact.text)
+                .font(bodyFont)
+                .lineSpacing(bodyLineSpacing)
+                .foregroundStyle(AppColor.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            let hasPublisher = publisher != nil && !publisher!.isEmpty
+            let hasCitations = !citations.isEmpty
+
+            if hasPublisher || hasCitations {
+                ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
+                    if let publisher, !publisher.isEmpty {
+                        Text(publisher)
+                            .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                            .foregroundStyle(currentSecondaryTextColor)
+                    }
+
+                    ForEach(fact.citationIDs, id: \.self) { id in
+                        if let citation = overview.citations[id] {
+                            citationPill(citation)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -659,33 +703,7 @@ struct EventOverviewReaderView: View {
                 .padding(.top, AppLayout.bulletTopInset * textScale)
                 .accessibilityHidden(true)
 
-            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                Text(fact.text)
-                    .font(bodyFont)
-                    .lineSpacing(bodyLineSpacing)
-                    .foregroundStyle(AppColor.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-
-                let hasPublisher = publisher != nil && !publisher!.isEmpty
-                let hasCitations = !citations.isEmpty
-
-                if hasPublisher || hasCitations {
-                    ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
-                        if let publisher, !publisher.isEmpty {
-                            Text(publisher)
-                                .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                                .foregroundStyle(currentSecondaryTextColor)
-                        }
-
-                        ForEach(fact.citationIDs, id: \.self) { id in
-                            if let citation = overview.citations[id] {
-                                citationPill(citation)
-                            }
-                        }
-                    }
-                }
-            }
+            highlightContent(fact: fact, publisher: publisher, citations: citations)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
@@ -1110,19 +1128,50 @@ struct EventOverviewReaderView: View {
     }
 
     private var perspectivesSection: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Perspectives")
-                .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundStyle(AppColor.primaryText)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityHeading(.h2)
+        overviewSection(title: "Perspectives") {
+            ForEach(validPerspectives) { perspective in
+                perspectiveRow(perspective)
+            }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                ForEach(validPerspectives) { perspective in
-                    perspectiveRow(perspective)
+    @ViewBuilder
+    private func perspectiveContent(
+        _ perspective: OverviewPerspective,
+        source: String?,
+        citations: [OverviewCitation]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            Text(perspective.participant)
+                .font(AppTypography.overviewFont(.emphasis, scale: textScale))
+                .foregroundStyle(AppColor.primaryText)
+                .textSelection(.enabled)
+
+            Text(perspective.position)
+                .font(bodyFont)
+                .lineSpacing(bodyLineSpacing)
+                .foregroundStyle(AppColor.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            let hasSource = source != nil && !source!.isEmpty
+            let hasCitations = !citations.isEmpty
+
+            if hasSource || hasCitations {
+                ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
+                    if let source, !source.isEmpty {
+                        Text(source)
+                            .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                            .foregroundStyle(currentSecondaryTextColor)
+                    }
+
+                    ForEach(perspective.citationIDs, id: \.self) { id in
+                        if let citation = overview.citations[id] {
+                            citationPill(citation)
+                        }
+                    }
                 }
             }
-            .padding(.vertical, AppSpacing.xxs)
         }
     }
 
@@ -1142,38 +1191,7 @@ struct EventOverviewReaderView: View {
                     .foregroundStyle(AppColor.accent)
                     .accessibilityHidden(true)
 
-                VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                    Text(perspective.participant)
-                        .font(AppTypography.overviewFont(.emphasis, scale: textScale))
-                        .foregroundStyle(AppColor.primaryText)
-                        .textSelection(.enabled)
-
-                    Text(perspective.position)
-                        .font(bodyFont)
-                        .lineSpacing(bodyLineSpacing)
-                        .foregroundStyle(AppColor.primaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-
-                    let hasSource = source != nil && !source!.isEmpty
-                    let hasCitations = !citations.isEmpty
-
-                    if hasSource || hasCitations {
-                        ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
-                            if let source, !source.isEmpty {
-                                Text(source)
-                                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                                    .foregroundStyle(currentSecondaryTextColor)
-                            }
-
-                            ForEach(perspective.citationIDs, id: \.self) { id in
-                                if let citation = overview.citations[id] {
-                                    citationPill(citation)
-                                }
-                            }
-                        }
-                    }
-                }
+                perspectiveContent(perspective, source: source, citations: citations)
             }
 
             if perspective.id != validPerspectives.last?.id {
@@ -1193,19 +1211,42 @@ struct EventOverviewReaderView: View {
     }
 
     private var industryImpactSection: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Industry Impact")
-                .font(AppTypography.overviewFont(.section, scale: textScale))
-                .foregroundStyle(AppColor.primaryText)
-                .accessibilityAddTraits(.isHeader)
-                .accessibilityHeading(.h2)
+        overviewSection(title: "Industry Impact") {
+            ForEach(validIndustryImpact) { item in
+                industryImpactRow(item)
+            }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                ForEach(validIndustryImpact) { item in
-                    industryImpactRow(item)
+    @ViewBuilder
+    private func industryImpactContent(
+        _ item: OverviewIndustryImpact,
+        citations: [OverviewCitation]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            TagView(
+                title: item.industry,
+                tint: AppColor.accent,
+                font: AppTypography.overviewFont(.micro, scale: textScale)
+            )
+            .accessibilityHidden(true)
+
+            Text(item.implication)
+                .font(bodyFont)
+                .lineSpacing(bodyLineSpacing)
+                .foregroundStyle(AppColor.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+
+            if !citations.isEmpty {
+                ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
+                    ForEach(item.citationIDs, id: \.self) { id in
+                        if let citation = overview.citations[id] {
+                            citationPill(citation)
+                        }
+                    }
                 }
             }
-            .padding(.vertical, AppSpacing.xxs)
         }
     }
 
@@ -1215,31 +1256,7 @@ struct EventOverviewReaderView: View {
         let sources = citedSources(item.citationIDs)
 
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                TagView(
-                    title: item.industry,
-                    tint: AppColor.accent,
-                    font: AppTypography.overviewFont(.micro, scale: textScale)
-                )
-                .accessibilityHidden(true)
-
-                Text(item.implication)
-                    .font(bodyFont)
-                    .lineSpacing(bodyLineSpacing)
-                    .foregroundStyle(AppColor.primaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-
-                if !citations.isEmpty {
-                    ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
-                        ForEach(item.citationIDs, id: \.self) { id in
-                            if let citation = overview.citations[id] {
-                                citationPill(citation)
-                            }
-                        }
-                    }
-                }
-            }
+            industryImpactContent(item, citations: citations)
 
             if item.id != validIndustryImpact.last?.id {
                 Divider().opacity(Self.dividerOpacity(for: contrast))

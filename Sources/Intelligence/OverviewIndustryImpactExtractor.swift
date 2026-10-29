@@ -159,6 +159,124 @@ struct OverviewIndustryImpactExtractor: Sendable {
         }
     }
 
+    private static func buildExclusions(
+        from excludeSentences: Set<String>
+    ) -> (strings: Set<String>, wordsList: [Set<String>]) {
+        let excludeStrings = Set(
+            excludeSentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+        let excludeWordsList = excludeStrings.compactMap { ex -> Set<String>? in
+            let w = wordsSet(from: ex)
+            return w.isEmpty ? nil : w
+        }
+        return (excludeStrings, excludeWordsList)
+    }
+
+    private static func buildPassageCitationMap(
+        from existingCitations: [String: OverviewCitation]
+    ) -> [String: OverviewCitation] {
+        var passageToCitation: [String: OverviewCitation] = [:]
+        for citation in existingCitations.values where passageToCitation[citation.passageID] == nil {
+            passageToCitation[citation.passageID] = citation
+        }
+        return passageToCitation
+    }
+
+    private static func evaluateCandidateSentence(
+        _ sentence: String,
+        passage: EvidencePassage,
+        article: FeedArticle,
+        sourceMeta: OverviewSourceMetadata,
+        coveredIndustries: Set<StandardIndustry>,
+        resultIndex: Int
+    ) -> (impact: OverviewIndustryImpact, citation: OverviewCitation, industry: StandardIndustry)? {
+        let lower = sentence.lowercased()
+        let words = wordsSet(from: lower)
+        guard let industry = identifyIndustry(for: lower, words: words),
+            !coveredIndustries.contains(industry)
+        else {
+            return nil
+        }
+
+        let sentenceCitationID = "impact_cite_\(passage.id)_\(resultIndex)"
+        let sentenceCitation = OverviewCitation(
+            id: sentenceCitationID,
+            articleID: passage.articleID,
+            passageID: passage.id,
+            passageFingerprint: passage.fingerprint,
+            quote: sentence,
+            source: sourceMeta
+        )
+
+        let candidateImpact = OverviewIndustryImpact(
+            id: "impact_\(industry.rawValue.lowercased().filter(\.isLetter))_\(resultIndex)",
+            industry: industry.rawValue,
+            implication: sentence,
+            citationIDs: [sentenceCitationID]
+        )
+
+        guard
+            validateIndustryImpact(
+                candidateImpact,
+                citation: sentenceCitation,
+                passage: passage,
+                article: article
+            )
+        else {
+            return nil
+        }
+
+        return (candidateImpact, sentenceCitation, industry)
+    }
+
+    private static func sourceMetadata(
+        for passage: EvidencePassage,
+        article: FeedArticle,
+        citations: [String: OverviewCitation]
+    ) -> OverviewSourceMetadata {
+        citations[passage.id]?.source
+            ?? OverviewSourceMetadata(
+                title: article.title,
+                name: article.source,
+                url: article.link,
+                publishedAt: article.pubDate
+            )
+    }
+
+    private static func processPassageSentences(
+        passage: EvidencePassage,
+        article: FeedArticle,
+        sourceMeta: OverviewSourceMetadata,
+        exclusions: (strings: Set<String>, wordsList: [Set<String>]),
+        results: inout [OverviewIndustryImpact],
+        impactCitations: inout [OverviewCitation],
+        coveredIndustries: inout Set<StandardIndustry>
+    ) {
+        let sentences = extractCandidateSentences(from: passage.text)
+        for sentence in sentences where results.count < 4 {
+            guard
+                isEligibleSentence(
+                    sentence,
+                    article: article,
+                    excludeStrings: exclusions.strings,
+                    excludeWordsList: exclusions.wordsList
+                )
+            else { continue }
+
+            if let match = evaluateCandidateSentence(
+                sentence,
+                passage: passage,
+                article: article,
+                sourceMeta: sourceMeta,
+                coveredIndustries: coveredIndustries,
+                resultIndex: results.count + 1
+            ) {
+                results.append(match.impact)
+                impactCitations.append(match.citation)
+                coveredIndustries.insert(match.industry)
+            }
+        }
+    }
+
     /// Extracts structured Industry Impact entries from evidence passages.
     static func extractIndustryImpact(
         passages: [EvidencePassage],
@@ -170,83 +288,21 @@ struct OverviewIndustryImpactExtractor: Sendable {
         var impactCitations: [OverviewCitation] = []
         var coveredIndustries = Set<StandardIndustry>()
         let articlesByID = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let exclusions = buildExclusions(from: excludeSentences)
+        let passageToCitation = buildPassageCitationMap(from: existingCitations)
 
-        // Pre-compute exclude token sets once to avoid redundant allocations in candidate loops
-        let excludeStrings = Set(
-            excludeSentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
-        let excludeWordsList = excludeStrings.compactMap { ex -> Set<String>? in
-            let w = wordsSet(from: ex)
-            return w.isEmpty ? nil : w
-        }
-
-        // Build mapping from passage ID to citation
-        var passageToCitation: [String: OverviewCitation] = [:]
-        for citation in existingCitations.values {
-            if passageToCitation[citation.passageID] == nil {
-                passageToCitation[citation.passageID] = citation
-            }
-        }
-
-        for passage in passages {
+        for passage in passages where results.count < 4 {
             guard let article = articlesByID[passage.articleID] else { continue }
-            let citation = passageToCitation[passage.id]
-            let sourceMeta =
-                citation?.source
-                ?? OverviewSourceMetadata(
-                    title: article.title,
-                    name: article.source,
-                    url: article.link,
-                    publishedAt: article.pubDate
-                )
-
-            let sentences = extractCandidateSentences(from: passage.text)
-            for sentence in sentences {
-                guard
-                    isEligibleSentence(
-                        sentence,
-                        article: article,
-                        excludeStrings: excludeStrings,
-                        excludeWordsList: excludeWordsList
-                    )
-                else {
-                    continue
-                }
-                let lower = sentence.lowercased()
-                let words = wordsSet(from: lower)
-                guard let industry = identifyIndustry(for: lower, words: words) else { continue }
-                guard !coveredIndustries.contains(industry) else { continue }
-
-                // Build a dedicated citation for this exact sentence to satisfy verbatim quote grounding
-                let sentenceCitationID = "impact_cite_\(passage.id)_\(results.count + 1)"
-                let sentenceCitation = OverviewCitation(
-                    id: sentenceCitationID,
-                    articleID: passage.articleID,
-                    passageID: passage.id,
-                    passageFingerprint: passage.fingerprint,
-                    quote: sentence,
-                    source: sourceMeta
-                )
-
-                let candidateImpact = OverviewIndustryImpact(
-                    id: "impact_\(industry.rawValue.lowercased().filter(\.isLetter))_\(results.count + 1)",
-                    industry: industry.rawValue,
-                    implication: sentence,
-                    citationIDs: [sentenceCitationID]
-                )
-
-                if validateIndustryImpact(
-                    candidateImpact,
-                    citation: sentenceCitation,
-                    passage: passage,
-                    article: article
-                ) {
-                    results.append(candidateImpact)
-                    impactCitations.append(sentenceCitation)
-                    coveredIndustries.insert(industry)
-                    if results.count >= 4 { break }
-                }
-            }
-            if results.count >= 4 { break }
+            let sourceMeta = sourceMetadata(for: passage, article: article, citations: passageToCitation)
+            processPassageSentences(
+                passage: passage,
+                article: article,
+                sourceMeta: sourceMeta,
+                exclusions: exclusions,
+                results: &results,
+                impactCitations: &impactCitations,
+                coveredIndustries: &coveredIndustries
+            )
         }
 
         return ExtractedIndustryImpact(items: results, citations: impactCitations)
@@ -314,12 +370,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         let phrases = [
             "premier league", "world cup", "champions league", "super bowl", "penalty shootout", "final match",
         ]
-        for phrase in phrases {
-            if text.contains(phrase) {
-                return true
-            }
-        }
-        return false
+        return phrases.contains(where: { text.contains($0) })
     }
 
     private static func isEligibleSentence(
@@ -363,10 +414,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
 
     private static func identifyIndustry(for text: String, words: Set<String>) -> StandardIndustry? {
         for industry in StandardIndustry.allCases {
-            for cue in industry.cues {
-                if matchesCue(cue, in: text, words: words) {
-                    return industry
-                }
+            for cue in industry.cues where matchesCue(cue, in: text, words: words) {
+                return industry
             }
         }
         return nil
