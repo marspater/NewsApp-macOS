@@ -78,7 +78,8 @@ class Tokenizer:
 def pair_prefix(gap_hours=None, same_publisher=None):
     """The words the pair model reads in front of each text (#626), identical to `EventMatcher.pairModelInput` in
     Swift: the pair's time gap and whether one publisher wrote both, "unknown" where the data has neither."""
-    gap = 'gap unknown' if gap_hours is None else f'gap {round(gap_hours)} hours'
+    # int(x + 0.5) rounds a half up, as Swift's rounded() does; Python's round() would give 2 for 2.5.
+    gap = 'gap unknown' if gap_hours is None else f'gap {int(gap_hours + 0.5)} hours'
     if same_publisher is None:
         publisher = 'publishers unknown'
     else:

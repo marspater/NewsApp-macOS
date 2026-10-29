@@ -23,11 +23,17 @@ CLASSES = {
 }
 
 
+def inside_checkout(path):
+    """Whether the resolved path lies in this checkout (or any Git checkout): article text never enters one."""
+    resolved = pathlib.Path(path).expanduser().resolve()
+    checkout = pathlib.Path(__file__).resolve().parents[2]
+    return checkout in resolved.parents or any((parent / '.git').exists() for parent in resolved.parents)
+
+
 def private_export(value):
     """The export file, which must be a regular file outside this checkout."""
     path = pathlib.Path(value).expanduser().resolve()
-    checkout = pathlib.Path(__file__).resolve().parents[2]
-    if not path.is_file() or checkout in path.parents:
+    if not path.is_file() or inside_checkout(path):
         raise argparse.ArgumentTypeError(f'{value} is not a private export outside the checkout')
     return path
 
@@ -47,7 +53,7 @@ def main(argv=None):
     parser.add_argument('--out', type=pathlib.Path, help='training CSV to append the labelled rows to')
     args = parser.parse_args(argv)
     if args.labels:
-        if not (args.snapshot and args.out) or '.git' in [p.name for p in [args.out, *args.out.parents]]:
+        if not (args.snapshot and args.out) or inside_checkout(args.out):
             parser.error('--labels needs --snapshot and --out, outside the checkout')
         written = export_labels(args.export, args.kind, args.labels, args.snapshot, args.out)
         print(f'{args.kind}: {written} rows written')
@@ -67,6 +73,17 @@ def main(argv=None):
 
 # --- reviewed labels as training rows (#625) ---------------------------------------------------------------------
 
+def read_labels(labels):
+    """`index label` lines of a labels file as {index: label}; other lines are ignored."""
+    verdicts = {}
+    with labels.open(encoding='utf-8') as handle:
+        for line in handle:
+            parts = line.split()
+            if len(parts) == 2 and parts[0].isdigit():
+                verdicts[int(parts[0])] = parts[1]
+    return verdicts
+
+
 def export_labels(export, kind, labels, snapshot, out):
     """Writes the labelled rows of one class as weighted training rows (`--export-pairs` shape, weight 5): `same`
     is 1, `related` and `different` are 0. Texts come from the library copy (read-only), the pieces from the app's
@@ -75,17 +92,12 @@ def export_labels(export, kind, labels, snapshot, out):
     import sqlite3
     import urllib.parse
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'training'))
-    from wordpiece import Tokenizer, pair_prefix
+    from wordpiece import Tokenizer
     tag, space = re.compile(r'<[^>]+>'), re.compile(r'\s+')
     with export.open(newline='', encoding='utf-8') as handle:
         rows = [row for row in csv.DictReader(handle) if CLASSES[kind](row)]
     rows.sort(key=order)
-    verdicts = {}
-    with labels.open(encoding='utf-8') as handle:
-        for line in handle:
-            parts = line.split()
-            if len(parts) == 2 and parts[0].isdigit():
-                verdicts[int(parts[0])] = parts[1]
+    verdicts = read_labels(labels)
     # The copy is opened read-only by a validated path: a regular .sqlite3 file outside any app container.
     copy = pathlib.Path(snapshot).expanduser().resolve()
     if not copy.is_file() or copy.suffix != '.sqlite3' or '/Library/Containers/' in str(copy):
@@ -103,6 +115,11 @@ def export_labels(export, kind, labels, snapshot, out):
         return title + '\n' + lead
 
     exists = out.exists()
+    existing = set()
+    if exists:
+        # A rerun of the same labels must not double a row's weight; distinct review rounds still append.
+        with out.open(newline='', encoding='utf-8') as handle:
+            existing = {(row['text_a'], row['text_b']) for row in csv.DictReader(handle)}
     with out.open('a', newline='', encoding='utf-8') as handle:
         # Local training rows, never opened as a spreadsheet.
         writer = csv.writer(handle)  # nosemgrep: python.lang.security.use-defusedcsv.use-defusedcsv
@@ -112,12 +129,9 @@ def export_labels(export, kind, labels, snapshot, out):
         for index, row in enumerate(rows, start=1):
             verdict = verdicts.get(index)
             a, b = text(row['article_id']), text(row['other_article_id'])
-            if verdict not in ('same', 'related', 'different') or not a or not b:
+            if verdict not in ('same', 'related', 'different') or not a or not b or (a, b) in existing:
                 continue
-            # The prefix the model reads at run time (#626): the pair's gap and whether one publisher wrote both.
-            prefix = pair_prefix(abs(float(row['published_a']) - float(row['published_b'])) / 3600,
-                                 row['source_a'] == row['source_b'])
-            a, b = prefix + a, prefix + b
+            existing.add((a, b))
             writer.writerow([1 if verdict == 'same' else 0, f'r:{kind}:{index}', a, b,
                              ' '.join(map(str, tokenizer.pieces(a))), ' '.join(map(str, tokenizer.pieces(b))), 5])
             written += 1
