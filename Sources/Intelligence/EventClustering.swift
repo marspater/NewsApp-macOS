@@ -671,7 +671,19 @@ enum EventClusterer {
         report.merged = merges.merged
         report.changedEvents.formUnion(merges.changedEvents)
         await store()
-        report.changedEvents.formUnion(try await linkStories())
+        // The story pass reads every active event and lone report (#581). It runs when the pass processed a report
+        // or changed an event, once per launch, and after a reader verdict; otherwise an unchanged archive stays
+        // at zero work.
+        let storiesStale: Bool
+        if let lastStoryPass = await database.lastStoryPass {
+            storiesStale = (try await database.newestVerdict() ?? .distantPast) >= lastStoryPass
+        } else {
+            storiesStale = true
+        }
+        if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale {
+            report.changedEvents.formUnion(try await linkStories())
+            await database.recordStoryPass(at: now)
+        }
         return report
     }
 
