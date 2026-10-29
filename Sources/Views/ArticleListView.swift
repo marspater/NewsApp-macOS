@@ -106,6 +106,7 @@ struct ArticleListView: View {
     @State private var isReaderRefreshing = false
     /// Stories the reader's muting removes from this list, across every page.
     @State private var mutedCount = 0
+    @State private var searchSuggestion: String?
     @State private var showsMuted = false
     @State private var confirmsUnmuteAll = false
 
@@ -186,6 +187,9 @@ struct ArticleListView: View {
         } else if isSearching {
             VStack(spacing: AppSpacing.md) {
                 ContentUnavailableView.search(text: searchText)
+                if let searchSuggestion {
+                    Button("Search for “\(searchSuggestion)”") { searchText = searchSuggestion }
+                }
                 if mutedCount > 0 && !showsMuted && !listMuting.isEmpty {
                     Button(mutedCount == 1 ? "Show 1 Muted Story" : "Show \(mutedCount) Muted Stories") {
                         showsMuted = true
@@ -463,8 +467,15 @@ struct ArticleListView: View {
             if !isPaging {
                 var hidden = 0
                 if !muting.isEmpty { hidden = try await countMuted(muting) }
+                // A search that finds nothing offers the closest spelling that does; a failure means no suggestion.
+                var suggestion: String?
+                if isSearching && fetched.isEmpty {
+                    suggestion = try? await articleStore.database.searchSuggestion(
+                        query: searchText, muting: showsMuted ? MuteRules() : muting)
+                }
                 try Task.checkCancellation()
                 mutedCount = hidden
+                searchSuggestion = suggestion
             }
             let page = Array(fetched.prefix(200))
             let listed = isPaging ? buffer.displayed.articles + page : page

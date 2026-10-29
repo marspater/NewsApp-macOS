@@ -341,6 +341,68 @@ struct ArticleFilterQuery: Equatable, Sendable {
     }
 }
 
+/// Spelling help for a search that finds nothing (#708): misspelled terms map to the closest word of the library.
+enum SearchSpelling {
+    /// Lowercased runs of letters and digits.
+    static func words(in text: String) -> [String] {
+        text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    }
+
+    /// Optimal string alignment distance: an insertion, deletion, substitution or adjacent swap each costs one edit.
+    static func distance(_ a: [Unicode.Scalar], _ b: [Unicode.Scalar]) -> Int {
+        guard !a.isEmpty, !b.isEmpty else { return max(a.count, b.count) }
+        var beforePrevious = [Int](repeating: 0, count: b.count + 1)
+        var previous = Array(0...b.count)
+        var current = [Int](repeating: 0, count: b.count + 1)
+        for i in 1...a.count {
+            current[0] = i
+            for j in 1...b.count {
+                current[j] = min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1))
+                if i > 1, j > 1, a[i - 1] == b[j - 2], a[i - 2] == b[j - 1] {
+                    current[j] = min(current[j], beforePrevious[j - 2] + 1)
+                }
+            }
+            (beforePrevious, previous, current) = (previous, current, beforePrevious)
+        }
+        return previous[b.count]
+    }
+
+    /// The word a term most likely meant: nil when the term starts a library word (search matches prefixes), is
+    /// shorter than four characters, or nothing is close. One edit is allowed up to five characters, two beyond;
+    /// ties go to the more frequent word, then the alphabetically first.
+    static func correction(for term: String, in vocabulary: [String: Int]) -> String? {
+        let typed = Array(term.unicodeScalars)
+        guard typed.count >= 4, !vocabulary.keys.contains(where: { $0.hasPrefix(term) }) else { return nil }
+        let limit = typed.count <= 5 ? 1 : 2
+        var best: (word: String, edits: Int, count: Int)?
+        for (word, count) in vocabulary {
+            let candidate = Array(word.unicodeScalars)
+            guard abs(candidate.count - typed.count) <= limit else { continue }
+            let edits = distance(typed, candidate)
+            guard edits <= limit else { continue }
+            if let current = best,
+                (current.edits, -current.count, current.word) <= (edits, -count, word)
+            {
+                continue
+            }
+            best = (word, edits, count)
+        }
+        return best?.word
+    }
+
+    /// The query with every misspelled term replaced, operators and other words kept; nil when nothing changed.
+    static func corrected(_ query: String, vocabulary: [String: Int]) -> String? {
+        var replacements: [String: String] = [:]
+        for term in ArticleFilterQuery.parse(query).terms {
+            if let word = correction(for: term, in: vocabulary) { replacements[term] = word }
+        }
+        guard !replacements.isEmpty else { return nil }
+        return query.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.map { token in
+            replacements[token.lowercased().replacingOccurrences(of: "\"", with: "")] ?? token
+        }.joined(separator: " ")
+    }
+}
+
 struct ArticleQueryCursor: Equatable, Sendable {
     let value: Double
     let id: String

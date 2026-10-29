@@ -19,6 +19,7 @@ actor DatabaseEngine {
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
+    private var spellingCache: (key: String, words: [String: Int])?
     private(set) var healthNotice: String?
 
     func databaseHealthNotice() -> String? {
@@ -2291,6 +2292,43 @@ actor DatabaseEngine {
         let results = try executeQueryArticles(
             sql: sql, params: params, prepareErrorMessage: "Failed to prepare FTS search query")
         return try curateImages(in: results)
+    }
+
+    /// "Search for …" when a search finds nothing (#708): the query with misspelled words replaced by the closest
+    /// words of stored headlines and feed summaries, offered only when that search finds stories.
+    func searchSuggestion(query: String, muting: MuteRules = MuteRules()) throws -> String? {
+        guard let corrected = SearchSpelling.corrected(query, vocabulary: try spellingVocabulary()) else { return nil }
+        return try searchArticles(query: corrected, limit: 1, muting: muting).isEmpty ? nil : corrected
+    }
+
+    /// Word counts of visible headlines and feed summaries, rebuilt only after stories are added or removed.
+    private func spellingVocabulary() throws -> [String: Int] {
+        guard let db = db else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        func eachRow(_ sql: String, _ body: (OpaquePointer?) -> Void) throws {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw sqliteError(db, "Cannot prepare spelling vocabulary query")
+            }
+            defer { sqlite3_finalize(statement) }
+            while sqlite3_step(statement) == SQLITE_ROW { body(statement) }
+        }
+        var key = ""
+        try eachRow("SELECT count(*), coalesce(max(rowid), 0) FROM articles;") {
+            key = "\(sqlite3_column_int64($0, 0)):\(sqlite3_column_int64($0, 1))"
+        }
+        if let spellingCache, spellingCache.key == key { return spellingCache.words }
+        var words: [String: Int] = [:]
+        try eachRow(
+            "SELECT a.title || ' ' || coalesce(a.description, '') FROM articles a WHERE \(Self.visibleArticle);"
+        ) {
+            guard let text = sqlite3_column_text($0, 0) else { return }
+            for word in SearchSpelling.words(in: String(cString: text)) { words[word, default: 0] += 1 }
+        }
+        spellingCache = (key, words)
+        return words
     }
 
     // MARK: - State Mutations

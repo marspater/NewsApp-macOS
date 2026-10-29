@@ -623,6 +623,7 @@ struct NewsTests {
             await testDatabaseEnginePersistence()
             await testFTS5SearchAndOperators()
             try await testUnchangedFTSRefresh()
+            try await testSearchSpellingSuggestion()
             try await testFTSRowIDMigration()
             try await testDatabaseHealthAndDerivedRetention()
             try await testRealLibraryMigrationFixture()
@@ -729,6 +730,7 @@ struct NewsTests {
         try testCapturedFingerprintReview()
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
+        try await testSearchSpellingSuggestion()
         try await testFTSRowIDMigration()
         try await testDatabaseHealthAndDerivedRetention()
         try await testRealLibraryMigrationFixture()
@@ -891,6 +893,42 @@ struct NewsTests {
         assertEqual(rowID(), migratedID, "Existing v11 database receives a durable FTS key")
         assertEqual(indexData(), migratedIndex, "Existing v11 database receives the guarded trigger")
         assertEqual(try await db.searchArticles(query: "Updated").count, 1, "Migration preserves searchable rows")
+        await db.close()
+    }
+
+    static func testSearchSpellingSuggestion() async throws {
+        func scalars(_ text: String) -> [Unicode.Scalar] { Array(text.unicodeScalars) }
+        assertEqual(SearchSpelling.distance(scalars("nvida"), scalars("nvidia")), 1, "One deletion is one edit")
+        assertEqual(SearchSpelling.distance(scalars("teh"), scalars("the")), 1, "An adjacent swap is one edit")
+        assertEqual(SearchSpelling.distance(scalars("kitten"), scalars("sitting")), 3, "Classic distance")
+        let vocabulary = ["nvidia": 3, "chips": 2, "election": 4, "elections": 1, "artificial": 2]
+        func correction(_ term: String) -> String? { SearchSpelling.correction(for: term, in: vocabulary) }
+        assertEqual(correction("nvida"), "nvidia", "A typo maps to the library word")
+        assertEqual(correction("chps"), "chips", "Four characters allow one edit")
+        assertEqual(correction("nvid"), nil, "A word's start is not a typo")
+        assertEqual(correction("chp"), nil, "Under four characters is never changed")
+        assertEqual(correction("electionz"), "election", "Ties go to the commoner word")
+        assertEqual(correction("zebra"), nil, "Nothing close, no correction")
+        assertEqual(
+            SearchSpelling.corrected("Nvida \"artifical\" source:reuters", vocabulary: vocabulary),
+            "nvidia artificial source:reuters", "Misspelled terms change; operators stay")
+        assertEqual(SearchSpelling.corrected("nvidia chips", vocabulary: vocabulary), nil, "Known words, no suggestion")
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let db = DatabaseEngine(path: directory.appendingPathComponent("spelling.sqlite3").path)
+        try await db.open()
+        try await db.upsertArticles([
+            FeedArticle(
+                title: "Nvidia unveils new chips", link: "https://example.com/nvidia", guid: "nvidia",
+                description: "The chipmaker raised its forecast", pubDate: Date(), source: "Publisher")
+        ])
+        assertTrue(try await db.searchArticles(query: "nvida chips").isEmpty, "The typo finds nothing")
+        assertEqual(
+            try await db.searchSuggestion(query: "nvida chips"), "nvidia chips", "The suggestion fixes the typo")
+        assertEqual(
+            try await db.searchSuggestion(query: "nvidia tariffs"), nil, "A word with nothing close gets no suggestion")
         await db.close()
     }
 
