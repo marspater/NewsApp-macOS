@@ -190,7 +190,8 @@ enum EventClusterer {
                 let unvetted =
                     pair.embeddingCosine == nil && pair.neuralEligible && pair.conflict == nil
                     && (pair.sharedSpecificAnchors >= 1
-                        || (matchPolicy.anchorlessModelCosine.isFinite && pair.sharedAnchors == 0))
+                        || (matchPolicy.anchorlessModelCosine.isFinite && pair.sharedAnchors == 0
+                            && abs(a.date.timeIntervalSince(b.date)) <= matchPolicy.anchorlessModelGap))
                 if unvetted || EventMatcher.needsPairModel(pair) {
                     deferredCurrentRow = true
                     if pair.isMatch { pair = EventMatcher.unvetted(pair) }
