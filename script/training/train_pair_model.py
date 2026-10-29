@@ -598,8 +598,8 @@ def main(argv):
     trained, tok, held_out, report = train(
         rows, Stage(args.epochs, args.rate, args.frozen, args.smoothing), pretrain or None,
         Stage(args.pretrain_epochs, 3e-5), args.init, args.out)
-    out = pathlib.Path(args.out)
-    out.mkdir(parents=True, exist_ok=True)
+    out = pathlib.Path(args.out)  # OUT_DIR is the operator's own output directory, named on the command line
+    out.mkdir(parents=True, exist_ok=True)  # NOSONAR
     torch.save(trained.state_dict(), out / STATE)
     export(trained, tok, held_out, args.out)
     metadata = {

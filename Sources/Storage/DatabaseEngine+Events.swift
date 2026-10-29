@@ -1077,10 +1077,10 @@ extension DatabaseEngine {
     }
 
     /// The live event, its membership version and its members, for a whole-event check.
-    func eventMatchMembers(eventID: String) throws -> (id: String, version: Int, members: [EventMatchRow])? {
+    func eventMatchMembers(eventID: String) throws -> ActiveEvent? {
         guard let live = try? liveEvent(eventID) else { return nil }
         let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id = ?;", [.text(live.id)])
-        return (live.id, live.version, members)
+        return ActiveEvent(id: live.id, version: live.version, members: members)
     }
 
     /// Visible reports published since `activeSince` that no event holds and the current matcher has processed: the

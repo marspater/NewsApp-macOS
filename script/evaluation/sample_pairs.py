@@ -168,14 +168,16 @@ def export_labels(export, kind, labels, snapshot, out, holdout=None, prefixed=Fa
             writer.writerow(HEADER)
         for index, row, label in labelled_rows(export, kind, read_verdicts(labels), holdout_ids(holdout)):
             a, b = text(row['article_id']), text(row['other_article_id'])
-            if not a or not b or (a, b) in existing:
+            if not a or not b:
                 continue
-            existing.add((a, b))
             if prefixed:
                 # The prefix an earlier model read (#626): the pair's gap and whether one publisher wrote both.
                 prefix = pair_prefix(abs(float(row['published_a']) - float(row['published_b'])) / 3600,
                                      row['source_a'] == row['source_b'])
                 a, b = prefix + a, prefix + b
+            if (a, b) in existing:  # compared as written, prefix included, so a rerun appends nothing twice
+                continue
+            existing.add((a, b))
             writer.writerow([label, f'r:{kind}:{index}', a, b, ' '.join(map(str, tokenizer.pieces(a))),
                              ' '.join(map(str, tokenizer.pieces(b))), 5, ''])
             written += 1
