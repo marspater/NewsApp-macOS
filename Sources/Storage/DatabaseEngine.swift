@@ -1486,14 +1486,17 @@ actor DatabaseEngine {
 
     /// The stored story of the same publisher with the same folded headline, published within
     /// `publisherTitleWindow` (#583). The publisher's stories of that window are read and compared in Swift, so no alias
-    /// row and no schema change are needed; the oldest such story wins when several exist.
+    /// row and no schema change are needed. The lookup uses the publisher name the upsert stores as `source`; for a
+    /// site the catalog does not name, that is the feed's own title ("World news"), so the stored story must also come
+    /// from the same host. Two stored stories with that headline (a pair the window kept apart) make the target
+    /// ambiguous, and the item stays a story of its own.
     private func publisherTitleTarget(_ article: FeedArticle) throws -> String? {
         guard article.pubDate != DateParser.unknownDate,
-            let key = ArticleIdentity.publisherTitleKey(title: article.title, source: article.source)
+            let key = ArticleIdentity.publisherTitleKey(title: article.title, source: article.publisherName)
         else { return nil }
         var statement: OpaquePointer?
         let sql = """
-            SELECT id, title FROM articles
+            SELECT id, title, canonical_url FROM articles
             WHERE source = ? AND published_at BETWEEN ? AND ?
                 AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = articles.id)
             ORDER BY published_at, id;
@@ -1505,18 +1508,23 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(statement) }
         let published = article.pubDate.timeIntervalSince1970
-        sqlite3_bind_text(statement, 1, article.source, -1, Self.sqliteTransient)
+        sqlite3_bind_text(statement, 1, article.publisherName, -1, Self.sqliteTransient)
         sqlite3_bind_double(statement, 2, published - ArticleIdentity.publisherTitleWindow)
         sqlite3_bind_double(statement, 3, published + ArticleIdentity.publisherTitleWindow)
+        let catalogued = FeedCatalog.publisher(forLink: article.link) != nil
+        let host = URL(string: article.normalizedLink)?.host
+        var matches: [String] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = sqlite3_column_text(statement, 0), let title = sqlite3_column_text(statement, 1) else {
                 continue
             }
-            if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.source) == key {
-                return String(cString: id)
+            let storedHost = sqlite3_column_text(statement, 2).flatMap { URL(string: String(cString: $0))?.host }
+            guard catalogued || (host != nil && storedHost == host) else { continue }
+            if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.publisherName) == key {
+                matches.append(String(cString: id))
             }
         }
-        return nil
+        return matches.count == 1 ? matches.first : nil
     }
 
     private func publisherTextTarget(_ article: FeedArticle) throws -> String? {
