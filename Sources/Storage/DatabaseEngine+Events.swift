@@ -630,9 +630,9 @@ extension DatabaseEngine {
             ) v
             JOIN pair_assessments p ON p.article_id = v.article_id AND p.other_article_id = v.other_article_id
             JOIN articles a ON a.id = v.article_id JOIN articles b ON b.id = v.other_article_id
-            WHERE p.features IS NOT NULL ORDER BY v.article_id, v.other_article_id LIMIT ?;
-            """, [.integer(limit)]
-        ).compactMap { row in
+            WHERE p.features IS NOT NULL ORDER BY v.article_id, v.other_article_id;
+            """
+        ).compactMap { row -> PairCalibration.Row? in
             guard let json = row[1], let gap = row[2].flatMap(Double.init),
                 let signals = try? decoder.decode(EventPairFeatures.self, from: Data(json.utf8)),
                 let pairModel = signals.pairModel
@@ -642,7 +642,8 @@ extension DatabaseEngine {
                     pairModel: pairModel, cosine: signals.cosine, sharedSpecific: signals.sharedSpecific,
                     gapHours: gap / 3600, sameAct: signals.conflict != EventConflict.differentAct.rawValue),
                 same: row[0] == "1")
-        }
+        }.prefix(limit).map { $0 }
+        // The limit applies to usable rows, after the ones without a model score are dropped.
     }
 
     func storyAttachedEventIDs(since activeSince: Date) throws -> Set<String> {
@@ -1095,7 +1096,14 @@ extension DatabaseEngine {
     }
 
     /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
-    func activeEventMembers(since activeSince: Date) throws -> [(id: String, version: Int, members: [EventMatchRow])] {
+    /// A live event with its membership version and members, for the story pass (#581).
+    struct ActiveEvent {
+        var id: String
+        var version: Int
+        var members: [EventMatchRow]
+    }
+
+    func activeEventMembers(since activeSince: Date) throws -> [ActiveEvent] {
         let since = activeSince.timeIntervalSince1970
         let versions = try eventRows(
             "SELECT id, membership_version FROM events WHERE merged_into IS NULL AND updated_at >= ? ORDER BY id;",
@@ -1109,7 +1117,8 @@ extension DatabaseEngine {
         let byEvent = Dictionary(grouping: rows) { $0.eventID ?? "" }
         return versions.compactMap { row in
             guard let id = row[0], let members = byEvent[id], !members.isEmpty else { return nil }
-            return (id, row[1].flatMap { Int($0) } ?? 1, members.sorted { $0.id < $1.id })
+            return ActiveEvent(
+                id: id, version: row[1].flatMap { Int($0) } ?? 1, members: members.sorted { $0.id < $1.id })
         }
     }
 

@@ -3135,9 +3135,15 @@ actor DatabaseEngine {
         // 1. Pair assessments older than 30 days.
         let pairCutoff = nowTimestamp - 30 * 86400
         var pairStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM pair_assessments WHERE assessed_at < ?;", -1, &pairStmt, nil)
-            == SQLITE_OK
-        {
+        // A pair the reader judged keeps its signals: the verdict calibration (#629) fits on them.
+        let prunePairs = """
+            DELETE FROM pair_assessments WHERE assessed_at < ?
+                AND NOT EXISTS (SELECT 1 FROM event_inclusions i
+                    WHERE i.article_id = pair_assessments.article_id AND i.other_article_id = pair_assessments.other_article_id)
+                AND NOT EXISTS (SELECT 1 FROM event_exclusions x
+                    WHERE x.article_id = pair_assessments.article_id AND x.other_article_id = pair_assessments.other_article_id);
+            """
+        if sqlite3_prepare_v2(db, prunePairs, -1, &pairStmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(pairStmt) }
             sqlite3_bind_double(pairStmt, 1, pairCutoff)
             _ = sqlite3_step(pairStmt)

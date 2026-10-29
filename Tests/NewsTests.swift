@@ -454,6 +454,9 @@ struct NewsTests {
             print(
                 "    verdict replay (#629): \(replay.verdicts) verdicts, \(replay.bare) decided as the reader did at the"
                     + " cutoff, \(replay.calibrated) with the calibration\(replay.fitted ? "" : " (dormant)")")
+            assertTrue(
+                replay.fitted, "The verdict replay needs 50 verdicts with both answers; a dormant replay proves nothing"
+            )
             assertTrue(replay.calibrated >= replay.bare, "The calibration decides no fewer verdicts right")
             return
         }
@@ -12332,7 +12335,8 @@ struct NewsTests {
     static func verdictReplay(
         _ rows: [PairCalibration.Row], base: Double = EventMatchPolicy.standard.pairModelThreshold
     ) -> (verdicts: Int, bare: Int, calibrated: Int, fitted: Bool) {
-        let calibration = PairCalibration.fit(rows)
+        // Fitted as production fits: on at most the first 1,000 rows (verdicts.csv is written in pair-id order).
+        let calibration = PairCalibration.fit(Array(rows.prefix(1_000)))
         var bare = 0
         var calibrated = 0
         for row in rows {
@@ -12523,7 +12527,7 @@ struct NewsTests {
             print("    rules only (NEWS_ENERGY=0): \(deferred) rows deferred to a pass with energy; no floor")
         }
         assertTrue(
-            rulesOnly || metrics.truePositives >= fixture.expected.minimumTruePositives,
+            (rulesOnly && deferred > 0) || metrics.truePositives >= fixture.expected.minimumTruePositives,
             "Authored corpus true positives fell below the recorded floor (\(metrics.truePositives))")
         assertTrue(
             metrics.falsePositives <= fixture.expected.maximumFalsePositives,
@@ -12954,10 +12958,16 @@ struct NewsTests {
                         if let va = vectorCache[items[i].id], let vb = vectorCache[items[j].id] {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
-                        let pair = EventMatcher.assess(
-                            a, b, policy: StoryCorpus.policyFromEnvironment(), embeddingSimilarity: similarity,
-                            samePublisher: items[i].source == items[j].source)
                         let diagnosePolicy = StoryCorpus.policyFromEnvironment()
+                        var pair = EventMatcher.assess(
+                            a, b, policy: diagnosePolicy, embeddingSimilarity: similarity,
+                            samePublisher: items[i].source == items[j].source)
+                        // The clusterer's same-publisher gate (NEWS_SAME_PUBLISHER=1), so the printed gate is the real one.
+                        if diagnosePolicy.samePublisherRequiresMatch, !pair.isMatch, !items[i].source.isEmpty,
+                            items[i].source == items[j].source
+                        {
+                            pair.isCompatible = false
+                        }
                         func input(_ index: Int) -> String {
                             let text = EventFeatures.matchingText(
                                 title: items[index].title, description: items[index].description ?? "")
@@ -12968,6 +12978,10 @@ struct NewsTests {
                                     samePublisher: known ? items[i].source == items[j].source : nil) : text
                         }
                         let pairModel = EventMatcher.needsPairModel(pair) ? await probability(input(i), input(j)) : nil
+                        // As the clusterer does: a borderline pair the model confirms at the cutoff is a match.
+                        if let pairModel, pairModel >= diagnosePolicy.pairModelThreshold {
+                            pair = EventMatcher.modelConfirmed(pair, policy: diagnosePolicy)
+                        }
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
                         let primaryDisjoint =
@@ -13363,15 +13377,18 @@ struct NewsTests {
                 SELECT a.id, a.source, a.published_at, m.event_id, a.title,
                     (SELECT count(*) FROM event_members x WHERE x.event_id = m.event_id)
                 FROM articles a LEFT JOIN event_members m ON m.article_id = a.id
-                WHERE a.published_at >= ? AND \(DatabaseEngine.visibleArticle) ORDER BY a.published_at, a.id;
-                """, [.real(newest.timeIntervalSince1970 - 3 * 86_400)])
+                WHERE a.published_at >= ? AND a.published_at <= ? AND \(DatabaseEngine.visibleArticle)
+                ORDER BY a.published_at, a.id;
+                """, [.real(newest.timeIntervalSince1970 - 3 * 86_400), .real(newest.timeIntervalSince1970)])
             let cardLines =
                 ["card,article,source,published,event,event_size,title"]
                 + windowRows.map { row in
                     let card = row[3].map { storyOf[$0] ?? $0 } ?? row[0] ?? ""
-                    let title = "\"" + (row[4] ?? "").replacingOccurrences(of: "\"", with: "\"\"") + "\""
-                    let fields = [row[0], row[1], row[2], row[3], row[5]].map { $0 ?? "" }
-                    return ([card] + fields + [title]).joined(separator: ",")
+                    // Every field is quoted: ids and sources are free text ("Example, Inc.").
+                    func quoted(_ value: String?) -> String {
+                        "\"" + (value ?? "").replacingOccurrences(of: "\"", with: "\"\"") + "\""
+                    }
+                    return ([card, row[0], row[1], row[2], row[3], row[5], row[4]].map(quoted)).joined(separator: ",")
                 }
             try StoryCorpus.writePrivate(
                 Data(cardLines.joined(separator: "\n").utf8),
@@ -13733,6 +13750,19 @@ struct NewsTests {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
+        // Every copy of a holdout headline is left out, whichever snapshot holds it and under whichever id: the titles
+        // are collected from all snapshots first.
+        var holdoutTitles = Set<String>()
+        for path in snapshots.split(separator: ":").map(String.init) where !holdoutIDs.isEmpty {
+            let copy = scratch.appendingPathComponent("titles-\(UUID().uuidString).sqlite3").path
+            try FileManager.default.copyItem(atPath: path, toPath: copy)
+            let db = DatabaseEngine(path: copy)
+            try await db.open()
+            for row in try await db.eventRows("SELECT id, title FROM articles;") {
+                if let id = row[0], let title = row[1], holdoutIDs.contains(id) { holdoutTitles.insert(key(title)) }
+            }
+            await db.close()
+        }
         for path in snapshots.split(separator: ":").map(String.init) {
             guard !path.contains("/Library/Containers/") else {
                 throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
@@ -13750,8 +13780,6 @@ struct NewsTests {
                 LEFT JOIN events e ON e.id = m.event_id AND e.merged_into IS NULL
                 WHERE a.published_at IS NOT NULL;
                 """)
-            let holdoutTitles = Set(
-                articles.filter { $0[0].map(holdoutIDs.contains) == true }.compactMap { $0[1] }.map(key))
             for values in articles {
                 guard let id = values[0], let title = values[1], let published = values[4].flatMap({ Double($0) })
                 else { continue }
@@ -13773,7 +13801,7 @@ struct NewsTests {
             let corrections = try await db.eventRows(
                 """
                 SELECT article_id, other_article_id, 1 FROM event_inclusions
-                UNION ALL SELECT article_id, other_article_id, 0 FROM event_exclusions;
+                UNION ALL SELECT article_id, other_article_id, 0 FROM event_exclusions ORDER BY 1, 2;
                 """)
             // Pairs the pair model alone linked (#627), keyed low id first like the decisions.
             let modelOnly = Set(

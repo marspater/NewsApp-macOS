@@ -284,7 +284,9 @@ def gdelt_download(slot, kind, cache):
     if not target.exists():
         try:
             write_private(target, fetch(GDELT + target.name))
-        except OSError as error:  # URLError and TimeoutError are OSErrors
+        except urllib.error.HTTPError as error:
+            if error.code != 404:  # only an absent 15-minute file is skipped; anything else stops the build
+                raise
             print(f'    skip {target.name}: {error}', file=sys.stderr)
             return None
     return target
@@ -449,10 +451,11 @@ def archived_page(url, cache, attempts=3):
 
 
 def semeval_label(overall):
-    """Overall similarity 1 (most similar) is one story, 3 and 4 are not, 2 is ambiguous and dropped."""
+    """Overall similarity 1 (most similar) is one story, 3 and 4 are not; 2 and the half-steps up to it are ambiguous
+    and dropped (the files carry averaged ratings such as 2.5)."""
     if overall < 1.5:
         return 1
-    if overall >= 2.5:
+    if overall >= 3:
         return 0
     return None
 

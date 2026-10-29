@@ -285,7 +285,8 @@ enum EventClusterer {
             guard !pending.isEmpty else { break }
             await prefetch(pending)
             for row in pending where !handled.contains(row.id) {
-                guard remaining > 0 else { break matching }
+                // Only this batch ends here: the flush below still runs, and the pass ends on the next budget check.
+                guard remaining > 0 else { break }
                 try Task.checkCancellation()
                 deferredCurrentRow = false
                 defer { if deferredCurrentRow { deferred.insert(row.id) } }
@@ -597,8 +598,11 @@ enum EventClusterer {
                     return dateA != dateB ? dateA < dateB : (a?.id ?? lhs) < (b?.id ?? rhs)
                 }
                 for id in shared.keys.sorted(by: precedes) {
+                    // The exclusion check covers the whole story the event belongs to, not only the event itself.
+                    let storyMembers = (components.groups.first(where: { $0.contains(id) }) ?? [id])
+                        .flatMap { membersOf[$0] ?? [] }
                     guard let members = membersOf[id],
-                        exclusions[single.id]?.isDisjoint(with: members.map(\.id)) != false,
+                        exclusions[single.id]?.isDisjoint(with: storyMembers.map(\.id)) != false,
                         let gap = Self.closestGap([single], members), gap <= candidatePolicy.activeEventLifetime
                     else { continue }
                     // Its own headline names the story: a live blog's latest entry can carry another one.
@@ -713,7 +717,9 @@ enum EventClusterer {
                         merges.merged += 1
                         merges.changedEvents.insert(survivor.id)
                         merges.changedEvents.insert(candidate.id)
-                        survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
+                        survivor = DatabaseEngine.ActiveEvent(
+                            id: survivor.id, version: merged.membershipVersion,
+                            members: survivor.members + candidate.members)
                         // The merged members' terms can reach a third fragment the survivor's alone did not.
                         for term in candidateTerms.subtracting(survivorTerms) {
                             for id in eventsByTerm[term] ?? [] where id != survivor.id {
@@ -746,7 +752,8 @@ enum EventClusterer {
         } else {
             storiesStale = true
         }
-        if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale {
+        // Without energy there are no vectors, and the story pass would detach attachments it cannot re-check.
+        if allowsEnergy, report.processed > 0 || !report.changedEvents.isEmpty || storiesStale {
             report.changedEvents.formUnion(try await linkStories())
             await database.recordStoryPass(at: now)
         }

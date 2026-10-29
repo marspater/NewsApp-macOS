@@ -138,6 +138,9 @@ enum StoryCorpus {
         guard var clock = items.first?.pubDate else { return [:] }
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
+        // The candidate scorers are built once: each PairScorer loads a model and owns the pair cache.
+        let pairProbability = pairProbabilityFromEnvironment()
+        let storyProbabilities = storyProbabilitiesFromEnvironment()
         do {
             var index = 0
             while index < items.count {
@@ -155,8 +158,8 @@ enum StoryCorpus {
                     let energy = ProcessInfo.processInfo.environment["NEWS_ENERGY"] != "0"
                     let report = try await EventClusterer.run(
                         in: db, matchPolicy: policy, now: clock,
-                        allowsEnergy: energy, pairProbability: pairProbabilityFromEnvironment(),
-                        storyProbabilities: storyProbabilitiesFromEnvironment())
+                        allowsEnergy: energy, pairProbability: pairProbability,
+                        storyProbabilities: storyProbabilities)
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)
@@ -168,11 +171,8 @@ enum StoryCorpus {
                 let event = try await db.eventID(forArticle: resolved)
                 var story = "document:" + resolved
                 if let event { story = "story:" + (try await db.storyID(forEvent: event) ?? event) }
-                // NEWS_SCORE_STORIES=1 (#627) scores stories instead of events: two events of one story count as one.
-                let scoresStories = ProcessInfo.processInfo.environment["NEWS_SCORE_STORIES"] == "1"
-                result[item.id] = (
-                    scoresStories ? story : (event.map { "event:" + $0 } ?? "document:" + resolved), story
-                )
+                // `.event` stays the event; story-level scoring (NEWS_SCORE_STORIES=1, #627) reads `.story`.
+                result[item.id] = (event.map { "event:" + $0 } ?? "document:" + resolved, story)
             }
             await db.close()
             return result
@@ -194,9 +194,12 @@ enum StoryCorpus {
         if environment["NEWS_PAIR_MODEL"] == "0" { return { @Sendable _, _ in nil } }
         guard let path = environment["NEWS_PAIR_MODEL_PATH"] else { return nil }
         let candidate = PairScorer(modelURL: URL(fileURLWithPath: path))
-        guard environment["NEWS_PAIR_RULE"] == "story" else {
-            return { @Sendable a, b in await candidate.probability(a, b) }
+        // A candidate that cannot score fails the evaluation instead of silently handing the rules-only result to it.
+        let score: @Sendable (String, String) async -> Double? = { a, b in
+            guard await candidate.isAvailable else { preconditionFailure("NEWS_PAIR_MODEL_PATH \(path) cannot score") }
+            return await candidate.probability(a, b)
         }
+        guard environment["NEWS_PAIR_RULE"] == "story" else { return score }
         return { @Sendable a, b in
             guard let p = await candidate.probabilities(a, b) else { return nil }
             return p.same > p.related && 1 - p.same - p.related <= 0.10 ? p.same + p.related : 0
@@ -230,11 +233,15 @@ enum StoryCorpus {
             policy.compatibleShare = value
         }
         if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
-        if let value = environment["NEWS_STORY_MODEL"].flatMap(Double.init) { policy.storyModelThreshold = value }
+        if let value = environment["NEWS_STORY_MODEL"].flatMap(Double.init), value.isFinite, (0...1).contains(value) {
+            policy.storyModelThreshold = value
+        }
         if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
         // The semantic veto and rescue cutoffs (#628), swept when the sentence encoder changes.
-        if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init) { policy.semanticVetoThreshold = value }
-        if let value = environment["NEWS_SEMANTIC_RESCUE"].flatMap(Double.init) {
+        if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init), value.isFinite {
+            policy.semanticVetoThreshold = value
+        }
+        if let value = environment["NEWS_SEMANTIC_RESCUE"].flatMap(Double.init), value.isFinite {
             policy.semanticMatchThreshold = value
         }
         return policy

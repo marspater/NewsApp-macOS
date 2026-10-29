@@ -589,7 +589,7 @@ extension NewsTests {
             guard vectors.allSatisfy({ $0 != nil }) else { throw StoryCorpus.Failure.invalid("A text did not embed") }
             report["minilm_\(label)"] = [
                 "load_ms": load, "first_prediction_ms": first, "per_text_median_ms": median(single),
-                "batch_49_ms": corpusBatch, "batch_2000_ms": largeBatch,
+                "batch_\(texts.count)_ms": corpusBatch, "batch_2000_ms": largeBatch,
             ]
 
             // The pair model's functions as `PairScorer` loads them, or its one 256-token function (#554).

@@ -97,7 +97,9 @@ def read_verdicts(labels):
 def holdout_ids(holdout):
     """Article ids of the library holdout's pairs; none without a holdout file."""
     import json
-    return {x for pair in json.loads(holdout.read_text()) for x in (pair['a'], pair['b'])} if holdout else set()
+    if not holdout:
+        return set()
+    return {x for pair in json.loads(holdout.read_text(encoding='utf-8')) for x in (pair['a'], pair['b'])}
 
 
 def library_texts(snapshot):
