@@ -469,49 +469,66 @@ struct NewsTests {
         if CommandLine.arguments.contains("--duplicate-replay") {
             // Local (#583): every same-publisher, same-headline pair of the last seven days of a library copy, re-ingested
             // into a fresh store as two feed items; prints how many pairs become one story and how many stay two.
-            guard let snapshot = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] else {
+            guard let snapshotPath = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] else {
                 throw StoryCorpus.Failure.invalid("--duplicate-replay needs NEWS_SNAPSHOT_DB")
             }
+            // Resolved first, so a link outside the container cannot point the replay at the live library.
+            let snapshot = URL(fileURLWithPath: snapshotPath).resolvingSymlinksInPath().path
             guard !snapshot.contains("/Library/Containers/") else {
                 throw StoryCorpus.Failure.invalid("Replay a copy of the library, never the live file")
             }
             let source = DatabaseEngine(path: snapshot)
             try await source.open()
-            let rows = try await source.eventRows(
+            // Every article of the last seven days; the pairs are formed with the resolver's own folded key, so
+            // punctuation and diacritics fold as in production and both sides of a pair lie inside the window.
+            let articles = try await source.eventRows(
                 """
-                SELECT a.title, a.source, a.guid, a.canonical_url, a.published_at, b.guid, b.canonical_url, b.published_at
-                FROM articles a JOIN articles b
-                    ON a.source = b.source AND lower(a.title) = lower(b.title) AND a.id < b.id
-                WHERE a.published_at > (SELECT max(published_at) FROM articles) - 7 * 86400;
+                SELECT title, source, guid, canonical_url, published_at, id FROM articles
+                WHERE published_at > (SELECT max(published_at) FROM articles) - 7 * 86400
+                ORDER BY published_at, id;
                 """)
             await source.close()
+            var byKey: [String: [[String?]]] = [:]
+            for row in articles {
+                guard let title = row[0], let publisher = row[1],
+                    let key = ArticleIdentity.publisherTitleKey(title: title, source: publisher)
+                else { continue }
+                byKey[key, default: []].append(row)
+            }
+            var pairs = 0
             var merged = 0
             var apart = 0
-            for row in rows {
-                guard let title = row[0], let publisher = row[1], let first = row[4].flatMap(Double.init),
-                    let second = row[7].flatMap(Double.init)
-                else { continue }
-                let fresh = DatabaseEngine(path: ":memory:")
-                try await fresh.open()
-                let a = FeedArticle(
-                    title: title, link: row[3] ?? "", guid: row[2], description: "",
-                    pubDate: Date(timeIntervalSince1970: first), source: publisher)
-                let b = FeedArticle(
-                    title: title, link: row[6] ?? "", guid: row[5], description: "",
-                    pubDate: Date(timeIntervalSince1970: second), source: publisher)
-                try await fresh.upsertArticles([a])
-                try await fresh.upsertArticles([b])
-                let one = try await fresh.resolvedArticleID(for: a) == (try await fresh.resolvedArticleID(for: b))
-                await fresh.close()
-                if one { merged += 1 } else { apart += 1 }
-                print(
-                    String(
-                        format: "      %@ %.1fh %@: %@", one ? "one story " : "two stories", abs(second - first) / 3600,
-                        publisher, title))
+            for group in byKey.values.sorted(by: { ($0.first?[5] ?? "") < ($1.first?[5] ?? "") })
+            where group.count >= 2 {
+                for i in group.indices {
+                    for j in group.indices where j > i {
+                        let (x, y) = (group[i], group[j])
+                        guard let title = x[0], let publisher = x[1], let first = x[4].flatMap(Double.init),
+                            let second = y[4].flatMap(Double.init)
+                        else { continue }
+                        pairs += 1
+                        let fresh = DatabaseEngine(path: ":memory:")
+                        try await fresh.open()
+                        let a = FeedArticle(
+                            title: title, link: x[3] ?? "", guid: x[2], description: "",
+                            pubDate: Date(timeIntervalSince1970: first), source: publisher)
+                        let b = FeedArticle(
+                            title: y[0] ?? title, link: y[3] ?? "", guid: y[2], description: "",
+                            pubDate: Date(timeIntervalSince1970: second), source: publisher)
+                        try await fresh.upsertArticles([a])
+                        try await fresh.upsertArticles([b])
+                        let one =
+                            try await fresh.resolvedArticleID(for: a) == (try await fresh.resolvedArticleID(for: b))
+                        await fresh.close()
+                        if one { merged += 1 } else { apart += 1 }
+                        print(
+                            String(
+                                format: "      %@ %.1fh %@: %@", one ? "one story " : "two stories",
+                                abs(second - first) / 3600, publisher, title))
+                    }
+                }
             }
-            print(
-                "    duplicate replay: \(rows.count) same-publisher pairs, \(merged) become one story, \(apart) stay two"
-            )
+            print("    duplicate replay: \(pairs) same-publisher pairs, \(merged) become one story, \(apart) stay two")
             return
         }
         if CommandLine.arguments.contains("--library-holdout") {
@@ -11740,16 +11757,12 @@ struct NewsTests {
         assertEqual(summaries.first?.seenVersion, 2, "Seen versions add up")
         assertFalse(summaries.first?.hasSubstantiveUpdate ?? true, "Nothing new since the reader looked")
         try await db.upsertArticles([
-            story(5, "Protesters fill Ljubljana streets again after parliament ousts Novak", hours: 6.5)
+            story(5, "Thousands protest in central Ljubljana after parliament votes to oust Novak", hours: 6.5)
         ])
         _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(60))
         summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
-        if try await db.eventID(forArticle: try await db.resolvedArticleID(for: stories[0])) != nil,
-            (summaries.first?.members.count ?? 0) == 5
-        {
-            assertTrue(
-                summaries.first?.hasSubstantiveUpdate ?? false, "A report that joined after the look is an update")
-        }
+        assertEqual(summaries.first?.members.count, 5, "The late protest report joins the story")
+        assertTrue(summaries.first?.hasSubstantiveUpdate ?? false, "A report that joined after the look is an update")
         // "Not the Same Event" through the story: the protest report leaves its own event, not the lead's.
         let separated = try await db.separateArticle(ids[2], fromEvent: storyID ?? "")
         assertEqual(separated.id, protest, "The article leaves the event that held it")
@@ -11779,6 +11792,12 @@ struct NewsTests {
             assertTrue(
                 try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
                 "An exclusion across the events vetoes the story link")
+            // A story id naming an event that pruning removed is cleared with it.
+            try await apart.eventRows("UPDATE events SET story_id = 'pruned-lead' WHERE id = ?;", [.text(protestApart)])
+            try await apart.pruneEmptyEvents()
+            assertEqual(
+                try await apart.eventRows("SELECT story_id FROM events WHERE id = ?;", [.text(protestApart)]).first?[0],
+                nil, "A dangling story id is cleared when its lead event is gone")
         }
         await apart.close()
         await db.close()
@@ -12462,7 +12481,8 @@ struct NewsTests {
                         if let va = vectorCache[items[i].id], let vb = vectorCache[items[j].id] {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
-                        let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let pair = EventMatcher.assess(
+                            a, b, policy: StoryCorpus.policyFromEnvironment(), embeddingSimilarity: similarity)
                         let pairModel =
                             EventMatcher.needsPairModel(pair)
                             ? await PairScorer.shared.probability(
@@ -12817,10 +12837,13 @@ struct NewsTests {
         let byStory = Dictionary(grouping: recent.filter { $0.event != nil }) { storyOf[$0.event ?? ""] ?? "" }
         let storySources = byStory.mapValues { Set($0.map(\.source)).count }
         let multiStory = recent.filter { ($0.event.flatMap { storySources[storyOf[$0] ?? ""] } ?? 0) >= 2 }.count
-        let joinedStories = byStory.filter { Set($0.value.compactMap(\.event)).count >= 2 }
+        // Events per story over every event, not only those with reports in the audit window.
+        let eventsOf = Dictionary(grouping: storyOf.keys) { storyOf[$0] ?? "" }.mapValues(\.count)
+        let joinedStories = byStory.filter { (eventsOf[$0.key] ?? 0) >= 2 }
         if let output = ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"] {
-            // One line per story that joins two or more events: each event's earliest headline, for the group review.
-            var lines = ["story_id,events,members,acts"]
+            // One line per story that joins two or more events: each event's earliest headline within the window,
+            // for the group review.
+            var lines = ["story_id,events,recent_members,recent_acts"]
             for (story, rows) in joinedStories.sorted(by: { $0.key < $1.key }) {
                 let acts = Dictionary(grouping: rows) { $0.event ?? "" }.values
                     .compactMap { group in
@@ -12829,7 +12852,7 @@ struct NewsTests {
                     .sorted()
                 lines.append(
                     [
-                        story, String(acts.count), String(rows.count),
+                        story, String(eventsOf[story] ?? acts.count), String(rows.count),
                         "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
                     ]
                     .joined(separator: ","))
