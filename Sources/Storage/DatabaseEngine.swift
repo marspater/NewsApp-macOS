@@ -1512,13 +1512,13 @@ actor DatabaseEngine {
         sqlite3_bind_double(statement, 2, published - ArticleIdentity.publisherTitleWindow)
         sqlite3_bind_double(statement, 3, published + ArticleIdentity.publisherTitleWindow)
         let catalogued = FeedCatalog.publisher(forLink: article.link) != nil
-        let host = URL(string: article.normalizedLink)?.host
+        let host = MuteRules.linkHost(article.normalizedLink)
         var matches: [String] = []
         while sqlite3_step(statement) == SQLITE_ROW {
             guard let id = sqlite3_column_text(statement, 0), let title = sqlite3_column_text(statement, 1) else {
                 continue
             }
-            let storedHost = sqlite3_column_text(statement, 2).flatMap { URL(string: String(cString: $0))?.host }
+            let storedHost = sqlite3_column_text(statement, 2).flatMap { MuteRules.linkHost(String(cString: $0)) }
             guard catalogued || (host != nil && storedHost == host) else { continue }
             if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.publisherName) == key {
                 matches.append(String(cString: id))
