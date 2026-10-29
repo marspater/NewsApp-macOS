@@ -1120,7 +1120,8 @@ actor DatabaseEngine {
             sqlite3_create_function_v2(db, "news_muted_source", 2, flags, nil, mutedSourceFunction, nil, nil, nil)
                 == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_muted_topic", 3, flags, nil, mutedTopicFunction, nil, nil, nil)
-                == SQLITE_OK
+                == SQLITE_OK,
+            sqlite3_create_function_v2(db, "news_cosine", 2, flags, nil, cosineFunction, nil, nil, nil) == SQLITE_OK
         else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1,
@@ -3892,6 +3893,28 @@ func publisherInputFunction(
     func text(_ index: Int) -> String { sqlite3_value_text(arguments[index]).map { String(cString: $0) } ?? "" }
     let hash = PublisherContentRevision.inputHash(title: text(0), description: text(1), content: text(2))
     sqlite3_result_text(context, hash, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+}
+
+/// `news_cosine(a, b)`: similarity of two stored `article_embeddings` vectors through vDSP
+/// (`SentenceEmbedder.cosineSimilarity`; stored vectors are L2-normalized). NULL unless both are 384-float blobs.
+func cosineFunction(
+    _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
+) {
+    guard count == 2, let values else { return sqlite3_result_null(context) }
+    func vector(_ index: Int) -> [Float]? {
+        let value = values[index]
+        guard sqlite3_value_type(value) == SQLITE_BLOB, let blob = sqlite3_value_blob(value) else { return nil }
+        let dimension = SentenceEmbedder.vectorDimension
+        let byteCount = dimension * MemoryLayout<Float>.stride
+        guard Int(sqlite3_value_bytes(value)) == byteCount else { return nil }
+        // SQLite does not promise Float alignment for blob memory, so copy the bytes instead of rebinding them.
+        return [Float](unsafeUninitializedCapacity: dimension) { buffer, initialized in
+            memcpy(buffer.baseAddress!, blob, byteCount)
+            initialized = dimension
+        }
+    }
+    guard let left = vector(0), let right = vector(1) else { return sqlite3_result_null(context) }
+    sqlite3_result_double(context, SentenceEmbedder.cosineSimilarity(left, right))
 }
 
 /// Pure content classification for the one-time topic repair; never trusts an earlier generated label.

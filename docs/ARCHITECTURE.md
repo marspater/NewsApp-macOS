@@ -314,6 +314,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 - The feed groups an already filtered page (`EventFeedGrouping`). `FeedUpdateBuffer` holds a shown list; additions and regrouping wait behind an explicit update. Saved Stories and History stay ungrouped and unmuted.
 
 - Muting (`MuteRules`) is the reader's own: hosts (cover subdomains) and whole-word topics on headline + feed summary. Applied in SQLite before `LIMIT` via `news_muted_source` / `news_muted_topic`.
+- `news_cosine(a, b)` scores two stored `article_embeddings` vectors in SQL through vDSP (`SentenceEmbedder.cosineSimilarity`); it is NULL unless both are 384-float blobs, so a caller filters by `model_version` and never compares vectors of different models. It is there for hybrid search (#708), which measures its full-scan latency before any vector index is considered.
 
 - Lead images (`StoryCurator`, after a clustering pass): ≤30 imageless shown stories, `fetchArticleHead` reads ≤256 KiB. An image declared by two stories is a site default and dropped.
 
