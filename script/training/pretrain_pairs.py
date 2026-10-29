@@ -348,9 +348,12 @@ def build_gdelt(events, mentions, titles, writer, cap):
 
 # --- SemEval-2022 Task 8 ----------------------------------------------------------------------------------------------
 
+SEMEVAL_CSVS = ('semeval-2022_task8_train-data_batch.csv', 'final_eval_data.csv')
+
+
 def semeval_pairs(cache):
     """English-English pairs with their overall similarity, from the Zenodo training and evaluation CSVs."""
-    for name in ('semeval-2022_task8_train-data_batch.csv', 'final_eval_data.csv'):
+    for name in SEMEVAL_CSVS:
         target = cache / name
         if not target.exists():
             target.write_bytes(fetch(ZENODO + name + '/content'))
@@ -532,6 +535,9 @@ def run_gdelt(args, out, tokenizer):
 def run_semeval(args, out, tokenizer):
     cache = out / 'semeval'
     cache.mkdir(exist_ok=True)
+    if args.cached_only:  # nothing is fetched, the Zenodo CSVs included
+        for name in SEMEVAL_CSVS:
+            require((cache / name).exists(), f'--cached-only needs {name} under {cache}')
     writer = Writer(out / 'semeval-pairs.csv', tokenizer)
     attempts = 0 if args.cached_only else 3  # --cached-only: a stopped fetch's pages are used, nothing is fetched
     written = build_semeval(semeval_pairs(cache), writer, lambda url: archived_page(url, cache, attempts))

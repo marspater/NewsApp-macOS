@@ -17,7 +17,7 @@ Refs #623 (M11), #624 (M12), #574. Built on Mars's Mac with `script/training/pre
 
 `reviewed-pairs.csv`: SHA-256 `6085daced6ea4a29a7b1b5822ce900d1a55bd60614a8d07aa4440afc5d4d2d13`; `library-m15/pairs.csv`: SHA-256 `14e678fe5392bc15d2844406e407233e7f2f600e14af6d195f6bff5be7ce53ee`.
 
-`semeval-pairs.csv` (prefixed, 25 October): SHA-256 `47e899c5967e6328a72e4ce44d96264ed0cf9356d6ab8c0748824e7283569a5e`. Stage-2 files: prefixed library + reviewed `stage2.csv` SHA-256 `2f9d881c20fb84003d1ef3d5f2f48aca39c4272c3d67aeb58e6795e772d7b481`, plain `stage2-m15.csv` `49c2f08025b7ff4f4e3778fa1ee15316d1d0f35254fe9695182bbcf79288e3b7`, prefixed with SemEval `stage2-semeval.csv` `6cb13cbc20972af3d0c1cd354f01d28226c067c6d15e3fa6e1caefc195d746e6`; prefixed `wcep-pairs.csv` (325,545 rows) `ff721259…`, prefixed `gdelt-negatives.csv` (15,725) `ad085156…` as recorded in `run-b/metadata.json`.
+`semeval-pairs.csv` (prefixed, 25 October): SHA-256 `47e899c5967e6328a72e4ce44d96264ed0cf9356d6ab8c0748824e7283569a5e`. Stage-2 files: prefixed library + reviewed `stage2.csv` SHA-256 `2f9d881c20fb84003d1ef3d5f2f48aca39c4272c3d67aeb58e6795e772d7b481`, plain `stage2-m15.csv` `49c2f08025b7ff4f4e3778fa1ee15316d1d0f35254fe9695182bbcf79288e3b7`, prefixed with SemEval `stage2-semeval.csv` `6cb13cbc20972af3d0c1cd354f01d28226c067c6d15e3fa6e1caefc195d746e6`; prefixed `wcep-pairs.csv` (325,545 rows) `ff721259b476f83d2e0f1319f513e221780891e0d94e53d4ea71b18c914d1ec7`, prefixed `gdelt-negatives.csv` (15,725) `ad0851563f101a87e09ded5b7f60a10a31df45bb9b80f89c8c92a7f59d7bde1e` (both also in `run-b/metadata.json`).
 
 `wcep-pairs.csv`: 978,539,979 bytes, SHA-256 `94c2c25a9cc60fe642c732002eab86ec6342b32dd156f27bb9352ee418f56a91`.
 
