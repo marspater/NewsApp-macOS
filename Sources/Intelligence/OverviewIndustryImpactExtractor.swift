@@ -117,16 +117,17 @@ struct OverviewIndustryImpactExtractor: Sendable {
         "supply", "supplies", "shortage", "shortages", "inventory", "backlog", "logistics", "shipment", "shipments",
         "delivery", "deliveries", "supply chain", "bottleneck", "bottlenecks",
         // Demand
-        "demand", "order", "orders", "booking", "bookings", "cancellation", "cancellations", "slump",
+        "demand", "orders", "booking", "bookings", "cancellation", "cancellations", "slump",
         // Regulation
         "regulation", "regulations", "regulator", "regulators", "antitrust", "sanctions", "compliance",
         "trade restriction", "trade restrictions", "subsidy", "subsidies", "mandate",
-        // Jobs
-        "job", "jobs", "layoff", "layoffs", "laid off", "job cut", "job cuts", "hiring", "strike", "strikes",
-        "walkout", "walkouts", "labor", "workers", "union", "wages",
-        // Operations
-        "operation", "operations", "production", "flight", "flights", "halt", "halts", "halted", "cancel",
-        "cancels", "cancelled", "canceling", "plant", "plants", "facility", "facilities", "shutdown", "shutdowns",
+        // Jobs. Single words such as "strike", "workers" or "union" also describe conflict and protest news,
+        // so only unambiguous labor phrases count.
+        "jobs", "layoff", "layoffs", "laid off", "job cut", "job cuts", "hiring", "labor strike", "labour strike",
+        "walkout", "walkouts", "wages",
+        // Operations. "operation", "flight", "plant" and "facility" alone are too ambiguous for the same reason.
+        "production", "production halt", "production halts", "flight cancellations", "halt", "halts", "halted",
+        "cancel", "cancels", "cancelled", "canceling", "plant closure", "plant closures", "shutdown", "shutdowns",
         "outage", "outages", "disruption", "disruptions", "grounded",
     ]
 
@@ -356,27 +357,9 @@ struct OverviewIndustryImpactExtractor: Sendable {
         }
     }
 
-    /// Checks business implication cues in lowercased text and its word set; ignores singular "order"
-    /// when it appears only in "in order to", "in order that", or "in order for".
+    /// Checks business implication cues in lowercased text and its word set.
     private static func hasImplication(text: String, words: Set<String>) -> Bool {
-        for cue in implicationCues {
-            if cue == "order" {
-                if words.contains("order") {
-                    let cleaned =
-                        text
-                        .replacingOccurrences(of: "in order to", with: " ")
-                        .replacingOccurrences(of: "in order that", with: " ")
-                        .replacingOccurrences(of: "in order for", with: " ")
-                    let cleanedWords = wordsSet(from: cleaned)
-                    if cleanedWords.contains("order") {
-                        return true
-                    }
-                }
-            } else if matchesCue(cue, in: text, words: words) {
-                return true
-            }
-        }
-        return false
+        implicationCues.contains { matchesCue($0, in: text, words: words) }
     }
 
     /// Reports whether the article title or sentence contains one of the sports exclusion cues.

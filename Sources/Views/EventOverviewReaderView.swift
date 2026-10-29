@@ -365,31 +365,24 @@ struct EventOverviewReaderView: View {
         return nil
     }
 
-    /// Combines date text (or a formatted publication date), planned status, summary, and citation sources.
-    /// Prefixes dates with "Reported" when there is no event date; omits the date when neither fallback exists.
+    /// Mirrors `timelineDateRow`: the date text plus a "Reported" publication date for dated events, otherwise
+    /// the date text or publication date with a "Reported" prefix; then planned status, summary and sources.
     nonisolated static func timelineItemAccessibilityLabel(
         item: OverviewTimelineItem, citations: [OverviewCitation] = []
     ) -> String {
         var parts: [String] = []
-        let displayDate: String
-        if !item.dateText.isEmpty {
-            displayDate = item.dateText
-        } else if let pubDate = item.publicationDate {
-            displayDate = pubDate.formatted(date: .abbreviated, time: .omitted)
-        } else {
-            displayDate = ""
-        }
-
-        if !displayDate.isEmpty {
-            if item.eventDate != nil {
-                parts.append(displayDate)
-            } else {
-                let label = displayDate.hasPrefix("Reported ") ? displayDate : "Reported \(displayDate)"
-                parts.append(label)
-            }
+        let hasDateText = !item.dateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let publicationText = item.publicationDate?.formatted(date: .abbreviated, time: .omitted)
+        if item.eventDate != nil {
+            if hasDateText { parts.append(item.dateText) }
+        } else if let shown = hasDateText ? item.dateText : publicationText {
+            parts.append(shown.hasPrefix("Reported ") ? shown : "Reported \(shown)")
         }
         if item.isFuturePlan {
             parts.append("Planned")
+        }
+        if item.eventDate != nil, let publicationText {
+            parts.append("Reported \(publicationText)")
         }
         let summaryTrimmed = item.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = summaryTrimmed.hasSuffix(".") ? String(summaryTrimmed.dropLast()) : summaryTrimmed

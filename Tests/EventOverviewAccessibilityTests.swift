@@ -632,6 +632,15 @@ struct EventOverviewAccessibilityTests {
         let voPast = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item1, citations: [cit])
         assertEqual(voPast, "Oct 1. Initial event. Source: AP", "VoiceOver past event reads date, summary, source")
 
+        let itemBothDates = OverviewTimelineItem(
+            id: "t1_reported", dateText: "Oct 1", summary: "Initial event", isFuturePlan: false, eventDate: pastDate1,
+            publicationDate: pubDateOnly)
+        let reportedText = pubDateOnly.formatted(date: .abbreviated, time: .omitted)
+        assertEqual(
+            EventOverviewReaderView.timelineItemAccessibilityLabel(item: itemBothDates, citations: [cit]),
+            "Oct 1. Reported \(reportedText). Initial event. Source: AP",
+            "VoiceOver dated event also reads the Reported publication date shown in the row")
+
         let voPubOnly = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item3, citations: [cit])
         assertEqual(
             voPubOnly, "Reported Oct 3. Reported discovery. Source: AP",
@@ -974,7 +983,7 @@ extension EventOverviewAccessibilityTests {
         let cases: [(industry: String, sentence: String)] = [
             ("Energy", "Energy companies halted pipeline operations after widespread equipment failures yesterday."),
             ("Financial Services", "Banks reduced lending fees after regulators approved the revised rules."),
-            ("Healthcare", "Hospitals suspended operations after workers began a nationwide strike yesterday."),
+            ("Healthcare", "Hospitals halted operations after workers began a nationwide labor strike yesterday."),
             (
                 "Technology",
                 "Chipmakers halted production following severe component supply shortages across the region."
@@ -986,7 +995,7 @@ extension EventOverviewAccessibilityTests {
             ("Media & Entertainment", "Streaming studios halted production after writers began a nationwide strike."),
             (
                 "Telecommunications",
-                "Broadband providers suspended operations after widespread equipment failures last night."
+                "Broadband providers reported outages after widespread equipment failures last night."
             ),
             ("Real Estate", "Construction companies halted operations after workers began a nationwide strike."),
             ("Defense & Aerospace", "Aerospace companies halted production after workers began a nationwide strike."),
@@ -1018,7 +1027,7 @@ extension EventOverviewAccessibilityTests {
             "Energy companies halted pipeline operations after widespread equipment failures yesterday.",
             "Oil refineries reported higher costs after a prolonged equipment outage yesterday.",
             "Banks reduced lending fees after regulators approved the revised rules.",
-            "Hospitals suspended operations after workers began a nationwide strike yesterday.",
+            "Hospitals halted operations after workers began a nationwide labor strike yesterday.",
             "Chipmakers halted production following severe component supply shortages across the region.",
             "Airlines cancelled flights after crews began a nationwide strike yesterday.",
         ]
@@ -1041,7 +1050,8 @@ extension EventOverviewAccessibilityTests {
         let withinPassage = OverviewIndustryImpactExtractor.extractIndustryImpact(
             passages: [combined.passage], articles: [combined.article], existingCitations: [:])
         assertEqual(
-            withinPassage.items.map(\.implication), result.items.map(\.implication), "Limit also applies within a passage")
+            withinPassage.items.map(\.implication), result.items.map(\.implication),
+            "Limit also applies within a passage")
         assertEqual(
             withinPassage.citations.map(\.quote), result.items.map(\.implication),
             "Each quote excludes neighboring sentences")
@@ -1055,7 +1065,7 @@ extension EventOverviewAccessibilityTests {
         assertEqual(
             withSource.items, withinPassage.items, "Metadata does not alter selected implications or identifiers")
         assertEqual(
-            withSource.citations.map(\.source), Array<OverviewSourceMetadata?>(repeating: metadata, count: 4),
+            withSource.citations.map(\.source), [OverviewSourceMetadata?](repeating: metadata, count: 4),
             "Reuses the existing passage source")
         assertEqual(
             withinPassage.citations.first?.sourceTitle, combined.article.title,
@@ -1083,6 +1093,9 @@ extension EventOverviewAccessibilityTests {
             "Local residents reported higher costs after the recent public celebration ended.",
             "Soil samples revealed higher costs for the research team during testing.",
             "Airlines cancelled flights after the championship tournament ended at the stadium.",
+            "A missile strike hit the main hospital in the city, killing twelve people overnight.",
+            "The military operation used precision weapons against targets near the border on Tuesday.",
+            "A court order froze the bank accounts of the suspects pending trial next month.",
         ]
         for sentence in rejected {
             let fixture = impactFixture(sentence)
@@ -1122,11 +1135,11 @@ extension EventOverviewAccessibilityTests {
         assertTrue(
             sportsResult.items.isEmpty, "Sports in the article title excludes an otherwise eligible business sentence")
 
-        let orderFixture = impactFixture("Banks received a large order from clients after the review.")
+        let orderFixture = impactFixture("Banks received large orders from clients after the review.")
         let orderResult = OverviewIndustryImpactExtractor.extractIndustryImpact(
             passages: [orderFixture.passage], articles: [orderFixture.article], existingCitations: [:])
         assertEqual(
-            orderResult.items.map(\.industry), ["Financial Services"], "A genuine order remains a demand implication")
+            orderResult.items.map(\.industry), ["Financial Services"], "Genuine orders remain a demand implication")
 
         // Synthetic padding isolates the word-count boundary from sector and implication matching.
         for count in [7, 8, 60, 61] {
@@ -1172,7 +1185,8 @@ extension EventOverviewAccessibilityTests {
             "A grounded quote cannot support an altered numeric claim")
         assertFalse(
             validates(
-                impact(implication: "Energy companies did not halt pipeline operations after costs rose by 20 percent.")),
+                impact(
+                    implication: "Energy companies did not halt pipeline operations after costs rose by 20 percent.")),
             "A grounded quote cannot support inverted negation")
 
         let brokenCitations = [
@@ -1248,7 +1262,8 @@ extension EventOverviewAccessibilityTests {
             assertEqual(decoded.industryImpact, [impact], "Document exposes the stored industry impact")
             assertEqual(decoded.citations[citation.id], citation, "Document preserves industry citation provenance")
             assertFalse(
-                OverviewEvidenceSections(industryImpact: [impact]).isEmpty, "Industry impact alone keeps sections present")
+                OverviewEvidenceSections(industryImpact: [impact]).isEmpty,
+                "Industry impact alone keeps sections present")
 
             // Optional fields tolerate absence, but malformed present values must not silently disappear.
             for malformed in [
@@ -1413,7 +1428,8 @@ extension EventOverviewAccessibilityTests {
                 articles: [first.article, second.article], model: model)
             assertEqual(generated.kind, .synthesized, "Control: deterministic stub produces an accepted model draft")
             assertEqual(generated.summary, "\(energy) \(technology)", "Draft has the expected introduction")
-            assertEqual(generated.facts.map(\.text), [banking, healthcare, agriculture], "Draft has the expected facts")
+            assertEqual(
+                generated.facts.map(\.text), [banking, healthcare, agriculture], "Draft has the expected facts")
             assertEqual(generated.industryImpact, [keptImpact], "Intro and fact duplicates are removed from impact")
             assertEqual(
                 generated.perspectives, [keptPerspective], "Intro and fact duplicates are removed from perspectives")
