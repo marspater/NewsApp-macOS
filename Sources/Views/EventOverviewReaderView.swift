@@ -641,16 +641,16 @@ struct EventOverviewReaderView: View {
         Self.citedSources(citationIDs, citations: overview.citations, memberArticles: memberArticles)
     }
 
-    /// Returns the first available attribution in citation order, preferring each citation's nonblank
-    /// source name over its matching member article's publisher name, or nil when none is available.
+    /// Returns the first available attribution in citation order, preferring the matching member article's
+    /// nonempty publisher name, then the citation's trimmed, nonblank source name, or nil when none is available.
     private func factPublisher(_ fact: OverviewFact) -> String? {
         for citID in fact.citationIDs {
             if let citation = overview.citations[citID] {
-                if let name = citation.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
-                    return name
-                }
                 if let match = matchingArticle(for: citation), !match.publisherName.isEmpty {
                     return match.publisherName
+                }
+                if let name = citation.sourceName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+                    return name
                 }
             }
         }

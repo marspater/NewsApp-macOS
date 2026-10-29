@@ -131,9 +131,14 @@ struct OverviewIndustryImpactExtractor: Sendable {
         "outage", "outages", "disruption", "disruptions", "grounded",
     ]
 
+    /// Legal orders do not establish customer demand or a practical industry implication.
+    private static let legalOrderCues: [String] = [
+        "court order", "court orders", "restraining order", "restraining orders", "executive order", "executive orders",
+    ]
+
     private static let multiWordRegexes: [String: NSRegularExpression] = {
         var dict: [String: NSRegularExpression] = [:]
-        var allCues: [String] = implicationCues
+        var allCues: [String] = implicationCues + legalOrderCues
         for industry in StandardIndustry.allCases {
             allCues.append(contentsOf: industry.cues)
         }
@@ -357,9 +362,10 @@ struct OverviewIndustryImpactExtractor: Sendable {
         }
     }
 
-    /// Checks business implication cues in lowercased text and its word set.
+    /// Rejects legal-order phrases before checking business implication cues in lowercased text and its word set.
     private static func hasImplication(text: String, words: Set<String>) -> Bool {
-        implicationCues.contains { matchesCue($0, in: text, words: words) }
+        guard !legalOrderCues.contains(where: { matchesCue($0, in: text, words: words) }) else { return false }
+        return implicationCues.contains { matchesCue($0, in: text, words: words) }
     }
 
     /// Reports whether the article title or sentence contains one of the sports exclusion cues.

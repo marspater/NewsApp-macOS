@@ -1096,6 +1096,9 @@ extension EventOverviewAccessibilityTests {
             "A missile strike hit the main hospital in the city, killing twelve people overnight.",
             "The military operation used precision weapons against targets near the border on Tuesday.",
             "A court order froze the bank accounts of the suspects pending trial next month.",
+            "Court orders froze the bank accounts of the suspects pending trial next month.",
+            "Restraining orders barred the bank executives from contacting witnesses during the trial.",
+            "Executive orders directed banks to release the records during the investigation.",
         ]
         for sentence in rejected {
             let fixture = impactFixture(sentence)
