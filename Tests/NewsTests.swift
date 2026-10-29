@@ -5192,10 +5192,12 @@ struct NewsTests {
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         let start = Date(timeIntervalSince1970: 1_700_000_000)
-        func item(_ guid: String, _ path: String, _ title: String, source: String = "CNA", hours: Double) -> FeedArticle
-        {
+        func item(
+            _ guid: String, _ path: String, _ title: String, source: String = "CNA", host: String = "news.invalid",
+            hours: Double
+        ) -> FeedArticle {
             FeedArticle(
-                title: title, link: "https://news.invalid/\(path)", guid: guid, description: "Lead \(guid).",
+                title: title, link: "https://\(host)/\(path)", guid: guid, description: "Lead \(guid).",
                 pubDate: start.addingTimeInterval(hours * 3600), source: source)
         }
         let headline = "OpenAI says its AI agents disabled their own safety monitors"
@@ -5228,6 +5230,26 @@ struct NewsTests {
             "The key folds case, punctuation and diacritics")
         // Once two GUIDs point at one story, either GUID resolves to it on the next refresh.
         assertEqual(try await db.resolvedArticleID(for: second), firstID, "The duplicate's GUID keeps resolving")
+        let hostPairs = [
+            ("example.com", "www.example.com", true),
+            ("www.example.com", "example.com", true),
+            ("WWW.EXAMPLE.COM.", "example.com", true),
+            ("example.com", "other.example.com", false),
+            ("example.com", "another.example", false),
+            ("ft.com", "news.ft.com", true),
+        ]
+        for (index, pair) in hostPairs.enumerated() {
+            let source = "World news \(index)"
+            let original = item(
+                "host-\(index)-1", "original-\(index)", headline, source: source, host: pair.0, hours: 0)
+            let duplicate = item(
+                "host-\(index)-2", "duplicate-\(index)", headline, source: source, host: pair.1, hours: 0.5)
+            try await db.upsertArticles([original])
+            let originalID = try await db.resolvedArticleID(for: original)
+            assertEqual(
+                try await db.resolvedArticleID(for: duplicate) == originalID, pair.2,
+                "Publisher headline matching from \(pair.0) to \(pair.1) respects host normalization and catalog names")
+        }
         await db.close()
     }
 
@@ -11860,28 +11882,32 @@ struct NewsTests {
         _ = try await EventClusterer.run(in: apart, now: now)
         var apartIDs: [String] = []
         for article in stories { apartIDs.append(try await apart.resolvedArticleID(for: article)) }
-        if let voteApart = try await apart.eventID(forArticle: apartIDs[0]),
+        guard let voteApart = try await apart.eventID(forArticle: apartIDs[0]),
             let protestApart = try await apart.eventID(forArticle: apartIDs[2])
-        {
-            assertEqual(
-                try await apart.storyID(forEvent: voteApart), try await apart.storyID(forEvent: protestApart),
-                "Linked before the exclusion")
-            // A reader's exclusion between one vote report and one protest report, both staying in their events.
-            let (low, high) = apartIDs[0] < apartIDs[2] ? (apartIDs[0], apartIDs[2]) : (apartIDs[2], apartIDs[0])
-            try await apart.eventRows(
-                "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
-                [.text(low), .text(high), .real(now.timeIntervalSince1970)])
-            _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(120))
-            assertTrue(
-                try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
-                "An exclusion across the events vetoes the story link")
-            // A story id naming an event that pruning removed is cleared with it.
-            try await apart.eventRows("UPDATE events SET story_id = 'pruned-lead' WHERE id = ?;", [.text(protestApart)])
-            try await apart.pruneEmptyEvents()
-            assertEqual(
-                try await apart.eventRows("SELECT story_id FROM events WHERE id = ?;", [.text(protestApart)]).first?[0],
-                nil, "A dangling story id is cleared when its lead event is gone")
+        else {
+            assertTrue(false, "The vote and the protest are two events in the exclusion fixture")
+            await apart.close()
+            await db.close()
+            return
         }
+        assertEqual(
+            try await apart.storyID(forEvent: voteApart), try await apart.storyID(forEvent: protestApart),
+            "Linked before the exclusion")
+        // A reader's exclusion between one vote report and one protest report, both staying in their events.
+        let (low, high) = apartIDs[0] < apartIDs[2] ? (apartIDs[0], apartIDs[2]) : (apartIDs[2], apartIDs[0])
+        try await apart.eventRows(
+            "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+            [.text(low), .text(high), .real(now.timeIntervalSince1970)])
+        _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(120))
+        assertTrue(
+            try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
+            "An exclusion across the events vetoes the story link")
+        // A story id naming an event that pruning removed is cleared with it.
+        try await apart.eventRows("UPDATE events SET story_id = 'pruned-lead' WHERE id = ?;", [.text(protestApart)])
+        try await apart.pruneEmptyEvents()
+        assertEqual(
+            try await apart.eventRows("SELECT story_id FROM events WHERE id = ?;", [.text(protestApart)]).first?[0],
+            nil, "A dangling story id is cleared when its lead event is gone")
         await apart.close()
         await db.close()
     }
