@@ -901,7 +901,7 @@ struct NewsTests {
         assertEqual(SearchSpelling.distance(scalars("nvida"), scalars("nvidia")), 1, "One deletion is one edit")
         assertEqual(SearchSpelling.distance(scalars("teh"), scalars("the")), 1, "An adjacent swap is one edit")
         assertEqual(SearchSpelling.distance(scalars("kitten"), scalars("sitting")), 3, "Classic distance")
-        let vocabulary = ["nvidia": 3, "chips": 2, "election": 4, "elections": 1, "artificial": 2]
+        let vocabulary = ["nvidia": 3, "chips": 2, "election": 4, "elections": 1, "artificial": 2, "2026": 5]
         func correction(_ term: String) -> String? { SearchSpelling.correction(for: term, in: vocabulary) }
         assertEqual(correction("nvida"), "nvidia", "A typo maps to the library word")
         assertEqual(correction("chps"), "chips", "Four characters allow one edit")
@@ -909,6 +909,7 @@ struct NewsTests {
         assertEqual(correction("chp"), nil, "Under four characters is never changed")
         assertEqual(correction("electionz"), "election", "Ties go to the commoner word")
         assertEqual(correction("zebra"), nil, "Nothing close, no correction")
+        assertEqual(correction("2027"), nil, "A number is never corrected to another number")
         assertEqual(
             SearchSpelling.corrected("Nvida \"artifical\" source:reuters", vocabulary: vocabulary),
             "nvidia artificial source:reuters", "Misspelled terms change; operators stay")

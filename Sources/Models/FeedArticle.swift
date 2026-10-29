@@ -368,11 +368,13 @@ enum SearchSpelling {
     }
 
     /// The word a term most likely meant: nil when the term starts a library word (search matches prefixes), is
-    /// shorter than four characters, or nothing is close. One edit is allowed up to five characters, two beyond;
-    /// ties go to the more frequent word, then the alphabetically first.
+    /// shorter than four characters, holds a digit (2027 is not a typo of 2026), or nothing is close. One edit is
+    /// allowed up to five characters, two beyond; ties go to the more frequent word, then the alphabetically first.
     static func correction(for term: String, in vocabulary: [String: Int]) -> String? {
         let typed = Array(term.unicodeScalars)
-        guard typed.count >= 4, !vocabulary.keys.contains(where: { $0.hasPrefix(term) }) else { return nil }
+        guard typed.count >= 4, !term.contains(where: \.isNumber),
+            !vocabulary.keys.contains(where: { $0.hasPrefix(term) })
+        else { return nil }
         let limit = typed.count <= 5 ? 1 : 2
         var best: String?
         var bestRank = (edits: limit + 1, count: 0)

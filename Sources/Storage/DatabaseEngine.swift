@@ -2313,7 +2313,13 @@ actor DatabaseEngine {
                 throw sqliteError(db, "Cannot prepare spelling vocabulary query")
             }
             defer { sqlite3_finalize(statement) }
-            while sqlite3_step(statement) == SQLITE_ROW { body(statement) }
+            var status = sqlite3_step(statement)
+            while status == SQLITE_ROW {
+                body(statement)
+                status = sqlite3_step(statement)
+            }
+            // A scan that stops early must not be cached as the whole vocabulary.
+            guard status == SQLITE_DONE else { throw sqliteError(db, "Cannot read spelling vocabulary") }
         }
         var key = ""
         try eachRow("SELECT count(*), coalesce(max(rowid), 0) FROM articles;") {
