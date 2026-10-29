@@ -3111,6 +3111,8 @@ actor DatabaseEngine {
         sqlite3_bind_double(stmt, 2, cutoff)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention pruning failed") }
         let changes = Int(sqlite3_changes(db))
+        // The only delete of stories: SQLite may reuse a deleted top rowid, so the spelling cache key could repeat.
+        if changes > 0 { spellingCache = nil }
         try pruneEmptyEvents()
 
         // Prune derived intelligence rows that are no longer needed for active clustering (#537):
