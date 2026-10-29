@@ -1394,7 +1394,8 @@ struct NewsTests {
         let elapsed = ProcessInfo.processInfo.systemUptime - start
         var byID: [String: [Float]] = [:]
         for (item, vector) in zip(fixture.articles, vectors) {
-            if let vector { byID[item.id] = vector }
+            guard let vector else { throw StoryCorpus.Failure.invalid("No embedding for \(item.id); nothing written") }
+            byID[item.id] = vector
         }
         let file = try StoryCorpus.privateDirectory(output).appendingPathComponent("embedding-vectors.json")
         let data = try JSONSerialization.data(
