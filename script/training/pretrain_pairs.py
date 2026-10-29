@@ -98,6 +98,14 @@ SOURCE_ORIGINS = ('https://data.gdeltproject.org/', 'https://zenodo.org/', 'http
 OPENER = urllib.request.build_opener(SourceRedirects())
 
 
+def write_private(target, data):
+    """Writes beside the target and moves into place, so an interrupted write never leaves a truncated cache file."""
+    partial = target.with_name(f'{target.name}.{os.getpid()}.{threading.get_ident()}.tmp')
+    partial.write_bytes(data)
+    os.chmod(partial, 0o600)
+    os.replace(partial, target)
+
+
 def order(a, b):
     """A fixed pseudo-random order (FNV-1a of the two keys), as the Swift exporter uses."""
     value = 14_695_981_039_346_656_037
@@ -268,8 +276,7 @@ def gdelt_download(slot, kind, cache):
     target = cache / f'{slot}.{suffix}'
     if not target.exists():
         try:
-            target.write_bytes(fetch(GDELT + target.name))
-            os.chmod(target, 0o600)
+            write_private(target, fetch(GDELT + target.name))
         except OSError as error:  # URLError and TimeoutError are OSErrors
             print(f'    skip {target.name}: {error}', file=sys.stderr)
             return None
@@ -385,8 +392,7 @@ def semeval_pairs(cache):
     for name in SEMEVAL_CSVS:
         target = cache / name
         if not target.exists():
-            target.write_bytes(fetch(ZENODO + name + '/content'))
-            os.chmod(target, 0o600)
+            write_private(target, fetch(ZENODO + name + '/content'))
         with target.open(newline='', encoding='utf-8') as handle:
             for row in csv.DictReader(handle):
                 if row.get('url1_lang') == 'en' and row.get('url2_lang') == 'en':
