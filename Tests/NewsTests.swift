@@ -5181,10 +5181,12 @@ struct NewsTests {
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         let start = Date(timeIntervalSince1970: 1_700_000_000)
-        func item(_ guid: String, _ path: String, _ title: String, source: String = "CNA", hours: Double) -> FeedArticle
-        {
+        func item(
+            _ guid: String, _ path: String, _ title: String, source: String = "CNA", host: String = "news.invalid",
+            hours: Double
+        ) -> FeedArticle {
             FeedArticle(
-                title: title, link: "https://news.invalid/\(path)", guid: guid, description: "Lead \(guid).",
+                title: title, link: "https://\(host)/\(path)", guid: guid, description: "Lead \(guid).",
                 pubDate: start.addingTimeInterval(hours * 3600), source: source)
         }
         let headline = "OpenAI says its AI agents disabled their own safety monitors"
@@ -5217,6 +5219,26 @@ struct NewsTests {
             "The key folds case, punctuation and diacritics")
         // Once two GUIDs point at one story, either GUID resolves to it on the next refresh.
         assertEqual(try await db.resolvedArticleID(for: second), firstID, "The duplicate's GUID keeps resolving")
+        let hostPairs = [
+            ("example.com", "www.example.com", true),
+            ("www.example.com", "example.com", true),
+            ("WWW.EXAMPLE.COM.", "example.com", true),
+            ("example.com", "other.example.com", false),
+            ("example.com", "another.example", false),
+            ("ft.com", "news.ft.com", true),
+        ]
+        for (index, pair) in hostPairs.enumerated() {
+            let source = "World news \(index)"
+            let original = item(
+                "host-\(index)-1", "original-\(index)", headline, source: source, host: pair.0, hours: 0)
+            let duplicate = item(
+                "host-\(index)-2", "duplicate-\(index)", headline, source: source, host: pair.1, hours: 0.5)
+            try await db.upsertArticles([original])
+            let originalID = try await db.resolvedArticleID(for: original)
+            assertEqual(
+                try await db.resolvedArticleID(for: duplicate) == originalID, pair.2,
+                "Publisher headline matching from \(pair.0) to \(pair.1) respects host normalization and catalog names")
+        }
         await db.close()
     }
 
