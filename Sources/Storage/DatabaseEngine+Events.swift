@@ -1455,6 +1455,11 @@ extension DatabaseEngine {
                     AND NOT EXISTS (SELECT 1 FROM event_overviews o WHERE o.event_id = events.id);
                 """)
         }
+        // A story named by a pruned lead event would otherwise carry that id on its inactive siblings (#581);
+        // `assignStories` rewrites active events only.
+        try executeSimple(
+            "UPDATE events SET story_id = NULL WHERE story_id IS NOT NULL AND story_id NOT IN (SELECT id FROM events);"
+        )
     }
 
     // MARK: - Article Features and Pair Decisions (#522)

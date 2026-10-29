@@ -24,11 +24,17 @@ CLASSES = {
 }
 
 
+def inside_checkout(path):
+    """Whether the resolved path lies in this checkout (or any Git checkout): article text never enters one."""
+    resolved = pathlib.Path(path).expanduser().resolve()
+    checkout = pathlib.Path(__file__).resolve().parents[2]
+    return checkout in resolved.parents or any((parent / '.git').exists() for parent in resolved.parents)
+
+
 def private_export(value):
     """The export file, which must be a regular file outside this checkout."""
     path = pathlib.Path(value).expanduser().resolve()
-    checkout = pathlib.Path(__file__).resolve().parents[2]
-    if not path.is_file() or checkout in path.parents:
+    if not path.is_file() or inside_checkout(path):
         raise argparse.ArgumentTypeError(f'{value} is not a private export outside the checkout')
     return path
 
@@ -52,7 +58,7 @@ def main(argv=None):
                         help='prepend the gap-and-publisher words (#626); off, as the app and the exporter default')
     args = parser.parse_args(argv)
     if args.labels:
-        if not (args.snapshot and args.out) or '.git' in [p.name for p in [args.out, *args.out.parents]]:
+        if not (args.snapshot and args.out) or inside_checkout(args.out):
             parser.error('--labels needs --snapshot and --out, outside the checkout')
         written = export_labels(args.export, args.kind, args.labels, args.snapshot, args.out, args.holdout,
                                 args.prefix)
@@ -147,6 +153,11 @@ def export_labels(export, kind, labels, snapshot, out, holdout=None, prefixed=Fa
     from wordpiece import Tokenizer, pair_prefix
     text, tokenizer = library_texts(snapshot), Tokenizer()
     exists = require_header(out)
+    existing = set()
+    if exists:
+        # A rerun of the same labels must not double a row's weight; distinct review rounds still append.
+        with out.open(newline='', encoding='utf-8') as handle:
+            existing = {(row['text_a'], row['text_b']) for row in csv.DictReader(handle)}
     written = 0
     with out.open('a', newline='', encoding='utf-8') as handle:
         # Local training rows, never opened as a spreadsheet.
@@ -155,8 +166,9 @@ def export_labels(export, kind, labels, snapshot, out, holdout=None, prefixed=Fa
             writer.writerow(HEADER)
         for index, row, label in labelled_rows(export, kind, read_verdicts(labels), holdout_ids(holdout)):
             a, b = text(row['article_id']), text(row['other_article_id'])
-            if not a or not b:
+            if not a or not b or (a, b) in existing:
                 continue
+            existing.add((a, b))
             if prefixed:
                 # The prefix an earlier model read (#626): the pair's gap and whether one publisher wrote both.
                 prefix = pair_prefix(abs(float(row['published_a']) - float(row['published_b'])) / 3600,
