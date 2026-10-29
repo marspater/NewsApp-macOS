@@ -651,7 +651,8 @@ enum EventMatcher {
             && (score >= policy.compatibilityScore || (embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold)
             && (!policy.compatibleRequiresMatch || isMatch)
         let anchorlessCandidate =
-            sharedAnchors == 0 && (embeddingSimilarity ?? 0) >= policy.anchorlessModelCosine
+            sharedAnchors == 0 && embeddingSimilarity != nil
+            && (embeddingSimilarity ?? 0) >= policy.anchorlessModelCosine
             && gap <= policy.anchorlessModelGap
         let isBorderline =
             !isMatch && conflict == nil && !primaryDisjoint
