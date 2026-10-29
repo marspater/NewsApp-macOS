@@ -11777,28 +11777,32 @@ struct NewsTests {
         _ = try await EventClusterer.run(in: apart, now: now)
         var apartIDs: [String] = []
         for article in stories { apartIDs.append(try await apart.resolvedArticleID(for: article)) }
-        if let voteApart = try await apart.eventID(forArticle: apartIDs[0]),
+        guard let voteApart = try await apart.eventID(forArticle: apartIDs[0]),
             let protestApart = try await apart.eventID(forArticle: apartIDs[2])
-        {
-            assertEqual(
-                try await apart.storyID(forEvent: voteApart), try await apart.storyID(forEvent: protestApart),
-                "Linked before the exclusion")
-            // A reader's exclusion between one vote report and one protest report, both staying in their events.
-            let (low, high) = apartIDs[0] < apartIDs[2] ? (apartIDs[0], apartIDs[2]) : (apartIDs[2], apartIDs[0])
-            try await apart.eventRows(
-                "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
-                [.text(low), .text(high), .real(now.timeIntervalSince1970)])
-            _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(120))
-            assertTrue(
-                try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
-                "An exclusion across the events vetoes the story link")
-            // A story id naming an event that pruning removed is cleared with it.
-            try await apart.eventRows("UPDATE events SET story_id = 'pruned-lead' WHERE id = ?;", [.text(protestApart)])
-            try await apart.pruneEmptyEvents()
-            assertEqual(
-                try await apart.eventRows("SELECT story_id FROM events WHERE id = ?;", [.text(protestApart)]).first?[0],
-                nil, "A dangling story id is cleared when its lead event is gone")
+        else {
+            assertTrue(false, "The vote and the protest are two events in the exclusion fixture")
+            await apart.close()
+            await db.close()
+            return
         }
+        assertEqual(
+            try await apart.storyID(forEvent: voteApart), try await apart.storyID(forEvent: protestApart),
+            "Linked before the exclusion")
+        // A reader's exclusion between one vote report and one protest report, both staying in their events.
+        let (low, high) = apartIDs[0] < apartIDs[2] ? (apartIDs[0], apartIDs[2]) : (apartIDs[2], apartIDs[0])
+        try await apart.eventRows(
+            "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+            [.text(low), .text(high), .real(now.timeIntervalSince1970)])
+        _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(120))
+        assertTrue(
+            try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
+            "An exclusion across the events vetoes the story link")
+        // A story id naming an event that pruning removed is cleared with it.
+        try await apart.eventRows("UPDATE events SET story_id = 'pruned-lead' WHERE id = ?;", [.text(protestApart)])
+        try await apart.pruneEmptyEvents()
+        assertEqual(
+            try await apart.eventRows("SELECT story_id FROM events WHERE id = ?;", [.text(protestApart)]).first?[0],
+            nil, "A dangling story id is cleared when its lead event is gone")
         await apart.close()
         await db.close()
     }
