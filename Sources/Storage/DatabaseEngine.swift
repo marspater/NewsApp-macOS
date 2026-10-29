@@ -2301,7 +2301,8 @@ actor DatabaseEngine {
         return try searchArticles(query: corrected, limit: 1, muting: muting).isEmpty ? nil : corrected
     }
 
-    /// Word counts of visible headlines and feed summaries, rebuilt only after stories are added or removed.
+    /// Word counts of visible headlines and feed summaries, rebuilt only after stories are added, removed, re-worded
+    /// or reconciled: every insert and every headline or summary change appends a `publisher_content_revisions` row.
     private func spellingVocabulary() throws -> [String: Int] {
         guard let db = db else {
             throw NSError(
@@ -2322,8 +2323,13 @@ actor DatabaseEngine {
             guard status == SQLITE_DONE else { throw sqliteError(db, "Cannot read spelling vocabulary") }
         }
         var key = ""
-        try eachRow("SELECT count(*), coalesce(max(rowid), 0) FROM articles;") {
-            key = "\(sqlite3_column_int64($0, 0)):\(sqlite3_column_int64($0, 1))"
+        try eachRow(
+            """
+            SELECT (SELECT count(*) FROM articles), (SELECT coalesce(max(rowid), 0) FROM publisher_content_revisions),
+                   (SELECT count(*) FROM article_reconciliations);
+            """
+        ) {
+            key = "\(sqlite3_column_int64($0, 0)):\(sqlite3_column_int64($0, 1)):\(sqlite3_column_int64($0, 2))"
         }
         if let spellingCache, spellingCache.key == key { return spellingCache.words }
         var words: [String: Int] = [:]

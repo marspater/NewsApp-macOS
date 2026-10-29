@@ -930,6 +930,14 @@ struct NewsTests {
             try await db.searchSuggestion(query: "nvida chips"), "nvidia chips", "The suggestion fixes the typo")
         assertEqual(
             try await db.searchSuggestion(query: "nvidia tariffs"), nil, "A word with nothing close gets no suggestion")
+        // A re-worded headline keeps the story count and rowid; the cached word list must still see the new words.
+        try await db.upsertArticles([
+            FeedArticle(
+                title: "Nvidia unveils new processors", link: "https://example.com/nvidia", guid: "nvidia",
+                description: "The chipmaker raised its forecast", pubDate: Date(), source: "Publisher")
+        ])
+        assertEqual(
+            try await db.searchSuggestion(query: "procesors"), "processors", "An edited headline refreshes the words")
         await db.close()
     }
 
