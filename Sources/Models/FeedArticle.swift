@@ -374,20 +374,21 @@ enum SearchSpelling {
         let typed = Array(term.unicodeScalars)
         guard typed.count >= 4, !vocabulary.keys.contains(where: { $0.hasPrefix(term) }) else { return nil }
         let limit = typed.count <= 5 ? 1 : 2
-        var best: (word: String, edits: Int, count: Int)?
+        var best: String?
+        var bestRank = (edits: limit + 1, count: 0)
         for (word, count) in vocabulary {
             let candidate = Array(word.unicodeScalars)
             guard abs(candidate.count - typed.count) <= limit else { continue }
             let edits = distance(typed, candidate)
-            guard edits <= limit else { continue }
-            if let current = best,
-                (current.edits, -current.count, current.word) <= (edits, -count, word)
-            {
-                continue
-            }
-            best = (word, edits, count)
+            let isBetter =
+                edits < bestRank.edits
+                || (edits == bestRank.edits
+                    && (count > bestRank.count || (count == bestRank.count && word < (best ?? word))))
+            guard edits <= limit, isBetter else { continue }
+            best = word
+            bestRank = (edits, count)
         }
-        return best?.word
+        return best
     }
 
     /// The query with every misspelled term replaced, operators and other words kept; nil when nothing changed.
