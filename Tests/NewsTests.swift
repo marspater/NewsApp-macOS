@@ -11764,13 +11764,15 @@ struct NewsTests {
         // The gate: re-clustering the copy without corrections re-merges the excluded vote pair, so the harness fails.
         let holdout = directory.appendingPathComponent("holdout.json")
         try Data("[]".utf8).write(to: holdout)
-        var failed = false
+        var failure = ""
         do {
             try await evaluateLibraryHoldout(snapshot: path, holdout: holdout.path)
         } catch {
-            failed = true
+            failure = "\(error)"
         }
-        assertTrue(failed, "A violated verdict fails the library holdout run")
+        assertTrue(
+            failure.contains("reader verdicts violated"), "A violated verdict fails the library holdout run: \(failure)"
+        )
     }
 
     /// The story layer (#581): two events of one story (a vote and the protest after it) become one card, versions and
@@ -13215,7 +13217,16 @@ struct NewsTests {
             func append(_ label: Int, _ group: String, _ i: Int, _ j: Int, weight: Int = 1) {
                 let pairKey = [key(rows[i].title) + "|" + rows[i].source, key(rows[j].title) + "|" + rows[j].source]
                     .sorted().joined(separator: "\n")
-                guard seen.insert(pairKey).inserted else { return }
+                if weight == 5 {
+                    // A verdict is one article pair: keyed by ids, so two pairs with the same headlines stay
+                    // distinct; the text key is taken as well, so the mined row of that pair is skipped.
+                    guard seen.insert([rows[i].id, rows[j].id].sorted().joined(separator: "\n")).inserted else {
+                        return
+                    }
+                    seen.insert(pairKey)
+                } else {
+                    guard seen.insert(pairKey).inserted else { return }
+                }
                 lines.append(
                     [
                         String(label), quoted(group), quoted(rows[i].text), quoted(rows[j].text), pieces(rows[i].text),
