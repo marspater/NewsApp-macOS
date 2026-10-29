@@ -61,6 +61,16 @@ struct EventOverviewAccessibilityTests {
         testEpicT3HighlightSeparationAndHierarchy()
         testEpicT4DistinctPerspectivesDesign()
         await testEpicTRobustnessConcurrencyAndErrorHandling()
+        testIndustryImpactSectorCoverage()
+        testIndustryImpactSelectionAndCitations()
+        testIndustryImpactEligibilityBoundaries()
+        testIndustryImpactCitationValidation()
+        testEvidenceSectionsCompatibility()
+        testOverviewDeduplicationBoundaries()
+        testComposerPreservesIndustryImpactWithTimeline()
+        await testModelCompositionDeduplicatesEvidenceSections()
+        testTimelineOrderingTiesAndMissingDates()
+        testEvidenceAttributionFallbacks()
 
         print("Finished \(testsRun) event overview accessibility checks with \(failures) failures.")
         if failures > 0 {
@@ -935,5 +945,584 @@ struct EventOverviewAccessibilityTests {
         } catch {
             assertTrue(false, "OverviewEvidenceSections JSON serialization threw: \(error)")
         }
+    }
+}
+
+extension EventOverviewAccessibilityTests {
+    // MARK: - Industry impact regression fixtures
+
+    private static func impactFixture(
+        _ text: String, id: String = "impact-regression", title: String = "Business update"
+    ) -> (article: FeedArticle, passage: EvidencePassage) {
+        let article = FeedArticle(
+            storedID: id, title: title, link: "https://example.com/\(id)", guid: id,
+            description: text, pubDate: Date(timeIntervalSince1970: 1_793_088_000), source: "Fixture News")
+        return (article, EvidencePassage(id: "passage-\(id)", articleID: id, text: text))
+    }
+
+    private static func impactCitation(
+        _ passage: EvidencePassage, id: String = "impact-citation", fingerprint: String? = nil,
+        articleID: String? = nil, quote: String? = nil, source: OverviewSourceMetadata? = nil
+    ) -> OverviewCitation {
+        OverviewCitation(
+            id: id, articleID: articleID ?? passage.articleID, passageID: passage.id,
+            passageFingerprint: fingerprint ?? passage.fingerprint, quote: quote ?? passage.text, source: source)
+    }
+
+    static func testIndustryImpactSectorCoverage() {
+        print("  - Testing industry sector recognition and sentence-level citation grounding...")
+        let cases: [(industry: String, sentence: String)] = [
+            ("Energy", "Energy companies halted pipeline operations after widespread equipment failures yesterday."),
+            ("Financial Services", "Banks reduced lending fees after regulators approved the revised rules."),
+            ("Healthcare", "Hospitals suspended operations after workers began a nationwide strike yesterday."),
+            (
+                "Technology",
+                "Chipmakers halted production following severe component supply shortages across the region."
+            ),
+            ("Transportation", "Airlines cancelled flights after crews began a nationwide strike yesterday."),
+            ("Agriculture", "Farmers reported falling crop prices after the recent harvest ended."),
+            ("Manufacturing", "Steel manufacturers halted production after workers began a nationwide strike."),
+            ("Retail & E-commerce", "E-commerce orders increased after shoppers returned during the annual sale."),
+            ("Media & Entertainment", "Streaming studios halted production after writers began a nationwide strike."),
+            (
+                "Telecommunications",
+                "Broadband providers suspended operations after widespread equipment failures last night."
+            ),
+            ("Real Estate", "Construction companies halted operations after workers began a nationwide strike."),
+            ("Defense & Aerospace", "Aerospace companies halted production after workers began a nationwide strike."),
+        ]
+        for (index, entry) in cases.enumerated() {
+            let fixture = impactFixture(entry.sentence, id: "sector-\(index)")
+            let result = OverviewIndustryImpactExtractor.extractIndustryImpact(
+                passages: [fixture.passage], articles: [fixture.article], existingCitations: [:])
+            assertEqual(
+                result.items.map(\.industry), [entry.industry], "Recognizes \(entry.industry) from its own cues")
+            assertEqual(result.items.map(\.implication), [entry.sentence], "Preserves the publisher's exact sentence")
+            assertEqual(result.citations.count, 1, "Each sector has one supporting citation")
+            guard let item = result.items.first, let citation = result.citations.first else { continue }
+            assertEqual(item.citationIDs, [citation.id], "Impact points to the returned citation")
+            assertEqual(citation.quote, entry.sentence, "Citation quotes only the extracted sentence")
+            assertEqual(citation.articleID, fixture.article.id, "Citation retains the stored article identity")
+            assertEqual(citation.passageID, fixture.passage.id, "Citation retains the stored passage identity")
+            assertEqual(citation.passageFingerprint, fixture.passage.fingerprint, "Citation binds to the passage text")
+            assertTrue(
+                OverviewIndustryImpactExtractor.validateIndustryImpact(
+                    item, against: [citation.id: citation], passages: [fixture.passage], articles: [fixture.article]),
+                "Extracted \(entry.industry) implication passes claim verification")
+        }
+    }
+
+    static func testIndustryImpactSelectionAndCitations() {
+        print("  - Testing industry limits, missing articles, and source metadata...")
+        let sentences = [
+            "Energy companies halted pipeline operations after widespread equipment failures yesterday.",
+            "Oil refineries reported higher costs after a prolonged equipment outage yesterday.",
+            "Banks reduced lending fees after regulators approved the revised rules.",
+            "Hospitals suspended operations after workers began a nationwide strike yesterday.",
+            "Chipmakers halted production following severe component supply shortages across the region.",
+            "Airlines cancelled flights after crews began a nationwide strike yesterday.",
+        ]
+        let fixtures = sentences.enumerated().map { impactFixture($0.element, id: "selection-\($0.offset)") }
+        let orphan = impactFixture(sentences[0], id: "orphan")
+        let result = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [orphan.passage] + fixtures.map(\.passage), articles: fixtures.map(\.article),
+            existingCitations: [:])
+        assertEqual(
+            result.items.map(\.industry), ["Energy", "Financial Services", "Healthcare", "Technology"],
+            "Skips missing articles, retains the first implication per industry, and caps results at four")
+        assertEqual(
+            result.items.map(\.implication), [sentences[0], sentences[2], sentences[3], sentences[4]],
+            "Selection preserves passage order without replacing an earlier sector's sentence")
+        assertEqual(result.citations.count, 4, "Skipped candidates produce no unused citations")
+        assertEqual(Set(result.items.map(\.id)).count, 4, "Selected impact identifiers are unique")
+        assertEqual(Set(result.citations.map(\.id)).count, 4, "Selected citation identifiers are unique")
+
+        let combined = impactFixture(sentences.joined(separator: " "), id: "combined")
+        let withinPassage = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [combined.passage], articles: [combined.article], existingCitations: [:])
+        assertEqual(
+            withinPassage.items.map(\.implication), result.items.map(\.implication), "Limit also applies within a passage")
+        assertEqual(
+            withinPassage.citations.map(\.quote), result.items.map(\.implication),
+            "Each quote excludes neighboring sentences")
+
+        let metadata = OverviewSourceMetadata(
+            title: "Original publisher headline", name: "Original Wire", url: "https://example.com/original",
+            publishedAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let existing = impactCitation(combined.passage, id: "existing-source", source: metadata)
+        let withSource = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [combined.passage], articles: [combined.article], existingCitations: [existing.id: existing])
+        assertEqual(
+            withSource.items, withinPassage.items, "Metadata does not alter selected implications or identifiers")
+        assertEqual(
+            withSource.citations.map(\.source), Array<OverviewSourceMetadata?>(repeating: metadata, count: 4),
+            "Reuses the existing passage source")
+        assertEqual(
+            withinPassage.citations.first?.sourceTitle, combined.article.title,
+            "Missing metadata falls back to article title")
+        assertEqual(
+            withinPassage.citations.first?.publishedAt, combined.article.pubDate, "Fallback preserves publication date")
+
+        let repeated = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: fixtures.map(\.passage), articles: fixtures.map(\.article), existingCitations: [:])
+        assertEqual(repeated.items, result.items, "Repeated extraction produces identical items")
+        assertEqual(repeated.citations, result.citations, "Repeated extraction produces identical citations")
+    }
+
+    static func testIndustryImpactEligibilityBoundaries() {
+        print("  - Testing industry eligibility, exclusions, and sentence length boundaries...")
+        let rejected = [
+            "Energy prices are expected to rise after the recent pipeline disruption.",
+            "Analysts predict that energy costs will double after the supply disruption.",
+            "Investors should buy shares in energy companies after the supply disruption.",
+            "Banks received a strong buy recommendation after reporting higher lending fees.",
+            "Energy researchers gathered samples in order to understand the unusual findings.",
+            "Energy researchers gathered samples in order that colleagues could examine them.",
+            "Energy researchers gathered samples in order for colleagues to examine them.",
+            "Energy researchers presented their latest findings at the annual conference yesterday.",
+            "Local residents reported higher costs after the recent public celebration ended.",
+            "Soil samples revealed higher costs for the research team during testing.",
+            "Airlines cancelled flights after the championship tournament ended at the stadium.",
+        ]
+        for sentence in rejected {
+            let fixture = impactFixture(sentence)
+            let result = OverviewIndustryImpactExtractor.extractIndustryImpact(
+                passages: [fixture.passage], articles: [fixture.article], existingCitations: [:])
+            assertTrue(result.items.isEmpty, "Rejects ineligible sentence: \(sentence)")
+            assertTrue(result.citations.isEmpty, "Rejected sentence creates no citation")
+        }
+
+        let sentence = "Energy costs increased across all regional markets today."
+        let fixture = impactFixture(sentence)
+        let mixed = impactFixture("\(rejected[0]) \(sentence)", id: "forecast-then-stated")
+        let mixedResult = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [mixed.passage], articles: [mixed.article], existingCitations: [:])
+        assertEqual(
+            mixedResult.items.map(\.implication), [sentence],
+            "Rejecting a forecast does not prevent a later stated implication for the same industry")
+        assertEqual(mixedResult.citations.map(\.quote), [sentence], "Only the accepted sentence receives a citation")
+        for exclusion in [
+            " \n\(sentence.uppercased())\t ", "Energy costs increased across all regional markets yesterday.",
+        ] {
+            let excluded = OverviewIndustryImpactExtractor.extractIndustryImpact(
+                passages: [fixture.passage], articles: [fixture.article], existingCitations: [:],
+                excludeSentences: [exclusion])
+            assertTrue(excluded.items.isEmpty, "Excludes normalized or near-duplicate highlights")
+            assertTrue(excluded.citations.isEmpty, "Excluded highlights create no citation")
+        }
+        let retained = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [fixture.passage], articles: [fixture.article], existingCitations: [:],
+            excludeSentences: ["  \n ", "The council approved a new bridge yesterday."])
+        assertEqual(
+            retained.items.map(\.implication), [sentence], "Blank and unrelated highlights do not suppress impact")
+
+        let sportsTitle = impactFixture(sentence, title: "World Cup championship report")
+        let sportsResult = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [sportsTitle.passage], articles: [sportsTitle.article], existingCitations: [:])
+        assertTrue(
+            sportsResult.items.isEmpty, "Sports in the article title excludes an otherwise eligible business sentence")
+
+        let orderFixture = impactFixture("Banks received a large order from clients after the review.")
+        let orderResult = OverviewIndustryImpactExtractor.extractIndustryImpact(
+            passages: [orderFixture.passage], articles: [orderFixture.article], existingCitations: [:])
+        assertEqual(
+            orderResult.items.map(\.industry), ["Financial Services"], "A genuine order remains a demand implication")
+
+        // Synthetic padding isolates the word-count boundary from sector and implication matching.
+        for count in [7, 8, 60, 61] {
+            let padding = Array(repeating: "regional", count: count - 5).joined(separator: " ")
+            let boundary = impactFixture("Energy costs increased across \(padding) markets.")
+            let result = OverviewIndustryImpactExtractor.extractIndustryImpact(
+                passages: [boundary.passage], articles: [boundary.article], existingCitations: [:])
+            let expected = (8...60).contains(count) ? 1 : 0
+            assertEqual(result.items.count, expected, "Sentence length \(count) respects inclusive 8–60 word bounds")
+            assertEqual(result.citations.count, expected, "Sentence length rejection leaves no citation")
+        }
+    }
+
+    static func testIndustryImpactCitationValidation() {
+        print("  - Testing industry impact validation fails closed on broken evidence...")
+        let sentence = "Energy companies halted pipeline operations after costs rose by 20 percent."
+        let fixture = impactFixture(sentence)
+        let citation = impactCitation(fixture.passage)
+        func impact(
+            industry: String = "Energy", implication: String? = nil, ids: [String] = ["impact-citation"]
+        ) -> OverviewIndustryImpact {
+            OverviewIndustryImpact(
+                id: "validation-impact", industry: industry, implication: implication ?? sentence, citationIDs: ids)
+        }
+        func validates(
+            _ item: OverviewIndustryImpact, citationMap: [String: OverviewCitation]? = nil,
+            passages: [EvidencePassage]? = nil
+        ) -> Bool {
+            OverviewIndustryImpactExtractor.validateIndustryImpact(
+                item, against: citationMap ?? [citation.id: citation], passages: passages ?? [fixture.passage],
+                articles: [fixture.article])
+        }
+        assertTrue(validates(impact()), "Control: grounded industry implication validates")
+        assertFalse(validates(impact(ids: [])), "An implication requires at least one citation")
+        assertFalse(validates(impact(implication: " \n\t ")), "Whitespace implication is invalid")
+        assertFalse(validates(impact(industry: "Unknown Sector")), "Undocumented industry is invalid")
+        assertFalse(validates(impact(), citationMap: [:]), "Missing citation is invalid")
+        assertFalse(validates(impact(), passages: []), "Missing passage is invalid")
+        assertFalse(
+            validates(impact(ids: [citation.id, "missing"])), "Every citation must resolve, even after a valid one")
+        assertFalse(
+            validates(impact(implication: sentence.replacingOccurrences(of: "20", with: "90"))),
+            "A grounded quote cannot support an altered numeric claim")
+        assertFalse(
+            validates(
+                impact(implication: "Energy companies did not halt pipeline operations after costs rose by 20 percent.")),
+            "A grounded quote cannot support inverted negation")
+
+        let brokenCitations = [
+            impactCitation(fixture.passage, fingerprint: "stale-fingerprint"),
+            impactCitation(fixture.passage, articleID: "different-article"),
+            impactCitation(fixture.passage, quote: "The source never reported this sentence."),
+        ]
+        for broken in brokenCitations {
+            assertFalse(
+                validates(impact(), citationMap: [broken.id: broken]),
+                "Rejects stale fingerprints, mismatched articles, and ungrounded quotes")
+        }
+    }
+
+    static func testEvidenceSectionsCompatibility() {
+        print("  - Testing legacy evidence decoding and complete document round trips...")
+        let legacyJSON = """
+            {
+                "introduction": [{"id":"intro","text":"A cited introduction.","citationIDs":["c"]}],
+                "timeline": [{"id":"past","dateText":"Oct 1","summary":"Talks opened.",
+                              "citationIDs":["c"],"isFuturePlan":false}],
+                "perspectives": [{"id":"speaker","participant":"Council","position":"Supported the plan.",
+                                  "citationIDs":["c"],"sourcePublisher":"Fixture News"}],
+                "thematicAngle": {"id":"angle","title":"Costs","summary":"Costs rose.","citationIDs":["c"],"facts":[]},
+                "coverageSentiment": {"score":0.25,"label":"Measured","confidence":0.8,"rationale":"Source wording"}
+            }
+            """
+        do {
+            let decoder = JSONDecoder()
+            let encoder = JSONEncoder()
+            let legacy = try decoder.decode(OverviewEvidenceSections.self, from: Data(legacyJSON.utf8))
+            assertTrue(
+                legacy.industryImpact.isEmpty, "Legacy populated sections default missing industry impact to empty")
+            assertEqual(legacy.introduction?.map(\.id), ["intro"], "Legacy introduction survives the new decoder")
+            assertEqual(legacy.timeline.map(\.id), ["past"], "Legacy timeline survives the new decoder")
+            assertEqual(legacy.perspectives.map(\.id), ["speaker"], "Legacy perspectives survive the new decoder")
+            assertEqual(legacy.thematicAngle?.title, "Costs", "Legacy thematic angle survives the new decoder")
+            assertEqual(legacy.coverageSentiment?.score, 0.25, "Legacy coverage sentiment survives the new decoder")
+            assertFalse(legacy.isEmpty, "Populated legacy sections are still present")
+            assertEqual(
+                try decoder.decode(OverviewEvidenceSections.self, from: encoder.encode(legacy)), legacy,
+                "Every legacy field survives re-encoding")
+
+            let nullJSON = """
+                {"introduction":null,"timeline":null,"perspectives":null,"industryImpact":null,
+                 "thematicAngle":null,"coverageSentiment":null}
+                """
+            let nullSections = try decoder.decode(OverviewEvidenceSections.self, from: Data(nullJSON.utf8))
+            assertEqual(
+                nullSections, OverviewEvidenceSections(), "Explicit null sections use the absent-section defaults")
+            let emptyObject = try JSONSerialization.jsonObject(with: encoder.encode(nullSections)) as? [String: Any]
+            assertEqual(emptyObject?.count, 0, "Empty optional sections are omitted from the encoded object")
+
+            let fixture = impactFixture("Energy costs increased across all regional markets today.")
+            let citation = impactCitation(fixture.passage)
+            let impact = OverviewIndustryImpact(
+                id: "round-trip-impact", industry: "Energy", implication: fixture.passage.text,
+                citationIDs: [citation.id])
+            let sections = OverviewEvidenceSections(
+                timeline: legacy.timeline, perspectives: legacy.perspectives, thematicAngle: legacy.thematicAngle,
+                coverageSentiment: legacy.coverageSentiment, introduction: legacy.introduction,
+                industryImpact: [impact])
+            let document = EventOverviewDocument(
+                id: "round-trip-document", eventID: "round-trip-event",
+                version: OverviewVersionContext(membershipVersion: 7, inputTextHash: "stable-input"),
+                content: OverviewContent(
+                    title: "Energy update", summary: "", citations: [citation], evidenceSections: sections),
+                provenance: OverviewProvenance(
+                    memberArticleIDs: [fixture.article.id], kind: .fallbackExcerpts,
+                    createdAt: fixture.article.pubDate, updatedAt: fixture.article.pubDate))
+            let decoded = try decoder.decode(EventOverviewDocument.self, from: encoder.encode(document))
+            assertEqual(decoded, document, "Complete overview round trip preserves new and existing fields")
+            assertEqual(decoded.industryImpact, [impact], "Document exposes the stored industry impact")
+            assertEqual(decoded.citations[citation.id], citation, "Document preserves industry citation provenance")
+            assertFalse(
+                OverviewEvidenceSections(industryImpact: [impact]).isEmpty, "Industry impact alone keeps sections present")
+
+            // Optional fields tolerate absence, but malformed present values must not silently disappear.
+            for malformed in [
+                #"{"industryImpact":{}}"#,
+                #"{"industryImpact":[{"id":"bad","industry":"Energy","implication":"Costs rose."}]}"#,
+                #"{"timeline":"invalid"}"#,
+                #"{"perspectives":17}"#,
+            ] {
+                do {
+                    _ = try decoder.decode(OverviewEvidenceSections.self, from: Data(malformed.utf8))
+                    assertTrue(false, "Malformed evidence must throw: \(malformed)")
+                } catch is DecodingError {
+                    assertTrue(true, "Malformed evidence is rejected by the decoder")
+                }
+            }
+        } catch {
+            assertTrue(false, "Evidence compatibility fixture failed: \(error)")
+        }
+    }
+
+    static func testOverviewDeduplicationBoundaries() {
+        print("  - Testing inclusive deduplication thresholds and preservation of distinct viewpoints...")
+        let excluded = "alpha bravo charlie delta echo foxtrot golf hotel india juliet"
+        // All tokens are distinct: the union is ten, making the threshold exact and independent of token ordering.
+        let cases: [(text: String, keepPerspective: Bool, keepImpact: Bool)] = [
+            (" \n\(excluded.uppercased())\t ", false, false),
+            ("alpha bravo charlie delta echo foxtrot golf", false, false),  // 7/10: perspective boundary
+            ("alpha bravo charlie delta echo foxtrot", true, false),  // 6/10: impact boundary
+            ("alpha bravo charlie delta echo", true, true),
+            ("kilo lima mike november oscar", true, true),
+        ]
+        for entry in cases {
+            let perspective = OverviewPerspective(
+                id: "threshold-view", participant: "Council", position: entry.text, citationIDs: ["c"],
+                sourcePublisher: "Fixture News", originalWireSource: "AP")
+            let impact = OverviewIndustryImpact(
+                id: "threshold-impact", industry: "Energy", implication: entry.text, citationIDs: ["c"])
+            assertEqual(
+                OverviewComposer.deduplicatePerspectives([perspective], against: [excluded]),
+                entry.keepPerspective ? [perspective] : [], "Perspective uses an inclusive 0.7 overlap threshold")
+            assertEqual(
+                OverviewComposer.deduplicateIndustryImpact([impact], against: [excluded]),
+                entry.keepImpact ? [impact] : [], "Impact uses an inclusive 0.6 overlap threshold")
+        }
+        let first = OverviewPerspective(
+            id: "first", participant: "Workers", position: "Workers supported revised pay rules.")
+        let duplicate = OverviewPerspective(id: "duplicate", participant: "Council", position: excluded)
+        let last = OverviewPerspective(
+            id: "last", participant: "Residents", position: "Residents requested improved bus access.")
+        assertEqual(
+            OverviewComposer.deduplicatePerspectives([first, duplicate, last], against: [excluded, "  "]),
+            [first, last], "Filtering preserves source-coverage order and every retained perspective's fields")
+        let blank = OverviewIndustryImpact(id: "blank", industry: "Energy", implication: " \n\t ")
+        assertTrue(
+            OverviewComposer.deduplicateIndustryImpact([blank], against: []).isEmpty,
+            "Empty implications are removed even without exclusions")
+    }
+
+    static func testComposerPreservesIndustryImpactWithTimeline() {
+        print("  - Testing industry impact survives timeline attachment without repeating highlights...")
+        let timelineSentences = [
+            "The council approved the river bridge proposal on October 1, 2026.",
+            "The council opened the river bridge to residents on October 3, 2026.",
+        ]
+        let impactSentence = "Energy costs increased across all regional markets today."
+        let fixtures = (timelineSentences + [impactSentence]).enumerated().map {
+            impactFixture($0.element, id: "composition-\($0.offset)")
+        }
+        let facts = fixtures.prefix(2).map {
+            PassageAnchoredFact(
+                id: "fact-\($0.article.id)", statement: $0.passage.text, passageID: $0.passage.id,
+                quote: $0.passage.text, articleID: $0.article.id)
+        }
+        let document = OverviewComposer.composeOverview(
+            eventID: "impact-timeline", eventTitle: "Bridge update", verifiedFacts: facts,
+            passages: fixtures.map(\.passage), articles: fixtures.map(\.article), membershipVersion: 7)
+        assertEqual(document.timeline.count, 2, "Control: both dated facts produce the attached timeline")
+        assertEqual(
+            document.industryImpact.map(\.implication), [impactSentence], "Attaching a timeline preserves impact")
+        assertEqual(document.membershipVersion, 7, "Composition retains event membership binding")
+        assertEqual(document.memberArticleIDs, fixtures.map { $0.article.id }, "Composition retains original members")
+        for item in document.industryImpact {
+            assertTrue(
+                OverviewIndustryImpactExtractor.validateIndustryImpact(
+                    item, against: document.citations, passages: fixtures.map(\.passage),
+                    articles: fixtures.map(\.article)),
+                "Composed industry citations remain resolvable and grounded after attachment")
+        }
+
+        let highlightedImpact = PassageAnchoredFact(
+            id: "highlighted-impact", statement: impactSentence, passageID: fixtures[2].passage.id,
+            quote: impactSentence, articleID: fixtures[2].article.id)
+        let deduplicated = OverviewComposer.composeOverview(
+            eventID: "impact-highlight", eventTitle: "Energy update", verifiedFacts: [highlightedImpact],
+            passages: [fixtures[2].passage], articles: [fixtures[2].article])
+        assertEqual(
+            deduplicated.facts.map(\.text), [impactSentence], "Control: industry sentence is selected as a highlight")
+        assertTrue(deduplicated.industryImpact.isEmpty, "Highlight sentence is not repeated as industry impact")
+    }
+
+    static func testModelCompositionDeduplicatesEvidenceSections() async {
+        print("  - Testing model composition deduplicates introduction and facts while preserving other evidence...")
+        let energy = "Energy costs increased across all regional markets today."
+        let banking = "Regional banks reduced lending fees after the review."
+        let healthcare = "Hospital workers resumed operations after the pay agreement."
+        let technology = "Chipmakers halted production following severe component supply shortages."
+        let agriculture = "Farmers reported falling crop prices after the harvest."
+        let transportation = "Shipping companies cancelled deliveries after ports halted operations."
+        let viewpoint = "Port workers supported revised staffing rules."
+        let datedEvent = "The review opened on October 1, 2026."
+        let first = impactFixture([energy, banking, healthcare].joined(separator: " "), id: "model-first")
+        let second = impactFixture(
+            [technology, agriculture, transportation, viewpoint, datedEvent].joined(separator: " "), id: "model-second")
+        let firstCitation = impactCitation(first.passage, id: "first-impact-citation")
+        let citation = impactCitation(second.passage)
+        let keptImpact = OverviewIndustryImpact(
+            id: "kept-impact", industry: "Transportation", implication: transportation, citationIDs: [citation.id])
+        let keptPerspective = OverviewPerspective(
+            id: "kept-view", participant: "Port workers", position: viewpoint,
+            citationIDs: [citation.id], sourcePublisher: "Fixture News")
+        let timeline = [
+            OverviewTimelineItem(
+                id: "model-timeline", dateText: "Oct 1, 2026", summary: datedEvent, citationIDs: [citation.id])
+        ]
+        let sections = OverviewEvidenceSections(
+            timeline: timeline,
+            perspectives: [
+                OverviewPerspective(
+                    id: "intro-view", participant: "Council", position: energy, citationIDs: [firstCitation.id]),
+                OverviewPerspective(
+                    id: "fact-view", participant: "Banks", position: banking, citationIDs: [firstCitation.id]),
+                keptPerspective,
+            ],
+            industryImpact: [
+                OverviewIndustryImpact(
+                    id: "intro-impact", industry: "Energy", implication: energy, citationIDs: [firstCitation.id]),
+                OverviewIndustryImpact(
+                    id: "fact-impact", industry: "Financial Services", implication: banking,
+                    citationIDs: [firstCitation.id]),
+                keptImpact,
+            ])
+        let fallback = EventOverviewDocument(
+            id: "model-fallback", eventID: "model-event",
+            version: OverviewVersionContext(membershipVersion: 3, inputTextHash: "model-input"),
+            content: OverviewContent(
+                title: "Business update", summary: "", citations: [firstCitation, citation], evidenceSections: sections),
+            provenance: OverviewProvenance(
+                memberArticleIDs: [first.article.id, second.article.id], kind: .fallbackExcerpts))
+        let answer = """
+            INTRO|P1|\(energy)
+            INTRO|P2|\(technology)
+            FACT|P1|\(banking)
+            FACT|P1|\(healthcare)
+            FACT|P2|\(agriculture)
+            """
+        let model = NewsTextModel { prompt, _ in
+            prompt.contains("Return plain text only:") ? answer : "YES"
+        }
+        do {
+            let generated = try await OverviewComposer.composeWithModel(
+                fallback: fallback, passages: [first.passage, second.passage],
+                articles: [first.article, second.article], model: model)
+            assertEqual(generated.kind, .synthesized, "Control: deterministic stub produces an accepted model draft")
+            assertEqual(generated.summary, "\(energy) \(technology)", "Draft has the expected introduction")
+            assertEqual(generated.facts.map(\.text), [banking, healthcare, agriculture], "Draft has the expected facts")
+            assertEqual(generated.industryImpact, [keptImpact], "Intro and fact duplicates are removed from impact")
+            assertEqual(
+                generated.perspectives, [keptPerspective], "Intro and fact duplicates are removed from perspectives")
+            assertEqual(generated.timeline, timeline, "Other evidence sections survive model replacement")
+            assertEqual(
+                generated.citations[citation.id], citation, "Retained impact and perspective keep their citation")
+            assertEqual(generated.version, fallback.version, "Model replacement preserves input and version binding")
+            assertEqual(
+                generated.memberArticleIDs, fallback.memberArticleIDs, "Model replacement preserves original members")
+            assertEqual(fallback.industryImpact.count, 3, "Composition does not mutate the fallback document")
+        } catch {
+            assertTrue(false, "Stubbed model composition failed: \(error)")
+        }
+    }
+
+    static func testTimelineOrderingTiesAndMissingDates() {
+        print("  - Testing stable timeline ordering, date precedence, and undated labels...")
+        let early = Date(timeIntervalSince1970: 1000)
+        let later = Date(timeIntervalSince1970: 2000)
+        let event = OverviewTimelineItem(
+            id: "event", dateText: "Oct 1", summary: "Event occurred.", eventDate: early, publicationDate: later)
+        let sameEvent = OverviewTimelineItem(
+            id: "event-tie", dateText: "Oct 1", summary: "Additional event.", eventDate: early)
+        let reported = OverviewTimelineItem(
+            id: "reported", dateText: "Oct 1", summary: "Report published.", publicationDate: early)
+        let publicationTie = OverviewTimelineItem(
+            id: "reported-tie", dateText: "Oct 1", summary: "Second report published.", publicationDate: early)
+        let undated = OverviewTimelineItem(id: "undated", dateText: "", summary: "  Undated update. \n")
+        let undatedTie = OverviewTimelineItem(id: "undated-tie", dateText: "", summary: "Another update.")
+        let plan = OverviewTimelineItem(
+            id: "plan", dateText: "Oct 1", summary: "Vote scheduled.", isFuturePlan: true, eventDate: early)
+        let laterPlan = OverviewTimelineItem(
+            id: "later-plan", dateText: "Oct 2", summary: "Hearing scheduled.", isFuturePlan: true, eventDate: later)
+        let undatedPlan = OverviewTimelineItem(
+            id: "undated-plan", dateText: "", summary: "Review scheduled.", isFuturePlan: true)
+        let input = [undated, undatedPlan, reported, laterPlan, event, publicationTie, plan, sameEvent, undatedTie]
+        let sorted = EventOverviewReaderView.sortTimelineItems(input)
+        assertEqual(
+            sorted.map(\.id),
+            [
+                "event", "event-tie", "reported", "reported-tie", "undated", "undated-tie", "plan", "later-plan",
+                "undated-plan",
+            ],
+            "Event date wins over publication date; dated rows precede undated rows and ties retain source order")
+        assertEqual(
+            EventOverviewReaderView.sortTimelineItems(sorted), sorted, "Sorting an ordered timeline is idempotent")
+        assertEqual(input.first?.id, "undated", "Sorting leaves the source timeline untouched")
+        assertEqual(
+            EventOverviewReaderView.timelineItemAccessibilityLabel(item: undated), "Undated update",
+            "Missing dates omit the date line and do not announce Reported")
+        assertEqual(
+            EventOverviewReaderView.timelineItemAccessibilityLabel(item: undatedPlan), "Planned. Review scheduled",
+            "Undated plans still announce Planned without a fabricated date")
+        let blank = OverviewTimelineItem(id: "blank", dateText: "Oct 1", summary: " \n\t ")
+        assertEqual(
+            EventOverviewReaderView.filterValidTimeline([undated, blank]), [undated],
+            "An undated summary is retained while a dated blank summary is removed")
+    }
+
+    static func testEvidenceAttributionFallbacks() {
+        print("  - Testing evidence attribution fallbacks and punctuation...")
+        let fixture = impactFixture("Energy costs increased across all regional markets today.")
+        let source = OverviewSourceMetadata(name: "Fixture News")
+        let citation = impactCitation(fixture.passage, source: source)
+        let unknownCitation = impactCitation(fixture.passage, id: "unknown-source")
+        let secondCitation = impactCitation(
+            fixture.passage, id: "second-source", source: OverviewSourceMetadata(name: "Second Wire"))
+        assertEqual(
+            EventOverviewReaderView.highlightAccessibilityLabel(
+                takeaway: "  Costs rose. \n", publisher: nil, citations: [unknownCitation, citation, secondCitation]),
+            "Costs rose. Source: Fixture News, Second Wire", "Unknown highlight publisher falls back to cited sources")
+        assertEqual(
+            EventOverviewReaderView.highlightAccessibilityLabel(
+                takeaway: "Costs rose.", publisher: "Named Publisher", citations: [citation]),
+            "Costs rose. Source: Named Publisher", "Explicit publisher takes precedence over citation attribution")
+        assertEqual(
+            EventOverviewReaderView.perspectiveAccessibilityLabel(
+                participant: "  Council \n", position: "  Supported the plan. \n", source: nil, citations: [citation]),
+            "Council. Supported the plan. Source: Fixture News",
+            "Perspective trims text and falls back to citation source")
+        assertEqual(
+            EventOverviewReaderView.industryImpactAccessibilityLabel(
+                industry: "Energy", implication: "  Costs rose. \n", citations: [unknownCitation]),
+            "Energy: Costs rose.", "Unknown sources do not create empty source announcements")
+        assertEqual(
+            EventOverviewReaderView.industryImpactAccessibilityLabel(
+                industry: "Energy", implication: "Costs rose.", citations: [citation, secondCitation]),
+            "Energy: Costs rose. Source: Fixture News, Second Wire", "Multiple sources use one sentence separator")
+        assertEqual(
+            EventOverviewReaderView.formatPerspectiveSource(wire: " \n ", publisher: "  Local News \n"),
+            "via Local News", "Blank wire falls back to a trimmed publisher")
+        assertEqual(
+            EventOverviewReaderView.formatPerspectiveSource(wire: " via AP ", publisher: "Local News"),
+            "via AP syndicate", "Wire takes precedence and does not duplicate the via prefix")
+        assertEqual(
+            EventOverviewReaderView.formatPerspectiveSource(wire: " \n", publisher: " \t"), nil,
+            "Absent attribution does not generate a placeholder")
+
+        let incomplete = [
+            OverviewIndustryImpact(id: "blank-sector", industry: " \n", implication: "Costs rose."),
+            OverviewIndustryImpact(id: "blank-text", industry: "Energy", implication: " \t"),
+        ]
+        assertFalse(
+            EventOverviewReaderView.hasEvidenceContent(
+                timeline: [], perspectives: [], industryImpact: incomplete, thematicAngle: nil),
+            "Incomplete impact entries do not make an empty evidence section visible")
+        let valid = OverviewIndustryImpact(id: "visible", industry: "Energy", implication: fixture.passage.text)
+        assertEqual(
+            EventOverviewReaderView.filterValidIndustryImpact([incomplete[0], valid, incomplete[1]]), [valid],
+            "Filtering incomplete impact entries preserves valid data")
     }
 }
