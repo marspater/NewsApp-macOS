@@ -12573,6 +12573,10 @@ struct NewsTests {
                         vectorCache[item.id] = vector
                     }
                 }
+                // The replay's scorer (a candidate model or none under NEWS_PAIR_MODEL=0), else the shipped one; built once.
+                let probability =
+                    StoryCorpus.pairProbabilityFromEnvironment()
+                    ?? { @Sendable a, b in await PairScorer.shared.probability(a, b) }
                 for i in items.indices {
                     for j in items.indices where j > i {
                         let gold = items[i].event != nil && items[i].event == items[j].event
@@ -12596,10 +12600,6 @@ struct NewsTests {
                                     text, gap: abs(items[i].published.timeIntervalSince(items[j].published)),
                                     samePublisher: known ? items[i].source == items[j].source : nil) : text
                         }
-                        // The replay's scorer (a candidate model or none under NEWS_PAIR_MODEL=0), else the shipped one.
-                        let probability =
-                            StoryCorpus.pairProbabilityFromEnvironment()
-                            ?? { @Sendable a, b in await PairScorer.shared.probability(a, b) }
                         let pairModel = EventMatcher.needsPairModel(pair) ? await probability(input(i), input(j)) : nil
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
