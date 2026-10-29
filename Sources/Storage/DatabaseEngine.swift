@@ -19,6 +19,10 @@ actor DatabaseEngine {
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
+    /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
+    private(set) var lastStoryPass: Date?
+
+    func recordStoryPass(at date: Date) { lastStoryPass = date }
     private(set) var healthNotice: String?
 
     func databaseHealthNotice() -> String? {
