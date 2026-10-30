@@ -49,13 +49,16 @@ final class NotificationPermissionRequest {
     private var subscription: AnyCancellable?
 
     init(feedManager: FeedManager, settings: AppSettings, request: @escaping () -> Void) {
-        subscription = feedManager.$lastRefreshCompletedAt
-            .combineLatest(
-                feedManager.$articles.map { !$0.isEmpty }.removeDuplicates(), settings.$notificationsEnabled,
-                settings.$firstLaunchCompleted
-            )
-            .sink { [weak self] refreshed, hasStories, enabled, onboarded in
-                guard let self, !self.hasRequested, refreshed != nil, hasStories, enabled, onboarded else { return }
+        // Stories are checked when a refresh completes, never while one is still publishing its first stories.
+        let refreshedWithStories = feedManager.$lastRefreshCompletedAt
+            .compactMap { $0 }
+            .filter { [weak feedManager] _ in feedManager?.articles.isEmpty == false }
+            .first()
+        subscription =
+            refreshedWithStories
+            .combineLatest(settings.$notificationsEnabled, settings.$firstLaunchCompleted)
+            .sink { [weak self] _, enabled, onboarded in
+                guard let self, !self.hasRequested, enabled, onboarded else { return }
                 self.hasRequested = true
                 request()
             }

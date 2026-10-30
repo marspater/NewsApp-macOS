@@ -17084,7 +17084,11 @@ struct NewsTests {
         let delivering = TestCounter()
         let feedManager = await manager(settings, delivering: delivering)
         var requests = 0
-        let request = NotificationPermissionRequest(feedManager: feedManager, settings: settings) { requests += 1 }
+        var requestedMidRefresh = false
+        let request = NotificationPermissionRequest(feedManager: feedManager, settings: settings) {
+            requests += 1
+            requestedMidRefresh = requestedMidRefresh || feedManager.isAnyFeedLoading
+        }
         assertEqual(requests, 0, "Nothing is asked at launch")
         settings.completeFirstLaunch()
         await feedManager.fetchFeedsAsync()
@@ -17093,6 +17097,7 @@ struct NewsTests {
         await feedManager.fetchFeedsAsync()
         assertTrue(!feedManager.articles.isEmpty, "The second refresh brings a story")
         assertEqual(requests, 1, "The first refresh with stories asks once")
+        assertFalse(requestedMidRefresh, "After an empty refresh, the next one asks only once it has completed")
         await feedManager.fetchFeedsAsync()
         settings.setNotificationsEnabled(false)
         settings.setNotificationsEnabled(true)
