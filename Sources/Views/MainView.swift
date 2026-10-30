@@ -473,7 +473,7 @@ struct MainView: View {
     private func operatorSuggestion(_ option: (token: String, summary: String)) -> some View {
         HStack(spacing: AppSpacing.sm) {
             Image(systemName: operatorIcon(for: option.token))
-                .foregroundStyle(AppColor.accent)
+                .foregroundStyle(AppColor.accentText)
                 .frame(width: 16)
                 .accessibilityHidden(true)
             ZStack(alignment: .leading) {
