@@ -176,7 +176,7 @@ public struct MarkAllAsReadIntent: AppIntent {
     @MainActor
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         let store = articleStore ?? IntentDependencyResolver.resolveArticleStore()
-        await store.markAllAsRead()
+        await store.markAllAsRead(muting: IntentDependencyResolver.resolveAppSettings().muteRules)
         return .result(dialog: "All stories marked as read.")
     }
 }
