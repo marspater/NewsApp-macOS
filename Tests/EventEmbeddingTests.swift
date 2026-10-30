@@ -12,7 +12,11 @@ extension NewsTests {
         print("  - Testing on-device sentence embeddings & hybrid matcher (#127, #307)...")
 
         try testBertTokenizer()
+        try await testSentenceEmbedderUnavailableResources()
         try await testSentenceEmbedderInference()
+        try await testSentenceEmbedderPaddedCompatibility()
+        try await testSentenceEmbedderBatchBoundaries()
+        try await testEmbeddingVectorExport()
         try await testArticleEmbeddingsDatabaseRoundtrip()
         try await testArticleEmbeddingsForeignKeyCascade()
         try await testHybridEventMatcherSemanticRescueAndVeto()
@@ -210,6 +214,206 @@ extension NewsTests {
             abs(SentenceEmbedder.cosineSimilarity(batchVectors[2], vecC) - 1.0) < 1e-5,
             "Batch vector 2 matches single embed vector"
         )
+    }
+
+    // MARK: - SentenceEmbedder throughput regressions (#540)
+
+    private static func embeddingResource(_ name: String, _ ext: String) -> URL {
+        Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Models")
+            ?? URL(fileURLWithPath: "Sources/Resources/Models/\(name).\(ext)")
+    }
+
+    private static func testSentenceEmbedderUnavailableResources() async throws {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let cases = [
+            ("missing model", missing, embeddingResource("vocab", "txt")),
+            ("missing vocabulary", embeddingResource("minilm", "mlmodelc"), missing),
+            ("both missing", missing, missing),
+        ]
+        for (label, modelURL, vocabURL) in cases {
+            let embedder = SentenceEmbedder(modelURL: modelURL, vocabURL: vocabURL)
+            let available = await embedder.isAvailable
+            assertFalse(available, "\(label): embedder must be unavailable")
+            let single = await embedder.embed("Apple reports earnings")
+            assertEqual(single, nil, "\(label): single embedding fails gracefully")
+            let empty = await embedder.embedBatch([])
+            assertTrue(empty.isEmpty, "\(label): empty batch stays empty")
+            let texts = (0...SentenceEmbedder.batchLimit).map { "Report \($0)" }
+            let batch = await embedder.embedBatch(texts)
+            assertEqual(batch.count, texts.count, "\(label): unavailable batch preserves every position")
+            assertTrue(batch.allSatisfy { $0 == nil }, "\(label): unavailable batch contains only nils")
+        }
+    }
+
+    private static func assertValidEmbedding(_ vector: [Float], _ context: String) {
+        assertEqual(vector.count, 384, "\(context): dimension remains compatible with stored vectors")
+        assertTrue(vector.allSatisfy { $0.isFinite }, "\(context): every component is finite")
+        let squaredNorm = vector.reduce(0.0) { $0 + Double($1) * Double($1) }
+        assertTrue(abs(squaredNorm - 1) < 1e-3, "\(context): vector has unit length")
+    }
+
+    private static func assertEmbeddingMatches(_ actual: [Float], _ expected: [Float], _ context: String) {
+        assertValidEmbedding(actual, context)
+        assertEqual(actual.count, expected.count, "\(context): vector dimensions match")
+        let cosine = zip(actual, expected).reduce(0.0) { $0 + Double($1.0) * Double($1.1) }
+        assertTrue(cosine >= 0.9999, "\(context): cosine \(cosine) preserves the pre-optimization embedding")
+    }
+
+    /// Independent oracle for the pre-#540 contract: 128 padded input positions and boxed, mask-aware pooling.
+    /// Comparing only embedBatch with embed would miss a regression shared by both new paths.
+    private static func paddedEmbedding(
+        _ text: String, model: MLModel, tokenizer: BertWordPieceTokenizer
+    ) throws -> [Float] {
+        let encoded = tokenizer.encode(text, maxSequenceLength: 128)
+        let ids = try MLMultiArray(shape: [1, 128], dataType: .int32)
+        let mask = try MLMultiArray(shape: [1, 128], dataType: .int32)
+        for index in 0..<128 {
+            ids[index] = NSNumber(value: encoded.inputIDs[index])
+            mask[index] = NSNumber(value: encoded.attentionMask[index])
+        }
+        let input = try MLDictionaryFeatureProvider(dictionary: [
+            "input_ids": MLFeatureValue(multiArray: ids), "attention_mask": MLFeatureValue(multiArray: mask),
+        ])
+        let output = try model.prediction(from: input)
+        guard let hidden = output.featureValue(for: "last_hidden_state")?.multiArrayValue else {
+            throw StoryCorpus.Failure.invalid("Padded reference model has no last_hidden_state")
+        }
+        var vector = [Double](repeating: 0, count: 384)
+        for token in 0..<128 where encoded.attentionMask[token] == 1 {
+            for dimension in vector.indices {
+                vector[dimension] += hidden[[0, NSNumber(value: token), NSNumber(value: dimension)]].doubleValue
+            }
+        }
+        // The positive mean divisor cancels in L2 normalization.
+        let norm = sqrt(vector.reduce(0) { $0 + $1 * $1 })
+        assertTrue(norm > 0 && norm.isFinite, "Padded reference has a finite, nonzero norm")
+        return vector.map { Float($0 / norm) }
+    }
+
+    private static func testSentenceEmbedderPaddedCompatibility() async throws {
+        let tokenizer = try BertWordPieceTokenizer(vocabURL: embeddingResource("vocab", "txt"))
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .all
+        let model = try MLModel(contentsOf: embeddingResource("minilm", "mlmodelc"), configuration: configuration)
+        let full = Array(repeating: "apple", count: 126).joined(separator: " ")
+        let overflow = full + " earthquake damages buildings"
+        let texts = [
+            "", " \t\n ", "Apple", "Erdoğan meets Sánchez in Ankara.",
+            String(repeating: "z", count: 101),
+            Array(repeating: "apple", count: 125).joined(separator: " "), full, overflow,
+        ]
+        let lengths = texts.map { tokenizer.encode($0).attentionMask.filter { $0 == 1 }.count }
+        assertEqual(lengths[0], 2, "Empty input still includes CLS and SEP")
+        assertEqual(lengths[5], 127, "Fixture exercises one token below the sequence limit")
+        assertEqual(lengths[6], 128, "Fixture exactly fills the model's sequence limit")
+        assertEqual(
+            tokenizer.encode(full).inputIDs, tokenizer.encode(overflow).inputIDs,
+            "Text beyond the token limit is truncated before SEP")
+
+        let embedder = SentenceEmbedder.shared
+        let batch = await embedder.embedBatch(texts)
+        assertEqual(batch.count, texts.count, "Mixed-length batch preserves every input")
+        for (index, text) in texts.enumerated() {
+            let expected = try paddedEmbedding(text, model: model, tokenizer: tokenizer)
+            guard let single = await embedder.embed(text), let batched = batch[index] else {
+                assertTrue(false, "Boundary text \(index) must embed singly and in a batch")
+                return
+            }
+            assertEmbeddingMatches(single, expected, "Single boundary text \(index)")
+            assertEmbeddingMatches(batched, expected, "Batched boundary text \(index)")
+        }
+        assertEqual(SentenceEmbedder.modelVersion, 2, "Compatible embeddings keep the stored-vector version")
+    }
+
+    private static func testSentenceEmbedderBatchBoundaries() async throws {
+        let embedder = SentenceEmbedder.shared
+        let samples = [
+            "", "Apple reports record quarterly revenue.",
+            "A powerful earthquake damages buildings in eastern Turkey.",
+            "Erdoğan meets Sánchez in Ankara.",
+            Array(repeating: "apple", count: 126).joined(separator: " "),
+        ]
+        var expected: [[Float]] = []
+        for text in samples {
+            guard let vector = await embedder.embed(text) else {
+                assertTrue(false, "Every batch-order fixture must embed")
+                return
+            }
+            assertValidEmbedding(vector, "Batch-order reference")
+            expected.append(vector)
+        }
+        let limit = SentenceEmbedder.batchLimit
+        for count in [0, 1, limit - 1, limit, limit + 1, 2 * limit + 1] {
+            let texts = (0..<count).map { samples[$0 % samples.count] }
+            let batch = await embedder.embedBatch(texts)
+            assertEqual(batch.count, count, "Batch of \(count) preserves cardinality including its final partial chunk")
+            for index in texts.indices {
+                guard let vector = batch[index] else {
+                    assertTrue(false, "Batch of \(count) must retain the vector at index \(index)")
+                    return
+                }
+                assertEmbeddingMatches(vector, expected[index % samples.count], "Batch of \(count), index \(index)")
+            }
+        }
+        // A later call must not retain positions or output buffers from the preceding multi-chunk batch.
+        let repeated = await embedder.embedBatch([samples[2], samples[1], samples[2]])
+        assertEqual(repeated.count, 3, "A subsequent batch has only its own results")
+        for (index, expectedIndex) in [2, 1, 2].enumerated() {
+            guard let vector = repeated[index] else {
+                assertTrue(false, "Repeated input at \(index) must retain its position")
+                return
+            }
+            assertEmbeddingMatches(vector, expected[expectedIndex], "Subsequent batch index \(index)")
+        }
+    }
+
+    private static func testEmbeddingVectorExport() async throws {
+        struct Article: Decodable { let id: String, title: String, description: String? }
+        struct Fixture: Decodable { let articles: [Article] }
+        let fixture = try JSONDecoder().decode(
+            Fixture.self,
+            from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/story-corpus/matcher-regressions-v1.json")))
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? fm.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("embedding-vectors.json")
+        try await exportEmbeddingVectors(output: directory.path)
+        let original = try Data(contentsOf: file)
+        let vectors = try JSONDecoder().decode([String: [Float]].self, from: original)
+        assertEqual(Set(vectors.keys), Set(fixture.articles.map(\.id)), "Export includes exactly the authored corpus IDs")
+        for article in fixture.articles {
+            let text = EventFeatures.matchingText(title: article.title, description: article.description ?? "")
+            guard let exported = vectors[article.id], let expected = await SentenceEmbedder.shared.embed(text) else {
+                assertTrue(false, "Export contains a usable vector for \(article.id)")
+                return
+            }
+            assertEmbeddingMatches(exported, expected, "Exported article \(article.id)")
+        }
+        let attributes = try fm.attributesOfItem(atPath: file.path)
+        assertEqual(
+            (attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600,
+            "Embedding evidence is readable and writable only by its owner")
+
+        do {
+            try await exportEmbeddingVectors(output: directory.path)
+            assertTrue(false, "A second export must refuse to overwrite the comparison reference")
+        } catch {
+            assertEqual(try Data(contentsOf: file), original, "Refused export leaves the reference byte-for-byte intact")
+        }
+
+        // A pre-existing output link must not let an export replace a separate reference file.
+        let target = directory.appendingPathComponent("reference.json")
+        try original.write(to: target)
+        try fm.removeItem(at: file)
+        try fm.createSymbolicLink(at: file, withDestinationURL: target)
+        do {
+            try await exportEmbeddingVectors(output: directory.path)
+            assertTrue(false, "An existing symlink is also a reference that must not be overwritten")
+        } catch {
+            assertEqual(try Data(contentsOf: target), original, "Refused export leaves the symlink target intact")
+            assertEqual(try fm.destinationOfSymbolicLink(atPath: file.path), target.path, "Output link remains intact")
+        }
     }
 
     // MARK: - SQLite v21 article_embeddings Roundtrip & Cascade (#127, #307)
