@@ -70,9 +70,9 @@ Checks, the merged base (256-token model) against the change:
 - Story regressions: identical, 23 event pairs and 31 story pairs, with known gaps of 8 event pairs and 4 story pairs.
 - Tune replay: the whole report is identical, en 44 / 0 / 49.
 
-Placement and latency, measured on a quiet machine with no training or build running and a 1-minute load average of 2.4–2.9. The 55 corpus pairs need 64 or 128 tokens.
+Placement and latency, measured on a quiet machine with no training or build running and a 1-minute load average of 2.4–2.9. The 55 corpus pairs need 64 or 128 tokens. The timings are model predictions on inputs built before the timer starts: one prediction, and one batched prediction per sequence length. They are not end-to-end pair scores. `PairScorer.probabilities` also tokenizes each pair and runs two predictions, one per order, one pair at a time, so an uncached pair score costs at least twice a single prediction plus tokenization; the ratio between before and after is what the table shows. The 27 October benchmark JSON names the single-prediction figure `per_pair_median_ms`; `--compute-plan` now reports it as `single_prediction_median_ms`.
 
-| Pair model | Neural Engine share (`.cpuAndNeuralEngine`) | One pair, median | 55 pairs, batched per length | Load |
+| Pair model | Neural Engine share (`.cpuAndNeuralEngine`) | One prediction, median | 55 inputs, one batched prediction per length | Load |
 | --- | --- | --- | --- | --- |
 | before: one 256-token function, `.all` | 76% | 1.8 ms | 87 ms | 697 ms |
 | before, `.cpuAndNeuralEngine` | 76% | 1.8 ms | 87 ms | 685 ms |

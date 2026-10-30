@@ -15,9 +15,9 @@ first two encoder layers frozen. The loss is cross-entropy against the classes a
 classes' probabilities), label-smoothed by 0.05 and scaled by the row weight, with no class weight on top. GDELT hard
 negatives (group `g:`, partial `01`) whose shipped-MiniLM cosine is below 0.55 count as exact `different`.
 `--exclude-headlines FILE` (folded headlines of the library holdout and the tune corpus, one a line) leaves out every
-row of every input that names one: GDELT pages carry the same headlines. Tune and holdout never enter training; the
-cutoff is chosen afterwards on tune and on the held-out sweep, and the Swift replay against the library holdout is the
-gate.
+row of every input that names one: GDELT pages carry the same headlines, so `--pretrain` requires it. Tune and
+holdout never enter training; the cutoff is chosen afterwards on tune and on the held-out sweep, and the Swift replay
+against the library holdout is the gate.
 `train_pair_model.py --check-shipped [MODEL.mlmodelc]` checks the weight import alone against the shipped encoder, or
 against another compiled encoder (one flexible-length function, or one function per enumerated length, #554).
 
@@ -26,12 +26,13 @@ Pairs CSV contract (#627), written by `./test.sh --export-pairs`, `pretrain_pair
 `label` is a class id as the #551 review protocol labels a pair: 0 different (another story, or the same kind of
 occurrence elsewhere or at another time), 1 related (another act of the same story), 2 same (one occurrence reported
 twice). `marginal` is empty for an exact label, or the class ids (digits) whose summed probability is the target of a
-partial label: `12` one story, same or related (WCEP-10 pairs more than 18 h apart); `01` not one occurrence (GDELT hard
-negatives, far-apart library negatives, "Not the Same Event" verdicts: none of them says the two reports are different
-stories). Reviewed `different` labels and clean same-day negatives stay exact `different`. `label` is then one of those
-classes and is only reported. `weight` scales the row's loss (reviewed labels and verdicts 5, same-day negatives 2);
-`pieces_*` are the app's word-piece ids, space-separated; `group` names where the row came from. A file without the
-`marginal` column is a binary file of the earlier contract: 1 is same (2), 0 is different (0).
+partial label: `12` one story, same or related (`pretrain_pairs.py` writes WCEP-10 positives as label `1`, marginal
+`12`); `01` not one occurrence (GDELT hard negatives, far-apart library negatives, "Not the Same Event" verdicts: none
+of them says the two reports are different stories). Reviewed `different` labels and clean same-day negatives stay
+exact `different`. `label` is then one of those classes and is only reported. `weight` scales the row's loss
+(reviewed labels and verdicts 5, same-day negatives 2); `pieces_*` are the app's word-piece ids, space-separated;
+`group` names where the row came from. A file without the `marginal` column is a binary file of the earlier contract:
+1 is same (2), 0 is different (0).
 Training uses the word pieces the app exported, so it sees exactly the ids the app sends. The tokenizer port below only
 serves the shipped-model check and the self-check; `encode_ids` mirrors `BertWordPieceTokenizer.encodePair`.
 """
@@ -103,9 +104,12 @@ CONST = re.compile(
     r'val = tensor<fp16, \[[0-9, ]+\]>\(BLOBFILE\(path = (?:tensor<string, \[\]>|string)'
     r'\("@model_path/weights/weight.bin"\), offset = (?:tensor<uint64, \[\]>|uint64)\((\d+)\)')
 
+WEIGHT_PREFIX = re.compile(r'^(?:model_)?(?:bert_)?')  # MIL weight names to `BertModel` keys (`shipped_state`)
+
 
 def shipped_state(path=SHIPPED):
-    """The shipped model's fp16 tensors by Hugging Face `BertModel` key, read from its MIL program and weight file."""
+    """The shipped model's fp16 tensors by Hugging Face `BertModel` key, read from its MIL program and weight file:
+    the encoder names them `bert_…`, the pair model `model_bert_…` (its head `model_classifier_…`)."""
     mil = (path / 'model.mil').read_text()
     blob = (path / 'weights/weight.bin').read_bytes()
     state = {}
@@ -114,7 +118,7 @@ def shipped_state(path=SHIPPED):
         require(sentinel == 0xDEADBEEF and dtype == 1, f'Unexpected blob header for {name}')
         shape = [int(d) for d in dims.split(', ')]
         values = np.frombuffer(blob, dtype=np.float16, count=size // 2, offset=start).reshape(shape)
-        key = re.sub(r'^(model|bert)_', '', name).removesuffix('_to_fp16')
+        key = WEIGHT_PREFIX.sub('', name).removesuffix('_to_fp16')
         state[key] = torch.from_numpy(values.astype(np.float32))
     return state
 
@@ -132,7 +136,7 @@ def load_shipped(module, path=SHIPPED):
 def compiled_functions(path=SHIPPED):
     """A compiled encoder's functions by input length (`length_16` …); a single flexible-length function (the encoder
     before #554) stands under its longest length, 128, which it accepts like any shorter one."""
-    description = json.loads((path / 'metadata.json').read_text())
+    description = json.loads((path / 'metadata.json').read_text(encoding='utf-8'))
     functions = (description[0] if isinstance(description, list) else description).get('functions') or []
     if not functions:
         return {128: ct.models.CompiledMLModel(str(path))}
@@ -165,10 +169,16 @@ def targets(row):
     """The classes one CSV row allows under the contract above: one class for an exact label, two for a partial one."""
     if 'marginal' not in row:
         return frozenset([2 if row['label'] == '1' else 0])
+    require(row['marginal'] is not None, 'A three-way file has a row without the marginal field; rewrite that file')
     label = int(row['label'])
     classes = frozenset(int(c) for c in row['marginal']) if row['marginal'] else frozenset([label])
     require(label in classes and classes <= {0, 1, 2}, f'Bad label {label} with marginal {row["marginal"]!r}')
     return classes
+
+
+def finite_or_none(value):
+    """A number for JSON, or None where a one-class held-out split leaves it undefined (NaN is not JSON)."""
+    return value if value is not None and math.isfinite(value) else None
 
 
 def bits(classes):
@@ -177,6 +187,7 @@ def bits(classes):
 
 
 EXCLUDED = set()  # --exclude-headlines: folded headlines of the library holdout and the tune corpus
+PAIR_PREFIX = re.compile(r'^gap (?:unknown|\d+ hours); (?:same publisher|different publishers|publishers unknown)\. ')
 LEFT_OUT = {}  # rows left out per input file for naming one of them
 
 
@@ -198,15 +209,17 @@ def read_pairs(path, cap=None):
     def ids(value):
         return np.array(value.split(), dtype=np.int32)
     def named(row):
-        return {fold(row['text_a'].split('\n', 1)[0]), fold(row['text_b'].split('\n', 1)[0])} & EXCLUDED
+        heads = (PAIR_PREFIX.sub('', row[side].split('\n', 1)[0]) for side in ('text_a', 'text_b'))
+        return {fold(head) for head in heads} & EXCLUDED
     with file.open(newline='', encoding='utf-8') as handle:
         rows, left_out = [], 0
         for row in csv.DictReader(handle):
             if EXCLUDED and named(row):
                 left_out += 1
                 continue
-            rows.append((bits(targets(row)), row['group'], ids(row['pieces_a']), ids(row['pieces_b']),
-                         float(row.get('weight') or 1.0)))
+            weight = float(row.get('weight') or 1.0)
+            require(math.isfinite(weight) and weight >= 0, f'{file.name}: bad weight {row.get("weight")!r}')
+            rows.append((bits(targets(row)), row['group'], ids(row['pieces_a']), ids(row['pieces_b']), weight))
     LEFT_OUT[file.name] = left_out
     if cap and len(rows) > cap:
         rows.sort(key=lambda r: zlib.crc32(r[2].tobytes() + r[3].tobytes()))
@@ -369,7 +382,8 @@ def run_epoch(model, data, device, optimization, batch):
         logits = model(input_ids=ids.long(), attention_mask=mask.long(), token_type_ids=types.long()).logits
         # Per-row weights (#624): reviewed labels and reader verdicts count five times, same-day negatives twice; no
         # class weight multiplies them (#627).
-        (partial_loss(logits, allowed, smoothing) * weight).sum().div(weight.sum().clamp(min=1.0)).backward()
+        weight_sum = weight.sum().clamp(min=torch.finfo(weight.dtype).eps)  # the batch's own weight, never below eps
+        (partial_loss(logits, allowed, smoothing) * weight).sum().div(weight_sum).backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         schedule.step()
@@ -402,8 +416,9 @@ def fit_stage(model, tokenizer, rows, device, stage, name, report):
         line, same_auc, story_auc = held_out_line(name, epoch + 1, probabilities, masks)
         print(line, flush=True)
         report[name] = {'epochs': epochs, 'rate': rate, 'frozen_layers': frozen, 'smoothing': smoothing,
-                        'training': len(fit), 'held_out': len(held), 'held_out_same_auc': same_auc,
-                        'held_out_story_auc': story_auc, 'last_epoch': line, 'sweep': sweep(probabilities, masks)}
+                        'training': len(fit), 'held_out': len(held), 'held_out_same_auc': finite_or_none(same_auc),
+                        'held_out_story_auc': finite_or_none(story_auc), 'last_epoch': line,
+                        'sweep': sweep(probabilities, masks)}
     print('\n'.join(report[name]['sweep']))
     return held
 
@@ -544,11 +559,22 @@ def self_check():
             and float(partial_loss(torch.tensor([[-9.0, 0.0, 4.0]]), story, 0.0)) < 0.02
             and float(partial_loss(torch.tensor([[4.0, 0.0, 0.0]]), story, 0.0)) > 3,
             'A partial label sums its classes')
+    require([WEIGHT_PREFIX.sub('', n) for n in ('bert_pooler', 'model_bert_pooler', 'model_classifier')]
+            == ['pooler', 'pooler', 'classifier'], 'Shipped weight names of the encoder and the pair model')
     require(fold('Erdoğan meets Sánchez, again!') == 'erdogan meets sanchez again',
             'Headlines fold for the leak check')
     swept = sweep([[0.02, 0.08, 0.90], [0.05, 0.60, 0.35], [0.30, 0.05, 0.65]], [4, 2, 1])
     require('same >= 0.9: TP 1, FP 0, FN 0' in swept and 'same >= 0.6: TP 1, FP 1, FN 0' in swept
             and 'story >= 0.9: TP 1, FP 0, FN 0' in swept, 'Held-out sweep under both admission rules')
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            main(['pairs.csv', 'out', '--pretrain', 'public.csv'])
+        refused = False
+    except SystemExit:
+        refused = True
+    require(refused, 'Pretraining without headline exclusions is refused before any CSV is read')
     print('Pair model training self-check passed')
 
 
@@ -574,6 +600,8 @@ def main(argv):
     if args.exclude_headlines:
         EXCLUDED.update(line.strip() for line in args.exclude_headlines.read_text().splitlines())  # NOSONAR
         EXCLUDED.discard('')
+    if args.pretrain and not EXCLUDED:
+        parser.error('--pretrain needs --exclude-headlines (holdout and tune headlines): public data carries them')
     rows = read_pairs(args.pairs)
     if args.sweep:
         model = BertForSequenceClassification(CONFIG)
@@ -583,10 +611,11 @@ def main(argv):
         print('\n'.join(sweep(predict(model.to(device), tensors(Tokenizer(), held), device), [r[0] for r in held])))
         return
     pretrain = [r for path in args.pretrain for r in read_pairs(path, cap=args.pretrain_cap)]
+    out = pathlib.Path(args.out)  # OUT_DIR is the operator's own output directory, named on the command line
+    out.mkdir(parents=True, exist_ok=True)  # NOSONAR
     trained, tok, held_out, report = train(
         rows, Stage(args.epochs, args.rate, args.frozen, args.smoothing), pretrain or None,
         Stage(args.pretrain_epochs, 3e-5), args.init, args.out)
-    out = pathlib.Path(args.out)
     torch.save(trained.state_dict(), out / STATE)
     export(trained, tok, held_out, args.out)
     metadata = {
@@ -595,12 +624,12 @@ def main(argv):
                    'pretrain': [describe(path, read_pairs(path, cap=args.pretrain_cap)) for path in args.pretrain]},
         'pretrain_cap': args.pretrain_cap, 'init': args.init and describe_state(args.init),
         'excluded_headlines': args.exclude_headlines and describe_state(args.exclude_headlines),
-        'classes': list(CLASSES), 'output': 'probabilities', 'smoothing': SMOOTHING,
+        'classes': list(CLASSES), 'output': 'probabilities', 'smoothing': args.smoothing,
         'stages': report, 'batch': BATCH,
         'versions': {'python': platform.python_version(), 'torch': torch.__version__,
                      'transformers': __import__('transformers').__version__, 'coremltools': ct.__version__},
     }
-    text = json.dumps(metadata, indent=1, sort_keys=True) + '\n'
+    text = json.dumps(metadata, indent=1, sort_keys=True, allow_nan=False) + '\n'
     # OUT_DIR is the operator's own output directory, named on the command line.
     (out / 'metadata.json').write_text(text)  # NOSONAR
     print(f'wrote {out / "metadata.json"}')

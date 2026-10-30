@@ -795,7 +795,7 @@ extension NewsTests {
             guard vectors.allSatisfy({ $0 != nil }) else { throw StoryCorpus.Failure.invalid("A text did not embed") }
             report["minilm_\(label)"] = [
                 "load_ms": load, "first_prediction_ms": first, "per_text_median_ms": median(single),
-                "batch_49_ms": corpusBatch, "batch_2000_ms": largeBatch,
+                "batch_\(texts.count)_ms": corpusBatch, "batch_2000_ms": largeBatch,
             ]
 
             // The pair model's functions as `PairScorer` loads them, or its one 256-token function (#554).
@@ -843,11 +843,14 @@ extension NewsTests {
                 }
                 return milliseconds(since: start)
             }
+            // Model predictions on prebuilt inputs only: `PairScorer.probabilities` also tokenizes and predicts both
+            // orders of a pair, one at a time, so an uncached pair score costs more than one prediction.
             let pairFirst = try timed([providers[0]])
-            let pairs = try providers.map { try timed([$0]) }
+            let predictions = try providers.map { try timed([$0]) }
             report["pairscorer_\(label)"] = [
-                "load_ms": pairLoad, "first_prediction_ms": pairFirst, "per_pair_median_ms": median(pairs),
-                "batch_\(providers.count)_ms": try timed(providers),
+                "load_ms": pairLoad, "first_prediction_ms": pairFirst,
+                "single_prediction_median_ms": median(predictions),
+                "batched_predictions_\(providers.count)_ms": try timed(providers),
             ]
         }
         let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
@@ -867,8 +870,9 @@ extension NewsTests {
         }
         var plans: [String: Any] = [:]
         for name in program.functions.keys {
-            // The plan places only the function the configuration names.
-            if name != "main" { configuration.functionName = name }
+            // The plan places only the function the configuration names: every function by name in a multifunction
+            // program, so no earlier function's name carries over; the default for a single-function one.
+            configuration.functionName = program.functions.count > 1 ? name : nil
             let plan = try await MLComputePlan.load(contentsOf: url, configuration: configuration)
             guard case .program(let program) = plan.modelStructure, let function = program.functions[name] else {
                 continue

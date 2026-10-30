@@ -611,6 +611,68 @@ struct EventMatchPolicy: Sendable, Equatable {
     static let standard = EventMatchPolicy()
 }
 
+/// Bounded calibration of the pair model's cutoff from the reader's verdicts (#629): a logistic layer over
+/// `[pairModel (p_same), cosine, sharedSpecific, gapHours, sameAct]`, fitted from "Same Event" (1) and "Not the Same
+/// Event" (0) pairs that carry stored pair-model signals, refitted every clustering pass, so after each verdict.
+/// It moves a pair's cutoff by at most `maximumShift`, down where the reader's verdicts call pairs like it one event and
+/// up where they do not. Dormant below `minimumVerdicts`: without it the cutoff is the policy's, unchanged.
+struct PairCalibration: Sendable, Equatable {
+    struct Row: Sendable, Equatable {
+        var features: [Double]
+        var same: Bool
+    }
+    static let minimumVerdicts = 50
+    static let maximumShift = 0.05
+    /// Bias first, then one weight per feature.
+    let weights: [Double]
+
+    /// The five inputs, each scaled to about 0…1: names counted up to five, the gap up to the 72 h lifetime.
+    static func features(
+        pairModel: Double, cosine: Double?, sharedSpecific: Int, gapHours: Double, sameAct: Bool
+    ) -> [Double] {
+        let names = Double(min(max(sharedSpecific, 0), 5)) / 5
+        return [pairModel, cosine ?? 0, names, min(max(gapHours, 0), 72) / 72, sameAct ? 1 : 0]
+    }
+
+    /// Plain gradient descent on the mean log loss with a small ridge; nil below `minimumVerdicts` or when the verdicts
+    /// hold only one answer. ponytail: full-batch descent, a few hundred rows; IRLS if the verdicts grow into thousands.
+    static func fit(_ rows: [Row], iterations: Int = 400, rate: Double = 0.5, ridge: Double = 0.001)
+        -> PairCalibration?
+    {
+        guard rows.count >= minimumVerdicts, rows.contains(where: \.same), rows.contains(where: { !$0.same }) else {
+            return nil
+        }
+        var weights = [Double](repeating: 0, count: 6)
+        for _ in 0..<iterations {
+            var gradient = [Double](repeating: 0, count: 6)
+            for row in rows {
+                let error = Self.sigmoid(weights, row.features) - (row.same ? 1 : 0)
+                gradient[0] += error
+                for (index, value) in row.features.enumerated() { gradient[index + 1] += error * value }
+            }
+            for index in weights.indices {
+                let penalty = index == 0 ? 0 : ridge * weights[index]
+                weights[index] -= rate * (gradient[index] / Double(rows.count) + penalty)
+            }
+        }
+        return PairCalibration(weights: weights)
+    }
+
+    private static func sigmoid(_ weights: [Double], _ features: [Double]) -> Double {
+        var sum = weights[0]
+        for (index, value) in features.enumerated() { sum += weights[index + 1] * value }
+        return 1 / (1 + exp(-sum))
+    }
+
+    /// The probability that the reader would call a pair with these features one event.
+    func probability(_ features: [Double]) -> Double { Self.sigmoid(weights, features) }
+
+    /// The pair's cutoff: `base` moved by at most `maximumShift`.
+    func cutoff(_ base: Double, _ features: [Double]) -> Double {
+        base - Self.maximumShift * (2 * probability(features) - 1)
+    }
+}
+
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
     case language, unknownDate, timeGap, period, year, weekday, calendarDay, edition, differentAct, titleNumbers,

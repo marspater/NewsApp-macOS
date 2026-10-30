@@ -433,6 +433,33 @@ struct NewsTests {
             try await testStoryRegressionCorpus()
             return
         }
+        if CommandLine.arguments.contains("--verdict-replay") {
+            // NEWS_VERDICTS: a JSON array of {"pairModel", "cosine", "sharedSpecific", "gapHours", "sameAct", "same"}
+            // (#629); without it, the synthetic verdicts of the unit test.
+            struct Verdict: Decodable {
+                let pairModel: Double, cosine: Double?, sharedSpecific: Int, gapHours: Double, sameAct: Bool, same: Bool
+            }
+            var rows = syntheticVerdicts(120)
+            if let path = ProcessInfo.processInfo.environment["NEWS_VERDICTS"] {
+                let data = try Data(contentsOf: URL(fileURLWithPath: path))
+                rows = try JSONDecoder().decode([Verdict].self, from: data).map {
+                    PairCalibration.Row(
+                        features: PairCalibration.features(
+                            pairModel: $0.pairModel, cosine: $0.cosine, sharedSpecific: $0.sharedSpecific,
+                            gapHours: $0.gapHours, sameAct: $0.sameAct),
+                        same: $0.same)
+                }
+            }
+            let replay = verdictReplay(rows)
+            print(
+                "    verdict replay (#629): \(replay.verdicts) verdicts, \(replay.bare) decided as the reader did at the"
+                    + " cutoff, \(replay.calibrated) with the calibration\(replay.fitted ? "" : " (dormant)")")
+            assertTrue(
+                replay.fitted, "The verdict replay needs 50 verdicts with both answers; a dormant replay proves nothing"
+            )
+            assertTrue(replay.calibrated >= replay.bare, "The calibration decides no fewer verdicts right")
+            return
+        }
         if CommandLine.arguments.contains("--embedding-vectors") {
             guard let output = ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"] else {
                 throw StoryCorpus.Failure.invalid("--embedding-vectors needs NEWS_EVENT_OUTPUT")
@@ -710,6 +737,7 @@ struct NewsTests {
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
             try await testMatcherRegressionCorpus()
             try await testStoryRegressionCorpus()
+            try await testPairCalibration()
             try testCapturedFingerprintReview()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
@@ -823,6 +851,7 @@ struct NewsTests {
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
         try await testMatcherRegressionCorpus()
         try await testStoryRegressionCorpus()
+        try await testPairCalibration()
         try testCapturedFingerprintReview()
         await testFTS5SearchAndOperators()
         try await testUnchangedFTSRefresh()
@@ -11910,14 +11939,32 @@ struct NewsTests {
             csv.contains("\n0,\"v:") && csv.contains("\n2,\"v:") && csv.contains(",5,01"),
             "An exclusion is not one occurrence (0, marginal 01), an inclusion is same (2)")
         // A library-holdout article (#579) never leaves as a training row, verdicts included.
+        let otherPath = directory.appendingPathComponent("other.sqlite3").path
+        let otherDB = DatabaseEngine(path: otherPath)
+        try await otherDB.open()
+        let other = story(4, "Astronomers discover a distant galaxy", hours: 2)
+        try await otherDB.upsertArticles([other])
+        let otherID = try await otherDB.resolvedArticleID(for: other)
+        await otherDB.close()
         let heldOut = directory.appendingPathComponent("holdout-protest.json")
-        try JSONSerialization.data(withJSONObject: [["a": ids[2], "b": "elsewhere", "label": "different"]])
+        try JSONSerialization.data(withJSONObject: [["a": ids[2], "b": otherID, "label": "different"]])
             .write(to: heldOut)
         let held = directory.appendingPathComponent("held")
         try FileManager.default.createDirectory(
             at: held, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        do {
+            try await exportTrainingPairs(
+                snapshots: path, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
+                verdictsOnly: true)
+            assertTrue(false, "An unresolved holdout ID must fail the export")
+        } catch StoryCorpus.Failure.invalid(let message) {
+            assertTrue(message.contains("do not resolve 1 library holdout IDs"), "Missing holdout IDs are reported")
+        }
+        assertFalse(
+            FileManager.default.fileExists(atPath: held.appendingPathComponent("verdicts.csv").path),
+            "An incomplete holdout title set never writes training rows")
         try await exportTrainingPairs(
-            snapshots: path, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
+            snapshots: path + ":" + otherPath, output: held.path, corpusPath: corpus.path, holdoutPath: heldOut.path,
             verdictsOnly: true)
         let heldCSV = try String(contentsOf: held.appendingPathComponent("verdicts.csv"), encoding: .utf8)
         assertEqual(
@@ -11942,6 +11989,13 @@ struct NewsTests {
     /// and an exclusion across the two events keeps them apart.
     static func testStoryLayer() async throws {
         print("  - Testing the story layer: one card per story across related acts (#581)...")
+        var components = EventClusterer.StoryComponents()
+        components.join("a", "b")
+        components.join("c", "d")
+        assertEqual(Set(components.component(of: "b")), ["a", "b"], "A component holds every event joined with it")
+        assertEqual(components.component(of: "z"), ["z"], "An event in no component is its own")
+        components.join("b", "c")
+        assertEqual(Set(components.component(of: "a")), ["a", "b", "c", "d"], "Joins are transitive")
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         let start = Date(timeIntervalSince1970: 1_700_000_000)
@@ -12020,11 +12074,44 @@ struct NewsTests {
         assertEqual(
             try await apart.storyID(forEvent: voteApart), try await apart.storyID(forEvent: protestApart),
             "Linked before the exclusion")
-        // A reader's exclusion between one vote report and one protest report, both staying in their events.
+        // The expanded story card reads every event of the story, not only the lead's reports.
+        var storyReports = 0
+        if let lead = try await apart.storyID(forEvent: voteApart) {
+            for id in try await apart.storyEventIDs(lead) {
+                storyReports += try await apart.fetchArticles(limit: nil, eventID: id).count
+            }
+        }
+        assertEqual(
+            try await apart.fetchArticles(limit: nil, eventID: voteApart, wholeStory: true).count, storyReports,
+            "A story's reports are its events' reports")
+        assertTrue(
+            try await apart.fetchArticles(limit: nil, eventID: voteApart).count < storyReports,
+            "One event of the story holds fewer reports than the story")
+        // A low-energy pass can finish every report while leaving only the story work pending.
+        let lastStoryPass = await apart.lastStoryPass
+        try await apart.upsertArticles([story(9, "Astronomers discover a distant galaxy", hours: 6)])
+        let withoutEnergy = try await EventClusterer.run(
+            in: apart, now: now.addingTimeInterval(30), allowsEnergy: false)
+        assertEqual(withoutEnergy.processed, 1, "Low energy finishes the unrelated report")
+        assertEqual(withoutEnergy.deferred, 0, "No report is deferred in the story-only retry fixture")
+        assertTrue(await apart.storyPassPending, "Skipped story work remains pending")
+        let idleWithoutEnergy = try await EventClusterer.run(
+            in: apart, now: now.addingTimeInterval(40), allowsEnergy: false)
+        assertEqual(idleWithoutEnergy.processed, 0, "The next pass has no reports to process")
+        assertEqual(await apart.lastStoryPass, lastStoryPass, "Low energy leaves the last completed story pass intact")
+        let resumedAt = now.addingTimeInterval(60)
+        let resumed = try await EventClusterer.run(in: apart, now: resumedAt, allowsEnergy: true)
+        assertEqual(resumed.processed, 0, "Story work resumes with no pending reports")
+        assertEqual(await apart.lastStoryPass, resumedAt, "The pending story pass completes when energy returns")
+        assertFalse(await apart.storyPassPending, "Completed story work clears the pending marker")
+        _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(90), allowsEnergy: true)
+        assertEqual(await apart.lastStoryPass, resumedAt, "An unchanged library does not repeat completed story work")
+        // A reader's exclusion between one vote report and one protest report, both staying in their events. It is
+        // recorded after the last completed story pass, as a verdict in the app is, so the next pass re-checks stories.
         let (low, high) = apartIDs[0] < apartIDs[2] ? (apartIDs[0], apartIDs[2]) : (apartIDs[2], apartIDs[0])
         try await apart.eventRows(
             "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
-            [.text(low), .text(high), .real(now.timeIntervalSince1970)])
+            [.text(low), .text(high), .real(now.addingTimeInterval(100).timeIntervalSince1970)])
         _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(120))
         assertTrue(
             try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
@@ -12301,6 +12388,99 @@ struct NewsTests {
                 + "--last 10m")
     }
 
+    /// A verdict replay (#629): how many verdicts the pair model decides as the reader did at `base`, and with the
+    /// calibration fitted on them. Clean when the calibration decides at least as many as the bare cutoff.
+    static func verdictReplay(
+        _ rows: [PairCalibration.Row], base: Double = EventMatchPolicy.standard.pairModelThreshold
+    ) -> (verdicts: Int, bare: Int, calibrated: Int, fitted: Bool) {
+        // Fitted as production fits: on at most the first 1,000 rows (verdicts.csv is written in pair-id order).
+        let calibration = PairCalibration.fit(Array(rows.prefix(1_000)))
+        var bare = 0
+        var calibrated = 0
+        for row in rows {
+            if (row.features[0] >= base) == row.same { bare += 1 }
+            let cutoff = calibration?.cutoff(base, row.features) ?? base
+            if (row.features[0] >= cutoff) == row.same { calibrated += 1 }
+        }
+        return (rows.count, bare, calibrated, calibration != nil)
+    }
+
+    /// Synthetic verdicts: the pair model spread over 0.82–0.98, and the reader says "same" for reports under 24 h
+    /// apart, which the bare cutoff cannot see.
+    static func syntheticVerdicts(_ count: Int) -> [PairCalibration.Row] {
+        (0..<count).map { index in
+            let gap = Double(index * 7 % 60)
+            return PairCalibration.Row(
+                features: PairCalibration.features(
+                    pairModel: 0.82 + 0.16 * Double(index % 17) / 16, cosine: 0.7, sharedSpecific: 2, gapHours: gap,
+                    sameAct: true),
+                same: gap < 24)
+        }
+    }
+
+    /// Bounded calibration (#629): dormant below 50 verdicts, never more than ±0.05 off the cutoff, gone when the stored
+    /// pair signals are cleared, and a clean synthetic verdict replay.
+    static func testPairCalibration() async throws {
+        print("  - Testing the bounded pair-model calibration from reader verdicts (#629)...")
+        let base = EventMatchPolicy.standard.pairModelThreshold
+        assertTrue(PairCalibration.fit(syntheticVerdicts(49)) == nil, "Dormant below 50 verdicts")
+        let oneAnswer = syntheticVerdicts(80).map { PairCalibration.Row(features: $0.features, same: true) }
+        assertTrue(PairCalibration.fit(oneAnswer) == nil, "Verdicts with one answer fit nothing")
+        guard let calibration = PairCalibration.fit(syntheticVerdicts(120)) else {
+            return assertTrue(false, "120 verdicts with both answers fit a calibration")
+        }
+        for features in [[0.0, 0, 0, 0, 0], [1.0, 1, 1, 1, 1], [0.9, 0.7, 0.4, 0, 1], [0.9, 0.7, 0.4, 1, 1]] {
+            let cutoff = calibration.cutoff(base, features)
+            assertTrue(abs(cutoff - base) <= PairCalibration.maximumShift + 1e-12, "The cutoff moves at most ±0.05")
+        }
+        let near = PairCalibration.features(pairModel: 0.9, cosine: 0.7, sharedSpecific: 2, gapHours: 2, sameAct: true)
+        let far = PairCalibration.features(pairModel: 0.9, cosine: 0.7, sharedSpecific: 2, gapHours: 48, sameAct: true)
+        assertTrue(calibration.cutoff(base, near) < calibration.cutoff(base, far), "It learns what the verdicts say")
+        let replay = verdictReplay(syntheticVerdicts(120))
+        assertTrue(replay.fitted && replay.calibrated >= replay.bare, "The synthetic verdict replay is clean")
+
+        // Verdicts reach the fit through the stored signals of their pair decisions; without them it is dormant again.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let reports = (0..<4).map { index in
+            FeedArticle(
+                storedID: "verdict-\(index)", title: "Report \(index)", link: "https://verdict.invalid/\(index)",
+                guid: "verdict-\(index)", description: "", pubDate: start.addingTimeInterval(Double(index) * 3600),
+                source: "Publisher \(index)")
+        }
+        try await db.upsertArticles(reports)
+        var ids: [String] = []
+        for report in reports { ids.append(try await db.resolvedArticleID(for: report)) }
+        func decision(_ a: String, _ b: String) -> DatabaseEngine.PairDecision {
+            let (low, high) = a < b ? (a, b) : (b, a)
+            return DatabaseEngine.PairDecision(
+                articleID: low, otherArticleID: high, decision: "borderline", reason: "borderline", score: 0.6,
+                features: #"{"cosine":0.7,"entity":0.5,"pairModel":0.88,"sharedAnchors":2,"sharedKeywords":2,"#
+                    + #""sharedSpecific":2,"what":0.3}"#)
+        }
+        try await db.upsertPairDecisions(
+            [decision(ids[0], ids[1]), decision(ids[2], ids[3])], matcherVersion: EventMatcher.version)
+        for (table, a, b) in [("event_inclusions", ids[0], ids[1]), ("event_exclusions", ids[2], ids[3])] {
+            let (low, high) = a < b ? (a, b) : (b, a)
+            try await db.eventRows(
+                "INSERT INTO \(table)(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                [.text(low), .text(high), .real(start.timeIntervalSince1970)])
+        }
+        let rows = try await db.calibrationRows()
+        assertEqual(rows.map(\.same).sorted { !$0 && $1 }, [false, true], "One row per verdict with a stored signal")
+        assertEqual(rows.first?.features.count, 5, "Five features per verdict")
+        assertEqual(try await db.calibrationRows(limit: 1).count, 1, "The limit bounds the rows read")
+        try await db.clearArticleEnrichment()
+        let cleared = try await db.calibrationRows()
+        assertEqual(cleared.count, 0, "Clear AI Analysis empties the calibration's input")
+        assertTrue(PairCalibration.fit(cleared) == nil, "… so the calibration is dormant again")
+        assertEqual(
+            try await db.eventRows("SELECT count(*) FROM pair_assessments;").first?.first ?? nil, "2",
+            "The pair decisions themselves remain")
+        await db.close()
+    }
+
     /// Authored story regressions (#581): the known story failures as synthetic families, asserted exactly at both levels,
     /// which reports share an event and which share a story card. A pair in `knownGaps` is asserted the other way round
     /// from its label, so a fix that closes a gap fails here until the gap is taken off the list.
@@ -12384,6 +12564,8 @@ struct NewsTests {
         // a pass with energy and the true-positive floor cannot hold; the false-pair ceiling still applies.
         let rulesOnly = ProcessInfo.processInfo.environment["NEWS_ENERGY"] == "0"
         var deferred = 0
+        // Event labels only: a story-level link between two events of one story would read as a false pair, so this
+        // corpus is scored by event; the story regressions and the library holdout's story level measure stories.
         let memberships = try await StoryCorpus.eventMemberships(articles: articles) { deferred += $0.deferred }
         var metrics = EventCorpusMetrics()
         var falsePairs: [String] = []
@@ -12406,7 +12588,7 @@ struct NewsTests {
             print("    rules only (NEWS_ENERGY=0): \(deferred) rows deferred to a pass with energy; no floor")
         }
         assertTrue(
-            rulesOnly || metrics.truePositives >= fixture.expected.minimumTruePositives,
+            (rulesOnly && deferred > 0) || metrics.truePositives >= fixture.expected.minimumTruePositives,
             "Authored corpus true positives fell below the recorded floor (\(metrics.truePositives))")
         assertTrue(
             metrics.falsePositives <= fixture.expected.maximumFalsePositives,
@@ -12414,6 +12596,21 @@ struct NewsTests {
     }
 
     static func testEventCorpusHarness(fixtureRoot: URL) async throws {
+        // A pinned holdout window includes both boundaries and excludes later snapshot reports.
+        let windowDB = DatabaseEngine(path: ":memory:")
+        try await windowDB.open()
+        let pinned = Date(timeIntervalSince1970: 1_700_000_000)
+        let windowArticles = [-3 * 86_400 - 1, -3 * 86_400, 0, 1].enumerated().map { index, offset in
+            FeedArticle(
+                storedID: "window-\(index)", title: "Window report \(index)", link: "https://window.invalid/\(index)",
+                guid: "window-\(index)", description: "", pubDate: pinned.addingTimeInterval(Double(offset)),
+                source: "Corpus")
+        }
+        try await windowDB.upsertArticles(windowArticles)
+        let window = try await recentLibraryRows(windowDB, now: pinned)
+        assertEqual(window.newest, pinned, "The pinned clock is independent of the snapshot's newest report")
+        assertEqual(window.rows.map(\.id), ["window-1", "window-2"], "Recent totals use the closed pinned window")
+        await windowDB.close()
         // One refresh-sized batch must not bypass production's article budget in the evaluator.
         let batchDate = Date(timeIntervalSince1970: 1_700_000_000)
         let oversized = (0..<2_001).map { index in
@@ -12837,10 +13034,16 @@ struct NewsTests {
                         if let va = vectorCache[items[i].id], let vb = vectorCache[items[j].id] {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
-                        let pair = EventMatcher.assess(
-                            a, b, policy: StoryCorpus.policyFromEnvironment(), embeddingSimilarity: similarity,
-                            samePublisher: items[i].source == items[j].source)
                         let diagnosePolicy = StoryCorpus.policyFromEnvironment()
+                        var pair = EventMatcher.assess(
+                            a, b, policy: diagnosePolicy, embeddingSimilarity: similarity,
+                            samePublisher: !items[i].source.isEmpty && items[i].source == items[j].source)
+                        // The clusterer's same-publisher gate (NEWS_SAME_PUBLISHER=1), so the printed gate is the real one.
+                        if diagnosePolicy.samePublisherRequiresMatch, !pair.isMatch, !items[i].source.isEmpty,
+                            items[i].source == items[j].source
+                        {
+                            pair.isCompatible = false
+                        }
                         func input(_ index: Int) -> String {
                             let text = EventFeatures.matchingText(
                                 title: items[index].title, description: items[index].description ?? "")
@@ -12851,6 +13054,10 @@ struct NewsTests {
                                     samePublisher: known ? items[i].source == items[j].source : nil) : text
                         }
                         let pairModel = EventMatcher.needsPairModel(pair) ? await probability(input(i), input(j)) : nil
+                        // As the clusterer does: a borderline pair the model confirms at the cutoff is a match.
+                        if let pairModel, pairModel >= diagnosePolicy.pairModelThreshold {
+                            pair = EventMatcher.modelConfirmed(pair, policy: diagnosePolicy)
+                        }
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
                         let primaryDisjoint =
@@ -12920,7 +13127,7 @@ struct NewsTests {
                     items: items.map {
                         PairExportItem(
                             id: $0.id, title: $0.title, description: $0.description ?? "", published: $0.published,
-                            event: $0.event)
+                            event: $0.event, source: $0.source)
                     },
                     predicted: predicted, split: split, outputDirectory: outputDirectory)
                 print("    exported \(pairs) candidate pairs with features for the fit (#524)")
@@ -12990,22 +13197,29 @@ struct NewsTests {
         let id: String, title: String, description: String, source: String, date: Date, event: String?
     }
 
-    /// Stories published in the last three days of a library copy (relative to its newest story), with their live event.
-    static func recentLibraryRows(_ db: DatabaseEngine) async throws -> (rows: [LibraryRow], newest: Date) {
-        let newest =
-            try await db.eventRows(
-                "SELECT max(published_at) FROM articles WHERE published_at < ?;",
-                [.real(Date().timeIntervalSince1970 + 86_400)]
-            ).first?.first.flatMap { $0 }.flatMap(Double.init) ?? Date().timeIntervalSince1970
+    /// Stories in the three days ending at `now` (by default the copy's newest story), with their live event.
+    static func recentLibraryRows(
+        _ db: DatabaseEngine, now: Date? = nil
+    ) async throws -> (rows: [LibraryRow], newest: Date) {
+        let newest: TimeInterval
+        if let now {
+            newest = now.timeIntervalSince1970
+        } else {
+            newest =
+                try await db.eventRows(
+                    "SELECT max(published_at) FROM articles WHERE published_at < ?;",
+                    [.real(Date().timeIntervalSince1970 + 86_400)]
+                ).first?.first.flatMap { $0 }.flatMap(Double.init) ?? Date().timeIntervalSince1970
+        }
         let rows = try await db.eventRows(
             """
             SELECT a.id, a.title, coalesce(a.description, ''), a.source, a.published_at, e.id
             FROM articles a
             LEFT JOIN event_members m ON m.article_id = a.id
             LEFT JOIN events e ON e.id = m.event_id AND e.merged_into IS NULL
-            WHERE a.published_at >= ? AND \(DatabaseEngine.visibleArticle)
+            WHERE a.published_at >= ? AND a.published_at <= ? AND \(DatabaseEngine.visibleArticle)
             ORDER BY a.published_at, a.id;
-            """, [.real(newest - 3 * 86_400)]
+            """, [.real(newest - 3 * 86_400), .real(newest)]
         ).compactMap { row -> LibraryRow? in
             guard let id = row[0], let title = row[1], let published = row[4].flatMap(Double.init) else { return nil }
             return LibraryRow(
@@ -13121,7 +13335,7 @@ struct NewsTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let copy = directory.appendingPathComponent("library.sqlite3").path
-        try FileManager.default.copyItem(atPath: snapshot, toPath: copy)
+        try StoryCorpus.writableCopy(of: snapshot, to: copy)
         let db = DatabaseEngine(path: copy)
         try await db.open()
         // The reader's verdicts (#552) are read before the corrections are cleared: the matcher alone must keep every
@@ -13135,6 +13349,9 @@ struct NewsTests {
             guard let a = row[0], let b = row[1] else { return nil }
             return (a, b, row[2] == "1")
         }
+        // The calibration the app would apply (#629) is read before the verdicts and pair decisions are cleared and
+        // handed to every pass, so the holdout measures the cutoff production uses.
+        let calibrationRows = try await db.calibrationRows()
         for table in [
             "event_overview_citations", "event_overviews", "event_state", "event_members", "event_match_state",
             "pair_assessments", "event_exclusions", "event_inclusions", "events",
@@ -13142,10 +13359,9 @@ struct NewsTests {
             try await db.eventRows("DELETE FROM \(table);")
         }
         // NEWS_HOLDOUT_NOW=<epoch> pins the clock to when the holdout was drawn, for a copy taken later (#688).
-        var newest = try await recentLibraryRows(db).newest
-        if let pinned = ProcessInfo.processInfo.environment["NEWS_HOLDOUT_NOW"].flatMap({ TimeInterval($0) }) {
-            newest = Date(timeIntervalSince1970: pinned)
-        }
+        let pinned = ProcessInfo.processInfo.environment["NEWS_HOLDOUT_NOW"].flatMap { TimeInterval($0) }
+            .map { Date(timeIntervalSince1970: $0) }
+        let newest = try await recentLibraryRows(db, now: pinned).newest
         let policy = StoryCorpus.policyFromEnvironment()
         let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
         let candidate = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL_PATH"]
@@ -13156,7 +13372,7 @@ struct NewsTests {
             let report = try await EventClusterer.run(
                 in: db, matchPolicy: policy, now: newest, allowsEnergy: true,
                 pairProbability: StoryCorpus.pairProbabilityFromEnvironment(),
-                storyProbabilities: StoryCorpus.storyProbabilitiesFromEnvironment())
+                storyProbabilities: StoryCorpus.storyProbabilitiesFromEnvironment(), calibrationRows: calibrationRows)
             passes += 1
             total.processed += report.processed
             total.joined += report.joined
@@ -13225,7 +13441,7 @@ struct NewsTests {
         let precision = truePairs + falsePairs == 0 ? 0 : Double(truePairs) / Double(truePairs + falsePairs)
         let recall = truePairs + missed == 0 ? 0 : Double(truePairs) / Double(truePairs + missed)
         // Story-level view: recent stories shown in an event with two or more publishers, and in a story (#581).
-        let recent = try await recentLibraryRows(db).rows
+        let recent = try await recentLibraryRows(db, now: newest).rows
         let sources = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }
             .mapValues { Set($0.map(\.source)).count }
         let multi = recent.filter { ($0.event.flatMap { sources[$0] } ?? 0) >= 2 }.count
@@ -13246,15 +13462,18 @@ struct NewsTests {
                 SELECT a.id, a.source, a.published_at, m.event_id, a.title,
                     (SELECT count(*) FROM event_members x WHERE x.event_id = m.event_id)
                 FROM articles a LEFT JOIN event_members m ON m.article_id = a.id
-                WHERE a.published_at >= ? AND \(DatabaseEngine.visibleArticle) ORDER BY a.published_at, a.id;
-                """, [.real(newest.timeIntervalSince1970 - 3 * 86_400)])
+                WHERE a.published_at >= ? AND a.published_at <= ? AND \(DatabaseEngine.visibleArticle)
+                ORDER BY a.published_at, a.id;
+                """, [.real(newest.timeIntervalSince1970 - 3 * 86_400), .real(newest.timeIntervalSince1970)])
             let cardLines =
                 ["card,article,source,published,event,event_size,title"]
                 + windowRows.map { row in
                     let card = row[3].map { storyOf[$0] ?? $0 } ?? row[0] ?? ""
-                    let title = "\"" + (row[4] ?? "").replacingOccurrences(of: "\"", with: "\"\"") + "\""
-                    let fields = [row[0], row[1], row[2], row[3], row[5]].map { $0 ?? "" }
-                    return ([card] + fields + [title]).joined(separator: ",")
+                    // Every field is quoted: ids and sources are free text ("Example, Inc.").
+                    func quoted(_ value: String?) -> String {
+                        "\"" + (value ?? "").replacingOccurrences(of: "\"", with: "\"\"") + "\""
+                    }
+                    return ([card, row[0], row[1], row[2], row[3], row[5], row[4]].map(quoted)).joined(separator: ",")
                 }
             try StoryCorpus.writePrivate(
                 Data(cardLines.joined(separator: "\n").utf8),
@@ -13349,7 +13568,7 @@ struct NewsTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let copy = directory.appendingPathComponent("library.sqlite3").path
-        try FileManager.default.copyItem(atPath: snapshot, toPath: copy)
+        try StoryCorpus.writableCopy(of: snapshot, to: copy)
         let db = DatabaseEngine(path: copy)
         try await db.open()
         let newest =
@@ -13377,6 +13596,7 @@ struct NewsTests {
         let description: String
         let published: Date
         let event: String?
+        var source = ""
     }
 
     static func exportPairFeatures(
@@ -13407,7 +13627,10 @@ struct NewsTests {
                 if let left = vectors[i], let right = vectors[j] {
                     cosine = SentenceEmbedder.cosineSimilarity(left, right)
                 }
-                let pair = EventMatcher.assess(a, b, embeddingSimilarity: cosine)
+                // The clusterer's publisher identity, so edition conflicts and series evidence match it (#688).
+                let pair = EventMatcher.assess(
+                    a, b, embeddingSimilarity: cosine,
+                    samePublisher: !items[i].source.isEmpty && items[i].source == items[j].source)
                 let gold = items[i].event != nil && items[i].event == items[j].event
                 guard gold || pair.sharedAnchors + pair.sharedKeywords >= 1 else { continue }
                 let same = predicted[i] != nil && predicted[i] == predicted[j]
@@ -13431,12 +13654,19 @@ struct NewsTests {
 
     /// Re-clusters a copy of a library from scratch at the current matcher, in the order the stories arrived (#627), so
     /// its events and stories (`story_id`) are the ones this build would make: events, memberships, match state and
-    /// pair decisions are cleared (corrections stay), every story is marked processed, and a clock walks the
-    /// publication dates in 6 h steps, reopening the stories published by each step for one clustering pass at that
-    /// time. Returns the copy, made in `directory`.
+    /// pair decisions are cleared, and a clock walks the publication dates in 6 h steps. The copy starts without
+    /// articles; each step inserts the stories published by it, with their rows in every table that references them
+    /// (corrections once both reports are in), and clusters at that time, so no candidate is a story from after the
+    /// clock. Returns the copy, made in `directory`.
     static func reclusteredLibraryCopy(_ path: String, in directory: URL) async throws -> String {
         let copy = directory.appendingPathComponent(UUID().uuidString + ".sqlite3").path
-        try FileManager.default.copyItem(atPath: path, toPath: copy)
+        let source = directory.appendingPathComponent(UUID().uuidString + "-source.sqlite3").path
+        try StoryCorpus.writableCopy(of: path, to: copy)
+        try StoryCorpus.writableCopy(of: path, to: source)
+        // The source is migrated like the copy, so both have the same columns for the row copies below.
+        let migrated = DatabaseEngine(path: source)
+        try await migrated.open()
+        await migrated.close()
         let db = DatabaseEngine(path: copy)
         try await db.open()
         for table in [
@@ -13446,9 +13676,28 @@ struct NewsTests {
             try await db.eventRows("DELETE FROM \(table);")
         }
         let date = DatabaseEngine.articleDateOrder
-        try await db.eventRows(
-            "INSERT INTO event_match_state SELECT id, ?, 0 FROM articles;", [.integer(EventMatcher.version)])
-        let dates = try await db.eventRows("SELECT DISTINCT \(date) FROM articles a ORDER BY 1;")
+        // Every table that references an article, with its referencing columns; FTS rows follow the articles'
+        // triggers, new stories get no match state, so each step's stories are pending, and pair decisions and
+        // memberships are this build's own, never the source's.
+        var dependents: [(table: String, columns: [String])] = []
+        for row in try await db.eventRows(
+            """
+            SELECT m.name, group_concat(f."from") FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f
+            WHERE m.type = 'table' AND f."table" = 'articles' GROUP BY m.name ORDER BY m.name;
+            """)
+        {
+            guard let table = row[0], let columns = row[1],
+                ![
+                    "article_fts_rows", "event_match_state", "event_members", "event_overview_citations",
+                    "pair_assessments",
+                ].contains(table)
+            else { continue }
+            dependents.append((table, columns.split(separator: ",").map(String.init)))
+        }
+        for dependent in dependents { try await db.eventRows("DELETE FROM \(dependent.table);") }
+        try await db.eventRows("DELETE FROM articles;")
+        try await db.eventRows("ATTACH DATABASE ? AS src;", [.text(source)])
+        let dates = try await db.eventRows("SELECT DISTINCT \(date) FROM src.articles a ORDER BY 1;")
             .compactMap { $0.first.flatMap { $0 }.flatMap(Double.init) }
         let policy = StoryCorpus.policyFromEnvironment()
         var total = EventClusteringReport()
@@ -13457,10 +13706,20 @@ struct NewsTests {
         var index = 0
         while index < dates.count {
             let clock = max(dates[index], previous + 6 * 3600)
+            let arriving = "SELECT id FROM src.articles a WHERE \(date) > ? AND \(date) <= ?"
             try await db.eventRows(
-                "DELETE FROM event_match_state WHERE article_id IN "
-                    + "(SELECT id FROM articles a WHERE \(date) > ? AND \(date) <= ?);",
+                "INSERT INTO articles SELECT * FROM src.articles a WHERE \(date) > ? AND \(date) <= ?;",
                 [.real(previous), .real(clock)])
+            // A row joins once every report it names is in and one of them arrives now.
+            for dependent in dependents {
+                let present = dependent.columns.map { "(\($0) IS NULL OR \($0) IN (SELECT id FROM main.articles))" }
+                let new = dependent.columns.map { "\($0) IN (\(arriving))" }
+                try await db.eventRows(
+                    "INSERT OR IGNORE INTO main.\(dependent.table) SELECT * FROM src.\(dependent.table) WHERE "
+                        + present.joined(separator: " AND ") + " AND (" + new.joined(separator: " OR ") + ");",
+                    Array(repeating: [DatabaseEngine.EventValue.real(previous), .real(clock)], count: new.count)
+                        .flatMap { $0 })
+            }
             var passes = 0
             repeat {
                 let report = try await EventClusterer.run(
@@ -13480,7 +13739,9 @@ struct NewsTests {
         let stories = try await db.eventRows(
             "SELECT count(DISTINCT coalesce(story_id, id)), count(*) FROM events WHERE merged_into IS NULL;"
         ).first
+        try await db.eventRows("DETACH DATABASE src;")
         await db.close()
+        try? FileManager.default.removeItem(atPath: source)
         print(
             "    re-clustered \(URL(fileURLWithPath: path).lastPathComponent) at matcher v\(EventMatcher.version): "
                 + "\(steps) steps, processed \(total.processed), created \(total.created), merged \(total.merged); "
@@ -13616,10 +13877,32 @@ struct NewsTests {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: scratch) }
-        for path in snapshots.split(separator: ":").map(String.init) {
-            guard !path.contains("/Library/Containers/") else {
-                throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
+        // Every copy of a holdout headline is left out, whichever snapshot holds it and under whichever id: the titles
+        // are collected from all snapshots first.
+        var holdoutTitles = Set<String>()
+        var unresolvedHoldoutIDs = holdoutIDs
+        // The live library is refused before anything reads or copies it.
+        guard !snapshots.split(separator: ":").contains(where: { $0.contains("/Library/Containers/") }) else {
+            throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
+        }
+        for path in snapshots.split(separator: ":").map(String.init) where !holdoutIDs.isEmpty {
+            let copy = scratch.appendingPathComponent("titles-\(UUID().uuidString).sqlite3").path
+            try StoryCorpus.writableCopy(of: path, to: copy)
+            let db = DatabaseEngine(path: copy)
+            try await db.open()
+            for row in try await db.eventRows("SELECT id, title FROM articles;") {
+                if let id = row[0], let title = row[1], holdoutIDs.contains(id) {
+                    holdoutTitles.insert(key(title))
+                    unresolvedHoldoutIDs.remove(id)
+                }
             }
+            await db.close()
+        }
+        guard unresolvedHoldoutIDs.isEmpty else {
+            throw StoryCorpus.Failure.invalid(
+                "Snapshots do not resolve \(unresolvedHoldoutIDs.count) library holdout IDs")
+        }
+        for path in snapshots.split(separator: ":").map(String.init) {
             // Mined pairs come from this build's events and stories, not the ones stored by an older matcher.
             let db = DatabaseEngine(path: verdictsOnly ? path : try await reclusteredLibraryCopy(path, in: scratch))
             try await db.open()
@@ -13633,8 +13916,6 @@ struct NewsTests {
                 LEFT JOIN events e ON e.id = m.event_id AND e.merged_into IS NULL
                 WHERE a.published_at IS NOT NULL;
                 """)
-            let holdoutTitles = Set(
-                articles.filter { $0[0].map(holdoutIDs.contains) == true }.compactMap { $0[1] }.map(key))
             for values in articles {
                 guard let id = values[0], let title = values[1], let published = values[4].flatMap({ Double($0) })
                 else { continue }
@@ -13656,7 +13937,7 @@ struct NewsTests {
             let corrections = try await db.eventRows(
                 """
                 SELECT article_id, other_article_id, 1 FROM event_inclusions
-                UNION ALL SELECT article_id, other_article_id, 0 FROM event_exclusions;
+                UNION ALL SELECT article_id, other_article_id, 0 FROM event_exclusions ORDER BY 1, 2;
                 """)
             // Pairs the pair model alone linked (#627), keyed low id first like the decisions.
             let modelOnly = Set(
@@ -13779,20 +14060,26 @@ struct NewsTests {
                 rows[$0].event ?? ""
             }
             .mapValues(\.count)
-            let hardConflicts: Set<EventConflict> = [.places, .titleNumbers, .period, .year, .weekday]
+            let hardConflicts: Set<EventConflict> = [.places, .titleNumbers, .period, .year, .weekday, .edition]
             var sameDay = Set<[Int]>()
             for indices in byAnchor.values {
                 let sample =
                     indices.count > 80 ? Array(indices.sorted { rows[$0].id < rows[$1].id }.prefix(80)) : indices
                 for (n, i) in sample.enumerated() {
-                    for j in sample[(n + 1)...] where rows[i].source != rows[j].source {
+                    // Same-publisher pairs stay in: two items of one series in different events are the commonest
+                    // false merge (#551), so they are the most useful negatives.
+                    for j in sample[(n + 1)...] {
                         guard let a = rows[i].event, let b = rows[j].event, a != b, (eventSizes[a] ?? 0) >= 2,
                             (eventSizes[b] ?? 0) >= 2, rows[i].date != DateParser.unknownDate,
                             rows[j].date != DateParser.unknownDate,
                             abs(rows[i].date.timeIntervalSince(rows[j].date)) <= 36 * 3600,
                             (storyOf[a] ?? a) != (storyOf[b] ?? b)
                         else { continue }
-                        let conflict = EventMatcher.assess(features[i], features[j]).conflict
+                        // The clusterer's publisher relation, so two editions of one series meet their edition conflict.
+                        let conflict = EventMatcher.assess(
+                            features[i], features[j],
+                            samePublisher: !rows[i].source.isEmpty && rows[i].source == rows[j].source
+                        ).conflict
                         guard conflict.map(hardConflicts.contains) == true || (cosine(i, j) ?? 1) < 0.58 else {
                             continue
                         }

@@ -171,12 +171,19 @@ def evaluate(bert, tokenizer, rows, device):
     from train_pair_model import auc
     scores = cosines(bert, tokenizer, rows, device)
     labels = [r['kind'] == 'positive' for r in rows]
-    report = {'pairs': len(rows), 'positives': sum(labels), 'auc': round(auc(scores, labels), 4)}
+    positive = [s for s, y in zip(scores, labels, strict=True) if y]
+    negative = [s for s, y in zip(scores, labels, strict=True) if not y]
+
+    def stat(function, values):  # None where one class is missing: NaN is not JSON
+        return round(float(function(values)), 4) if values else None
+
+    score = auc(scores, labels)
+    report = {'pairs': len(rows), 'positives': len(positive), 'auc': round(score, 4) if math.isfinite(score) else None}
     for cutoff in (0.55, 0.70):
-        report[f'positives_at_{cutoff}'] = round(float(np.mean([s >= cutoff for s, y in zip(scores, labels) if y])), 4)
-        report[f'negatives_at_{cutoff}'] = round(float(np.mean([s >= cutoff for s, y in zip(scores, labels) if not y])), 4)
-    report['positive_cosine_median'] = round(float(np.median([s for s, y in zip(scores, labels) if y])), 4)
-    report['negative_cosine_median'] = round(float(np.median([s for s, y in zip(scores, labels) if not y])), 4)
+        report[f'positives_at_{cutoff}'] = stat(lambda v, c=cutoff: np.mean([s >= c for s in v]), positive)
+        report[f'negatives_at_{cutoff}'] = stat(lambda v, c=cutoff: np.mean([s >= c for s in v]), negative)
+    report['positive_cosine_median'] = stat(np.median, positive)
+    report['negative_cosine_median'] = stat(np.median, negative)
     return report
 
 
@@ -276,7 +283,8 @@ def main(argv):
                              'transformers': __import__('transformers').__version__,
                              'coremltools': __import__('coremltools').__version__}}
     # OUT_DIR is the operator's own output directory, named on the command line.
-    (out / 'metadata.json').write_text(json.dumps(metadata, indent=1, sort_keys=True) + '\n')  # NOSONAR
+    text = json.dumps(metadata, indent=1, sort_keys=True, allow_nan=False) + '\n'
+    (out / 'metadata.json').write_text(text)  # NOSONAR
     print(f'wrote {out / "minilm.mlpackage"}')
 
 

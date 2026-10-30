@@ -58,7 +58,8 @@ enum EventClusterer {
         limit: Int = 2_000,
         allowsEnergy: Bool = IntelligencePolicy.allowsEnergy(),
         pairProbability: (@Sendable (String, String) async -> Double?)? = nil,
-        storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)? = nil
+        storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)? = nil,
+        calibrationRows: [PairCalibration.Row]? = nil
     ) async throws -> EventClusteringReport {
         let injectedProbability = pairProbability
         let pairProbability = pairProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
@@ -70,6 +71,11 @@ enum EventClusterer {
             return await PairScorer.shared.probabilities(a, b)
         }
         var report = EventClusteringReport()
+        /// The reader's verdicts move the pair model's cutoff by at most ±0.05 (#629); nil, and today's cutoff, below 50.
+        // The reader's verdicts as stored, unless an evaluation supplies the rows it read before clearing them (#629).
+        let storedRows =
+            allowsEnergy && calibrationRows == nil ? ((try? await database.calibrationRows()) ?? []) : []
+        let calibration = allowsEnergy ? PairCalibration.fit(calibrationRows ?? storedRows) : nil
         /// Under the energy rule (#534) neither model runs: pairs they might have settled stay as the rules left them
         /// and the rows involved are marked one matcher version behind, so the next pass with energy reads them again.
         var deferred = Set<String>()
@@ -221,7 +227,17 @@ enum EventClusterer {
                     }
                     modelScores[key] = await pairProbability(input(a), input(b))
                 }
-                if let probability = modelScores[key] ?? nil, probability >= matchPolicy.pairModelThreshold {
+                let cutoff = { (probability: Double) -> Double in
+                    guard let calibration else { return matchPolicy.pairModelThreshold }
+                    return calibration.cutoff(
+                        matchPolicy.pairModelThreshold,
+                        PairCalibration.features(
+                            pairModel: probability, cosine: pair.embeddingCosine,
+                            sharedSpecific: pair.sharedSpecificAnchors,
+                            gapHours: abs(a.date.timeIntervalSince(b.date)) / 3600,
+                            sameAct: pair.conflict != .differentAct))
+                }
+                if let probability = modelScores[key] ?? nil, probability >= cutoff(probability) {
                     pair = EventMatcher.modelConfirmed(pair, policy: matchPolicy)
                 }
             }
@@ -273,7 +289,8 @@ enum EventClusterer {
             guard !pending.isEmpty else { break }
             await prefetch(pending)
             for row in pending where !handled.contains(row.id) {
-                guard remaining > 0 else { break matching }
+                // Only this batch ends here: the flush below still runs, and the pass ends on the next budget check.
+                guard remaining > 0 else { break }
                 try Task.checkCancellation()
                 deferredCurrentRow = false
                 defer { if deferredCurrentRow { deferred.insert(row.id) } }
@@ -481,8 +498,13 @@ enum EventClusterer {
                 for right in b.prefix(Self.storySampleSize) {
                     total += 1
                     let pair = await ruled(left, right)
-                    let names = features(left).specificAnchors.intersection(features(right).specificAnchors)
-                        .subtracting(common).count
+                    // A shared series title of one publisher is no shared name, as in `storyPairsAgree`.
+                    let template =
+                        EventFeatures.sharedSeriesTerms(
+                            features(left), features(right),
+                            samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
+                    let names = features(left).without(template).specificAnchors
+                        .intersection(features(right).without(template).specificAnchors).subtracting(common).count
                     guard pair.neuralEligible, pair.conflict == nil || pair.conflict == .differentAct, names >= 1,
                         pair.sharedKeywords >= 1 || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
                     else { continue }
@@ -564,7 +586,17 @@ enum EventClusterer {
                     var agree = false
                     if count >= matchPolicy.storyLinkAnchors { agree = await storyPairsAgree(a, b, common: common) }
                     if !agree { agree = await storyModelAgrees(a, b, common: common) }
-                    guard agree else { continue }
+                    // A reader's exclusion anywhere across the two stories keeps them apart, not only between these
+                    // two events: joins are transitive.
+                    let excluded = components.component(of: event.id).contains { left in
+                        (membersOf[left] ?? []).contains { member in
+                            guard let apart = exclusions[member.id] else { return false }
+                            return components.component(of: other).contains { right in
+                                (membersOf[right] ?? []).contains { apart.contains($0.id) }
+                            }
+                        }
+                    }
+                    guard agree, !excluded else { continue }
                     components.join(event.id, other)
                 }
             }
@@ -585,8 +617,11 @@ enum EventClusterer {
                     return dateA != dateB ? dateA < dateB : (a?.id ?? lhs) < (b?.id ?? rhs)
                 }
                 for id in shared.keys.sorted(by: precedes) {
+                    // The exclusion check covers the whole story the event belongs to, not only the event itself.
+                    let storyMembers = (components.groups.first(where: { $0.contains(id) }) ?? [id])
+                        .flatMap { membersOf[$0] ?? [] }
                     guard let members = membersOf[id],
-                        exclusions[single.id]?.isDisjoint(with: members.map(\.id)) != false,
+                        exclusions[single.id]?.isDisjoint(with: storyMembers.map(\.id)) != false,
                         let gap = Self.closestGap([single], members), gap <= candidatePolicy.activeEventLifetime
                     else { continue }
                     // Its own headline names the story: a live blog's latest entry can carry another one.
@@ -701,7 +736,9 @@ enum EventClusterer {
                         merges.merged += 1
                         merges.changedEvents.insert(survivor.id)
                         merges.changedEvents.insert(candidate.id)
-                        survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
+                        survivor = DatabaseEngine.ActiveEvent(
+                            id: survivor.id, version: merged.membershipVersion,
+                            members: survivor.members + candidate.members)
                         // The merged members' terms can reach a third fragment the survivor's alone did not.
                         for term in candidateTerms.subtracting(survivorTerms) {
                             for id in eventsByTerm[term] ?? [] where id != survivor.id {
@@ -727,16 +764,21 @@ enum EventClusterer {
         await store()
         // The story pass reads every active event and lone report (#581). It runs when the pass processed a report
         // or changed an event, once per launch, and after a reader verdict; otherwise an unchanged archive stays
-        // at zero work.
+        // at zero work. Skipped work remains pending until a pass with energy completes it.
         let storiesStale: Bool
         if let lastStoryPass = await database.lastStoryPass {
             storiesStale = (try await database.newestVerdict() ?? .distantPast) >= lastStoryPass
         } else {
             storiesStale = true
         }
-        if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale {
-            report.changedEvents.formUnion(try await linkStories())
-            await database.recordStoryPass(at: now)
+        // Without energy there are no vectors, and the story pass would detach attachments it cannot re-check.
+        let storiesPending = await database.storyPassPending
+        if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale || storiesPending {
+            await database.deferStoryPass()
+            if allowsEnergy {
+                report.changedEvents.formUnion(try await linkStories())
+                await database.recordStoryPass(at: now)
+            }
         }
         return report
     }
@@ -759,6 +801,13 @@ enum EventClusterer {
             parent[left] = parent[left] ?? left
             parent[right] = parent[right] ?? right
             if left != right { parent[max(left, right)] = min(left, right) }
+        }
+
+        /// Every id joined with `id`, itself included.
+        func component(of id: String) -> [String] {
+            let root = find(id)
+            let joined = parent.keys.filter { find($0) == root }
+            return joined.isEmpty ? [id] : joined
         }
 
         /// Components with two or more members, each sorted.

@@ -617,6 +617,37 @@ extension DatabaseEngine {
         return created
     }
 
+    /// The reader's verdicts on pairs the pair model scored (#629): "Same Event" pairs as same, "Not the Same Event"
+    /// pairs as not, each with the stored signals of its pair decision and the gap between the two reports.
+    func calibrationRows(limit: Int = 1_000) throws -> [PairCalibration.Row] {
+        let decoder = JSONDecoder()
+        return try eventRows(
+            """
+            SELECT v.same, p.features, abs(a.published_at - b.published_at) FROM (
+                SELECT article_id, other_article_id, 1 AS same FROM event_inclusions
+                UNION ALL SELECT article_id, other_article_id, 0 FROM event_exclusions
+            ) v
+            JOIN pair_assessments p ON p.article_id = v.article_id AND p.other_article_id = v.other_article_id
+            JOIN articles a ON a.id = v.article_id JOIN articles b ON b.id = v.other_article_id
+            WHERE json_extract(p.features, '$.pairModel') IS NOT NULL AND p.matcher_version = ?
+            ORDER BY v.article_id, v.other_article_id LIMIT ?;
+            """, [.integer(EventMatcher.version), .integer(limit)]
+        ).compactMap { row -> PairCalibration.Row? in
+            guard let json = row[1], let gap = row[2].flatMap(Double.init),
+                let signals = try? decoder.decode(EventPairFeatures.self, from: Data(json.utf8)),
+                let pairModel = signals.pairModel
+            else { return nil }
+            return PairCalibration.Row(
+                features: PairCalibration.features(
+                    pairModel: pairModel, cosine: signals.cosine, sharedSpecific: signals.sharedSpecific,
+                    gapHours: gap / 3600, sameAct: signals.conflict != EventConflict.differentAct.rawValue),
+                same: row[0] == "1")
+        }
+        // Rows without a model score, or scored by an older matcher whose scores need not match the current scorer, are
+        // filtered in SQL, so the limit counts usable rows and bounds the work. Their verdicts stay; only the scores
+        // are not fitted.
+    }
+
     /// Events of one report that belong to a story (#581): reports the story pass attached as acts of their own.
     func storyAttachedEventIDs(since activeSince: Date) throws -> Set<String> {
         Set(
@@ -1049,10 +1080,10 @@ extension DatabaseEngine {
     }
 
     /// The live event, its membership version and its members, for a whole-event check.
-    func eventMatchMembers(eventID: String) throws -> (id: String, version: Int, members: [EventMatchRow])? {
+    func eventMatchMembers(eventID: String) throws -> ActiveEvent? {
         guard let live = try? liveEvent(eventID) else { return nil }
         let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id = ?;", [.text(live.id)])
-        return (live.id, live.version, members)
+        return ActiveEvent(id: live.id, version: live.version, members: members)
     }
 
     /// Visible reports published since `activeSince` that no event holds and the current matcher has processed: the
@@ -1068,7 +1099,14 @@ extension DatabaseEngine {
     }
 
     /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
-    func activeEventMembers(since activeSince: Date) throws -> [(id: String, version: Int, members: [EventMatchRow])] {
+    /// A live event with its membership version and members, for the story pass (#581).
+    struct ActiveEvent {
+        var id: String
+        var version: Int
+        var members: [EventMatchRow]
+    }
+
+    func activeEventMembers(since activeSince: Date) throws -> [ActiveEvent] {
         let since = activeSince.timeIntervalSince1970
         let versions = try eventRows(
             "SELECT id, membership_version FROM events WHERE merged_into IS NULL AND updated_at >= ? ORDER BY id;",
@@ -1082,7 +1120,8 @@ extension DatabaseEngine {
         let byEvent = Dictionary(grouping: rows) { $0.eventID ?? "" }
         return versions.compactMap { row in
             guard let id = row[0], let members = byEvent[id], !members.isEmpty else { return nil }
-            return (id, row[1].flatMap { Int($0) } ?? 1, members.sorted { $0.id < $1.id })
+            return ActiveEvent(
+                id: id, version: row[1].flatMap { Int($0) } ?? 1, members: members.sorted { $0.id < $1.id })
         }
     }
 

@@ -174,8 +174,15 @@ def export(args, out):
     model.load_state_dict(state)
     export_functions(PairEncoder(model.eval()).eval(), ('input_ids', 'attention_mask', 'token_type_ids'),
                      ('probability' if labels == 1 else 'probabilities',), PAIR_LENGTHS,
-                     out / 'pairscorer.mlpackage',
+                     out / 'pairscorer.mlpackage', describe_pair,
                      compress=lambda m: compress(m, args.mode))
+
+
+def describe_pair(mlmodel):
+    """The package's human-readable fields, which the multifunction join drops; the metadata file records the rest."""
+    mlmodel.short_description = 'Pair model for story matching: same-event probability of two texts (#525, #554)'
+    mlmodel.author = 'News'
+    mlmodel.license = 'Derived from sentence-transformers/all-MiniLM-L6-v2, Apache License 2.0'
 
 
 def check(args, out, texts):

@@ -284,7 +284,9 @@ def gdelt_download(slot, kind, cache):
     if not target.exists():
         try:
             write_private(target, fetch(GDELT + target.name))
-        except OSError as error:  # URLError and TimeoutError are OSErrors
+        except urllib.error.HTTPError as error:
+            if error.code != 404:  # only an absent 15-minute file is skipped; anything else stops the build
+                raise
             print(f'    skip {target.name}: {error}', file=sys.stderr)
             return None
     return target
@@ -419,13 +421,15 @@ def page_fields(body):
 
 def archived_page(url, cache, attempts=3):
     """Title and first paragraphs of a page from the Internet Archive, cached by URL hash. A page the archive does
-    not have (404, 403) is cached as None; a rate limit, server error or timeout is retried with a pause and never
-    cached, so a later run fetches it again."""
+    not have (403, 404, 410) is cached as None; a rate limit, server error or timeout is retried with a pause and never
+    cached, and when every attempt fails the build stops, so no CSV is published without the page; a rerun resumes
+    from the cache. With no attempts (`--cached-only`) an uncached page is None."""
     key = hashlib.sha256(url.encode()).hexdigest()
     target = cache / 'pages' / (key + '.json')
     if target.exists():
         return json.loads(target.read_text())
     archived = url if url.startswith(ARCHIVE) else ARCHIVE + 'web/2020id_/' + url
+    failure = None
     for attempt in range(attempts):
         try:
             result = page_fields(fetch(archived, timeout=60, limit=400_000).decode('utf-8', errors='replace'))
@@ -434,11 +438,15 @@ def archived_page(url, cache, attempts=3):
             if error.code in (403, 404, 410):
                 result = None
                 break
+            failure = error
             time.sleep(15 * (attempt + 1))
-        except (OSError, ValueError):  # URLError and TimeoutError are OSErrors
+        except (OSError, ValueError) as error:  # URLError and TimeoutError are OSErrors
+            failure = error
             time.sleep(15 * (attempt + 1))
     else:
-        return None
+        if not attempts:
+            return None
+        raise ConnectionError(f'{archived}: {attempts} attempts failed') from failure
     target.parent.mkdir(exist_ok=True)
     # Written beside the target and moved into place, so an interrupted write never leaves a half file to parse.
     partial = target.with_name(f'{key}.{os.getpid()}.{threading.get_ident()}.tmp')
@@ -449,10 +457,11 @@ def archived_page(url, cache, attempts=3):
 
 
 def semeval_label(overall):
-    """Overall similarity 1 (most similar) is one story, 3 and 4 are not, 2 is ambiguous and dropped."""
+    """Overall similarity 1 (most similar) is one story, 3 and 4 are not; 2 and the half-steps up to it are ambiguous
+    and dropped (the files carry averaged ratings such as 2.5)."""
     if overall < 1.5:
         return 1
-    if overall >= 2.5:
+    if overall >= 3:
         return 0
     return None
 
@@ -538,9 +547,46 @@ def self_check():
             rows = list(csv.DictReader(handle))
         require(rows[0]['weight'] == '2' and (rows[0]['label'], rows[0]['marginal']) == ('1', '12')
                 and (rows[1]['label'], rows[1]['marginal']) == ('0', ''), 'SemEval labels and weight')
+        require([semeval_label(x) for x in (1.0, 1.4, 1.5, 2.0, 2.5, 2.9, 3.0, 4.0)] == [1, 1, None, None, None, None,
+                                                                                   0, 0], 'SemEval midpoints dropped')
+        failure_checks(out)
         require(list(gdelt_slots('20260101', '20260102', 2)) == ['20260101000000', '20260101120000', '20260102000000',
                                                                  '20260102120000'], 'GDELT slots')
     print('pretrain_pairs self-check passed')
+
+
+def failure_checks(out):
+    """GDELT: only a 404 is a missing slot. Archive: 403/404/410 are cached as None, exhausted retries raise, and
+    `--cached-only` (no attempts) gives None. A stub opener stands in for the network."""
+    global OPENER
+    real_opener, real_sleep = OPENER, time.sleep
+
+    class Failing:
+        def __init__(self, code):
+            self.code = code
+
+        def open(self, request, timeout):
+            raise urllib.error.HTTPError(request.full_url, self.code, 'stub', {}, None)
+
+    def raises(call):
+        try:
+            call()
+        except OSError:
+            return True
+        return False
+
+    time.sleep = lambda seconds: None
+    try:
+        OPENER = Failing(404)
+        require(gdelt_download('20260101000000', 'export', out) is None, 'A GDELT 404 is a missing slot')
+        require(archived_page('https://example.com/gone', out) is None
+                and archived_page('https://example.com/gone', out, attempts=0) is None, 'An absent page is cached')
+        OPENER = Failing(500)
+        require(raises(lambda: gdelt_download('20260101000000', 'mentions', out)), 'Other GDELT errors stop the build')
+        require(raises(lambda: archived_page('https://example.com/busy', out)), 'Exhausted archive retries raise')
+        require(archived_page('https://example.com/busy', out, attempts=0) is None, '--cached-only fetches nothing')
+    finally:
+        OPENER, time.sleep = real_opener, real_sleep
 
 
 def parse(argv):

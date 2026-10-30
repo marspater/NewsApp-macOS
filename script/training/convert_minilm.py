@@ -171,6 +171,7 @@ def main(argv):
     bert, source = build(args.source)
     tokenizer = Tokenizer()
     path = out / 'minilm.mlpackage'
+    shipped = compiled_functions(SHIPPED)  # loaded first: after the conversion it segfaulted (coremltools 9.0)
     encoder, models = convert(bert, LENGTHS, path, describe)
     torch_difference = 0.0
     for text in CHECK_TEXTS:
@@ -178,7 +179,7 @@ def main(argv):
         with torch.no_grad():
             ours = encoder(torch.tensor([ids], dtype=torch.int32), torch.ones(1, len(ids), dtype=torch.int32))[0]
         torch_difference = max(torch_difference, float(np.abs(ours.numpy() - predict(models, ids)).max()))
-    shipped_difference, shipped_cosine = compare(models, compiled_functions(SHIPPED), CHECK_TEXTS, tokenizer)
+    shipped_difference, shipped_cosine = compare(models, shipped, CHECK_TEXTS, tokenizer)
     metadata = {
         'model': 'minilm', 'source': source, 'max_tokens': MAX_TOKENS,
         'functions': [f'length_{length}' for length in LENGTHS], 'compute_units': 'cpuAndNeuralEngine',
