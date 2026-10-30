@@ -44,10 +44,10 @@ The owner's library was first copied with SQLite's online backup API, which incl
 0. Quit News and take a fresh copy of the library with the online backup API:
 
    ```bash
-   (umask 077 && sqlite3 "file:$HOME/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-pre-v2-install.sqlite3" && cp "$HOME/Library/Containers/com.marspater.news/Data/Library/Preferences/com.marspater.news.plist" "$HOME/news-eval/com.marspater.news-pre-v2-install.plist") && stat -f %Lp "$HOME/news-eval/library-pre-v2-install.sqlite3"
+   (umask 077 && sqlite3 "file:$HOME/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-pre-v2-install.sqlite3" && L="$HOME/Library/Containers/com.marspater.news/Data/Library" && install -m 600 "$L/Preferences/com.marspater.news.plist" "$HOME/news-eval/com.marspater.news-pre-v2-install.plist" && install -m 600 "$L/Application Support/com.marspater.news/news.sqlite3.world-tension-v2.json" "$HOME/news-eval/library-pre-v2-install.world-tension-v2.json") && stat -f %Lp "$HOME"/news-eval/*-pre-v2-install*
    ```
 
-   Continue only if the last line prints `600`.
+   Continue only if every line prints `600` (`install -m 600` sets the mode even when a copy already exists).
 
    Then, on the merged `main` (which now contains every v2 branch, #768 and #770 included), run the combined check on a writable copy of it: `NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=<copy> ./test.sh`. Install only if it passes and the copy reads schema 27 with the same story, read and saved counts.
 1. On a clean checkout of the merged `main`, run `git tag v2.0.0`. **Do not push the tag:** pushing runs `release.yml`.
@@ -62,7 +62,7 @@ The owner's library was first copied with SQLite's online backup API, which incl
 5. Check that Shortcuts lists the News actions (#748).
 6. Remove stray copies (`~/Projects/News/News.app`, worktree builds) so `feed://` and `news://` open the installed app.
 
-**Rollback:** quit News; copy `~/news-eval/library-pre-v2-install.sqlite3` (or the 30 October copy) over `news.sqlite3` and remove `news.sqlite3-wal` and `news.sqlite3-shm`; restore the tension file; copy `~/news-eval/com.marspater.news-pre-v2-install.plist` back to `~/Library/Containers/com.marspater.news/Data/Library/Preferences/com.marspater.news.plist` and run `killall cfprefsd` so the restored preferences are read; then reinstall the previous app. The newer-schema guard (#751) keeps an older build from writing to a v27 library.
+**Rollback:** quit News and do not open it until these steps are done; copy `~/news-eval/library-pre-v2-install.sqlite3` (or the 30 October copy) over `news.sqlite3` and remove `news.sqlite3-wal` and `news.sqlite3-shm`; copy `library-pre-v2-install.world-tension-v2.json` back as `news.sqlite3.world-tension-v2.json`; copy `com.marspater.news-pre-v2-install.plist` back to the container's `Preferences` folder and run `killall cfprefsd`; check that the restored library reads schema 25 (`sqlite3 "file:…/news.sqlite3?mode=ro" "PRAGMA user_version;"`); only then reinstall the previous app. Builds before #751 have no newer-schema guard, so the previous app must never open the v27 library.
 
 ## Close-out
 
