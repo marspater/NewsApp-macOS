@@ -76,7 +76,7 @@ The original seven programs (J–P) each have a GitHub epic with sub-issues and 
 |---|---|---|---|---|---|
 | K1 (#540) | Embedding throughput | Pointer-based `MLMultiArray` pooling, batched inputs, no `NSNumber` subscripts; keep tokenizer and pooling semantics. | Vectors identical (cosine ≥ 0.9999 vs current on the authored corpus); cold 2,000-article pass ≥ 3× faster in `--performance-baseline`; benchmark JSON in `docs/benchmarks`. | M | P1 |
 | K2 (#541) | Clustering backlog order and fragment-merge pruning | `pendingEventMatchRows` newest-first; `mergeFragments` indexes active events by shared specific anchor before pairwise assessment. | Same memberships on the authored corpus and private tune replay (TP/FP unchanged); fragment-merge time measured before/after. | M | P1 |
-| K3 (#542) | Lazy model loading | Load MiniLM and PairScorer on first use, not at actor init; cold launch does not touch CoreML. | Launch baseline (`script/launch_baseline.sh`) first-card time not worse; models load within the first clustering pass. | S | P2 |
+| K3 (#542) | Lazy model loading | Closed 25 October without a change: `SentenceEmbedder.shared` and `PairScorer.shared` are lazy statics that only `EventClusterer.run` touches, so the models load inside the first clustering pass, after the first refresh has published; cold launch does not open Core ML. | — | — | — |
 | K4 (#543) | Re-baseline performance budgets | After J1–K3: `--performance-baseline`, launch and full-app workload on the seeded library; update `docs/audits` and budgets. | Dated audit + JSON; budgets in ARCHITECTURE updated. | S | P2 |
 
 ### L · Logic hardening, deterministic layers (epic #573, milestone L)

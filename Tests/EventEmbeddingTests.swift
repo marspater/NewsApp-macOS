@@ -3,6 +3,7 @@
 // and hybrid anchor + embedding event matching (#127, #307).
 
 import Accelerate
+import CoreML
 import Foundation
 import SQLite3
 
@@ -11,12 +12,83 @@ extension NewsTests {
         print("  - Testing on-device sentence embeddings & hybrid matcher (#127, #307)...")
 
         try testBertTokenizer()
+        try await testSentenceEmbedderUnavailableResources()
         try await testSentenceEmbedderInference()
+        try await testSentenceEmbedderPaddedCompatibility()
+        try await testSentenceEmbedderBatchBoundaries()
+        try await testEmbeddingVectorExport()
         try await testArticleEmbeddingsDatabaseRoundtrip()
         try await testArticleEmbeddingsForeignKeyCascade()
         try await testHybridEventMatcherSemanticRescueAndVeto()
         try await testEmbeddingAwareValidationOfAssignedMembers()
         testCosineSQLFunction()
+        await testPairScorerReadsTheBinaryModel()
+        try await testStoryModelSignal()
+    }
+
+    /// The story signal (#627): two events sharing one specific name are one story by the rules only with a second name;
+    /// with `storyModelThreshold` set, a story model's p_same + p_related at or above it (p_different at most 0.15)
+    /// links them. Off by default, so the default pass keeps them apart.
+    private static func testStoryModelSignal() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func report(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://storymodel.invalid/\(id)", guid: "storymodel-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let articles = [
+            report(1, "Parliament votes to oust Prime Minister Novak", hours: 0),
+            report(2, "Parliament votes to oust Novak as Prime Minister", hours: 1),
+            report(3, "Thousands protest in the capital after parliament votes to oust Novak", hours: 5),
+            report(4, "Thousands protest in the capital streets after parliament votes to oust Novak", hours: 6),
+        ]
+        /// The stories of the vote event and the protest event, nil when they are not two events.
+        func stories(threshold: Double) async throws -> (String?, String?)? {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles(articles)
+            var policy = EventMatchPolicy.standard
+            policy.storyModelThreshold = threshold
+            _ = try await EventClusterer.run(
+                in: db, matchPolicy: policy, now: start.addingTimeInterval(7 * 3600), allowsEnergy: true,
+                pairProbability: { @Sendable _, _ in nil }, storyProbabilities: { @Sendable _, _ in (0.6, 0.35) })
+            var ids: [String] = []
+            for article in articles { ids.append(try await db.resolvedArticleID(for: article)) }
+            var result: (String?, String?)?
+            if let vote = try await db.eventID(forArticle: ids[0]),
+                let protest = try await db.eventID(forArticle: ids[2]),
+                vote != protest
+            {
+                result = (try await db.storyID(forEvent: vote), try await db.storyID(forEvent: protest))
+            }
+            await db.close()
+            return result
+        }
+        guard let off = try await stories(threshold: .infinity), let on = try await stories(threshold: 0.8) else {
+            assertTrue(false, "The vote and the protest are two events")
+            return
+        }
+        assertTrue(off.0 != off.1, "One shared name is no story by the rules alone")
+        assertTrue(on.0 != nil && on.0 == on.1, "The story model's signal links them")
+    }
+
+    /// The shipped pair model is binary (v11 weights): `PairScorer` reads it as same-event probability with related 0,
+    /// and `probability` is the same-event probability of `probabilities` (#627).
+    private static func testPairScorerReadsTheBinaryModel() async {
+        let scorer = PairScorer()
+        guard await scorer.isAvailable else {
+            assertTrue(false, "The bundled pair model loads")
+            return
+        }
+        let a = "Magnitude 6.1 earthquake strikes eastern Turkey\nBuildings collapsed in Malatya."
+        let b = "Strong earthquake hits eastern Turkey, buildings collapse\nA 6.1 quake struck near Malatya."
+        guard let both = await scorer.probabilities(a, b), let same = await scorer.probability(a, b) else {
+            assertTrue(false, "The pair model scores a pair")
+            return
+        }
+        assertEqual(both.related, 0, "A binary pair model has no related-act probability")
+        assertEqual(both.same, same, "probability is the same-event probability")
+        assertTrue(same > 0 && same < 1, "A probability lies between 0 and 1")
     }
 
     // MARK: - news_cosine SQL function
@@ -182,6 +254,208 @@ extension NewsTests {
             abs(SentenceEmbedder.cosineSimilarity(batchVectors[2], vecC) - 1.0) < 1e-5,
             "Batch vector 2 matches single embed vector"
         )
+    }
+
+    // MARK: - SentenceEmbedder throughput regressions (#540)
+
+    private static func embeddingResource(_ name: String, _ ext: String) -> URL {
+        Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Models")
+            ?? URL(fileURLWithPath: "Sources/Resources/Models/\(name).\(ext)")
+    }
+
+    private static func testSentenceEmbedderUnavailableResources() async throws {
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let cases = [
+            ("missing model", missing, embeddingResource("vocab", "txt")),
+            ("missing vocabulary", embeddingResource("minilm", "mlmodelc"), missing),
+            ("both missing", missing, missing),
+        ]
+        for (label, modelURL, vocabURL) in cases {
+            let embedder = SentenceEmbedder(modelURL: modelURL, vocabURL: vocabURL)
+            let available = await embedder.isAvailable
+            assertFalse(available, "\(label): embedder must be unavailable")
+            let single = await embedder.embed("Apple reports earnings")
+            assertEqual(single, nil, "\(label): single embedding fails gracefully")
+            let empty = await embedder.embedBatch([])
+            assertTrue(empty.isEmpty, "\(label): empty batch stays empty")
+            let texts = (0...SentenceEmbedder.batchLimit).map { "Report \($0)" }
+            let batch = await embedder.embedBatch(texts)
+            assertEqual(batch.count, texts.count, "\(label): unavailable batch preserves every position")
+            assertTrue(batch.allSatisfy { $0 == nil }, "\(label): unavailable batch contains only nils")
+        }
+    }
+
+    private static func assertValidEmbedding(_ vector: [Float], _ context: String) {
+        assertEqual(vector.count, 384, "\(context): dimension remains compatible with stored vectors")
+        assertTrue(vector.allSatisfy { $0.isFinite }, "\(context): every component is finite")
+        let squaredNorm = vector.reduce(0.0) { $0 + Double($1) * Double($1) }
+        assertTrue(abs(squaredNorm - 1) < 1e-3, "\(context): vector has unit length")
+    }
+
+    private static func assertEmbeddingMatches(_ actual: [Float], _ expected: [Float], _ context: String) {
+        assertValidEmbedding(actual, context)
+        assertEqual(actual.count, expected.count, "\(context): vector dimensions match")
+        let cosine = zip(actual, expected).reduce(0.0) { $0 + Double($1.0) * Double($1.1) }
+        assertTrue(cosine >= 0.9999, "\(context): cosine \(cosine) preserves the pre-optimization embedding")
+    }
+
+    /// Independent oracle for the pre-#540 contract: 128 padded input positions and boxed, mask-aware pooling.
+    /// Comparing only embedBatch with embed would miss a regression shared by both new paths.
+    private static func paddedEmbedding(
+        _ text: String, model: MLModel, tokenizer: BertWordPieceTokenizer
+    ) throws -> [Float] {
+        let encoded = tokenizer.encode(text, maxSequenceLength: 128)
+        let ids = try MLMultiArray(shape: [1, 128], dataType: .int32)
+        let mask = try MLMultiArray(shape: [1, 128], dataType: .int32)
+        for index in 0..<128 {
+            ids[index] = NSNumber(value: encoded.inputIDs[index])
+            mask[index] = NSNumber(value: encoded.attentionMask[index])
+        }
+        let input = try MLDictionaryFeatureProvider(dictionary: [
+            "input_ids": MLFeatureValue(multiArray: ids), "attention_mask": MLFeatureValue(multiArray: mask),
+        ])
+        let output = try model.prediction(from: input)
+        guard let hidden = output.featureValue(for: "last_hidden_state")?.multiArrayValue else {
+            throw StoryCorpus.Failure.invalid("Padded reference model has no last_hidden_state")
+        }
+        var vector = [Double](repeating: 0, count: 384)
+        for token in 0..<128 where encoded.attentionMask[token] == 1 {
+            for dimension in vector.indices {
+                vector[dimension] += hidden[[0, NSNumber(value: token), NSNumber(value: dimension)]].doubleValue
+            }
+        }
+        // The positive mean divisor cancels in L2 normalization.
+        let norm = sqrt(vector.reduce(0) { $0 + $1 * $1 })
+        assertTrue(norm > 0 && norm.isFinite, "Padded reference has a finite, nonzero norm")
+        return vector.map { Float($0 / norm) }
+    }
+
+    private static func testSentenceEmbedderPaddedCompatibility() async throws {
+        let tokenizer = try BertWordPieceTokenizer(vocabURL: embeddingResource("vocab", "txt"))
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = .all
+        let model = try MLModel(contentsOf: embeddingResource("minilm", "mlmodelc"), configuration: configuration)
+        let full = Array(repeating: "apple", count: 126).joined(separator: " ")
+        let overflow = full + " earthquake damages buildings"
+        let texts = [
+            "", " \t\n ", "Apple", "Erdoğan meets Sánchez in Ankara.",
+            String(repeating: "z", count: 101),
+            Array(repeating: "apple", count: 125).joined(separator: " "), full, overflow,
+        ]
+        let lengths = texts.map { tokenizer.encode($0).attentionMask.filter { $0 == 1 }.count }
+        assertEqual(lengths[0], 2, "Empty input still includes CLS and SEP")
+        assertEqual(lengths[5], 127, "Fixture exercises one token below the sequence limit")
+        assertEqual(lengths[6], 128, "Fixture exactly fills the model's sequence limit")
+        assertEqual(
+            tokenizer.encode(full).inputIDs, tokenizer.encode(overflow).inputIDs,
+            "Text beyond the token limit is truncated before SEP")
+
+        let embedder = SentenceEmbedder.shared
+        let batch = await embedder.embedBatch(texts)
+        assertEqual(batch.count, texts.count, "Mixed-length batch preserves every input")
+        for (index, text) in texts.enumerated() {
+            let expected = try paddedEmbedding(text, model: model, tokenizer: tokenizer)
+            guard let single = await embedder.embed(text), let batched = batch[index] else {
+                assertTrue(false, "Boundary text \(index) must embed singly and in a batch")
+                return
+            }
+            assertEmbeddingMatches(single, expected, "Single boundary text \(index)")
+            assertEmbeddingMatches(batched, expected, "Batched boundary text \(index)")
+        }
+        assertEqual(SentenceEmbedder.modelVersion, 2, "Compatible embeddings keep the stored-vector version")
+    }
+
+    private static func testSentenceEmbedderBatchBoundaries() async throws {
+        let embedder = SentenceEmbedder.shared
+        let samples = [
+            "", "Apple reports record quarterly revenue.",
+            "A powerful earthquake damages buildings in eastern Turkey.",
+            "Erdoğan meets Sánchez in Ankara.",
+            Array(repeating: "apple", count: 126).joined(separator: " "),
+        ]
+        var expected: [[Float]] = []
+        for text in samples {
+            guard let vector = await embedder.embed(text) else {
+                assertTrue(false, "Every batch-order fixture must embed")
+                return
+            }
+            assertValidEmbedding(vector, "Batch-order reference")
+            expected.append(vector)
+        }
+        let limit = SentenceEmbedder.batchLimit
+        for count in [0, 1, limit - 1, limit, limit + 1, 2 * limit + 1] {
+            let texts = (0..<count).map { samples[$0 % samples.count] }
+            let batch = await embedder.embedBatch(texts)
+            assertEqual(batch.count, count, "Batch of \(count) preserves cardinality including its final partial chunk")
+            for index in texts.indices {
+                guard let vector = batch[index] else {
+                    assertTrue(false, "Batch of \(count) must retain the vector at index \(index)")
+                    return
+                }
+                assertEmbeddingMatches(vector, expected[index % samples.count], "Batch of \(count), index \(index)")
+            }
+        }
+        // A later call must not retain positions or output buffers from the preceding multi-chunk batch.
+        let repeated = await embedder.embedBatch([samples[2], samples[1], samples[2]])
+        assertEqual(repeated.count, 3, "A subsequent batch has only its own results")
+        for (index, expectedIndex) in [2, 1, 2].enumerated() {
+            guard let vector = repeated[index] else {
+                assertTrue(false, "Repeated input at \(index) must retain its position")
+                return
+            }
+            assertEmbeddingMatches(vector, expected[expectedIndex], "Subsequent batch index \(index)")
+        }
+    }
+
+    private static func testEmbeddingVectorExport() async throws {
+        struct Article: Decodable { let id: String, title: String, description: String? }
+        struct Fixture: Decodable { let articles: [Article] }
+        let fixture = try JSONDecoder().decode(
+            Fixture.self,
+            from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/story-corpus/matcher-regressions-v1.json")))
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? fm.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("embedding-vectors.json")
+        try await exportEmbeddingVectors(output: directory.path)
+        let original = try Data(contentsOf: file)
+        let vectors = try JSONDecoder().decode([String: [Float]].self, from: original)
+        assertEqual(
+            Set(vectors.keys), Set(fixture.articles.map(\.id)), "Export includes exactly the authored corpus IDs")
+        for article in fixture.articles {
+            let text = EventFeatures.matchingText(title: article.title, description: article.description ?? "")
+            guard let exported = vectors[article.id], let expected = await SentenceEmbedder.shared.embed(text) else {
+                assertTrue(false, "Export contains a usable vector for \(article.id)")
+                return
+            }
+            assertEmbeddingMatches(exported, expected, "Exported article \(article.id)")
+        }
+        let attributes = try fm.attributesOfItem(atPath: file.path)
+        assertEqual(
+            (attributes[.posixPermissions] as? NSNumber)?.intValue, 0o600,
+            "Embedding evidence is readable and writable only by its owner")
+
+        do {
+            try await exportEmbeddingVectors(output: directory.path)
+            assertTrue(false, "A second export must refuse to overwrite the comparison reference")
+        } catch {
+            assertEqual(
+                try Data(contentsOf: file), original, "Refused export leaves the reference byte-for-byte intact")
+        }
+
+        // A pre-existing output link must not let an export replace a separate reference file.
+        let target = directory.appendingPathComponent("reference.json")
+        try original.write(to: target)
+        try fm.removeItem(at: file)
+        try fm.createSymbolicLink(at: file, withDestinationURL: target)
+        do {
+            try await exportEmbeddingVectors(output: directory.path)
+            assertTrue(false, "An existing symlink is also a reference that must not be overwritten")
+        } catch {
+            assertEqual(try Data(contentsOf: target), original, "Refused export leaves the symlink target intact")
+            assertEqual(try fm.destinationOfSymbolicLink(atPath: file.path), target.path, "Output link remains intact")
+        }
     }
 
     // MARK: - SQLite v21 article_embeddings Roundtrip & Cascade (#127, #307)
@@ -490,5 +764,200 @@ extension NewsTests {
             memberIDs.contains(art2.id) && memberIDs.contains(art1.id),
             "Semantically divergent member must not remain clustered together after embedding validation"
         )
+    }
+
+    // MARK: - Compute placement (#554)
+
+    /// `--compute-plan` (#554): where Core ML runs each shipped model. `MLComputePlan` gives every operation's preferred
+    /// device and estimated cost under `.all` and `.cpuAndNeuralEngine`, per function; the report sums the cost by device
+    /// and names the operations that cannot run on the Neural Engine. Then each compute unit's load time and the latency
+    /// of one text, one pair and a batch.
+    /// `NEWS_EMBEDDING_MODEL_PATH` and `NEWS_PAIR_MODEL_PATH` measure candidate `.mlmodelc` folders instead.
+    static func reportComputePlacement() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        let minilm = URL(
+            fileURLWithPath: environment["NEWS_EMBEDDING_MODEL_PATH"] ?? "Sources/Resources/Models/minilm.mlmodelc")
+        let pairscorer = URL(
+            fileURLWithPath: environment["NEWS_PAIR_MODEL_PATH"] ?? "Sources/Resources/Models/pairscorer.mlmodelc")
+        struct Item: Decodable { let title: String, description: String? }
+        struct Fixture: Decodable { let articles: [Item] }
+        let texts = try JSONDecoder().decode(
+            Fixture.self,
+            from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/story-corpus/matcher-regressions-v1.json"))
+        ).articles.map { EventFeatures.matchingText(title: $0.title, description: $0.description ?? "") }
+        let tokenizer = try BertWordPieceTokenizer(vocabURL: URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt"))
+        let lengths = texts.map { text in tokenizer.encode(text).attentionMask.filter { $0 == 1 }.count }.sorted()
+        var report: [String: Any] = [
+            "texts": texts.count, "tokens_median": lengths[lengths.count / 2], "tokens_max": lengths.last ?? 0,
+            "os": ProcessInfo.processInfo.operatingSystemVersionString,
+        ]
+        let units: [(String, MLComputeUnits)] = [
+            ("all", .all), ("cpuAndNeuralEngine", .cpuAndNeuralEngine), ("cpuAndGPU", .cpuAndGPU),
+            ("cpuOnly", .cpuOnly),
+        ]
+        for (name, url) in [("minilm", minilm), ("pairscorer", pairscorer)] {
+            for (label, unit) in units.prefix(2) {
+                report["\(name)_plan_\(label)"] = try await computePlans(url, unit)
+            }
+        }
+        let batch = (0..<2_000).map { texts[$0 % texts.count] }
+        func milliseconds(since start: TimeInterval) -> Double {
+            ((ProcessInfo.processInfo.systemUptime - start) * 10_000).rounded() / 10
+        }
+        func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
+        // The word-piece share of one text's embedding time, the same on every compute unit.
+        report["tokenize_per_text_median_ms"] = median(
+            texts.map { text in
+                let start = ProcessInfo.processInfo.systemUptime
+                _ = tokenizer.encode(text)
+                return milliseconds(since: start)
+            })
+        for (label, unit) in units {
+            var start = ProcessInfo.processInfo.systemUptime
+            let embedder = SentenceEmbedder(modelURL: minilm, computeUnits: unit)
+            let load = milliseconds(since: start)
+            guard await embedder.isAvailable else { throw StoryCorpus.Failure.invalid("\(minilm.path) does not load") }
+            start = ProcessInfo.processInfo.systemUptime
+            _ = await embedder.embed(texts[0])
+            let first = milliseconds(since: start)
+            var single: [Double] = []
+            for text in texts {
+                start = ProcessInfo.processInfo.systemUptime
+                _ = await embedder.embed(text)
+                single.append(milliseconds(since: start))
+            }
+            start = ProcessInfo.processInfo.systemUptime
+            _ = await embedder.embedBatch(texts)
+            let corpusBatch = milliseconds(since: start)
+            start = ProcessInfo.processInfo.systemUptime
+            let vectors = await embedder.embedBatch(batch)
+            let largeBatch = milliseconds(since: start)
+            guard vectors.allSatisfy({ $0 != nil }) else { throw StoryCorpus.Failure.invalid("A text did not embed") }
+            report["minilm_\(label)"] = [
+                "load_ms": load, "first_prediction_ms": first, "per_text_median_ms": median(single),
+                "batch_\(texts.count)_ms": corpusBatch, "batch_2000_ms": largeBatch,
+            ]
+
+            // The pair model's functions as `PairScorer` loads them, or its one 256-token function (#554).
+            func loadPair(_ function: String?) throws -> MLModel {
+                let configuration = MLModelConfiguration()
+                configuration.computeUnits = unit
+                configuration.functionName = function
+                return try MLModel(contentsOf: pairscorer, configuration: configuration)
+            }
+            start = ProcessInfo.processInfo.systemUptime
+            var pairModels: [Int: MLModel] = [:]
+            for length in PairScorer.sequenceLengths { pairModels[length] = try? loadPair("length_\(length)") }
+            if pairModels.count < PairScorer.sequenceLengths.count {
+                pairModels = [PairScorer.maxSequenceLength: try loadPair(nil)]
+            }
+            let pairLoad = milliseconds(since: start)
+            let providers = try zip(texts, texts.dropFirst()).map { a, b in
+                let encoded = tokenizer.encodePair(a, b, maxSequenceLength: PairScorer.maxSequenceLength)
+                let tokens = encoded.attentionMask.filter { $0 == 1 }.count
+                let length = pairModels.keys.sorted().first { $0 >= tokens } ?? PairScorer.maxSequenceLength
+                var inputs: [String: MLFeatureValue] = [:]
+                for (name, values) in [
+                    ("input_ids", encoded.inputIDs), ("attention_mask", encoded.attentionMask),
+                    ("token_type_ids", encoded.tokenTypeIDs),
+                ] {
+                    let array = try MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32)
+                    array.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
+                        _ = buffer.initialize(from: values.prefix(length))
+                    }
+                    inputs[name] = MLFeatureValue(multiArray: array)
+                }
+                return (length, try MLDictionaryFeatureProvider(dictionary: inputs))
+            }
+            // Synchronous, as `PairScorer` calls it: in an async context `prediction(from:)` picks the async overload.
+            // A batch runs one Core ML batch per length.
+            func timed(_ providers: [(Int, MLDictionaryFeatureProvider)]) throws -> Double {
+                let start = ProcessInfo.processInfo.systemUptime
+                for (length, model) in pairModels {
+                    let batch = providers.filter { $0.0 == length }.map(\.1)
+                    if batch.count == 1 {
+                        _ = try model.prediction(from: batch[0])
+                    } else if !batch.isEmpty {
+                        _ = try model.predictions(fromBatch: MLArrayBatchProvider(array: batch))
+                    }
+                }
+                return milliseconds(since: start)
+            }
+            // Model predictions on prebuilt inputs only: `PairScorer.probabilities` also tokenizes and predicts both
+            // orders of a pair, one at a time, so an uncached pair score costs more than one prediction.
+            let pairFirst = try timed([providers[0]])
+            let predictions = try providers.map { try timed([$0]) }
+            report["pairscorer_\(label)"] = [
+                "load_ms": pairLoad, "first_prediction_ms": pairFirst,
+                "single_prediction_median_ms": median(predictions),
+                "batched_predictions_\(providers.count)_ms": try timed(providers),
+            ]
+        }
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        print("COMPUTE_PLACEMENT_JSON_BEGIN")
+        print(String(decoding: data, as: UTF8.self))
+        print("COMPUTE_PLACEMENT_JSON_END")
+    }
+
+    /// Each function's `MLComputePlan` under `units`: the cost-weighted share of each preferred device, and per operator
+    /// the count that cannot run on the Neural Engine and the count the plan sends elsewhere although it could.
+    private static func computePlans(_ url: URL, _ units: MLComputeUnits) async throws -> [String: Any] {
+        let configuration = MLModelConfiguration()
+        configuration.computeUnits = units
+        let structure = try await MLComputePlan.load(contentsOf: url, configuration: configuration).modelStructure
+        guard case .program(let program) = structure else {
+            throw StoryCorpus.Failure.invalid("\(url.path) is not an ML program")
+        }
+        var plans: [String: Any] = [:]
+        for name in program.functions.keys {
+            // The plan places only the function the configuration names: every function by name in a multifunction
+            // program, so no earlier function's name carries over; the default for a single-function one.
+            configuration.functionName = program.functions.count > 1 ? name : nil
+            let plan = try await MLComputePlan.load(contentsOf: url, configuration: configuration)
+            guard case .program(let program) = plan.modelStructure, let function = program.functions[name] else {
+                continue
+            }
+            plans[name] = computePlan(plan, function)
+        }
+        return plans
+    }
+
+    private static func computePlan(
+        _ plan: MLComputePlan, _ function: MLModelStructure.Program.Function
+    ) -> [String: Any] {
+        var costByDevice: [String: Double] = [:]
+        var operations = 0
+        var notOnNeuralEngine: [String: Int] = [:]
+        var placedElsewhere: [String: Int] = [:]
+        func device(_ device: MLComputeDevice) -> String {
+            switch device {
+            case .cpu: "cpu"
+            case .gpu: "gpu"
+            case .neuralEngine: "neuralEngine"
+            @unknown default: "other"
+            }
+        }
+        func walk(_ block: MLModelStructure.Program.Block) {
+            for operation in block.operations {
+                operation.blocks.forEach(walk)
+                guard let usage = plan.deviceUsage(for: operation) else { continue }
+                operations += 1
+                let preferred = device(usage.preferred)
+                costByDevice[preferred, default: 0] += plan.estimatedCost(of: operation)?.weight ?? 0
+                if !usage.supported.contains(where: { device($0) == "neuralEngine" }) {
+                    notOnNeuralEngine[operation.operatorName, default: 0] += 1
+                } else if preferred != "neuralEngine" {
+                    placedElsewhere[operation.operatorName, default: 0] += 1
+                }
+            }
+        }
+        walk(function.block)
+        let total = costByDevice.values.reduce(0, +)
+        return [
+            "operations": operations,
+            "cost_share": costByDevice.mapValues { total > 0 ? ($0 / total * 10_000).rounded() / 10_000 : 0 },
+            "not_supported_on_neural_engine": notOnNeuralEngine,
+            "supported_but_placed_elsewhere": placedElsewhere,
+        ]
     }
 }

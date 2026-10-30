@@ -18,7 +18,7 @@ powerlog/
 .swiftpm/
 
 # Python evaluation tooling cache
-script/evaluation/__pycache__/
+__pycache__/
 
 # Codacy local CLI state
 .codacy/

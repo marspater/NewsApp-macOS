@@ -66,6 +66,25 @@ These are hard pairs by construction: everything the rules nearly matched or nea
 
 **Matcher v12 (#580)** on the same holdout: 21 pairs linked (14 `same`, 4 `related`, 3 `different`), precision 0.667, recall 0.318 (14 of 44); the seven wrong links are the same seven as under v11 (no new wrong link), 598 of 1,556 recent stories (38%) in a multi-publisher event. Authored corpus 22 / 0 and private tune replay 44 / 0 / 49 unchanged. Newly linked: the CNA OpenAI pair, both iOS 27.2 pairs, two of four Pope Leo pairs, Real Madrid vs Leipzig report and live blog, and a Taiz pair; still missed: Storm Austen (anchors shared, cosine 0.69 and pair model 0.86 just under their cutoffs), the PHP explainers, the France protest live blogs and the CNA Pope report whose lead names three countries.
 
+**Same-publisher duplicates (#583)** on the same copy (`--duplicate-replay`, 18 same-publisher same-headline pairs of the last seven days): 10 become one story, every genuine duplicate (0 to 2.6 h apart: CNA, France 24, Arab News, Al Jazeera); 8 stay two: seven "Cartoon by Amjad Rasmi" items 23 h to 16 days apart and one Arab News analysis reposted 14 h later, outside the 12-hour window chosen so the daily cartoon stays separate.
+
+**Gates sweep (#582)**, each change alone against this holdout at matcher v12 (14 true / 7 wrong links, 598 of 1,556 recent stories in a multi-publisher event):
+
+| Change | Linked `same` / wrong | Multi-publisher share |
+| --- | --- | --- |
+| Pair model off | 8 / 7 | 31% |
+| Pair-model cutoff 0.95 | 14 / 7 | 38% |
+| Pair-model cutoff 0.85 | 14 / 8 | 38% |
+| Pair-model cutoff 0.80 (the issue's proposal) | 15 / 8 | 39% |
+| Rescue at cosine ≥ 0.65 for pairs sharing two specific anchors | 15 / 9 | 39% |
+| … at ≥ 0.60 | 15 / 16 | 39% |
+| Anchorless pairs at cosine ≥ 0.85 to the model | 14 / 7 | 38% |
+| Compatibility only for matching pairs | 6 / 2 | 37% |
+| Unanimous admission (`compatibleShare` 1.0) | 11 / 5 | 38% |
+| Same-publisher pairs compatible only when matching | 13 / 6 | 38% |
+
+Nothing is adopted. The loosenings buy at most one true link for one or more wrong ones (cutoff 0.80: 15 / 8; cutoff 0.85: 14 / 8; two-anchor rescue at 0.65: 15 / 9, at 0.60: 15 / 16); the cutoff at 0.95 and the anchorless gate change nothing (14 / 7); the tightenings remove one to five wrong links for one to eight true ones (same-publisher rule 13 / 6, unanimous admission 11 / 5, compatibility only for matching pairs 6 / 2). The model at 0.9 is net positive (six true links, no wrong one, against the model off). The fragment-merge model path and the admission tolerance for model-confirmed pairs the issue asked for already exist since v11: `mergeFragments` → `compatibleFragments` applies the rule checks first and then `assessed` asks `PairScorer` for the eligible borderline cross pairs, and `modelConfirmed` stands in for the shared anchor in `eventScore`; that path makes 0 merges on the copy before and after. The seven wrong links are three reports carried into an event by a third member's match (two same-publisher), three related acts the act classifier does not classify, and one pair-model confirmation at 0.986. Authored corpus 22 / 0 and private tune replay 44 / 0 / 49 unchanged with the knobs off and with the same-publisher rule on.
+
 The gate for #580, #582 and #581 is this file: precision ≥ 0.97 means at most one wrong link among the pairs linked, and every slice reports the recall it adds. Identical and near-identical headlines left unlinked here (CNA "OpenAI says its AI agents disabled their own safety monitors" twice, 9to5Mac "iOS 27.2" pairs, four Pope Leo pairs across CNA, BBC, CBC and Al Jazeera, Storm Austen across BBC, Euronews and Africanews) are the #580 targets. The three wrong links are two Euronews/Africanews daily bulletin pairs and one same-publisher series pair, the pattern the pair review found (`docs/audits/2026-10-24-pair-decision-review.md`).
 
 ```sh

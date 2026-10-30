@@ -1,9 +1,5 @@
 import Foundation
 
-#if canImport(FoundationModels)
-    import FoundationModels
-#endif
-
 /// How much a story matters to a general reader following the news, decided on device from its headline and summary.
 enum StoryImportance: Int, Sendable, Comparable {
     case minor = 0
@@ -13,109 +9,19 @@ enum StoryImportance: Int, Sendable, Comparable {
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
 }
 
-/// Rates a story's importance; `nil` means no rating is available.
-struct StoryImportanceJudge: Sendable {
-    var isAvailable = true
-    let rate: @Sendable (EventJudgeReport) async -> StoryImportance?
-
-    static let unavailable = StoryImportanceJudge(isAvailable: false) { _ in nil }
-    /// The on-device model when Apple Intelligence is ready; each call returns nil otherwise.
-    static let onDevice = StoryImportanceJudge { await OnDeviceImportanceJudge.shared.rate($0) }
-}
-
-/// Asks the on-device model, once per report text. Reports are untrusted data, framed and sanitized.
-actor OnDeviceImportanceJudge {
-    static let shared = OnDeviceImportanceJudge()
-    // ponytail: process-lifetime cache cleared at 5,000 entries; stories come from a 72-hour window.
-    private var cache: [String: StoryImportance] = [:]
-
-    func rate(_ report: EventJudgeReport) async -> StoryImportance? {
-        let key = "\(report.id)\u{1}\(report.title)\u{1}\(report.summary.hashValue)"
-        if let known = cache[key] { return known }
-        guard let level = await Self.modelRating(report) else { return nil }
-        if cache.count >= 5_000 { cache.removeAll() }
-        cache[key] = level
-        return level
-    }
-
-    /// One fresh model answer that bypasses the cache; nil without the model. Production rates greedily, so the same text
-    /// always gets the same level. The #309 stability re-rate passes `sampled` to draw from the model's top 90% instead,
-    /// which shows how close a rating sits to the boundary between levels.
-    static func modelRating(_ report: EventJudgeReport, sampled: Bool = false) async -> StoryImportance? {
-        #if canImport(FoundationModels)
-            guard #available(macOS 26.0, *), case .available = SystemLanguageModel.default.availability else {
-                return nil
-            }
-            do {
-                // Like the event judge: news text needs the content-transformation guardrails and a plain-text answer.
-                let session = LanguageModelSession(
-                    model: SystemLanguageModel(guardrails: .permissiveContentTransformations))
-                let response = try await session.respond(
-                    to: prompt(report),
-                    options: GenerationOptions(
-                        samplingMode: sampled ? .random(probabilityThreshold: 0.9) : .greedy,
-                        maximumResponseTokens: 8))
-                return level(response.content)
-            } catch {
-                return nil
-            }
-        #else
-            return nil
-        #endif
-    }
-
-    /// The first word of the answer; anything else is no rating.
-    static func level(_ answer: String) -> StoryImportance? {
-        switch answer.uppercased().split(whereSeparator: { !$0.isLetter }).first {
-        case "MAJOR": return .major
-        case "NOTABLE": return .notable
-        case "MINOR": return .minor
-        default: return nil
-        }
-    }
-
-    static func report(_ row: EventMatchRow) -> EventJudgeReport {
-        EventJudgeReport(id: row.id, title: row.title, summary: row.description)
-    }
-
-    static func prompt(_ report: EventJudgeReport) -> String {
-        """
-        \(GenerationPromptDefense.untrustedDataSystemGuard)
-
-        Rate how important this news story is for a general reader who follows world news.
-        MAJOR: affects many people, a whole country or a market. Examples: wars and major attacks, disasters with \
-        deaths, elections and major government decisions, major court rulings, deaths of prominent people, major \
-        economic or company news, public health emergencies.
-        NOTABLE: significant national or international news with a narrower reach.
-        MINOR: local or niche news, celebrity and lifestyle, sports results, features, opinion, explainers, live blogs, \
-        quizzes, how-to and shopping.
-        Media or industry business news, such as programme cuts at a broadcaster, is MINOR unless it affects a \
-        whole sector or national policy.
-        Incidents at military sites count by consequence: trespass arrests are MINOR; damage, sabotage, terrorism \
-        charges or a real security breach are NOTABLE.
-        Nationwide price changes of staple goods are NOTABLE; a change by one company or in one region is MINOR.
-        Answer with exactly one word: MAJOR, NOTABLE or MINOR.
-
-        \(GenerationPromptDefense.frameArticleData(title: report.title, description: report.summary))
-        """
-    }
-}
-
-/// Explicit rating audits and bounded publisher-image lookup. Refresh never schedules importance ratings.
+/// Bounded publisher-image lookup. Nothing in the app rates importance; the opt-in live curation measurement in the
+/// test build does (#549).
 enum StoryCurator {
     struct Report: Equatable, Sendable {
-        var rated = 0
         var expired = 0
         var imagesFound = 0
         var imagesChecked = 0
-        var changed: Bool { rated > 0 || expired > 0 || imagesChecked > 0 }
+        var changed: Bool { expired > 0 || imagesChecked > 0 }
     }
 
     static func run(
         in database: DatabaseEngine,
-        judge: StoryImportanceJudge,
         imageFinder: StoryImageFinder = .unavailable,
-        budget: Int = 60,
         imageBudget: Int = 30,
         muting: MuteRules = MuteRules(),
         keepingFeedURLs: [String] = [],
@@ -123,20 +29,6 @@ enum StoryCurator {
         now: Date = Date()
     ) async throws -> Report {
         var report = Report()
-        if judge.isAvailable, budget > 0 {
-            for row in try await database.pendingImportanceRows(
-                activeSince: now.addingTimeInterval(-activeLifetime), limit: budget)
-            {
-                try Task.checkCancellation()
-                guard let level = await judge.rate(OnDeviceImportanceJudge.report(row)) else { continue }
-                try Task.checkCancellation()
-                if try await database.recordImportance(
-                    row.id, level, at: now, expectedTitle: row.title, expectedDescription: row.description)
-                {
-                    report.rated += 1
-                }
-            }
-        }
         if imageFinder.isAvailable, imageBudget > 0 {
             // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
             var lookedUp = Set<String>()

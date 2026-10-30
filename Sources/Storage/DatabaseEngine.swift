@@ -20,6 +20,17 @@ actor DatabaseEngine {
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
     private var spellingCache: (key: String, words: [String: Int])?
+    /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
+    private(set) var lastStoryPass: Date?
+    /// Story work skipped or interrupted since the last completed pass; retried when energy permits.
+    private(set) var storyPassPending = false
+
+    func deferStoryPass() { storyPassPending = true }
+
+    func recordStoryPass(at date: Date) {
+        lastStoryPass = date
+        storyPassPending = false
+    }
     private(set) var healthNotice: String?
 
     func databaseHealthNotice() -> String? {
@@ -1106,6 +1117,25 @@ actor DatabaseEngine {
             try Task.checkCancellation()
             try setUserVersion(26)
         }
+        if version < 27 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // The story layer (#581): a live event may belong to a story, named by the id of its earliest event.
+                // The clusterer's story pass rewrites it for active events; NULL means the event is a story of its own.
+                // A fixture that re-runs the migrations from an older version may already carry the column.
+                if !(try columnNames(of: "events")).contains("story_id") {
+                    try executeSimple("ALTER TABLE events ADD COLUMN story_id TEXT;")
+                }
+                try executeSimple("CREATE INDEX IF NOT EXISTS idx_events_story ON events(story_id);")
+                try Task.checkCancellation()
+                try setUserVersion(27)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
     }
 
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -1456,6 +1486,7 @@ actor DatabaseEngine {
         if let target = idTarget ?? urlTarget { return target }
         if let target = try publisherTextTarget(article) { return target }
         if let target = try historicalTarget(article) { return target }
+        if let target = try publisherTitleTarget(article) { return target }
         // Direct legacy callers may still supply an unscoped model. Keep that key
         // only if unused; a GUID already owned by another feed needs its scoped key.
         if let scoped, article.storedID == nil,
@@ -1483,6 +1514,49 @@ actor DatabaseEngine {
             if Self.isDocumentURL(url) { try recordAlias(kind: "url", value: url, articleID: id) }
         }
         try commitTransaction()
+    }
+
+    /// The stored story of the same publisher with the same folded headline, published within
+    /// `publisherTitleWindow` (#583). The publisher's stories of that window are read and compared in Swift, so no alias
+    /// row and no schema change are needed. The lookup uses the publisher name the upsert stores as `source`; for a
+    /// site the catalog does not name, that is the feed's own title ("World news"), so the stored story must also come
+    /// from the same host. Two stored stories with that headline (a pair the window kept apart) make the target
+    /// ambiguous, and the item stays a story of its own.
+    private func publisherTitleTarget(_ article: FeedArticle) throws -> String? {
+        guard article.pubDate != DateParser.unknownDate,
+            let key = ArticleIdentity.publisherTitleKey(title: article.title, source: article.publisherName)
+        else { return nil }
+        var statement: OpaquePointer?
+        let sql = """
+            SELECT id, title, canonical_url FROM articles
+            WHERE source = ? AND published_at BETWEEN ? AND ?
+                AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = articles.id)
+            ORDER BY published_at, id;
+            """
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot prepare publisher title lookup"])
+        }
+        defer { sqlite3_finalize(statement) }
+        let published = article.pubDate.timeIntervalSince1970
+        sqlite3_bind_text(statement, 1, article.publisherName, -1, Self.sqliteTransient)
+        sqlite3_bind_double(statement, 2, published - ArticleIdentity.publisherTitleWindow)
+        sqlite3_bind_double(statement, 3, published + ArticleIdentity.publisherTitleWindow)
+        let catalogued = FeedCatalog.publisher(forLink: article.link) != nil
+        let host = MuteRules.linkHost(article.normalizedLink)
+        var matches: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(statement, 0), let title = sqlite3_column_text(statement, 1) else {
+                continue
+            }
+            let storedHost = sqlite3_column_text(statement, 2).flatMap { MuteRules.linkHost(String(cString: $0)) }
+            guard catalogued || (host != nil && storedHost == host) else { continue }
+            if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.publisherName) == key {
+                matches.append(String(cString: id))
+            }
+        }
+        return matches.count == 1 ? matches.first : nil
     }
 
     private func publisherTextTarget(_ article: FeedArticle) throws -> String? {
@@ -2038,6 +2112,7 @@ actor DatabaseEngine {
         var id: String?
         var canonicalURL: String?
         var eventID: String?
+        var wholeStory = false
         var includingOriginals: Bool
         var publicationWindow: ClosedRange<Date>?
         var muting: MuteRules
@@ -2064,9 +2139,20 @@ actor DatabaseEngine {
         }
     }
 
-    private func eventFilterConditions(eventID: String) throws -> (sql: String, params: [QueryParameter]) {
+    private func eventFilterConditions(eventID: String, wholeStory: Bool = false) throws -> (
+        sql: String, params: [QueryParameter]
+    ) {
         let resolvedID = try resolvedEventID(eventID) ?? eventID
-        return (" AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)", [("text", resolvedID)])
+        guard wholeStory else {
+            return (" AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)", [("text", resolvedID)])
+        }
+        // Every live event of the event's story (#581), the event itself when it is a story of its own.
+        let sql = """
+             AND a.id IN (SELECT m.article_id FROM event_members m JOIN events e ON e.id = m.event_id
+                WHERE e.merged_into IS NULL
+                    AND coalesce(e.story_id, e.id) = (SELECT coalesce(story_id, id) FROM events WHERE id = ?))
+            """
+        return (sql, [("text", resolvedID)])
     }
 
     private func publicationWindowConditions(_ publicationWindow: ClosedRange<Date>) -> (
@@ -2119,7 +2205,7 @@ actor DatabaseEngine {
             params += filter.params
         }
         if let eventID = criteria.eventID {
-            let filter = try eventFilterConditions(eventID: eventID)
+            let filter = try eventFilterConditions(eventID: eventID, wholeStory: criteria.wholeStory)
             query += filter.sql
             params += filter.params
         }
@@ -2201,6 +2287,7 @@ actor DatabaseEngine {
         id: String? = nil,
         canonicalURL: String? = nil,
         eventID: String? = nil,
+        wholeStory: Bool = false,
         includingOriginals: Bool = false,
         publicationWindow: ClosedRange<Date>? = nil,
         muting: MuteRules = MuteRules(),
@@ -2215,6 +2302,7 @@ actor DatabaseEngine {
             id: id,
             canonicalURL: canonicalURL,
             eventID: eventID,
+            wholeStory: wholeStory,
             includingOriginals: includingOriginals,
             publicationWindow: publicationWindow,
             muting: muting,
@@ -3020,7 +3108,8 @@ actor DatabaseEngine {
     // MARK: - Granular Cache Purging
 
     /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings, stored matcher
-    /// signals and the World Tension history. Articles, events, pair decisions and subscriptions remain intact.
+    /// signals, the pair decisions' stored signals (which resets the verdict calibration, #629) and the World Tension
+    /// history. Articles, events, pair decisions and subscriptions remain intact.
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
         try beginTransaction()
@@ -3030,6 +3119,7 @@ actor DatabaseEngine {
             try clearEventOverviews()
             try executeSimple("DELETE FROM article_embeddings;")
             try executeSimple("DELETE FROM article_features;")
+            try executeSimple("UPDATE pair_assessments SET features = NULL;")
             try commitTransaction()
         } catch {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
@@ -3119,9 +3209,15 @@ actor DatabaseEngine {
         // 1. Pair assessments older than 30 days.
         let pairCutoff = nowTimestamp - 30 * 86400
         var pairStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM pair_assessments WHERE assessed_at < ?;", -1, &pairStmt, nil)
-            == SQLITE_OK
-        {
+        // A pair the reader judged keeps its signals: the verdict calibration (#629) fits on them.
+        let prunePairs = """
+            DELETE FROM pair_assessments WHERE assessed_at < ?
+                AND NOT EXISTS (SELECT 1 FROM event_inclusions i
+                    WHERE i.article_id = pair_assessments.article_id AND i.other_article_id = pair_assessments.other_article_id)
+                AND NOT EXISTS (SELECT 1 FROM event_exclusions x
+                    WHERE x.article_id = pair_assessments.article_id AND x.other_article_id = pair_assessments.other_article_id);
+            """
+        if sqlite3_prepare_v2(db, prunePairs, -1, &pairStmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(pairStmt) }
             sqlite3_bind_double(pairStmt, 1, pairCutoff)
             _ = sqlite3_step(pairStmt)

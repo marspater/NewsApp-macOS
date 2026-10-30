@@ -1,0 +1,1 @@
+- Resume story linking skipped during Low Power Mode when energy permits, even after all reports have been processed.

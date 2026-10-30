@@ -173,12 +173,19 @@ actor SentenceEmbedder {
     static let modelVersion = 2
     static let vectorDimension = 384
     static let maxSequenceLength = 128
+    /// The model's functions (#554): `convert_minilm.py` exports one fixed-length function per entry, `length_16` to
+    /// `length_128`, sharing one set of weights, and each text runs in the shortest that holds it. A flexible 1–128
+    /// length kept the whole model on the CPU; fixed lengths run on the Neural Engine.
+    static let sequenceLengths = [16, 32, 64, maxSequenceLength]
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "SentenceEmbedder")
-    private let model: MLModel?
+    /// One loaded function per sequence length; empty when the model is missing or a function does not load.
+    private let models: [Int: MLModel]
     private let tokenizer: BertWordPieceTokenizer?
 
-    init(modelURL: URL? = nil, vocabURL: URL? = nil) {
+    /// `.cpuAndNeuralEngine` by default (#554): under `.all` Core ML placed the 16- to 64-token functions on the GPU,
+    /// which clustering in the background would take from the interface.
+    init(modelURL: URL? = nil, vocabURL: URL? = nil, computeUnits: MLComputeUnits = .cpuAndNeuralEngine) {
         let effectiveModelURL = modelURL ?? bundledModelResource("minilm", "mlmodelc")
         let effectiveVocabURL = vocabURL ?? bundledModelResource("vocab", "txt")
 
@@ -195,85 +202,152 @@ actor SentenceEmbedder {
             self.tokenizer = nil
         }
 
+        var models: [Int: MLModel] = [:]
         if FileManager.default.fileExists(atPath: effectiveModelURL.path) {
-            let config = MLModelConfiguration()
-            config.computeUnits = .all
             do {
-                self.model = try MLModel(contentsOf: effectiveModelURL, configuration: config)
+                for length in Self.sequenceLengths {
+                    let config = MLModelConfiguration()
+                    config.computeUnits = computeUnits
+                    config.functionName = "length_\(length)"
+                    models[length] = try MLModel(contentsOf: effectiveModelURL, configuration: config)
+                }
             } catch {
                 logger.error("Failed to load MLModel from \(effectiveModelURL.path): \(error.localizedDescription)")
-                self.model = nil
+                models = [:]
             }
-        } else {
-            self.model = nil
         }
+        self.models = models
     }
 
     /// Whether on-device embeddings are ready and available.
     var isAvailable: Bool {
-        model != nil && tokenizer != nil
+        !models.isEmpty && tokenizer != nil
     }
 
     /// Generates a 384-dimensional L2-normalized float vector for input text.
     func embed(_ text: String) -> [Float]? {
-        guard let model, let tokenizer else { return nil }
-        let (inputIDs, attentionMask) = tokenizer.encode(text, maxSequenceLength: Self.maxSequenceLength)
-        let seqLen = inputIDs.count
-
-        guard let inMultiArray = try? MLMultiArray(shape: [1, NSNumber(value: seqLen)], dataType: .int32),
-            let maskMultiArray = try? MLMultiArray(shape: [1, NSNumber(value: seqLen)], dataType: .int32)
-        else {
-            return nil
-        }
-
-        for i in 0..<seqLen {
-            inMultiArray[i] = NSNumber(value: inputIDs[i])
-            maskMultiArray[i] = NSNumber(value: attentionMask[i])
-        }
-
-        guard
-            let featureProvider = try? MLDictionaryFeatureProvider(dictionary: [
-                "input_ids": MLFeatureValue(multiArray: inMultiArray),
-                "attention_mask": MLFeatureValue(multiArray: maskMultiArray),
-            ])
-        else {
-            return nil
-        }
-
-        guard let output = try? model.prediction(from: featureProvider),
-            let lastHidden = output.featureValue(for: "last_hidden_state")?.multiArrayValue
-        else {
-            return nil
-        }
-
-        // Mean pooling over valid (non-padding) tokens
-        let validTokens = max(1, attentionMask.filter { $0 == 1 }.count)
-        var pooled = [Float](repeating: 0, count: Self.vectorDimension)
-
-        for t in 0..<validTokens {
-            for d in 0..<Self.vectorDimension {
-                pooled[d] += lastHidden[[0, NSNumber(value: t), NSNumber(value: d)]].floatValue
-            }
-        }
-
-        var scale = 1.0 / Float(validTokens)
-        vDSP_vsmul(pooled, 1, &scale, &pooled, 1, vDSP_Length(Self.vectorDimension))
-
-        // L2 Normalization using Accelerate
-        var sumSquares: Float = 0
-        vDSP_svesq(pooled, 1, &sumSquares, vDSP_Length(Self.vectorDimension))
-        let norm = sqrt(sumSquares)
-        if norm > 0 {
-            var invNorm = 1.0 / norm
-            vDSP_vsmul(pooled, 1, &invNorm, &pooled, 1, vDSP_Length(Self.vectorDimension))
-        }
-
-        return pooled
+        guard let tokenizer, let input = Self.input(tokenizer, text), let model = models[input.length],
+            let output = try? model.prediction(from: input.provider),
+            let hidden = output.featureValue(for: "last_hidden_state")?.multiArrayValue
+        else { return nil }
+        return Self.pooled(hidden, tokens: input.tokens)
     }
 
-    /// Embeds a batch of texts sequentially; a text the model cannot embed keeps its position as nil.
+    /// Texts per Core ML batch (#554): every output of a batch holds IOSurface memory until the batch is released, and
+    /// one batch of a few thousand texts exhausted the system's IOSurfaces, which Core ML raises as an exception.
+    static let batchLimit = 64
+
+    /// Embeds texts in Core ML batches per sequence length (#540, #554); a text the model cannot embed keeps its
+    /// position as nil. When a batch is refused, its texts run alone.
     func embedBatch(_ texts: [String]) -> [[Float]?] {
-        texts.map { embed($0) }
+        guard let tokenizer, !models.isEmpty else { return texts.map { _ in nil } }
+        let inputs = texts.map { Self.input(tokenizer, $0) }
+        var vectors = [[Float]?](repeating: nil, count: texts.count)
+        for (length, model) in models {
+            let all = inputs.indices.filter { inputs[$0]?.length == length }
+            for start in stride(from: 0, to: all.count, by: Self.batchLimit) {
+                let indices = Array(all[start..<min(start + Self.batchLimit, all.count)])
+                guard let batch = Self.pooledBatch(model, indices.compactMap { inputs[$0] }) else {
+                    for index in indices { vectors[index] = embed(texts[index]) }
+                    continue
+                }
+                for (vector, index) in zip(batch, indices) { vectors[index] = vector }
+            }
+        }
+        return vectors
+    }
+
+    /// One batch, pooled inside an autorelease pool so its outputs' memory is returned before the next batch.
+    private static func pooledBatch(_ model: MLModel, _ inputs: [Input]) -> [[Float]?]? {
+        autoreleasepool {
+            guard
+                let batch = try? model.predictions(
+                    fromBatch: MLArrayBatchProvider(array: inputs.map(\.provider)))
+            else { return nil }
+            var vectors: [[Float]?] = []
+            for position in inputs.indices {
+                let hidden = batch.features(at: position).featureValue(for: "last_hidden_state")?.multiArrayValue
+                vectors.append(hidden.flatMap { pooled($0, tokens: inputs[position].tokens) })
+            }
+            return vectors
+        }
+    }
+
+    private struct Input {
+        let provider: MLDictionaryFeatureProvider
+        let tokens: Int
+        let length: Int
+    }
+
+    /// The model's two inputs at the next exported length (#540, #554): padding to 128 cost attention over 128
+    /// positions for a 30-token headline, so a text takes the shortest length that holds it. The attention mask leaves
+    /// the padding out and `pooled` averages the tokens present only. Values are written through the arrays' buffers.
+    private static func input(_ tokenizer: BertWordPieceTokenizer, _ text: String) -> Input? {
+        let encoded = tokenizer.encode(text, maxSequenceLength: maxSequenceLength)
+        let tokens = encoded.attentionMask.lastIndex(of: 1).map { $0 + 1 } ?? 0
+        let length = sequenceLengths.first { $0 >= tokens } ?? maxSequenceLength
+        guard tokens > 0, let ids = try? MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32),
+            let mask = try? MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32)
+        else { return nil }
+        ids.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
+            _ = buffer.initialize(from: encoded.inputIDs.prefix(length))
+        }
+        mask.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
+            _ = buffer.initialize(from: encoded.attentionMask.prefix(length))
+        }
+        guard
+            let provider = try? MLDictionaryFeatureProvider(dictionary: [
+                "input_ids": MLFeatureValue(multiArray: ids), "attention_mask": MLFeatureValue(multiArray: mask),
+            ])
+        else { return nil }
+        return Input(provider: provider, tokens: tokens, length: length)
+    }
+
+    /// Mean over the tokens present, L2-normalized, summed through the array's buffer (#540): the boxed subscript cost
+    /// one `NSNumber` per element, 49,000 per text.
+    private static func pooled(_ hidden: MLMultiArray, tokens: Int) -> [Float]? {
+        guard hidden.shape.count == 3, hidden.shape[2].intValue == vectorDimension, hidden.shape[1].intValue >= tokens,
+            tokens > 0
+        else { return nil }
+        var pooled = [Float](repeating: 0, count: vectorDimension)
+        let tokenStride = hidden.strides[1].intValue
+        let dimensionStride = Int32(hidden.strides[2].intValue)
+        if hidden.dataType == .float32 {
+            hidden.withUnsafeBufferPointer(ofType: Float.self) { buffer in
+                pooled.withUnsafeMutableBufferPointer { sum in
+                    for token in 0..<tokens {
+                        cblas_saxpy(
+                            Int32(vectorDimension), 1, buffer.baseAddress! + token * tokenStride, dimensionStride,
+                            sum.baseAddress!, 1)
+                    }
+                }
+            }
+        } else if hidden.dataType == .float16 {
+            // The fixed-length export returns half floats (#554); summed in Float, as the boxed path below did.
+            let dimensionStride = Int(dimensionStride)
+            hidden.withUnsafeBufferPointer(ofType: Float16.self) { buffer in
+                for token in 0..<tokens {
+                    for dimension in 0..<vectorDimension {
+                        pooled[dimension] += Float(buffer[token * tokenStride + dimension * dimensionStride])
+                    }
+                }
+            }
+        } else {
+            for token in 0..<tokens {
+                for dimension in 0..<vectorDimension {
+                    pooled[dimension] += hidden[[0, NSNumber(value: token), NSNumber(value: dimension)]].floatValue
+                }
+            }
+        }
+        var scale = 1 / Float(tokens)
+        vDSP_vsmul(pooled, 1, &scale, &pooled, 1, vDSP_Length(vectorDimension))
+        var sumSquares: Float = 0
+        vDSP_svesq(pooled, 1, &sumSquares, vDSP_Length(vectorDimension))
+        if sumSquares > 0 {
+            var inverse = 1 / sqrt(sumSquares)
+            vDSP_vsmul(pooled, 1, &inverse, &pooled, 1, vDSP_Length(vectorDimension))
+        }
+        return pooled
     }
 
     /// Computes cosine similarity between two L2-normalized float vectors in < 0.1 microseconds using vDSP.
@@ -285,68 +359,102 @@ actor SentenceEmbedder {
     }
 }
 
-/// The project's own pair cross-encoder (#525): the probability that two texts report one event, from MiniLM fine-tuned
-/// on pairs mined from library copies (`script/training/train_pair_model.py`). Unavailable without the bundled model;
+/// The project's own pair cross-encoder (#525): the probabilities that two texts report one event (`same`) or another
+/// act of one story (`related`, #627), from MiniLM fine-tuned on pairs mined from library copies
+/// (`script/training/train_pair_model.py`). A three-way model answers through its `probabilities` output (different,
+/// related, same); a binary model through `probability`, read as related 0. Unavailable without the bundled model;
 /// the matcher then decides as it did before.
 actor PairScorer {
     static let shared = PairScorer()
     static let maxSequenceLength = 256
+    /// The model's functions (#554): `length_64`, `length_128` and `length_256` share one set of weights, and a pair
+    /// runs padded to the shortest that holds it, the padding masked out. A model of one 256-token function (a candidate
+    /// from `train_pair_model.py`) runs every pair at 256.
+    static let sequenceLengths = [64, 128, maxSequenceLength]
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "PairScorer")
-    private let model: MLModel?
+    /// One loaded function per sequence length; empty when the model is missing or does not load.
+    private let models: [Int: MLModel]
     private let tokenizer: BertWordPieceTokenizer?
     /// Probabilities by text pair for the app's lifetime: the texts determine the answer, so passes that meet the same
     /// unmerged pair again do not run the model again. ponytail: cleared at 20,000 entries; persist if relaunches matter.
-    private var cache: [Int: Double] = [:]
+    private var cache: [Int: (same: Double, related: Double)] = [:]
 
+    /// `.cpuAndNeuralEngine` (#554): under `.all` Core ML put the 64-token function on the GPU, which clustering in the
+    /// background would take from the interface.
     init(modelURL: URL? = nil, vocabURL: URL? = nil) {
         let modelURL = modelURL ?? bundledModelResource("pairscorer", "mlmodelc")
         let vocabURL = vocabURL ?? bundledModelResource("vocab", "txt")
         tokenizer = try? BertWordPieceTokenizer(vocabURL: vocabURL)
         guard FileManager.default.fileExists(atPath: modelURL.path) else {
-            model = nil
+            models = [:]
             return
         }
-        let config = MLModelConfiguration()
-        config.computeUnits = .all
-        do {
-            model = try MLModel(contentsOf: modelURL, configuration: config)
-        } catch {
-            logger.error("Failed to load the pair model: \(error.localizedDescription)")
-            model = nil
+        func load(_ function: String?) throws -> MLModel {
+            let config = MLModelConfiguration()
+            config.computeUnits = .cpuAndNeuralEngine
+            config.functionName = function
+            return try MLModel(contentsOf: modelURL, configuration: config)
         }
+        var models: [Int: MLModel] = [:]
+        for length in Self.sequenceLengths {
+            models[length] = try? load("length_\(length)")
+        }
+        if models.count < Self.sequenceLengths.count {
+            do {
+                models = [Self.maxSequenceLength: try load(nil)]
+            } catch {
+                logger.error("Failed to load the pair model: \(error.localizedDescription)")
+                models = [:]
+            }
+        }
+        self.models = models
     }
 
-    var isAvailable: Bool { model != nil && tokenizer != nil }
+    var isAvailable: Bool { !models.isEmpty && tokenizer != nil }
 
-    /// The mean of both orders, since a cross-encoder reads its two inputs differently.
-    func probability(_ a: String, _ b: String) -> Double? {
+    /// The probability that the two texts report one event; event admission reads this (#627).
+    func probability(_ a: String, _ b: String) -> Double? { probabilities(a, b)?.same }
+
+    /// Same-event and related-act probabilities, each the mean of both orders, since a cross-encoder reads its two
+    /// inputs differently.
+    func probabilities(_ a: String, _ b: String) -> (same: Double, related: Double)? {
         let key = (a < b ? a + "\u{0}" + b : b + "\u{0}" + a).hashValue
         if let cached = cache[key] { return cached }
         guard let forward = score(a, b), let backward = score(b, a) else { return nil }
         if cache.count >= 20_000 { cache.removeAll() }
-        cache[key] = (forward + backward) / 2
-        return cache[key]
+        let mean = (same: (forward.same + backward.same) / 2, related: (forward.related + backward.related) / 2)
+        cache[key] = mean
+        return mean
     }
 
-    private func score(_ a: String, _ b: String) -> Double? {
-        guard let model, let tokenizer else { return nil }
+    private func score(_ a: String, _ b: String) -> (same: Double, related: Double)? {
+        guard let tokenizer else { return nil }
         let encoded = tokenizer.encodePair(a, b, maxSequenceLength: Self.maxSequenceLength)
+        let tokens = encoded.attentionMask.lastIndex(of: 1).map { $0 + 1 } ?? 0
+        guard let length = models.keys.sorted().first(where: { $0 >= tokens }), let model = models[length] else {
+            return nil
+        }
         var inputs: [String: MLFeatureValue] = [:]
         for (name, values) in [
             ("input_ids", encoded.inputIDs), ("attention_mask", encoded.attentionMask),
             ("token_type_ids", encoded.tokenTypeIDs),
         ] {
-            guard let array = try? MLMultiArray(shape: [1, NSNumber(value: values.count)], dataType: .int32) else {
+            guard let array = try? MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32) else {
                 return nil
             }
-            for (index, value) in values.enumerated() { array[index] = NSNumber(value: value) }
+            array.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
+                _ = buffer.initialize(from: values.prefix(length))
+            }
             inputs[name] = MLFeatureValue(multiArray: array)
         }
         guard let provider = try? MLDictionaryFeatureProvider(dictionary: inputs),
-            let output = try? model.prediction(from: provider),
-            let probability = output.featureValue(for: "probability")?.multiArrayValue
+            let output = try? model.prediction(from: provider)
         else { return nil }
-        return probability[0].doubleValue
+        if let classes = output.featureValue(for: "probabilities")?.multiArrayValue, classes.count == 3 {
+            return (classes[2].doubleValue, classes[1].doubleValue)
+        }
+        guard let probability = output.featureValue(for: "probability")?.multiArrayValue else { return nil }
+        return (probability[0].doubleValue, 0)
     }
 }

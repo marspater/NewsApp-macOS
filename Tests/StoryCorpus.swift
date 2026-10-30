@@ -124,13 +124,24 @@ enum StoryCorpus {
 
     /// Replays only the caller's selected split through real ingestion, candidate generation and clustering.
     /// Resolved single documents share a membership even when they have no multi-document event.
-    static func eventMemberships(articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil) async throws
-        -> [String: String]
+    /// Evaluation commands may select story cards; event-level tests keep the default event memberships.
+    static func eventMemberships(
+        articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil
+    ) async throws -> [String: String] {
+        try await memberships(articles: articles, onPass: onPass).mapValues(\.event)
+    }
+
+    /// The same replay with each item's story card as well (#581): its event's story, else the item alone.
+    static func memberships(articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil) async throws
+        -> [String: (event: String, story: String)]
     {
         let items = articles.sorted { ($0.pubDate, $0.id) < ($1.pubDate, $1.id) }
         guard var clock = items.first?.pubDate else { return [:] }
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
+        // The candidate scorers are built once: each PairScorer loads a model and owns the pair cache.
+        let pairProbability = pairProbabilityFromEnvironment()
+        let storyProbabilities = storyProbabilitiesFromEnvironment()
         do {
             var index = 0
             while index < items.count {
@@ -143,27 +154,26 @@ enum StoryCorpus {
                 if !batch.isEmpty {
                     try await db.upsertArticles(batch)
                     // Keep production's per-pass article limit in evaluation too.
-                    // NEWS_PAIR_THRESHOLD sweeps the pair model's cutoff on tune (#525); NEWS_PAIR_MODEL=0 turns it off.
-                    var policy = EventMatchPolicy.standard
-                    if let value = ProcessInfo.processInfo.environment["NEWS_PAIR_THRESHOLD"].flatMap({ Double($0) }) {
-                        policy.pairModelThreshold = value
-                    }
-                    let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
+                    let policy = policyFromEnvironment()
                     // NEWS_ENERGY=0 replays the rules-only pass of Low Power Mode (#534).
                     let energy = ProcessInfo.processInfo.environment["NEWS_ENERGY"] != "0"
                     let report = try await EventClusterer.run(
                         in: db, matchPolicy: policy, now: clock,
-                        allowsEnergy: energy, pairProbability: modelOff ? { @Sendable _, _ in nil } : nil)
+                        allowsEnergy: energy, pairProbability: pairProbability,
+                        storyProbabilities: storyProbabilities)
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)
                 if index < items.count, items[index].pubDate > clock { clock = items[index].pubDate }
             }
-            var result: [String: String] = [:]
+            var result: [String: (event: String, story: String)] = [:]
             for item in items {
                 let resolved = try await db.resolvedArticleID(for: item)
                 let event = try await db.eventID(forArticle: resolved)
-                result[item.id] = event.map { "event:" + $0 } ?? "document:" + resolved
+                var story = "document:" + resolved
+                if let event { story = "story:" + (try await db.storyID(forEvent: event) ?? event) }
+                // `.event` stays the event; the story regressions (#581) read `.story` against their story labels.
+                result[item.id] = (event.map { "event:" + $0 } ?? "document:" + resolved, story)
             }
             await db.close()
             return result
@@ -171,6 +181,76 @@ enum StoryCorpus {
             await db.close()
             throw error
         }
+    }
+
+    /// The matcher policy with the sweep overrides of the evaluation flags (#525, #582): NEWS_PAIR_THRESHOLD,
+    /// NEWS_RESCUE_TWO_ANCHORS (cosine), NEWS_MODEL_ANCHORLESS (cosine), NEWS_COMPATIBLE_REQUIRES_MATCH=1,
+    /// NEWS_COMPATIBLE_SHARE, NEWS_SAME_PUBLISHER=1, NEWS_STORY_MODEL (#627). NEWS_PAIR_MODEL=0 turns the model off at the call site.
+    /// The pair model the evaluation flags use (#624): `NEWS_PAIR_MODEL=0` none, `NEWS_PAIR_MODEL_PATH` a candidate
+    /// `pairscorer.mlmodelc` (compile a `.mlpackage` with `xcrun coremlcompiler compile`), otherwise the shipped one.
+    /// With a candidate, `NEWS_PAIR_RULE=story` (#627, evaluation only) admits on p_same + p_related when p_same
+    /// outweighs p_related and p_different is at most 0.10, so NEWS_PAIR_THRESHOLD applies to that sum.
+    static func pairProbabilityFromEnvironment() -> (@Sendable (String, String) async -> Double?)? {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["NEWS_PAIR_MODEL"] == "0" { return { @Sendable _, _ in nil } }
+        guard let path = environment["NEWS_PAIR_MODEL_PATH"] else { return nil }
+        let candidate = PairScorer(modelURL: URL(fileURLWithPath: path))
+        // A candidate that cannot score fails the evaluation instead of silently handing the rules-only result to it.
+        let score: @Sendable (String, String) async -> Double? = { a, b in
+            guard await candidate.isAvailable else { preconditionFailure("NEWS_PAIR_MODEL_PATH \(path) cannot score") }
+            return await candidate.probability(a, b)
+        }
+        guard environment["NEWS_PAIR_RULE"] == "story" else { return score }
+        return { @Sendable a, b in
+            guard await candidate.isAvailable else { preconditionFailure("NEWS_PAIR_MODEL_PATH \(path) cannot score") }
+            guard let p = await candidate.probabilities(a, b) else { return nil }
+            return p.same > p.related && 1 - p.same - p.related <= 0.10 ? p.same + p.related : 0
+        }
+    }
+
+    /// A separate story model for the story signal (#627, evaluation): `NEWS_STORY_MODEL_PATH` a three-way
+    /// `pairscorer.mlmodelc` whose p_same + p_related the story pass reads instead of the pair model's.
+    static func storyProbabilitiesFromEnvironment()
+        -> (@Sendable (String, String) async -> (same: Double, related: Double)?)?
+    {
+        guard let path = ProcessInfo.processInfo.environment["NEWS_STORY_MODEL_PATH"] else { return nil }
+        let model = PairScorer(modelURL: URL(fileURLWithPath: path))
+        // A story model that cannot score fails the evaluation instead of handing it rules-only links.
+        return { @Sendable a, b in
+            guard await model.isAvailable else { preconditionFailure("NEWS_STORY_MODEL_PATH \(path) cannot score") }
+            return await model.probabilities(a, b)
+        }
+    }
+
+    static func policyFromEnvironment() -> EventMatchPolicy {
+        let environment = ProcessInfo.processInfo.environment
+        var policy = EventMatchPolicy.standard
+        if let value = environment["NEWS_PAIR_THRESHOLD"].flatMap(Double.init) { policy.pairModelThreshold = value }
+        if let value = environment["NEWS_RESCUE_TWO_ANCHORS"].flatMap(Double.init) {
+            policy.twoAnchorRescueThreshold = value
+        }
+        if let value = environment["NEWS_MODEL_ANCHORLESS"].flatMap(Double.init) {
+            policy.anchorlessModelCosine = value
+        }
+        if environment["NEWS_COMPATIBLE_REQUIRES_MATCH"] == "1" { policy.compatibleRequiresMatch = true }
+        if let value = environment["NEWS_COMPATIBLE_SHARE"].flatMap(Double.init), value.isFinite,
+            (0...1).contains(value)
+        {
+            policy.compatibleShare = value
+        }
+        if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
+        if let value = environment["NEWS_STORY_MODEL"].flatMap(Double.init), value.isFinite, (0...1).contains(value) {
+            policy.storyModelThreshold = value
+        }
+        if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
+        // The semantic veto and rescue cutoffs (#628), swept when the sentence encoder changes.
+        if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init), value.isFinite {
+            policy.semanticVetoThreshold = value
+        }
+        if let value = environment["NEWS_SEMANTIC_RESCUE"].flatMap(Double.init), value.isFinite {
+            policy.semanticMatchThreshold = value
+        }
+        return policy
     }
 
     static func checkReplay() async throws {
@@ -404,6 +484,13 @@ enum StoryCorpus {
     static func capturePairKey(_ first: String, _ second: String) -> String {
         let (left, right) = first < second ? (first, second) : (second, first)
         return String(ArticleIdentity.sha256Hex("news-capture-pair-v1:" + left + "\n" + right).prefix(16))
+    }
+
+    /// A private, writable copy of a library snapshot: eval backups are kept read-only (0444), and a copy would inherit
+    /// that mode, so opening it (WAL, migrations, re-clustering) would fail.
+    static func writableCopy(of snapshot: String, to copy: String) throws {
+        try FileManager.default.copyItem(atPath: snapshot, toPath: copy)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy)
     }
 
     /// Publisher text stays in an existing directory that belongs to the user, is closed to everyone else
