@@ -18484,6 +18484,20 @@ struct NewsTests {
                 pending: ["https://starred.invalid/feed": [(starredStorm, 0.5)]], delivery: staleStarred
             ).banners.map { $0.article?.title ?? "" }, ["Storm leaves thousands without power"],
             "A fresh normal event posts beside a stale starred sibling")
+        // A stale priority event does not hide a fresh normal event of the same story.
+        var stalePriority = NotificationDelivery(mode: .full)
+        stalePriority.events = [stormMajor.id: "storm-c", stormSecond.id: "storm-b"]
+        stalePriority.stories = ["storm-b": "storm-a", "storm-c": "storm-a"]
+        stalePriority.publishers = ["storm-c": 5]
+        stalePriority.ledger.announced = [
+            "storm-c": .init(leadKey: EventFeedSummary.titleKey(stormMajor.title), lane: .priority),
+            "storm-b": .init(leadKey: "an older lead", lane: .normal),
+        ]
+        assertEqual(
+            NotificationService.plan(
+                new: [(stormMajor, 0.9), (stormSecond, 0.75)], pending: [:], delivery: stalePriority
+            ).banners.map { $0.article?.title ?? "" }, ["Storm leaves thousands without power"],
+            "A fresh normal event posts beside a stale priority sibling with a new lead")
 
         // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
         let rising = report(800, "Explosion levels block")
