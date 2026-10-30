@@ -493,10 +493,10 @@ struct OverviewIndustryImpactExtractor: Sendable {
         !contentTerms(sentence).subtracting(industryCueTerms).isDisjoint(with: storyTerms)
     }
 
-    /// Someone's view framed as one ("emphasized that", "argued that") is commentary, not a stated implication. Plain
+    /// Someone's view framed as one ("emphasized that", "argued that", "noted that") is commentary, not a stated implication. Plain
     /// "said that" stays, since a company's stated plan is usually reported that way.
     private static let opinionFramingRegex = try? NSRegularExpression(
-        pattern: #"\b(emphasi[sz]ed|argued|stressed|insisted|claimed|believes|contended|maintained) that\b"#,
+        pattern: #"\b(emphasi[sz]ed|argued|stressed|insisted|claimed|believes|contended|maintained|noted) that\b"#,
         options: [.caseInsensitive])
 
     /// Also a sentence that opens with a quotation mark: a speaker's words, not a reported effect.
@@ -509,7 +509,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
     private static let earlierPeriodRegex = try? NSRegularExpression(
         pattern:
             #"\b(last (year|month|quarter|decade)|(years|decades|months) ago|earlier this year|in (19|20)\d\d|"#
-            + #"in (january|february|march|april|may|june|july|august|september|october|november|december))\b"#,
+            + #"in (january|february|march|april|may|june|july|august|september|october|november|december)"#
+            + #"(,? (19|20)\d\d)?)\b"#,
         options: [.caseInsensitive])
 
     /// A sentence placed in an earlier period ("In July", "last year", "in 2023") is background, not an implication of
@@ -528,8 +529,13 @@ struct OverviewIndustryImpactExtractor: Sendable {
             let phrase = sentence[range].lowercased()
             if let year = Int(phrase.suffix(4)), phrase.hasPrefix("in ") {
                 if year < reportYear { return true }
-            } else if phrase.hasPrefix("in "), let index = months.firstIndex(of: String(phrase.dropFirst(3))) {
-                if index + 1 < reportMonth { return true }
+            } else if phrase.hasPrefix("in "),
+                let monthName = phrase.dropFirst(3).split(whereSeparator: { !$0.isLetter }).first,
+                let index = months.firstIndex(of: String(monthName))
+            {
+                // "In November 2025" carries its own year; a bare month is this year's.
+                let year = Int(phrase.suffix(4)) ?? reportYear
+                if (year, index + 1) < (reportYear, reportMonth) { return true }
             } else {
                 return true
             }

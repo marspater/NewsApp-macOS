@@ -1116,6 +1116,14 @@ extension EventOverviewAccessibilityTests {
                 "“The network offers some of the best satellite coverage, with virtually no competitors,” the chief said of the chip supply."
             ),
             (
+                "Sanctions on chip exports tighten again",
+                "Analysts noted that sanctions have driven a surge in domestic semiconductor production abroad."
+            ),
+            (
+                "Airline strike cancels flights across Europe",
+                "In November 2025, the strike cancelled flights and raised costs for airlines."
+            ),
+            (
                 "Clashes in the West Bank leave several injured",
                 "Clashes in the West Bank halted deliveries to shops across the area this week."
             ),
@@ -1136,6 +1144,11 @@ extension EventOverviewAccessibilityTests {
                 "Strike by defense contractors halts work on new fighter jets",
                 "Defense contractors halted production at two plants after the strike began on Monday.",
                 "Defense & Aerospace"
+            ),
+            (
+                "Airline strike cancels flights across Europe",
+                "In December 2026, the strike cancelled flights and raised costs for airlines.",
+                "Transportation"
             ),
         ]
         for entry in accepted {

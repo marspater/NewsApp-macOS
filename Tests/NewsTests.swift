@@ -9173,8 +9173,10 @@ struct NewsTests {
 
         // NEWS_OVERVIEWS_NOW=<epoch> pins the 72 h window, so a rerun on the same copy measures the same events (#670).
         let selectionAnchor =
-            environment["NEWS_OVERVIEWS_NOW"].flatMap { TimeInterval($0) }.map { Date(timeIntervalSince1970: $0) }
-            ?? captureDate
+            environment["NEWS_OVERVIEWS_NOW"].flatMap { raw -> Date? in
+                guard let seconds = TimeInterval(raw), seconds.isFinite else { return nil }
+                return Date(timeIntervalSince1970: seconds)
+            } ?? captureDate
         let selectionWindowStart = selectionAnchor.addingTimeInterval(-72 * 3600)
         let selectionWindowEnd = selectionAnchor
         let selectionAnchorUTC = isoFormatter.string(from: selectionAnchor)
