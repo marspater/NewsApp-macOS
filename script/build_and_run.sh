@@ -45,13 +45,35 @@ fi
 # The sed program is literal on purpose: nothing in it should expand.
 # shellcheck disable=SC2016
 PROCESS_PATTERN="^$(printf '%s' "$APP/Contents/MacOS/News" | sed 's/[][\.*^$()+?{}|]/\\&/g')"
-# Close the previous reader only after a successful build. The development build closes only itself, never the
-# installed app; the real-library build closes every News so two processes never share the real container.
+# Close the previous reader only after a successful build. The real-library build closes every running app with the
+# real bundle id, wherever its bundle is, so two processes never share the real container; the development build
+# closes only its own bundle. Neither touches another worktree's development build.
+OLD_PIDS=()
 if [[ "$BUNDLE_ID" == "com.marspater.news" ]]; then
-    pkill -x News 2>/dev/null || true
+    while IFS= read -r pid; do
+        executable=$(ps -o comm= -p "$pid" || true)
+        id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+            "${executable%/Contents/MacOS/News}/Contents/Info.plist" 2>/dev/null || true)
+        if [[ "$id" == "$BUNDLE_ID" ]]; then OLD_PIDS+=("$pid"); fi
+    done < <(pgrep -x News || true)
 else
-    pkill -f "$PROCESS_PATTERN" 2>/dev/null || true
+    while IFS= read -r pid; do OLD_PIDS+=("$pid"); done < <(pgrep -f "$PROCESS_PATTERN" || true)
 fi
+# macOS bash 3.2 treats an empty array as unbound under `set -u`.
+for pid in ${OLD_PIDS[@]+"${OLD_PIDS[@]}"}; do
+    kill "$pid" 2>/dev/null || true
+done
+# Launch only once they have exited, so the process lookup below can't pick up the previous instance.
+for pid in ${OLD_PIDS[@]+"${OLD_PIDS[@]}"}; do
+    for _ in 1 2 3 4 5; do
+        kill -0 "$pid" 2>/dev/null || break
+        sleep 1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "❌ The previous News process $pid did not exit; not launching." >&2
+        exit 1
+    fi
+done
 echo "Launching $(basename "$APP") (bundle id: $BUNDLE_ID)..."
 open -n "$APP"
 [[ "$MODE" == run ]] && exit 0
