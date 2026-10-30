@@ -37,6 +37,22 @@ struct SettingsView: View {
         }
     }
 
+    /// A category is on while any sidebar section maps to it; turning it off removes every such section. Shared
+    /// with the first-launch sheet.
+    static func sectionBinding(_ category: NewsCategory, feedManager: FeedManager) -> Binding<Bool> {
+        Binding(
+            get: { feedManager.userSections.contains { predefinedCategory(for: $0) == category } },
+            set: { enabled in
+                if enabled {
+                    feedManager.addSection(category.rawValue)
+                } else {
+                    for section in feedManager.userSections where predefinedCategory(for: section) == category {
+                        feedManager.removeSection(section)
+                    }
+                }
+            })
+    }
+
     @EnvironmentObject var appSettings: AppSettings
     @EnvironmentObject var articleStore: ArticleStore
     @EnvironmentObject var feedManager: FeedManager
@@ -144,20 +160,7 @@ struct SettingsView: View {
 
             Section(header: sectionHeader("Predefined Categories")) {
                 ForEach(NewsCategory.allCases, id: \.self) { category in
-                    Toggle(
-                        category.rawValue,
-                        isOn: Binding(
-                            get: { feedManager.userSections.contains { Self.predefinedCategory(for: $0) == category } },
-                            set: { enabled in
-                                if enabled {
-                                    feedManager.addSection(category.rawValue)
-                                } else {
-                                    for section in feedManager.userSections
-                                    where Self.predefinedCategory(for: section) == category {
-                                        feedManager.removeSection(section)
-                                    }
-                                }
-                            }))
+                    Toggle(category.rawValue, isOn: Self.sectionBinding(category, feedManager: feedManager))
                 }
                 Text("Choose the categories shown in the sidebar. Your existing sections stay available.")
                     .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)

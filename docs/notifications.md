@@ -225,8 +225,9 @@ delivered in the last hour.
 ## Permission
 
 News does not ask for notification permission at launch (#562). `NotificationPermissionRequest` asks once per launch,
-when the first refresh has completed, the first-launch sheet is done and notifications are on. If notifications are
-off then, it asks when they are turned on. Notification categories and the delegate are still set up at launch, so
+when a refresh has completed and the library holds stories, the first-launch sheet has closed and notifications are
+on. Whichever comes last triggers it: a later refresh that brings the first stories, the sheet closing, or turning
+notifications on. Notification categories and the delegate are still set up at launch, so
 banner actions keep working. macOS shows the prompt only once; later requests return the saved answer.
 
 ## Relaunch

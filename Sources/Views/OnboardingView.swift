@@ -49,7 +49,7 @@ struct OnboardingView: View {
                 }
                 Section("Sections") {
                     ForEach(NewsCategory.allCases, id: \.self) { category in
-                        Toggle(category.rawValue, isOn: sectionBinding(category))
+                        Toggle(category.rawValue, isOn: SettingsView.sectionBinding(category, feedManager: feedManager))
                     }
                     Text("Choose the categories shown in the sidebar.")
                         .font(AppTypography.caption)
@@ -79,31 +79,13 @@ struct OnboardingView: View {
         .frame(minHeight: AppLayout.catalogSheetMinHeight)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Start Reading") {
-                    appSettings.completeFirstLaunch()
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
+                // The presenter completes the first launch once the sheet has gone.
+                Button("Start Reading") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
             }
         }
         .sheet(isPresented: $showsCatalog) {
             FeedCatalogView()
         }
-    }
-
-    /// The same rule as Settings › General: a category is on while any section maps to it.
-    private func sectionBinding(_ category: NewsCategory) -> Binding<Bool> {
-        Binding(
-            get: { feedManager.userSections.contains { SettingsView.predefinedCategory(for: $0) == category } },
-            set: { enabled in
-                if enabled {
-                    feedManager.addSection(category.rawValue)
-                } else {
-                    let matching = feedManager.userSections.filter {
-                        SettingsView.predefinedCategory(for: $0) == category
-                    }
-                    for section in matching { feedManager.removeSection(section) }
-                }
-            })
     }
 }

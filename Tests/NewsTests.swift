@@ -17058,24 +17058,41 @@ struct NewsTests {
         assertTrue(AppSettings(defaults: feeds).firstLaunchCompleted, "Existing subscriptions skip the sheet")
         assertTrue(AppSettings(defaults: mode).firstLaunchCompleted, "Settings from an earlier version skip the sheet")
 
-        // The permission request waits for the first completed refresh, the sheet and the setting.
-        func manager(_ settings: AppSettings) async -> FeedManager {
+        // The permission request waits for a refresh that leaves stories, the closed sheet and the setting.
+        // Refreshes deliver nothing until `delivering` is incremented; then each feed brings one story.
+        func manager(_ settings: AppSettings, delivering: TestCounter) async -> FeedManager {
+            settings.aiEnabled = false
             let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
             await store.initialize()
-            return FeedManager(settings: settings, store: store, schedulesRefresh: false, fetchBatch: { _, _ in [] })
+            return FeedManager(
+                settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in
+                    guard await delivering.value > 0 else { return [] }
+                    return urls.map { url in
+                        let story = FeedArticle(
+                            title: "First story", link: "https://example.com/onboarding/story", guid: "first",
+                            description: "", pubDate: Date(), source: "Publisher")
+                        return (url, [story], nil, nil)
+                    }
+                },
+                notifyBatch: { _, _ in }, imageFinder: .unavailable)
         }
         let (newName, newDefaults) = suite("onboarding-permission")
         let (offName, offDefaults) = suite("onboarding-permission-off")
         defer { for name in [newName, offName] { removeTestDefaults(name) } }
         let settings = AppSettings(defaults: newDefaults)
-        let feedManager = await manager(settings)
+        let delivering = TestCounter()
+        let feedManager = await manager(settings, delivering: delivering)
         var requests = 0
         let request = NotificationPermissionRequest(feedManager: feedManager, settings: settings) { requests += 1 }
         assertEqual(requests, 0, "Nothing is asked at launch")
-        await feedManager.fetchFeedsAsync()
-        assertEqual(requests, 0, "Nothing is asked while the first-launch sheet is open")
         settings.completeFirstLaunch()
-        assertEqual(requests, 1, "Finishing the sheet after the first refresh asks once")
+        await feedManager.fetchFeedsAsync()
+        assertEqual(requests, 0, "A refresh that brings no stories does not ask")
+        await delivering.increment()
+        await feedManager.fetchFeedsAsync()
+        assertTrue(!feedManager.articles.isEmpty, "The second refresh brings a story")
+        assertEqual(requests, 1, "The first refresh with stories asks once")
         await feedManager.fetchFeedsAsync()
         settings.setNotificationsEnabled(false)
         settings.setNotificationsEnabled(true)
@@ -17083,18 +17100,22 @@ struct NewsTests {
         assertTrue(request.hasRequested, "The request records that it asked")
         feedManager.stopBackgroundWork()
 
+        // Stories and a refresh first: the sheet's closing, then turning notifications on, decide.
         let quiet = AppSettings(defaults: offDefaults)
-        quiet.completeFirstLaunch()
         quiet.setNotificationsEnabled(false)
-        let quietManager = await manager(quiet)
+        let quietDelivering = TestCounter()
+        await quietDelivering.increment()
+        let quietManager = await manager(quiet, delivering: quietDelivering)
         var quietRequests = 0
         let quietRequest = NotificationPermissionRequest(feedManager: quietManager, settings: quiet) {
             quietRequests += 1
         }
         await quietManager.fetchFeedsAsync()
-        assertEqual(quietRequests, 0, "With notifications off, a refresh does not ask")
+        assertEqual(quietRequests, 0, "Nothing is asked while the first-launch sheet is open")
+        quiet.completeFirstLaunch()
+        assertEqual(quietRequests, 0, "With notifications off, closing the sheet does not ask")
         quiet.setNotificationsEnabled(true)
-        assertEqual(quietRequests, 1, "Turning notifications on after a refresh asks")
+        assertEqual(quietRequests, 1, "Turning notifications on after a refresh with stories asks")
         assertTrue(quietRequest.hasRequested, "The request records that it asked")
         quietManager.stopBackgroundWork()
     }

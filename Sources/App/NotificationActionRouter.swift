@@ -40,8 +40,9 @@ enum NotificationActionIdentifier {
     }
 }
 
-/// Asks for notification permission once per launch (#562), never at launch: only after the first refresh has
-/// completed, the first-launch sheet is done and notifications are on. Turning notifications on later asks then.
+/// Asks for notification permission once per launch (#562), never at launch: only once a refresh has completed and
+/// the reader has stories, the first-launch sheet is closed and notifications are on. Whichever comes last asks:
+/// a later refresh that brings the first stories, or turning notifications on.
 @MainActor
 final class NotificationPermissionRequest {
     private(set) var hasRequested = false
@@ -49,9 +50,12 @@ final class NotificationPermissionRequest {
 
     init(feedManager: FeedManager, settings: AppSettings, request: @escaping () -> Void) {
         subscription = feedManager.$lastRefreshCompletedAt
-            .combineLatest(settings.$notificationsEnabled, settings.$firstLaunchCompleted)
-            .sink { [weak self] refreshed, enabled, onboarded in
-                guard let self, !self.hasRequested, refreshed != nil, enabled, onboarded else { return }
+            .combineLatest(
+                feedManager.$articles.map { !$0.isEmpty }.removeDuplicates(), settings.$notificationsEnabled,
+                settings.$firstLaunchCompleted
+            )
+            .sink { [weak self] refreshed, hasStories, enabled, onboarded in
+                guard let self, !self.hasRequested, refreshed != nil, hasStories, enabled, onboarded else { return }
                 self.hasRequested = true
                 request()
             }

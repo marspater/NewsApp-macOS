@@ -31,6 +31,7 @@ struct NewsApp: App {
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var readManager = AppContainer.shared.readManager
     @StateObject private var savedStories = AppContainer.shared.savedStories
+    @State private var onboardingClosed = false
 
     @MainActor private static func showAlert(_ message: String) {
         let alert = NSAlert()
@@ -50,11 +51,13 @@ struct NewsApp: App {
                 .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
                 .modifier(SystemSettingsOverrideModifier())
-                // First launch only (#562); closing the sheet any way completes it.
+                // First launch only (#562); closing the sheet any way completes it, after it has gone, so the
+                // notification prompt that completion can trigger never appears over the sheet.
                 .sheet(
                     isPresented: Binding(
-                        get: { !appSettings.firstLaunchCompleted },
-                        set: { if !$0 { appSettings.completeFirstLaunch() } })
+                        get: { !appSettings.firstLaunchCompleted && !onboardingClosed },
+                        set: { if !$0 { onboardingClosed = true } }),
+                    onDismiss: { appSettings.completeFirstLaunch() }
                 ) {
                     OnboardingView()
                 }
@@ -373,7 +376,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         notificationPermission = NotificationPermissionRequest(
             feedManager: AppContainer.shared.feedManager, settings: AppSettings.shared
         ) {
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
+                // Delivery checks the authorization when it posts; the answer itself needs no handling here.
+            }
         }
 
         NewsShortcuts.updateAppShortcutParameters()
