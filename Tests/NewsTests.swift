@@ -7920,6 +7920,17 @@ struct NewsTests {
             description: "Thousands marched in Paris on Saturday.", date: now)
         assertFalse(plainStart.names.contains("thousands"), "An ordinary sentence-initial word is still no name")
 
+        // The pair model's input prefix (#626): the gap and the publishers in plain words, "unknown" when absent.
+        assertEqual(
+            EventMatcher.pairModelInput("Headline\nLead", gap: 14.4 * 3600, samePublisher: true),
+            "gap 14 hours; same publisher. Headline\nLead", "Gap and one publisher")
+        assertEqual(
+            EventMatcher.pairModelInput("H", gap: 1.6 * 3600, samePublisher: false),
+            "gap 2 hours; different publishers. H", "Rounded gap and two publishers")
+        assertEqual(
+            EventMatcher.pairModelInput("H", gap: nil, samePublisher: nil), "gap unknown; publishers unknown. H",
+            "Public pretraining rows without dates or publishers")
+
         // Admission and rescue knobs measured in #582, all off in the standard policy.
         var sweep = EventMatchPolicy.standard
         let storm = features(
@@ -11932,13 +11943,15 @@ struct NewsTests {
             var pairs: [String] = []
             func add(_ a: String, _ b: String) { pairs.append(a + " | " + b) }
         }
-        func clustered(_ answer: Double?) async throws -> (events: [String?], calls: [String]) {
+        func clustered(_ answer: Double?, prefix: Bool = false) async throws -> (events: [String?], calls: [String]) {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
             try await db.upsertArticles(stories)
             let calls = Calls()
+            var policy = EventMatchPolicy.standard
+            policy.pairModelPrefix = prefix
             _ = try await EventClusterer.run(
-                in: db, now: start.addingTimeInterval(4 * 3600),
+                in: db, matchPolicy: policy, now: start.addingTimeInterval(4 * 3600),
                 pairProbability: { a, b in
                     await calls.add(a, b)
                     return answer
@@ -11958,6 +11971,13 @@ struct NewsTests {
         assertFalse(
             confident.calls.contains { $0.contains("oust Prime Minister Novak") && $0.contains("Thousands protest") },
             "A pair with a hard conflict (two different acts) is never sent to the model")
+        assertTrue(
+            confident.calls.allSatisfy { !$0.hasPrefix("gap ") },
+            "With the prefix off (the default) the model reads the plain texts")
+        let prefixed = try await clustered(0.99, prefix: true)
+        assertTrue(
+            prefixed.calls.allSatisfy { $0.hasPrefix("gap ") && $0.contains(" | gap ") },
+            "With the prefix on (#626) both inputs carry the gap and publisher words")
         let unsure = try await clustered(EventMatchPolicy.standard.pairModelThreshold - 0.01)
         assertEqual(unsure.events[0], nil, "Below the threshold the flood reports stay apart")
         let unavailable = try await clustered(nil)
@@ -12579,6 +12599,10 @@ struct NewsTests {
                         vectorCache[item.id] = vector
                     }
                 }
+                // The replay's scorer (a candidate model or none under NEWS_PAIR_MODEL=0), else the shipped one; built once.
+                let probability =
+                    StoryCorpus.pairProbabilityFromEnvironment()
+                    ?? { @Sendable a, b in await PairScorer.shared.probability(a, b) }
                 for i in items.indices {
                     for j in items.indices where j > i {
                         let gold = items[i].event != nil && items[i].event == items[j].event
@@ -12592,14 +12616,17 @@ struct NewsTests {
                         }
                         let pair = EventMatcher.assess(
                             a, b, policy: StoryCorpus.policyFromEnvironment(), embeddingSimilarity: similarity)
-                        let pairModel =
-                            EventMatcher.needsPairModel(pair)
-                            ? await PairScorer.shared.probability(
-                                EventFeatures.matchingText(
-                                    title: items[i].title, description: items[i].description ?? ""),
-                                EventFeatures.matchingText(
-                                    title: items[j].title, description: items[j].description ?? ""))
-                            : nil
+                        let diagnosePolicy = StoryCorpus.policyFromEnvironment()
+                        func input(_ index: Int) -> String {
+                            let text = EventFeatures.matchingText(
+                                title: items[index].title, description: items[index].description ?? "")
+                            let known = !items[i].source.isEmpty && !items[j].source.isEmpty
+                            return diagnosePolicy.pairModelPrefix
+                                ? EventMatcher.pairModelInput(
+                                    text, gap: abs(items[i].published.timeIntervalSince(items[j].published)),
+                                    samePublisher: known ? items[i].source == items[j].source : nil) : text
+                        }
+                        let pairModel = EventMatcher.needsPairModel(pair) ? await probability(input(i), input(j)) : nil
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
                         let primaryDisjoint =
@@ -13263,6 +13290,7 @@ struct NewsTests {
                 """)
             await db.close()
             let features = rows.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
+            let prefixed = StoryCorpus.policyFromEnvironment().pairModelPrefix
             func append(_ label: Int, _ group: String, _ i: Int, _ j: Int, weight: Int = 1) {
                 let pairKey = [key(rows[i].title) + "|" + rows[i].source, key(rows[j].title) + "|" + rows[j].source]
                     .sorted().joined(separator: "\n")
@@ -13276,10 +13304,20 @@ struct NewsTests {
                 } else {
                     guard seen.insert(pairKey).inserted else { return }
                 }
+                // The prefix the model reads at run time (#626): the pair's gap and whether one publisher wrote both.
+                func input(_ index: Int) -> String {
+                    // Unknown stays unknown: an undated article or an empty publisher gives no gap or relation.
+                    let dated = rows[i].date != DateParser.unknownDate && rows[j].date != DateParser.unknownDate
+                    let known = !rows[i].source.isEmpty && !rows[j].source.isEmpty
+                    return prefixed
+                        ? EventMatcher.pairModelInput(
+                            rows[index].text, gap: dated ? abs(rows[i].date.timeIntervalSince(rows[j].date)) : nil,
+                            samePublisher: known ? rows[i].source == rows[j].source : nil) : rows[index].text
+                }
                 lines.append(
                     [
-                        String(label), quoted(group), quoted(rows[i].text), quoted(rows[j].text), pieces(rows[i].text),
-                        pieces(rows[j].text), String(weight),
+                        String(label), quoted(group), quoted(input(i)), quoted(input(j)), pieces(input(i)),
+                        pieces(input(j)), String(weight),
                     ].joined(separator: ","))
             }
             let indexByID = Dictionary(rows.indices.map { (rows[$0].id, $0) }, uniquingKeysWith: { a, _ in a })

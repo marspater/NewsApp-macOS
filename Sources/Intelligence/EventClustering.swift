@@ -199,9 +199,16 @@ enum EventClusterer {
             } else if EventMatcher.needsPairModel(pair) {
                 let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
                 if modelScores[key] == nil {
-                    modelScores[key] = await pairProbability(
-                        EventFeatures.matchingText(title: a.title, description: a.description),
-                        EventFeatures.matchingText(title: b.title, description: b.description))
+                    let gap: TimeInterval? = matchPolicy.pairModelPrefix ? abs(a.date.timeIntervalSince(b.date)) : nil
+                    let samePublisher: Bool? =
+                        matchPolicy.pairModelPrefix && !a.source.isEmpty && !b.source.isEmpty
+                        ? a.source == b.source : nil
+                    func input(_ row: EventMatchRow) -> String {
+                        let text = EventFeatures.matchingText(title: row.title, description: row.description)
+                        return matchPolicy.pairModelPrefix
+                            ? EventMatcher.pairModelInput(text, gap: gap, samePublisher: samePublisher) : text
+                    }
+                    modelScores[key] = await pairProbability(input(a), input(b))
                 }
                 if let probability = modelScores[key] ?? nil, probability >= matchPolicy.pairModelThreshold {
                     pair = EventMatcher.modelConfirmed(pair, policy: matchPolicy)

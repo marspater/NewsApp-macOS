@@ -73,3 +73,15 @@ class Tokenizer:
         types = [0] * (len(pa) + 2) + [1] * (len(pb) + 1)
         padding = max_length - len(ids)
         return ids + [self.pad] * padding, [1] * len(ids) + [0] * padding, types + [0] * padding
+
+
+def pair_prefix(gap_hours=None, same_publisher=None):
+    """The words the pair model reads in front of each text (#626), identical to `EventMatcher.pairModelInput` in
+    Swift: the pair's time gap and whether one publisher wrote both, "unknown" where the data has neither."""
+    # int(x + 0.5) rounds a half up, as Swift's rounded() does; Python's round() would give 2 for 2.5.
+    gap = 'gap unknown' if gap_hours is None else f'gap {int(gap_hours + 0.5)} hours'
+    if same_publisher is None:
+        publisher = 'publishers unknown'
+    else:
+        publisher = 'same publisher' if same_publisher else 'different publishers'
+    return f'{gap}; {publisher}. '

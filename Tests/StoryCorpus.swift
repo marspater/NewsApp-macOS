@@ -198,6 +198,7 @@ enum StoryCorpus {
             policy.compatibleShare = value
         }
         if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
+        if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
         return policy
     }
 
