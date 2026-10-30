@@ -10577,6 +10577,11 @@ struct NewsTests {
         assertEqual(
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "1",
             "Reopening preserves one index")
+        assertTrue(
+            value(
+                "EXPLAIN QUERY PLAN SELECT a.id FROM articles a ORDER BY \(DatabaseEngine.articleDateOrder) DESC, a.id LIMIT 201;",
+                column: 3)?.contains("idx_articles_order") == true,
+            "List pages walk the date-order index instead of sorting every story (#778)")
         assertEqual(
             value("SELECT count(*) FROM sqlite_master WHERE name='story_image_defaults';"), "1",
             "Upgraded libraries remember site defaults")
@@ -20140,9 +20145,15 @@ struct NewsTests {
                     title: "Document \(index)", link: base + "/\(index)", guid: "repeat-\(index)", description: first,
                     pubDate: Date(), source: "Recurring publisher", imageUrl: base + "/shared.jpg"))
         }
-        try await db.upsertArticles(repeats)
+        try await db.upsertArticles(Array(repeats.prefix(2)))
+        assertTrue(
+            try await db.repeatedImageURLs(source: "Recurring publisher").isEmpty,
+            "Two documents do not make an image recurring")
+        try await db.upsertArticles([repeats[2]])
         let repeated = try await db.repeatedImageURLs(source: "Recurring publisher")
-        assertEqual(repeated, Set([base + "/shared.jpg"]), "Recurrence counts distinct publisher documents")
+        assertEqual(
+            repeated, Set([base + "/shared.jpg"]),
+            "Recurrence counts distinct publisher documents, also after an earlier lookup was cached (#778)")
         assertTrue(
             try await db.fetchArticles().filter { $0.source == "Recurring publisher" }.allSatisfy {
                 $0.imageUrl == nil

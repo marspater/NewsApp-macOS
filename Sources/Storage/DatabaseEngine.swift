@@ -20,6 +20,10 @@ actor DatabaseEngine {
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
     private var spellingCache: (key: String, words: [String: Int])?
+    /// `repeatedImageURLs` by publisher. Every curated fetch asks for it, single-story fetches included, and the query
+    /// reads every reader document of the publisher (10–40 ms on a real library), so classification writes and list
+    /// reloads queued behind it (#778). Dropped when stories are stored or their images or documents change.
+    private var repeatedImageCache: [String: Set<String>] = [:]
     /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
     private(set) var lastStoryPass: Date?
     /// Story work skipped or interrupted since the last completed pass; retried when energy permits.
@@ -262,6 +266,12 @@ actor DatabaseEngine {
                 try executeSimple(
                     "ALTER TABLE notification_priority_queue ADD COLUMN story_id TEXT NOT NULL DEFAULT '';")
             }
+            // Lists page in date order (#778). Created on open like the side tables above, so it needs no schema
+            // version; its expression is `articleDateOrder` without the table alias, since any other text leaves the
+            // planner sorting every row.
+            try executeSimple(
+                "CREATE INDEX IF NOT EXISTS idx_articles_order ON articles((\(Self.articleDateOrderColumns)) DESC, id);"
+            )
             // Ensure article_embeddings table exists on all databases (including pre-existing v21 databases) (#127, #307)
             try executeSimple(
                 """
@@ -2089,6 +2099,7 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
         guard !articles.isEmpty else { return [] }
+        repeatedImageCache = [:]
 
         let signpostState = NewsSignposts.begin(
             NewsSignposts.database, name: "DatabaseBatchUpsert", metadata: "count=\(articles.count)")
@@ -2408,6 +2419,8 @@ actor DatabaseEngine {
     // Unknown publisher dates retain their identity sentinel; ingestion time orders them.
     static let articleDateOrder =
         "CASE WHEN a.published_at = \(DateParser.unknownDate.timeIntervalSince1970) THEN a.created_at ELSE a.published_at END"
+    /// `articleDateOrder` over the bare columns, the expression of `idx_articles_order`.
+    static let articleDateOrderColumns = articleDateOrder.replacingOccurrences(of: "a.", with: "")
 
     private static let savedDocumentIDs =
         "SELECT article_id FROM article_state WHERE is_saved = 1 UNION SELECT r.duplicate_id FROM article_reconciliations r JOIN article_state s ON s.article_id = r.survivor_id WHERE s.is_saved = 1"
@@ -2448,7 +2461,8 @@ actor DatabaseEngine {
             params += scope.params
         }
         if let read = isRead {
-            sql += " AND s.is_read = ?"
+            // Unread is most of a library: kept off the is_read index, the date-order index pages it (#778).
+            sql += read ? " AND s.is_read = ?" : " AND +s.is_read = ?"
             params.append(("int", read ? 1 : 0))
         }
         if let saved = isSaved {
@@ -3171,7 +3185,10 @@ actor DatabaseEngine {
     // ponytail: flag three distinct documents, return at most 64 recurring URLs per publisher.
     // This rejects repeated furniture heuristically; a publisher-specific allowlist needs corpus evidence.
     /// Recurrence is publisher-local and counts distinct documents, not GUID copies.
+    /// ponytail: retention deletes keep the cached set until the next stored batch (at most one refresh interval), so a
+    /// recurring image whose third story was pruned stays filtered that long; drop the cache in the prune if it matters.
     func repeatedImageURLs(source: String) throws -> Set<String> {
+        if let cached = repeatedImageCache[source] { return cached }
         let sql = """
             SELECT url FROM (
                 SELECT image_url AS url, canonical_url FROM articles WHERE source = ?
@@ -3202,6 +3219,7 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: Int(status),
                 userInfo: [NSLocalizedDescriptionKey: "Cannot read publisher image recurrence"])
         }
+        repeatedImageCache[source] = urls
         return urls
     }
 
@@ -3253,6 +3271,8 @@ actor DatabaseEngine {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
+        // Classification alone leaves images and documents, and so the publisher's recurring images, as they are.
+        if image != nil || readerDocument != nil { repeatedImageCache = [:] }
 
         try beginTransaction()
         defer {
@@ -3567,6 +3587,7 @@ actor DatabaseEngine {
     /// Clears persisted article body text from local storage.
     /// Preserves subscriptions, saved stories, and read history markers.
     func clearArticleCache() throws {
+        repeatedImageCache = [:]
         try beginTransaction()
         do {
             try executeSimple(
@@ -3585,6 +3606,7 @@ actor DatabaseEngine {
     /// Clears replaceable data; article headers, read history and saved bodies are user data.
     func clearAllDatabaseCache() throws {
         try requireWritable()
+        repeatedImageCache = [:]
         try clearWorldTensionHistory()
         try beginTransaction()
         do {
