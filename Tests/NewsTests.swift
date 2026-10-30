@@ -12575,6 +12575,20 @@ struct NewsTests {
         assertEqual(
             try await db.relatedActEvents(eventID: protest, limit: .max).map(\.eventID), [vote],
             "The newest event's overview reaches the story's earlier event")
+        // "Earlier in This Story" (#671): the story's own earlier events come first and are never capped away by other
+        // links; other links fill up to the cap.
+        let store = await ArticleStore(database: db)
+        assertEqual(
+            try await store.relatedStoryEvents(eventID: protest).map(\.eventID), [vote],
+            "The overview lists the story's earlier event")
+        func link(_ id: String) -> RelatedStoryEvent {
+            RelatedStoryEvent(eventID: id, articleID: "a-\(id)", title: id, firstPublishedAt: now)
+        }
+        assertEqual(
+            ArticleStore.earlierLinks(
+                story: ["s1", "s2"].map { link($0) }, others: ["l1", "l2", "l3", "s1", "l4"].map { link($0) }
+            ).map(\.eventID), ["s1", "s2", "l1", "l2", "l3"],
+            "Every story event first, then at most three other links, no duplicates")
         assertEqual(summaries.first?.members.count, 4, "All four reports are on the card")
         assertEqual(summaries.first?.membershipVersion, 2, "The story version is the sum of its events' versions")
         assertEqual(summaries.first?.seenVersion, nil, "Never opened")
