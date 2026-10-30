@@ -8037,6 +8037,13 @@ struct NewsTests {
         assertEqual(
             EventFeatures.stormNames(in: "Storm Ellen Leaves Thousands Without Power"), ["ellen"],
             "A storm name in a Title Case headline is read too")
+        assertEqual(
+            EventFeatures.stormNames(in: "Storm Éowyn brings record winds to Ireland"), ["eowyn"],
+            "An accented storm name is read and folded")
+        assertTrue(
+            EventFeatures.stormNames(in: "Storm Ciarán nears the coast")
+                != EventFeatures.stormNames(in: "Storm Éowyn nears the coast"),
+            "Two accented storms differ")
         assertTrue(
             EventFeatures.stormNames(in: "Winter Storm Brings Snow to Chicago").isEmpty
                 && EventFeatures.stormNames(in: "Winter Storm Dumps Snow on Chicago").isEmpty

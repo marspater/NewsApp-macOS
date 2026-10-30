@@ -152,7 +152,7 @@ extension EventFeatures {
     private static let editionWords: Set<String> = ["morning", "midday", "afternoon", "evening", "night", "overnight"]
 
     private static let stormRegex = try? NSRegularExpression(
-        pattern: #"\b(?:Storm|Hurricane|Typhoon|Cyclone)\s+([A-Z][a-z]+)\b"#)
+        pattern: #"\b(?:Storm|Hurricane|Typhoon|Cyclone)\s+(\p{Lu}\p{Ll}+)"#)
     /// Capitalized words after "Storm" that are not names ("Storm Warning", "Storm Season", "Storm Will Hit").
     private static let stormNonNames: Set<String> = [
         "warning", "warnings", "watch", "season", "damage", "surge", "center", "centre", "front", "clouds", "tracker",
@@ -174,7 +174,8 @@ extension EventFeatures {
                 let word = String(title[range])
                 let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
                 guard !stormNonNames.contains(word.lowercased()), lemma == nil || lemma == word else { return nil }
-                return word.lowercased()
+                // "Éowyn" and "Eowyn" are one storm.
+                return word.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
             })
     }
     private static let numberWords: [String: String] = [
