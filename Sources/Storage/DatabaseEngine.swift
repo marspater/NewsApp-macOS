@@ -2165,6 +2165,18 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: "Failed to prepare article existence query"])
         }
         defer { sqlite3_finalize(existenceStmt) }
+        var expiredStmt: OpaquePointer?
+        guard
+            sqlite3_prepare_v2(
+                db, "SELECT 1 FROM expired_stories WHERE key IN ('pruned:' || ?, 'pruned:' || ?);", -1, &expiredStmt,
+                nil)
+                == SQLITE_OK
+        else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare pruned story query"])
+        }
+        defer { sqlite3_finalize(expiredStmt) }
         var insertedIDs = Set<String>()
         let now = Date().timeIntervalSince1970
 
@@ -2186,6 +2198,11 @@ actor DatabaseEngine {
                     userInfo: [NSLocalizedDescriptionKey: "Failed to check stored article identity"])
             }
             if existenceStatus == SQLITE_DONE {
+                // A story pruned by retention that its feed still serves stays pruned (#783).
+                sqlite3_reset(expiredStmt)
+                sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
+                sqlite3_bind_text(expiredStmt, 2, canonical, -1, Self.sqliteTransient)
+                if sqlite3_step(expiredStmt) == SQLITE_ROW { continue }
                 insertedIDs.insert(id)
             }
 
@@ -3633,29 +3650,44 @@ actor DatabaseEngine {
 
         let expired = """
             SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
-            WHERE s.is_read = 1 AND s.is_saved = 0 AND \(Self.articleDateOrder) < ?
+            WHERE s.is_read = 1 AND s.is_saved = 0 AND \(Self.articleDateOrder) < ?1
                 AND \(Self.visibleArticle)
                 AND NOT EXISTS (SELECT 1 FROM event_overview_citations c
                     WHERE c.article_id = a.id OR c.article_id IN (
                         SELECT duplicate_id FROM article_reconciliations WHERE survivor_id = a.id))
             """
-        let sql = """
-            DELETE FROM articles WHERE id IN (
-                \(expired)
-                UNION SELECT r.duplicate_id FROM article_reconciliations r
-                    WHERE r.survivor_id IN (\(expired))
-            );
+        let doomed = """
+            \(expired)
+            UNION SELECT r.duplicate_id FROM article_reconciliations r WHERE r.survivor_id IN (\(expired))
             """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw sqliteError(db, "Could not prepare retention pruning")
+        // A feed can keep serving a story long after it was read and pruned. Its stored ID and identity aliases
+        // stay behind in `expired_stories` under a `pruned:` prefix, so `upsertArticles` never brings it back as a
+        // new, unread story (#783). Unprefixed rows are old importance-expiry tombstones and suppress nothing.
+        // ponytail: tombstones are never pruned (about three short rows per pruned story); expire old ones if the
+        // table ever matters for size.
+        let tombstones = """
+            INSERT OR REPLACE INTO expired_stories (key, expired_at)
+            SELECT 'pruned:' || value, ?2 FROM article_aliases
+                WHERE kind IN ('id', 'url') AND article_id IN (\(doomed))
+            UNION SELECT 'pruned:' || id, ?2 FROM articles WHERE id IN (\(doomed));
+            """
+        try beginTransaction()
+        defer {
+            if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_double(stmt, 1, cutoff)
-        sqlite3_bind_double(stmt, 2, cutoff)
-        guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention pruning failed") }
-        let changes = Int(sqlite3_changes(db))
+        var changes = 0
+        for (sql, step) in [(tombstones, "tombstones"), ("DELETE FROM articles WHERE id IN (\(doomed));", "pruning")] {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw sqliteError(db, "Could not prepare retention \(step)")
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff)
+            if sql == tombstones { sqlite3_bind_double(stmt, 2, nowTimestamp) }
+            guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention \(step) failed") }
+            changes = Int(sqlite3_changes(db))
+        }
+        try commitTransaction()
         // The only delete of stories: SQLite may reuse a deleted top rowid, so the spelling cache key could repeat.
         if changes > 0 { spellingCache = nil }
         try pruneEmptyEvents()
