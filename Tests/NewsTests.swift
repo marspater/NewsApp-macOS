@@ -16608,7 +16608,7 @@ struct NewsTests {
             assertEqual(markStore.unreadCount, 0, "Unread count is 0 after MarkAllAsReadIntent")
             let dialogMark = extractDialogText(from: resMark)
             assertTrue(
-                dialogMark != nil && dialogMark!.contains("All stories marked as read"),
+                dialogMark != nil && dialogMark!.contains("All visible stories marked as read"),
                 "MarkAllAsReadIntent returns confirmation dialog")
         } catch {
             assertTrue(false, "MarkAllAsReadIntent perform threw: \(error)")
@@ -16620,7 +16620,7 @@ struct NewsTests {
             assertEqual(markStore.unreadCount, 0, "Unread count remains 0 on repeat MarkAllAsReadIntent")
             let dialogMark2 = extractDialogText(from: resMark2)
             assertTrue(
-                dialogMark2 != nil && dialogMark2!.contains("All stories marked as read"),
+                dialogMark2 != nil && dialogMark2!.contains("All visible stories marked as read"),
                 "Confirmation dialog returned on idempotent run")
         } catch {
             assertTrue(false, "MarkAllAsReadIntent repeat threw: \(error)")
@@ -16634,7 +16634,7 @@ struct NewsTests {
             let resAmbientMark = try await ambientMarkIntent.perform()
             let dialogAmbient = extractDialogText(from: resAmbientMark)
             assertTrue(
-                dialogAmbient != nil && dialogAmbient!.contains("All stories marked as read"),
+                dialogAmbient != nil && dialogAmbient!.contains("All visible stories marked as read"),
                 "Ambient MarkAllAsReadIntent succeeds via resolver")
         } catch {
             assertTrue(false, "Ambient MarkAllAsReadIntent threw: \(error)")
@@ -18065,6 +18065,12 @@ struct NewsTests {
             AppSettings.normalizeFeedURL("user:pass@example.com/rss"), "https://user:pass@example.com/rss",
             "Credentials without a scheme are not mistaken for a scheme")
         assertTrue(AppSettings.normalizeFeedURL("[2001:db8::1]/feed") != nil, "A bracketed IPv6 host is accepted")
+        assertTrue(
+            AppSettings.normalizeFeedURL("ftp:user:pass@example.com/rss") == nil,
+            "An explicit unsupported scheme is refused before credentials are read")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed:8443/rss"), "https://feed:8443/rss",
+            "feed: followed by a port is a host named feed, not a wrapper")
         let invalidURL = AppSettings.normalizeFeedURL("")
         assertEqual(invalidURL, nil, "Empty string should return nil")
 
