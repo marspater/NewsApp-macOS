@@ -15,9 +15,9 @@ first two encoder layers frozen. The loss is cross-entropy against the classes a
 classes' probabilities), label-smoothed by 0.05 and scaled by the row weight, with no class weight on top. GDELT hard
 negatives (group `g:`, partial `01`) whose shipped-MiniLM cosine is below 0.55 count as exact `different`.
 `--exclude-headlines FILE` (folded headlines of the library holdout and the tune corpus, one a line) leaves out every
-row of every input that names one: GDELT pages carry the same headlines. Tune and holdout never enter training; the
-cutoff is chosen afterwards on tune and on the held-out sweep, and the Swift replay against the library holdout is the
-gate.
+row of every input that names one: GDELT pages carry the same headlines, so `--pretrain` requires it. Tune and
+holdout never enter training; the cutoff is chosen afterwards on tune and on the held-out sweep, and the Swift replay
+against the library holdout is the gate.
 `train_pair_model.py --check-shipped [MODEL.mlmodelc]` checks the weight import alone against the shipped encoder, or
 against another compiled encoder (one flexible-length function, or one function per enumerated length, #554).
 
@@ -26,13 +26,13 @@ Pairs CSV contract (#627), written by `./test.sh --export-pairs`, `pretrain_pair
 `label` is a class id as the #551 review protocol labels a pair: 0 different (another story, or the same kind of
 occurrence elsewhere or at another time), 1 related (another act of the same story), 2 same (one occurrence reported
 twice). `marginal` is empty for an exact label, or the class ids (digits) whose summed probability is the target of a
-partial label: `12` one story, same or related (`pretrain_pairs.py` writes WCEP-10 positives as label `1`, marginal `12`);
-`01` not one occurrence (GDELT hard
-negatives, far-apart library negatives, "Not the Same Event" verdicts: none of them says the two reports are different
-stories). Reviewed `different` labels and clean same-day negatives stay exact `different`. `label` is then one of those
-classes and is only reported. `weight` scales the row's loss (reviewed labels and verdicts 5, same-day negatives 2);
-`pieces_*` are the app's word-piece ids, space-separated; `group` names where the row came from. A file without the
-`marginal` column is a binary file of the earlier contract: 1 is same (2), 0 is different (0).
+partial label: `12` one story, same or related (`pretrain_pairs.py` writes WCEP-10 positives as label `1`, marginal
+`12`); `01` not one occurrence (GDELT hard negatives, far-apart library negatives, "Not the Same Event" verdicts: none
+of them says the two reports are different stories). Reviewed `different` labels and clean same-day negatives stay
+exact `different`. `label` is then one of those classes and is only reported. `weight` scales the row's loss
+(reviewed labels and verdicts 5, same-day negatives 2); `pieces_*` are the app's word-piece ids, space-separated;
+`group` names where the row came from. A file without the `marginal` column is a binary file of the earlier contract:
+1 is same (2), 0 is different (0).
 Training uses the word pieces the app exported, so it sees exactly the ids the app sends. The tokenizer port below only
 serves the shipped-model check and the self-check; `encode_ids` mirrors `BertWordPieceTokenizer.encodePair`.
 """
@@ -561,6 +561,15 @@ def self_check():
     swept = sweep([[0.02, 0.08, 0.90], [0.05, 0.60, 0.35], [0.30, 0.05, 0.65]], [4, 2, 1])
     require('same >= 0.9: TP 1, FP 0, FN 0' in swept and 'same >= 0.6: TP 1, FP 1, FN 0' in swept
             and 'story >= 0.9: TP 1, FP 0, FN 0' in swept, 'Held-out sweep under both admission rules')
+    import contextlib
+    import io
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            main(['pairs.csv', 'out', '--pretrain', 'public.csv'])
+        refused = False
+    except SystemExit:
+        refused = True
+    require(refused, 'Pretraining without headline exclusions is refused before any CSV is read')
     print('Pair model training self-check passed')
 
 
@@ -586,6 +595,8 @@ def main(argv):
     if args.exclude_headlines:
         EXCLUDED.update(line.strip() for line in args.exclude_headlines.read_text().splitlines())  # NOSONAR
         EXCLUDED.discard('')
+    if args.pretrain and not EXCLUDED:
+        parser.error('--pretrain needs --exclude-headlines (holdout and tune headlines): public data carries them')
     rows = read_pairs(args.pairs)
     if args.sweep:
         model = BertForSequenceClassification(CONFIG)

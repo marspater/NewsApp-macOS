@@ -577,7 +577,17 @@ enum EventClusterer {
                     var agree = false
                     if count >= matchPolicy.storyLinkAnchors { agree = await storyPairsAgree(a, b, common: common) }
                     if !agree { agree = await storyModelAgrees(a, b, common: common) }
-                    guard agree else { continue }
+                    // A reader's exclusion anywhere across the two stories keeps them apart, not only between these
+                    // two events: joins are transitive.
+                    let excluded = components.component(of: event.id).contains { left in
+                        (membersOf[left] ?? []).contains { member in
+                            guard let apart = exclusions[member.id] else { return false }
+                            return components.component(of: other).contains { right in
+                                (membersOf[right] ?? []).contains { apart.contains($0.id) }
+                            }
+                        }
+                    }
+                    guard agree, !excluded else { continue }
                     components.join(event.id, other)
                 }
             }
@@ -782,6 +792,13 @@ enum EventClusterer {
             parent[left] = parent[left] ?? left
             parent[right] = parent[right] ?? right
             if left != right { parent[max(left, right)] = min(left, right) }
+        }
+
+        /// Every id joined with `id`, itself included.
+        func component(of id: String) -> [String] {
+            let root = find(id)
+            let joined = parent.keys.filter { find($0) == root }
+            return joined.isEmpty ? [id] : joined
         }
 
         /// Components with two or more members, each sorted.

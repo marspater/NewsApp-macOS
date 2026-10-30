@@ -81,6 +81,7 @@ def main(argv=None):
 
 HEADER = ['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight', 'marginal']
 LABELS = {'different': 0, 'related': 1, 'same': 2}
+UNKNOWN_DATE = -62_135_769_600.0  # Swift's Date.distantPast, the app's DateParser.unknownDate, in seconds since 1970
 
 
 def read_verdicts(labels):
@@ -171,9 +172,12 @@ def export_labels(export, kind, labels, snapshot, out, holdout=None, prefixed=Fa
             if not a or not b:
                 continue
             if prefixed:
-                # The prefix an earlier model read (#626): the pair's gap and whether one publisher wrote both.
-                prefix = pair_prefix(abs(float(row['published_a']) - float(row['published_b'])) / 3600,
-                                     row['source_a'] == row['source_b'])
+                # The prefix an earlier model read (#626): the pair's gap and whether one publisher wrote both, unknown
+                # for an undated article or an empty publisher, as `--export-pairs` writes them.
+                times = float(row['published_a']), float(row['published_b'])
+                gap = None if min(times) <= UNKNOWN_DATE else abs(times[0] - times[1]) / 3600
+                same = row['source_a'] == row['source_b'] if row['source_a'] and row['source_b'] else None
+                prefix = pair_prefix(gap, same)
                 a, b = prefix + a, prefix + b
             if (a, b) in existing:  # compared as written, prefix included, so a rerun appends nothing twice
                 continue

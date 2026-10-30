@@ -2110,6 +2110,7 @@ actor DatabaseEngine {
         var id: String?
         var canonicalURL: String?
         var eventID: String?
+        var wholeStory = false
         var includingOriginals: Bool
         var publicationWindow: ClosedRange<Date>?
         var muting: MuteRules
@@ -2136,9 +2137,20 @@ actor DatabaseEngine {
         }
     }
 
-    private func eventFilterConditions(eventID: String) throws -> (sql: String, params: [QueryParameter]) {
+    private func eventFilterConditions(eventID: String, wholeStory: Bool = false) throws -> (
+        sql: String, params: [QueryParameter]
+    ) {
         let resolvedID = try resolvedEventID(eventID) ?? eventID
-        return (" AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)", [("text", resolvedID)])
+        guard wholeStory else {
+            return (" AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)", [("text", resolvedID)])
+        }
+        // Every live event of the event's story (#581), the event itself when it is a story of its own.
+        let sql = """
+             AND a.id IN (SELECT m.article_id FROM event_members m JOIN events e ON e.id = m.event_id
+                WHERE e.merged_into IS NULL
+                    AND coalesce(e.story_id, e.id) = (SELECT coalesce(story_id, id) FROM events WHERE id = ?))
+            """
+        return (sql, [("text", resolvedID)])
     }
 
     private func publicationWindowConditions(_ publicationWindow: ClosedRange<Date>) -> (
@@ -2191,7 +2203,7 @@ actor DatabaseEngine {
             params += filter.params
         }
         if let eventID = criteria.eventID {
-            let filter = try eventFilterConditions(eventID: eventID)
+            let filter = try eventFilterConditions(eventID: eventID, wholeStory: criteria.wholeStory)
             query += filter.sql
             params += filter.params
         }
@@ -2273,6 +2285,7 @@ actor DatabaseEngine {
         id: String? = nil,
         canonicalURL: String? = nil,
         eventID: String? = nil,
+        wholeStory: Bool = false,
         includingOriginals: Bool = false,
         publicationWindow: ClosedRange<Date>? = nil,
         muting: MuteRules = MuteRules(),
@@ -2287,6 +2300,7 @@ actor DatabaseEngine {
             id: id,
             canonicalURL: canonicalURL,
             eventID: eventID,
+            wholeStory: wholeStory,
             includingOriginals: includingOriginals,
             publicationWindow: publicationWindow,
             muting: muting,

@@ -617,7 +617,6 @@ extension DatabaseEngine {
         return created
     }
 
-    /// Events of one report that belong to a story (#581): reports the story pass attached as acts of their own.
     /// The reader's verdicts on pairs the pair model scored (#629): "Same Event" pairs as same, "Not the Same Event"
     /// pairs as not, each with the stored signals of its pair decision and the gap between the two reports.
     func calibrationRows(limit: Int = 1_000) throws -> [PairCalibration.Row] {
@@ -630,8 +629,9 @@ extension DatabaseEngine {
             ) v
             JOIN pair_assessments p ON p.article_id = v.article_id AND p.other_article_id = v.other_article_id
             JOIN articles a ON a.id = v.article_id JOIN articles b ON b.id = v.other_article_id
-            WHERE p.features IS NOT NULL ORDER BY v.article_id, v.other_article_id;
-            """
+            WHERE json_extract(p.features, '$.pairModel') IS NOT NULL ORDER BY v.article_id, v.other_article_id
+            LIMIT ?;
+            """, [.integer(limit)]
         ).compactMap { row -> PairCalibration.Row? in
             guard let json = row[1], let gap = row[2].flatMap(Double.init),
                 let signals = try? decoder.decode(EventPairFeatures.self, from: Data(json.utf8)),
@@ -642,10 +642,11 @@ extension DatabaseEngine {
                     pairModel: pairModel, cosine: signals.cosine, sharedSpecific: signals.sharedSpecific,
                     gapHours: gap / 3600, sameAct: signals.conflict != EventConflict.differentAct.rawValue),
                 same: row[0] == "1")
-        }.prefix(limit).map { $0 }
-        // The limit applies to usable rows, after the ones without a model score are dropped.
+        }
+        // Rows without a model score are filtered in SQL, so the limit counts usable rows and bounds the work.
     }
 
+    /// Events of one report that belong to a story (#581): reports the story pass attached as acts of their own.
     func storyAttachedEventIDs(since activeSince: Date) throws -> Set<String> {
         Set(
             try eventRows(

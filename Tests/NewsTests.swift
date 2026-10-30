@@ -11989,6 +11989,13 @@ struct NewsTests {
     /// and an exclusion across the two events keeps them apart.
     static func testStoryLayer() async throws {
         print("  - Testing the story layer: one card per story across related acts (#581)...")
+        var components = EventClusterer.StoryComponents()
+        components.join("a", "b")
+        components.join("c", "d")
+        assertEqual(Set(components.component(of: "b")), ["a", "b"], "A component holds every event joined with it")
+        assertEqual(components.component(of: "z"), ["z"], "An event in no component is its own")
+        components.join("b", "c")
+        assertEqual(Set(components.component(of: "a")), ["a", "b", "c", "d"], "Joins are transitive")
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         let start = Date(timeIntervalSince1970: 1_700_000_000)
@@ -12067,6 +12074,19 @@ struct NewsTests {
         assertEqual(
             try await apart.storyID(forEvent: voteApart), try await apart.storyID(forEvent: protestApart),
             "Linked before the exclusion")
+        // The expanded story card reads every event of the story, not only the lead's reports.
+        var storyReports = 0
+        if let lead = try await apart.storyID(forEvent: voteApart) {
+            for id in try await apart.storyEventIDs(lead) {
+                storyReports += try await apart.fetchArticles(limit: nil, eventID: id).count
+            }
+        }
+        assertEqual(
+            try await apart.fetchArticles(limit: nil, eventID: voteApart, wholeStory: true).count, storyReports,
+            "A story's reports are its events' reports")
+        assertTrue(
+            try await apart.fetchArticles(limit: nil, eventID: voteApart).count < storyReports,
+            "One event of the story holds fewer reports than the story")
         // A low-energy pass can finish every report while leaving only the story work pending.
         let lastStoryPass = await apart.lastStoryPass
         try await apart.upsertArticles([story(9, "Astronomers discover a distant galaxy", hours: 6)])
@@ -12086,11 +12106,12 @@ struct NewsTests {
         assertFalse(await apart.storyPassPending, "Completed story work clears the pending marker")
         _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(90), allowsEnergy: true)
         assertEqual(await apart.lastStoryPass, resumedAt, "An unchanged library does not repeat completed story work")
-        // A reader's exclusion between one vote report and one protest report, both staying in their events.
+        // A reader's exclusion between one vote report and one protest report, both staying in their events. It is
+        // recorded after the last completed story pass, as a verdict in the app is, so the next pass re-checks stories.
         let (low, high) = apartIDs[0] < apartIDs[2] ? (apartIDs[0], apartIDs[2]) : (apartIDs[2], apartIDs[0])
         try await apart.eventRows(
             "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
-            [.text(low), .text(high), .real(now.timeIntervalSince1970)])
+            [.text(low), .text(high), .real(now.addingTimeInterval(100).timeIntervalSince1970)])
         _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(120))
         assertTrue(
             try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
@@ -12449,6 +12470,7 @@ struct NewsTests {
         let rows = try await db.calibrationRows()
         assertEqual(rows.map(\.same).sorted { !$0 && $1 }, [false, true], "One row per verdict with a stored signal")
         assertEqual(rows.first?.features.count, 5, "Five features per verdict")
+        assertEqual(try await db.calibrationRows(limit: 1).count, 1, "The limit bounds the rows read")
         try await db.clearArticleEnrichment()
         let cleared = try await db.calibrationRows()
         assertEqual(cleared.count, 0, "Clear AI Analysis empties the calibration's input")
@@ -13017,7 +13039,7 @@ struct NewsTests {
                         let diagnosePolicy = StoryCorpus.policyFromEnvironment()
                         var pair = EventMatcher.assess(
                             a, b, policy: diagnosePolicy, embeddingSimilarity: similarity,
-                            samePublisher: items[i].source == items[j].source)
+                            samePublisher: !items[i].source.isEmpty && items[i].source == items[j].source)
                         // The clusterer's same-publisher gate (NEWS_SAME_PUBLISHER=1), so the printed gate is the real one.
                         if diagnosePolicy.samePublisherRequiresMatch, !pair.isMatch, !items[i].source.isEmpty,
                             items[i].source == items[j].source
@@ -13107,7 +13129,7 @@ struct NewsTests {
                     items: items.map {
                         PairExportItem(
                             id: $0.id, title: $0.title, description: $0.description ?? "", published: $0.published,
-                            event: $0.event)
+                            event: $0.event, source: $0.source)
                     },
                     predicted: predicted, split: split, outputDirectory: outputDirectory)
                 print("    exported \(pairs) candidate pairs with features for the fit (#524)")
@@ -13573,6 +13595,7 @@ struct NewsTests {
         let description: String
         let published: Date
         let event: String?
+        var source = ""
     }
 
     static func exportPairFeatures(
@@ -13603,7 +13626,10 @@ struct NewsTests {
                 if let left = vectors[i], let right = vectors[j] {
                     cosine = SentenceEmbedder.cosineSimilarity(left, right)
                 }
-                let pair = EventMatcher.assess(a, b, embeddingSimilarity: cosine)
+                // The clusterer's publisher identity, so edition conflicts and series evidence match it (#688).
+                let pair = EventMatcher.assess(
+                    a, b, embeddingSimilarity: cosine,
+                    samePublisher: !items[i].source.isEmpty && items[i].source == items[j].source)
                 let gold = items[i].event != nil && items[i].event == items[j].event
                 guard gold || pair.sharedAnchors + pair.sharedKeywords >= 1 else { continue }
                 let same = predicted[i] != nil && predicted[i] == predicted[j]
@@ -13830,7 +13856,8 @@ struct NewsTests {
             await db.close()
         }
         guard unresolvedHoldoutIDs.isEmpty else {
-            throw StoryCorpus.Failure.invalid("Snapshots do not resolve \(unresolvedHoldoutIDs.count) library holdout IDs")
+            throw StoryCorpus.Failure.invalid(
+                "Snapshots do not resolve \(unresolvedHoldoutIDs.count) library holdout IDs")
         }
         for path in snapshots.split(separator: ":").map(String.init) {
             guard !path.contains("/Library/Containers/") else {
@@ -13999,7 +14026,9 @@ struct NewsTests {
                 let sample =
                     indices.count > 80 ? Array(indices.sorted { rows[$0].id < rows[$1].id }.prefix(80)) : indices
                 for (n, i) in sample.enumerated() {
-                    for j in sample[(n + 1)...] where rows[i].source != rows[j].source {
+                    // Same-publisher pairs stay in: two items of one series in different events are the commonest
+                    // false merge (#551), so they are the most useful negatives.
+                    for j in sample[(n + 1)...] {
                         guard let a = rows[i].event, let b = rows[j].event, a != b, (eventSizes[a] ?? 0) >= 2,
                             (eventSizes[b] ?? 0) >= 2, rows[i].date != DateParser.unknownDate,
                             rows[j].date != DateParser.unknownDate,
