@@ -13677,7 +13677,8 @@ struct NewsTests {
         }
         let date = DatabaseEngine.articleDateOrder
         // Every table that references an article, with its referencing columns; FTS rows follow the articles'
-        // triggers, and new stories get no match state, so each step's stories are pending.
+        // triggers, new stories get no match state, so each step's stories are pending, and pair decisions and
+        // memberships are this build's own, never the source's.
         var dependents: [(table: String, columns: [String])] = []
         for row in try await db.eventRows(
             """
@@ -13686,7 +13687,10 @@ struct NewsTests {
             """)
         {
             guard let table = row[0], let columns = row[1],
-                !["article_fts_rows", "event_match_state", "event_members", "event_overview_citations"].contains(table)
+                ![
+                    "article_fts_rows", "event_match_state", "event_members", "event_overview_citations",
+                    "pair_assessments",
+                ].contains(table)
             else { continue }
             dependents.append((table, columns.split(separator: ",").map(String.init)))
         }
