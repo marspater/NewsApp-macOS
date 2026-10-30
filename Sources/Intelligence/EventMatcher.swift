@@ -6,7 +6,7 @@ import NaturalLanguage
 /// `storageVersion` and recomputes them when the version changes or the title or description does (#522).
 struct EventFeatures: Hashable, Sendable, Codable {
     /// Bump when extraction changes; stored records of older versions are recomputed on first use.
-    static let storageVersion = 3
+    static let storageVersion = 4
     /// Dominant language when the recognizer is reasonably sure; nil otherwise.
     var language: String?
     // Who
@@ -43,6 +43,12 @@ struct EventFeatures: Hashable, Sendable, Codable {
     var seriesTerms: Set<String> = []
     /// Edition slots named in the headline ("Morning", "Evening"): two items of one series in different slots differ.
     var editions: Set<String> = []
+    /// Named storms in the headline ("Storm Arlo", "Hurricane Milton"), lowercased names: two headlines naming different
+    /// storms report different weather events however alike they read (#741).
+    var stormNames: Set<String> = []
+    /// Specific names that appear in the headline itself, not only in the description: a publisher's own name in its
+    /// standard sign-off ("picked by Gadget Nine") is no shared name between two of its round-ups (#739).
+    var titleSpecificAnchors: Set<String> = []
 
     var anchors: Set<String> { people.union(organizations).union(places).union(names) }
     /// Places that name a country, canonicalized to a region code (`@US`).
@@ -68,6 +74,7 @@ struct EventFeatures: Hashable, Sendable, Codable {
         copy.keywords.subtract(terms)
         copy.titleNumbers.subtract(terms)
         copy.primaryTitleTerms.subtract(terms)
+        copy.titleSpecificAnchors.subtract(terms)
         return copy
     }
 }
@@ -143,6 +150,34 @@ extension EventFeatures {
         return (try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])) ?? NSRegularExpression()
     }()
     private static let editionWords: Set<String> = ["morning", "midday", "afternoon", "evening", "night", "overnight"]
+
+    private static let stormRegex = try? NSRegularExpression(
+        pattern: #"\b(?:Storm|Hurricane|Typhoon|Cyclone)\s+(\p{Lu}\p{Ll}+)"#)
+    /// Capitalized words after "Storm" that are not names ("Storm Warning", "Storm Season", "Storm Will Hit").
+    private static let stormNonNames: Set<String> = [
+        "warning", "warnings", "watch", "season", "damage", "surge", "center", "centre", "front", "clouds", "tracker",
+        "chasers", "system", "update", "updates", "will", "could", "may", "might", "should", "set", "is", "was",
+    ]
+
+    /// Lowercased storm names in a headline: "Storm Arlo", "Hurricane Milton", "Typhoon Kong-rey" (first part).
+    /// A Title Case verb after "Storm" ("Winter Storm Brings Snow") is no name: its lemma is a different, lowercase
+    /// word ("bring"), while a name keeps itself as its lemma ("Ellen") or has none ("Darragh").
+    static func stormNames(in title: String) -> Set<String> {
+        guard let stormRegex else { return [] }
+        let matches = stormRegex.matches(in: title, range: NSRange(title.startIndex..., in: title))
+        guard !matches.isEmpty else { return [] }
+        let tagger = NLTagger(tagSchemes: [.lemma])
+        tagger.string = title
+        return Set(
+            matches.compactMap { match in
+                guard let range = Range(match.range(at: 1), in: title) else { return nil }
+                let word = String(title[range])
+                let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
+                guard !stormNonNames.contains(word.lowercased()), lemma == nil || lemma == word else { return nil }
+                // "Éowyn" and "Eowyn" are one storm.
+                return word.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            })
+    }
     private static let numberWords: [String: String] = [
         "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
         "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "dozen": "12", "twenty": "20", "hundred": "100",
@@ -480,6 +515,12 @@ extension EventFeatures {
         collector.features.primaryTitleTerms.subtract(days.map(\.digits))
         collector.features.editions = Set(title.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
             .intersection(Self.editionWords)
+        collector.features.stormNames = Self.stormNames(in: title)
+        let headlineWords = Set(
+            title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { Self.normalized(String($0)) })
+        collector.features.titleSpecificAnchors = collector.features.specificAnchors.filter { anchor in
+            anchor.split(separator: " ").allSatisfy { headlineWords.contains(String($0)) }
+        }
         if let cut = title.firstIndex(where: { "|:—".contains($0) }),
             title[title.index(after: cut)...].contains(where: { $0.isLetter || $0.isNumber }),
             case let prefix = String(title[..<cut]), !Self.normalized(prefix).isEmpty
@@ -675,8 +716,8 @@ struct PairCalibration: Sendable, Equatable {
 
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
-    case language, unknownDate, timeGap, period, year, weekday, calendarDay, edition, differentAct, titleNumbers,
-        places, excluded, semanticDivergence
+    case language, unknownDate, timeGap, period, year, weekday, calendarDay, edition, namedStorm, differentAct,
+        titleNumbers, places, excluded, semanticDivergence
 }
 
 struct EventPairAssessment: Sendable, Equatable {
@@ -702,7 +743,7 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes, a retrained pair model included; recent articles and active memberships are
     /// revalidated. Unchanged archived memberships remain intact.
-    static let version = 13
+    static let version = 14
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval, sameSeries: Bool
@@ -724,6 +765,15 @@ enum EventMatcher {
         if disjoint(a.calendarDays, b.calendarDays) { return .calendarDay }
         // Morning and evening bulletins of one series are two items however alike their template reads (#688).
         if sameSeries && disjoint(a.editions, b.editions) { return .edition }
+        // Without a date or an edition word, two items of one series whose headlines share no specific name and that
+        // appeared on different days are two items ("Deals: …" round-ups, #739). Items with a date or an edition word
+        // are left to the checks above.
+        if sameSeries && a.calendarDays.isEmpty && b.calendarDays.isEmpty && a.editions.isEmpty && b.editions.isEmpty
+            && a.titleSpecificAnchors.isDisjoint(with: b.titleSpecificAnchors) && !sameUTCDay(a.date, b.date)
+        {
+            return .calendarDay
+        }
+        if disjoint(a.stormNames, b.stormNames) { return .namedStorm }
         if disjoint(a.titleNumbers, b.titleNumbers) { return .titleNumbers }
         // Three shared specific names outweigh one place the tagger mistyped ("Bellingham" as a place, #580).
         if !sharesPlace && a.specificAnchors.intersection(b.specificAnchors).count < 3
@@ -734,6 +784,12 @@ enum EventMatcher {
         // Last, so a different act is only reported when nothing else contradicts: it is a related-act candidate.
         if a.actClass.conflicts(with: b.actClass) { return .differentAct }
         return nil
+    }
+
+    private static func sameUTCDay(_ a: Date, _ b: Date) -> Bool {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        return calendar.isDate(a, inSameDayAs: b)
     }
 
     private static func isPrimaryDisjoint(_ a: EventFeatures, _ b: EventFeatures) -> Bool {
