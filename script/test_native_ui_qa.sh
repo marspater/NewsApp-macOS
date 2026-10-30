@@ -36,6 +36,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Intelligence/OverviewTimelineExtractor.swift \
     Sources/Intelligence/OverviewPerspectivesExtractor.swift \
     Sources/Intelligence/OverviewThematicAngleExtractor.swift \
+    Sources/Intelligence/OverviewIndustryImpactExtractor.swift \
     Sources/Intelligence/CoverageSentimentEvaluator.swift \
     Sources/Intelligence/EventCandidates.swift \
     Sources/Intelligence/IntelligencePolicy.swift \
@@ -79,6 +80,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Services/OPMLManager.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
+    Sources/App/NotificationActionRouter.swift \
     Sources/Views/FeedHealthLine.swift \
     Sources/Views/FeedCatalogView.swift \
     Sources/Views/TensionIndexView.swift \

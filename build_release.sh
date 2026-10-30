@@ -61,6 +61,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/OverviewTimelineExtractor.swift
     Sources/Intelligence/OverviewPerspectivesExtractor.swift
     Sources/Intelligence/OverviewThematicAngleExtractor.swift
+    Sources/Intelligence/OverviewIndustryImpactExtractor.swift
     Sources/Intelligence/CoverageSentimentEvaluator.swift
     Sources/Intelligence/EventCandidates.swift
     Sources/Intelligence/IntelligencePolicy.swift
