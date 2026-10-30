@@ -206,7 +206,8 @@ struct BriefingTensionStripView: View {
     private var trendSparkline: some View {
         HStack(alignment: .center, spacing: AppSpacing.xs) {
             EyebrowText("7-day trend")
-            BriefingTensionSparklineView(readings: state.trend(days: 7))
+            BriefingTensionSparklineView(
+                readings: state.trend(days: 7), baseline: state.reading?.assessment.score ?? 50)
         }
     }
 
@@ -282,6 +283,8 @@ struct BriefingTensionStripView: View {
 /// flat baseline.
 struct BriefingTensionSparklineView: View {
     let readings: [WorldTensionReading]
+    /// Where the flat line sits without two readings this week: the reading shown, which may be older than the week.
+    var baseline: Int = 50
 
     private static let chartWidth: CGFloat = 140
     private static let chartHeight: CGFloat = 36
@@ -306,7 +309,7 @@ struct BriefingTensionSparklineView: View {
                     .foregroundStyle(AppColor.tension(item.level))
                 }
             } else {
-                RuleMark(y: .value("Baseline", readings.last?.assessment.score ?? 50))
+                RuleMark(y: .value("Baseline", readings.last?.assessment.score ?? baseline))
                     .foregroundStyle(AppColor.borderSubtle)
                     .lineStyle(StrokeStyle(lineWidth: AppLayout.hairline, dash: [4, 4]))
             }

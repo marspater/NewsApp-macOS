@@ -4713,11 +4713,18 @@ struct NewsTests {
         assertEqual(lateSameDay.status, .assessed, "Five minutes before midnight UTC it is still today's")
         let older = WorldTensionState(history: [reading(-3, 20)], loadedAt: today.addingTimeInterval(23 * 3600))
         assertEqual(older.note, "Reading from \(reading(-3, 20).dayText)", "An older reading names its UTC day")
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = .gmt
+        // Compared with other readings, not a spelled date, so any locale, calendar and time zone gives the same result.
+        func readingAt(_ date: Date) -> WorldTensionReading {
+            WorldTensionReading(
+                evaluatedAt: date, inputHash: "at", modelGeneration: "generation", headlines: lateReading.headlines,
+                assessment: lateReading.assessment)
+        }
+        assertEqual(
+            lateReading.dayText, readingAt(today.addingTimeInterval(-86400 + 60)).dayText,
+            "00:01 and 23:30 UTC name the same UTC day, whatever the local time zone")
         assertTrue(
-            lateReading.dayText.contains(String(utc.component(.day, from: lateReading.id))),
-            "A reading's day is its UTC day, whatever the local time zone")
+            lateReading.dayText != readingAt(today.addingTimeInterval(60)).dayText,
+            "00:01 UTC the next day names the next day")
         var reloading = stale
         reloading.problem = WorldTensionError.deferred.errorDescription
         reloading.isLoading = true
