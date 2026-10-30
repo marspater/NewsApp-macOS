@@ -696,6 +696,7 @@ struct NewsTests {
             try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
             try await testPublisherTextFingerprints()
             try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
+            try await testOverviewVersionFollowsEventNotStorySum()
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()
@@ -811,6 +812,7 @@ struct NewsTests {
         try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
         try await testPublisherTextFingerprints()
         try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
+        try await testOverviewVersionFollowsEventNotStorySum()
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
         try await testPassageAnchoredFactExtraction()
@@ -20977,6 +20979,77 @@ struct NewsTests {
         _ = await store.setSaved(article: article, isSaved: false)
         let persistedSaved = try await store.database.isSaved(articleId: article.id)
         assertFalse(persistedSaved, "Explicit unsave is idempotent in SQLite")
+    }
+
+    /// #789: an overview carries its event's own membership version, not the story's summed one, so a sum that falls
+    /// after a merge neither refuses the save nor keeps an overview stored under the old sum.
+    @MainActor
+    static func testOverviewVersionFollowsEventNotStorySum() async throws {
+        print("  - Testing overview versions follow the event, not the story sum (#789)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let now = Date()
+        func report(_ id: String, _ source: String, hoursAgo: Double) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Report \(id)", link: "https://example.com/\(id)", guid: id,
+                description: "Text \(id).", pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        let reports = [
+            report("v789-a1", "One", hoursAgo: 1), report("v789-a2", "Two", hoursAgo: 1),
+            report("v789-b1", "Three", hoursAgo: 5), report("v789-b2", "Four", hoursAgo: 5),
+            report("v789-c1", "Five", hoursAgo: 6), report("v789-c2", "Six", hoursAgo: 6),
+            report("v789-d1", "Seven", hoursAgo: 7), report("v789-d2", "Eight", hoursAgo: 7),
+        ]
+        _ = try await db.upsertArticles(reports)
+        let opened = try await db.createEvent(memberArticleIDs: ["v789-a1", "v789-a2"], at: now)
+        let sibling = try await db.createEvent(memberArticleIDs: ["v789-b1", "v789-b2"], at: now)
+        let folded = try await db.createEvent(memberArticleIDs: ["v789-c1", "v789-c2"], at: now)
+        try await db.executeSimple(
+            "UPDATE events SET story_id = '\(opened.id)' WHERE id IN ('\(sibling.id)', '\(folded.id)');")
+        func summary() async throws -> EventFeedSummary? {
+            try await db.eventFeedSummaries(forArticles: ["v789-a1"]).first
+        }
+        let before = try await summary()
+        assertEqual(before?.eventID, opened.id, "The story opens its newest event")
+        assertEqual(before?.membershipVersion, 3, "The story sums its three events")
+        assertEqual(before?.eventVersion, 1, "The overview version is the opened event's own")
+
+        func overview(_ version: Int, _ hash: String) -> EventOverviewDocument {
+            EventOverviewDocument(
+                eventID: opened.id, version: OverviewVersionContext(membershipVersion: version, inputTextHash: hash),
+                content: OverviewContent(title: "Story", summary: "", facts: [], citations: []),
+                provenance: OverviewProvenance(memberArticleIDs: ["v789-a1", "v789-a2"], kind: .fallbackExcerpts))
+        }
+        assertTrue(
+            try await db.recordEventOverview(overview(3, "legacy")), "A row stored under the sum, as before #789")
+        assertTrue(
+            try await db.recordEventOverview(overview(1, "current")),
+            "The event's own version replaces a row stored under the story sum")
+
+        // A merge folds the sibling's version away and the survivor gains only +1: the sum falls from 4 to 3.
+        let foldedAgain = try await db.createEvent(memberArticleIDs: ["v789-d1"], at: now)
+        _ = try await db.mergeEvents(foldedAgain.id, into: folded.id, at: now)
+        assertEqual(try await summary()?.membershipVersion, 4, "The story sums the opened event and two siblings")
+        _ = try await db.mergeEvents(folded.id, into: sibling.id, at: now)
+        let after = try await summary()
+        assertEqual(after?.membershipVersion, 3, "The story sum falls after the merge")
+        assertEqual(after?.eventVersion, 1, "The opened event's version is unchanged by a sibling merge")
+        assertFalse(
+            try await db.fetchEventOverview(eventID: opened.id)?.isStale(currentMembershipVersion: 1) ?? true,
+            "The stored overview stays current across the sibling merge")
+        assertTrue(
+            try await db.recordEventOverview(overview(1, "regenerated")),
+            "A save at the event's version is accepted after the story sum changed")
+
+        let extra = try await db.createEvent(memberArticleIDs: ["v789-d2"], at: now)
+        _ = try await db.mergeEvents(extra.id, into: opened.id, at: now)
+        assertFalse(
+            try await db.recordEventOverview(overview(1, "late")),
+            "A result for an older version of the event is still refused")
+        assertEqual(
+            try await db.fetchEventOverview(eventID: opened.id)?.version.inputTextHash, "regenerated",
+            "The refused result leaves the stored overview")
+        await db.close()
     }
 
     static func testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: String = "example.com") async throws {
