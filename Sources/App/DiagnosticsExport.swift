@@ -151,7 +151,14 @@ enum DiagnosticsExport {
             zip in zipped = Result { try Data(contentsOf: zip) }
         }
         if let coordinationError { throw coordinationError }
-        // An atomic write replaces an earlier export only once the new archive is complete.
-        try zipped.get().write(to: destination, options: .atomic)
+        // An atomic write replaces an earlier export only once the new archive is complete. It needs a temporary
+        // file beside the destination, which the sandbox can refuse (an external volume); the whole archive is
+        // already in memory, so a direct write is then the fallback, never a delete first.
+        let data = try zipped.get()
+        do {
+            try data.write(to: destination, options: .atomic)
+        } catch let error as CocoaError where error.code == .fileWriteNoPermission {
+            try data.write(to: destination)
+        }
     }
 }
