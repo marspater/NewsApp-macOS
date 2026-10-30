@@ -2092,8 +2092,17 @@ actor DatabaseEngine {
             // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
             // must be stored, or the old ETag keeps being sent and health keeps the old item counts.
             if let feedUrl, let validators {
+                // Same rule as the articles path: a refresh cancelled while waiting writes nothing.
+                try beginTransaction()
+                defer {
+                    if sqlite3_get_autocommit(db) == 0 {
+                        loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                    }
+                }
                 try recordFeedFetch(
                     validators, stats: FeedContentStats(articles: []), for: feedUrl, at: Date().timeIntervalSince1970)
+                try Task.checkCancellation()
+                try commitTransaction()
             }
             return []
         }
@@ -2984,13 +2993,14 @@ actor DatabaseEngine {
         }
     }
 
-    func markAllRead(feedUrl: String? = nil) throws {
+    func markAllRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) throws {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
         // Only unread stories the reading feed shows: earlier read times stay as they were, and reconciled
-        // originals and analysis-only panel reports stay hidden (marking them read would surface them in History).
+        // originals, muted stories and analysis-only panel reports stay as they are (marking a panel report read would
+        // surface it in History; a muted one would count as a reading interest).
         let collection = collectionScope()
         var params: [QueryParameter] = [("double", Date().timeIntervalSince1970)] + collection.params
         var sql = """
@@ -3001,6 +3011,10 @@ actor DatabaseEngine {
         if let feedUrl {
             sql += " AND a.id IN (SELECT article_id FROM article_feeds WHERE feed_url = ?)"
             params.append(("text", feedUrl))
+        }
+        if !muting.isEmpty {
+            sql += " AND NOT \(Self.mutedArticle)"
+            params += Self.mutingParameters(muting)
         }
         sql += ");"
         var stmt: OpaquePointer?

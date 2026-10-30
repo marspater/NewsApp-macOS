@@ -216,9 +216,9 @@ final class ArticleStore: ObservableObject {
         }
     }
 
-    func markAllAsRead(feedUrl: String? = nil) async {
+    func markAllAsRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) async {
         do {
-            try await database.markAllRead(feedUrl: feedUrl)
+            try await database.markAllRead(feedUrl: feedUrl, muting: muting)
             await refreshState()
         } catch {
             operationError = "Could not mark articles as read. Please try again."
