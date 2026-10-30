@@ -2092,8 +2092,17 @@ actor DatabaseEngine {
             // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
             // must be stored, or the old ETag keeps being sent and health keeps the old item counts.
             if let feedUrl, let validators {
+                // Same rule as the articles path: a refresh cancelled while waiting writes nothing.
+                try beginTransaction()
+                defer {
+                    if sqlite3_get_autocommit(db) == 0 {
+                        loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                    }
+                }
                 try recordFeedFetch(
                     validators, stats: FeedContentStats(articles: []), for: feedUrl, at: Date().timeIntervalSince1970)
+                try Task.checkCancellation()
+                try commitTransaction()
             }
             return []
         }
@@ -2198,11 +2207,17 @@ actor DatabaseEngine {
                     userInfo: [NSLocalizedDescriptionKey: "Failed to check stored article identity"])
             }
             if existenceStatus == SQLITE_DONE {
-                // A story pruned by retention that its feed still serves stays pruned (#783).
-                sqlite3_reset(expiredStmt)
-                sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
-                sqlite3_bind_text(expiredStmt, 2, canonical, -1, Self.sqliteTransient)
-                if sqlite3_step(expiredStmt) == SQLITE_ROW { continue }
+                // A story pruned by retention that its feed still serves stays pruned (#783), by its resolved ID or
+                // its feed-scoped GUID. An explicit save (preserving stored content) may bring it back.
+                if !preservingStoredContent {
+                    let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: identityFeedURL) ?? id
+                    sqlite3_reset(expiredStmt)
+                    sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
+                    sqlite3_bind_text(expiredStmt, 2, scoped, -1, Self.sqliteTransient)
+                    let expiredStatus = sqlite3_step(expiredStmt)
+                    if expiredStatus == SQLITE_ROW { continue }
+                    guard expiredStatus == SQLITE_DONE else { throw sqliteError(db, "Could not check pruned story") }
+                }
                 insertedIDs.insert(id)
             }
 
@@ -2984,13 +2999,14 @@ actor DatabaseEngine {
         }
     }
 
-    func markAllRead(feedUrl: String? = nil) throws {
+    func markAllRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) throws {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
         // Only unread stories the reading feed shows: earlier read times stay as they were, and reconciled
-        // originals and analysis-only panel reports stay hidden (marking them read would surface them in History).
+        // originals, muted stories and analysis-only panel reports stay as they are (marking a panel report read would
+        // surface it in History; a muted one would count as a reading interest).
         let collection = collectionScope()
         var params: [QueryParameter] = [("double", Date().timeIntervalSince1970)] + collection.params
         var sql = """
@@ -3001,6 +3017,10 @@ actor DatabaseEngine {
         if let feedUrl {
             sql += " AND a.id IN (SELECT article_id FROM article_feeds WHERE feed_url = ?)"
             params.append(("text", feedUrl))
+        }
+        if !muting.isEmpty {
+            sql += " AND NOT \(Self.mutedArticle)"
+            params += Self.mutingParameters(muting)
         }
         sql += ");"
         var stmt: OpaquePointer?
@@ -3662,13 +3682,15 @@ actor DatabaseEngine {
             """
         // A feed can keep serving a story long after it was read and pruned. Its stored ID and identity aliases
         // stay behind in `expired_stories` under a `pruned:` prefix, so `upsertArticles` never brings it back as a
-        // new, unread story (#783). Unprefixed rows are old importance-expiry tombstones and suppress nothing.
+        // new, unread story (#783). Only ID keys are kept: a URL can later carry a different story (a recurring or
+        // live page), which must still arrive. Unprefixed rows are old importance-expiry tombstones and suppress
+        // nothing.
         // ponytail: tombstones are never pruned (about three short rows per pruned story); expire old ones if the
         // table ever matters for size.
         let tombstones = """
             INSERT OR REPLACE INTO expired_stories (key, expired_at)
             SELECT 'pruned:' || value, ?2 FROM article_aliases
-                WHERE kind IN ('id', 'url') AND article_id IN (\(doomed))
+                WHERE kind = 'id' AND article_id IN (\(doomed))
             UNION SELECT 'pruned:' || id, ?2 FROM articles WHERE id IN (\(doomed));
             """
         try beginTransaction()
