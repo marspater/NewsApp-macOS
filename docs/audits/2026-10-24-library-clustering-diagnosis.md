@@ -32,7 +32,7 @@ Correct separations in the same window, for balance: France protests vs Milan pr
 
 1. Precision engineering is complete: no wrong merge was found among the pairs read for this diagnosis, and the authored corpus and holdout both stand at zero false pairs.
 2. The missing recall has four mechanisms, none of them a threshold: the act-level event definition shown directly as cards (#581), anchors lost for headline-initial, Title-Case, organization and product names (#580), fragment merging that cannot use the pair model and an all-pairs admission rule (#582), and duplicate items from one publisher (#583).
-3. The old holdout cannot gate these changes. #579 draws a holdout from this library: borderline rows with score ≥ 0.6, singletons sharing a keyword with an event within 36 h, and fragment pairs sharing two terms, labelled by Claude under the protocol in CONTRIBUTING with Mars spot-checking twenty.
+3. The old holdout cannot gate these changes. #579 draws a holdout from this library: borderline rows with score ≥ 0.6, singletons sharing a keyword with an event within 36 h, and fragment pairs sharing two terms, labelled by Claude under the protocol in CONTRIBUTING, with a 20-pair spot-check by Mars planned; it was not done (see below).
 
 ## Reproduce
 
@@ -44,7 +44,7 @@ sqlite3 copy.sqlite3 "select coalesce(em.event_id,'-'), a.source, a.title from a
 
 ## Library holdout (#579)
 
-Drawn from the same copy with `--review-pairs --holdout-candidates` and labelled by Claude under the pair review protocol in CONTRIBUTING (Mars's 20-pair spot-check pending: the first twenty borderline candidates in the recorded order). The file stays outside the repository: `~/news-eval/holdout-2026-10-24/library-holdout-2026-10-24.json` (`0600`), SHA-256 `bbb4ded1d9c635444053b63ae638ddba3f3e3f6c0a014caa012155c67a1710b9`; the candidate export `holdout-candidates.csv` sits beside it.
+Drawn from the same copy with `--review-pairs --holdout-candidates` and labelled by Claude under the pair review protocol in CONTRIBUTING (the 20-pair spot-check was not done before this holdout was retired on 27 October; see `2026-10-30-epic-m-verification.md`). The file stays outside the repository: `~/news-eval/holdout-2026-10-24/library-holdout-2026-10-24.json` (`0600`), SHA-256 `bbb4ded1d9c635444053b63ae638ddba3f3e3f6c0a014caa012155c67a1710b9`; the candidate export `holdout-candidates.csv` sits beside it.
 
 | Class (drawn in SHA-256 order of the two ids) | Pairs | `same` | `related` | `different` |
 | --- | --- | --- | --- | --- |

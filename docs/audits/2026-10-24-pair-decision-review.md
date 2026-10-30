@@ -1,6 +1,6 @@
 # Pair decision review — 24 October 2026
 
-Refs #551 (M1), #574. Review of the pair decisions stored in a read-only copy of the live library (5,998 articles, newest published 24 October 2026 15:00 UTC, schema v25, matcher v11), exported with `--review-pairs` and labelled under the protocol in CONTRIBUTING ("Pair review protocol"). Labelled by Claude; Mars has not spot-checked yet (20 pairs are due, see the last section). Receipts: `~/news-eval/review-2026-10-24/` (`0700`), SHA-256 of the export `a2bacbb6…8847`, of the label files `05641689…901d` (match), `93cd0005…4815` (pair model), `83824a6a…e846` (related act).
+Refs #551 (M1), #574. Review of the pair decisions stored in a read-only copy of the live library (5,998 articles, newest published 24 October 2026 15:00 UTC, schema v25, matcher v11), exported with `--review-pairs` and labelled under the protocol in CONTRIBUTING ("Pair review protocol"). Labelled by Claude; the planned 20-pair spot-check by Mars was not done (see the last section). Receipts: `~/news-eval/review-2026-10-24/` (`0700`), SHA-256 of the export `a2bacbb6…8847`, of the label files `05641689…901d` (match), `93cd0005…4815` (pair model), `83824a6a…e846` (related act).
 
 Rows in the copy: 921 `match`/`match`, 484 `match`/`pairModel`, 470 `borderline`, 56 `related-act`, 0 `vetoed` (the copy predates the row type).
 
@@ -35,7 +35,7 @@ Related-act rows (35 `different` of 56): the rule is "act conflict, one shared s
 3. **#580/#583: a same-publisher pair needs stricter evidence.** Eight of thirteen rule false merges are one publisher's series items. A same-source pair should require a shared specific anchor beyond the publisher's own templated words and no date-only difference in the headline ("October 21st" vs "October 22nd" are `titleNumbers` only when written as digits; ordinal dates are not).
 4. The authored corpus (22 / 0) and the private holdout (38 / 0 / 0) are both saturated and blind to these errors. The library holdout from #579 replaces them as the gate.
 
-## Spot-check (Mars, pending)
+## Spot-check (not done; see `2026-10-30-epic-m-verification.md`)
 
 Twenty pairs for Mars, drawn as the first twenty of the match sample in the recorded order (`python3 script/evaluation/sample_pairs.py pairs-review.csv match 0 20` on the export). Mars's labels and any overturned label are to be appended here with the reason; three overturned in twenty mean the sample is relabelled.
 
