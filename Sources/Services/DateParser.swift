@@ -5,7 +5,7 @@ struct DateParser {
     static let unknownDate = Date.distantPast
 
     static func parse(_ dateString: String) -> Date? {
-        let trimmed = dateString.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = dateString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.utf8.count <= 512 else { return nil }
 
         let isoFormatter = ISO8601DateFormatter()
@@ -15,6 +15,7 @@ struct DateParser {
         isoFormatter.formatOptions = [.withInternetDateTime]
         if let d = isoFormatter.date(from: trimmed) { return d }
 
+        trimmed = Self.numericZone(trimmed)
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
@@ -39,7 +40,7 @@ struct DateParser {
         for fmt in formats {
             formatter.dateFormat = fmt
             if let d = formatter.date(from: trimmed) {
-                return d
+                return Self.fullCentury(d)
             }
         }
 
@@ -48,9 +49,32 @@ struct DateParser {
             let withoutWeekday = String(trimmed[trimmed.index(after: comma)...]).trimmingCharacters(in: .whitespaces)
             for format in ["d MMM yyyy HH:mm:ss Z", "d MMM yyyy HH:mm Z"] {
                 formatter.dateFormat = format
-                if let date = formatter.date(from: withoutWeekday) { return date }
+                if let date = formatter.date(from: withoutWeekday) { return Self.fullCentury(date) }
             }
         }
         return nil
+    }
+
+    /// Zone names feeds use beyond RFC 822's, as offsets; DateFormatter does not know them and FeedKit's fallback
+    /// mis-offsets them (#796). IST is India's, the common case in English news feeds.
+    private static let zoneOffsets = [
+        "BST": "+0100", "IST": "+0530", "CET": "+0100", "CEST": "+0200", "EET": "+0200", "EEST": "+0300",
+        "WET": "+0000", "WEST": "+0100", "MSK": "+0300", "JST": "+0900", "KST": "+0900", "HKT": "+0800",
+        "SGT": "+0800", "AEST": "+1000", "AEDT": "+1100", "ACST": "+0930", "AWST": "+0800", "NZST": "+1200",
+        "NZDT": "+1300",
+    ]
+
+    private static func numericZone(_ text: String) -> String {
+        guard let space = text.lastIndex(of: " "), let offset = zoneOffsets[String(text[text.index(after: space)...])]
+        else { return text }
+        return String(text[..<space]) + " " + offset
+    }
+
+    /// RFC 822 and RSS 2.0 allow two-digit years, which the four-digit patterns read as years 0-99.
+    private static func fullCentury(_ date: Date) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        guard calendar.component(.year, from: date) < 100 else { return date }
+        return calendar.date(byAdding: .year, value: 2000, to: date) ?? date
     }
 }

@@ -282,6 +282,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
 
         guard insideItem else { return }
+        // An Atom entry's <source> describes the feed it was copied from; its title is not the entry's (#795).
+        if isAtom, elementStack.contains("source") { return }
         if currentElement == "media:credit", !itemImageCandidates.isEmpty {
             let index = itemImageCandidates.count - 1
             itemImageCandidates[index].credit = String(((itemImageCandidates[index].credit ?? "") + string).prefix(500))
@@ -493,7 +495,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private func applyFeedKitItem(_ itemXML: String, baseURL: URL?, to article: FeedArticle) -> FeedArticle {
         guard !Task.isCancelled else { return article }
         let namespaces =
-            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:media=\"http://search.yahoo.com/mrss/\" xmlns:content=\"http://purl.org/rss/1.0/modules/content/\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\""
+            "xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:media=\"http://search.yahoo.com/mrss/\" xmlns:content=\"http://purl.org/rss/1.0/modules/content/\" xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\" xmlns:ext=\"urn:x-news:foreign\""
         let xml =
             isAtom
             ? "<feed xmlns=\"http://www.w3.org/2005/Atom\" \(namespaces)>\(itemXML)</feed>"
@@ -595,7 +597,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         case "http://purl.org/rss/1.0/modules/content/": return "content:" + name
         case "http://search.yahoo.com/mrss/": return "media:" + name
         case "http://purl.org/dc/elements/1.1/": return "dc:" + name
-        default: return name
+        // RSS 2.0 has no namespace; Atom, RSS 1.0, RDF and XHTML content elements keep their local names.
+        case nil, "", "http://www.w3.org/2005/Atom", "http://purl.org/atom/ns#", "http://purl.org/rss/1.0/",
+            "http://my.netscape.com/rdf/simple/0.9/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+            "http://www.w3.org/1999/xhtml":
+            return name
+        // Any other vocabulary (itunes:title, googleplay:description) never stands in for the item's own fields (#795).
+        default: return "ext:" + name
         }
     }
 
