@@ -44,8 +44,6 @@ struct ArticleListView: View {
     @Binding var searchText: String
     @Binding var mastheadNotice: MastheadNotice?
     @Binding var articlePath: NavigationPath
-    /// The World Tension state the sidebar shows, for the Briefing strip (#781).
-    var tension = WorldTensionState()
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
@@ -833,7 +831,6 @@ struct ArticleListView: View {
             BriefingView(
                 entries: listed,
                 briefing: briefing,
-                tension: tension,
                 actions: BriefingActions(
                     onOpenArticle: { article in openArticle(article) },
                     onOpenEvent: { event in

@@ -19,7 +19,6 @@ struct SidebarView: View {
     @Binding var mastheadNotice: MastheadNotice?
     /// Panel collection is on, so the sidebar foot shows the news tension reading.
     var showsTensionReading = false
-    var tension = WorldTensionState()
     var openTension: () -> Void = {
         // Default no-op action
     }
@@ -60,7 +59,7 @@ struct SidebarView: View {
             if showsTensionReading {
                 VStack(spacing: 0) {
                     Divider()
-                    TensionSidebarButton(state: tension, open: openTension)
+                    TensionSidebarButton(open: openTension)
                         .padding(.horizontal, AppLayout.sidebarInset)
                         .padding(.vertical, AppSpacing.xs)
                 }

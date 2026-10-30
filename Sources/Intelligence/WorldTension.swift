@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 enum WorldTensionFactor: String, CaseIterable, Codable, Sendable {
     case novelty = "Novelty"
@@ -315,6 +316,13 @@ struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
     /// A keyword estimate that stands in while the model cannot assess the headlines; it is never saved and the model is
     /// asked again next time. A saved estimate is the day's reading for headlines the model declined (#523).
     var isProvisionalEstimate: Bool { assessment.isEstimate == true && inputHash.hasSuffix(":estimate") }
+
+    /// The UTC day the reading belongs to, as the trend's axis labels it ("Oct 28").
+    var dayText: String {
+        var style = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        style.timeZone = .gmt
+        return id.formatted(style)
+    }
 }
 
 enum WorldTensionError: LocalizedError {
@@ -588,8 +596,18 @@ actor WorldTensionService {
 
 }
 
-/// What every World Tension surface shows (#781): the sidebar foot, the Briefing strip and the sheet take this one
-/// value from `MainView`, which reloads it, so they cannot disagree about the reading or its state.
+/// The one World Tension state of a window (#781). `MainView` owns it, reloads it and puts it in the environment once;
+/// the sidebar foot, the Briefing strip and the sheet read it there, so they cannot disagree, and the story list never
+/// takes it as an input, so a reload does not re-evaluate the list.
+@MainActor @Observable final class WorldTensionModel {
+    var state: WorldTensionState
+
+    init(state: WorldTensionState = WorldTensionState()) {
+        self.state = state
+    }
+}
+
+/// What every World Tension surface shows (#781): one value, held by `WorldTensionModel`.
 struct WorldTensionState: Equatable, Sendable {
     enum Status: Equatable, Sendable {
         /// AI story analysis or panel collection is off: nothing is assessed or shown.
@@ -640,7 +658,7 @@ struct WorldTensionState: Equatable, Sendable {
         case .assessing: return "Assessing headlines"
         case .assessed: return nil
         case .estimate: return "Keyword estimate"
-        case .stale: return "Reading from \(age)"
+        case .stale: return "Reading from \(staleDay)"
         case .unavailable: return "Assessment unavailable"
         }
     }
@@ -670,19 +688,17 @@ struct WorldTensionState: Equatable, Sendable {
                 ? "The on-device model could not assess today's headlines. A keyword estimate stands in, and the model is asked again after the next refresh."
                 : "The on-device model declined today's headlines. A keyword estimate stands in until new headlines arrive."
         case .stale, .unavailable:
-            if let problem { return problem }
-            return isLoading
-                ? "Today's international panel headlines are being assessed on this Mac."
-                : "Today's headlines have not been assessed yet."
+            // A running assessment outranks the previous run's failure.
+            if isLoading { return "Today's international panel headlines are being assessed on this Mac." }
+            return problem ?? "Today's headlines have not been assessed yet."
         }
     }
 
-    /// How long ago the newest reading was made, in words ("yesterday", "3 days ago").
-    private var age: String {
+    /// The newest reading's UTC day in words, the measure staleness uses: "yesterday", else its day ("Oct 28"). A
+    /// reading made at 23:30 UTC is yesterday's at 00:05 UTC, however few minutes have passed.
+    private var staleDay: String {
         guard let latest = history.last else { return "" }
-        let formatter = RelativeDateTimeFormatter()
-        formatter.dateTimeStyle = .named
-        return formatter.localizedString(for: latest.evaluatedAt, relativeTo: loadedAt)
+        return today.timeIntervalSince(latest.id) <= 86400 ? "yesterday" : latest.dayText
     }
 
     /// The readings of the last `days` UTC days, today included.

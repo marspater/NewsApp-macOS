@@ -233,7 +233,8 @@ struct NativeUIQAChecks {
             await db.close()
             return
         }
-        let host = NSHostingView(rootView: TensionIndexView(state: state))
+        let model = WorldTensionModel(state: state)
+        let host = NSHostingView(rootView: TensionIndexView().environment(model))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 800),
             styleMask: [.titled], backing: .buffered, defer: false)
@@ -277,8 +278,16 @@ struct NativeUIQAChecks {
             text.contains("Current Panel Headlines"), "Failed reassessments expose current evidence alongside history")
         assertTrue(text.contains("Current unscored panel evidence"), "The current publisher headline is inspectable")
         for disableAI in [true, false] {
-            host.rootView = TensionIndexView(
-                state: WorldTensionState(aiEnabled: !disableAI, collectionEnabled: disableAI, history: state.history))
+            // Through the loader, so the rule under test is that it returns no panel headlines when a flag is off.
+            guard
+                let off = try? await WorldTensionState.load(
+                    service: WorldTensionService(model: .unavailable), database: db, now: Date(),
+                    aiEnabled: !disableAI, collectionEnabled: disableAI)
+            else {
+                assertTrue(false, "Load the tension state with AI or collection off")
+                continue
+            }
+            model.state = off
             let hiddenDeadline = ContinuousClock.now + .seconds(2)
             while renderedText().contains("Current Panel Headlines"), ContinuousClock.now < hiddenDeadline {
                 host.layoutSubtreeIfNeeded()

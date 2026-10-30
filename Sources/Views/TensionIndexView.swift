@@ -25,11 +25,12 @@ enum NewsTensionRequest {
 }
 
 /// World Tension v2: an on-device assessment of international headlines, with its own history. The sheet shows the
-/// state `MainView` loads for every surface (#781) and asks it for a fresh assessment; it assesses nothing itself.
+/// window's `WorldTensionModel` (#781) and asks its owner for a fresh assessment; it assesses nothing itself.
 struct TensionIndexView: View {
     static let navigationTitleText = "World Tension"
-    let state: WorldTensionState
-    /// Asks the owner of `state` for an assessment that ignores the saved one.
+    @Environment(WorldTensionModel.self) private var model
+    private var state: WorldTensionState { model.state }
+    /// Asks the owner of the model for an assessment that ignores the saved one.
     var reassess: () -> Void = {
         // Captures have nothing to reassess.
     }
@@ -164,7 +165,7 @@ struct TensionIndexView: View {
         let day =
             reading.id == TensionMethodology.day(containing: state.loadedAt).start
             ? "Today's assessment"
-            : "Assessment on \(reading.evaluatedAt.formatted(.dateTime.month(.abbreviated).day()))"
+            : "Assessment on \(reading.dayText)"
         let assessed = reading.assessment.assessedScore.map { "\(day) \($0)°, 7-day reading shown. " }
         let text = (assessed ?? "") + (ranking(reading) ?? "")
         return text.isEmpty ? nil : text
@@ -192,7 +193,7 @@ struct TensionIndexView: View {
         let direction = change > 0 ? "Up" : "Down"
         let movement = change == 0 ? "Unchanged" : "\(direction) \(abs(change))°"
         return
-            "\(movement) since the reading on \(previous.evaluatedAt.formatted(date: .abbreviated, time: .omitted))"
+            "\(movement) since the reading on \(previous.dayText)"
     }
 
     /// A titled group of the sheet (DESIGN.md 8.6): `md` inside, on the story card surface.
@@ -345,7 +346,7 @@ struct TensionTrendChart: View {
                     .foregroundStyle(AppColor.secondaryText)
                     PointMark(x: .value("Day", reading.id), y: .value("Reading", reading.assessment.score))
                         .foregroundStyle(AppColor.tension(reading.level))
-                        .accessibilityLabel(reading.evaluatedAt.formatted(date: .abbreviated, time: .omitted))
+                        .accessibilityLabel(reading.dayText)
                         .accessibilityValue(
                             "\(reading.assessment.score) degrees"
                                 + (reading.assessment.isEstimate == true ? ", keyword estimate" : ""))
@@ -647,8 +648,10 @@ struct TensionGlyph: View {
 /// The sidebar is intentionally static: no symbol effects or perpetual redraws in navigation chrome.
 struct TensionSidebarButton: View {
     /// The state the sheet and the Briefing strip show too (#781).
-    let state: WorldTensionState
+    @Environment(WorldTensionModel.self) private var model
     let open: () -> Void
+
+    private var state: WorldTensionState { model.state }
     @Environment(\.effectiveContrast) private var contrast
 
     private var reading: WorldTensionReading? { state.reading }

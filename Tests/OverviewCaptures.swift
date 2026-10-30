@@ -264,24 +264,26 @@ extension OverviewCaptures {
         for dark in [false, true] {
             let appearance = dark ? "dark" : "light"
             for (name, state) in states {
+                let model = WorldTensionModel(state: state)
                 failures += render(
-                    TensionIndexView(state: state), name: "tension-sheet-\(name)-\(appearance)",
+                    TensionIndexView().environment(model), name: "tension-sheet-\(name)-\(appearance)",
                     size: NSSize(width: AppLayout.tensionSheetWidth, height: AppLayout.tensionSheetHeight), dark: dark,
                     into: output)
                 failures += render(
                     VStack(spacing: 0) {
                         Divider()
-                        TensionSidebarButton(state: state, open: {})
+                        TensionSidebarButton(open: {})
                             .padding(.horizontal, AppLayout.sidebarInset)
                             .padding(.vertical, AppSpacing.xs)
-                    },
+                    }
+                    .environment(model),
                     name: "tension-sidebar-\(name)-\(appearance)", size: NSSize(width: 240, height: 64), dark: dark,
                     into: output)
                 guard ["assessed", "stale", "ai-off"].contains(name) else { continue }
                 // 1,000 pt list measure less the page insets, and the 900 pt window's detail column less them.
                 for width in [952, 632] {
                     failures += render(
-                        BriefingTensionStripView(state: state).padding(AppLayout.pageInset),
+                        BriefingTensionStripView().environment(model).padding(AppLayout.pageInset),
                         name: "tension-strip-\(name)-\(width + 48)pt-\(appearance)",
                         size: NSSize(width: width + 48, height: 340), dark: dark, into: output)
                 }
