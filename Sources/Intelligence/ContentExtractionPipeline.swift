@@ -1896,17 +1896,22 @@ final class ContentExtractionPipeline: Sendable {
         let multibyte: Int
     }
 
+    /// The byte length a UTF-8 lead byte announces.
+    private static func utf8Length(_ lead: UInt8) -> Int {
+        switch lead {
+        case 0xF0...: 4
+        case 0xE0...: 3
+        default: 2
+        }
+    }
+
     static func lenientUTF8(_ data: Data) -> LenientUTF8 {
         var end = data.endIndex
         for index in data.indices.reversed().prefix(4) where data[index] & 0xC0 != 0x80 {
             let lead = data[index]
-            let length: Int
-            switch lead {
-            case 0xF0...: length = 4
-            case 0xE0...: length = 3
-            default: length = 2
+            if (0xC2...0xF4).contains(lead), data.distance(from: index, to: data.endIndex) < utf8Length(lead) {
+                end = index
             }
-            if (0xC2...0xF4).contains(lead), data.distance(from: index, to: data.endIndex) < length { end = index }
             break
         }
         let bytes = data[data.startIndex..<end]

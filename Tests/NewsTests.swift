@@ -10561,6 +10561,12 @@ struct NewsTests {
             "Minor-rated stories retain image eligibility; pictured events need no lookup"
         )
         assertTrue(rows.first.map { ["e1", "e2"].contains($0.id) } == true, "Clustered stories come first")
+        let pastRefused = try await db.imagelessStoryRows(
+            activeSince: now.addingTimeInterval(-86_400), limit: 1,
+            isRequestable: { !$0.hasSuffix("/e1") && !$0.hasSuffix("/e2") })
+        assertTrue(
+            pastRefused.count == 1 && !["e1", "e2"].contains(pastRefused[0].id),
+            "Links the client would refuse do not use up the candidate limit (#818)")
         assertEqual(
             rows.first(where: { $0.id == "plain" })?.link, story("plain", "One").link,
             "A freshly ingested story has a usable URL before reader extraction")

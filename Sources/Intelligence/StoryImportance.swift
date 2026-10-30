@@ -33,14 +33,13 @@ enum StoryCurator {
             // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
             var lookedUp = Set<String>()
             for row in try await database.imagelessStoryRows(
-                activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting)
+                activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting,
+                isRequestable: { StoryImageFinder.pageURL($0) != nil })
             where lookedUp.count < imageBudget {
                 try Task.checkCancellation()
                 if let event = row.eventID, lookedUp.contains(event) { continue }
-                // A link the client would refuse before any request spends no budget. Nothing is recorded, so a story
-                // whose link is later corrected under the same id is still looked up (#818).
-                // ponytail: such rows are skipped on every pass; record them if they ever crowd the candidate limit.
-                guard StoryImageFinder.pageURL(row.link) != nil else { continue }
+                // A link the client would refuse before any request is never a candidate and spends no budget. Nothing
+                // is recorded, so a story whose link is later corrected under the same id is still looked up (#818).
                 lookedUp.insert(row.eventID ?? row.id)
                 switch await imageFinder.find(row.link) {
                 case .found(let url):
