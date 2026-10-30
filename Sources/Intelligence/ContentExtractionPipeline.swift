@@ -1870,12 +1870,12 @@ final class ContentExtractionPipeline: Sendable {
             return decoded
         }
 
-        // A UTF-8 page with a stray byte keeps its UTF-8 text: the bad byte becomes U+FFFD instead of the whole page
-        // turning into Latin-1 mojibake. Mostly invalid sequences mean a legacy single-byte page.
+        // Valid UTF-8 is UTF-8. A UTF-8 page with a stray byte keeps its UTF-8 text, the bad byte becoming U+FFFD,
+        // instead of turning into Latin-1 mojibake; invalid sequences outnumbering valid multi-byte characters mean
+        // a legacy single-byte page.
         let utf8 = Self.lenientUTF8(data)
-        let replaced = utf8.unicodeScalars.lazy.filter { $0 == "\u{FFFD}" }.count
-        if replaced == 0 || replaced < utf8.unicodeScalars.lazy.filter({ $0.value > 0x7F }).count - replaced {
-            return utf8
+        if utf8.invalid == 0 || (utf8.multibyte > 0 && utf8.invalid <= utf8.multibyte) {
+            return utf8.text
         }
         if let latin1 = String(data: data, encoding: .isoLatin1) {
             return latin1
@@ -1887,17 +1887,39 @@ final class ContentExtractionPipeline: Sendable {
         return String(decoding: data, as: UTF8.self)
     }
 
-    /// UTF-8 with invalid bytes replaced, after dropping a multi-byte sequence cut off at the end, as a 256 KiB
-    /// prefix fetch can leave it.
-    static func lenientUTF8(_ data: Data) -> String {
+    /// UTF-8 with invalid sequences replaced by U+FFFD, counting them and the valid multi-byte characters, after
+    /// dropping a multi-byte sequence cut off at the end, as a 256 KiB prefix fetch can leave it. Only a true
+    /// prefix is dropped: a lead byte (C2–F4) followed by fewer continuation bytes than it announces.
+    static func lenientUTF8(_ data: Data) -> (text: String, invalid: Int, multibyte: Int) {
         var end = data.endIndex
         for index in data.indices.reversed().prefix(4) where data[index] & 0xC0 != 0x80 {
             let lead = data[index]
-            let length = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1
-            if data.distance(from: index, to: data.endIndex) < length { end = index }
+            let length = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2
+            if (0xC2...0xF4).contains(lead), data.distance(from: index, to: data.endIndex) < length { end = index }
             break
         }
-        return String(decoding: data[data.startIndex..<end], as: UTF8.self)
+        let bytes = data[data.startIndex..<end]
+        if let strict = String(bytes: bytes, encoding: .utf8) {
+            return (strict, 0, strict.unicodeScalars.lazy.filter { $0.value > 0x7F }.count)
+        }
+        var scalars = String.UnicodeScalarView()
+        var invalid = 0
+        var multibyte = 0
+        var iterator = bytes.makeIterator()
+        var codec = Unicode.UTF8()
+        decoding: while true {
+            switch codec.decode(&iterator) {
+            case .scalarValue(let scalar):
+                if scalar.value > 0x7F { multibyte += 1 }
+                scalars.append(scalar)
+            case .error:
+                invalid += 1
+                scalars.append("\u{FFFD}")
+            case .emptyInput:
+                break decoding
+            }
+        }
+        return (String(scalars), invalid, multibyte)
     }
 
     private static let headerCharsetRegex = loggedExtraction("compileHeaderCharsetRegex") {
@@ -1936,7 +1958,7 @@ final class ContentExtractionPipeline: Sendable {
     private func decode(data: Data, charset: String) -> String? {
         switch charset {
         case "utf-8", "utf8":
-            return Self.lenientUTF8(data)
+            return Self.lenientUTF8(data).text
         case "iso-8859-1", "latin1":
             return String(data: data, encoding: .isoLatin1)
         case "windows-1252", "cp1252":
