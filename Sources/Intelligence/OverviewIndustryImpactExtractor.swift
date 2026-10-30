@@ -549,19 +549,14 @@ struct OverviewIndustryImpactExtractor: Sendable {
             }
         }
         let remainingWords = remaining == text ? words : wordsSet(from: remaining)
-        var best: (industry: StandardIndustry, count: Int, length: Int)?
-        for industry in StandardIndustry.allCases {
+        let scored = StandardIndustry.allCases.compactMap { industry -> (industry: StandardIndustry, cues: [String])? in
             let matched = industry.cues.filter { matchesCue($0, in: remaining, words: remainingWords) }
-            guard !matched.isEmpty else { continue }
-            let length = matched.map(\.count).max() ?? 0
-            if let current = best,
-                current.count > matched.count || (current.count == matched.count && current.length >= length)
-            {
-                continue
-            }
-            best = (industry, matched.count, length)
+            return matched.isEmpty ? nil : (industry, matched)
         }
-        return best?.industry
+        // max(by:) keeps the first of equal elements, so taxonomy order breaks a full tie.
+        return scored.max { lhs, rhs in
+            (lhs.cues.count, lhs.cues.map(\.count).max() ?? 0) < (rhs.cues.count, rhs.cues.map(\.count).max() ?? 0)
+        }?.industry
     }
 
     /// Checks a nonblank implication with an exact standard industry name against every listed citation.
