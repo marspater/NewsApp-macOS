@@ -64,6 +64,7 @@ struct EventOverviewAccessibilityTests {
         testIndustryImpactSectorCoverage()
         testIndustryImpactSelectionAndCitations()
         testIndustryImpactEligibilityBoundaries()
+        testIndustryImpactStoryRelevance()
         testIndustryImpactCitationValidation()
         testEvidenceSectionsCompatibility()
         testOverviewDeduplicationBoundaries()
@@ -960,11 +961,13 @@ struct EventOverviewAccessibilityTests {
 extension EventOverviewAccessibilityTests {
     // MARK: - Industry impact regression fixtures
 
+    /// One report whose headline is, unless given, the sentence itself, so the story-relevance gate holds and each
+    /// case tests the gate it names.
     private static func impactFixture(
-        _ text: String, id: String = "impact-regression", title: String = "Business update"
+        _ text: String, id: String = "impact-regression", title: String? = nil
     ) -> (article: FeedArticle, passage: EvidencePassage) {
         let article = FeedArticle(
-            storedID: id, title: title, link: "https://example.com/\(id)", guid: id,
+            storedID: id, title: title ?? text, link: "https://example.com/\(id)", guid: id,
             description: text, pubDate: Date(timeIntervalSince1970: 1_793_088_000), source: "Fixture News")
         return (article, EvidencePassage(id: "passage-\(id)", articleID: id, text: text))
     }
@@ -1077,6 +1080,93 @@ extension EventOverviewAccessibilityTests {
             passages: fixtures.map(\.passage), articles: fixtures.map(\.article), existingCitations: [:])
         assertEqual(repeated.items, result.items, "Repeated extraction produces identical items")
         assertEqual(repeated.citations, result.citations, "Repeated extraction produces identical citations")
+    }
+
+    /// Live entries that were not implications of their story (#670, 30 Oct check): a past layoff, a past order count
+    /// labelled Real Estate through "contractors", an off-story remark, market commentary; and homonyms.
+    static func testIndustryImpactStoryRelevance() {
+        print("  - Testing Industry Impact story relevance, earlier periods and industry choice...")
+        let rejected: [(title: String, sentence: String)] = [
+            (
+                "Microsoft employees in India can now opt for a buyout",
+                "In July, the gaming division laid off 3,200 employees, about a fifth of its staff."
+            ),
+            (
+                "Delivery app agrees to buy grocery rival for $17 billion",
+                "Its independent contractors completed 338 million orders across the country last year."
+            ),
+            (
+                "Investigators examined a foreign plot aimed at a company chief",
+                "Analysts noted that sanctions have driven a surge in domestic semiconductor production abroad."
+            ),
+            (
+                "Oil prices fall as peace hopes offset fears of wider conflict",
+                "Mixed signals from inventory reports only added to the volatility affecting crude oil valuations."
+            ),
+            (
+                "Spy plot aimed at the chipmaker's chief executive Huang uncovered",
+                "Huang emphasized that sanctions have driven a surge in domestic semiconductor production abroad."
+            ),
+            (
+                "Crude slips as traders weigh supply risks in the Gulf",
+                "Mixed signals from inventory reports only added to the volatility affecting crude oil valuations."
+            ),
+            (
+                "Satellite network back to normal over the region, operator says",
+                "“The network offers some of the best satellite coverage, with virtually no competitors,” the chief said of the chip supply."
+            ),
+            (
+                "Sanctions on chip exports tighten again",
+                "Analysts noted that sanctions have driven a surge in domestic semiconductor production abroad."
+            ),
+            (
+                "Airline strike cancels flights across Europe",
+                "In November 2025, the strike cancelled flights and raised costs for airlines."
+            ),
+            (
+                "Airline strike cancels flights across Europe",
+                "In September 2026, the strike cancelled flights and raised costs for airlines."
+            ),
+            (
+                "Clashes in the West Bank leave several injured",
+                "Clashes in the West Bank halted deliveries to shops across the area this week."
+            ),
+        ]
+        for entry in rejected {
+            let fixture = impactFixture(entry.sentence, title: entry.title)
+            let result = OverviewIndustryImpactExtractor.extractIndustryImpact(
+                passages: [fixture.passage], articles: [fixture.article], existingCitations: [:])
+            assertTrue(result.items.isEmpty, "Not an implication of its story: \(entry.sentence)")
+        }
+        let accepted: [(title: String, sentence: String, industry: String)] = [
+            (
+                "Drone attack cuts power across the capital",
+                "The attack left hospitals dependent on generators and limited water supplies across the capital.",
+                "Healthcare"
+            ),
+            (
+                "Strike by defense contractors halts work on new fighter jets",
+                "Defense contractors halted production at two plants after the strike began on Monday.",
+                "Defense & Aerospace"
+            ),
+            (
+                "Airline strike cancels flights across Europe",
+                "In December 2026, the strike cancelled flights and raised costs for airlines.",
+                "Transportation"
+            ),
+            (
+                "Airline strike cancels flights across Europe",
+                "Airlines noted that the strike cancelled flights and raised costs across Europe.",
+                "Transportation"
+            ),
+        ]
+        for entry in accepted {
+            let fixture = impactFixture(entry.sentence, title: entry.title)
+            let result = OverviewIndustryImpactExtractor.extractIndustryImpact(
+                passages: [fixture.passage], articles: [fixture.article], existingCitations: [:])
+            assertEqual(
+                result.items.map(\.industry), [entry.industry], "A stated effect on the story: \(entry.sentence)")
+        }
     }
 
     static func testIndustryImpactEligibilityBoundaries() {
