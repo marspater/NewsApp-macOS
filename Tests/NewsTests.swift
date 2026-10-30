@@ -603,6 +603,7 @@ struct NewsTests {
             try await testFTSRowIDMigration()
             try await testDatabaseHealthAndDerivedRetention()
             try await testRealLibraryMigrationFixture()
+            try await testLibraryBackupAndFutureSchemaGuard()
             return
         }
         if CommandLine.arguments.contains("--export-pairs") {
@@ -860,6 +861,7 @@ struct NewsTests {
         try await testFTSRowIDMigration()
         try await testDatabaseHealthAndDerivedRetention()
         try await testRealLibraryMigrationFixture()
+        try await testLibraryBackupAndFutureSchemaGuard()
         try await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
         await testContentExtractionPipelineDeep()
@@ -1393,6 +1395,118 @@ struct NewsTests {
             "Corrupted database surfaces a user-visible health notice on ArticleStore (#536)"
         )
         await corruptDB.close()
+    }
+
+    static func testLibraryBackupAndFutureSchemaGuard() async throws {
+        print("  - Testing the pre-migration backup and the newer-library guard (#746, #747)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-backup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func value(_ file: URL, _ sql: String) -> String? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            assertEqual(
+                sqlite3_open_v2(file.path, &handle, SQLITE_OPEN_READONLY, nil), SQLITE_OK, "Inspect backup fixture")
+            defer { sqlite3_close(handle) }
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+        func files(_ prefix: String) throws -> [String] {
+            try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix(prefix) }.sorted()
+        }
+        let current = String(DatabaseEngine.schemaVersion)
+        let library = directory.appendingPathComponent("news.sqlite3")
+        let creator = DatabaseEngine(path: library.path)
+        try await creator.open()
+        try await creator.upsertArticles(
+            ["a", "b", "c"].map { name in
+                FeedArticle(
+                    storedID: "backup-\(name)", title: "Backup report \(name)",
+                    link: "https://backup.test/\(name)", guid: "backup-guid-\(name)",
+                    description: "Backup body \(name)", pubDate: Date(), source: "Backup Publisher")
+            })
+        await creator.close()
+        assertEqual(value(library, "PRAGMA user_version;"), current, "A fresh library is written at schemaVersion")
+        assertEqual(try files("news-before-"), [], "A fresh library is never backed up")
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &handle), SQLITE_OK, "Open v25 backup fixture")
+        assertEqual(
+            sqlite3_exec(
+                handle,
+                "DROP INDEX idx_events_story; ALTER TABLE events DROP COLUMN story_id; PRAGMA user_version = 25;",
+                nil, nil, nil), SQLITE_OK, "Reconstruct a v25 library")
+        sqlite3_close(handle)
+
+        // A backup that cannot be written leaves the library unmigrated and read-only.
+        var holder: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &holder), SQLITE_OK, "Hold the v25 fixture's WAL files open")
+        assertEqual(
+            sqlite3_exec(holder, "SELECT count(*) FROM articles;", nil, nil, nil), SQLITE_OK, "Read v25 fixture")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        let blocked = DatabaseEngine(path: library.path)
+        try await blocked.open()
+        let blockedNotice = await blocked.databaseHealthNotice()
+        await blocked.close()
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        sqlite3_close(holder)
+        assertTrue(blockedNotice?.contains("couldn't back up") == true, "A failed backup surfaces the health notice")
+        assertEqual(value(library, "PRAGMA user_version;"), "25", "A failed backup stops the migration")
+
+        // Two older copies exist; the migration keeps the newer one and its own.
+        for (name, age) in [
+            ("news-before-v20-2026-01-01.sqlite3", 200.0), ("news-before-v21-2026-02-01.sqlite3", 100.0),
+        ] {
+            let url = directory.appendingPathComponent(name)
+            try Data("old copy".utf8).write(to: url)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-age * 86400)], ofItemAtPath: url.path)
+        }
+        let db = DatabaseEngine(path: library.path)
+        try await db.open()
+        let notice = await db.databaseHealthNotice()
+        assertEqual(notice, nil, "A backed-up migration opens writable without a notice")
+        assertEqual(value(library, "PRAGMA user_version;"), current, "The v25 library migrates to schemaVersion")
+        assertEqual(try await db.fetchArticles(limit: nil).count, 3, "The migration keeps every article")
+        await db.close()
+        let backups = try files("news-before-")
+        let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+        let backup = "news-before-v25-\(day).sqlite3"
+        assertEqual(backups, ["news-before-v21-2026-02-01.sqlite3", backup], "Only the newest two backups are kept")
+        let backupURL = directory.appendingPathComponent(backup)
+        assertEqual(value(backupURL, "PRAGMA user_version;"), "25", "The backup keeps the old schema version")
+        assertEqual(value(backupURL, "SELECT count(*) FROM articles;"), "3", "The backup keeps every article")
+        assertEqual(value(backupURL, "PRAGMA quick_check;"), "ok", "The backup is a sound database")
+        assertEqual(try files(".news-before-"), [], "No partial backup is left behind")
+
+        let reopened = DatabaseEngine(path: library.path)
+        try await reopened.open()
+        await reopened.close()
+        assertEqual(try files("news-before-"), backups, "A current library opens without a new backup")
+
+        // A library from a newer build opens read-only and stays byte-identical.
+        let future = directory.appendingPathComponent("future.sqlite3")
+        try FileManager.default.copyItem(at: library, to: future)
+        assertEqual(sqlite3_open(future.path, &handle), SQLITE_OK, "Open future fixture")
+        assertEqual(
+            sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil),
+            SQLITE_OK, "Reconstruct a library from a newer build")
+        sqlite3_close(handle)
+        let futureBytes = try Data(contentsOf: future)
+        let newer = DatabaseEngine(path: future.path)
+        try await newer.open()
+        let futureNotice = await newer.databaseHealthNotice()
+        assertTrue(futureNotice?.contains("newer version") == true, "A newer library surfaces the health notice")
+        assertEqual(try await newer.fetchArticles(limit: nil).count, 3, "A newer library stays readable")
+        do {
+            try await newer.markRead(articleId: "backup-a", isRead: true)
+            assertTrue(false, "A newer library refuses writes")
+        } catch {}
+        await newer.close()
+        assertEqual(try Data(contentsOf: future), futureBytes, "A newer library is never migrated or written")
+        assertEqual(try files("future-before-"), [], "A newer library is never backed up")
     }
 
     static func testRealLibraryMigrationFixture() async throws {

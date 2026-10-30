@@ -136,6 +136,10 @@ sequenceDiagram
 ## Schema history
 
 SQLite changes always ship as migrations that preserve WAL/FTS5, saved stories, read history and settings.
+Before the first step runs, an existing library is copied with the SQLite backup API to
+`news-before-v<old>-<date>.sqlite3` beside it (the newest two are kept); if the copy fails, the library opens
+read-only with the health notice. A library whose `user_version` is above `DatabaseEngine.schemaVersion` came from a
+newer build and opens read-only, never migrated.
 
 ```mermaid
 timeline
