@@ -1124,6 +1124,10 @@ extension EventOverviewAccessibilityTests {
                 "In November 2025, the strike cancelled flights and raised costs for airlines."
             ),
             (
+                "Airline strike cancels flights across Europe",
+                "In September 2026, the strike cancelled flights and raised costs for airlines."
+            ),
+            (
                 "Clashes in the West Bank leave several injured",
                 "Clashes in the West Bank halted deliveries to shops across the area this week."
             ),
@@ -1148,6 +1152,11 @@ extension EventOverviewAccessibilityTests {
             (
                 "Airline strike cancels flights across Europe",
                 "In December 2026, the strike cancelled flights and raised costs for airlines.",
+                "Transportation"
+            ),
+            (
+                "Airline strike cancels flights across Europe",
+                "Airlines noted that the strike cancelled flights and raised costs across Europe.",
                 "Transportation"
             ),
         ]

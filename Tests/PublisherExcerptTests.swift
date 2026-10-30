@@ -60,11 +60,11 @@ struct PublisherExcerptTests {
 
     // MARK: - 1. Version Bump
     static func testCurrentAnalysisVersionBumped() {
-        print("  - Testing current analysis version is at least 11...")
+        print("  - Testing current analysis version is 12...")
         assertTrue(
-            EventOverviewDocument.currentAnalysisVersion >= 11,
-            "EventOverviewDocument.currentAnalysisVersion must be at least 11 to invalidate overviews cached before"
-                + " publisher excerpts")
+            EventOverviewDocument.currentAnalysisVersion == 12,
+            "EventOverviewDocument.currentAnalysisVersion is 12: overviews cached before publisher excerpts (11) and the"
+                + " Industry Impact story check (12) recompute")
     }
 
     // MARK: - 2. Exact Excerpt / Citation Correspondence
