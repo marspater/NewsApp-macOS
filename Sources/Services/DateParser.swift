@@ -15,7 +15,7 @@ struct DateParser {
         isoFormatter.formatOptions = [.withInternetDateTime]
         if let d = isoFormatter.date(from: trimmed) { return d }
 
-        trimmed = Self.numericZone(trimmed)
+        trimmed = Self.fourDigitYear(Self.numericZone(trimmed))
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
@@ -40,7 +40,7 @@ struct DateParser {
         for fmt in formats {
             formatter.dateFormat = fmt
             if let d = formatter.date(from: trimmed) {
-                return Self.fullCentury(d)
+                return d
             }
         }
 
@@ -49,7 +49,7 @@ struct DateParser {
             let withoutWeekday = String(trimmed[trimmed.index(after: comma)...]).trimmingCharacters(in: .whitespaces)
             for format in ["d MMM yyyy HH:mm:ss Z", "d MMM yyyy HH:mm Z"] {
                 formatter.dateFormat = format
-                if let date = formatter.date(from: withoutWeekday) { return Self.fullCentury(date) }
+                if let date = formatter.date(from: withoutWeekday) { return date }
             }
         }
         return nil
@@ -70,11 +70,12 @@ struct DateParser {
         return String(text[..<space]) + " " + offset
     }
 
-    /// RFC 822 and RSS 2.0 allow two-digit years, which the four-digit patterns read as years 0-99.
-    private static func fullCentury(_ date: Date) -> Date {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
-        guard calendar.component(.year, from: date) < 100 else { return date }
-        return calendar.date(byAdding: .year, value: 2000, to: date) ?? date
+    /// RFC 822 and RSS 2.0 allow two-digit years, which the four-digit patterns read as years 0-99. The year is
+    /// widened in the text, before parsing, so a zone offset cannot carry year 99 into year 100 first.
+    private static func fourDigitYear(_ text: String) -> String {
+        // With two groups, "$120" is group 1 followed by "20".
+        text.replacingOccurrences(
+            of: #"^((?:[A-Za-z]+,\s*)?\d{1,2}\s+[A-Za-z]+\s+)(\d{2})(?=\s)"#, with: "$120$2",
+            options: .regularExpression)
     }
 }

@@ -180,7 +180,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }.joined()
         appendItemXML("<\(elementName)\(attributes)>")
 
-        if (elementName == "content:encoded" || elementName == "content") && contentDepth == nil {
+        // Content inside an Atom entry's <source> belongs to the origin feed, not the entry (#795).
+        if (elementName == "content:encoded" || elementName == "content") && contentDepth == nil
+            && !(isAtom && elementStack.dropLast().contains("source"))
+        {
             isCollectingContentEncoded = true
             itemContentEncoded = ""
             contentDepth = currentNestingDepth

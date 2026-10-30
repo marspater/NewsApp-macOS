@@ -245,6 +245,16 @@ enum FeedKitSwiftSoupTests {
         check(
             entry?.title == "Real headline" && entry?.description == "Entry summary",
             "An Atom entry's source title and subtitle stay out of the entry")
+        let sourcedContent = """
+            <feed xmlns="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+            <title>Planet</title><entry><title>Sourced</title><link href="https://example.com/sourced"/>
+            <id>urn:sourced</id><source><title>Origin</title><content:encoded>Origin feed text</content:encoded></source>
+            </entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(sourcedContent.utf8), feedURL: base).parse().first?.fullContent?
+                .contains("Origin feed text") != true,
+            "Content inside an Atom entry's source stays out of the entry's text")
 
         let malicious =
             "<!DOCTYPE rss [<!ENTITY payload 'expanded'>]><rss><channel><item><title>&payload;</title></item></channel></rss>"
@@ -331,6 +341,9 @@ enum FeedKitSwiftSoupTests {
             DateParser.parse("Fri, 30 Oct 26 10:00:00 GMT") == utc("2026-10-30T10:00:00Z"),
             "A two-digit RFC 822 year is in the 2000s")
         check(DateParser.parse("30 Oct 26 10:00 +0000") == utc("2026-10-30T10:00:00Z"), "Without a weekday too")
+        check(
+            DateParser.parse("Fri, 31 Dec 99 23:30:00 -0500") == utc("2100-01-01T04:30:00Z"),
+            "A zone offset that crosses the year boundary keeps the widened century")
         for (zone, instant) in [
             ("BST", "2026-10-30T09:00:00Z"), ("CET", "2026-10-30T09:00:00Z"), ("CEST", "2026-10-30T08:00:00Z"),
             ("IST", "2026-10-30T04:30:00Z"), ("AEST", "2026-10-30T00:00:00Z"), ("GMT", "2026-10-30T10:00:00Z"),
