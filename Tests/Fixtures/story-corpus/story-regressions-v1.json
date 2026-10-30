@@ -3,13 +3,48 @@
   "note": "Authored story regressions (#581): the known story failures of the 24 and 27 October library reviews, rewritten as synthetic reports from fictional publishers. Both levels are asserted exactly: which reports share an event (`event`) and which share a story card (`story`, else the event). A pair listed in `knownGaps` is asserted the other way round from its label, so a fix that closes a gap fails this test until the gap is removed from the list. Families sit five days apart so the candidate window isolates them.",
   "knownGaps": {
     "events": [
-      ["s18-a", "s18-d"], ["s18-b", "s18-d"], ["s18-c", "s18-d"],
-      ["s20-a", "s20-c"], ["s20-a", "s20-d"], ["s20-b", "s20-c"], ["s20-b", "s20-d"],
-      ["s23-a", "s23-b"]
+      [
+        "s18-a",
+        "s18-d"
+      ],
+      [
+        "s18-b",
+        "s18-d"
+      ],
+      [
+        "s18-c",
+        "s18-d"
+      ]
     ],
     "stories": [
-      ["s18-a", "s18-d"], ["s18-b", "s18-d"], ["s18-c", "s18-d"],
-      ["s23-a", "s23-b"]
+      [
+        "s18-a",
+        "s18-d"
+      ],
+      [
+        "s18-b",
+        "s18-d"
+      ],
+      [
+        "s18-c",
+        "s18-d"
+      ],
+      [
+        "s20-a",
+        "s20-c"
+      ],
+      [
+        "s20-a",
+        "s20-d"
+      ],
+      [
+        "s20-b",
+        "s20-c"
+      ],
+      [
+        "s20-b",
+        "s20-d"
+      ]
     ]
   },
   "articles": [
