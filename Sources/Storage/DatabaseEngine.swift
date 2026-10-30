@@ -2092,8 +2092,17 @@ actor DatabaseEngine {
             // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
             // must be stored, or the old ETag keeps being sent and health keeps the old item counts.
             if let feedUrl, let validators {
+                // Same rule as the articles path: a refresh cancelled while waiting writes nothing.
+                try beginTransaction()
+                defer {
+                    if sqlite3_get_autocommit(db) == 0 {
+                        loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                    }
+                }
                 try recordFeedFetch(
                     validators, stats: FeedContentStats(articles: []), for: feedUrl, at: Date().timeIntervalSince1970)
+                try Task.checkCancellation()
+                try commitTransaction()
             }
             return []
         }
