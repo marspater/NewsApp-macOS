@@ -175,8 +175,16 @@ actor DatabaseEngine {
             return
         }
 
+        // Held from the version check through the backup and the migration, so a second process opening the same
+        // library waits and then sees the migrated version instead of copying or migrating it again.
+        var migrationLock: Int32 = -1
+        defer { if migrationLock >= 0 { Darwin.close(migrationLock) } }
         do {
-            let version = try getUserVersion()
+            var version = try getUserVersion()
+            if version < Self.schemaVersion, dbPath != ":memory:" {
+                migrationLock = try lockForMigration()
+                version = try getUserVersion()
+            }
             // A library from a newer build is never migrated or written to by this one (#747).
             if version > Self.schemaVersion {
                 healthNotice =
@@ -293,6 +301,17 @@ actor DatabaseEngine {
         }
     }
 
+    /// An exclusive `flock` on `<library>.migration-lock`; closing the descriptor releases it.
+    private func lockForMigration() throws -> Int32 {
+        let descriptor = Darwin.open(dbPath + ".migration-lock", O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        guard descriptor >= 0 else { throw CocoaError(.fileWriteNoPermission) }
+        guard flock(descriptor, LOCK_EX) == 0 else {
+            Darwin.close(descriptor)
+            throw CocoaError(.fileLocking)
+        }
+        return descriptor
+    }
+
     private func hasTables() throws -> Bool {
         guard let db = db else { return false }
         var stmt: OpaquePointer?
@@ -315,7 +334,8 @@ actor DatabaseEngine {
         let prefix = "\(library.deletingPathExtension().lastPathComponent)-before-v"
         let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
         let target = folder.appendingPathComponent("\(prefix)\(version)-\(day).sqlite3")
-        let partial = folder.appendingPathComponent(".\(target.lastPathComponent).partial")
+        let partial = folder.appendingPathComponent(
+            ".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier).partial")
         let fileManager = FileManager.default
         try? fileManager.removeItem(at: partial)
 
@@ -328,6 +348,7 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "Could not create \(partial.lastPathComponent)"])
         }
+        sqlite3_busy_timeout(copy, Self.busyTimeoutMilliseconds)
         let backup = sqlite3_backup_init(copy, "main", db, "main")
         var status = backup.map { backup in
             let step = sqlite3_backup_step(backup, -1)
@@ -344,8 +365,17 @@ actor DatabaseEngine {
             try? fileManager.removeItem(at: partial)
             throw failure
         }
-        if fileManager.fileExists(atPath: target.path) { try fileManager.removeItem(at: target) }
-        try fileManager.moveItem(at: partial, to: target)
+        // A same-day copy is replaced atomically, so it survives if the new one can't be put in place.
+        do {
+            if fileManager.fileExists(atPath: target.path) {
+                _ = try fileManager.replaceItemAt(target, withItemAt: partial)
+            } else {
+                try fileManager.moveItem(at: partial, to: target)
+            }
+        } catch {
+            try? fileManager.removeItem(at: partial)
+            throw error
+        }
         logger.info("Backed up schema v\(version) library to \(target.lastPathComponent, privacy: .public)")
 
         // Pruning is best-effort: a leftover copy never blocks the migration.

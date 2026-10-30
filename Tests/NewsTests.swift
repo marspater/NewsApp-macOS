@@ -1455,6 +1455,27 @@ struct NewsTests {
         assertTrue(blockedNotice?.contains("couldn't back up") == true, "A failed backup surfaces the health notice")
         assertEqual(value(library, "PRAGMA user_version;"), "25", "A failed backup stops the migration")
 
+        // Two engines opening one v25 library together: one backup, one migration, no error.
+        let race = directory.appendingPathComponent("race", isDirectory: true)
+        try FileManager.default.createDirectory(at: race, withIntermediateDirectories: true)
+        let raceLibrary = race.appendingPathComponent("news.sqlite3")
+        try FileManager.default.copyItem(at: library, to: raceLibrary)
+        let racers = [DatabaseEngine(path: raceLibrary.path), DatabaseEngine(path: raceLibrary.path)]
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for racer in racers { group.addTask { try await racer.open() } }
+            try await group.waitForAll()
+        }
+        for racer in racers {
+            let raceNotice = await racer.databaseHealthNotice()
+            assertEqual(raceNotice, nil, "Both concurrent opens end writable")
+            await racer.close()
+        }
+        assertEqual(value(raceLibrary, "PRAGMA user_version;"), current, "Concurrent opens migrate the library once")
+        assertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: race.path).filter { $0.hasPrefix("news-before-") }
+                .count,
+            1, "Concurrent opens back the library up once")
+
         // Two older copies exist; the migration keeps the newer one and its own.
         for (name, age) in [
             ("news-before-v20-2026-01-01.sqlite3", 200.0), ("news-before-v21-2026-02-01.sqlite3", 100.0),
