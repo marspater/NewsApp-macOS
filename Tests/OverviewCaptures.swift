@@ -24,7 +24,7 @@ struct OverviewCaptures {
         let output = URL(
             fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : NSTemporaryDirectory())
         let failures = await MainActor.run { capture(into: output) }
-        print(failures == 0 ? "✅ Overview captures written to \(output.path)" : "❌ \(failures) blank captures")
+        print(failures == 0 ? "✅ Overview captures written to \(output.path)" : "❌ \(failures) captures failed")
         exit(failures == 0 ? 0 : 1)
     }
 
@@ -35,7 +35,8 @@ struct OverviewCaptures {
             [(name: String, appearance: NSAppearance.Name, scheme: ColorScheme, contrast: ColorSchemeContrast)] =
                 [
                     ("light", .aqua, .light, .standard), ("dark", .darkAqua, .dark, .standard),
-                    ("light-ic", .aqua, .light, .increased), ("dark-ic", .darkAqua, .dark, .increased),
+                    ("light-ic", .accessibilityHighContrastAqua, .light, .increased),
+                    ("dark-ic", .accessibilityHighContrastDarkAqua, .dark, .increased),
                 ]
         var failures = 0
         for width in [900, 1400] {
@@ -71,9 +72,18 @@ struct OverviewCaptures {
                         failures += 1
                         continue
                     }
-                    write(bitmap, to: output.appendingPathComponent("\(name).png"))
-                    if let gray = grayscale(cgImage) {
-                        write(NSBitmapImageRep(cgImage: gray), to: output.appendingPathComponent("\(name)-gray.png"))
+                    guard let gray = grayscale(cgImage) else {
+                        print("  grayscale failed: \(name)")
+                        failures += 1
+                        continue
+                    }
+                    for (image, file) in [(bitmap, name), (NSBitmapImageRep(cgImage: gray), "\(name)-gray")] {
+                        do {
+                            try write(image, to: output.appendingPathComponent("\(file).png"))
+                        } catch {
+                            print("  write failed: \(file): \(error.localizedDescription)")
+                            failures += 1
+                        }
                     }
                 }
             }
@@ -199,7 +209,10 @@ struct OverviewCaptures {
         return context.makeImage()
     }
 
-    static func write(_ bitmap: NSBitmapImageRep, to url: URL) {
-        try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
+    static func write(_ bitmap: NSBitmapImageRep, to url: URL) throws {
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
+        }
+        try png.write(to: url)
     }
 }
