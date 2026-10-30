@@ -12647,11 +12647,13 @@ struct NewsTests {
         let windowDB = DatabaseEngine(path: ":memory:")
         try await windowDB.open()
         let pinned = Date(timeIntervalSince1970: 1_700_000_000)
-        let windowArticles = [-3 * 86_400 - 1, -3 * 86_400, 0, 1].enumerated().map { index, offset in
+        // Typed offsets (3 days + 1 s and 3 days before the clock, the clock, 1 s after): the literal arithmetic inside
+        // the closure took the CI compiler past its type-check limit.
+        let windowOffsets: [TimeInterval] = [-259_201, -259_200, 0, 1]
+        let windowArticles: [FeedArticle] = windowOffsets.enumerated().map { index, offset in
             FeedArticle(
                 storedID: "window-\(index)", title: "Window report \(index)", link: "https://window.invalid/\(index)",
-                guid: "window-\(index)", description: "", pubDate: pinned.addingTimeInterval(Double(offset)),
-                source: "Corpus")
+                guid: "window-\(index)", description: "", pubDate: pinned.addingTimeInterval(offset), source: "Corpus")
         }
         try await windowDB.upsertArticles(windowArticles)
         let window = try await recentLibraryRows(windowDB, now: pinned)
