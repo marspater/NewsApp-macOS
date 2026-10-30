@@ -104,9 +104,12 @@ CONST = re.compile(
     r'val = tensor<fp16, \[[0-9, ]+\]>\(BLOBFILE\(path = (?:tensor<string, \[\]>|string)'
     r'\("@model_path/weights/weight.bin"\), offset = (?:tensor<uint64, \[\]>|uint64)\((\d+)\)')
 
+WEIGHT_PREFIX = re.compile(r'^(?:model_)?(?:bert_)?')  # MIL weight names to `BertModel` keys (`shipped_state`)
+
 
 def shipped_state(path=SHIPPED):
-    """The shipped model's fp16 tensors by Hugging Face `BertModel` key, read from its MIL program and weight file."""
+    """The shipped model's fp16 tensors by Hugging Face `BertModel` key, read from its MIL program and weight file:
+    the encoder names them `bert_…`, the pair model `model_bert_…` (its head `model_classifier_…`)."""
     mil = (path / 'model.mil').read_text()
     blob = (path / 'weights/weight.bin').read_bytes()
     state = {}
@@ -115,7 +118,7 @@ def shipped_state(path=SHIPPED):
         require(sentinel == 0xDEADBEEF and dtype == 1, f'Unexpected blob header for {name}')
         shape = [int(d) for d in dims.split(', ')]
         values = np.frombuffer(blob, dtype=np.float16, count=size // 2, offset=start).reshape(shape)
-        key = re.sub(r'^(model|bert)_', '', name).removesuffix('_to_fp16')
+        key = WEIGHT_PREFIX.sub('', name).removesuffix('_to_fp16')
         state[key] = torch.from_numpy(values.astype(np.float32))
     return state
 
@@ -556,6 +559,8 @@ def self_check():
             and float(partial_loss(torch.tensor([[-9.0, 0.0, 4.0]]), story, 0.0)) < 0.02
             and float(partial_loss(torch.tensor([[4.0, 0.0, 0.0]]), story, 0.0)) > 3,
             'A partial label sums its classes')
+    require([WEIGHT_PREFIX.sub('', n) for n in ('bert_pooler', 'model_bert_pooler', 'model_classifier')]
+            == ['pooler', 'pooler', 'classifier'], 'Shipped weight names of the encoder and the pair model')
     require(fold('Erdoğan meets Sánchez, again!') == 'erdogan meets sanchez again',
             'Headlines fold for the leak check')
     swept = sweep([[0.02, 0.08, 0.90], [0.05, 0.60, 0.35], [0.30, 0.05, 0.65]], [4, 2, 1])
