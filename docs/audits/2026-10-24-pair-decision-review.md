@@ -35,7 +35,7 @@ Related-act rows (35 `different` of 56): the rule is "act conflict, one shared s
 3. **#580/#583: a same-publisher pair needs stricter evidence.** Eight of thirteen rule false merges are one publisher's series items. A same-source pair should require a shared specific anchor beyond the publisher's own templated words and no date-only difference in the headline ("October 21st" vs "October 22nd" are `titleNumbers` only when written as digits; ordinal dates are not).
 4. The authored corpus (22 / 0) and the private holdout (38 / 0 / 0) are both saturated and blind to these errors. The library holdout from #579 replaces them as the gate.
 
-## Spot-check (Mars, pending)
+## Spot-check (not done; see `2026-10-30-epic-m-verification.md`)
 
 Twenty pairs for Mars, drawn as the first twenty of the match sample in the recorded order (`python3 script/evaluation/sample_pairs.py pairs-review.csv match 0 20` on the export). Mars's labels and any overturned label are to be appended here with the reason; three overturned in twenty mean the sample is relabelled.
 

@@ -44,7 +44,7 @@ sqlite3 copy.sqlite3 "select coalesce(em.event_id,'-'), a.source, a.title from a
 
 ## Library holdout (#579)
 
-Drawn from the same copy with `--review-pairs --holdout-candidates` and labelled by Claude under the pair review protocol in CONTRIBUTING (Mars's 20-pair spot-check pending: the first twenty borderline candidates in the recorded order). The file stays outside the repository: `~/news-eval/holdout-2026-10-24/library-holdout-2026-10-24.json` (`0600`), SHA-256 `bbb4ded1d9c635444053b63ae638ddba3f3e3f6c0a014caa012155c67a1710b9`; the candidate export `holdout-candidates.csv` sits beside it.
+Drawn from the same copy with `--review-pairs --holdout-candidates` and labelled by Claude under the pair review protocol in CONTRIBUTING (the 20-pair spot-check was not done before this holdout was retired on 27 October; see `2026-10-30-epic-m-verification.md`). The file stays outside the repository: `~/news-eval/holdout-2026-10-24/library-holdout-2026-10-24.json` (`0600`), SHA-256 `bbb4ded1d9c635444053b63ae638ddba3f3e3f6c0a014caa012155c67a1710b9`; the candidate export `holdout-candidates.csv` sits beside it.
 
 | Class (drawn in SHA-256 order of the two ids) | Pairs | `same` | `related` | `different` |
 | --- | --- | --- | --- | --- |
