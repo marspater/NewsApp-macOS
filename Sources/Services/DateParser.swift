@@ -5,7 +5,7 @@ struct DateParser {
     static let unknownDate = Date.distantPast
 
     static func parse(_ dateString: String) -> Date? {
-        let trimmed = dateString.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = dateString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.utf8.count <= 512 else { return nil }
 
         let isoFormatter = ISO8601DateFormatter()
@@ -15,6 +15,7 @@ struct DateParser {
         isoFormatter.formatOptions = [.withInternetDateTime]
         if let d = isoFormatter.date(from: trimmed) { return d }
 
+        trimmed = Self.fourDigitYear(Self.numericZone(trimmed))
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
@@ -52,5 +53,30 @@ struct DateParser {
             }
         }
         return nil
+    }
+
+    /// Zone names feeds use beyond RFC 822's, as offsets; DateFormatter does not know them and FeedKit's fallback
+    /// mis-offsets them (#796). IST is India's, the common case in English news feeds.
+    private static let zoneOffsets = [
+        "BST": "+0100", "IST": "+0530", "CET": "+0100", "CEST": "+0200", "EET": "+0200", "EEST": "+0300",
+        "WET": "+0000", "WEST": "+0100", "MSK": "+0300", "JST": "+0900", "KST": "+0900", "HKT": "+0800",
+        "SGT": "+0800", "AEST": "+1000", "AEDT": "+1100", "ACST": "+0930", "AWST": "+0800", "NZST": "+1200",
+        "NZDT": "+1300",
+    ]
+
+    private static func numericZone(_ text: String) -> String {
+        guard let space = text.lastIndex(of: " "), let offset = zoneOffsets[String(text[text.index(after: space)...])]
+        else { return text }
+        return String(text[..<space]) + " " + offset
+    }
+
+    /// RFC 822 and RSS 2.0 allow two-digit years, which the four-digit patterns read as years 0-99. The year is
+    /// widened in the text, before parsing, so a zone offset cannot carry year 99 into year 100 first.
+    private static func fourDigitYear(_ text: String) -> String {
+        // Day first ("Fri, 30 Oct 26 10:00") or month first ("Oct 30, 26"). With two groups, "$120" is group 1
+        // followed by "20".
+        text.replacingOccurrences(
+            of: #"^((?:[A-Za-z]+,\s*)?\d{1,2}\s+[A-Za-z]+\s+|[A-Za-z]+\s+\d{1,2},\s*)(\d{2})(?=\s|$)"#,
+            with: "$120$2", options: .regularExpression)
     }
 }
