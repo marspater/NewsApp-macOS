@@ -2207,11 +2207,17 @@ actor DatabaseEngine {
                     userInfo: [NSLocalizedDescriptionKey: "Failed to check stored article identity"])
             }
             if existenceStatus == SQLITE_DONE {
-                // A story pruned by retention that its feed still serves stays pruned (#783).
-                sqlite3_reset(expiredStmt)
-                sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
-                sqlite3_bind_text(expiredStmt, 2, canonical, -1, Self.sqliteTransient)
-                if sqlite3_step(expiredStmt) == SQLITE_ROW { continue }
+                // A story pruned by retention that its feed still serves stays pruned (#783), by its resolved ID or
+                // its feed-scoped GUID. An explicit save (preserving stored content) may bring it back.
+                if !preservingStoredContent {
+                    let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: identityFeedURL) ?? id
+                    sqlite3_reset(expiredStmt)
+                    sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
+                    sqlite3_bind_text(expiredStmt, 2, scoped, -1, Self.sqliteTransient)
+                    let expiredStatus = sqlite3_step(expiredStmt)
+                    if expiredStatus == SQLITE_ROW { continue }
+                    guard expiredStatus == SQLITE_DONE else { throw sqliteError(db, "Could not check pruned story") }
+                }
                 insertedIDs.insert(id)
             }
 
@@ -3676,13 +3682,15 @@ actor DatabaseEngine {
             """
         // A feed can keep serving a story long after it was read and pruned. Its stored ID and identity aliases
         // stay behind in `expired_stories` under a `pruned:` prefix, so `upsertArticles` never brings it back as a
-        // new, unread story (#783). Unprefixed rows are old importance-expiry tombstones and suppress nothing.
+        // new, unread story (#783). Only ID keys are kept: a URL can later carry a different story (a recurring or
+        // live page), which must still arrive. Unprefixed rows are old importance-expiry tombstones and suppress
+        // nothing.
         // ponytail: tombstones are never pruned (about three short rows per pruned story); expire old ones if the
         // table ever matters for size.
         let tombstones = """
             INSERT OR REPLACE INTO expired_stories (key, expired_at)
             SELECT 'pruned:' || value, ?2 FROM article_aliases
-                WHERE kind IN ('id', 'url') AND article_id IN (\(doomed))
+                WHERE kind = 'id' AND article_id IN (\(doomed))
             UNION SELECT 'pruned:' || id, ?2 FROM articles WHERE id IN (\(doomed));
             """
         try beginTransaction()

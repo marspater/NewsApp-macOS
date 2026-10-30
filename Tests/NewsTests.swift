@@ -1283,6 +1283,16 @@ struct NewsTests {
             try await shrinkDB.upsertArticles([bulkyArticles[0]]).isEmpty,
             "A pruned story keeps its stored ID's tombstone")
         assertTrue(try await shrinkDB.fetchArticles(limit: 10).isEmpty, "Pruned stories stay out of every list")
+        let sameAddress = FeedArticle(
+            title: "Next edition", link: served.link, guid: "served-guid-2", description: "A new edition",
+            pubDate: now, source: "Archival Press")
+        assertEqual(
+            try await shrinkDB.upsertArticles([sameAddress], feedUrl: servedFeed).count, 1,
+            "A new story at a pruned story's address still arrives")
+        try await shrinkDB.upsertArticles([bulkyArticles[1]], preservingStoredContent: true)
+        assertTrue(
+            try await shrinkDB.fetchArticles(limit: 10).contains { $0.id == bulkyArticles[1].id },
+            "Saving a pruned story explicitly stores it again")
         await shrinkDB.checkpointAndOptimize()
         await shrinkDB.close()
         let sizeAfterPrune =
