@@ -118,6 +118,7 @@ SWIFT_SOURCES=(
     Sources/Services/OPMLManager.swift \
     Sources/Views/ArticleWebView.swift \
     Sources/App/NewsSignposts.swift \
+    Sources/App/DiagnosticsExport.swift \
     Sources/App/UpdateChecker.swift \
     Sources/App/NewsURLParser.swift \
     Sources/App/Intents.swift \

@@ -919,6 +919,7 @@ struct NewsTests {
         await testContentQualityValidation()
         await testExtractionOutcomeDiagnostics()
         await testCanonicalClassificationDisambiguation()
+        try await testDiagnosticsExport()
         await testAppContainerWiring()
         try await testReadManagerReconciliationCache()
         try await testMemoryLeakMitigationsAndErrorHandling()
@@ -20600,6 +20601,81 @@ struct NewsTests {
         assertEqual(
             content("DJI's vlogging camera is a good deal at under $400"), "Technology",
             "A camera deal stays Technology")
+    }
+
+    @MainActor
+    static func testDiagnosticsExport() async throws {
+        print("  - Testing the diagnostics export and its redaction (#564)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let title = "Minister resigns over leaked budget memo"
+        let log = [
+            DiagnosticsExport.LogLine(
+                date: now, category: "Feeds", level: "Error",
+                message: "Fetch failed for https://reader:pw@news.example.com/world/2026/leaked-memo?id=7 after 3 tries"
+            ),
+            DiagnosticsExport.LogLine(
+                date: now, category: "Database", level: "Notice",
+                message: "Integrity check at /Users/mars/Library/Containers/com.marspater.news/Data/news.sqlite: ok"),
+            DiagnosticsExport.LogLine(
+                date: now, category: "Feeds", level: "Info", message: "Stored \(title) from feed:https://x.example/a"),
+        ]
+        let suite = testDefaultsSuite("diagnostics-export")
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: UserDefaults(suiteName: suite)!)
+        let failing = FeedHealth(FeedFetchState(failures: 2), now: now)
+        let summary = DiagnosticsExport.summary(
+            settings: settings, feedHealth: ["https://feeds.example.org/private/world.xml": failing], schema: 26,
+            now: now)
+        let files = DiagnosticsExport.files(summary: summary, log: log, titles: [title, "Short"])
+        let text = files.values.joined()
+        for hidden in ["/world/", "leaked-memo", "id=7", "reader:pw", "/private/world.xml", "/Users/mars", title] {
+            assertTrue(!text.contains(hidden), "The export leaves out \(hidden)")
+        }
+        let tricky = DiagnosticsExport.redact(
+            "a https://news.example.com/private'token b https://reader@mail@news.example.com:8443/p c", titles: [])
+        assertEqual(tricky, "a news.example.com b news.example.com c", "Quotes and repeated @ never keep URL text")
+        let logText = files["log.txt"] ?? ""
+        assertTrue(logText.contains("Fetch failed for news.example.com after 3 tries"), "URLs keep their host")
+        assertTrue(logText.contains("at ~/Library/Containers/com.marspater.news/Data/news.sqlite"), "Home becomes ~")
+        assertTrue(logText.contains("Stored <story> from feed:x.example"), "Story titles are replaced")
+        assertTrue(logText.hasPrefix("2026-09-21T14:13:20Z Error Feeds: "), "Lines carry date, level and category")
+        let summaryText = files["summary.txt"] ?? ""
+        assertTrue(summaryText.contains("Library schema version: 26"), "The summary names the schema version")
+        assertTrue(summaryText.contains("Feeds: 2, starred: 0"), "The summary counts subscriptions")
+        assertTrue(
+            summaryText.contains("feeds.example.org: Not responding (2 failed attempts)"), "Feed health by host")
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let zip = directory.appendingPathComponent("News Diagnostics.zip")
+        try DiagnosticsExport.archive(files, to: zip)
+        try DiagnosticsExport.archive(files, to: zip)  // An existing file is replaced.
+        assertTrue(try Data(contentsOf: zip).starts(with: [0x50, 0x4B, 0x03, 0x04]), "The export is a zip archive")
+        let listing = Process()
+        let output = Pipe()
+        listing.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        listing.arguments = ["-Z1", zip.path]
+        listing.standardOutput = output
+        try listing.run()
+        listing.waitUntilExit()
+        let names = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        assertTrue(
+            names.contains("News Diagnostics/summary.txt") && names.contains("News Diagnostics/log.txt"),
+            "The zip holds the summary and the log: \(names)")
+
+        // This process's own entries are readable from the unified log, as the app's are.
+        let marker = "diagnostics-check-\(UUID().uuidString)"
+        NewsSignposts.launchLog.notice("\(marker, privacy: .public)")
+        // The unified log may store the entry a moment later; poll briefly instead of reading once.
+        let deadline = ContinuousClock.now + .seconds(5)
+        var found = false
+        while !found && ContinuousClock.now < deadline {
+            let own = try DiagnosticsExport.currentLaunchLog()
+            found = own.contains { $0.message == marker && $0.category == "Launch" }
+            if !found { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        assertTrue(found, "The export reads this launch's log")
     }
 
     @MainActor

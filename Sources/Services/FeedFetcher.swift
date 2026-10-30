@@ -18,7 +18,7 @@ actor FeedFetcher {
     private let client: SecureHTTPClient
     private let now: @Sendable () -> Date
     private var hostCooldowns: [String: Date] = [:]
-    private let logger = Logger(subsystem: "com.marspater.news", category: "FeedFetcher")
+    private let logger = NewsSignposts.feedsLog
 
     init(client: SecureHTTPClient = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
         self.client = client
