@@ -409,7 +409,8 @@ private struct GridRowFixture: View {
     private func card(_ entry: FeedEntry) -> some View {
         switch entry {
         case .article(let article):
-            ArticleCardView(article: article, compact: false, action: {}, footer: CoverageRowSpace())
+            ArticleCardView(
+                article: article, compact: false, reservesCoverageRow: true, action: {}, footer: EmptyView())
         case .event(let summary, let representative, let members):
             EventCardView(
                 representative: representative, summary: summary, visibleMembers: members, compact: false,
