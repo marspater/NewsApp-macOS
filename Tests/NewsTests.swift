@@ -696,6 +696,7 @@ struct NewsTests {
             try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
             try await testPublisherTextFingerprints()
             try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
+            try await testOverviewVersionFollowsEventNotStorySum()
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()
@@ -725,6 +726,7 @@ struct NewsTests {
             try await testPairAssessmentsRecorded()
             try await testReaderVerdictsExportAndGate()
             try await testStoryLayer()
+            try await testStoryPassOrderIndependent()
             try await testEventInclusions()
             try await testPairModelGreyZone()
             try await testEventEmbeddingIntegration()
@@ -811,6 +813,7 @@ struct NewsTests {
         try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
         try await testPublisherTextFingerprints()
         try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
+        try await testOverviewVersionFollowsEventNotStorySum()
         try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
         try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
         try await testPassageAnchoredFactExtraction()
@@ -840,6 +843,7 @@ struct NewsTests {
         try await testPairAssessmentsRecorded()
         try await testReaderVerdictsExportAndGate()
         try await testStoryLayer()
+        try await testStoryPassOrderIndependent()
         try await testEventInclusions()
         try await testPairModelGreyZone()
         try await testEventEmbeddingIntegration()
@@ -908,6 +912,7 @@ struct NewsTests {
         await testNotificationServiceErrorLogging()
         try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot)
         try await testNotificationLanesAcrossRefreshes(fixtureRoot: fixtureRoot)
+        try await testNotifyBeforeClustering()
         await testArticleStoreErrorResilience()
         await testSystemErrorHardeningAndResilience()
         await testFeedArticleWrapContextNavigation()
@@ -1264,12 +1269,35 @@ struct NewsTests {
             )
         }
         try await shrinkDB.upsertArticles(bulkyArticles)
-        try await shrinkDB.markReadBatch(articleIds: bulkyArticles.map(\.id), isRead: true)
+        // A feed item, identified by its feed-scoped GUID, that the feed keeps serving after it is pruned (#783).
+        let servedFeed = "https://example.com/archive.xml"
+        let served = FeedArticle(
+            title: "Still served report", link: "https://example.com/served/report", guid: "served-guid",
+            description: "Served long after reading", pubDate: expiredDate, source: "Archival Press")
+        let servedID = try await shrinkDB.upsertArticles([served], feedUrl: servedFeed)
+        try await shrinkDB.markReadBatch(articleIds: bulkyArticles.map(\.id) + Array(servedID), isRead: true)
         await shrinkDB.checkpointAndOptimize()
         let sizeBeforePrune =
             (try? FileManager.default.attributesOfItem(atPath: shrinkPath)[.size] as? Int64) ?? 0
         let prunedCount = try await shrinkDB.pruneOldArticles(keepReadDays: 30, now: now)
-        assertEqual(prunedCount, 250, "Prunes all 250 expired read articles")
+        assertEqual(prunedCount, 251, "Prunes all 251 expired read articles")
+        assertTrue(
+            try await shrinkDB.upsertArticles([served], feedUrl: servedFeed).isEmpty,
+            "A pruned story its feed still serves is not stored again as new (#783)")
+        assertTrue(
+            try await shrinkDB.upsertArticles([bulkyArticles[0]]).isEmpty,
+            "A pruned story keeps its stored ID's tombstone")
+        assertTrue(try await shrinkDB.fetchArticles(limit: 10).isEmpty, "Pruned stories stay out of every list")
+        let sameAddress = FeedArticle(
+            title: "Next edition", link: served.link, guid: "served-guid-2", description: "A new edition",
+            pubDate: now, source: "Archival Press")
+        assertEqual(
+            try await shrinkDB.upsertArticles([sameAddress], feedUrl: servedFeed).count, 1,
+            "A new story at a pruned story's address still arrives")
+        try await shrinkDB.upsertArticles([bulkyArticles[1]], preservingStoredContent: true)
+        assertTrue(
+            try await shrinkDB.fetchArticles(limit: 10).contains { $0.id == bulkyArticles[1].id },
+            "Saving a pruned story explicitly stores it again")
         await shrinkDB.checkpointAndOptimize()
         await shrinkDB.close()
         let sizeAfterPrune =
@@ -2509,6 +2537,37 @@ struct NewsTests {
                 pipeline.decodeHTML(data: document.data(using: .isoLatin1)!), document,
                 "Cached meta regexes preserve both charset declarations")
         }
+        // #819: one stray byte in a UTF-8 page, and a prefix fetch cut inside a character, keep UTF-8 text.
+        var strayByte = Data("<p>It\u{2019}s caf\u{00e9} ".utf8)
+        strayByte.append(0xFF)
+        strayByte.append(contentsOf: Data("na\u{00ef}ve</p>".utf8))
+        assertEqual(
+            pipeline.decodeHTML(data: strayByte), "<p>It\u{2019}s caf\u{00e9} \u{FFFD}na\u{00ef}ve</p>",
+            "An undeclared UTF-8 page with one invalid byte is not decoded as Latin-1")
+        let utf8Response = HTTPURLResponse(
+            url: URL(string: "https://example.com/article")!,
+            statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html; charset=utf-8"])!
+        assertEqual(
+            pipeline.decodeHTML(data: strayByte, response: utf8Response),
+            "<p>It\u{2019}s caf\u{00e9} \u{FFFD}na\u{00ef}ve</p>", "A declared UTF-8 page decodes leniently")
+        let cut = Data("<p>caf\u{00e9} \u{2019}".utf8).dropLast(2)
+        assertEqual(
+            pipeline.decodeHTML(data: Data(cut), response: utf8Response), "<p>caf\u{00e9} ",
+            "A trailing partial sequence from a prefix fetch is trimmed")
+        assertEqual(
+            pipeline.decodeHTML(data: "<p>caf\u{00e9} na\u{00ef}ve</p>".data(using: .isoLatin1)!),
+            "<p>caf\u{00e9} na\u{00ef}ve</p>", "An undeclared Latin-1 page still decodes as Latin-1")
+        assertEqual(
+            pipeline.decodeHTML(data: Data("<p>caf\u{00e9} \u{FFFD}</p>".utf8)), "<p>caf\u{00e9} \u{FFFD}</p>",
+            "Valid UTF-8 containing a literal replacement character stays UTF-8")
+        var tied = Data("<p>caf\u{00e9} ".utf8)
+        tied.append(0xFF)
+        assertEqual(
+            pipeline.decodeHTML(data: tied), "<p>caf\u{00e9} \u{FFFD}",
+            "One valid multi-byte character against one invalid byte keeps UTF-8")
+        assertEqual(
+            pipeline.decodeHTML(data: "<p>na\u{00ef}ve \u{00ff}".data(using: .isoLatin1)!), "<p>na\u{00ef}ve \u{00ff}",
+            "A trailing byte that cannot start a UTF-8 sequence is not trimmed from a Latin-1 page")
         let inline = "<p>The <strong>central bank</strong> raised <a href='/rate'>rates</a> today.</p>"
         assertEqual(
             HTMLDOMBuilder.parse(html: inline).combinedText(), "The central bank raised rates today.",
@@ -3203,6 +3262,27 @@ struct NewsTests {
             exit(1)
         }
 
+        // #794: an http image address is requested over HTTPS instead of being refused.
+        let requestedScheme = SocketObservation()
+        MockURLProtocol.requestHandler = { request in
+            requestedScheme.recordText(request.url?.scheme ?? "")
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, mockData)
+        }
+        do {
+            let (data, _) = try await client.fetchImage(from: URL(string: "http://reader.invalid/test-image.jpg")!)
+            assertEqual(data.count, 1024, "An http image address still loads")
+            assertEqual(requestedScheme.hosts, ["https"], "An http image address is requested over HTTPS")
+        } catch {
+            assertTrue(false, "An http image address is upgraded, not refused: \(error)")
+        }
+        assertEqual(
+            SecureHTTPClient.upgradedToHTTPS(URL(string: "http://img.example:80/a.jpg?v=1")!).absoluteString,
+            "https://img.example/a.jpg?v=1", "The upgrade drops the default http port and keeps the query")
+        assertEqual(
+            SecureHTTPClient.upgradedToHTTPS(URL(string: "https://img.example/a.jpg")!).absoluteString,
+            "https://img.example/a.jpg", "An https image address is unchanged")
+
         // Test 2: Image too large
         let maxAllowed = Int(SecureHTTPClient.defaultImageLimit)
         let tooLargeDataSize = maxAllowed + 1024
@@ -3700,6 +3780,30 @@ struct NewsTests {
         let feed = feedURL.absoluteString
         settings.feedURLs = [feed]
         settings.aiEnabled = false
+        // #799: only web links enter the library; an item without a link keeps its GUID identity.
+        let linked = [
+            "smb://evil.example/share", "x-apple.systempreferences:com.apple.preference.security",
+            "file:///etc/passwd", "https://example.com/story", "http://example.com/older", "",
+        ].map {
+            FeedArticle(title: "Item", link: $0, guid: $0, description: "", pubDate: Date(), source: "Publisher")
+        }
+        assertEqual(
+            FeedFetcher.webArticles(linked).map(\.link), ["https://example.com/story", "http://example.com/older", ""],
+            "Feed items whose links are not web addresses are dropped")
+        let linkless = JSONFeedParser.parse(
+            data: Data(
+                #"{"version":"https://jsonfeed.org/version/1.1","title":"T","items":[{"id":"123","content_text":"Story"}]}"#
+                    .utf8),
+            feedURL: "https://example.com/feed.json")
+        assertEqual(
+            FeedFetcher.webArticles(linkless ?? []).map(\.guid), ["123"],
+            "A JSON Feed item without a URL is kept by its ID")
+        let emptyURL = JSONFeedParser.parse(
+            data: Data(
+                #"{"version":"https://jsonfeed.org/version/1.1","title":"T","items":[{"id":"https://example.com/a","url":"","content_text":"Story"}]}"#
+                    .utf8),
+            feedURL: "https://example.com/feed.json")
+        assertEqual(emptyURL?.first?.link, "https://example.com/a", "An empty url falls back to a web ID")
         let fetcher = FeedFetcher(client: client)
         var notified = 0
         // No image lookup: it outlives fetchFeedsAsync and its write transaction would hold the lock the trigger edits need.
@@ -3869,6 +3973,12 @@ struct NewsTests {
         assertEqual(
             stateAfterReopen?.validators, FeedValidators(etag: "\"keep\"", lastModified: nil),
             "Success does not touch validators")
+        // #788: a fresh 200 that carries no items still replaces the validators and the content stats.
+        await store.batchUpsert(articles: [], feedUrl: feed, validators: FeedValidators(etag: nil, lastModified: nil))
+        stateAfterReopen = try await db.feedFetchStates()[feed]
+        assertTrue(stateAfterReopen?.validators == nil, "An empty 200 clears validators the feed no longer sends")
+        assertEqual(stateAfterReopen?.itemCount, 0, "An empty 200 records that the feed carries no items")
+        assertEqual(stateAfterReopen?.latestItemAt, nil, "An emptied feed has no newest item")
         try await db.recordFeedFailure(feed, retryAfter: nil, at: t0)
         try await db.recordFeedFailure(feed, retryAfter: nil, at: t0.addingTimeInterval(700))
         let forgiven = t0.addingTimeInterval(700 + 1200 + FeedRetryPolicy.maximumDelay + 1)
@@ -6841,6 +6951,22 @@ struct NewsTests {
         assertTrue(
             await pipeline.extractArticleWithIdentity(from: insecureStory.url!.absoluteString).outcome.isSuccess,
             "An http:// story link is read over https")
+        for (status, expected) in [
+            (401, ExtractionOutcome.subscriberOnly), (402, .subscriberOnly), (403, .httpError(status: 403)),
+        ] {
+            MockURLProtocol.requestHandler = { request in
+                // A paywall page announcing more than the article limit still reports its status (#816).
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: status, httpVersion: nil,
+                        headerFields: ["Content-Length": "\(SecureHTTPClient.defaultArticleLimit + 1)"])!,
+                    Data("<html><body>Subscribe</body></html>".utf8)
+                )
+            }
+            assertEqual(
+                await pipeline.extractArticleWithIdentity(from: desktop.absoluteString).outcome, expected,
+                "HTTP \(status) from the publisher maps to its reader state over the network path")
+        }
         for path in ["baseline/mobile/story", "baseline/amp/story"] {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
@@ -10419,6 +10545,25 @@ struct NewsTests {
         assertEqual(
             await pageFinder.find("https://example.com/late"), StoryImageLookup.none,
             "Only figures within the bounded page prefix are considered")
+        assertEqual(StoryImageFinder.pageURL(""), nil, "An empty link is never requested")
+        assertEqual(StoryImageFinder.pageURL("/relative/story"), nil, "A relative link is never requested")
+        assertEqual(
+            StoryImageFinder.pageURL("https://example.com:22/story"), nil, "A link on a refused port is never requested"
+        )
+        assertEqual(
+            StoryImageFinder.pageURL("http://example.com/story")?.absoluteString, "https://example.com/story",
+            "An http link is requested over https")
+        // #818: a refused page is answered as no image (recorded, not retried); rate limits and outages retry.
+        for (status, expected) in [
+            (403, StoryImageLookup.none), (404, .none), (410, .none), (429, .unreachable), (503, .unreachable),
+        ] {
+            MockURLProtocol.requestHandler = { request in
+                (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, Data())
+            }
+            assertEqual(
+                await pageFinder.find("https://example.com/refused"), expected,
+                "HTTP \(status) from a publisher page maps to its lookup state")
+        }
         MockURLProtocol.requestHandler = nil
 
         var small = FeedArticle(
@@ -10492,6 +10637,12 @@ struct NewsTests {
             "Minor-rated stories retain image eligibility; pictured events need no lookup"
         )
         assertTrue(rows.first.map { ["e1", "e2"].contains($0.id) } == true, "Clustered stories come first")
+        let pastRefused = try await db.imagelessStoryRows(
+            activeSince: now.addingTimeInterval(-86_400), limit: 1,
+            isRequestable: { !$0.hasSuffix("/e1") && !$0.hasSuffix("/e2") })
+        assertTrue(
+            pastRefused.count == 1 && !["e1", "e2"].contains(pastRefused[0].id),
+            "Links the client would refuse do not use up the candidate limit (#818)")
         assertEqual(
             rows.first(where: { $0.id == "plain" })?.link, story("plain", "One").link,
             "A freshly ingested story has a usable URL before reader extraction")
@@ -10540,6 +10691,71 @@ struct NewsTests {
         assertFalse(scoped.contains { $0.id == "g2" }, "The hidden member itself is never looked up")
         await db.close()
         try await testStoryImageIndexMigration(fixtureRoot: fixtureRoot)
+        try await testMarkAllReadScope(fixtureRoot: fixtureRoot)
+    }
+
+    /// #784: Mark All as Read marks only unread stories the reading feed shows. Earlier read times stay, and
+    /// analysis-only panel reports stay unread, since a read panel report would surface in History.
+    static func testMarkAllReadScope(fixtureRoot: URL) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-mark-all-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        func report(_ id: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Report \(id)", link: fixtureRoot.appendingPathComponent(id).absoluteString,
+                guid: id, description: "Report.", pubDate: Date(), source: "Publisher")
+        }
+        let panelURL = TensionMethodology.v1.panel[8].url
+        try await db.upsertArticles([report("earlier"), report("unread")], feedUrl: "https://example.com/rss")
+        try await db.upsertArticles([report("panel")], feedUrl: panelURL)
+        await db.setCollectionOnlyFeedURLs([panelURL])
+        try await db.markRead(articleId: "earlier", isRead: true)
+        func readAt(_ id: String) -> Double? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            defer {
+                sqlite3_finalize(statement)
+                sqlite3_close(handle)
+            }
+            guard sqlite3_open(path, &handle) == SQLITE_OK,
+                sqlite3_prepare_v2(
+                    handle, "SELECT read_at FROM article_state WHERE article_id = ? AND is_read = 1", -1,
+                    &statement, nil) == SQLITE_OK
+            else { return nil }
+            sqlite3_bind_text(statement, 1, id, -1, DatabaseEngine.sqliteTransient)
+            return sqlite3_step(statement) == SQLITE_ROW ? sqlite3_column_double(statement, 0) : nil
+        }
+        let earlier = readAt("earlier")
+        try await Task.sleep(nanoseconds: 20_000_000)
+        try await db.markAllRead()
+        assertEqual(readAt("earlier"), earlier, "Mark All as Read keeps the time a story was first read")
+        assertTrue(readAt("unread") != nil, "Mark All as Read marks unread listed stories")
+        assertTrue(readAt("panel") == nil, "Analysis-only panel reports stay unread and out of History")
+        try await db.markRead(articleId: "unread", isRead: false)
+        try await db.markAllRead(feedUrl: panelURL)
+        assertTrue(readAt("panel") == nil, "A panel feed's own Mark All as Read leaves its hidden reports alone")
+        assertTrue(readAt("unread") == nil, "Another feed's Mark All as Read leaves this feed's stories unread")
+        try await db.markAllRead(feedUrl: "https://example.com/rss")
+        assertTrue(readAt("unread") != nil, "A feed's Mark All as Read marks its own unread stories")
+        // Muted stories are not in the list, so they stay unread rather than becoming reading interests.
+        try await db.upsertArticles(
+            [
+                FeedArticle(
+                    storedID: "muted", title: "Muted report", link: "https://muted.example/story", guid: "muted",
+                    description: "Report.", pubDate: Date(), source: "Muted Publisher")
+            ],
+            feedUrl: "https://example.com/rss")
+        try await db.markRead(articleId: "unread", isRead: false)
+        var muting = MuteRules()
+        _ = muting.addSource("muted.example")
+        try await db.markAllRead(muting: muting)
+        assertTrue(readAt("muted") == nil, "Mark All as Read leaves muted stories unread")
+        assertTrue(readAt("unread") != nil, "Mute rules still let unmuted stories be marked")
+        await db.close()
     }
 
     static func testStoryImageIndexMigration(fixtureRoot: URL) async throws {
@@ -10720,11 +10936,13 @@ struct NewsTests {
                 done.recordText("finished")
                 return (cancelled, end)
             }
-            await eventually("Actual transaction spills pages to the WAL before cancellation", timeout: .seconds(60)) {
+            // The spill comes later on a loaded machine, so wait for it or for the write to end, never a wall clock
+            // alone (#692); a write that ends first fails the next assertion.
+            await eventually("Actual transaction spills pages to the WAL before cancellation", timeout: .seconds(300)) {
                 let size =
                     (try? FileManager.default.attributesOfItem(atPath: path + "-wal")[.size] as? NSNumber)?.intValue
                     ?? 0
-                return size > 1_048_576
+                return size > 1_048_576 || done.count > 0
             }
             assertEqual(done.count, 0, "Ingestion is still active at the observed WAL spill")
             let start = ProcessInfo.processInfo.systemUptime
@@ -12711,6 +12929,58 @@ struct NewsTests {
         assertTrue(
             failure.contains("reader verdicts violated"), "A violated verdict fails the library holdout run: \(failure)"
         )
+    }
+
+    /// #791: with a reader's exclusion between two events that each agree with a third, which pair forms a story must
+    /// not depend on dictionary or input order: every insertion order and every run of the pass gives the same stories.
+    static func testStoryPassOrderIndependent() async throws {
+        print("  - Testing the story pass is independent of iteration and input order (#791)...")
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://order.invalid/\(id)", guid: "order-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let stories = [
+            story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana", hours: 0),
+            story(2, "Parliament in Ljubljana votes to oust Prime Minister Novak", hours: 1),
+            story(3, "Novak's party appoints interim leader in Ljubljana after parliament ousts him", hours: 3),
+            story(4, "Novak's party names interim leader in Ljubljana after parliament ousts him", hours: 3.5),
+            story(5, "Thousands protest in Ljubljana after parliament votes to oust Novak", hours: 5),
+            story(6, "Thousands protest in Ljubljana streets after parliament votes to oust Novak", hours: 6),
+        ]
+        let now = start.addingTimeInterval(7 * 3600)
+        var generator = SystemRandomNumberGenerator()
+        var groupings = Set<[[Int]]>()
+        for _ in 0..<8 {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles(stories.shuffled(using: &generator))
+            _ = try await EventClusterer.run(in: db, now: now)
+            var ids: [String] = []
+            for article in stories { ids.append(try await db.resolvedArticleID(for: article)) }
+            // The reader excluded an appointment report against a protest report.
+            let (low, high) = ids[2] < ids[4] ? (ids[2], ids[4]) : (ids[4], ids[2])
+            try await db.eventRows(
+                "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                [.text(low), .text(high), .real(now.addingTimeInterval(100).timeIntervalSince1970)])
+            _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(120))
+            var storyOf: [String] = []
+            for id in ids {
+                if let event = try await db.eventID(forArticle: id) {
+                    storyOf.append(try await db.storyID(forEvent: event) ?? event)
+                } else {
+                    storyOf.append(id)
+                }
+            }
+            let groups = Dictionary(grouping: storyOf.indices, by: { storyOf[$0] }).values.map { $0.sorted() }
+            groupings.insert(groups.sorted { $0.first ?? 0 < $1.first ?? 0 })
+            await db.close()
+        }
+        assertEqual(groupings.count, 1, "Every input order gives the same stories: \(groupings)")
+        assertEqual(
+            groupings.first, [[0, 1, 2, 3], [4, 5]],
+            "The vote joins the appointment, whose first report came first; the excluded protest stays apart")
     }
 
     /// The story layer (#581): two events of one story (a vote and the protest after it) become one card, versions and
@@ -16543,7 +16813,7 @@ struct NewsTests {
             assertEqual(markStore.unreadCount, 0, "Unread count is 0 after MarkAllAsReadIntent")
             let dialogMark = extractDialogText(from: resMark)
             assertTrue(
-                dialogMark != nil && dialogMark!.contains("All stories marked as read"),
+                dialogMark != nil && dialogMark!.contains("All visible stories marked as read"),
                 "MarkAllAsReadIntent returns confirmation dialog")
         } catch {
             assertTrue(false, "MarkAllAsReadIntent perform threw: \(error)")
@@ -16555,7 +16825,7 @@ struct NewsTests {
             assertEqual(markStore.unreadCount, 0, "Unread count remains 0 on repeat MarkAllAsReadIntent")
             let dialogMark2 = extractDialogText(from: resMark2)
             assertTrue(
-                dialogMark2 != nil && dialogMark2!.contains("All stories marked as read"),
+                dialogMark2 != nil && dialogMark2!.contains("All visible stories marked as read"),
                 "Confirmation dialog returned on idempotent run")
         } catch {
             assertTrue(false, "MarkAllAsReadIntent repeat threw: \(error)")
@@ -16569,7 +16839,7 @@ struct NewsTests {
             let resAmbientMark = try await ambientMarkIntent.perform()
             let dialogAmbient = extractDialogText(from: resAmbientMark)
             assertTrue(
-                dialogAmbient != nil && dialogAmbient!.contains("All stories marked as read"),
+                dialogAmbient != nil && dialogAmbient!.contains("All visible stories marked as read"),
                 "Ambient MarkAllAsReadIntent succeeds via resolver")
         } catch {
             assertTrue(false, "Ambient MarkAllAsReadIntent threw: \(error)")
@@ -17705,8 +17975,9 @@ struct NewsTests {
         do {
             _ = try await imageClient.fetchImage(from: imageURL)
             assertTrue(false, "Cached HTTP images cannot bypass disabled HTTP policy")
-        } catch let error as FeedError {
-            guard case .insecureScheme = error else { throw error }
+        } catch is URLError {
+            // With HTTP off the address is requested over HTTPS instead (#794), which this plain-HTTP fixture cannot
+            // answer: the cached http bytes are never returned.
         }
         _ = try await imageClient.fetchArticleHTML(from: imageURL, allowHTTP: true)
         assertEqual(receivedRequests.count, initialRequests + 2, "Article fetching still reloads cached URLs")
@@ -17977,6 +18248,42 @@ struct NewsTests {
         assertEqual(
             normalizedBare, "https://example.com", "Bare domain should gain https scheme and drop the root slash")
 
+        // #797: a pasted feed: address is unwrapped; any other explicit scheme is refused, not prefixed.
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed://example.com/rss"), "https://example.com/rss",
+            "feed:// addresses are unwrapped")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed:https://example.com/rss"), "https://example.com/rss",
+            "feed:https:// addresses are unwrapped")
+        for refused in [
+            "ftp://example.com/rss", "webcal://example.com/cal", "file:///etc/passwd", "javascript:alert(1)",
+        ] {
+            assertTrue(AppSettings.normalizeFeedURL(refused) == nil, "\(refused) is not a feed address")
+        }
+        assertEqual(
+            AppSettings.normalizeFeedURL("example.com:8443/feed"), "https://example.com:8443/feed",
+            "A host with a port still gets https")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed: https://example.com/rss"), "https://example.com/rss",
+            "A space after feed: is ignored")
+        assertEqual(
+            AppSettings.normalizeFeedURL("user:pass@example.com/rss"), "https://user:pass@example.com/rss",
+            "Credentials without a scheme are not mistaken for a scheme")
+        assertTrue(AppSettings.normalizeFeedURL("[2001:db8::1]/feed") != nil, "A bracketed IPv6 host is accepted")
+        assertTrue(
+            AppSettings.normalizeFeedURL("ftp:user:pass@example.com/rss") == nil,
+            "An explicit unsupported scheme is refused before credentials are read")
+        assertEqual(
+            AppSettings.addFeedFailureMessage(for: "ftp://example.com/rss"),
+            "Feed not added. ftp: addresses are not supported. Use an http or https feed address.",
+            "Add Feed names a refused scheme")
+        assertEqual(
+            AppSettings.addFeedFailureMessage(for: "https://example.com/rss"),
+            "Feed not added. Check the URL or whether you already subscribe.",
+            "A web address keeps the generic failure text")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed:8443/rss"), "https://feed:8443/rss",
+            "feed: followed by a port is a host named feed, not a wrapper")
         let invalidURL = AppSettings.normalizeFeedURL("")
         assertEqual(invalidURL, nil, "Empty string should return nil")
 
@@ -19247,8 +19554,9 @@ struct NewsTests {
         priority = NotificationService.plan(new: [], pending: [:], delivery: delivery)
         assertEqual(priority.banners.map(\.count), [5], "The waiting keys arrive in the next grouped banner")
         assertEqual(
-            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []), Set((0..<5).map { "major-\($0)" }),
-            "The grouped banner announces every waiting key")
+            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []),
+            Set((0..<5).map { "major-\($0)" } + (priority.banners.first?.members ?? [])),
+            "The grouped banner announces every waiting key and each key's own report (#790)")
         delivery.ledger.priorityLastHalfHour = 0
         delivery.ledger.priorityQueue = []
 
@@ -19458,6 +19766,70 @@ struct NewsTests {
         } catch {
             assertTrue(false, "Notification delivery storage failed: \(error)")
         }
+    }
+
+    /// #790: a banner for a report outside any event records the report itself. When another outlet's report later
+    /// clusters with it, the event counts as announced, so the new report posts no second banner on another thread.
+    @MainActor
+    static func testNotifyBeforeClustering() async throws {
+        print("  - Testing a report notified before clustering announces its later event (#790)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        func report(_ id: String, _ title: String, hoursAgo: Double, source: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: title, link: "https://notify.invalid/\(id)", guid: id, description: "",
+                pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        let first = report("n790-a", "Breaking: Mosul dam failure, emergency declared", hoursAgo: 2, source: "Wire One")
+        let second = report(
+            "n790-b", "Breaking: Mosul dam bursts, emergency declared", hoursAgo: 1, source: "Daily Two")
+        _ = try await db.upsertArticles([first, second])
+
+        let alone = NotificationService.plan(
+            new: [(article: first, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(mode: .full, now: now, ledger: try await db.notificationLedger(now: now)))
+        assertEqual(alone.banners.count, 1, "The report alone posts a banner")
+        assertEqual(
+            alone.banners.first?.announces, [first.id: EventFeedSummary.titleKey(first.title)],
+            "A report outside any event is announced under its own ID")
+        for banner in alone.banners { try await db.recordNotification(banner, at: now) }
+        var ledger = try await db.notificationLedger(now: now.addingTimeInterval(60))
+        assertTrue(
+            NotificationService.plan(
+                new: [(article: first, score: 0.9)], pending: [:],
+                delivery: NotificationDelivery(mode: .full, now: now.addingTimeInterval(60), ledger: ledger)
+            ).banners.isEmpty, "The announced report alone does not post again")
+
+        let event = try await db.createEvent(memberArticleIDs: [first.id, second.id], at: now)
+        let later = now.addingTimeInterval(600)
+        ledger = try await db.notificationLedger(now: later)
+        let announced = NotificationLedger.Announcement(leadKey: EventFeedSummary.titleKey(first.title), lane: .normal)
+        assertEqual(
+            ledger.announced, [event.id: announced, first.id: announced],
+            "The report's announcement is copied to the event it joined, under the event's lead headline, and kept")
+        let clustered = NotificationService.plan(
+            new: [(article: second, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(
+                mode: .full, events: [first.id: event.id, second.id: event.id], publishers: [event.id: 2],
+                leadTitles: [event.id: first.title], now: later, ledger: ledger))
+        assertTrue(clustered.banners.isEmpty, "The second outlet's report of the announced event posts no banner")
+
+        // The report keeps its own row: separated into another event, it makes that event announced too.
+        let third = report("n790-c", "Breaking: Mosul dam failure floods villages", hoursAgo: 0.5, source: "Post")
+        _ = try await db.upsertArticles([third])
+        _ = try await db.separateArticle(first.id, fromEvent: event.id)
+        let moved = try await db.createEvent(memberArticleIDs: [first.id, third.id], at: later)
+        ledger = try await db.notificationLedger(now: later.addingTimeInterval(60))
+        assertEqual(
+            ledger.announced[moved.id]?.lane, .normal, "The event the separated report joins inherits its announcement")
+        let separated = NotificationService.plan(
+            new: [(article: third, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(
+                mode: .full, events: [first.id: moved.id, third.id: moved.id], publishers: [moved.id: 2],
+                leadTitles: [moved.id: first.title], now: later.addingTimeInterval(60), ledger: ledger))
+        assertTrue(separated.banners.isEmpty, "The separated report's new event posts no duplicate banner")
+        await db.close()
     }
 
     /// Notification lanes through `FeedManager` (#665): the normal limit rolls across refreshes and a relaunch, delivery
@@ -20901,6 +21273,119 @@ struct NewsTests {
         _ = await store.setSaved(article: article, isSaved: false)
         let persistedSaved = try await store.database.isSaved(articleId: article.id)
         assertFalse(persistedSaved, "Explicit unsave is idempotent in SQLite")
+    }
+
+    /// #789: an overview carries its event's own membership version, not the story's summed one, so a sum that falls
+    /// after a merge neither refuses the save nor keeps an overview stored under the old sum.
+    @MainActor
+    static func testOverviewVersionFollowsEventNotStorySum() async throws {
+        print("  - Testing overview versions follow the event, not the story sum (#789)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let now = Date()
+        func report(_ id: String, _ source: String, hoursAgo: Double) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Report \(id)", link: "https://example.com/\(id)", guid: id,
+                description: "Text \(id).", pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        let reports = [
+            report("v789-a1", "One", hoursAgo: 1), report("v789-a2", "Two", hoursAgo: 1),
+            report("v789-b1", "Three", hoursAgo: 5), report("v789-b2", "Four", hoursAgo: 5),
+            report("v789-c1", "Five", hoursAgo: 6), report("v789-c2", "Six", hoursAgo: 6),
+            report("v789-d1", "Seven", hoursAgo: 7), report("v789-d2", "Eight", hoursAgo: 7),
+            report("v789-e1", "Nine", hoursAgo: 8), report("v789-e2", "Ten", hoursAgo: 8),
+        ]
+        _ = try await db.upsertArticles(reports)
+        let opened = try await db.createEvent(memberArticleIDs: ["v789-a1", "v789-a2"], at: now)
+        let sibling = try await db.createEvent(memberArticleIDs: ["v789-b1", "v789-b2"], at: now)
+        let folded = try await db.createEvent(memberArticleIDs: ["v789-c1", "v789-c2"], at: now)
+        try await db.executeSimple(
+            "UPDATE events SET story_id = '\(opened.id)' WHERE id IN ('\(sibling.id)', '\(folded.id)');")
+        func summary() async throws -> EventFeedSummary? {
+            try await db.eventFeedSummaries(forArticles: ["v789-a1"]).first
+        }
+        let before = try await summary()
+        assertEqual(before?.eventID, opened.id, "The story opens its newest event")
+        assertEqual(before?.membershipVersion, 3, "The story sums its three events")
+        assertEqual(before?.eventVersion, 1, "The overview version is the opened event's own")
+        // The warm-up path stores the overview under the event's version, not the story's sum.
+        let warmStore = ArticleStore(database: db)
+        let warmer = OverviewGenerationCoordinator(
+            store: warmStore, queue: EnrichmentQueue(store: warmStore), allowsEnergy: { true })
+        await warmer.warmVisibleOverviews(store: warmStore, muting: MuteRules())
+        assertEqual(
+            try await db.fetchEventOverview(eventID: opened.id)?.membershipVersion, 1,
+            "Warm-up versions the overview by the opened event, not the story sum")
+
+        func overview(_ version: Int, _ hash: String) -> EventOverviewDocument {
+            EventOverviewDocument(
+                eventID: opened.id, version: OverviewVersionContext(membershipVersion: version, inputTextHash: hash),
+                content: OverviewContent(title: "Story", summary: "", facts: [], citations: []),
+                provenance: OverviewProvenance(memberArticleIDs: ["v789-a1", "v789-a2"], kind: .fallbackExcerpts))
+        }
+        assertTrue(
+            try await db.recordEventOverview(overview(3, "legacy")), "A row stored under the sum, as before #789")
+        assertTrue(
+            try await db.recordEventOverview(overview(1, "current")),
+            "The event's own version replaces a row stored under the story sum")
+
+        // A merge folds the sibling's version away and the survivor gains only +1: the sum falls from 4 to 3.
+        let foldedAgain = try await db.createEvent(memberArticleIDs: ["v789-d1"], at: now)
+        _ = try await db.mergeEvents(foldedAgain.id, into: folded.id, at: now)
+        assertEqual(try await summary()?.membershipVersion, 4, "The story sums the opened event and two siblings")
+        _ = try await db.mergeEvents(folded.id, into: sibling.id, at: now)
+        let after = try await summary()
+        assertEqual(after?.membershipVersion, 3, "The story sum falls after the merge")
+        assertEqual(after?.eventVersion, 1, "The opened event's version is unchanged by a sibling merge")
+        assertFalse(
+            try await db.fetchEventOverview(eventID: opened.id)?.isStale(currentMembershipVersion: 1) ?? true,
+            "The stored overview stays current across the sibling merge")
+        assertTrue(
+            try await db.recordEventOverview(overview(1, "regenerated")),
+            "A save at the event's version is accepted after the story sum changed")
+
+        let extra = try await db.createEvent(memberArticleIDs: ["v789-d2"], at: now)
+        _ = try await db.mergeEvents(extra.id, into: opened.id, at: now)
+        assertFalse(
+            try await db.recordEventOverview(overview(1, "late")),
+            "A result for an older version of the event is still refused")
+        assertEqual(
+            try await db.fetchEventOverview(eventID: opened.id)?.version.inputTextHash, "regenerated",
+            "The refused result leaves the stored overview")
+        let fresh = try await db.createEvent(memberArticleIDs: ["v789-e1"], at: now)
+        let joiner = try await db.createEvent(memberArticleIDs: ["v789-e2"], at: now)
+        _ = try await db.mergeEvents(joiner.id, into: fresh.id, at: now)
+        assertFalse(
+            try await db.recordEventOverview(
+                EventOverviewDocument(
+                    eventID: fresh.id, version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "early"),
+                    content: OverviewContent(title: "Story", summary: "", facts: [], citations: []),
+                    provenance: OverviewProvenance(memberArticleIDs: ["v789-e1"], kind: .fallbackExcerpts))),
+            "A first overview started before the event gained a member is refused")
+        await db.close()
+
+        // A row stored under a story sum before #789 is dropped on open, so an equal event version later cannot
+        // read it as current.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("v789-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let legacy = DatabaseEngine(path: path)
+        try await legacy.open()
+        _ = try await legacy.upsertArticles([reports[0], reports[1]])
+        let legacyEvent = try await legacy.createEvent(memberArticleIDs: ["v789-a1", "v789-a2"], at: now)
+        let summed = EventOverviewDocument(
+            eventID: legacyEvent.id, version: OverviewVersionContext(membershipVersion: 3, inputTextHash: "legacy"),
+            content: OverviewContent(title: "Story", summary: "", facts: [], citations: []),
+            provenance: OverviewProvenance(memberArticleIDs: ["v789-a1", "v789-a2"], kind: .fallbackExcerpts))
+        assertTrue(try await legacy.recordEventOverview(summed), "Seed a row above its event's version")
+        await legacy.close()
+        let reopened = DatabaseEngine(path: path)
+        try await reopened.open()
+        assertEqual(
+            try await reopened.fetchEventOverview(eventID: legacyEvent.id), nil,
+            "A row above its event's version is dropped on open")
+        await reopened.close()
     }
 
     static func testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: String = "example.com") async throws {

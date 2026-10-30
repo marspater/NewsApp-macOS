@@ -266,6 +266,13 @@ actor DatabaseEngine {
                 try executeSimple(
                     "ALTER TABLE notification_priority_queue ADD COLUMN story_id TEXT NOT NULL DEFAULT '';")
             }
+            // Overviews stored under a story's summed version before #789 sit above their event's own version; a later
+            // event version could equal it with unchanged inputs and read as current, so they regenerate instead.
+            try executeSimple(
+                """
+                DELETE FROM event_overviews WHERE membership_version >
+                    (SELECT e.membership_version FROM events e WHERE e.id = event_overviews.event_id);
+                """)
             // Lists page in date order (#778). Created on open like the side tables above, so it needs no schema
             // version; its expression is `articleDateOrder` without the table alias, since any other text leaves the
             // planner sorting every row.
@@ -2098,7 +2105,24 @@ actor DatabaseEngine {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
-        guard !articles.isEmpty else { return [] }
+        guard !articles.isEmpty else {
+            // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
+            // must be stored, or the old ETag keeps being sent and health keeps the old item counts.
+            if let feedUrl, let validators {
+                // Same rule as the articles path: a refresh cancelled while waiting writes nothing.
+                try beginTransaction()
+                defer {
+                    if sqlite3_get_autocommit(db) == 0 {
+                        loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                    }
+                }
+                try recordFeedFetch(
+                    validators, stats: FeedContentStats(articles: []), for: feedUrl, at: Date().timeIntervalSince1970)
+                try Task.checkCancellation()
+                try commitTransaction()
+            }
+            return []
+        }
         repeatedImageCache = [:]
 
         let signpostState = NewsSignposts.begin(
@@ -2168,6 +2192,18 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: "Failed to prepare article existence query"])
         }
         defer { sqlite3_finalize(existenceStmt) }
+        var expiredStmt: OpaquePointer?
+        guard
+            sqlite3_prepare_v2(
+                db, "SELECT 1 FROM expired_stories WHERE key IN ('pruned:' || ?, 'pruned:' || ?);", -1, &expiredStmt,
+                nil)
+                == SQLITE_OK
+        else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to prepare pruned story query"])
+        }
+        defer { sqlite3_finalize(expiredStmt) }
         var insertedIDs = Set<String>()
         let now = Date().timeIntervalSince1970
 
@@ -2189,6 +2225,17 @@ actor DatabaseEngine {
                     userInfo: [NSLocalizedDescriptionKey: "Failed to check stored article identity"])
             }
             if existenceStatus == SQLITE_DONE {
+                // A story pruned by retention that its feed still serves stays pruned (#783), by its resolved ID or
+                // its feed-scoped GUID. An explicit save (preserving stored content) may bring it back.
+                if !preservingStoredContent {
+                    let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: identityFeedURL) ?? id
+                    sqlite3_reset(expiredStmt)
+                    sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
+                    sqlite3_bind_text(expiredStmt, 2, scoped, -1, Self.sqliteTransient)
+                    let expiredStatus = sqlite3_step(expiredStmt)
+                    if expiredStatus == SQLITE_ROW { continue }
+                    guard expiredStatus == SQLITE_DONE else { throw sqliteError(db, "Could not check pruned story") }
+                }
                 insertedIDs.insert(id)
             }
 
@@ -2973,14 +3020,30 @@ actor DatabaseEngine {
         }
     }
 
-    func markAllRead(feedUrl: String? = nil) throws {
+    func markAllRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) throws {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
-        let sql =
-            "UPDATE article_state SET is_read = 1, read_at = ?"
-            + (feedUrl == nil ? ";" : " WHERE article_id IN (SELECT article_id FROM article_feeds WHERE feed_url = ?);")
+        // Only unread stories the reading feed shows: earlier read times stay as they were, and reconciled
+        // originals, muted stories and analysis-only panel reports stay as they are (marking a panel report read would
+        // surface it in History; a muted one would count as a reading interest).
+        let collection = collectionScope()
+        var params: [QueryParameter] = [("double", Date().timeIntervalSince1970)] + collection.params
+        var sql = """
+            UPDATE article_state SET is_read = 1, read_at = ?
+            WHERE is_read = 0 AND article_id IN (
+                SELECT a.id FROM articles a WHERE \(Self.visibleArticle)\(collection.sql)
+            """
+        if let feedUrl {
+            sql += " AND a.id IN (SELECT article_id FROM article_feeds WHERE feed_url = ?)"
+            params.append(("text", feedUrl))
+        }
+        if !muting.isEmpty {
+            sql += " AND NOT \(Self.mutedArticle)"
+            params += Self.mutingParameters(muting)
+        }
+        sql += ");"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw NSError(
@@ -2988,8 +3051,7 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
-        if let feedUrl { sqlite3_bind_text(stmt, 2, feedUrl, -1, Self.sqliteTransient) }
+        bind(params, to: stmt)
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw NSError(
                 domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)),
@@ -3635,29 +3697,46 @@ actor DatabaseEngine {
 
         let expired = """
             SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
-            WHERE s.is_read = 1 AND s.is_saved = 0 AND \(Self.articleDateOrder) < ?
+            WHERE s.is_read = 1 AND s.is_saved = 0 AND \(Self.articleDateOrder) < ?1
                 AND \(Self.visibleArticle)
                 AND NOT EXISTS (SELECT 1 FROM event_overview_citations c
                     WHERE c.article_id = a.id OR c.article_id IN (
                         SELECT duplicate_id FROM article_reconciliations WHERE survivor_id = a.id))
             """
-        let sql = """
-            DELETE FROM articles WHERE id IN (
-                \(expired)
-                UNION SELECT r.duplicate_id FROM article_reconciliations r
-                    WHERE r.survivor_id IN (\(expired))
-            );
+        let doomed = """
+            \(expired)
+            UNION SELECT r.duplicate_id FROM article_reconciliations r WHERE r.survivor_id IN (\(expired))
             """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            throw sqliteError(db, "Could not prepare retention pruning")
+        // A feed can keep serving a story long after it was read and pruned. Its stored ID and identity aliases
+        // stay behind in `expired_stories` under a `pruned:` prefix, so `upsertArticles` never brings it back as a
+        // new, unread story (#783). Only ID keys are kept: a URL can later carry a different story (a recurring or
+        // live page), which must still arrive. Unprefixed rows are old importance-expiry tombstones and suppress
+        // nothing.
+        // ponytail: tombstones are never pruned (about three short rows per pruned story); expire old ones if the
+        // table ever matters for size.
+        let tombstones = """
+            INSERT OR REPLACE INTO expired_stories (key, expired_at)
+            SELECT 'pruned:' || value, ?2 FROM article_aliases
+                WHERE kind = 'id' AND article_id IN (\(doomed))
+            UNION SELECT 'pruned:' || id, ?2 FROM articles WHERE id IN (\(doomed));
+            """
+        try beginTransaction()
+        defer {
+            if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_double(stmt, 1, cutoff)
-        sqlite3_bind_double(stmt, 2, cutoff)
-        guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention pruning failed") }
-        let changes = Int(sqlite3_changes(db))
+        var changes = 0
+        for (sql, step) in [(tombstones, "tombstones"), ("DELETE FROM articles WHERE id IN (\(doomed));", "pruning")] {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+                throw sqliteError(db, "Could not prepare retention \(step)")
+            }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, cutoff)
+            if sql == tombstones { sqlite3_bind_double(stmt, 2, nowTimestamp) }
+            guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention \(step) failed") }
+            changes = Int(sqlite3_changes(db))
+        }
+        try commitTransaction()
         // The only delete of stories: SQLite may reuse a deleted top rowid, so the spelling cache key could repeat.
         if changes > 0 {
             spellingCache = nil
@@ -3951,14 +4030,24 @@ actor DatabaseEngine {
     /// never makes an announced story new again. An announcement of the last day keeps its time and lane under the
     /// survivor, recorded with the survivor's lead headline now (or the survivor's own recent one), so only a later
     /// change of that headline notifies again. A waiting priority key moves the same way. Merges forward one hop, so
-    /// one pass settles every row.
+    /// one pass settles every row. A story's own announcement (#790) is copied to the event it is in the same way and
+    /// kept, so the event counts as announced and its next report stays quiet, and so does any event the story later
+    /// moves to.
     private func foldMergedNotifications(since cutoff: TimeInterval) throws {
         let forwarded = "JOIN events e ON e.id = t.event_id WHERE e.merged_into IS NOT NULL"
+        let clustered = "JOIN event_members m ON m.article_id = t.event_id"
         let announced = try eventRows(
-            "SELECT t.event_id, e.merged_into, t.lead_key, t.notified_at, t.lane FROM event_notifications t \(forwarded);"
-        )
+            """
+            SELECT t.event_id, e.merged_into, t.lead_key, t.notified_at, t.lane, 1 FROM event_notifications t \(forwarded)
+            UNION ALL
+            SELECT t.event_id, m.event_id, t.lead_key, t.notified_at, t.lane, 0 FROM event_notifications t \(clustered);
+            """)
         let queued = try eventRows(
-            "SELECT t.event_id, e.merged_into, t.lead_key FROM notification_priority_queue t \(forwarded);")
+            """
+            SELECT t.event_id, e.merged_into, t.lead_key FROM notification_priority_queue t \(forwarded)
+            UNION ALL
+            SELECT t.event_id, m.event_id, t.lead_key FROM notification_priority_queue t \(clustered);
+            """)
         guard !announced.isEmpty || !queued.isEmpty else { return }
         let leads = try eventLeadTitles(Set((announced + queued).compactMap { $0[1] }))
         func leadKey(_ row: [String?]) -> String {
@@ -3982,7 +4071,10 @@ actor DatabaseEngine {
                         .real(cutoff),
                     ])
             }
-            try eventRows("DELETE FROM event_notifications WHERE event_id = ?;", [.text(absorbed)])
+            // A report's own row stays: if the reader separates it into another event, that event inherits it too.
+            if row[5] == "1" {
+                try eventRows("DELETE FROM event_notifications WHERE event_id = ?;", [.text(absorbed)])
+            }
         }
         for row in queued {
             guard let absorbed = row[0], let survivor = row[1] else { continue }
@@ -4167,7 +4259,12 @@ actor DatabaseEngine {
 
     /// Shown, recent stories without any image in their event and not looked up yet: clustered stories first, then the
     /// newest. Each row carries its event so a pass looks up one report per event.
-    func imagelessStoryRows(activeSince: Date, limit: Int, muting: MuteRules = MuteRules()) throws -> [(
+    /// `isRequestable` drops links the image client would refuse before they count toward `limit`, so they cannot
+    /// crowd out stories behind them on every pass (#818).
+    func imagelessStoryRows(
+        activeSince: Date, limit: Int, muting: MuteRules = MuteRules(),
+        isRequestable: @Sendable (String) -> Bool = { _ in true }
+    ) throws -> [(
         id: String, link: String, eventID: String?
     )] {
         // ponytail: at most 2,000 recent candidates per pass, matching the clustering bound.
@@ -4189,7 +4286,7 @@ actor DatabaseEngine {
         for row in rows {
             try Task.checkCancellation()
             guard results.count < limit else { break }
-            guard let id = row[0], let link = row[1] else { continue }
+            guard let id = row[0], let link = row[1], isRequestable(link) else { continue }
             let key = row[2] ?? id
             let pictured: Bool
             if let cached = picturedEvents[key] {

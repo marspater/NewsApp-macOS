@@ -55,6 +55,9 @@ struct EventFeedSummary: Hashable, Sendable {
     let membershipVersion: Int
     let seenVersion: Int?
     let members: [EventFeedMember]
+    /// The opened event's own membership version, which versions its overview. `membershipVersion` sums the
+    /// story's events for the update mark and can fall when a merge folds one away (#789).
+    var eventVersion = 1
 
     /// A single remaining member is shown as an ordinary publication.
     var isConfirmed: Bool { members.count >= 2 }
