@@ -19767,6 +19767,9 @@ struct NewsTests {
         for hidden in ["/world/", "leaked-memo", "id=7", "reader:pw", "/private/world.xml", "/Users/mars", title] {
             assertTrue(!text.contains(hidden), "The export leaves out \(hidden)")
         }
+        let tricky = DiagnosticsExport.redact(
+            "a https://news.example.com/private'token b https://user:pass@word@news.example.com:8443/p c", titles: [])
+        assertEqual(tricky, "a news.example.com b news.example.com c", "Quotes and repeated @ never keep URL text")
         let logText = files["log.txt"] ?? ""
         assertTrue(logText.contains("Fetch failed for news.example.com after 3 tries"), "URLs keep their host")
         assertTrue(logText.contains("at ~/Library/Containers/com.marspater.news/Data/news.sqlite"), "Home becomes ~")
@@ -19800,8 +19803,14 @@ struct NewsTests {
         // This process's own entries are readable from the unified log, as the app's are.
         let marker = "diagnostics-check-\(UUID().uuidString)"
         NewsSignposts.launchLog.notice("\(marker, privacy: .public)")
-        let own = try DiagnosticsExport.currentLaunchLog()
-        let found = own.contains { $0.message == marker && $0.category == "Launch" }
+        // The unified log may store the entry a moment later; poll briefly instead of reading once.
+        let deadline = ContinuousClock.now + .seconds(5)
+        var found = false
+        while !found && ContinuousClock.now < deadline {
+            let own = try DiagnosticsExport.currentLaunchLog()
+            found = own.contains { $0.message == marker && $0.category == "Launch" }
+            if !found { try await Task.sleep(for: .milliseconds(100)) }
+        }
         assertTrue(found, "The export reads this launch's log")
     }
 

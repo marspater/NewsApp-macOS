@@ -120,10 +120,14 @@ enum DiagnosticsExport {
         return ["summary.txt": redact(summary, titles: titles), "log.txt": redact(lines.joined(), titles: titles)]
     }
 
-    /// URLs keep only their host, home folders become `~`, and any listed story title is replaced.
+    /// URLs keep only their host, home folders become `~`, and listed story titles of 12 or more characters are
+    /// replaced.
     static func redact(_ text: String, titles: [String]) -> String {
-        var redacted = text.replacing(#/[A-Za-z][A-Za-z0-9+.\-]*://(?:[^\s/?#@"'<>]*@)?([^\s/?#"'<>:]*)[^\s"'<>]*/#) {
-            String($0.output.1)
+        // The whole non-space token goes, quotes included; the host follows the last `@` of the authority.
+        var redacted = text.replacing(#/[A-Za-z][A-Za-z0-9+.\-]*://(\S*)/#) { match in
+            let authority = match.output.1.prefix { !"/?#".contains($0) }
+            let host = authority.split(separator: "@", omittingEmptySubsequences: false).last ?? ""
+            return String(host.prefix { $0 != ":" && $0 != "'" && $0 != "\"" })
         }
         redacted = redacted.replacing(#/(?:/System/Volumes/Data)?/Users/[^/\s]+/#, with: "~")
         // Short titles are ordinary phrases; replacing them would blank unrelated log text.
@@ -142,16 +146,12 @@ enum DiagnosticsExport {
         try manager.createDirectory(at: folder, withIntermediateDirectories: true)
         for (name, text) in files { try Data(text.utf8).write(to: folder.appendingPathComponent(name)) }
         var coordinationError: NSError?
-        var copyError: Error?
+        var zipped: Result<Data, Error> = .failure(CocoaError(.fileWriteUnknown))
         NSFileCoordinator().coordinate(readingItemAt: folder, options: .forUploading, error: &coordinationError) {
-            zip in
-            do {
-                if manager.fileExists(atPath: destination.path) { try manager.removeItem(at: destination) }
-                try manager.copyItem(at: zip, to: destination)
-            } catch {
-                copyError = error
-            }
+            zip in zipped = Result { try Data(contentsOf: zip) }
         }
-        if let error = coordinationError ?? copyError { throw error }
+        if let coordinationError { throw coordinationError }
+        // An atomic write replaces an earlier export only once the new archive is complete.
+        try zipped.get().write(to: destination, options: .atomic)
     }
 }

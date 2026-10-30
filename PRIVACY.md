@@ -82,5 +82,5 @@ No access is requested or granted for:
   * A settings summary: counts of feeds, starred feeds, sections and mute rules; the refresh interval and retention period; and which notification, Dock badge, menu bar, on-device intelligence, insecure HTTP and World Tension options are on.
   * Feed health per subscription (responding or failing, newest item, text depth), named by host only.
 
-  It never contains story text. Before the zip is written, every URL is cut down to its host (no path, query or credentials), home folder paths are shortened to `~`, and the titles of stories the app has loaded are replaced with `<story>`.
+  The export does not add story text. Before the zip is written, every URL is cut down to its host (no path, query or credentials), home folder paths are shortened to `~`, and the titles of stories the app has loaded are replaced with `<story>` when they are 12 or more characters long. Shorter titles are left as written, because they match ordinary words in log text. The app does not log titles as public values, so they normally appear only as `<private>`.
 * **Complete Erasure**: Current application data is stored under `~/Library/Containers/com.marspater.news/`. Quit the app before manually removing its sandbox container. Removing that container does not erase exported OPML files or historical backups stored elsewhere.
