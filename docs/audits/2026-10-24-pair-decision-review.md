@@ -1,6 +1,6 @@
 # Pair decision review — 24 October 2026
 
-Refs #551 (M1), #574. Review of the pair decisions stored in a read-only copy of the live library (5,998 articles, newest published 24 October 2026 15:00 UTC, schema v25, matcher v11), exported with `--review-pairs` and labelled under the protocol in CONTRIBUTING ("Pair review protocol"). Labelled by Claude; Mars has not spot-checked yet (20 pairs are due, see the last section). Receipts: `~/news-eval/review-2026-10-24/` (`0700`), SHA-256 of the export `a2bacbb6…8847`, of the label files `05641689…901d` (match), `93cd0005…4815` (pair model), `83824a6a…e846` (related act).
+Refs #551 (M1), #574. Review of the pair decisions stored in a read-only copy of the live library (5,998 articles, newest published 24 October 2026 15:00 UTC, schema v25, matcher v11), exported with `--review-pairs` and labelled under the protocol in CONTRIBUTING ("Pair review protocol"). Labelled by Claude; the planned 20-pair spot-check by Mars was not done (see the last section). Receipts: `~/news-eval/review-2026-10-24/` (`0700`), SHA-256 of the export `a2bacbb6…8847`, of the label files `05641689…901d` (match), `93cd0005…4815` (pair model), `83824a6a…e846` (related act).
 
 Rows in the copy: 921 `match`/`match`, 484 `match`/`pairModel`, 470 `borderline`, 56 `related-act`, 0 `vetoed` (the copy predates the row type).
 

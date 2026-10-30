@@ -32,7 +32,7 @@ Correct separations in the same window, for balance: France protests vs Milan pr
 
 1. Precision engineering is complete: no wrong merge was found among the pairs read for this diagnosis, and the authored corpus and holdout both stand at zero false pairs.
 2. The missing recall has four mechanisms, none of them a threshold: the act-level event definition shown directly as cards (#581), anchors lost for headline-initial, Title-Case, organization and product names (#580), fragment merging that cannot use the pair model and an all-pairs admission rule (#582), and duplicate items from one publisher (#583).
-3. The old holdout cannot gate these changes. #579 draws a holdout from this library: borderline rows with score ≥ 0.6, singletons sharing a keyword with an event within 36 h, and fragment pairs sharing two terms, labelled by Claude under the protocol in CONTRIBUTING with Mars spot-checking twenty.
+3. The old holdout cannot gate these changes. #579 draws a holdout from this library: borderline rows with score ≥ 0.6, singletons sharing a keyword with an event within 36 h, and fragment pairs sharing two terms, labelled by Claude under the protocol in CONTRIBUTING, with a 20-pair spot-check by Mars planned; it was not done (see below).
 
 ## Reproduce
 
