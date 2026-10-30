@@ -11882,6 +11882,12 @@ struct NewsTests {
                 "INSERT INTO event_inclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
                 [.text(pair.0), .text(pair.1), .real(now.timeIntervalSince1970)])
         }
+        // The protest report joins the vote's story alone (#581), so the separation also excludes it: count the pairs.
+        let verdicts =
+            try await db.eventRows(
+                "SELECT (SELECT count(*) FROM event_exclusions) + (SELECT count(*) FROM event_inclusions);"
+            ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
+        assertTrue(verdicts >= 2, "Both corrections are recorded")
         await db.close()
         let corpus = directory.appendingPathComponent("corpus.json")
         try Data(#"{"articles":[{"title":"Unrelated corpus item","published":"2010-01-01T00:00:00Z"}]}"#.utf8)
@@ -11892,9 +11898,10 @@ struct NewsTests {
         // Texts carry newlines, so the rows are checked by their markers rather than split by line.
         assertTrue(
             csv.hasPrefix("label,group,text_a,text_b,pieces_a,pieces_b,weight\n"), "The export has a weight column")
-        assertEqual(csv.components(separatedBy: ",\"v:").count - 1, 2, "One row per verdict")
+        assertEqual(csv.components(separatedBy: ",\"v:").count - 1, verdicts, "One row per verdict")
         assertEqual(
-            csv.components(separatedBy: ",5\n").count - 1 + (csv.hasSuffix(",5") ? 1 : 0), 2, "Verdict rows weigh five")
+            csv.components(separatedBy: ",5\n").count - 1 + (csv.hasSuffix(",5") ? 1 : 0), verdicts,
+            "Verdict rows weigh five")
         assertTrue(
             csv.contains("\n0,\"v:") && csv.contains("\n1,\"v:"), "An exclusion is a negative, an inclusion a positive")
         // The gate: re-clustering the copy without corrections re-merges the excluded vote pair, so the harness fails.
@@ -11944,17 +11951,21 @@ struct NewsTests {
         }
         let storyID = try await db.storyID(forEvent: vote)
         assertEqual(storyID, try await db.storyID(forEvent: protest), "Two acts of one story share a story")
-        assertTrue(storyID == vote || storyID == protest, "The story is named by one of its events")
+        assertEqual(storyID, vote, "The story is named by its earliest event")
         assertTrue(
             report.changedEvents.contains(vote) && report.changedEvents.contains(protest), "Story changes are reported")
         assertEqual(try await db.storyEventIDs(storyID ?? "").sorted(), [vote, protest].sorted(), "Both events belong")
+        assertEqual(try await db.storyEventIDs(protest).sorted(), [vote, protest].sorted(), "… from either event")
         var summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
         assertEqual(summaries.count, 1, "One card for the story")
-        assertEqual(summaries.first?.eventID, storyID, "The card carries the story id")
+        assertEqual(summaries.first?.eventID, protest, "The card opens the story's newest event")
+        assertEqual(
+            try await db.relatedActEvents(eventID: protest, limit: .max).map(\.eventID), [vote],
+            "The newest event's overview reaches the story's earlier event")
         assertEqual(summaries.first?.members.count, 4, "All four reports are on the card")
         assertEqual(summaries.first?.membershipVersion, 2, "The story version is the sum of its events' versions")
         assertEqual(summaries.first?.seenVersion, nil, "Never opened")
-        assertEqual(try await db.markEventSeen(storyID ?? ""), 2, "Seeing the story marks every event")
+        assertEqual(try await db.markEventSeen(protest), 2, "Seeing the story through its open event marks every event")
         summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
         assertEqual(summaries.first?.seenVersion, 2, "Seen versions add up")
         assertFalse(summaries.first?.hasSubstantiveUpdate ?? true, "Nothing new since the reader looked")
@@ -12006,6 +12017,48 @@ struct NewsTests {
             try await apart.eventRows("SELECT story_id FROM events WHERE id = ?;", [.text(protestApart)]).first?[0],
             nil, "A dangling story id is cleared when its lead event is gone")
         await apart.close()
+        assertTrue(
+            EventClusterer.headline("Elon Musk’s dangerous grip on outer space", names: "musk"),
+            "A name in a headline is found across case and possessives")
+        assertTrue(EventClusterer.headline("iOS 27.2: Three new features", names: "ios 27.2"), "Multi-word names match")
+        assertFalse(EventClusterer.headline("Muskrat numbers rise", names: "musk"), "Only whole words match")
+        // A report alone that agrees with the story joins its card as a one-member event; it never names the story,
+        // never merges into an event, and a reader's exclusion against the story's reports takes it out again.
+        let attach = DatabaseEngine(path: ":memory:")
+        try await attach.open()
+        let appointment = story(
+            6, "Novak's party appoints interim leader in Ljubljana after parliament ousts him", hours: 3)
+        try await attach.upsertArticles(stories + [appointment])
+        _ = try await EventClusterer.run(in: attach, now: now)
+        _ = try await EventClusterer.run(in: attach, now: now.addingTimeInterval(60))
+        let appointmentID = try await attach.resolvedArticleID(for: appointment)
+        var attachIDs: [String] = []
+        for article in stories { attachIDs.append(try await attach.resolvedArticleID(for: article)) }
+        if let single = try await attach.eventID(forArticle: appointmentID),
+            let voteEvent = try await attach.eventID(forArticle: attachIDs[0])
+        {
+            assertEqual(
+                try await attach.eventMatchMembers(eventID: single)?.members.count, 1,
+                "The attached report stays an event of its own")
+            let lead = try await attach.storyID(forEvent: voteEvent)
+            assertEqual(try await attach.storyID(forEvent: single), lead, "The report alone joins the story")
+            assertTrue(lead != single, "A report alone never names the story")
+            assertEqual(
+                try await attach.eventFeedSummaries(forArticles: [attachIDs[0]]).first?.members.count, 5,
+                "The story card shows the attached report")
+            for other in attachIDs {
+                let (low, high) = appointmentID < other ? (appointmentID, other) : (other, appointmentID)
+                try await attach.eventRows(
+                    "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                    [.text(low), .text(high), .real(now.timeIntervalSince1970)])
+            }
+            _ = try await EventClusterer.run(in: attach, now: now.addingTimeInterval(120))
+            assertEqual(
+                try await attach.storyID(forEvent: single), single, "An exclusion against the story takes it out")
+        } else {
+            assertTrue(false, "The appointment is attached to the vote's story as an event of its own")
+        }
+        await attach.close()
         await db.close()
     }
 
@@ -13088,7 +13141,31 @@ struct NewsTests {
         // Events per story over every event, not only those with reports in the audit window.
         let eventsOf = Dictionary(grouping: storyOf.keys) { storyOf[$0] ?? "" }.mapValues(\.count)
         let joinedStories = byStory.filter { (eventsOf[$0.key] ?? 0) >= 2 }
+        // The feed's cards: one per story, one per report no story holds (#581).
+        func card(_ row: LibraryRow) -> String { row.event.map { storyOf[$0] ?? $0 } ?? row.id }
+        let cards = Set(recent.map(card)).count
         if let output = ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"] {
+            // Every report of the clusterer's window (72 h before its clock, NEWS_HOLDOUT_NOW when set) with its card, for
+            // card counts and named cases (#581).
+            let windowRows = try await db.eventRows(
+                """
+                SELECT a.id, a.source, a.published_at, m.event_id, a.title,
+                    (SELECT count(*) FROM event_members x WHERE x.event_id = m.event_id)
+                FROM articles a LEFT JOIN event_members m ON m.article_id = a.id
+                WHERE a.published_at >= ? AND \(DatabaseEngine.visibleArticle) ORDER BY a.published_at, a.id;
+                """, [.real(newest.timeIntervalSince1970 - 3 * 86_400)])
+            let cardLines =
+                ["card,article,source,published,event,event_size,title"]
+                + windowRows.map { row in
+                    let card = row[3].map { storyOf[$0] ?? $0 } ?? row[0] ?? ""
+                    let title = "\"" + (row[4] ?? "").replacingOccurrences(of: "\"", with: "\"\"") + "\""
+                    let fields = [row[0], row[1], row[2], row[3], row[5]].map { $0 ?? "" }
+                    return ([card] + fields + [title]).joined(separator: ",")
+                }
+            try StoryCorpus.writePrivate(
+                Data(cardLines.joined(separator: "\n").utf8),
+                to: try StoryCorpus.privateDirectory(output).appendingPathComponent("story-cards.csv"),
+                replacing: false)
             // One line per story that joins two or more events: each event's earliest headline within the window,
             // for the group review.
             var lines = ["story_id,events,recent_members,recent_acts"]
@@ -13116,6 +13193,7 @@ struct NewsTests {
                 format:
                     "    stories: %d (%.0f%%) recent stories in a multi-publisher story; %d stories join two or more events",
                 multiStory, recent.isEmpty ? 0 : 100 * Double(multiStory) / Double(recent.count), joinedStories.count))
+        print("    cards: \(cards) for \(recent.count) recent stories (one per story, one per report no story holds)")
         if !verdicts.isEmpty {
             print("    verdicts (#552): \(verdicts.count) in the copy, \(verdictFailures.count) violated")
             for failure in verdictFailures { print("      \(failure)") }

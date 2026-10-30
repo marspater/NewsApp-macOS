@@ -52,6 +52,11 @@ struct EventFeatures: Hashable, Sendable, Codable {
     /// Names that point at one occurrence: people, organizations, local places and untyped names, not countries.
     var specificAnchors: Set<String> { anchors.subtracting(countries) }
 
+    /// The series name's terms when two reports of one publisher share a series prefix (#688); nil for any other pair.
+    static func sharedSeriesTerms(_ a: EventFeatures, _ b: EventFeatures, samePublisher: Bool) -> Set<String>? {
+        samePublisher && a.series != nil && a.series == b.series ? a.seriesTerms.union(b.seriesTerms) : nil
+    }
+
     /// The features without the given terms: inside one publisher's series its name is no evidence (#688).
     func without(_ terms: Set<String>) -> EventFeatures {
         guard !terms.isEmpty else { return self }
@@ -680,9 +685,9 @@ enum EventMatcher {
         _ a: EventFeatures, _ b: EventFeatures, policy: EventMatchPolicy = .standard,
         embeddingSimilarity: Double? = nil, samePublisher: Bool = false
     ) -> EventPairAssessment {
-        let sameSeries = samePublisher && a.series != nil && a.series == b.series
-        let template = sameSeries ? a.seriesTerms.union(b.seriesTerms) : []
-        let (a, b) = (a.without(template), b.without(template))
+        let template = EventFeatures.sharedSeriesTerms(a, b, samePublisher: samePublisher)
+        let sameSeries = template != nil
+        let (a, b) = (a.without(template ?? []), b.without(template ?? []))
         let neuralEligible = usesNeuralPaths(a, b)
         let embeddingSimilarity = neuralEligible ? embeddingSimilarity : nil
         let gap = abs(a.date.timeIntervalSince(b.date))

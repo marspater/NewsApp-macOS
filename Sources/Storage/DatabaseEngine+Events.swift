@@ -527,36 +527,57 @@ extension DatabaseEngine {
         return try eventRows("SELECT coalesce(story_id, id) FROM events WHERE id = ?;", [.text(live)]).first?[0]
     }
 
-    /// Live events of a story, the lead first.
-    func storyEventIDs(_ storyID: String) throws -> [String] {
-        try eventRows(
+    /// Live events of the story that `eventID` (any of its events, or the story id) belongs to, the story's own id first.
+    func storyEventIDs(_ eventID: String) throws -> [String] {
+        let storyID = try storyID(forEvent: eventID) ?? eventID
+        return try eventRows(
             "SELECT id FROM events WHERE merged_into IS NULL AND (id = ? OR story_id = ?) ORDER BY id = ? DESC, created_at, id;",
             [.text(storyID), .text(storyID), .text(storyID)]
         ).compactMap { $0[0] }
     }
 
     /// Writes the story of every live event updated since `activeSince`: the earliest event of each group names the
-    /// story, an event in no group is a story of its own. Returns the events whose story changed.
-    func assignStories(_ groups: [[String]], since activeSince: Date) throws -> Set<String> {
+    /// story, an event in no group is a story of its own. `attaching` maps a report alone to the event whose story it
+    /// joins (#581): it joins as the only member of its own event, created at `date` when it has none; a report that
+    /// now shares an event with others is left out. Returns the events whose story changed and the events created.
+    func assignStories(
+        _ groups: [[String]], attaching: [String: String] = [:], since activeSince: Date, at date: Date = Date()
+    ) throws -> Set<String> {
         try inEventTransaction { () throws -> Set<String> in
-            var current: [String: (story: String?, created: Double)] = [:]
+            var groups = groups
+            let created = try attachSingles(attaching, to: &groups, at: date)
+            // A story is named by its earliest event of two or more reports, never by an attached report alone; events
+            // are ordered by their first report (date, then article ID), since event IDs are random.
+            var current: [String: (story: String?, rank: StoryRank)] = [:]
             for row in try eventRows(
-                "SELECT id, story_id, created_at FROM events WHERE merged_into IS NULL AND updated_at >= ?;",
-                [.real(activeSince.timeIntervalSince1970)])
+                """
+                SELECT e.id, e.story_id, (SELECT count(*) FROM event_members m WHERE m.event_id = e.id) < 2, first.date,
+                    first.id
+                FROM events e
+                LEFT JOIN (
+                    SELECT m.event_id, \(Self.articleDateOrder) AS date, a.id,
+                        row_number() OVER (PARTITION BY m.event_id ORDER BY \(Self.articleDateOrder), a.id) AS n
+                    FROM event_members m JOIN articles a ON a.id = m.article_id
+                ) first ON first.event_id = e.id AND first.n = 1
+                WHERE e.merged_into IS NULL AND e.updated_at >= ?;
+                """, [.real(activeSince.timeIntervalSince1970)])
             {
-                if let id = row[0] { current[id] = (row[1], row[2].flatMap(Double.init) ?? 0) }
+                guard let id = row[0] else { continue }
+                current[id] = (
+                    row[1],
+                    StoryRank(
+                        alone: row[2] == "1", date: row[3].flatMap { Double($0) } ?? 0, article: row[4] ?? "", event: id
+                    )
+                )
             }
             var desired: [String: String?] = current.mapValues { _ in nil }
             for group in groups {
-                let members = group.filter { current[$0] != nil }
-                guard members.count >= 2,
-                    let lead = members.min(by: {
-                        (current[$0]?.created ?? 0, $0) < (current[$1]?.created ?? 0, $1)
-                    })
-                else { continue }
-                for member in members { desired[member] = lead }
+                var ranked: [(id: String, rank: StoryRank)] = []
+                for id in group { if let rank = current[id]?.rank { ranked.append((id, rank)) } }
+                guard ranked.count >= 2, let lead = ranked.min(by: { $0.rank < $1.rank })?.id else { continue }
+                for member in ranked { desired[member.id] = lead }
             }
-            var changed = Set<String>()
+            var changed = created
             for (id, story) in desired where current[id]?.story != story {
                 try eventRows(
                     "UPDATE events SET story_id = ? WHERE id = ?;", [story.map { .text($0) } ?? .null, .text(id)])
@@ -564,6 +585,48 @@ extension DatabaseEngine {
             }
             return changed
         }
+    }
+
+    /// Puts each attached report into its target's group as the only member of its own event, created at `date` when
+    /// it has none; a report that now shares an event with others is left out. Returns the events created.
+    private func attachSingles(_ attaching: [String: String], to groups: inout [[String]], at date: Date) throws
+        -> Set<String>
+    {
+        var created = Set<String>()
+        for (article, target) in attaching.sorted(by: { $0.key < $1.key }) {
+            guard let member = try memberArticleID(article) else { continue }
+            let single: String
+            if let own = try eventRows("SELECT event_id FROM event_members WHERE article_id = ?;", [.text(member)])
+                .first?[0]
+            {
+                guard
+                    try eventRows("SELECT count(*) FROM event_members WHERE event_id = ?;", [.text(own)]).first?[0]
+                        == "1"
+                else { continue }
+                single = own
+            } else {
+                single = try insertEvent(members: [member], at: date.timeIntervalSince1970)
+                created.insert(single)
+            }
+            if let index = groups.firstIndex(where: { $0.contains(target) }) {
+                groups[index].append(single)
+            } else {
+                groups.append([target, single])
+            }
+        }
+        return created
+    }
+
+    /// Events of one report that belong to a story (#581): reports the story pass attached as acts of their own.
+    func storyAttachedEventIDs(since activeSince: Date) throws -> Set<String> {
+        Set(
+            try eventRows(
+                """
+                SELECT e.id FROM events e JOIN event_members m ON m.event_id = e.id
+                WHERE e.merged_into IS NULL AND e.story_id IS NOT NULL AND e.updated_at >= ?
+                GROUP BY e.id HAVING count(*) = 1;
+                """, [.real(activeSince.timeIntervalSince1970)]
+            ).compactMap { $0[0] })
     }
 
     /// The event that currently holds an article; old article IDs resolve to the stored document.
@@ -909,7 +972,8 @@ extension DatabaseEngine {
             ).first?.first.flatMap { $0.flatMap(Int.init) } ?? 0
         guard total > 0 else { return [] }
         var common = Set<String>()
-        for term in terms.sorted().prefix(64) {
+        // Every term is checked, one FTS count each: a cap let all but the alphabetically first names through (#581).
+        for term in terms.sorted() {
             try Task.checkCancellation()
             let words = term.split { !$0.isLetter && !$0.isNumber }
             guard !words.isEmpty else { continue }
@@ -989,6 +1053,18 @@ extension DatabaseEngine {
         guard let live = try? liveEvent(eventID) else { return nil }
         let members = try eventMatchRows("\(Self.eventMatchColumns) WHERE m.event_id = ?;", [.text(live.id)])
         return (live.id, live.version, members)
+    }
+
+    /// Visible reports published since `activeSince` that no event holds and the current matcher has processed: the
+    /// reports alone the story pass may attach to a story (#581).
+    func unclusteredEventMatchRows(since activeSince: Date, matcherVersion: Int) throws -> [EventMatchRow] {
+        try eventMatchRows(
+            """
+            \(Self.eventMatchColumns)
+            WHERE m.event_id IS NULL AND ms.matcher_version = ? AND \(Self.articleDateOrder) >= ?
+                AND \(Self.visibleArticle)
+            ORDER BY a.id;
+            """, [.integer(matcherVersion), .real(activeSince.timeIntervalSince1970)])
     }
 
     /// Every live event updated since `activeSince`, with its members, for merging fragments of one story.
@@ -1301,9 +1377,22 @@ extension DatabaseEngine {
                         articleID: member.articleID, source: member.source, title: member.title, date: member.date,
                         joinedVersion: member.joinedVersion + others, isRead: member.isRead, isSaved: member.isSaved)
                 }
+                // The card opens the story's newest event of two or more reports, by its first report (#581): the
+                // latest act, whose reports raise the card's update mark; `story_id` stays the earliest event.
+                var first: [String: (date: Date, id: String)] = [:]
+                var counts: [String: Int] = [:]
+                for row in story.rows {
+                    counts[row.event, default: 0] += 1
+                    let key = (row.member.date, row.member.articleID)
+                    if let known = first[row.event], (known.date, known.id) <= key { continue }
+                    first[row.event] = key
+                }
+                let open =
+                    first.filter { (counts[$0.key] ?? 0) >= 2 }
+                    .max(by: { ($0.value.date, $0.value.id, $0.key) < ($1.value.date, $1.value.id, $1.key) })?.key
                 summaries.append(
                     EventFeedSummary(
-                        eventID: story.id, membershipVersion: membershipVersion, seenVersion: seenVersion,
+                        eventID: open ?? story.id, membershipVersion: membershipVersion, seenVersion: seenVersion,
                         members: members))
             }
             for row in rows {
@@ -1475,7 +1564,7 @@ extension DatabaseEngine {
     }
 
     /// Live events whose members the matcher judged a different act of the same story as this event's members
-    /// (decision "related-act"), each by its earliest member, newest event first.
+    /// (decision "related-act"), and the other events of its story (#581), each by its earliest member, newest first.
     func relatedActEvents(eventID: String, limit: Int = EventStoryRelation.linkLimit) throws -> [RelatedStoryEvent] {
         guard let live = try resolvedEventID(eventID) else { return [] }
         let rows = try eventRows(
@@ -1500,10 +1589,25 @@ extension DatabaseEngine {
                 eventID: id, articleID: articleID, title: title,
                 firstPublishedAt: Date(timeIntervalSince1970: published))
         }
+        // The other events of its story (#581), each by its earliest report: the overview opens the story's newest
+        // event, and "Earlier in This Story" reaches the story's earlier events through this list.
+        for id in try storyEventIDs(live) where id != live && earliest[id] == nil {
+            guard
+                let row = try eventRows(
+                    """
+                    SELECT a.id, a.title, a.published_at FROM event_members m JOIN articles a ON a.id = m.article_id
+                    WHERE m.event_id = ? AND \(Self.visibleArticle) ORDER BY a.published_at, a.id LIMIT 1;
+                    """, [.text(id)]
+                ).first, let articleID = row[0], let title = row[1], let published = row[2].flatMap({ Double($0) })
+            else { continue }
+            earliest[id] = RelatedStoryEvent(
+                eventID: id, articleID: articleID, title: title,
+                firstPublishedAt: Date(timeIntervalSince1970: published))
+        }
         return Array(
             earliest.values.sorted {
                 $0.firstPublishedAt == $1.firstPublishedAt
-                    ? $0.eventID < $1.eventID : $0.firstPublishedAt > $1.firstPublishedAt
+                    ? $0.articleID < $1.articleID : $0.firstPublishedAt > $1.firstPublishedAt
             }.prefix(limit))
     }
 
@@ -1585,5 +1689,20 @@ extension DatabaseEngine {
             try? rollbackTransaction()
             throw error
         }
+    }
+}
+
+/// An event's place in its story (#581): events of two or more reports before reports alone, then by first report (date,
+/// then article ID), then by event ID, since event IDs are random.
+private struct StoryRank: Comparable {
+    let alone: Bool
+    let date: Double
+    let article: String
+    let event: String
+
+    static func < (lhs: StoryRank, rhs: StoryRank) -> Bool {
+        if lhs.alone != rhs.alone { return !lhs.alone }
+        if lhs.date != rhs.date { return lhs.date < rhs.date }
+        return lhs.article != rhs.article ? lhs.article < rhs.article : lhs.event < rhs.event
     }
 }

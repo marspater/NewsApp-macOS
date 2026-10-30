@@ -276,7 +276,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Never claim more than the data shows: feed health is operational, not a quality rating; publisher updates are not verified corrections; overviews are generated and cite sources.
 - Generated content: "Generated summary", "Extractive summary", "Key points", "Event overview", "Assembled on this Mac from the cited passages" (caption or tooltip), "Assessed on this Mac". Never "AI-generated", "automated estimate" or a tone label.
 - Toolbar: Refresh's tooltip is "Check feeds for new stories"; the queued-updates button reads "Show N New Stories" with the tooltip "Stories that arrived in the background". Both are listed in Help › Keyboard Shortcuts.
-- The story layer (#581) groups related events into one card; "story" stays the word for what the person opens, and the wording for its acts and timeline is settled with that change.
+- The story layer (#581) groups related events into one card; "story" stays the word for what the person opens, and it opens the overview of its newest event of two or more reports (by first report), so a later development's reports are what the card opens to; the story keeps the identity of its earliest event, and a report that joined the story alone never opens it. The story's other events keep the word "event" (no new term such as "act"): those that began before the open event are listed under "Earlier in This Story", one row each with the date of its first report and its headline, newest first, and each row opens that event's own overview. "Timeline" stays the dated statements of the open event's overview.
 - No exclamation marks, no marketing adjectives, no "AI magic".
 
 ## 18. Components
