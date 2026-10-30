@@ -103,10 +103,10 @@ final class ArticleStore: ObservableObject {
     )
         async -> Set<String>
     {
-        guard !newArticles.isEmpty else { return [] }
+        guard !newArticles.isEmpty || validators != nil else { return [] }
         do {
             let insertedIDs = try await database.upsertArticles(newArticles, feedUrl: feedUrl, validators: validators)
-            if publish { await refreshState() }
+            if publish, !newArticles.isEmpty { await refreshState() }
             return insertedIDs
         } catch is CancellationError {
             // Superseded refreshes must not publish stale snapshots.
