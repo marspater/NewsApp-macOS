@@ -10469,6 +10469,54 @@ struct NewsTests {
         assertFalse(scoped.contains { $0.id == "g2" }, "The hidden member itself is never looked up")
         await db.close()
         try await testStoryImageIndexMigration(fixtureRoot: fixtureRoot)
+        try await testMarkAllReadScope(fixtureRoot: fixtureRoot)
+    }
+
+    /// #784: Mark All as Read marks only unread stories the reading feed shows. Earlier read times stay, and
+    /// analysis-only panel reports stay unread, since a read panel report would surface in History.
+    static func testMarkAllReadScope(fixtureRoot: URL) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-mark-all-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        func report(_ id: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Report \(id)", link: fixtureRoot.appendingPathComponent(id).absoluteString,
+                guid: id, description: "Report.", pubDate: Date(), source: "Publisher")
+        }
+        let panelURL = TensionMethodology.v1.panel[8].url
+        try await db.upsertArticles([report("earlier"), report("unread")], feedUrl: "https://example.com/rss")
+        try await db.upsertArticles([report("panel")], feedUrl: panelURL)
+        await db.setCollectionOnlyFeedURLs([panelURL])
+        try await db.markRead(articleId: "earlier", isRead: true)
+        func readAt(_ id: String) -> Double? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            defer {
+                sqlite3_finalize(statement)
+                sqlite3_close(handle)
+            }
+            guard sqlite3_open(path, &handle) == SQLITE_OK,
+                sqlite3_prepare_v2(
+                    handle, "SELECT read_at FROM article_state WHERE article_id = ? AND is_read = 1", -1,
+                    &statement, nil) == SQLITE_OK
+            else { return nil }
+            sqlite3_bind_text(statement, 1, id, -1, DatabaseEngine.sqliteTransient)
+            return sqlite3_step(statement) == SQLITE_ROW ? sqlite3_column_double(statement, 0) : nil
+        }
+        let earlier = readAt("earlier")
+        try await Task.sleep(nanoseconds: 20_000_000)
+        try await db.markAllRead()
+        assertEqual(readAt("earlier"), earlier, "Mark All as Read keeps the time a story was first read")
+        assertTrue(readAt("unread") != nil, "Mark All as Read marks unread listed stories")
+        assertTrue(readAt("panel") == nil, "Analysis-only panel reports stay unread and out of History")
+        try await db.markRead(articleId: "unread", isRead: false)
+        try await db.markAllRead(feedUrl: panelURL)
+        assertTrue(readAt("panel") == nil, "A panel feed's own Mark All as Read leaves its hidden reports alone")
+        await db.close()
     }
 
     static func testStoryImageIndexMigration(fixtureRoot: URL) async throws {
