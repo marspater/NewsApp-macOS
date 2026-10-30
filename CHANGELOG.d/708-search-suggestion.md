@@ -1,0 +1,1 @@
+- Search: a search that finds nothing offers "Search for …" with misspelled words corrected to the closest words in your stories' headlines and summaries, shown only when the corrected search finds stories.

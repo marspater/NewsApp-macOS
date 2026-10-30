@@ -21,6 +21,7 @@ extension NewsTests {
         try await testArticleEmbeddingsForeignKeyCascade()
         try await testHybridEventMatcherSemanticRescueAndVeto()
         try await testEmbeddingAwareValidationOfAssignedMembers()
+        testCosineSQLFunction()
         await testPairScorerReadsTheBinaryModel()
         try await testStoryModelSignal()
     }
@@ -88,6 +89,45 @@ extension NewsTests {
         assertEqual(both.related, 0, "A binary pair model has no related-act probability")
         assertEqual(both.same, same, "probability is the same-event probability")
         assertTrue(same > 0 && same < 1, "A probability lies between 0 and 1")
+    }
+
+    // MARK: - news_cosine SQL function
+
+    private static func testCosineSQLFunction() {
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(":memory:", &handle), SQLITE_OK, "Open in-memory database for news_cosine")
+        defer { sqlite3_close(handle) }
+        assertEqual(
+            sqlite3_create_function_v2(
+                handle, "news_cosine", 2, SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, cosineFunction, nil, nil, nil),
+            SQLITE_OK, "Register news_cosine")
+        func unit(_ components: [Int: Float]) -> [Float] {
+            var vector = [Float](repeating: 0, count: SentenceEmbedder.vectorDimension)
+            for (index, value) in components { vector[index] = value }
+            let norm = sqrt(components.values.reduce(0) { $0 + $1 * $1 })
+            return vector.map { $0 / norm }
+        }
+        // Blob, blob → cosine; any other argument shape → NULL.
+        func cosine(_ left: [Float], _ right: [Float]) -> Double? {
+            var statement: OpaquePointer?
+            assertEqual(
+                sqlite3_prepare_v2(handle, "SELECT news_cosine(?, ?);", -1, &statement, nil), SQLITE_OK,
+                "Prepare news_cosine")
+            defer { sqlite3_finalize(statement) }
+            for (index, vector) in [left, right].enumerated() {
+                _ = vector.withUnsafeBytes { raw in
+                    sqlite3_bind_blob(
+                        statement, Int32(index + 1), raw.baseAddress, Int32(raw.count), DatabaseEngine.sqliteTransient)
+                }
+            }
+            assertEqual(sqlite3_step(statement), SQLITE_ROW, "news_cosine returns a row")
+            return sqlite3_column_type(statement, 0) == SQLITE_NULL ? nil : sqlite3_column_double(statement, 0)
+        }
+        let x = unit([0: 1])
+        assertTrue(abs((cosine(x, x) ?? 0) - 1) < 1e-6, "Identical vectors have cosine 1")
+        assertTrue(abs((cosine(x, unit([0: 1, 1: 1])) ?? 0) - 0.5.squareRoot()) < 1e-6, "45° apart has cosine √½")
+        assertTrue(abs(cosine(x, unit([1: 1])) ?? 1) < 1e-6, "Orthogonal vectors have cosine 0")
+        assertTrue(cosine(x, [1, 0, 0]) == nil, "A vector of another dimension is NULL, not a wrong score")
     }
 
     // MARK: - BertWordPieceTokenizer (#127)

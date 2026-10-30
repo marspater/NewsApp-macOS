@@ -19,6 +19,7 @@ actor DatabaseEngine {
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
+    private var spellingCache: (key: String, words: [String: Int])?
     /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
     private(set) var lastStoryPass: Date?
     /// Story work skipped or interrupted since the last completed pass; retried when energy permits.
@@ -1150,7 +1151,8 @@ actor DatabaseEngine {
             sqlite3_create_function_v2(db, "news_muted_source", 2, flags, nil, mutedSourceFunction, nil, nil, nil)
                 == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_muted_topic", 3, flags, nil, mutedTopicFunction, nil, nil, nil)
-                == SQLITE_OK
+                == SQLITE_OK,
+            sqlite3_create_function_v2(db, "news_cosine", 2, flags, nil, cosineFunction, nil, nil, nil) == SQLITE_OK
         else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1,
@@ -2380,6 +2382,55 @@ actor DatabaseEngine {
         return try curateImages(in: results)
     }
 
+    /// "Search for …" when a search finds nothing (#708): the query with misspelled words replaced by the closest
+    /// words of stored headlines and feed summaries, offered only when that search finds stories.
+    func searchSuggestion(query: String, muting: MuteRules = MuteRules()) throws -> String? {
+        guard let corrected = SearchSpelling.corrected(query, vocabulary: try spellingVocabulary()) else { return nil }
+        return try searchArticles(query: corrected, limit: 1, muting: muting).isEmpty ? nil : corrected
+    }
+
+    /// Word counts of visible headlines and feed summaries, rebuilt only after stories are added, removed, re-worded
+    /// or reconciled: every insert and every headline or summary change appends a `publisher_content_revisions` row.
+    private func spellingVocabulary() throws -> [String: Int] {
+        guard let db = db else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        func eachRow(_ sql: String, _ body: (OpaquePointer?) -> Void) throws {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw sqliteError(db, "Cannot prepare spelling vocabulary query")
+            }
+            defer { sqlite3_finalize(statement) }
+            var status = sqlite3_step(statement)
+            while status == SQLITE_ROW {
+                body(statement)
+                status = sqlite3_step(statement)
+            }
+            // A scan that stops early must not be cached as the whole vocabulary.
+            guard status == SQLITE_DONE else { throw sqliteError(db, "Cannot read spelling vocabulary") }
+        }
+        var key = ""
+        try eachRow(
+            """
+            SELECT (SELECT count(*) FROM articles), (SELECT coalesce(max(rowid), 0) FROM publisher_content_revisions),
+                   (SELECT count(*) FROM article_reconciliations);
+            """
+        ) {
+            key = "\(sqlite3_column_int64($0, 0)):\(sqlite3_column_int64($0, 1)):\(sqlite3_column_int64($0, 2))"
+        }
+        if let spellingCache, spellingCache.key == key { return spellingCache.words }
+        var words: [String: Int] = [:]
+        try eachRow(
+            "SELECT a.title || ' ' || coalesce(a.description, '') FROM articles a WHERE \(Self.visibleArticle);"
+        ) {
+            guard let text = sqlite3_column_text($0, 0) else { return }
+            for word in SearchSpelling.words(in: String(cString: text)) { words[word, default: 0] += 1 }
+        }
+        spellingCache = (key, words)
+        return words
+    }
+
     // MARK: - State Mutations
 
     func markRead(articleId: String, isRead: Bool) throws {
@@ -3150,6 +3201,8 @@ actor DatabaseEngine {
         sqlite3_bind_double(stmt, 2, cutoff)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention pruning failed") }
         let changes = Int(sqlite3_changes(db))
+        // The only delete of stories: SQLite may reuse a deleted top rowid, so the spelling cache key could repeat.
+        if changes > 0 { spellingCache = nil }
         try pruneEmptyEvents()
 
         // Prune derived intelligence rows that are no longer needed for active clustering (#537):
@@ -3988,6 +4041,28 @@ func publisherInputFunction(
     func text(_ index: Int) -> String { sqlite3_value_text(arguments[index]).map { String(cString: $0) } ?? "" }
     let hash = PublisherContentRevision.inputHash(title: text(0), description: text(1), content: text(2))
     sqlite3_result_text(context, hash, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+}
+
+/// `news_cosine(a, b)`: similarity of two stored `article_embeddings` vectors through vDSP
+/// (`SentenceEmbedder.cosineSimilarity`; stored vectors are L2-normalized). NULL unless both are 384-float blobs.
+func cosineFunction(
+    _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
+) {
+    guard count == 2, let values else { return sqlite3_result_null(context) }
+    func vector(_ index: Int) -> [Float]? {
+        let value = values[index]
+        guard sqlite3_value_type(value) == SQLITE_BLOB, let blob = sqlite3_value_blob(value) else { return nil }
+        let dimension = SentenceEmbedder.vectorDimension
+        let byteCount = dimension * MemoryLayout<Float>.stride
+        guard Int(sqlite3_value_bytes(value)) == byteCount else { return nil }
+        // SQLite does not promise Float alignment for blob memory, so copy the bytes instead of rebinding them.
+        return [Float](unsafeUninitializedCapacity: dimension) { buffer, initialized in
+            memcpy(buffer.baseAddress!, blob, byteCount)
+            initialized = dimension
+        }
+    }
+    guard let left = vector(0), let right = vector(1) else { return sqlite3_result_null(context) }
+    sqlite3_result_double(context, SentenceEmbedder.cosineSimilarity(left, right))
 }
 
 /// Pure content classification for the one-time topic repair; never trusts an earlier generated label.
