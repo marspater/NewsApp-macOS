@@ -568,13 +568,16 @@ class FeedManager: NSObject, ObservableObject {
 
         var insertedIDs = Set<String>()
         var allParsed = [FeedArticle]()
+        // Collected statuses are published together after ingestion: one change per feed re-rendered every view that
+        // observes the manager once per feed (#778).
+        var statuses: [String: FeedStatus] = [:]
         for res in results {
             guard !Task.isCancelled else { break }
             guard targetURLs.contains(res.urlString) else { continue }
             if let err = res.error {
-                feedStatuses[res.urlString] = .failed(err)
+                statuses[res.urlString] = .failed(err)
             } else {
-                feedStatuses[res.urlString] = .idle
+                statuses[res.urlString] = .idle
                 if let incoming = res.articles {
                     let arts = incoming.map { article in
                         var article = article
@@ -588,6 +591,10 @@ class FeedManager: NSObject, ObservableObject {
                 }
             }
         }
+        // A feed removed while this run ingested keeps no status.
+        var updatedStatuses = feedStatuses
+        for (url, status) in statuses where updatedStatuses[url] != nil { updatedStatuses[url] = status }
+        feedStatuses = updatedStatuses
 
         // Publish one coherent snapshot per collection, including any committed prefix if it was cancelled.
         await articleStore.refreshState()
