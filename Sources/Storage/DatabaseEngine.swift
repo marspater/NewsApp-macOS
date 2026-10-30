@@ -1553,8 +1553,8 @@ actor DatabaseEngine {
                 // read the classifier's value from article_enrichment as before. A library that started this open
                 // below v22 had every hint replaced with a classifier label by the v22 step above (and its enrichment
                 // categories cleared, so nothing would match): clear them all. A content change can clear the
-                // enrichment category while the hint keeps the classifier's label: clear those labels too.
-                let labels = NewsCategory.allCases.map { "'\($0.rawValue)'" }.joined(separator: ", ")
+                // enrichment category while the hint keeps the classifier's label: clear it only where it is the label
+                // the classifier gives that article, since a publisher may send a label of the same name.
                 try executeSimple(
                     version < 22
                         // An article without an enrichment row keeps v22's label there, since the open-time backfill
@@ -1569,7 +1569,7 @@ actor DatabaseEngine {
                         UPDATE articles SET category = NULL WHERE category IS NOT NULL AND category = (
                             SELECT ae.category FROM article_enrichment ae WHERE ae.article_id = articles.id)
                             OR ((SELECT ae.category FROM article_enrichment ae WHERE ae.article_id = articles.id)
-                                IS NULL AND category IN (\(labels)));
+                                IS NULL AND category = news_topic(title, coalesce(description, ''), content));
                         """)
                 try Task.checkCancellation()
                 try setUserVersion(28)
