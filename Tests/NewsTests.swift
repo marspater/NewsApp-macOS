@@ -2523,6 +2523,17 @@ struct NewsTests {
         assertEqual(
             pipeline.decodeHTML(data: "<p>caf\u{00e9} na\u{00ef}ve</p>".data(using: .isoLatin1)!),
             "<p>caf\u{00e9} na\u{00ef}ve</p>", "An undeclared Latin-1 page still decodes as Latin-1")
+        assertEqual(
+            pipeline.decodeHTML(data: Data("<p>caf\u{00e9} \u{FFFD}</p>".utf8)), "<p>caf\u{00e9} \u{FFFD}</p>",
+            "Valid UTF-8 containing a literal replacement character stays UTF-8")
+        var tied = Data("<p>caf\u{00e9} ".utf8)
+        tied.append(0xFF)
+        assertEqual(
+            pipeline.decodeHTML(data: tied), "<p>caf\u{00e9} \u{FFFD}",
+            "One valid multi-byte character against one invalid byte keeps UTF-8")
+        assertEqual(
+            pipeline.decodeHTML(data: "<p>na\u{00ef}ve \u{00ff}".data(using: .isoLatin1)!), "<p>na\u{00ef}ve \u{00ff}",
+            "A trailing byte that cannot start a UTF-8 sequence is not trimmed from a Latin-1 page")
         let inline = "<p>The <strong>central bank</strong> raised <a href='/rate'>rates</a> today.</p>"
         assertEqual(
             HTMLDOMBuilder.parse(html: inline).combinedText(), "The central bank raised rates today.",
