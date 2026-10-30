@@ -1,0 +1,557 @@
+{
+  "after_multifunction_quiet": {
+    "minilm_all": {
+      "batch_2000_ms": 1671.2,
+      "batch_49_ms": 44.6,
+      "first_prediction_ms": 63.7,
+      "load_ms": 1254.2,
+      "per_text_median_ms": 2.8
+    },
+    "minilm_cpuAndGPU": {
+      "batch_2000_ms": 1584.6,
+      "batch_49_ms": 46.2,
+      "first_prediction_ms": 22.4,
+      "load_ms": 416.8,
+      "per_text_median_ms": 1.3
+    },
+    "minilm_cpuAndNeuralEngine": {
+      "batch_2000_ms": 742,
+      "batch_49_ms": 21.2,
+      "first_prediction_ms": 3.1,
+      "load_ms": 129.7,
+      "per_text_median_ms": 0.9
+    },
+    "minilm_cpuOnly": {
+      "batch_2000_ms": 1379.6,
+      "batch_49_ms": 31,
+      "first_prediction_ms": 3.2,
+      "load_ms": 435.1,
+      "per_text_median_ms": 1.1
+    },
+    "minilm_plan_all": {
+      "length_128": {
+        "cost_share": {
+          "cpu": 0.4259,
+          "neuralEngine": 0.5741
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 2,
+          "ios18.cast": 6,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "ios18.mul": 1,
+          "select": 1
+        },
+        "operations": 168,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 2,
+          "ios18.gather": 2,
+          "ios18.layer_norm": 1
+        }
+      },
+      "length_16": {
+        "cost_share": {
+          "gpu": 1
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 2,
+          "ios18.cast": 6,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "ios18.mul": 1,
+          "select": 1
+        },
+        "operations": 168,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 20,
+          "ios18.gather": 2,
+          "ios18.gelu": 6,
+          "ios18.layer_norm": 13,
+          "ios18.linear": 37,
+          "ios18.matmul": 12,
+          "ios18.mul": 7,
+          "ios18.reshape": 24,
+          "ios18.slice_by_index": 1,
+          "ios18.softmax": 6,
+          "ios18.sub": 1,
+          "ios18.tanh": 1,
+          "ios18.transpose": 24
+        }
+      },
+      "length_32": {
+        "cost_share": {
+          "gpu": 1
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 2,
+          "ios18.cast": 6,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "ios18.mul": 1,
+          "select": 1
+        },
+        "operations": 168,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 20,
+          "ios18.gather": 2,
+          "ios18.gelu": 6,
+          "ios18.layer_norm": 13,
+          "ios18.linear": 37,
+          "ios18.matmul": 12,
+          "ios18.mul": 7,
+          "ios18.reshape": 24,
+          "ios18.slice_by_index": 1,
+          "ios18.softmax": 6,
+          "ios18.sub": 1,
+          "ios18.tanh": 1,
+          "ios18.transpose": 24
+        }
+      },
+      "length_64": {
+        "cost_share": {
+          "gpu": 1
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 2,
+          "ios18.cast": 6,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "ios18.mul": 1,
+          "select": 1
+        },
+        "operations": 168,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 20,
+          "ios18.gather": 2,
+          "ios18.gelu": 6,
+          "ios18.layer_norm": 13,
+          "ios18.linear": 37,
+          "ios18.matmul": 12,
+          "ios18.mul": 7,
+          "ios18.reshape": 24,
+          "ios18.slice_by_index": 1,
+          "ios18.softmax": 6,
+          "ios18.sub": 1,
+          "ios18.tanh": 1,
+          "ios18.transpose": 24
+        }
+      }
+    },
+    "minilm_plan_cpuAndNeuralEngine": {
+      "length_128": {
+        "cost_share": {
+          "cpu": 0.4259,
+          "neuralEngine": 0.5741
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 2,
+          "ios18.cast": 6,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "ios18.mul": 1,
+          "select": 1
+        },
+        "operations": 168,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 2,
+          "ios18.gather": 2,
+          "ios18.layer_norm": 1
+        }
+      },
+      "length_16": {
+        "cost_share": {
+          "cpu": 0.4436,
+          "neuralEngine": 0.5564
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 2,
+          "ios18.cast": 6,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "ios18.mul": 1,
+          "select": 1
+        },
+        "operations": 168,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 2,
+          "ios18.gather": 2,
+          "ios18.layer_norm": 1
+        }
+      },
+      "length_32": {
+        "cost_share": {
+          "cpu": 0.3366,
+          "neuralEngine": 0.6634
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 2,
+          "ios18.cast": 6,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "ios18.mul": 1,
+          "select": 1
+        },
+        "operations": 168,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 2,
+          "ios18.gather": 2,
+          "ios18.layer_norm": 1
+        }
+      },
+      "length_64": {
+        "cost_share": {
+          "cpu": 0.2022,
+          "neuralEngine": 0.7978
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 2,
+          "ios18.cast": 6,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "ios18.mul": 1,
+          "select": 1
+        },
+        "operations": 168,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 2,
+          "ios18.gather": 2,
+          "ios18.layer_norm": 1
+        }
+      }
+    },
+    "os": "Version 27.2 (Build 26B123)",
+    "pairscorer_all": {
+      "batch_55_ms": 90.4,
+      "first_prediction_ms": 3.5,
+      "load_ms": 1070.8,
+      "per_pair_median_ms": 1.9
+    },
+    "pairscorer_cpuAndGPU": {
+      "batch_55_ms": 55.2,
+      "first_prediction_ms": 45.4,
+      "load_ms": 129.1,
+      "per_pair_median_ms": 3
+    },
+    "pairscorer_cpuAndNeuralEngine": {
+      "batch_55_ms": 86.6,
+      "first_prediction_ms": 3.5,
+      "load_ms": 750.2,
+      "per_pair_median_ms": 1.8
+    },
+    "pairscorer_cpuOnly": {
+      "batch_55_ms": 139.5,
+      "first_prediction_ms": 7,
+      "load_ms": 79,
+      "per_pair_median_ms": 4.9
+    },
+    "pairscorer_plan_all": {
+      "main": {
+        "cost_share": {
+          "cpu": 0.2424,
+          "neuralEngine": 0.7576
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 1,
+          "ios18.cast": 5,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "select": 1
+        },
+        "operations": 167,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 2,
+          "ios18.gather": 1,
+          "ios18.layer_norm": 1
+        }
+      }
+    },
+    "pairscorer_plan_cpuAndNeuralEngine": {
+      "main": {
+        "cost_share": {
+          "cpu": 0.2424,
+          "neuralEngine": 0.7576
+        },
+        "not_supported_on_neural_engine": {
+          "ios18.add": 1,
+          "ios18.cast": 5,
+          "ios18.expand_dims": 2,
+          "ios18.gather": 1,
+          "ios18.greater_equal": 1,
+          "select": 1
+        },
+        "operations": 167,
+        "supported_but_placed_elsewhere": {
+          "ios18.add": 2,
+          "ios18.gather": 1,
+          "ios18.layer_norm": 1
+        }
+      }
+    },
+    "texts": 56,
+    "tokenize_per_text_median_ms": 0,
+    "tokens_max": 57,
+    "tokens_median": 40
+  },
+  "authored_corpus": "matcher regressions v13: TP 23, FP 0, FN 2 before and after (identical)",
+  "before_shipped_flexible_contended": {
+    "minilm_all": {
+      "batch_2000_ms": 9746.4,
+      "batch_49_ms": 161.8,
+      "first_prediction_ms": 8.2,
+      "load_ms": 800,
+      "per_text_median_ms": 5.8
+    },
+    "minilm_cpuAndGPU": {
+      "batch_2000_ms": 8809.2,
+      "batch_49_ms": 251.3,
+      "first_prediction_ms": 7.1,
+      "load_ms": 449,
+      "per_text_median_ms": 8.5
+    },
+    "minilm_cpuAndNeuralEngine": {
+      "batch_2000_ms": 10193.4,
+      "batch_49_ms": 252.4,
+      "first_prediction_ms": 11.9,
+      "load_ms": 2390.5,
+      "per_text_median_ms": 6.6
+    },
+    "minilm_cpuOnly": {
+      "batch_2000_ms": 7772.9,
+      "batch_49_ms": 209.8,
+      "first_prediction_ms": 7.7,
+      "load_ms": 524.9,
+      "per_text_median_ms": 6.9
+    },
+    "minilm_plan": {
+      "cost_share": {
+        "cpu": 1
+      },
+      "not_supported_on_neural_engine": {
+        "cast": 3,
+        "expand_dims": 2,
+        "gather": 3,
+        "mul": 1,
+        "slice_by_index": 2,
+        "tile": 1
+      },
+      "operations": 266,
+      "supported_but_placed_elsewhere": {
+        "add": 20,
+        "cast": 2,
+        "concat": 25,
+        "gather": 49,
+        "gelu": 6,
+        "layer_norm": 13,
+        "linear": 37,
+        "matmul": 12,
+        "mul": 6,
+        "real_div": 1,
+        "reshape": 24,
+        "shape": 26,
+        "slice_by_index": 1,
+        "softmax": 6,
+        "sub": 1,
+        "tanh": 1,
+        "transpose": 24
+      }
+    },
+    "os": "Version 27.2 (Build 26B123)",
+    "pairscorer_all": {
+      "batch_48_ms": 176.9,
+      "first_prediction_ms": 9.5,
+      "load_ms": 8057.2,
+      "per_pair_median_ms": 4.6
+    },
+    "pairscorer_cpuAndGPU": {
+      "batch_48_ms": 422.5,
+      "first_prediction_ms": 8133.9,
+      "load_ms": 337.3,
+      "per_pair_median_ms": 9.3
+    },
+    "pairscorer_cpuAndNeuralEngine": {
+      "batch_48_ms": 183.9,
+      "first_prediction_ms": 7.4,
+      "load_ms": 3537.1,
+      "per_pair_median_ms": 4.8
+    },
+    "pairscorer_cpuOnly": {
+      "batch_48_ms": 1467.2,
+      "first_prediction_ms": 26.5,
+      "load_ms": 164.2,
+      "per_pair_median_ms": 28.5
+    },
+    "pairscorer_plan": {
+      "cost_share": {
+        "cpu": 0.2424,
+        "neuralEngine": 0.7576
+      },
+      "not_supported_on_neural_engine": {
+        "ios18.add": 1,
+        "ios18.cast": 5,
+        "ios18.expand_dims": 2,
+        "ios18.gather": 1,
+        "ios18.greater_equal": 1,
+        "select": 1
+      },
+      "operations": 167,
+      "supported_but_placed_elsewhere": {
+        "ios18.add": 2,
+        "ios18.gather": 1,
+        "ios18.layer_norm": 1
+      }
+    },
+    "texts": 49,
+    "tokens_max": 57,
+    "tokens_median": 40
+  },
+  "before_shipped_flexible_quiet": {
+    "minilm_all": {
+      "batch_2000_ms": 927.4,
+      "batch_49_ms": 27.2,
+      "first_prediction_ms": 2.5,
+      "load_ms": 252.5,
+      "per_text_median_ms": 1.1
+    },
+    "minilm_cpuAndGPU": {
+      "batch_2000_ms": 940.2,
+      "batch_49_ms": 27.1,
+      "first_prediction_ms": 2.3,
+      "load_ms": 104.7,
+      "per_text_median_ms": 1.1
+    },
+    "minilm_cpuAndNeuralEngine": {
+      "batch_2000_ms": 922.8,
+      "batch_49_ms": 27.3,
+      "first_prediction_ms": 2.4,
+      "load_ms": 225,
+      "per_text_median_ms": 1.2
+    },
+    "minilm_cpuOnly": {
+      "batch_2000_ms": 908,
+      "batch_49_ms": 26.6,
+      "first_prediction_ms": 2.3,
+      "load_ms": 94.5,
+      "per_text_median_ms": 1.1
+    },
+    "minilm_plan": {
+      "cost_share": {
+        "cpu": 1
+      },
+      "not_supported_on_neural_engine": {
+        "cast": 3,
+        "expand_dims": 2,
+        "gather": 3,
+        "mul": 1,
+        "slice_by_index": 2,
+        "tile": 1
+      },
+      "operations": 266,
+      "supported_but_placed_elsewhere": {
+        "add": 20,
+        "cast": 2,
+        "concat": 25,
+        "gather": 49,
+        "gelu": 6,
+        "layer_norm": 13,
+        "linear": 37,
+        "matmul": 12,
+        "mul": 6,
+        "real_div": 1,
+        "reshape": 24,
+        "shape": 26,
+        "slice_by_index": 1,
+        "softmax": 6,
+        "sub": 1,
+        "tanh": 1,
+        "transpose": 24
+      }
+    },
+    "os": "Version 27.2 (Build 26B123)",
+    "pairscorer_all": {
+      "batch_55_ms": 87.2,
+      "first_prediction_ms": 3.2,
+      "load_ms": 707.4,
+      "per_pair_median_ms": 1.8
+    },
+    "pairscorer_cpuAndGPU": {
+      "batch_55_ms": 51.7,
+      "first_prediction_ms": 35,
+      "load_ms": 96.9,
+      "per_pair_median_ms": 1.5
+    },
+    "pairscorer_cpuAndNeuralEngine": {
+      "batch_55_ms": 87.4,
+      "first_prediction_ms": 2.3,
+      "load_ms": 695.6,
+      "per_pair_median_ms": 1.8
+    },
+    "pairscorer_cpuOnly": {
+      "batch_55_ms": 102.5,
+      "first_prediction_ms": 4.7,
+      "load_ms": 50.9,
+      "per_pair_median_ms": 3.4
+    },
+    "pairscorer_plan": {
+      "cost_share": {
+        "cpu": 0.2424,
+        "neuralEngine": 0.7576
+      },
+      "not_supported_on_neural_engine": {
+        "ios18.add": 1,
+        "ios18.cast": 5,
+        "ios18.expand_dims": 2,
+        "ios18.gather": 1,
+        "ios18.greater_equal": 1,
+        "select": 1
+      },
+      "operations": 167,
+      "supported_but_placed_elsewhere": {
+        "ios18.add": 2,
+        "ios18.gather": 1,
+        "ios18.layer_norm": 1
+      }
+    },
+    "texts": 56,
+    "tokens_max": 57,
+    "tokens_median": 40
+  },
+  "change": "minilm.mlmodelc re-exported from the same weights as four fixed-length functions (16/32/64/128 tokens, shared weights); SentenceEmbedder pads each text to the next length, batches per length, pools half-float outputs from the buffer and loads with .cpuAndNeuralEngine",
+  "conditions": "Apple M5, 10 cores, 24 GB, macOS 27.2 (26B123), -O test runner, no training or evaluation job running; 1-minute load average 2.4-3.5 during the quiet runs. The contended block ran while a pair-model training run held the GPU (load 16-30).",
+  "date": "2026-10-27",
+  "embedding_cold_2000_ms": {
+    "after_load_average_1_5_15": [
+      "2.81 3.63 4.70 at start, 2.80 3.56 4.30 at end",
+      "3.26 3.38 4.00 at start, 5.34 5.96 5.05 at end"
+    ],
+    "after_ms": [
+      832.4,
+      768.2
+    ],
+    "before_load_average_1_5_15": "3.72 4.17 5.10 at end",
+    "before_premerge_runner_ms": 482.4,
+    "gate_ms": 1040,
+    "note": "synthetic 2,000 archive texts of about 8 word pieces, model load included; the after number includes loading four functions. The merged base (origin/mars/m-683-importance-judges) aborts this run with an IOSurface allocation exception in one unbounded Core ML batch, with the old model too; the after code bounds batches at 64 texts inside an autorelease pool. Before is the pre-merge runner on the same machine minutes later."
+  },
+  "epic": "#574",
+  "issue": "#554",
+  "rejected": {
+    "enumerated_shapes": "plan: every operation preferred on the CPU; per-text median 76 ms, 2,000 texts 155 s (contended)"
+  },
+  "texts": "authored-corpus matching texts (56 after the m-683 merge, 49 in the contended run), median 40 and at most 57 word pieces; batch_2000 cycles them",
+  "tune_replay_en": "TP 44, FP 0, FN 49 before and after; whole tune report identical",
+  "vector_parity_authored_corpus": {
+    "below_0_9999": 0,
+    "cosine_median": 0.999978,
+    "cosine_min": 0.999967,
+    "texts": 56
+  }
+}

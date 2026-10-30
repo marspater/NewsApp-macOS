@@ -439,6 +439,10 @@ struct NewsTests {
             try await exportEmbeddingVectors(output: output)
             return
         }
+        if CommandLine.arguments.contains("--compute-plan") {
+            try await reportComputePlacement()
+            return
+        }
         if CommandLine.arguments.contains("--fragment-merge-timing") {
             try await timeFragmentMerge()
             return

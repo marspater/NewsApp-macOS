@@ -1,11 +1,14 @@
 {
  "model": "minilm",
  "base": "sentence-transformers/all-MiniLM-L6-v2 (Apache License 2.0)",
- "converted_with": {"coremltools": "6.3.0", "torch": "1.13.1", "transformers": "4.8.2"},
- "inputs": {"input_ids": "int32 [1, 1...128]", "attention_mask": "int32 [1, 1...128]"},
+ "converted_with": {"coremltools": "9.0", "torch": "2.14.1", "transformers": "5.20.2", "conversion_date": "2026-10-27"},
+ "source": "the weights of the earlier minilm.mlmodelc (coremltools 6.3.0, flexible 1...128 tokens), unchanged",
+ "functions": {"length_16": "int32 [1, 16]", "length_32": "int32 [1, 32]", "length_64": "int32 [1, 64]", "length_128": "int32 [1, 128] (default)"},
+ "inputs": ["input_ids", "attention_mask"],
  "outputs": ["last_hidden_state", "pooler_output"],
  "precision": "float16",
+ "compute_units": "cpuAndNeuralEngine",
  "model_version": 2,
- "reproduce": "script/training/convert_minilm.py OUT --source hub (pinned revision) or --source shipped; parity numbers in docs/audits/2026-10-25-reproducible-models.md",
- "note": "The original conversion script was not kept; #555 added convert_minilm.py and its parity check."
+ "reproduce": "script/training/convert_minilm.py OUT --source hub (pinned revision; same weights); placement and parity in docs/audits/2026-10-27-neural-engine-placement.md",
+ "note": "#554: one fixed-length function per sequence length, so Core ML runs the encoder on the Neural Engine; pooled vectors agree with the earlier model to a cosine of at least 0.99996 on the authored corpus, so stored embeddings stay valid."
 }
