@@ -1470,6 +1470,18 @@ struct NewsTests {
         assertEqual(notice, nil, "A backed-up migration opens writable without a notice")
         assertEqual(value(library, "PRAGMA user_version;"), current, "The v25 library migrates to schemaVersion")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "The migration keeps every article")
+        // A write waits for another connection's lock instead of failing busy.
+        var locker: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &locker), SQLITE_OK, "Open a second connection")
+        assertEqual(
+            sqlite3_exec(locker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK, "A second connection takes the lock")
+        nonisolated(unsafe) let held = locker
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+            sqlite3_exec(held, "COMMIT;", nil, nil, nil)
+            sqlite3_close(held)
+        }
+        try await db.markRead(articleId: "backup-a", isRead: true)
+        assertTrue(try await db.isRead(articleId: "backup-a"), "A write waits out another connection's lock")
         await db.close()
         let backups = try files("news-before-")
         let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())

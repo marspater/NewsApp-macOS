@@ -34,6 +34,8 @@ actor DatabaseEngine {
     private(set) var healthNotice: String?
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
     static let schemaVersion = 27
+    /// How long a statement waits for another connection's lock before SQLite reports it busy.
+    static let busyTimeoutMilliseconds: Int32 = 5_000
 
     func databaseHealthNotice() -> String? {
         healthNotice
@@ -154,6 +156,8 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: "Failed to open database at \(dbPath): \(errMsg)"])
         }
 
+        // Another process on the same library (a second development build) waits for a lock instead of failing busy.
+        sqlite3_busy_timeout(openDb, Self.busyTimeoutMilliseconds)
         self.db = openDb
 
         if let issue = verifyQuickCheck() {
@@ -271,6 +275,7 @@ actor DatabaseEngine {
         var roHandle: OpaquePointer?
         let roFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
         if sqlite3_open_v2(dbPath, &roHandle, roFlags, nil) == SQLITE_OK, let roDb = roHandle {
+            sqlite3_busy_timeout(roDb, Self.busyTimeoutMilliseconds)
             self.db = roDb
             do {
                 try registerFunctions()
