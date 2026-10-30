@@ -37,11 +37,17 @@ extension DatabaseEngine {
         defer { sqlite3_finalize(checkStmt) }
 
         sqlite3_bind_text(checkStmt, 1, overview.eventID, -1, Self.sqliteTransient)
+        // A result for an older version of the event is stale, stored overview or not (#789). The event's own version
+        // decides, so a row stored under a story's summed version is replaced rather than kept.
+        let currentVersion = try eventRows(
+            "SELECT membership_version FROM events WHERE id = ?;", [.text(overview.eventID)]
+        ).first?[0].flatMap { Int($0) }
+        if let currentVersion, overview.membershipVersion < currentVersion { return false }
         var existingOverviewID: String?
         if sqlite3_step(checkStmt) == SQLITE_ROW {
             let existingVersion = Int(sqlite3_column_int(checkStmt, 1))
-            // An older result never overwrites a newer version
-            if existingVersion > overview.membershipVersion {
+            // Without an event row, an older result never overwrites a newer version.
+            if currentVersion == nil, existingVersion > overview.membershipVersion {
                 return false
             }
             if let idText = sqlite3_column_text(checkStmt, 0) {
@@ -1418,7 +1424,7 @@ extension DatabaseEngine {
                 ORDER BY coalesce(e.story_id, e.id), \(Self.articleDateOrder) DESC, a.id;
                 """, slice.map { .text($0) })
             var current: (id: String, rows: [Row])?
-            func flush() {
+            func flush() throws {
                 guard let story = current, !story.rows.isEmpty else { return }
                 var versions: [String: (version: Int, seen: Int?)] = [:]
                 for row in story.rows { versions[row.event] = (row.version, row.seen) }
@@ -1446,15 +1452,22 @@ extension DatabaseEngine {
                 let open =
                     first.filter { (counts[$0.key] ?? 0) >= 2 }
                     .max(by: { ($0.value.date, $0.value.id, $0.key) < ($1.value.date, $1.value.id, $1.key) })?.key
+                let eventID = open ?? story.id
+                // The overview is built from the opened event alone, so it carries that event's version, which
+                // only grows; the story sum falls when a merge folds a sibling away (#789).
+                let eventVersion =
+                    try versions[eventID]?.version
+                    ?? eventRows("SELECT membership_version FROM events WHERE id = ?;", [.text(eventID)]).first?[0]
+                    .flatMap { Int($0) } ?? 1
                 summaries.append(
                     EventFeedSummary(
-                        eventID: open ?? story.id, membershipVersion: membershipVersion, seenVersion: seenVersion,
-                        members: members))
+                        eventID: eventID, membershipVersion: membershipVersion, seenVersion: seenVersion,
+                        members: members, eventVersion: eventVersion))
             }
             for row in rows {
                 guard let storyID = row[0], let eventID = row[1], let articleID = row[4] else { continue }
                 if current?.id != storyID {
-                    flush()
+                    try flush()
                     current = (storyID, [])
                 }
                 current?.rows.append(
@@ -1468,7 +1481,7 @@ extension DatabaseEngine {
                             joinedVersion: row[8].flatMap { Int($0) } ?? 1,
                             isRead: row[9] == "1", isSaved: row[10] == "1")))
             }
-            flush()
+            try flush()
         }
         return summaries
     }

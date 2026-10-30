@@ -899,7 +899,9 @@ struct EventOverviewReaderView: View {
                         .accessibilityLabel(
                             Self.readArticleAccessibilityLabel(title: article.title, source: article.publisherName))
 
-                        if let url = URL(string: article.link) {
+                        if let url = URL(string: article.link),
+                            ["http", "https"].contains(url.scheme?.lowercased() ?? "")
+                        {
                             Button {
                                 NSWorkspace.shared.open(url)
                             } label: {

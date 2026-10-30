@@ -33,10 +33,13 @@ enum StoryCurator {
             // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
             var lookedUp = Set<String>()
             for row in try await database.imagelessStoryRows(
-                activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting)
+                activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting,
+                isRequestable: { StoryImageFinder.pageURL($0) != nil })
             where lookedUp.count < imageBudget {
                 try Task.checkCancellation()
                 if let event = row.eventID, lookedUp.contains(event) { continue }
+                // A link the client would refuse before any request is never a candidate and spends no budget. Nothing
+                // is recorded, so a story whose link is later corrected under the same id is still looked up (#818).
                 lookedUp.insert(row.eventID ?? row.id)
                 switch await imageFinder.find(row.link) {
                 case .found(let url):
@@ -63,7 +66,7 @@ enum StoryImageLookup: Equatable, Sendable {
     case found(String)
     /// The page was read and declares no usable image.
     case none
-    /// The page could not be read (offline, refused); try again on a later pass.
+    /// The page could not be read (offline, rate-limited, server error); try again on a later pass.
     case unreachable
 }
 
@@ -76,14 +79,35 @@ struct StoryImageFinder: Sendable {
     /// The article page through the protected client; http links are requested over https.
     static let publisherPages = publisherPages(using: .shared)
 
+    /// The page address a lookup requests: an absolute http(s) link with a host on a port the client allows, http
+    /// upgraded to https.
+    static func pageURL(_ link: String) -> URL? {
+        guard var components = URLComponents(string: link),
+            ["http", "https"].contains(components.scheme?.lowercased() ?? ""), !(components.host ?? "").isEmpty
+        else { return nil }
+        components.scheme = "https"
+        if components.port == 80 { components.port = nil }
+        guard SecureHTTPClient.allowedPorts.contains(components.port ?? 443) else { return nil }
+        return components.url
+    }
+
     static func publisherPages(using client: SecureHTTPClient) -> StoryImageFinder {
         StoryImageFinder { link in
-            guard var components = URLComponents(string: link) else { return .none }
-            if components.scheme?.lowercased() == "http" { components.scheme = "https" }
-            guard let url = components.url,
-                let (data, response) = try? await client.fetchArticleHead(from: url),
-                response.statusCode < 400
-            else { return .unreachable }
+            guard let url = pageURL(link) else { return .none }
+            let data: Data
+            let response: HTTPURLResponse
+            do {
+                (data, response) = try await client.fetchArticleHead(from: url)
+            } catch FeedError.blockedHost, FeedError.blockedPort, FeedError.insecureScheme {
+                // The protected client refuses this page before any request; asking again would not change that.
+                return Task.isCancelled ? .unreachable : .none
+            } catch FeedError.httpStatus(let status) where (400..<500).contains(status) && status != 429 {
+                // A refusal (403, 404, 410) is an answer: recorded as no image so the page is not asked again each
+                // pass, spending the lookup budget other imageless stories need (#818).
+                return Task.isCancelled ? .unreachable : .none
+            } catch {
+                return .unreachable
+            }
             guard !Task.isCancelled else { return .unreachable }
             return leadImage(
                 in: ContentExtractionPipeline.shared.decodeHTML(data: data, response: response),
