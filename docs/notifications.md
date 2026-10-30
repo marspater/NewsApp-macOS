@@ -22,8 +22,10 @@ a second pass waits until the first has finished posting.
 ## Scores and the dedupe key
 
 - **Score**: `NotificationService.computeImportance`, computed once per story (#545).
-- **Dedupe key**: the story's event id when it is in an event, otherwise the story id. One key yields at most one
-  banner per pass, in exactly one lane.
+- **Dedupe key**: the story (#581, #740) the report's event belongs to; the event id when the event is its own
+  story; otherwise, for a report outside any event, the report's id. Two events of one story share a key, so a story
+  yields at most one banner per pass, in exactly one lane, threaded under the story. Announcements and waiting
+  priority keys stay recorded per event; a waiting key drops out when its story is covered.
 - **Full-weight signal word**: a word of weight 1 in `breakingSignals` ("breaking", "killed", "earthquake", …), not
   the half-weight announcement words.
 
@@ -118,6 +120,10 @@ An event is **announced** when any banner (individual or grouped, any lane) has 
 - its lead headline changed (#545): the event notifies again, in the lane it now qualifies for;
 - it now qualifies for a **higher lane** than the highest lane it was announced in (normal → starred or priority,
   starred → priority): one banner in the new lane.
+
+**Stories (#740).** A new event of a story another of whose events is announced adds to that story and posts no
+banner, unless it qualifies for a higher lane than the highest lane any event of the story was announced in. The story
+then appears in the app, not as a second alert.
 
 **Merged events.** When clustering merges an event into another (fragment merge #541, "Same Event as…" #524), the
 absorbed event's announcement of the last 24 hours moves to the event it joined, keeping its time and highest lane.
@@ -221,6 +227,14 @@ delivered in the last hour.
   - 36 min: silent;
   - 48 min: banner (8).
   - That is at most 3 banners an hour for the feed, and 9 for three starred feeds, with no story missing from a count.
+
+## Permission
+
+News does not ask for notification permission at launch (#562). `NotificationPermissionRequest` asks once per launch,
+when a refresh has completed and the library holds stories, the first-launch sheet has closed and notifications are
+on. Whichever comes last triggers it: a later refresh that brings the first stories, the sheet closing, or turning
+notifications on. Notification categories and the delegate are still set up at launch, so
+banner actions keep working. macOS shows the prompt only once; later requests return the saved answer.
 
 ## Relaunch
 

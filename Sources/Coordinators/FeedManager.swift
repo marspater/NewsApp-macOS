@@ -523,6 +523,10 @@ class FeedManager: NSObject, ObservableObject {
             }
         }
         delivery.events = (try? await database.eventIDs(forArticles: storyIDs)) ?? [:]
+        delivery.stories =
+            (try? await database.storyIDs(
+                forEvents: Set(delivery.events.values).union(delivery.ledger.announced.keys)
+                    .union(delivery.ledger.priorityQueue.map(\.event)))) ?? [:]
         if delivery.mode == .full {
             let events = Set(delivery.events.values)
             delivery.publishers = (try? await database.eventPublisherCounts(events)) ?? [:]

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import UserNotifications
 
@@ -36,6 +37,31 @@ enum NotificationActionIdentifier {
     static func registerCategories(center: UNUserNotificationCenter = .current()) {
         guard Bundle.main.bundleIdentifier != nil else { return }
         center.setNotificationCategories([makeCategory()])
+    }
+}
+
+/// Asks for notification permission once per launch (#562), never at launch: only once a refresh has completed and
+/// the reader has stories, the first-launch sheet is closed and notifications are on. Whichever comes last asks:
+/// a later refresh that brings the first stories, or turning notifications on.
+@MainActor
+final class NotificationPermissionRequest {
+    private(set) var hasRequested = false
+    private var subscription: AnyCancellable?
+
+    init(feedManager: FeedManager, settings: AppSettings, request: @escaping () -> Void) {
+        // Stories are checked when a refresh completes, never while one is still publishing its first stories.
+        let refreshedWithStories = feedManager.$lastRefreshCompletedAt
+            .compactMap { $0 }
+            .filter { [weak feedManager] _ in feedManager?.articles.isEmpty == false }
+            .first()
+        subscription =
+            refreshedWithStories
+            .combineLatest(settings.$notificationsEnabled, settings.$firstLaunchCompleted)
+            .sink { [weak self] _, enabled, onboarded in
+                guard let self, !self.hasRequested, enabled, onboarded else { return }
+                self.hasRequested = true
+                request()
+            }
     }
 }
 

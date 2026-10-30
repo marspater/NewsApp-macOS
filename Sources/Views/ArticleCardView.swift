@@ -213,17 +213,18 @@ struct ArticleCardView<Footer: View>: View {
         HStack(spacing: AppSpacing.eyebrowGap) {
             EyebrowText(displaySource)
             Spacer()
-            stateGlyphs
+            stateGlyphs()
         }
     }
 
-    /// Saved glyph and unread dot, in this order, at the trailing end of the eyebrow line.
+    /// Saved glyph and unread dot, in this order, at the trailing end of the eyebrow line. The lead caption passes
+    /// its light text color, since the darkened light-appearance accent is too dim on the dark scrim.
     @ViewBuilder
-    private var stateGlyphs: some View {
+    private func stateGlyphs(saved: Color = AppColor.accentText) -> some View {
         if isSaved {
             Image(systemName: "bookmark.fill")
                 .font(AppTypography.eyebrow)
-                .foregroundStyle(AppColor.accent)
+                .foregroundStyle(saved)
                 .accessibilityLabel("Saved")
         }
         if !isRead {
@@ -332,7 +333,7 @@ struct ArticleCardView<Footer: View>: View {
             HStack(spacing: AppSpacing.sm) {
                 EyebrowText(displaySource, color: AppColor.leadText)
                 Spacer(minLength: AppSpacing.xs)
-                stateGlyphs
+                stateGlyphs(saved: AppColor.leadText)
             }
 
             Text(article.title)
@@ -358,7 +359,7 @@ struct ArticleCardView<Footer: View>: View {
                     .monospacedDigit()
                 Spacer(minLength: AppSpacing.xs)
                 if article.aiSummary != nil {
-                    TagView.intelligence()
+                    TagView.intelligence(foreground: AppColor.leadText)
                         .help("AI summary available")
                         .accessibilityLabel("AI summary available")
                 }
