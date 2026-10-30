@@ -1112,6 +1112,12 @@ extension EventOverviewAccessibilityTests {
             assertTrue(result.items.isEmpty, "Rejects ineligible sentence: \(sentence)")
             assertTrue(result.citations.isEmpty, "Rejected sentence creates no citation")
         }
+        assertFalse(
+            OverviewThematicAngleValidator.isForecast("Carmakers said they would cut production at two plants."),
+            "A reported plan is not a forecast")
+        assertTrue(
+            OverviewThematicAngleValidator.isForecast("Fuel costs would likely double for regional airlines."),
+            "A hedged projection is a forecast")
         // A legal order only stops "orders" from reading as demand; a stated operational impact still counts.
         let ordered = impactFixture("A court order halted production at the carmaker's main plant for two weeks.")
         assertEqual(

@@ -41,9 +41,10 @@ struct OverviewThematicAngleValidator: Sendable {
     ]
 
     /// A modal projection of a change ("could rise sharply", "may be cut", "would likely double"): a modal or
-    /// "likely to", up to two words, then a verb of change. The fixed phrases above miss these.
+    /// "likely to", up to two words, then a verb of change. The fixed phrases above miss these. A bare "would" is
+    /// left out: "said they would cut production" reports a stated plan, not a projection.
     private static let modalProjection = try? NSRegularExpression(
-        pattern: #"\b(could|might|may|would|is likely to|are likely to)\s+(\w+\s+){0,2}?"#
+        pattern: #"\b(could|might|may|would likely|is likely to|are likely to)\s+(\w+\s+){0,2}?"#
             + #"(rise|rises|fall|falls|increase|decrease|double|triple|drop|climb|surge|jump|soar|decline|slow|"#
             + #"grow|shrink|hit|halt|cut|disrupt|spike|plunge|tumble|collapse)\b"#)
 
