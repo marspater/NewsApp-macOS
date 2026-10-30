@@ -591,21 +591,27 @@ private struct LanePlanner {
                 story: $0.article.id)
         }
         // A waiting key drops out when this pass already covers its story, by a banner or a new key of another of
-        // the story's events, or when the story was announced in the priority lane (#740).
+        // the story's events, or when the story was announced in the priority lane, unless the key's own event was
+        // announced under another lead headline: that change may notify again (#740).
         let stories = delivery.stories
         let story = { (event: String) in stories[event] ?? event }
         let newStories = Set(newOverflow.map { story($0.event) })
         let waiting = ledger.priorityQueue.filter { item in
             !newStories.contains(story(item.event)) && !taken.contains(story(item.event))
-                && storyLanes[story(item.event)] != .priority
+                && (storyLanes[story(item.event)] != .priority
+                    || ledger.announced[item.event].map { $0.leadKey != item.leadKey } == true)
         }
         let overflow = (newOverflow + waiting).sorted { $0.score > $1.score }
         guard !overflow.isEmpty else { return [] }
         if ledger.priorityGroupLastHalfHour { return newOverflow }
+        // The queue may hold two events of one story from earlier passes; the banner counts and names each story
+        // once, its strongest key, and announces every key it covers.
+        var named = Set<String>()
+        let perStory = overflow.filter { named.insert(story($0.event)).inserted }
         banners.append(
             PlannedBanner(
-                lane: .priority, grouped: true, title: "Major news", headlines: overflow.prefix(2).map(\.title),
-                count: overflow.count, thread: "priority", sound: true,
+                lane: .priority, grouped: true, title: "Major news", headlines: perStory.prefix(2).map(\.title),
+                count: perStory.count, thread: "priority", sound: true,
                 announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first },
                 members: overflow.map(\.story).filter { !$0.isEmpty }))
         taken.formUnion(overflow.map { delivery.stories[$0.event] ?? $0.event })

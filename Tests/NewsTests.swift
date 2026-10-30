@@ -18430,6 +18430,27 @@ struct NewsTests {
         assertEqual(
             queuedPass.banners.map(\.grouped), [false],
             "A story's waiting key is covered by its new individual banner, not grouped beside it")
+        // Two waiting keys of one story, left by earlier passes, count once in the next grouped banner.
+        var twoQueued = NotificationDelivery(mode: .full)
+        twoQueued.stories = ["storm-b": "storm-a", "storm-c": "storm-a"]
+        twoQueued.ledger.priorityQueue = [
+            QueuedPriority(event: "storm-c", title: "Explosion at a storm shelter", score: 0.9, leadKey: "c"),
+            QueuedPriority(event: "storm-b", title: "Storm leaves thousands without power", score: 0.8, leadKey: "b"),
+            QueuedPriority(event: "quake", title: "Earthquake strikes the north", score: 0.85, leadKey: "q"),
+        ]
+        let groupedOnce = NotificationService.plan(new: [], pending: [:], delivery: twoQueued).banners
+        assertEqual(groupedOnce.map(\.count), [2], "A story queued twice counts once in the grouped banner")
+        assertEqual(
+            Set(groupedOnce.first.map { Array($0.announces.keys) } ?? []), ["storm-b", "storm-c", "quake"],
+            "The grouped banner still announces every waiting key")
+        // A waiting key whose own event was announced under another lead still posts after a priority announcement.
+        twoQueued.ledger.priorityQueue = [
+            QueuedPriority(event: "storm-b", title: "Storm death toll rises", score: 0.8, leadKey: "new lead")
+        ]
+        twoQueued.ledger.announced["storm-b"] = .init(leadKey: "old lead", lane: .priority)
+        assertEqual(
+            NotificationService.plan(new: [], pending: [:], delivery: twoQueued).banners.map(\.count), [1],
+            "A waiting key with a changed lead survives the story's priority announcement")
 
         // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
         let rising = report(800, "Explosion levels block")
