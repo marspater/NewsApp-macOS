@@ -215,6 +215,12 @@ struct FeedUpdateBuffer: Equatable, Sendable {
         displayed.events = events
     }
 
+    /// A subscription was added: its first refresh is the reader's and shows its stories at once instead of waiting
+    /// (#782).
+    static func subscriptionAdded(from previous: [String], to current: [String]) -> Bool {
+        !Set(current).isSubset(of: Set(previous))
+    }
+
     /// Bursts of store revisions are debounced, but a section's first page is shown at once.
     static func debouncesReload(isPaging: Bool, isNewQuery: Bool, hasStories: Bool) -> Bool {
         !isPaging && !isNewQuery && hasStories

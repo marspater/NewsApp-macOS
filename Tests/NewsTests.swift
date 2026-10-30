@@ -4282,6 +4282,17 @@ struct NewsTests {
         assertEqual(
             store.articles.filter { $0.title.hasPrefix("Catalog story from") }.count, ukraine.count,
             "A newly subscribed catalog feed's stories reach the library with that refresh (#782)")
+        assertTrue(
+            FeedUpdateBuffer.subscriptionAdded(from: [], to: ukraine.map(\.url)),
+            "Subscribing makes the list take the refresh as the reader's, not park it behind Show N New Stories")
+        assertFalse(
+            FeedUpdateBuffer.subscriptionAdded(from: ukraine.map(\.url), to: Array(ukraine.map(\.url).dropFirst())),
+            "Unsubscribing starts no reader refresh in the list")
+        var holding = FeedUpdateBuffer()
+        holding.replace(with: FeedSnapshot(articles: [store.articles.last!]))
+        assertEqual(
+            holding.receive(FeedSnapshot(articles: store.articles), holding: false, mode: .events), .replaced,
+            "A reader refresh shows the new stories instead of waiting behind the updates button")
         let batches = await requested.batches.count
         manager.addCatalogFeeds(ukraine)
         await manager.fetchFeedsAsync()

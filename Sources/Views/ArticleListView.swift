@@ -293,7 +293,7 @@ struct ArticleListView: View {
             // Subscribing asks for those stories, as Refresh does: the refresh the subscription starts shows them
             // instead of parking them behind the updates button, where the list looked unchanged (#782).
             .onChange(of: appSettings.feedURLs) { previous, current in
-                if !Set(current).isSubset(of: Set(previous)) { refreshFeeds() }
+                if FeedUpdateBuffer.subscriptionAdded(from: previous, to: current) { refreshFeeds() }
             }
             .focusable()
             .focused($listHasFocus)
@@ -797,7 +797,9 @@ struct ArticleListView: View {
             parts.append(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
         }
         if let listTotals {
-            let unread = !isSearching && listFilters.read == false ? "unread " : ""
+            let showsUnreadOnly =
+                isSearching ? ArticleFilterQuery.parse(searchText).isReadFilter == false : listFilters.read == false
+            let unread = showsUnreadOnly ? "unread " : ""
             parts.append(
                 "\(listTotals.stories.formatted()) \(unread)\(listTotals.stories == 1 ? "story" : "stories")")
             if groupingMode == .events && listTotals.events > 0 {
