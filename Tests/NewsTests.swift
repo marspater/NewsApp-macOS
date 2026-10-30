@@ -1485,6 +1485,7 @@ struct NewsTests {
             try FileManager.default.setAttributes(
                 [.modificationDate: Date().addingTimeInterval(-age * 86400)], ofItemAtPath: url.path)
         }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: library.path)
         let db = DatabaseEngine(path: library.path)
         try await db.open()
         let notice = await db.databaseHealthNotice()
@@ -1514,6 +1515,8 @@ struct NewsTests {
         let backup = "news-before-v25-\(day).sqlite3"
         assertEqual(backups, ["news-before-v21-2026-02-01.sqlite3", backup], "Only the newest two backups are kept")
         let backupURL = directory.appendingPathComponent(backup)
+        let backupMode = try FileManager.default.attributesOfItem(atPath: backupURL.path)[.posixPermissions] as? Int
+        assertEqual(backupMode, 0o600, "The backup keeps the library's file permissions")
         assertEqual(value(backupURL, "PRAGMA user_version;"), "25", "The backup keeps the old schema version")
         assertEqual(value(backupURL, "SELECT count(*) FROM articles;"), "3", "The backup keeps every article")
         assertEqual(value(backupURL, "PRAGMA quick_check;"), "ok", "The backup is a sound database")

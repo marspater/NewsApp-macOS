@@ -303,7 +303,7 @@ actor DatabaseEngine {
 
     /// An exclusive `flock` on `<library>.migration-lock`; closing the descriptor releases it.
     private func lockForMigration() throws -> Int32 {
-        let descriptor = Darwin.open(dbPath + ".migration-lock", O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        let descriptor = Darwin.open(dbPath + ".migration-lock", O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw CocoaError(.fileWriteNoPermission) }
         guard flock(descriptor, LOCK_EX) == 0 else {
             Darwin.close(descriptor)
@@ -338,6 +338,15 @@ actor DatabaseEngine {
             ".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier).partial")
         let fileManager = FileManager.default
         try? fileManager.removeItem(at: partial)
+        // The copy holds the same reading history as the library, so it gets the library's permissions, not the
+        // default ones; SQLite then opens the empty file as a new database.
+        let permissions = (try? fileManager.attributesOfItem(atPath: dbPath)[.posixPermissions]) ?? 0o600
+        guard fileManager.createFile(atPath: partial.path, contents: nil, attributes: [.posixPermissions: permissions])
+        else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Could not create \(partial.lastPathComponent)"])
+        }
 
         var copy: OpaquePointer?
         guard sqlite3_open_v2(partial.path, &copy, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK,
