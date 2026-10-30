@@ -2208,6 +2208,36 @@ struct NewsTests {
         assertEqual(publications, 1, "A changed classification publishes once")
         observation.cancel()
 
+        // Background classification publishes a burst together, with the latest state of every story (#778).
+        let burst = (0..<5).map { index in
+            FeedArticle(
+                title: "Burst \(index)", link: "https://example.com/burst-\(index)", guid: "burst-\(index)",
+                description: "Preview", pubDate: Date(), source: "Publisher")
+        }
+        await store.batchUpsert(articles: burst)
+        let burstRevision = store.revision
+        var burstPublications = 0
+        let burstObservation = store.$articles.dropFirst().sink { _ in burstPublications += 1 }
+        for article in burst {
+            await store.updateEnrichment(id: article.id, category: "Science", coalescesPublication: true)
+        }
+        await store.updateEnrichment(id: burst[0].id, category: "World", coalescesPublication: true)
+        assertEqual(burstPublications, 0, "Background classification waits to be published together")
+        assertEqual(store.revision, burstRevision, "Waiting classification does not reload queries yet")
+        let deadline = Date().addingTimeInterval(5)
+        while store.revision == burstRevision && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        assertEqual(burstPublications, 1, "A classification burst publishes the article collection once")
+        assertEqual(store.revision, burstRevision + 1, "A classification burst reloads queries once")
+        assertEqual(
+            store.articles.first { $0.title == "Burst 0" }?.category, "World",
+            "The latest classification of a story is the one published")
+        assertEqual(
+            store.articles.filter { $0.title.hasPrefix("Burst ") && $0.title != "Burst 0" }.compactMap(\.category),
+            Array(repeating: "Science", count: 4), "Every story of the burst is published")
+        burstObservation.cancel()
+
         let delegate = SecureSessionDelegateCoordinator()
         let request = URLRequest(url: URL(string: "https://example.com")!)
         let task = URLSession.shared.dataTask(with: request)

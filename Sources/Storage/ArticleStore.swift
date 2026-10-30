@@ -281,6 +281,15 @@ final class ArticleStore: ObservableObject {
 
     // MARK: - Enrichment
 
+    /// Background classification results not yet published; they go out together (#778).
+    private var pendingPublicationIDs: Set<String> = []
+    private var publicationTask: Task<Void, Never>?
+    /// How long background classification results wait to be published together. An enrichment burst after a
+    /// refresh writes hundreds of stories; publishing each one re-rendered every list, card and the open reader.
+    static let coalescedPublicationDelay: Duration = .seconds(1)
+
+    /// `coalescesPublication`: background classification, published with the other results of the next second
+    /// instead of at once. Writes the reader waits for publish at once.
     @discardableResult
     func updateEnrichment(
         id: String,
@@ -293,7 +302,8 @@ final class ArticleStore: ObservableObject {
         image: String? = nil,
         readerDocument: ReaderDocument? = nil,
         identityEvidence: DocumentIdentityEvidence? = nil,
-        expectedInputHash: String? = nil
+        expectedInputHash: String? = nil,
+        coalescesPublication: Bool = false
     ) async -> Bool {
         do {
             let id = try await database.resolvedArticleID(id)
@@ -311,7 +321,11 @@ final class ArticleStore: ObservableObject {
                     logger.error("Failed to record document identity: \(error.localizedDescription)")
                 }
             }
-            try await publishStoredArticle(id)
+            if coalescesPublication {
+                schedulePublication(id)
+            } else {
+                try await publishStoredArticles([id])
+            }
             return true
         } catch {
             logger.error("Failed to update enrichment: \(error.localizedDescription)")
@@ -319,20 +333,53 @@ final class ArticleStore: ObservableObject {
         }
     }
 
-    /// Hydrate the persisted result, including fields invalidated by publisher-input changes.
-    private func publishStoredArticle(_ id: String) async throws {
-        guard let updated = try await database.fetchArticles(limit: 1, id: id).first else { return }
-        // Reclassifying an unchanged story must not invalidate every feed card and the open reader.
-        if articles.contains(where: { $0.id == id && $0 == updated }),
-            !savedArticles.contains(where: { $0.id == id && $0 != updated })
-        {
-            return
+    /// Publishes `id` with every other background result of the next `coalescedPublicationDelay`. The stored rows are
+    /// read when the batch goes out, so the published state is the latest one.
+    private func schedulePublication(_ id: String) {
+        pendingPublicationIDs.insert(id)
+        guard publicationTask == nil else { return }
+        publicationTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.coalescedPublicationDelay)
+            guard let self else { return }
+            let ids = pendingPublicationIDs
+            pendingPublicationIDs = []
+            publicationTask = nil
+            do { try await publishStoredArticles(ids) } catch {
+                logger.error("Failed to publish enrichment: \(error.localizedDescription)")
+            }
         }
-        if let index = articles.firstIndex(where: { $0.id == id }) { articles[index] = updated }
-        if let index = savedArticles.firstIndex(where: { $0.id == id }) {
-            savedArticles[index] = updated
-            savedArticleIDs.insert(updated.id)
+    }
+
+    /// Hydrate the persisted results, including fields invalidated by publisher-input changes, in one publication.
+    private func publishStoredArticles(_ ids: Set<String>) async throws {
+        var stored: [FeedArticle] = []
+        for id in ids {
+            if let updated = try await database.fetchArticles(limit: 1, id: id).first { stored.append(updated) }
         }
+        var listed = articles
+        var saved = savedArticles
+        var listChanged = false
+        var savedChanged = false
+        var revised = false
+        for updated in stored {
+            let index = listed.firstIndex { $0.id == updated.id }
+            let savedIndex = saved.firstIndex { $0.id == updated.id }
+            // Reclassifying an unchanged story must not invalidate every feed card and the open reader.
+            if let index, listed[index] == updated, savedIndex.map({ saved[$0] == updated }) ?? true { continue }
+            revised = true
+            if let index, listed[index] != updated {
+                listed[index] = updated
+                listChanged = true
+            }
+            if let savedIndex, saved[savedIndex] != updated {
+                saved[savedIndex] = updated
+                savedChanged = true
+                savedArticleIDs.insert(updated.id)
+            }
+        }
+        guard revised else { return }
+        if listChanged { articles = listed }
+        if savedChanged { savedArticles = saved }
         revision &+= 1
     }
 
@@ -346,7 +393,7 @@ final class ArticleStore: ObservableObject {
             let articleId = try await database.resolvedArticleID(articleId)
             guard try await database.saveArticleAnalysis(analysis, for: articleId, expectedInputHash: expectedInputHash)
             else { return false }
-            try await publishStoredArticle(articleId)
+            try await publishStoredArticles([articleId])
             return true
         } catch {
             logger.error("Failed to save article analysis: \(error.localizedDescription)")
