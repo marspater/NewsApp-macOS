@@ -50,6 +50,14 @@ struct NewsApp: App {
                 .environmentObject(savedStories)
                 .preferredColorScheme(themeManager.appearance.colorScheme)
                 .modifier(SystemSettingsOverrideModifier())
+                // First launch only (#562); closing the sheet any way completes it.
+                .sheet(
+                    isPresented: Binding(
+                        get: { !appSettings.firstLaunchCompleted },
+                        set: { if !$0 { appSettings.completeFirstLaunch() } })
+                ) {
+                    OnboardingView()
+                }
         }
         .windowToolbarStyle(.unified)
         .commands {
@@ -355,14 +363,18 @@ struct KeyboardShortcutsCommands: Commands {
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    private var notificationPermission: NotificationPermissionRequest?
+
     func applicationDidFinishLaunching(_ _: Notification) {
         CacheManager.shared.configureOfflineCache()
         NotificationActionIdentifier.registerCategories()
-        // Request Notification Permissions on App Launch
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
-            // Notification authorization handled silently
-        }
         UNUserNotificationCenter.current().delegate = self
+        // Permission is asked once stories have arrived, not at launch (#562).
+        notificationPermission = NotificationPermissionRequest(
+            feedManager: AppContainer.shared.feedManager, settings: AppSettings.shared
+        ) {
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+        }
 
         NewsShortcuts.updateAppShortcutParameters()
 

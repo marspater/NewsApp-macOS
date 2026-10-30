@@ -890,6 +890,7 @@ struct NewsTests {
         try await testActiveWorkCancellation()
         await testSignpostHelperExecution()
         await testAppSettingsIsolationAndURLNormalization()
+        await testOnboardingAndPermissionTiming()
         await testFixedTaxonomyAndCaseInsensitivity()
         await testClassificationMultiStageAndConfidenceTiers()
         await testClassificationBenchmarkDataset()
@@ -17034,6 +17035,68 @@ struct NewsTests {
             assertTrue(false, "async measure must preserve the original error type")
         }
         assertTrue(caughtAsyncError, "async measure should propagate thrown error")
+    }
+
+    @MainActor
+    static func testOnboardingAndPermissionTiming() async {
+        print("  - Testing the first-launch setting and the deferred notification request (#562)...")
+        func suite(_ name: String, seed: [String: Any] = [:]) -> (String, UserDefaults) {
+            let name = testDefaultsSuite(name)
+            let defaults = UserDefaults(suiteName: name)!
+            for (key, value) in seed { defaults.set(value, forKey: key) }
+            return (name, defaults)
+        }
+        let (freshName, fresh) = suite("onboarding-fresh")
+        let (feedsName, feeds) = suite(
+            "onboarding-feeds", seed: [AppSettings.feedURLsKey: ["https://example.com/feed"]])
+        let (modeName, mode) = suite("onboarding-mode", seed: [AppSettings.notificationModeKey: "full"])
+        defer { for name in [freshName, feedsName, modeName] { removeTestDefaults(name) } }
+        assertFalse(AppSettings(defaults: fresh).firstLaunchCompleted, "A fresh install shows the first-launch sheet")
+        assertFalse(AppSettings(defaults: fresh).firstLaunchCompleted, "A sheet closed by quitting shows again")
+        AppSettings(defaults: fresh).completeFirstLaunch()
+        assertTrue(AppSettings(defaults: fresh).firstLaunchCompleted, "Completing the sheet persists")
+        assertTrue(AppSettings(defaults: feeds).firstLaunchCompleted, "Existing subscriptions skip the sheet")
+        assertTrue(AppSettings(defaults: mode).firstLaunchCompleted, "Settings from an earlier version skip the sheet")
+
+        // The permission request waits for the first completed refresh, the sheet and the setting.
+        func manager(_ settings: AppSettings) async -> FeedManager {
+            let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+            await store.initialize()
+            return FeedManager(settings: settings, store: store, schedulesRefresh: false, fetchBatch: { _, _ in [] })
+        }
+        let (newName, newDefaults) = suite("onboarding-permission")
+        let (offName, offDefaults) = suite("onboarding-permission-off")
+        defer { for name in [newName, offName] { removeTestDefaults(name) } }
+        let settings = AppSettings(defaults: newDefaults)
+        let feedManager = await manager(settings)
+        var requests = 0
+        let request = NotificationPermissionRequest(feedManager: feedManager, settings: settings) { requests += 1 }
+        assertEqual(requests, 0, "Nothing is asked at launch")
+        await feedManager.fetchFeedsAsync()
+        assertEqual(requests, 0, "Nothing is asked while the first-launch sheet is open")
+        settings.completeFirstLaunch()
+        assertEqual(requests, 1, "Finishing the sheet after the first refresh asks once")
+        await feedManager.fetchFeedsAsync()
+        settings.setNotificationsEnabled(false)
+        settings.setNotificationsEnabled(true)
+        assertEqual(requests, 1, "Later refreshes and toggles in the same launch do not ask again")
+        assertTrue(request.hasRequested, "The request records that it asked")
+        feedManager.stopBackgroundWork()
+
+        let quiet = AppSettings(defaults: offDefaults)
+        quiet.completeFirstLaunch()
+        quiet.setNotificationsEnabled(false)
+        let quietManager = await manager(quiet)
+        var quietRequests = 0
+        let quietRequest = NotificationPermissionRequest(feedManager: quietManager, settings: quiet) {
+            quietRequests += 1
+        }
+        await quietManager.fetchFeedsAsync()
+        assertEqual(quietRequests, 0, "With notifications off, a refresh does not ask")
+        quiet.setNotificationsEnabled(true)
+        assertEqual(quietRequests, 1, "Turning notifications on after a refresh asks")
+        assertTrue(quietRequest.hasRequested, "The request records that it asked")
+        quietManager.stopBackgroundWork()
     }
 
     @MainActor

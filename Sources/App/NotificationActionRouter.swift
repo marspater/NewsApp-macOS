@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import UserNotifications
 
@@ -36,6 +37,24 @@ enum NotificationActionIdentifier {
     static func registerCategories(center: UNUserNotificationCenter = .current()) {
         guard Bundle.main.bundleIdentifier != nil else { return }
         center.setNotificationCategories([makeCategory()])
+    }
+}
+
+/// Asks for notification permission once per launch (#562), never at launch: only after the first refresh has
+/// completed, the first-launch sheet is done and notifications are on. Turning notifications on later asks then.
+@MainActor
+final class NotificationPermissionRequest {
+    private(set) var hasRequested = false
+    private var subscription: AnyCancellable?
+
+    init(feedManager: FeedManager, settings: AppSettings, request: @escaping () -> Void) {
+        subscription = feedManager.$lastRefreshCompletedAt
+            .combineLatest(settings.$notificationsEnabled, settings.$firstLaunchCompleted)
+            .sink { [weak self] refreshed, enabled, onboarded in
+                guard let self, !self.hasRequested, refreshed != nil, enabled, onboarded else { return }
+                self.hasRequested = true
+                request()
+            }
     }
 }
 

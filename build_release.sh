@@ -104,6 +104,7 @@ SWIFT_SOURCES=(
     Sources/Views/MainView.swift
     Sources/Views/SettingsView.swift
     Sources/Views/FeedCatalogView.swift
+    Sources/Views/OnboardingView.swift
     Sources/Views/FeedHealthLine.swift
     Sources/Storage/SavedStoriesManager.swift
     Sources/Services/OPMLManager.swift

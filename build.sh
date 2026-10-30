@@ -110,6 +110,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/MainView.swift \
     Sources/Views/SettingsView.swift \
     Sources/Views/FeedCatalogView.swift \
+    Sources/Views/OnboardingView.swift \
     Sources/Views/FeedHealthLine.swift \
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
