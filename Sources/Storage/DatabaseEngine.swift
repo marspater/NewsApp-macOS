@@ -340,7 +340,9 @@ actor DatabaseEngine {
         try? fileManager.removeItem(at: partial)
         // The copy holds the same reading history as the library, so it gets the library's permissions, not the
         // default ones; SQLite then opens the empty file as a new database.
-        let permissions = (try? fileManager.attributesOfItem(atPath: dbPath)[.posixPermissions]) ?? 0o600
+        // Read from the resolved file: a symbolic link's own mode would give the copy broader permissions.
+        let resolvedPath = URL(fileURLWithPath: dbPath).resolvingSymlinksInPath().path
+        let permissions = (try? fileManager.attributesOfItem(atPath: resolvedPath)[.posixPermissions]) ?? 0o600
         guard fileManager.createFile(atPath: partial.path, contents: nil, attributes: [.posixPermissions: permissions])
         else {
             throw NSError(
@@ -3264,6 +3266,7 @@ actor DatabaseEngine {
     /// history. Articles, events, pair decisions and subscriptions remain intact.
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
+        try requireWritable()
         try beginTransaction()
         do {
             try clearWorldTensionHistory()
@@ -3300,6 +3303,7 @@ actor DatabaseEngine {
 
     /// Clears replaceable data; article headers, read history and saved bodies are user data.
     func clearAllDatabaseCache() throws {
+        try requireWritable()
         try clearWorldTensionHistory()
         try beginTransaction()
         do {
