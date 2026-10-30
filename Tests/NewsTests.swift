@@ -796,6 +796,7 @@ struct NewsTests {
         await testNavigationCommands()
         await testEscapeXML()
         await testOPMLParsingAndExporting()
+        try await testStoryExport()
         await testOfflineCacheAndResilience()
         await testArticleIdentityDeep()
         try await testPublisherTitleAliases()
@@ -5634,6 +5635,89 @@ struct NewsTests {
         let unescaped = "Ben & Jerry's <Ice Cream> \"Taste Test\""
         let expectedEscaped = "Ben &amp; Jerry&apos;s &lt;Ice Cream&gt; &quot;Taste Test&quot;"
         assertEqual(OPMLExporter.escapeXML(unescaped), expectedEscaped, "Strings should be correctly XML escaped")
+    }
+
+    static func testStoryExport() async throws {
+        print("  - Testing saved-story and history export (#565)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        func noBOM(_ data: Data) -> Bool { !data.starts(with: [0xEF, 0xBB, 0xBF]) }
+        for saved in [true, false] {
+            let entries = try await db.exportedStories(saved: saved)
+            assertTrue(entries.isEmpty, "An empty library exports an empty list")
+            let json = try StoryExport.json(entries)
+            assertTrue(noBOM(json), "JSON export is UTF-8 without a byte order mark")
+            assertTrue((try JSONSerialization.jsonObject(with: json) as? [Any])?.isEmpty == true, "Empty JSON list")
+            let markdown = String(decoding: StoryExport.markdown(entries, title: "History"), as: UTF8.self)
+            assertEqual(markdown, "# History\n\n", "Empty Markdown export is the heading alone")
+        }
+        let cafe = FeedArticle(
+            title: "Café [live] reopens", link: "https://example.com/news/cafe", guid: "cafe",
+            description: "Report", pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Example News\nWorld")
+        let undated = FeedArticle(
+            title: "Undated item", link: "https://example.com/news/undated", guid: "undated", description: "Report",
+            pubDate: DateParser.unknownDate, source: "Example News")
+        try await db.upsertArticles([cafe, undated], feedUrl: "https://example.com/feed")
+        try await db.setSaved(articleId: cafe.id, isSaved: true)
+        try await db.markRead(articleId: undated.id, isRead: true)
+        try await db.markRead(articleId: cafe.id, isRead: true)
+        // A reconciled duplicate, saved and read most recently, is never exported; exact times decide the order.
+        let copy = FeedArticle(
+            title: "Café [live] reopens (copy)", link: "https://example.com/news/cafe-copy", guid: "cafe-copy",
+            description: "Report", pubDate: cafe.pubDate, source: "Example News")
+        try await db.upsertArticles([copy], feedUrl: "https://example.com/feed")
+        try await db.setSaved(articleId: copy.id, isSaved: true)
+        try await db.markRead(articleId: copy.id, isRead: true)
+        let stored = Dictionary(
+            try await db.fetchArticles(limit: nil, includingOriginals: true).map { ($0.title, $0.id) },
+            uniquingKeysWith: { first, _ in first })
+        let cafeID = stored[cafe.title]!
+        let undatedID = stored[undated.title]!
+        let copyID = stored[copy.title]!
+        try await db.executeSimple(
+            """
+            UPDATE article_state SET saved_at = 2000, read_at = 3000 WHERE article_id = '\(cafeID)';
+            UPDATE article_state SET read_at = 3500 WHERE article_id = '\(undatedID)';
+            UPDATE article_state SET saved_at = 9000, read_at = 9000 WHERE article_id = '\(copyID)';
+            INSERT INTO article_reconciliations (duplicate_id, survivor_id, canonical_url, fingerprint)
+                VALUES ('\(copyID)', '\(cafeID)', '\(cafe.link)', 'test');
+            """)
+
+        let saved = try await db.exportedStories(saved: true)
+        assertEqual(saved.map(\.title), [cafe.title], "Only saved stories are exported as saved")
+        assertEqual(saved.first?.publisher, "Example News", "The publisher is the feed's first title line")
+        assertEqual(saved.first?.published, cafe.pubDate, "The publication date is exported")
+        assertEqual(saved.first?.savedAt, Date(timeIntervalSince1970: 2000), "Saved export carries the exact save time")
+        assertTrue(saved.first?.readAt == nil, "Saved export names no read time")
+        let history = try await db.exportedStories(saved: false)
+        assertEqual(history.map(\.title), [undated.title, cafe.title], "History lists every read story, newest first")
+        assertEqual(
+            history.map(\.readAt), [Date(timeIntervalSince1970: 3500), Date(timeIntervalSince1970: 3000)],
+            "History carries the exact read times")
+        assertTrue(history.allSatisfy { $0.savedAt == nil }, "History names no save time")
+        assertTrue(history.contains { $0.title == undated.title && $0.published == nil }, "Unknown dates are left out")
+
+        let json = try StoryExport.json(saved)
+        assertTrue(noBOM(json), "JSON export is UTF-8 without a byte order mark")
+        let object = (try JSONSerialization.jsonObject(with: json) as? [[String: Any]])?.first
+        assertEqual(object?["title"] as? String, "Café [live] reopens", "Non-ASCII titles round-trip as UTF-8")
+        assertEqual(object?["url"] as? String, cafe.link, "The story URL is exported unescaped")
+        assertTrue(object?["savedAt"] is String && object?["readAt"] == nil, "Saved JSON names the save time only")
+        assertEqual(object?["published"] as? String, "2026-09-21T14:13:20Z", "Dates are ISO 8601 in UTC")
+        let markdownData = StoryExport.markdown(history, title: "History")
+        assertTrue(noBOM(markdownData), "Markdown export is UTF-8 without a byte order mark")
+        let markdown = String(decoding: markdownData, as: UTF8.self)
+        assertTrue(markdown.hasPrefix("# History\n\n- "), "Markdown export is a heading and a list")
+        let cafeLine = "- [Café \\[live\\] reopens](<https://example.com/news/cafe>) · Example News · published "
+        assertTrue(markdown.contains(cafeLine), "Markdown escapes brackets in titles and links the story")
+        let undatedLine = "- [Undated item](<https://example.com/news/undated>) · Example News · read "
+        assertTrue(markdown.contains(undatedLine), "Undated stories list the read time only")
+        let broken = StoryExportEntry(
+            title: "Line one\r\nline two\rthree\nfour", publisher: "P", url: "https://example.com/x", published: nil)
+        let brokenMarkdown = String(decoding: StoryExport.markdown([broken], title: "History"), as: UTF8.self)
+        assertEqual(
+            brokenMarkdown, "# History\n\n- [Line one line two three four](<https://example.com/x>) · P\n",
+            "Line breaks in a title stay inside one list item")
     }
 
     static func testOPMLParsingAndExporting() async {

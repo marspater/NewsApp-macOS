@@ -3089,6 +3089,47 @@ actor DatabaseEngine {
         return try fetchArticles(isSaved: true)
     }
 
+    /// Saved stories, newest save first, or the read history, newest read first, for File › Export (#565).
+    func exportedStories(saved: Bool) throws -> [StoryExportEntry] {
+        guard let db = db else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        let time = saved ? "s.saved_at" : "s.read_at"
+        let sql = """
+            SELECT a.title, a.canonical_url, a.source, a.published_at, \(time) FROM articles a
+            JOIN article_state s ON s.article_id = a.id
+            WHERE \(saved ? "s.is_saved" : "s.is_read") = 1 AND \(Self.visibleArticle)
+            ORDER BY \(time) DESC, a.published_at DESC, a.id;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw sqliteError(db, "Could not load stories to export")
+        }
+        defer { sqlite3_finalize(stmt) }
+        func text(_ column: Int32) -> String {
+            sqlite3_column_text(stmt, column).map { String(cString: $0) } ?? ""
+        }
+        var entries = [StoryExportEntry]()
+        var status = sqlite3_step(stmt)
+        while status == SQLITE_ROW {
+            let published = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
+            let marked =
+                sqlite3_column_type(stmt, 4) == SQLITE_NULL
+                ? nil : Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
+            let link = text(1)
+            let publisher = FeedCatalog.publisher(forLink: link) ?? EventFeedSummary.displaySource(text(2))
+            var entry = StoryExportEntry(
+                title: text(0), publisher: publisher, url: link,
+                published: published == DateParser.unknownDate ? nil : published)
+            if saved { entry.savedAt = marked } else { entry.readAt = marked }
+            entries.append(entry)
+            status = sqlite3_step(stmt)
+        }
+        guard status == SQLITE_DONE else { throw sqliteError(db, "Could not load stories to export") }
+        return entries
+    }
+
     private static func sentimentLabel(for score: Double) -> String {
         if score > 0.25 { return "Positive" }
         if score < -0.25 { return "Critical" }
