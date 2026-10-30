@@ -314,7 +314,8 @@ extension NewsTests {
         try await exportEmbeddingVectors(output: directory.path)
         let original = try Data(contentsOf: file)
         let vectors = try JSONDecoder().decode([String: [Float]].self, from: original)
-        assertEqual(Set(vectors.keys), Set(fixture.articles.map(\.id)), "Export includes exactly the authored corpus IDs")
+        assertEqual(
+            Set(vectors.keys), Set(fixture.articles.map(\.id)), "Export includes exactly the authored corpus IDs")
         for article in fixture.articles {
             let text = EventFeatures.matchingText(title: article.title, description: article.description ?? "")
             guard let exported = vectors[article.id], let expected = await SentenceEmbedder.shared.embed(text) else {
@@ -332,7 +333,8 @@ extension NewsTests {
             try await exportEmbeddingVectors(output: directory.path)
             assertTrue(false, "A second export must refuse to overwrite the comparison reference")
         } catch {
-            assertEqual(try Data(contentsOf: file), original, "Refused export leaves the reference byte-for-byte intact")
+            assertEqual(
+                try Data(contentsOf: file), original, "Refused export leaves the reference byte-for-byte intact")
         }
 
         // A pre-existing output link must not let an export replace a separate reference file.
