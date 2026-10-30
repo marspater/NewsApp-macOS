@@ -1,102 +1,384 @@
 [
   {
     "metadataOutputVersion" : "3.0",
-    "storagePrecision" : "Float16",
+    "userDefinedMetadata" : {
+
+    },
+    "availability" : {
+      "macOS" : "15.0",
+      "tvOS" : "18.0",
+      "visionOS" : "2.0",
+      "watchOS" : "11.0",
+      "iOS" : "18.0",
+      "macCatalyst" : "18.0"
+    },
+    "inputSchema" : [
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1 × 128)",
+        "shortDescription" : "",
+        "shape" : "[1, 128]",
+        "name" : "input_ids",
+        "type" : "MultiArray"
+      },
+      {
+        "hasShapeFlexibility" : "0",
+        "isOptional" : "0",
+        "dataType" : "Int32",
+        "formattedType" : "MultiArray (Int32 1 × 128)",
+        "shortDescription" : "",
+        "shape" : "[1, 128]",
+        "name" : "attention_mask",
+        "type" : "MultiArray"
+      }
+    ],
     "outputSchema" : [
       {
         "hasShapeFlexibility" : "0",
         "isOptional" : "0",
-        "dataType" : "Float32",
-        "formattedType" : "MultiArray (Float32)",
-        "shortDescription" : "Sequence of hidden-states at the output of the last layer of the model",
-        "shape" : "[]",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1 × 128 × 384)",
+        "shortDescription" : "",
+        "shape" : "[1, 128, 384]",
         "name" : "last_hidden_state",
         "type" : "MultiArray"
       },
       {
         "hasShapeFlexibility" : "0",
         "isOptional" : "0",
-        "dataType" : "Float32",
-        "formattedType" : "MultiArray (Float32)",
-        "shortDescription" : "Last layer hidden-state of the first token of the sequence",
-        "shape" : "[]",
+        "dataType" : "Float16",
+        "formattedType" : "MultiArray (Float16 1 × 384)",
+        "shortDescription" : "",
+        "shape" : "[1, 384]",
         "name" : "pooler_output",
         "type" : "MultiArray"
       }
     ],
+    "storagePrecision" : "Mixed (Float16, Int32)",
     "modelParameters" : [
 
     ],
-    "specificationVersion" : 6,
-    "mlProgramOperationTypeHistogram" : {
-      "Concat" : 25,
-      "Linear" : 37,
-      "SliceByIndex" : 3,
-      "Sub" : 1,
-      "LayerNorm" : 13,
-      "Transpose" : 24,
-      "Shape" : 26,
-      "Matmul" : 12,
-      "RealDiv" : 1,
-      "Gelu" : 6,
-      "Softmax" : 6,
-      "Mul" : 7,
-      "Cast" : 5,
-      "Tile" : 1,
-      "Add" : 20,
-      "ExpandDims" : 2,
-      "Reshape" : 24,
-      "Gather" : 52,
-      "Tanh" : 1
-    },
-    "computePrecision" : "Mixed (Float16, Float32, Int32)",
+    "method" : "predict",
+    "functions" : [
+      {
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 16)",
+            "shortDescription" : "",
+            "shape" : "[1, 16]",
+            "name" : "input_ids",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 16)",
+            "shortDescription" : "",
+            "shape" : "[1, 16]",
+            "name" : "attention_mask",
+            "type" : "MultiArray"
+          }
+        ],
+        "computePrecision" : "Mixed (Float16, Int16, Int32, UInt16)",
+        "storagePrecision" : "Mixed (Float16, Int32)",
+        "stateSchema" : [
+
+        ],
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 16 × 384)",
+            "shortDescription" : "",
+            "shape" : "[1, 16, 384]",
+            "name" : "last_hidden_state",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 384)",
+            "shortDescription" : "",
+            "shape" : "[1, 384]",
+            "name" : "pooler_output",
+            "type" : "MultiArray"
+          }
+        ],
+        "name" : "length_16",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.linear" : 37,
+          "Ios18.sub" : 1,
+          "Select" : 1,
+          "Ios18.expandDims" : 2,
+          "Ios18.matmul" : 12,
+          "Ios18.gather" : 3,
+          "Ios18.gelu" : 6,
+          "Ios18.add" : 22,
+          "Ios18.tanh" : 1,
+          "Ios18.softmax" : 6,
+          "Ios18.sliceByIndex" : 1,
+          "Ios18.layerNorm" : 13,
+          "Ios18.transpose" : 24,
+          "Ios18.cast" : 6,
+          "Ios18.reshape" : 24,
+          "Ios18.greaterEqual" : 1,
+          "Ios18.mul" : 8
+        }
+      },
+      {
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 32)",
+            "shortDescription" : "",
+            "shape" : "[1, 32]",
+            "name" : "input_ids",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 32)",
+            "shortDescription" : "",
+            "shape" : "[1, 32]",
+            "name" : "attention_mask",
+            "type" : "MultiArray"
+          }
+        ],
+        "computePrecision" : "Mixed (Float16, Int16, Int32, UInt16)",
+        "storagePrecision" : "Mixed (Float16, Int32)",
+        "stateSchema" : [
+
+        ],
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 32 × 384)",
+            "shortDescription" : "",
+            "shape" : "[1, 32, 384]",
+            "name" : "last_hidden_state",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 384)",
+            "shortDescription" : "",
+            "shape" : "[1, 384]",
+            "name" : "pooler_output",
+            "type" : "MultiArray"
+          }
+        ],
+        "name" : "length_32",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.linear" : 37,
+          "Ios18.sub" : 1,
+          "Select" : 1,
+          "Ios18.expandDims" : 2,
+          "Ios18.matmul" : 12,
+          "Ios18.gather" : 3,
+          "Ios18.gelu" : 6,
+          "Ios18.add" : 22,
+          "Ios18.tanh" : 1,
+          "Ios18.softmax" : 6,
+          "Ios18.sliceByIndex" : 1,
+          "Ios18.layerNorm" : 13,
+          "Ios18.transpose" : 24,
+          "Ios18.cast" : 6,
+          "Ios18.reshape" : 24,
+          "Ios18.greaterEqual" : 1,
+          "Ios18.mul" : 8
+        }
+      },
+      {
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 64)",
+            "shortDescription" : "",
+            "shape" : "[1, 64]",
+            "name" : "input_ids",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 64)",
+            "shortDescription" : "",
+            "shape" : "[1, 64]",
+            "name" : "attention_mask",
+            "type" : "MultiArray"
+          }
+        ],
+        "computePrecision" : "Mixed (Float16, Int16, Int32, UInt16)",
+        "storagePrecision" : "Mixed (Float16, Int32)",
+        "stateSchema" : [
+
+        ],
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 64 × 384)",
+            "shortDescription" : "",
+            "shape" : "[1, 64, 384]",
+            "name" : "last_hidden_state",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 384)",
+            "shortDescription" : "",
+            "shape" : "[1, 384]",
+            "name" : "pooler_output",
+            "type" : "MultiArray"
+          }
+        ],
+        "name" : "length_64",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.linear" : 37,
+          "Ios18.sub" : 1,
+          "Select" : 1,
+          "Ios18.expandDims" : 2,
+          "Ios18.matmul" : 12,
+          "Ios18.gather" : 3,
+          "Ios18.gelu" : 6,
+          "Ios18.add" : 22,
+          "Ios18.tanh" : 1,
+          "Ios18.softmax" : 6,
+          "Ios18.sliceByIndex" : 1,
+          "Ios18.layerNorm" : 13,
+          "Ios18.transpose" : 24,
+          "Ios18.cast" : 6,
+          "Ios18.reshape" : 24,
+          "Ios18.greaterEqual" : 1,
+          "Ios18.mul" : 8
+        }
+      },
+      {
+        "inputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 128)",
+            "shortDescription" : "",
+            "shape" : "[1, 128]",
+            "name" : "input_ids",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Int32",
+            "formattedType" : "MultiArray (Int32 1 × 128)",
+            "shortDescription" : "",
+            "shape" : "[1, 128]",
+            "name" : "attention_mask",
+            "type" : "MultiArray"
+          }
+        ],
+        "computePrecision" : "Mixed (Float16, Int16, Int32, UInt16)",
+        "storagePrecision" : "Mixed (Float16, Int32)",
+        "stateSchema" : [
+
+        ],
+        "outputSchema" : [
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 128 × 384)",
+            "shortDescription" : "",
+            "shape" : "[1, 128, 384]",
+            "name" : "last_hidden_state",
+            "type" : "MultiArray"
+          },
+          {
+            "hasShapeFlexibility" : "0",
+            "isOptional" : "0",
+            "dataType" : "Float16",
+            "formattedType" : "MultiArray (Float16 1 × 384)",
+            "shortDescription" : "",
+            "shape" : "[1, 384]",
+            "name" : "pooler_output",
+            "type" : "MultiArray"
+          }
+        ],
+        "name" : "length_128",
+        "mlProgramOperationTypeHistogram" : {
+          "Ios18.linear" : 37,
+          "Ios18.sub" : 1,
+          "Select" : 1,
+          "Ios18.expandDims" : 2,
+          "Ios18.matmul" : 12,
+          "Ios18.gather" : 3,
+          "Ios18.gelu" : 6,
+          "Ios18.add" : 22,
+          "Ios18.tanh" : 1,
+          "Ios18.softmax" : 6,
+          "Ios18.sliceByIndex" : 1,
+          "Ios18.layerNorm" : 13,
+          "Ios18.transpose" : 24,
+          "Ios18.cast" : 6,
+          "Ios18.reshape" : 24,
+          "Ios18.greaterEqual" : 1,
+          "Ios18.mul" : 8
+        }
+      }
+    ],
     "isUpdatable" : "0",
+    "defaultFunctionName" : "length_128",
+    "specificationVersion" : 9,
     "stateSchema" : [
 
     ],
-    "availability" : {
-      "macOS" : "12.0",
-      "tvOS" : "15.0",
-      "visionOS" : "1.0",
-      "watchOS" : "8.0",
-      "iOS" : "15.0",
-      "macCatalyst" : "15.0"
+    "computePrecision" : "Mixed (Float16, Int16, Int32, UInt16)",
+    "mlProgramOperationTypeHistogram" : {
+      "Ios18.linear" : 37,
+      "Ios18.sub" : 1,
+      "Select" : 1,
+      "Ios18.expandDims" : 2,
+      "Ios18.matmul" : 12,
+      "Ios18.gather" : 3,
+      "Ios18.gelu" : 6,
+      "Ios18.add" : 22,
+      "Ios18.tanh" : 1,
+      "Ios18.softmax" : 6,
+      "Ios18.sliceByIndex" : 1,
+      "Ios18.layerNorm" : 13,
+      "Ios18.transpose" : 24,
+      "Ios18.cast" : 6,
+      "Ios18.reshape" : 24,
+      "Ios18.greaterEqual" : 1,
+      "Ios18.mul" : 8
     },
+    "shortDescription" : "Sentence encoder for story matching: mean-pooled token states (#555, #554)",
+    "license" : "Derived from sentence-transformers\/all-MiniLM-L6-v2, Apache License 2.0",
+    "generatedClassName" : "minilm",
+    "author" : "News",
     "modelType" : {
       "name" : "MLModelType_mlProgram"
-    },
-    "userDefinedMetadata" : {
-      "com.github.apple.coremltools.version" : "6.3.0",
-      "com.github.apple.coremltools.source" : "torch==1.13.1",
-      "transformers_version" : "4.8.2"
-    },
-    "inputSchema" : [
-      {
-        "dataType" : "Int32",
-        "hasShapeFlexibility" : "1",
-        "isOptional" : "0",
-        "shapeFlexibility" : "1 × 1...128",
-        "shapeRange" : "[[1, 1], [1, 128]]",
-        "formattedType" : "MultiArray (Int32 1 × 1)",
-        "type" : "MultiArray",
-        "shape" : "[1, 1]",
-        "name" : "input_ids",
-        "shortDescription" : "Indices of input sequence tokens in the vocabulary"
-      },
-      {
-        "dataType" : "Int32",
-        "hasShapeFlexibility" : "1",
-        "isOptional" : "0",
-        "shapeFlexibility" : "1 × 1...128",
-        "shapeRange" : "[[1, 1], [1, 128]]",
-        "formattedType" : "MultiArray (Int32 1 × 1)",
-        "type" : "MultiArray",
-        "shape" : "[1, 1]",
-        "name" : "attention_mask",
-        "shortDescription" : "Mask to avoid performing attention on padding token indices (1 = not masked, 0 = masked)"
-      }
-    ],
-    "generatedClassName" : "minilm",
-    "method" : "predict"
+    }
   }
 ]

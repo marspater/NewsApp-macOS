@@ -42,7 +42,7 @@ struct EventCardView: View {
             // none of them has an image and the event has members hidden from lists (World Tension panel feeds, #595).
             guard isExpanded || needsHiddenMemberImage else { return }
             do {
-                let loaded = try await articleStore.eventMemberArticles(eventID: summary.eventID)
+                let loaded = try await articleStore.storyMemberArticles(eventID: summary.eventID)
                 try Task.checkCancellation()
                 members = loaded
                 hasLoaded = true

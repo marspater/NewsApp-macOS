@@ -1,23 +1,29 @@
 #!/usr/bin/env python3
-"""Build pretraining pairs for the pair model (#623, M11) from public event-clustered news, in the `--export-pairs`
-CSV format plus a `weight` column, outside the checkout.
+"""Build pretraining pairs for the pair model (#623, M11) from public event-clustered news, in the three-way pairs
+CSV contract of `train_pair_model.py` (#627: label 0 different, 1 related, 2 same; `marginal` for partial labels),
+outside the checkout.
 
     pretrain_pairs.py wcep OUT_DIR [--split train] [--clusters N]
-        WCEP-10 (Hugging Face `ccdv/WCEP-10`, pinned revision; Ghalandari et al. 2020): positives are pairs of
-        articles inside one event cluster (cap 15 per cluster), negatives are pairs across clusters whose synthetic
-        headlines share a capitalized name (cap twice the positives). Headline = first sentence, lead = the next 600
-        characters.
+        WCEP-10 (Hugging Face `ccdv/WCEP-10`, pinned revision; Ghalandari et al. 2020): pairs of articles inside one
+        event cluster (cap 15 per cluster) are one story, same or related (label 1, marginal `12`): the clusters span
+        days and the dataset carries no publication times, so no pair is known to be one occurrence; pairs across
+        clusters whose synthetic headlines share a capitalized name are different (0; cap twice the positives).
+        Headline = first sentence, lead = the next 600 characters.
     pretrain_pairs.py gdelt OUT_DIR --from YYYYMMDD --to YYYYMMDD [--slots-per-day 8] [--cap 100000]
         GDELT 2.1 Events, Mentions and GKG files of the range (downloaded into OUT_DIR/gdelt, resumable): hard
         negatives with real headlines: two events with the same Actor1 and Actor2 names and action country, different
-        event ids, one to seven days apart, whose headlines share a capitalized name. Shared event ids are never used
-        as positives.
+        event ids, one to seven days apart, whose headlines share a capitalized name; not one occurrence, possibly a
+        later act of one story (label 0, marginal `01`). Shared event ids are never used as positives.
     pretrain_pairs.py semeval OUT_DIR
-        SemEval-2022 Task 8 (Zenodo 6507872): English-English pairs; overall similarity 1 is label 1, 3 and 4 are
-        label 0, 2 is dropped; page text from the Internet Archive (cached under OUT_DIR/semeval), weight 2;
-        `--cached-only` writes the pairs whose pages the cache already holds and fetches nothing.
+        SemEval-2022 Task 8 (Zenodo 6507872): English-English pairs; overall similarity 1 is one story (label 1,
+        marginal `12`), 3 and 4 are different (0), 2 is dropped; page text from the Internet Archive (cached under
+        OUT_DIR/semeval), weight 2; `--cached-only` writes the pairs whose pages the cache already holds and fetches
+        nothing.
     pretrain_pairs.py --self-check
         Synthetic clusters, events and pages through the same code, no downloads.
+
+`--prefix` puts the gap-and-publisher words (#626) in front of each text; off by default, as in the app and the
+exporters.
 
 Everything is written with 0600 permissions and never overwrites; a path inside a Git checkout is refused. Only
 https URLs of the three sources are opened.
@@ -44,7 +50,7 @@ from datetime import date, timedelta
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from wordpiece import Tokenizer, pair_prefix, require
 
-HEADER = ['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight']
+HEADER = ['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight', 'marginal']
 LEAD = 600
 SENTENCE_END = re.compile(r'(?<=[.!?])\s+(?=[A-Z"\'“‘])')
 CAPITALIZED = re.compile(r"\b[A-Z][a-zA-Z'’-]{3,}\b")
@@ -61,6 +67,7 @@ WCEP_REVISION = 'e231ece6b9131ef38a8eff15c5ec40f3fa211289'
 WCEP_POSITIVES_PER_CLUSTER = 15
 GDELT_SAMPLE = 30
 FETCH_WORKERS = 3
+PREFIX = False  # --prefix: the gap-and-publisher words of #626 in front of each text
 
 
 def private_directory(value):
@@ -134,8 +141,8 @@ def headline_and_lead(text):
 
 
 def pair_text(headline, lead, gap_hours=None, same_publisher=None):
-    """The model's input: the pair prefix (#626) and the matching text."""
-    return pair_prefix(gap_hours, same_publisher) + headline + '\n' + lead
+    """The model's input: the matching text, behind the pair prefix (#626) with `--prefix`."""
+    return (pair_prefix(gap_hours, same_publisher) if PREFIX else '') + headline + '\n' + lead
 
 
 def host(url):
@@ -165,13 +172,13 @@ class Writer:
         self.rows = 0
         self.seen = set()
 
-    def write(self, label, group, text_a, text_b, weight=1.0):
+    def write(self, label, group, text_a, text_b, weight=1.0, marginal=''):
         key = tuple(sorted((text_a, text_b)))
         if text_a == text_b or key in self.seen:
             return False
         self.seen.add(key)
         pieces = [' '.join(map(str, self.tokenizer.pieces(text))) for text in (text_a, text_b)]
-        self.csv.writerow([label, group, text_a, text_b, pieces[0], pieces[1], f'{weight:g}'])
+        self.csv.writerow([label, group, text_a, text_b, pieces[0], pieces[1], f'{weight:g}', marginal])
         self.rows += 1
         return True
 
@@ -209,11 +216,11 @@ def cluster_texts(documents):
 
 
 def wcep_positives(cluster, texts, writer):
-    """Pairs inside one cluster, capped, in the fixed order."""
+    """Pairs inside one cluster, capped, in the fixed order: one story, same or related (#627)."""
     pairs = [(i, j) for i in range(len(texts)) for j in range(i + 1, len(texts))]
     pairs.sort(key=lambda p, cluster=cluster: order(f'{cluster}:{p[0]}', f'{cluster}:{p[1]}'))
     return sum(1 for i, j in pairs[:WCEP_POSITIVES_PER_CLUSTER]
-               if writer.write(1, 'w:' + cluster, pair_text(*texts[i]), pair_text(*texts[j])))
+               if writer.write(1, 'w:' + cluster, pair_text(*texts[i]), pair_text(*texts[j]), marginal='12'))
 
 
 def texts_by_name(headlines):
@@ -277,7 +284,9 @@ def gdelt_download(slot, kind, cache):
     if not target.exists():
         try:
             write_private(target, fetch(GDELT + target.name))
-        except OSError as error:  # URLError and TimeoutError are OSErrors
+        except urllib.error.HTTPError as error:
+            if error.code != 404:  # only an absent 15-minute file is skipped; anything else stops the build
+                raise
             print(f'    skip {target.name}: {error}', file=sys.stderr)
             return None
     return target
@@ -377,7 +386,7 @@ def build_gdelt(events, mentions, titles, writer, cap):
         if written >= cap:
             break
         if writer.write(0, 'g:' + a_id, pair_text(a_title, '', gap_hours, same_site),
-                        pair_text(b_title, '', gap_hours, same_site)):
+                        pair_text(b_title, '', gap_hours, same_site), marginal='01'):
             written += 1
     return written
 
@@ -412,13 +421,15 @@ def page_fields(body):
 
 def archived_page(url, cache, attempts=3):
     """Title and first paragraphs of a page from the Internet Archive, cached by URL hash. A page the archive does
-    not have (404, 403) is cached as None; a rate limit, server error or timeout is retried with a pause and never
-    cached, so a later run fetches it again."""
+    not have (403, 404, 410) is cached as None; a rate limit, server error or timeout is retried with a pause and never
+    cached, and when every attempt fails the build stops, so no CSV is published without the page; a rerun resumes
+    from the cache. With no attempts (`--cached-only`) an uncached page is None."""
     key = hashlib.sha256(url.encode()).hexdigest()
     target = cache / 'pages' / (key + '.json')
     if target.exists():
         return json.loads(target.read_text())
     archived = url if url.startswith(ARCHIVE) else ARCHIVE + 'web/2020id_/' + url
+    failure = None
     for attempt in range(attempts):
         try:
             result = page_fields(fetch(archived, timeout=60, limit=400_000).decode('utf-8', errors='replace'))
@@ -427,11 +438,15 @@ def archived_page(url, cache, attempts=3):
             if error.code in (403, 404, 410):
                 result = None
                 break
+            failure = error
             time.sleep(15 * (attempt + 1))
-        except (OSError, ValueError):  # URLError and TimeoutError are OSErrors
+        except (OSError, ValueError) as error:  # URLError and TimeoutError are OSErrors
+            failure = error
             time.sleep(15 * (attempt + 1))
     else:
-        return None
+        if not attempts:
+            return None
+        raise ConnectionError(f'{archived}: {attempts} attempts failed') from failure
     target.parent.mkdir(exist_ok=True)
     # Written beside the target and moved into place, so an interrupted write never leaves a half file to parse.
     partial = target.with_name(f'{key}.{os.getpid()}.{threading.get_ident()}.tmp')
@@ -442,10 +457,11 @@ def archived_page(url, cache, attempts=3):
 
 
 def semeval_label(overall):
-    """Overall similarity 1 (most similar) is one story, 3 and 4 are not, 2 is ambiguous and dropped."""
+    """Overall similarity 1 (most similar) is one story, 3 and 4 are not; 2 and the half-steps up to it are ambiguous
+    and dropped (the files carry averaged ratings such as 2.5)."""
     if overall < 1.5:
         return 1
-    if overall >= 2.5:
+    if overall >= 3:
         return 0
     return None
 
@@ -460,9 +476,9 @@ def build_semeval(pairs, writer, page, workers=FETCH_WORKERS):
     for pair_id, link1, link2, overall in pairs:
         a, b = pages.get(link1), pages.get(link2)
         same_site = host(link1) == host(link2) if host(link1) and host(link2) else None
-        if a and b and writer.write(semeval_label(overall), 's:' + pair_id,
-                                    pair_text(a['title'], a['lead'], None, same_site),
-                                    pair_text(b['title'], b['lead'], None, same_site), 2):
+        label = semeval_label(overall)
+        if a and b and writer.write(label, 's:' + pair_id, pair_text(a['title'], a['lead'], None, same_site),
+                                    pair_text(b['title'], b['lead'], None, same_site), 2, '12' if label else ''):
             written += 1
     return written
 
@@ -473,9 +489,10 @@ def summarize(path):
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     with path.open(newline='', encoding='utf-8') as handle:
         rows = list(csv.DictReader(handle))
-    positives = sum(1 for r in rows if r['label'] == '1')
-    print(f'    {path.name}: {len(rows)} pairs, {positives} same event, {len(rows) - positives} different; '
-          f'sha256 {digest}')
+    counts = {}
+    for row in rows:
+        counts[(row['label'], row['marginal'])] = counts.get((row['label'], row['marginal']), 0) + 1
+    print(f'    {path.name}: {len(rows)} pairs by (label, marginal) {dict(sorted(counts.items()))}; sha256 {digest}')
 
 
 def self_check():
@@ -510,7 +527,13 @@ def self_check():
         require(written == 1, f'GDELT self-check: {written} negatives')
         with (out / 'gdelt.csv').open(newline='') as handle:
             gdelt_row = next(csv.DictReader(handle))
-        require(gdelt_row['text_a'].startswith('gap 48 hours; publishers unknown. '), 'GDELT rows carry the prefix')
+        require(gdelt_row['label'] == '0' and gdelt_row['marginal'] == '01', 'GDELT rows are not one occurrence')
+        require(not gdelt_row['text_a'].startswith('gap'), 'No prefix without --prefix')
+        with (out / 'wcep.csv').open(newline='') as handle:
+            wcep_rows = list(csv.DictReader(handle))
+        require({(r['label'], r['marginal']) for r in wcep_rows if r['group'].startswith('w:')} == {('1', '12')}
+                and {(r['label'], r['marginal']) for r in wcep_rows if r['group'].startswith('wn:')} == {('0', '')},
+                'WCEP clusters are one story, cross-cluster pairs different')
         require(host('https://web.archive.org/web/2020id_/https://www.bbc.co.uk/news/1') == 'bbc.co.uk', 'host()')
         pages = {'a': {'title': 'Storm hits coast', 'lead': 'x' * 300},
                  'b': {'title': 'Coastal storm batters towns', 'lead': 'y' * 300},
@@ -522,16 +545,54 @@ def self_check():
         require(written == 2, f'SemEval self-check: {written} pairs (the ambiguous 2 dropped)')
         with (out / 'semeval.csv').open(newline='') as handle:
             rows = list(csv.DictReader(handle))
-        require(rows[0]['weight'] == '2' and rows[0]['label'] == '1' and rows[1]['label'] == '0',
-                'SemEval labels and weight')
+        require(rows[0]['weight'] == '2' and (rows[0]['label'], rows[0]['marginal']) == ('1', '12')
+                and (rows[1]['label'], rows[1]['marginal']) == ('0', ''), 'SemEval labels and weight')
+        require([semeval_label(x) for x in (1.0, 1.4, 1.5, 2.0, 2.5, 2.9, 3.0, 4.0)] == [1, 1, None, None, None, None,
+                                                                                   0, 0], 'SemEval midpoints dropped')
+        failure_checks(out)
         require(list(gdelt_slots('20260101', '20260102', 2)) == ['20260101000000', '20260101120000', '20260102000000',
                                                                  '20260102120000'], 'GDELT slots')
     print('pretrain_pairs self-check passed')
 
 
+def failure_checks(out):
+    """GDELT: only a 404 is a missing slot. Archive: 403/404/410 are cached as None, exhausted retries raise, and
+    `--cached-only` (no attempts) gives None. A stub opener stands in for the network."""
+    global OPENER
+    real_opener, real_sleep = OPENER, time.sleep
+
+    class Failing:
+        def __init__(self, code):
+            self.code = code
+
+        def open(self, request, timeout):
+            raise urllib.error.HTTPError(request.full_url, self.code, 'stub', {}, None)
+
+    def raises(call):
+        try:
+            call()
+        except OSError:
+            return True
+        return False
+
+    time.sleep = lambda seconds: None
+    try:
+        OPENER = Failing(404)
+        require(gdelt_download('20260101000000', 'export', out) is None, 'A GDELT 404 is a missing slot')
+        require(archived_page('https://example.com/gone', out) is None
+                and archived_page('https://example.com/gone', out, attempts=0) is None, 'An absent page is cached')
+        OPENER = Failing(500)
+        require(raises(lambda: gdelt_download('20260101000000', 'mentions', out)), 'Other GDELT errors stop the build')
+        require(raises(lambda: archived_page('https://example.com/busy', out)), 'Exhausted archive retries raise')
+        require(archived_page('https://example.com/busy', out, attempts=0) is None, '--cached-only fetches nothing')
+    finally:
+        OPENER, time.sleep = real_opener, real_sleep
+
+
 def parse(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--self-check', action='store_true')
+    parser.add_argument('--prefix', action='store_true', help='the gap-and-publisher words (#626); off by default')
     sub = parser.add_subparsers(dest='command')
     wcep = sub.add_parser('wcep')
     wcep.add_argument('out')
@@ -585,7 +646,9 @@ def run_semeval(args, out, tokenizer):
 
 
 def main(argv=None):
+    global PREFIX
     args = parse(argv)
+    PREFIX = args.prefix
     if args.self_check:
         self_check()
         return
