@@ -925,7 +925,9 @@ struct ArticleListView: View {
         case .article(let article):
             ArticleCardView(
                 article: article, isSelected: listHasFocus && article.id == focusedArticleID,
-                compact: !gridLayout, isLead: isLead, action: { openArticle(article) }, footer: EmptyView()
+                compact: !gridLayout, isLead: isLead, action: { openArticle(article) },
+                // In a grid row it ends level with the event cards beside it (#779).
+                footer: gridLayout && !isLead ? CoverageRowSpace() : nil
             )
             .id(entry.id)
             .onAppear {

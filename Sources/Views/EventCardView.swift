@@ -23,7 +23,6 @@ struct EventCardView: View {
 
     @EnvironmentObject private var articleStore: ArticleStore
     @Environment(\.effectiveReduceMotion) private var reduceMotion
-    @Environment(\.effectiveContrast) private var contrast
     @State private var members: [FeedArticle] = []
     /// Loaded with the members, so the submenu is ready before a context menu opens on a row.
     @State private var relatedEvents: [RelatedStoryEvent] = []
@@ -84,28 +83,10 @@ struct EventCardView: View {
                 Task { await articleStore.markEventSeen(eventID) }
             }
         } label: {
-            HStack(spacing: AppSpacing.xs) {
-                Image(systemName: "square.stack.3d.up")
-                    .font(AppTypography.label)
-                Text(summary.coverageText)
-                    .font(AppTypography.label)
-                if let latest = summary.latestDate {
-                    Text("· updated \(latest, format: .relative(presentation: .named))")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.tertiaryText(for: contrast))
-                        .monospacedDigit()
-                }
-                if summary.hasSubstantiveUpdate {
-                    TagView(title: "Updated", tint: AppColor.accent)
-                }
-                Spacer(minLength: AppSpacing.xs)
-                Image(systemName: "chevron.down")
-                    .font(AppTypography.eyebrow)
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            }
-            .foregroundStyle(AppColor.secondaryText)
-            .padding(.horizontal, AppSpacing.sm)
-            .padding(.vertical, AppSpacing.xs)
+            CoverageRowLabel(
+                coverageText: summary.coverageText, latestDate: summary.latestDate,
+                hasUpdate: summary.hasSubstantiveUpdate, isExpanded: isExpanded
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -175,6 +156,58 @@ struct EventCardView: View {
         .padding(.vertical, AppSpacing.xxs)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Sources covering this story")
+    }
+}
+
+/// The coverage row: symbol, coverage, last update, "Updated" tag and chevron. It keeps one line and the tag's height
+/// with or without the tag, so every collapsed event card of a grid row is as tall as the others (#779).
+private struct CoverageRowLabel: View {
+    let coverageText: String
+    let latestDate: Date?
+    let hasUpdate: Bool
+    let isExpanded: Bool
+
+    @Environment(\.effectiveContrast) private var contrast
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            TagView(title: "Updated", tint: AppColor.accent).hidden()
+            HStack(spacing: AppSpacing.xs) {
+                Image(systemName: "square.stack.3d.up")
+                    .font(AppTypography.label)
+                Text(coverageText)
+                    .font(AppTypography.label)
+                    .layoutPriority(1)
+                if let latestDate {
+                    Text("· updated \(latestDate, format: .relative(presentation: .named, unitsStyle: .abbreviated))")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.tertiaryText(for: contrast))
+                        .monospacedDigit()
+                }
+                if hasUpdate {
+                    TagView(title: "Updated", tint: AppColor.accent)
+                }
+                Spacer(minLength: AppSpacing.xs)
+                Image(systemName: "chevron.down")
+                    .font(AppTypography.eyebrow)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+            .lineLimit(1)
+        }
+        .foregroundStyle(AppColor.secondaryText)
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xs)
+    }
+}
+
+/// The room a grid story card without coverage keeps below its story: a hidden coverage row, so the collapsed cards
+/// of a row end level whether or not they are events (#779).
+struct CoverageRowSpace: View {
+    var body: some View {
+        Divider().hidden()
+        CoverageRowLabel(coverageText: " ", latestDate: nil, hasUpdate: false, isExpanded: false)
+            .hidden()
+            .accessibilityHidden(true)
     }
 }
 

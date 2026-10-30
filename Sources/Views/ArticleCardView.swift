@@ -106,6 +106,9 @@ struct ArticleCardView<Footer: View>: View {
 
             footer
         }
+        // A card is as tall as its own content: in a grid row it never stretches to a taller neighbour, such as an
+        // event card showing its sources (#779).
+        .fixedSize(horizontal: false, vertical: true)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .containerShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         // The shadow is cast by the filled card shape rather than the composited card, whose shadow needed an
@@ -192,17 +195,24 @@ struct ArticleCardView<Footer: View>: View {
             // Eyebrow Row: Source + Badges
             regularEyebrow
 
-            // Headline
-            Text(article.title)
-                .font(AppTypography.cardHeadline(compact ? .list : .grid))
-                .foregroundStyle(isRead ? AppColor.secondaryText : AppColor.primaryText)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                // In the fixed-height list card the summary gives up lines before the headline does.
-                .layoutPriority(1)
-
-            // Description
-            regularDescription
+            if compact {
+                headline
+                regularDescription
+            } else {
+                // A grid card keeps room for two lines of headline and two of summary, so the collapsed cards of a
+                // row end level however long their text is; the text itself stays together at the top (#779).
+                ZStack(alignment: .topLeading) {
+                    VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
+                        Text(verbatim: "A\nA").font(AppTypography.cardHeadline(.grid))
+                        Text(verbatim: "A\nA").font(AppTypography.body)
+                    }
+                    .hidden()
+                    VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
+                        headline
+                        regularDescription
+                    }
+                }
+            }
 
             Spacer(minLength: AppSpacing.xxs)
 
@@ -237,6 +247,16 @@ struct ArticleCardView<Footer: View>: View {
         }
     }
 
+    private var headline: some View {
+        Text(article.title)
+            .font(AppTypography.cardHeadline(compact ? .list : .grid))
+            .foregroundStyle(isRead ? AppColor.secondaryText : AppColor.primaryText)
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
+            // In the fixed-height list card the summary gives up lines before the headline does.
+            .layoutPriority(1)
+    }
+
     @ViewBuilder
     private var regularDescription: some View {
         if !article.description.isEmpty {
@@ -264,6 +284,9 @@ struct ArticleCardView<Footer: View>: View {
                 TagView.intelligence()
                     .help("AI summary available")
                     .accessibilityLabel("AI summary available")
+            } else if !compact {
+                // A grid card keeps the tag's height without it, so it ends level with a card that has one.
+                TagView.intelligence().hidden()
             }
         }
     }
