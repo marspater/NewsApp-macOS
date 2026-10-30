@@ -25,6 +25,15 @@ enum AppColor {
 
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
     static var accent: Color { Color.accentColor }
+    /// The accent for text: the system accent is one color in every appearance, which gave 4.2:1 on the dark page
+    /// background. This keeps the person's accent choice, a little darker in light and lighter in dark, so text in it
+    /// stays above 4.5:1 (#754). Fills, strokes and symbols keep `accent`.
+    static let accentText = Color(
+        NSColor(name: "accentText") { appearance in
+            let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            return NSColor.controlAccentColor.blended(withFraction: dark ? 0.3 : 0.15, of: dark ? .white : .black)
+                ?? NSColor.controlAccentColor
+        })
     /// Subtle warm gold for generated-content marks: darker on light, brighter on dark, saturated with Increase Contrast.
     static let intelligence = Color(
         nsColor: NSColor(name: "intelligence") { appearance in
@@ -428,7 +437,7 @@ struct UnreadDot: View {
 }
 
 /// A small capsule for a state or label ("Updated", the intelligence tag). The fill is the tint at 12 %,
-/// 22 % with Increase Contrast (DESIGN.md 11).
+/// 22 % with Increase Contrast (DESIGN.md 11); the text is the tint mixed toward the primary text color.
 struct TagView: View {
     let title: String
     var systemImage: String?
@@ -445,10 +454,18 @@ struct TagView: View {
             Text(title)
         }
         .font(font)
-        .foregroundStyle(tint)
+        .foregroundStyle(textColor)
         .padding(.horizontal, AppSpacing.eyebrowGap)
         .padding(.vertical, AppSpacing.textStack)
         .background(fill, in: Capsule())
+    }
+
+    /// Tinted text is mixed toward the primary text color (darker in light, lighter in dark, more with Increase
+    /// Contrast), so it keeps at least 4.5:1 on its own wash; the bare tint fell to 2.9:1 in dark Increase Contrast
+    /// (#754).
+    private var textColor: Color {
+        if tint == AppColor.secondaryText { return tint }
+        return tint.mix(with: AppColor.primaryText, by: contrast == .increased ? 0.5 : 0.35)
     }
 
     /// Neutral tags share the badge background; tinted tags take a wash of their tint.

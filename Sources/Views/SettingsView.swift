@@ -192,7 +192,7 @@ struct SettingsView: View {
             // Add feed row
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .imageScale(.large)
                 TextField("Feed URL", text: $newFeedURL)
                     .textFieldStyle(.roundedBorder)
@@ -738,7 +738,7 @@ struct SettingsView: View {
 
                     HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "bolt.shield")
-                            .foregroundStyle(AppColor.accent)
+                            .foregroundStyle(AppColor.accentText)
                             .padding(.top, AppSpacing.textStack)
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("When it runs")
@@ -826,7 +826,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "shield.lefthalf.filled")
-                            .foregroundStyle(AppColor.accent)
+                            .foregroundStyle(AppColor.accentText)
                             .padding(.top, AppSpacing.textStack)
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("Hardened Runtime & App Sandbox")
@@ -1081,7 +1081,7 @@ struct SettingsView: View {
         NoticeView(tint: AppColor.accent) {
             HStack(spacing: AppSpacing.sm) {
                 Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .imageScale(.large)
                     .accessibilityHidden(true)
 

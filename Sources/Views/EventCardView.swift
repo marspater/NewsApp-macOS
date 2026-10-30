@@ -212,7 +212,7 @@ private struct EventSourceRow: View {
                 if isSaved {
                     Image(systemName: "bookmark.fill")
                         .font(AppTypography.eyebrow)
-                        .foregroundStyle(AppColor.accent)
+                        .foregroundStyle(AppColor.accentText)
                 }
                 Text(article.cardDateText())
                     .font(AppTypography.caption)

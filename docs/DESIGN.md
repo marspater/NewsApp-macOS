@@ -229,6 +229,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Intelligence (warm gold): only for labels and glyphs of generated content. Never body text or glass tint.
 - Status: success, warning and danger system colors for icons and small fills; text stays in the label colors. Yellow never carries text.
 - Fills: tags and neutral badges use the badge fill token; accent fills are 12 % (22 % with Increase Contrast).
+- Accent text: text and symbols in the accent use the accent-text token, which is the person's accent a little darker in light and lighter in dark, because the system accent is one color in every appearance and gave 4.2:1 on the dark page. Text on a tinted tag or citation pill is the tint mixed toward the primary text color (35 %, 50 % with Increase Contrast). Both keep at least 4.5:1 in light, dark and Increase Contrast.
 - Separators: `AppColor.borderSubtle` maps to the system separator color; with Increase Contrast, borders use the contrast tokens already defined for the reader.
 - Light and dark are designed together; every new color token has both values and an increased-contrast value. The in-app appearance override stays optional and defaults to System.
 
