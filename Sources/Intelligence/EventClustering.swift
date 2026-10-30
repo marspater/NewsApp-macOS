@@ -476,7 +476,9 @@ enum EventClusterer {
                     let names = l.specificAnchors.intersection(r.specificAnchors).subtracting(common).count
                     let sharesFigure = !l.titleNumbers.isDisjoint(with: r.titleNumbers)
                     let figure = single && names >= 1 && pair.sharedKeywords >= 2 && sharesFigure
-                    if (pair.conflict == nil || pair.conflict == .differentAct)
+                    // A story may span places (Ebola cases in two countries), so different headline places do not
+                    // veto a story link the way they veto one event (#737).
+                    if (pair.conflict == nil || pair.conflict == .differentAct || pair.conflict == .headlinePlaces)
                         && (names >= matchPolicy.storyLinkAnchors || figure) && pair.sharedKeywords >= 1
                         && (!single || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold)
                     {
@@ -505,7 +507,9 @@ enum EventClusterer {
                             samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
                     let names = features(left).without(template).specificAnchors
                         .intersection(features(right).without(template).specificAnchors).subtracting(common).count
-                    guard pair.neuralEligible, pair.conflict == nil || pair.conflict == .differentAct, names >= 1,
+                    guard pair.neuralEligible,
+                        pair.conflict == nil || pair.conflict == .differentAct || pair.conflict == .headlinePlaces,
+                        names >= 1,
                         pair.sharedKeywords >= 1 || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
                     else { continue }
                     let text = { (row: EventMatchRow) in

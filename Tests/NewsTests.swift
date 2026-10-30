@@ -8049,6 +8049,34 @@ struct NewsTests {
                 && EventFeatures.stormNames(in: "Winter Storm Dumps Snow on Chicago").isEmpty
                 && EventFeatures.stormNames(in: "Storm Will Hit the Coast Tonight").isEmpty,
             "A Title Case verb after Storm is no storm name")
+        // #737: different places in the headlines separate reports whose descriptions mention both places.
+        let kyivFire = EventFeatures(
+            title: "Ukraine: firefighters battle flames and rescue dog from Kyiv ruins",
+            description: "Russian strikes hit Kyiv overnight; in Kramatorsk crews also fought fires.", date: now)
+        let kramatorskFire = EventFeatures(
+            title: "Russians attack firefighters while they tackle blaze in Kramatorsk",
+            description: "The attack came hours after Kyiv was hit and firefighters rescued a dog.",
+            date: now.addingTimeInterval(3600))
+        assertEqual(
+            EventMatcher.assess(kyivFire, kramatorskFire).conflict, .headlinePlaces,
+            "Fires in Kyiv and in Kramatorsk are two events though each description names the other city")
+        let ceutaA = EventFeatures(
+            title: "Moroccan police intercept migrant swimming back towards Ceuta",
+            description: "Spain has deported migrants from Ceuta this week.", date: now)
+        let ceutaB = EventFeatures(
+            title: "Spain deports migrants from Ceuta in move criticised by rights group",
+            description: "Moroccan police intercepted a migrant swimming back.", date: now.addingTimeInterval(3600))
+        assertTrue(
+            EventMatcher.assess(ceutaA, ceutaB).conflict != .headlinePlaces,
+            "Headlines that share a place (Ceuta) are not split by their countries")
+        let dieselA = EventFeatures(
+            title: "Trump administration may let more Russian diesel onto market", description: "", date: now)
+        let dieselB = EventFeatures(
+            title: "Trump-Putin diesel deal has not lowered US fuel prices", description: "",
+            date: now.addingTimeInterval(3600))
+        assertTrue(
+            EventMatcher.assess(dieselA, dieselB).conflict != .headlinePlaces,
+            "Headlines that share a person (Trump) are not split by their countries")
         // #739: the different-day veto covers only series items with no headline date or edition word.
         var roundUpOne = quake
         roundUpOne.series = "deals"
