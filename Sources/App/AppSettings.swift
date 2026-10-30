@@ -89,7 +89,7 @@ final class AppSettings: ObservableObject {
     /// Days a read, unsaved story stays before retention deletes it; 0 keeps every story.
     @Published private(set) var articleRetentionDays: Int
     @Published var notificationsEnabled: Bool
-    /// The Dock icon shows the unread count.
+    /// The Dock icon shows the unread stories of today's Briefing and of notifications since launch (#584).
     @Published private(set) var showsDockBadge: Bool
     /// The macOS menu bar shows an optional unread item (off by default).
     @Published private(set) var showsMenuBarExtra: Bool

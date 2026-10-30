@@ -44,9 +44,20 @@ struct MainView: View {
     @State private var tensionDayStart = TensionMethodology.day(containing: Date()).start
     @State private var isWindowDropTargeted = false
 
-    /// The Dock icon carries the unread count while the setting is on; clearing it removes the badge.
-    private func updateDockBadge(_ unread: Int) {
-        NSApp.dockTile.badgeLabel = appSettings.showsDockBadge && unread > 0 ? String(unread) : nil
+    @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
+    @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
+    @AppStorage("briefingEditionArticleIDs") private var briefingEditionArticleIDs = ""
+
+    /// Unread stories of the current Briefing and unread notified stories since launch, not the whole library (#584).
+    private var dockBadgeCount: Int {
+        FiniteBriefing.dockBadgeCount(
+            editionIDs: briefingEditionArticleIDs, selectedAt: Date(timeIntervalSince1970: briefingEditionSelectedAt),
+            hour: briefingEditionHour, notified: feedManager.notifiedStoryIDs, read: readManager.readArticles)
+    }
+
+    /// The Dock icon carries the count while the setting is on; zero or the setting off removes the badge.
+    private func updateDockBadge(_ count: Int) {
+        NSApp.dockTile.badgeLabel = appSettings.showsDockBadge && count > 0 ? String(count) : nil
     }
 
     var body: some View {
@@ -62,8 +73,8 @@ struct MainView: View {
             .navigationSplitViewStyle(.balanced)
             // A sheet, so the rest of the window waits until the reader closes it.
             .sheet(isPresented: $showsTension, content: tensionSheetContent)
-            .onChange(of: articleStore.unreadCount, initial: true) { _, count in updateDockBadge(count) }
-            .onChange(of: appSettings.showsDockBadge) { _, _ in updateDockBadge(articleStore.unreadCount) }
+            .onChange(of: dockBadgeCount, initial: true) { _, count in updateDockBadge(count) }
+            .onChange(of: appSettings.showsDockBadge) { _, _ in updateDockBadge(dockBadgeCount) }
             .onReceive(NotificationCenter.default.publisher(for: .showNewsTensionCommand)) { _ in
                 handleNewsTensionCommand()
             }

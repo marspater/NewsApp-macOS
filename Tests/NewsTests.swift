@@ -847,6 +847,7 @@ struct NewsTests {
         await testEventFeedGroupingAndStability()
         testEventFeedGroupingOptimization()
         try await testFiniteBriefing()
+        testDockBadgeCount()
         try await testPublisherContentProvenance()
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
@@ -11056,6 +11057,30 @@ struct NewsTests {
         await manager.waitForEventClustering()
         assertEqual(try await EventClusterer.run(in: db).processed, 0, "Refreshes leave nothing unmatched")
         manager.stopBackgroundWork()
+    }
+
+    static func testDockBadgeCount() {
+        print("  - Testing the Dock badge: today's unread Briefing plus notified stories (#584)...")
+        // 3,502 stories, 3,454 of them unread; 10 Briefing stories, 8 unread; 2 notified stories, unread.
+        let library = (0..<3_502).map { "story-\($0)" }
+        let edition = Array(library[0..<10])
+        let read = Set(library[3_456...]).union(edition[0..<2])
+        assertEqual(library.filter { !read.contains($0) }.count, 3_454, "The seeded library has 3,454 unread stories")
+        let notified: Set<String> = ["story-20", "story-21"]
+        let now = Date()
+        let selectedAt = FiniteBriefing.editionStart(now: now, hour: 7)
+        func badge(_ read: Set<String>, notified: Set<String> = notified, selectedAt: Date = selectedAt) -> Int {
+            FiniteBriefing.dockBadgeCount(
+                editionIDs: edition.joined(separator: "\n"), selectedAt: selectedAt, hour: 7, notified: notified,
+                read: read, now: now)
+        }
+        assertEqual(badge(read), 10, "8 unread Briefing stories and 2 notified ones make the badge 10, not 3,454")
+        assertEqual(badge(read.union(["story-5"])), 9, "Reading a Briefing story lowers the badge at once")
+        assertEqual(badge(read, notified: notified.union(["story-6"])), 10, "A notified Briefing story counts once")
+        assertEqual(badge(read.union(notified)), 8, "Read notified stories no longer count")
+        let yesterday = FiniteBriefing.editionStart(now: now, hour: 7).addingTimeInterval(-60)
+        assertEqual(badge(read, selectedAt: yesterday), 2, "An edition from before the edition hour counts nothing")
+        assertEqual(badge(Set(library)), 0, "Nothing unread hides the badge")
     }
 
     static func testFiniteBriefing() async throws {
