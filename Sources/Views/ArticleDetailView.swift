@@ -1589,7 +1589,7 @@ struct ArticleDetailView: View {
         }
 
         let eventID = summary.eventID
-        let membershipVersion = summary.membershipVersion
+        let membershipVersion = summary.eventVersion
 
         if let existing = currentOverview,
             existing.eventID == eventID,

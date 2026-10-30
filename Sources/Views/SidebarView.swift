@@ -274,7 +274,7 @@ struct SidebarView: View {
         if feedManager.addFeed(url: urlString) {
             showConfirmation("Subscribed to \(URL(string: urlString)?.host ?? "feed")")
         } else {
-            feedManager.articleStore.operationError = "Feed not added. Check the URL or whether you already subscribe."
+            feedManager.articleStore.operationError = AppSettings.addFeedFailureMessage(for: urlString)
         }
     }
 
