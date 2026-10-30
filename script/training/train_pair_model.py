@@ -12,6 +12,17 @@ model first trains on the public pretraining CSVs from `pretrain_pairs.py` (stag
 pairs (stage 2). Tune and holdout never enter any CSV; the cutoff is chosen afterwards by the Swift replay against the
 library holdout, which is the gate.
 `train_pair_model.py --check-shipped` checks the weight import alone against the shipped model.
+
+Pairs CSV contract (#627), written by `./test.sh --export-pairs`, `pretrain_pairs.py` and `sample_pairs.py --labels`:
+    label,group,text_a,text_b,pieces_a,pieces_b,weight,marginal
+`label` is a class id as the #551 review protocol labels a pair: 0 different (another story, or the same kind of
+occurrence elsewhere or at another time), 1 related (another act of the same story), 2 same (one occurrence reported
+twice). `marginal` is empty for an exact label, or the class ids (digits) whose summed probability is the target of a
+partial label: `12` one story, same or related (WCEP-10 pairs more than 18 h apart); `01` not one occurrence (GDELT hard
+negatives, far-apart library negatives, "Not the Same Event" verdicts). `label` is then one of those classes and is only
+reported. `weight` scales the row's loss (reviewed labels and verdicts 5, same-day negatives 2); `pieces_*` are the app's
+word-piece ids, space-separated; `group` names where the row came from. A file without the `marginal` column is a
+binary file of the earlier contract: 1 is same (2), 0 is different (0).
 Training uses the word pieces the app exported, so it sees exactly the ids the app sends. The tokenizer port below only
 serves the shipped-model check and the self-check; `encode_ids` mirrors `BertWordPieceTokenizer.encodePair`.
 """
@@ -93,9 +104,21 @@ def check_shipped():
     print('Shipped MiniLM weights import check passed')
 
 
+def targets(row):
+    """The classes one CSV row allows under the contract above: one class for an exact label, two for a partial one."""
+    if 'marginal' not in row:
+        return frozenset([2 if row['label'] == '1' else 0])
+    label = int(row['label'])
+    classes = frozenset(int(c) for c in row['marginal']) if row['marginal'] else frozenset([label])
+    require(label in classes and classes <= {0, 1, 2}, f'Bad label {label} with marginal {row["marginal"]!r}')
+    return classes
+
+
 def read_pairs(path, cap=None):
     """Rows of one CSV as (label, group, pieces_a, pieces_b, weight); the pieces are int32 arrays, so a million-pair
-    file fits in memory. With `cap`, a fixed pseudo-random subset of that many rows (CRC-32 order of the texts)."""
+    file fits in memory. With `cap`, a fixed pseudo-random subset of that many rows (CRC-32 order of the texts).
+    The binary head reads a row as same (1) when it allows only `same`, as not same (0) when it excludes `same`, and
+    skips a partial label that allows `same` among others (#627)."""
     file = pathlib.Path(path).resolve()
     require(file.suffix == '.csv' and file.is_file(), 'Use the --export-pairs CSV')
     require(not any((parent / '.git').exists() for parent in file.parents), 'Keep the pairs outside Git checkouts')
@@ -103,9 +126,9 @@ def read_pairs(path, cap=None):
     def ids(value):
         return np.array(value.split(), dtype=np.int32)
     with file.open(newline='', encoding='utf-8') as handle:
-        rows = [(int(row['label']), row['group'], ids(row['pieces_a']), ids(row['pieces_b']),
+        rows = [(int(classes == {2}), row['group'], ids(row['pieces_a']), ids(row['pieces_b']),
                  float(row.get('weight') or 1.0))
-                for row in csv.DictReader(handle)]
+                for row in csv.DictReader(handle) if (classes := targets(row)) == {2} or 2 not in classes]
     if cap and len(rows) > cap:
         rows.sort(key=lambda r: zlib.crc32(r[2].tobytes() + r[3].tobytes()))
         rows = rows[:cap]
@@ -312,6 +335,9 @@ def self_check():
             and built[2][0, :6].tolist() == [0, 0, 0, 0, 1, 1] and int(built[1][0].sum()) == 6,
             'Tensors match encode_ids')
     require(built[0][0].tolist() == tokenizer.encode_ids([7, 8], [9])[0], 'Array rows equal the list encoder')
+    require([targets(r) for r in ({'label': '1'}, {'label': '0'}, {'label': '2', 'marginal': ''},
+                                  {'label': '1', 'marginal': '12'}, {'label': '0', 'marginal': '01'})]
+            == [{2}, {0}, {2}, {1, 2}, {0, 1}], 'Binary and three-way rows read by the contract')
     print('Pair model training self-check passed')
 
 
