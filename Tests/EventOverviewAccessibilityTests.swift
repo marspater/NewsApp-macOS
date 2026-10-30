@@ -1107,6 +1107,12 @@ extension EventOverviewAccessibilityTests {
             assertTrue(result.items.isEmpty, "Rejects ineligible sentence: \(sentence)")
             assertTrue(result.citations.isEmpty, "Rejected sentence creates no citation")
         }
+        // A legal order only stops "orders" from reading as demand; a stated operational impact still counts.
+        let ordered = impactFixture("A court order halted production at the carmaker's main plant for two weeks.")
+        assertEqual(
+            OverviewIndustryImpactExtractor.extractIndustryImpact(
+                passages: [ordered.passage], articles: [ordered.article], existingCitations: [:]
+            ).items.count, 1, "A court order that halts production is still an industry impact")
 
         let sentence = "Energy costs increased across all regional markets today."
         let fixture = impactFixture(sentence)

@@ -362,10 +362,21 @@ struct OverviewIndustryImpactExtractor: Sendable {
         }
     }
 
-    /// Rejects legal-order phrases before checking business implication cues in lowercased text and its word set.
+    /// Checks business implication cues in lowercased text and its word set. Legal-order phrases are removed first,
+    /// so "court orders" is not read as demand, while another cue in the same sentence ("halted production") counts.
     private static func hasImplication(text: String, words: Set<String>) -> Bool {
-        guard !legalOrderCues.contains(where: { matchesCue($0, in: text, words: words) }) else { return false }
-        return implicationCues.contains { matchesCue($0, in: text, words: words) }
+        guard legalOrderCues.contains(where: { matchesCue($0, in: text, words: words) }) else {
+            return implicationCues.contains { matchesCue($0, in: text, words: words) }
+        }
+        var remaining = text
+        for cue in legalOrderCues {
+            if let regex = multiWordRegexes[cue] {
+                remaining = regex.stringByReplacingMatches(
+                    in: remaining, range: NSRange(remaining.startIndex..., in: remaining), withTemplate: " ")
+            }
+        }
+        let remainingWords = wordsSet(from: remaining)
+        return implicationCues.contains { matchesCue($0, in: remaining, words: remainingWords) }
     }
 
     /// Reports whether the article title or sentence contains one of the sports exclusion cues.
