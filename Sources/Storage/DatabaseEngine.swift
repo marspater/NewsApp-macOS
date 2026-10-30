@@ -1545,13 +1545,17 @@ actor DatabaseEngine {
                 // classifier's value, clear it: a feed that sends a category restores it on its next fetch, and lists
                 // read the classifier's value from article_enrichment as before. A library that started this open
                 // below v22 had every hint replaced with a classifier label by the v22 step above (and its enrichment
-                // categories cleared, so nothing would match): clear them all.
+                // categories cleared, so nothing would match): clear them all. A content change can clear the
+                // enrichment category while the hint keeps the classifier's label: clear those labels too.
+                let labels = NewsCategory.allCases.map { "'\($0.rawValue)'" }.joined(separator: ", ")
                 try executeSimple(
                     version < 22
                         ? "UPDATE articles SET category = NULL WHERE category IS NOT NULL;"
                         : """
                         UPDATE articles SET category = NULL WHERE category IS NOT NULL AND category = (
-                            SELECT ae.category FROM article_enrichment ae WHERE ae.article_id = articles.id);
+                            SELECT ae.category FROM article_enrichment ae WHERE ae.article_id = articles.id)
+                            OR ((SELECT ae.category FROM article_enrichment ae WHERE ae.article_id = articles.id)
+                                IS NULL AND category IN (\(labels)));
                         """)
                 try Task.checkCancellation()
                 try setUserVersion(28)

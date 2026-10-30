@@ -10631,13 +10631,15 @@ struct NewsTests {
             "Upgraded libraries remember site defaults")
 
         // #817: classifier output stays out of the publisher-hint column, and v28 clears the rows it reached.
-        let hints = ["hint-classified", "hint-publisher"].map { id in
+        let hints = ["hint-classified", "hint-publisher", "hint-unclassified", "hint-unrated"].map { id in
             FeedArticle(
                 storedID: id, title: "Hint report \(id)", link: fixtureRoot.appendingPathComponent(id).absoluteString,
                 guid: id, description: "Report.", pubDate: Date(), source: "Publisher")
         }
         try await db.upsertArticles(hints)
-        for hint in hints { try await db.updateEnrichment(articleId: hint.id, update: .init(category: "World")) }
+        for hint in hints.prefix(2) {
+            try await db.updateEnrichment(articleId: hint.id, update: .init(category: "World"))
+        }
         assertEqual(
             value("SELECT category FROM articles WHERE id = 'hint-classified';"), nil,
             "A classification is stored in article_enrichment only (#817)")
@@ -10648,7 +10650,7 @@ struct NewsTests {
         assertEqual(
             sqlite3_exec(
                 handle,
-                "UPDATE articles SET category = 'World' WHERE id = 'hint-classified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-publisher'; PRAGMA user_version = 27;",
+                "UPDATE articles SET category = 'World' WHERE id = 'hint-classified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-publisher'; UPDATE articles SET category = 'Politics' WHERE id = 'hint-unclassified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-unrated'; PRAGMA user_version = 27;",
                 nil, nil, nil), SQLITE_OK, "Reconstruct a v27 library with a classifier category in the hint column")
         try await db.open()
         assertEqual(value("PRAGMA user_version;"), "28", "The v27 library migrates to v28")
@@ -10658,6 +10660,12 @@ struct NewsTests {
         assertEqual(
             value("SELECT category FROM articles WHERE id = 'hint-publisher';"), "Sport",
             "v28 keeps a publisher category that differs from the classifier's")
+        assertEqual(
+            value("SELECT category FROM articles WHERE id = 'hint-unclassified';"), nil,
+            "v28 clears a classifier label left in the hint after its enrichment category was cleared")
+        assertEqual(
+            value("SELECT category FROM articles WHERE id = 'hint-unrated';"), "Sport",
+            "v28 keeps an unclassified article's publisher category")
         await db.close()
     }
 
