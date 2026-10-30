@@ -14,6 +14,7 @@ The current release simplification uses existing #102 labeled tune/English holdo
 
 ```sh
 ./test.sh                         # Full regressions, including parser-to-embedding/clustering integration; also run by the commit hook
+script/test_event_overview_accessibility.sh # Story Overview sections, Industry Impact included (Epic T); headless, and run by a plain ./test.sh after the main runner, together with script/test_reader_accessibility.sh and script/test_tension_calibration.sh
 NEWS_TEST_FORCE=1 ./test.sh       # A plain ./test.sh skips the Swift runner when the same inputs already passed on this machine; this reruns it
 ./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook

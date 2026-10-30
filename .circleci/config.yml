@@ -40,6 +40,12 @@ jobs:
           name: "Run unit tests and regressions via Smarter Testing"
           command: circleci testsuite run "unit tests"
       - run:
+          name: "Standalone headless runners (Story Overview, reader accessibility, tension calibration)"
+          command: |
+            script/test_event_overview_accessibility.sh
+            script/test_reader_accessibility.sh
+            script/test_tension_calibration.sh
+      - run:
           name: "Verify publisher excerpts"
           command: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
       - run:
