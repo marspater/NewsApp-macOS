@@ -1,4 +1,5 @@
 import AppIntents
+import AppKit
 import CryptoKit
 import Darwin
 import Foundation
@@ -6,6 +7,7 @@ import ImageIO
 import NaturalLanguage
 import Network
 import SQLite3
+import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
@@ -15186,6 +15188,50 @@ struct NewsTests {
         await queue.enqueue(articles: [], priority: .background, allowHTTP: false)
     }
 
+    /// Runs on the main actor: resolving an AppKit-backed Color off the main thread waits on SwiftUI's main-thread
+    /// lock, which this runner's main executor never grants, so the check hung.
+    @MainActor
+    static func testTagTextContrast() {
+        // Tinted tag text keeps 4.5:1 on its wash over the page, light and dark, with and without Increase Contrast
+        // (#754). The accent path mixes from accent text, so each system accent is checked through that math.
+        func srgb(_ color: Color, _ environment: EnvironmentValues, over page: Color.Resolved? = nil) -> NSColor {
+            let top = color.resolve(in: environment)
+            let alpha = page == nil ? 1 : top.opacity
+            func channel(_ value: Float, _ under: Float?) -> CGFloat {
+                CGFloat(value * alpha + (under ?? 0) * (1 - alpha))
+            }
+            return NSColor(
+                srgbRed: channel(top.red, page?.red), green: channel(top.green, page?.green),
+                blue: channel(top.blue, page?.blue), alpha: 1)
+        }
+        let accents: [NSColor] = [
+            .systemBlue, .systemPurple, .systemPink, .systemRed, .systemOrange, .systemYellow, .systemGreen,
+            .systemGray,
+        ]
+        for scheme in [ColorScheme.light, .dark] {
+            var environment = EnvironmentValues()
+            environment.colorScheme = scheme
+            let page = AppColor.background.resolve(in: environment)
+            let reference = scheme == .dark ? srgb(AppColor.background, environment) : .white
+            for contrast in [ColorSchemeContrast.standard, .increased] {
+                var pairs: [(String, Color, Color)] = [
+                    ("current accent", TagView.textColor(tint: AppColor.accent, contrast: contrast), AppColor.accent)
+                ]
+                for accent in accents {
+                    let base = Color(nsColor: AppColor.readableAccent(accent, dark: scheme == .dark, on: reference))
+                    pairs.append(
+                        ("\(accent)", TagView.textColor(tint: base, contrast: contrast), Color(nsColor: accent)))
+                }
+                for (name, text, tint) in pairs {
+                    let wash = srgb(TagView.fill(tint: tint, contrast: contrast), environment, over: page)
+                    assertTrue(
+                        AppColor.contrastRatio(srgb(text, environment), wash) >= 4.5,
+                        "Tag text on its \(name) wash keeps 4.5:1 (\(scheme), \(contrast))")
+                }
+            }
+        }
+    }
+
     static func testDesignSystemAndArticleFilter() async {
         print("  - Testing Phase 4 Design System Tokens and Article Filter Query Parser...")
 
@@ -15217,6 +15263,8 @@ struct NewsTests {
         assertEqual(AppTypography.bodyLineSpacing(for: .casper), 10.0, "Casper theme line spacing should be 10")
         assertEqual(AppTypography.bodyLineSpacing(for: .edition), 8.0, "Edition theme line spacing should be 8")
         assertEqual(AppTypography.bodyLineSpacing(for: .alto), 12.0, "Alto theme line spacing should be 12")
+
+        await testTagTextContrast()
 
         // 4. ArticleFilterQuery structured parsing
         let complexQuery = "source:Bloomberg category:Tech is:unread apple silicon"
