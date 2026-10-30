@@ -740,7 +740,7 @@ struct EventOverviewReaderView: View {
         HStack(alignment: .top, spacing: AppSpacing.sm) {
             Circle()
                 .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
-                .foregroundStyle(AppColor.accent)
+                .foregroundStyle(AppColor.accentText)
                 .padding(.top, AppLayout.bulletTopInset * textScale)
                 .accessibilityHidden(true)
 
@@ -809,7 +809,7 @@ struct EventOverviewReaderView: View {
             mark.link = URL(string: "\(citationScheme)://\(index)")
             mark.font = AppTypography.overviewFont(.micro, scale: scale).bold()
             mark.baselineOffset = AppTypography.superscriptOffset
-            mark.foregroundColor = AppColor.accent
+            mark.foregroundColor = AppColor.accentText
             result.append(AttributedString(" "))
             result.append(mark)
         }
@@ -861,7 +861,7 @@ struct EventOverviewReaderView: View {
                     HStack(alignment: .center, spacing: AppSpacing.sm) {
                         Text("[\(index + 1)]")
                             .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                            .foregroundStyle(AppColor.accent)
+                            .foregroundStyle(AppColor.accentText)
                             .bold()
                             .monospacedDigit()
                             .frame(
@@ -871,7 +871,7 @@ struct EventOverviewReaderView: View {
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             EyebrowText(
                                 article.publisherName,
-                                color: AppColor.accent,
+                                color: AppColor.accentText,
                                 font: AppTypography.overviewFont(.eyebrow, scale: textScale)
                             )
 
@@ -928,7 +928,7 @@ struct EventOverviewReaderView: View {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "newspaper")
                     .imageScale(.small)
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .accessibilityHidden(true)
 
                 Text("Sources (\(memberArticles.count))")
@@ -1136,7 +1136,7 @@ struct EventOverviewReaderView: View {
                 if hasEventDate && hasDateText {
                     Text(item.dateText)
                         .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                        .foregroundStyle(AppColor.accent)
+                        .foregroundStyle(AppColor.accentText)
                         .bold()
                 } else if !hasEventDate && (hasDateText || hasPubDate) {
                     let displayDate =
@@ -1147,7 +1147,7 @@ struct EventOverviewReaderView: View {
                         let text = displayDate.hasPrefix("Reported ") ? displayDate : "Reported \(displayDate)"
                         Text(text)
                             .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                            .foregroundStyle(AppColor.accent)
+                            .foregroundStyle(AppColor.accentText)
                             .bold()
                     }
                 }
@@ -1239,7 +1239,7 @@ struct EventOverviewReaderView: View {
             HStack(alignment: .top, spacing: AppSpacing.sm) {
                 Image(systemName: "person.crop.circle")
                     .font(AppTypography.overviewFont(.emphasis, scale: textScale))
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .accessibilityHidden(true)
 
                 perspectiveContent(perspective, source: source, citations: citations)
@@ -1365,7 +1365,7 @@ struct EventOverviewReaderView: View {
                 HStack(alignment: .top, spacing: AppSpacing.xs) {
                     Circle()
                         .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
-                        .foregroundStyle(AppColor.accent)
+                        .foregroundStyle(AppColor.accentText)
                         .padding(.top, AppLayout.bulletTopInset * textScale)
                         .accessibilityHidden(true)
 
