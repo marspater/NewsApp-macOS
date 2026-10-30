@@ -431,7 +431,7 @@ struct MainView: View {
         if feedManager.addFeed(url: urlString) {
             mastheadNotice = MastheadNotice(message: "Subscribed to \(url.host ?? "feed")")
         } else {
-            articleStore.operationError = "Feed not added. Check the URL or whether you already subscribe."
+            articleStore.operationError = AppSettings.addFeedFailureMessage(for: urlString)
         }
     }
 

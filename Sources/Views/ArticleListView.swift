@@ -106,6 +106,8 @@ struct ArticleListView: View {
     @State private var isReaderRefreshing = false
     /// Stories the reader's muting removes from this list, across every page.
     @State private var mutedCount = 0
+    /// Stories of this list across all its pages and the events grouping them; nil until a new list has loaded.
+    @State private var listTotals: (stories: Int, events: Int)?
     @State private var searchSuggestion: String?
     @State private var showsMuted = false
     @State private var confirmsUnmuteAll = false
@@ -136,7 +138,10 @@ struct ArticleListView: View {
             ? .events : .publications
     }
 
-    private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
+    /// The shown page grouped once per change of page or grouping; the body reads it several times (#778).
+    @State private var groupedEntries = GroupedEntries()
+
+    private var entries: [FeedEntry] { groupedEntries.entries(of: buffer.displayed, mode: groupingMode) }
 
     /// Once stories are on screen they stay put: background collection, grouping and rating queue behind the
     /// updates button instead of reshuffling the list. A refresh the reader started is the exception while the list
@@ -285,6 +290,19 @@ struct ArticleListView: View {
                 briefing = nil
                 if isBriefing { pageRequest += 1 }
             }
+            // Subscribing asks for those stories, as Refresh does: the refresh the subscription starts shows them
+            // instead of parking them behind the updates button, where the list looked unchanged (#782).
+            .onChange(of: appSettings.feedURLs) { previous, current in
+                if FeedUpdateBuffer.subscriptionAdded(from: previous, to: current) { refreshFeeds(subscription: true) }
+            }
+            // A subscription's stories held while an article was open appear when the reader closes.
+            .onChange(of: articlePath.isEmpty) { _, isClosed in
+                guard isClosed, buffer.holdsSubscription else { return }
+                showPendingUpdates()
+                buffer.holdsSubscription = false
+                appliesNextUpdate = true
+                refreshReloads += 1
+            }
             .focusable()
             .focused($listHasFocus)
             .defaultFocus($listHasFocus, true)
@@ -377,8 +395,13 @@ struct ArticleListView: View {
     private func performQueryReload() async {
         let identity = queryIdentity
         let runID = UUID()
-        queryRunID = runID
         if isBriefing {
+            // Bursts of store revisions rebuilt the board once each; they are debounced as in the list. A new or
+            // rolled-over edition (no briefing yet) loads at once.
+            if briefing != nil, loadedQuery == identity, !buffer.displayed.articles.isEmpty {
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+            }
+            queryRunID = runID
             queryError = nil
             isLoadingPage = true
             defer { if queryRunID == runID { isLoadingPage = false } }
@@ -429,7 +452,8 @@ struct ArticleListView: View {
                 let briefingArticles = briefing?.articles ?? []
                 let events = (try? await articleStore.eventFeedSummaries(for: briefingArticles.map(\.id))) ?? []
                 try Task.checkCancellation()
-                buffer.replace(with: FeedSnapshot(articles: briefingArticles, events: events))
+                let snapshot = FeedSnapshot(articles: briefingArticles, events: events)
+                if buffer.displayed != snapshot { buffer.replace(with: snapshot) }
                 hasMoreResults = false
                 mutedCount = 0
                 loadedQuery = identity
@@ -442,6 +466,14 @@ struct ArticleListView: View {
         }
         let isNewQuery = loadedQuery != identity
         let isPaging = !isNewQuery && pageRequest != loadedPageRequest && cursor != nil
+        // The debounce comes before any state changes, so a burst of revisions that keeps restarting it leaves the
+        // list alone instead of re-rendering it for each one (#778).
+        if FeedUpdateBuffer.debouncesReload(
+            isPaging: isPaging, isNewQuery: isNewQuery, hasStories: !buffer.displayed.articles.isEmpty)
+        {
+            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+        }
+        queryRunID = runID
         loadedPageRequest = pageRequest
         if isNewQuery {
             buffer = FeedUpdateBuffer()
@@ -449,17 +481,13 @@ struct ArticleListView: View {
             cursor = nil
             hasMoreResults = false
             expandedEvents = []
+            listTotals = nil
             loadedQuery = identity
         }
         queryError = nil
         isLoadingPage = true
         defer { if queryRunID == runID { isLoadingPage = false } }
         do {
-            if FeedUpdateBuffer.debouncesReload(
-                isPaging: isPaging, isNewQuery: isNewQuery, hasStories: !buffer.displayed.articles.isEmpty)
-            {
-                try await Task.sleep(for: .milliseconds(180))
-            }
             let muting = listMuting
             let fetched = try await fetchPage(
                 after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
@@ -467,6 +495,7 @@ struct ArticleListView: View {
             if !isPaging {
                 var hidden = 0
                 if !muting.isEmpty { hidden = try await countMuted(muting) }
+                let totals = try await countListed(showsMuted ? MuteRules() : muting)
                 // A search that finds nothing offers the closest spelling that does; a failure means no suggestion.
                 var suggestion: String?
                 if isSearching && fetched.isEmpty {
@@ -475,6 +504,7 @@ struct ArticleListView: View {
                 }
                 try Task.checkCancellation()
                 mutedCount = hidden
+                listTotals = totals
                 searchSuggestion = suggestion
             }
             let page = Array(fetched.prefix(200))
@@ -542,6 +572,16 @@ struct ArticleListView: View {
         }
         let filters = listFilters
         return try await articleStore.database.mutedArticleCount(
+            section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
+    }
+
+    /// The masthead's totals: every story of the list, across all its pages, and the events grouping them (#782).
+    private func countListed(_ muting: MuteRules) async throws -> (stories: Int, events: Int) {
+        if isSearching {
+            return try await articleStore.database.listTotals(search: searchText, muting: muting)
+        }
+        let filters = listFilters
+        return try await articleStore.database.listTotals(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
     }
 
@@ -637,7 +677,9 @@ struct ArticleListView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Aligned with the content column: the centred list and Briefing measure, or the full-width grid.
+        .frame(maxWidth: gridLayout && !isBriefing ? .infinity : AppLayout.listMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, AppSpacing.md)
         .padding(.bottom, AppLayout.cardGap)
@@ -753,18 +795,28 @@ struct ArticleListView: View {
         }
     }
 
-    /// Story count, how many cards group an event's coverage, and when feeds last refreshed.
+    /// The list's story count and how many events group them, across every page rather than the loaded one (#782);
+    /// "unread" when the list shows unread stories only. Then when feeds last refreshed.
     private var listSubtitle: String {
         if isBriefing {
             let edition = (briefing?.startedAt ?? Date()).formatted(.dateTime.weekday(.wide).month(.wide).day())
             return "\(edition) briefing · Selected by coverage and your interests"
         }
-        var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
+        var parts: [String] = []
         if !isSearching && (selectedTopic ?? "Today") == "Today" {
-            parts.insert(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()), at: 0)
+            parts.append(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
         }
-        let events = entries.filter { if case .event = $0 { return true } else { return false } }.count
-        if events > 0 { parts.append("\(events) grouped \(events == 1 ? "event" : "events")") }
+        if let listTotals {
+            let showsUnreadOnly =
+                isSearching ? ArticleFilterQuery.parse(searchText).isReadFilter == false : listFilters.read == false
+            let unread = showsUnreadOnly ? "unread " : ""
+            parts.append(
+                "\(listTotals.stories.formatted()) \(unread)\(listTotals.stories == 1 ? "story" : "stories")")
+            if groupingMode == .events && listTotals.events > 0 {
+                parts.append(
+                    "\(listTotals.events.formatted()) grouped \(listTotals.events == 1 ? "event" : "events")")
+            }
+        }
         if !isSearching, let refreshed = feedManager.lastRefreshCompletedAt {
             parts.append("Updated \(refreshed.formatted(date: .omitted, time: .shortened))")
         }
@@ -911,7 +963,8 @@ struct ArticleListView: View {
         case .article(let article):
             ArticleCardView(
                 article: article, isSelected: listHasFocus && article.id == focusedArticleID,
-                compact: !gridLayout, isLead: isLead, action: { openArticle(article) }, footer: EmptyView()
+                compact: !gridLayout, isLead: isLead, reservesCoverageRow: gridLayout && !isLead,
+                action: { openArticle(article) }, footer: EmptyView()
             )
             .id(entry.id)
             .onAppear {
@@ -1199,17 +1252,38 @@ struct ArticleListView: View {
 
     /// Refresh means "show me what's new": queued updates appear at once, and results arriving during the refresh
     /// (collection, event grouping, rating) replace the list instead of waiting behind the updates button.
-    private func refreshFeeds() {
+    private func refreshFeeds(subscription: Bool = false) {
         Task {
             if articlePath.isEmpty { showPendingUpdates() }
             isReaderRefreshing = true
             defer { isReaderRefreshing = false }
             await feedManager.fetchFeedsAsync()
-            // An open article keeps the list still; its updates wait as usual.
-            guard articlePath.isEmpty else { return }
+            // An open article keeps the list still; its updates wait as usual, a subscription's until it closes.
+            guard articlePath.isEmpty else {
+                if subscription { buffer.holdsSubscription = true }
+                return
+            }
             appliesNextUpdate = true
             refreshReloads += 1
         }
+    }
+}
+
+/// Memoizes `FeedSnapshot.entries(_:)`. An unchanged snapshot compares in constant time, since its arrays share
+/// storage with the cached one; regrouping a 200-story page on every read showed in scrolling (#778).
+@MainActor
+private final class GroupedEntries {
+    private var snapshot: FeedSnapshot?
+    private var mode: FeedGroupingMode?
+    private var cached: [FeedEntry] = []
+
+    func entries(of snapshot: FeedSnapshot, mode: FeedGroupingMode) -> [FeedEntry] {
+        if snapshot != self.snapshot || mode != self.mode {
+            cached = snapshot.entries(mode)
+            self.snapshot = snapshot
+            self.mode = mode
+        }
+        return cached
     }
 }
 

@@ -23,7 +23,6 @@ struct EventCardView: View {
 
     @EnvironmentObject private var articleStore: ArticleStore
     @Environment(\.effectiveReduceMotion) private var reduceMotion
-    @Environment(\.effectiveContrast) private var contrast
     @State private var members: [FeedArticle] = []
     /// Loaded with the members, so the submenu is ready before a context menu opens on a row.
     @State private var relatedEvents: [RelatedStoryEvent] = []
@@ -84,28 +83,10 @@ struct EventCardView: View {
                 Task { await articleStore.markEventSeen(eventID) }
             }
         } label: {
-            HStack(spacing: AppSpacing.xs) {
-                Image(systemName: "square.stack.3d.up")
-                    .font(AppTypography.label)
-                Text(summary.coverageText)
-                    .font(AppTypography.label)
-                if let latest = summary.latestDate {
-                    Text("· updated \(latest, format: .relative(presentation: .named))")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.tertiaryText(for: contrast))
-                        .monospacedDigit()
-                }
-                if summary.hasSubstantiveUpdate {
-                    TagView(title: "Updated", tint: AppColor.accent)
-                }
-                Spacer(minLength: AppSpacing.xs)
-                Image(systemName: "chevron.down")
-                    .font(AppTypography.eyebrow)
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
-            }
-            .foregroundStyle(AppColor.secondaryText)
-            .padding(.horizontal, AppSpacing.sm)
-            .padding(.vertical, AppSpacing.xs)
+            CoverageRowLabel(
+                coverageText: summary.coverageText, latestDate: summary.latestDate,
+                hasUpdate: summary.hasSubstantiveUpdate, isExpanded: isExpanded, isGrid: !compact && !isLead
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

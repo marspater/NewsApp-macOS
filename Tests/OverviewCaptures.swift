@@ -17,7 +17,9 @@ import SwiftUI
 
 /// Story Overview captures for Epic T (#669–#673) without a window or Screen Recording: the reader view is rendered
 /// offscreen at 900 pt and 1,400 pt, text sizes 1.0 and 1.3, light, dark and Increase Contrast, each also redrawn in
-/// gray. Run with `NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift script/native_performance_baseline.sh DIR`;
+/// gray. Then two rows of story grid cards (#779), collapsed and with the event card's sources shown, in light and
+/// dark, with each card's height. Run with `NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift
+/// script/native_performance_baseline.sh DIR`; `NEWS_CAPTURES=overview` or `NEWS_CAPTURES=grid` runs one set, and
 /// `NEWS_CAPTURE_SET=tension` renders the World Tension sheet, sidebar foot and Briefing strip instead (#781).
 @main
 struct OverviewCaptures {
@@ -25,7 +27,14 @@ struct OverviewCaptures {
         let output = URL(
             fileURLWithPath: CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : NSTemporaryDirectory())
         let set = ProcessInfo.processInfo.environment["NEWS_CAPTURE_SET"]
-        let failures = await MainActor.run { set == "tension" ? captureTension(into: output) : capture(into: output) }
+        let only = ProcessInfo.processInfo.environment["NEWS_CAPTURES"]
+        var failures = 0
+        if set == "tension" {
+            failures = await MainActor.run { captureTension(into: output) }
+        } else {
+            if only != "grid" { failures = await MainActor.run { capture(into: output) } }
+            if only != "overview" { failures += await GridRowCaptures.capture(into: output) }
+        }
         print(failures == 0 ? "✅ Captures written to \(output.path)" : "❌ \(failures) captures failed")
         exit(failures == 0 ? 0 : 1)
     }
@@ -376,6 +385,205 @@ extension OverviewCaptures {
         } catch {
             print("  write failed: \(name): \(error.localizedDescription)")
             return 1
+        }
+    }
+}
+
+/// Two rows of grid cards as the story list lays them out (#779): an article card, an event card of four reports and an
+/// article card with an intelligence tag, then a row of three article cards. Rendered collapsed and with the event
+/// card's sources shown, in light and dark; each card's height is printed and written to grid-heights.json.
+@MainActor
+enum GridRowCaptures {
+    static func capture(into output: URL) async -> Int {
+        do {
+            return try await render(into: output)
+        } catch {
+            print("  grid captures failed: \(error)")
+            return 1
+        }
+    }
+
+    static func render(into output: URL) async throws -> Int {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-grid-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = testDefaultsSuite("test.captures.grid")
+        defer {
+            removeTestDefaults(suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let settings = AppSettings(defaults: UserDefaults(suiteName: suite)!)
+        let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
+        let store = ArticleStore(database: database)
+        await store.initialize()
+        let published = Date().addingTimeInterval(-3 * 3600)
+        func story(_ id: String, _ title: String, _ summary: String, _ source: String, minutes: Double) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: title, link: "https://\(source.lowercased().filter(\.isLetter)).example/\(id)",
+                guid: id, description: summary, pubDate: published.addingTimeInterval(-minutes * 60), source: source)
+        }
+        let listed = [
+            story("grid-a", "Council approves new bus lanes", "A short summary.", "City Desk", minutes: 0),
+            story(
+                "grid-e", "Port strike halts container shipping on the east coast as contract talks collapse",
+                "Dockworkers at 14 ports walked off the job after employers rejected a wage offer, stopping most "
+                    + "container traffic.", "Harbor Times", minutes: 5),
+            story(
+                "grid-c", "Researchers map a deep-sea current that carries heat from the tropics toward the poles", "",
+                "Science Weekly", minutes: 10),
+            story("grid-d", "Library extends weekend hours", "Branches open until eight.", "City Desk", minutes: 15),
+            story(
+                "grid-f", "Rail operator orders forty new trains", "Deliveries start next year.", "Transit Wire",
+                minutes: 20),
+            story("grid-g", "Museum reopens its east wing after repairs", "", "Arts Daily", minutes: 25),
+        ]
+        let coverage = [
+            story("grid-e2", "Dockworkers walk out as talks fail", "", "Wire Service", minutes: 30),
+            story("grid-e3", "Ports close as strike begins", "", "Morning Ledger", minutes: 35),
+            story("grid-e4", "Retailers warn of delays as ports close", "", "Trade Journal", minutes: 40),
+        ]
+        try await database.upsertArticles(listed + coverage)
+        guard
+            case .created = try await database.applyEventMatch(
+                "grid-e", .create(with: coverage.map(\.id)), matcherVersion: EventMatcher.version)
+        else { throw CocoaError(.featureUnsupported) }
+        try await database.updateEnrichment(articleId: "grid-c", update: .init(summary: "A generated summary."))
+        let stored = try await database.fetchArticles(limit: nil).filter { article in
+            listed.contains { $0.id == article.id }
+        }
+        let events = try await store.eventFeedSummaries(for: stored.map(\.id))
+        let entries = EventFeedGrouping.entries(for: stored, events: events, mode: .events)
+        guard entries.count == 6, case .event = entries[1] else { throw CocoaError(.featureUnsupported) }
+
+        var failures = 0
+        var report: [String: [String: Double]] = [:]
+        var collapsedEventHeight: Double?
+        let variants: [(name: String, appearance: NSAppearance.Name, scheme: ColorScheme)] = [
+            ("light", .aqua, .light), ("dark", .darkAqua, .dark),
+        ]
+        for expanded in [false, true] {
+            for variant in variants {
+                let heights = CardHeights()
+                let view = NSHostingView(
+                    rootView: GridRowFixture(entries: entries, expanded: expanded, heights: heights)
+                        .environmentObject(settings)
+                        .environmentObject(store)
+                        .environmentObject(ReadManager(articleStore: store))
+                        .environmentObject(SavedStoriesManager(articleStore: store))
+                        .environment(\.colorScheme, variant.scheme)
+                        .environment(\.overrideReduceMotion, true))
+                let appearance = NSAppearance(named: variant.appearance) ?? NSAppearance.currentDrawing()
+                view.appearance = appearance
+                view.frame = NSRect(x: 0, y: 0, width: 1040, height: 1200)
+                // The expanded card loads its sources from the store. Wait until its height has grown past the
+                // collapsed card's by more than the loading row and then held for ten updates; five seconds without
+                // that is a failed capture, not a picture of the spinner.
+                let event = entries[1].id
+                var settled = !expanded
+                var stableUpdates = 0
+                var lastHeight = 0.0
+                for _ in 0..<300 where !settled {
+                    try await Task.sleep(for: .milliseconds(16))
+                    appearance.performAsCurrentDrawingAppearance { view.layoutSubtreeIfNeeded() }
+                    let height = heights.values[event] ?? 0
+                    stableUpdates = height == lastHeight ? stableUpdates + 1 : 0
+                    lastHeight = height
+                    settled = height > (collapsedEventHeight ?? .infinity) + 100 && stableUpdates >= 10
+                }
+                if !expanded {
+                    for _ in 0..<30 {
+                        try await Task.sleep(for: .milliseconds(16))
+                        appearance.performAsCurrentDrawingAppearance { view.layoutSubtreeIfNeeded() }
+                    }
+                    collapsedEventHeight = heights.values[event]
+                }
+                guard settled else {
+                    print("  sources did not load: grid-row-expanded-\(variant.name)")
+                    failures += 1
+                    continue
+                }
+                var rendered: NSBitmapImageRep?
+                appearance.performAsCurrentDrawingAppearance {
+                    view.layoutSubtreeIfNeeded()
+                    guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                    view.cacheDisplay(in: view.bounds, to: bitmap)
+                    rendered = bitmap
+                }
+                let file = "grid-row-\(expanded ? "expanded" : "collapsed")-\(variant.name)"
+                guard let full = rendered, let bitmap = OverviewCaptures.trimmed(full) else {
+                    failures += 1
+                    continue
+                }
+                do {
+                    try OverviewCaptures.write(bitmap, to: output.appendingPathComponent("\(file).png"))
+                } catch {
+                    print("  write failed: \(file): \(error.localizedDescription)")
+                    failures += 1
+                }
+                report[file] = heights.values
+                // The bug this capture guards (#779): showing the event's sources must not change any other card.
+                if expanded, let collapsed = report["grid-row-collapsed-\(variant.name)"] {
+                    for entry in entries where entry.id != event && heights.values[entry.id] != collapsed[entry.id] {
+                        print("  \(file): \(entry.id) changed height when the event card expanded")
+                        failures += 1
+                    }
+                }
+                print(
+                    "  \(file): " + entries.map { "\($0.id)=\(Int(heights.values[$0.id] ?? 0))" }.joined(separator: " ")
+                )
+            }
+        }
+        try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+            .write(to: output.appendingPathComponent("grid-heights.json"))
+        await database.close()
+        return failures
+    }
+}
+
+@MainActor
+private final class CardHeights {
+    var values: [String: Double] = [:]
+}
+
+/// The story list's grid: the columns, spacing and cards of `ArticleListView.cardCollection` in grid layout.
+private struct GridRowFixture: View {
+    let entries: [FeedEntry]
+    let expanded: Bool
+    let heights: CardHeights
+
+    var body: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(
+                    .adaptive(minimum: AppLayout.gridColumnMinimum, maximum: AppLayout.gridColumnMaximum),
+                    spacing: AppLayout.cardGap, alignment: .top)
+            ],
+            spacing: AppLayout.cardGap
+        ) {
+            ForEach(entries) { entry in
+                card(entry)
+                    .onGeometryChange(for: Double.self) {
+                        Double($0.size.height)
+                    } action: {
+                        heights.values[entry.id] = $0
+                    }
+            }
+        }
+        .padding(AppLayout.pageInset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(AppColor.background)
+    }
+
+    @ViewBuilder
+    private func card(_ entry: FeedEntry) -> some View {
+        switch entry {
+        case .article(let article):
+            ArticleCardView(
+                article: article, compact: false, reservesCoverageRow: true, action: {}, footer: EmptyView())
+        case .event(let summary, let representative, let members):
+            EventCardView(
+                representative: representative, summary: summary, visibleMembers: members, compact: false,
+                isExpanded: .constant(expanded), openRepresentative: {}, openMember: { _, _ in }, separate: { _ in },
+                combine: { _ in })
         }
     }
 }
