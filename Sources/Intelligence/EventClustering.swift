@@ -594,6 +594,18 @@ enum EventClusterer {
                 events.map { ($0.id, $0.members.sorted { ($0.date, $0.id) < ($1.date, $1.id) }) },
                 uniquingKeysWith: { a, _ in a })
             var components = StoryComponents()
+            /// A reader's exclusion anywhere across the two stories keeps them apart, not only between two events: joins
+            /// are transitive.
+            func storiesExcluded(_ first: String, _ second: String) -> Bool {
+                components.component(of: first).contains { left in
+                    (membersOf[left] ?? []).contains { member in
+                        guard let apart = exclusions[member.id] else { return false }
+                        return components.component(of: second).contains { right in
+                            (membersOf[right] ?? []).contains { apart.contains($0.id) }
+                        }
+                    }
+                }
+            }
             for event in events {
                 try Task.checkCancellation()
                 var shared: [String: Int] = [:]
@@ -611,15 +623,7 @@ enum EventClusterer {
                     if !agree { agree = await storyModelAgrees(a, b, common: common) }
                     // A reader's exclusion anywhere across the two stories keeps them apart, not only between these
                     // two events: joins are transitive.
-                    let excluded = components.component(of: event.id).contains { left in
-                        (membersOf[left] ?? []).contains { member in
-                            guard let apart = exclusions[member.id] else { return false }
-                            return components.component(of: other).contains { right in
-                                (membersOf[right] ?? []).contains { apart.contains($0.id) }
-                            }
-                        }
-                    }
-                    guard agree, !excluded else { continue }
+                    guard agree, !storiesExcluded(event.id, other) else { continue }
                     components.join(event.id, other)
                 }
             }
@@ -635,13 +639,15 @@ enum EventClusterer {
                 }, uniquingKeysWith: { a, _ in a })
             // A country in more than the common-actor share of active events (a war's country, the US) is the
             // backdrop of many stories, not a link between two of them.
+            // Counted over every active event, one-report events included.
             var countryHolders: [String: Int] = [:]
-            for countries in countriesOf.values {
+            for event in active {
+                let countries = event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).countries) }
                 for country in countries { countryHolders[country, default: 0] += 1 }
             }
             let commonCountries = Set(
                 countryHolders.filter {
-                    Double($0.value) > Double(events.count) * EventStoryRelation.commonActorShare && $0.value >= 3
+                    Double($0.value) > Double(active.count) * EventStoryRelation.commonActorShare && $0.value >= 3
                 }.keys)
             if let keywords = matchPolicy.storyCountryKeywords, allowsEnergy {
                 var eventsByCountry: [String: [String]] = [:]
@@ -660,7 +666,7 @@ enum EventClusterer {
                                 checked.insert([first, second]).inserted,
                                 (keywordsOf[first] ?? []).intersection(keywordsOf[second] ?? []).count >= keywords,
                                 let a = membersOf[first], let b = membersOf[second],
-                                !a.contains(where: { exclusions[$0.id]?.isDisjoint(with: b.map(\.id)) == false }),
+                                !storiesExcluded(first, second),
                                 let gap = Self.closestGap(a, b), gap <= candidatePolicy.activeEventLifetime,
                                 await storyCountryAgrees(a, b, keywords: keywords, commonCountries: commonCountries)
                             else { continue }
