@@ -640,6 +640,10 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// A related-act pair links two events into one story when it shares at least this many specific names (#581):
     /// a country or a common name alone linked unrelated stories in 35 of 56 reviewed related-act rows.
     var storyLinkAnchors = 2
+    /// Country signal for stories that share only a country (#737): two events, or a report alone and an event, are
+    /// one story when two thirds of their cross pairs share a country, have no conflict (so no different act), share at
+    /// least this many keywords and reach the semantic veto's cosine. Nil turns it off; off by default (evaluation).
+    var storyCountryKeywords: Int?
     /// The pair model's story signal (#627): two events, or a report alone and an event, are one story when two thirds
     /// of their cross pairs score p_same + p_related at or above this with p_different at most 0.15, share one specific
     /// name that is not a common actor, and share a keyword or reach the semantic veto's cosine. Infinity turns it off;

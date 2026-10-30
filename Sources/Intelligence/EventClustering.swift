@@ -519,6 +519,29 @@ enum EventClusterer {
             }
             return total > 0 && agreeing * 3 >= total * 2
         }
+        /// The country signal (#737, `storyCountryKeywords`): two thirds of the cross pairs between the earliest members
+        /// share a country, have no conflict, share `keywords` keywords and reach the semantic veto's cosine.
+        func storyCountryAgrees(
+            _ a: [EventMatchRow], _ b: [EventMatchRow], keywords: Int, commonCountries: Set<String>
+        ) async -> Bool {
+            var agreeing = 0
+            var total = 0
+            for left in a.prefix(Self.storySampleSize) {
+                for right in b.prefix(Self.storySampleSize) {
+                    total += 1
+                    let pair = await ruled(left, right)
+                    if pair.conflict == nil,
+                        !features(left).countries.subtracting(commonCountries)
+                            .isDisjoint(with: features(right).countries),
+                        pair.sharedKeywords >= keywords,
+                        (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
+                    {
+                        agreeing += 1
+                    }
+                }
+            }
+            return total > 0 && agreeing * 3 >= total * 2
+        }
         /// The story pass (#581): two active events sharing at least `storyLinkAnchors` specific names that are not
         /// common actors of the week (`EventStoryRelation.commonActorShare`, the "Earlier in This Story" guard) are one
         /// story when `storyPairsAgree`; a reader's exclusion across the two events vetoes the link. Stories are
@@ -571,6 +594,17 @@ enum EventClusterer {
                 events.map { ($0.id, $0.members.sorted { ($0.date, $0.id) < ($1.date, $1.id) }) },
                 uniquingKeysWith: { a, _ in a })
             var components = StoryComponents()
+            /// A reader's exclusion anywhere across the two stories keeps them apart, not only between two events: joins
+            /// are transitive.
+            func storiesExcluded(_ first: String, _ second: String) -> Bool {
+                let other = Set(components.component(of: second).flatMap { membersOf[$0] ?? [] }.map(\.id))
+                for event in components.component(of: first) {
+                    for member in membersOf[event] ?? [] where exclusions[member.id]?.isDisjoint(with: other) == false {
+                        return true
+                    }
+                }
+                return false
+            }
             for event in events {
                 try Task.checkCancellation()
                 var shared: [String: Int] = [:]
@@ -588,16 +622,56 @@ enum EventClusterer {
                     if !agree { agree = await storyModelAgrees(a, b, common: common) }
                     // A reader's exclusion anywhere across the two stories keeps them apart, not only between these
                     // two events: joins are transitive.
-                    let excluded = components.component(of: event.id).contains { left in
-                        (membersOf[left] ?? []).contains { member in
-                            guard let apart = exclusions[member.id] else { return false }
-                            return components.component(of: other).contains { right in
-                                (membersOf[right] ?? []).contains { apart.contains($0.id) }
-                            }
+                    guard agree, !storiesExcluded(event.id, other) else { continue }
+                    components.join(event.id, other)
+                }
+            }
+            // Country signal (#737): events sharing a country and `keywords` keywords across their members, not yet
+            // one story, are checked pair by pair. ponytail: quadratic per country, fine for an evaluation knob.
+            let countriesOf = Dictionary(
+                events.map { event in
+                    (event.id, event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).countries) })
+                }, uniquingKeysWith: { a, _ in a })
+            let keywordsOf = Dictionary(
+                events.map { event in
+                    (event.id, event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).keywords) })
+                }, uniquingKeysWith: { a, _ in a })
+            // A country in more than the common-actor share of active events (a war's country, the US) is the
+            // backdrop of many stories, not a link between two of them.
+            // Counted over every active event, one-report events included.
+            var countryHolders: [String: Int] = [:]
+            for event in active {
+                let countries = event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).countries) }
+                for country in countries { countryHolders[country, default: 0] += 1 }
+            }
+            let commonCountries = Set(
+                countryHolders.filter {
+                    Double($0.value) > Double(active.count) * EventStoryRelation.commonActorShare && $0.value >= 3
+                }.keys)
+            if let keywords = matchPolicy.storyCountryKeywords, allowsEnergy {
+                var eventsByCountry: [String: [String]] = [:]
+                for (id, countries) in countriesOf {
+                    for country in countries.subtracting(commonCountries) {
+                        eventsByCountry[country, default: []].append(id)
+                    }
+                }
+                var checked = Set<[String]>()
+                for ids in eventsByCountry.values {
+                    let sorted = ids.sorted()
+                    for (index, first) in sorted.enumerated() {
+                        for second in sorted[(index + 1)...] {
+                            try Task.checkCancellation()
+                            guard components.find(first) != components.find(second),
+                                checked.insert([first, second]).inserted,
+                                (keywordsOf[first] ?? []).intersection(keywordsOf[second] ?? []).count >= keywords,
+                                let a = membersOf[first], let b = membersOf[second],
+                                !storiesExcluded(first, second),
+                                let gap = Self.closestGap(a, b), gap <= candidatePolicy.activeEventLifetime,
+                                await storyCountryAgrees(a, b, keywords: keywords, commonCountries: commonCountries)
+                            else { continue }
+                            components.join(first, second)
                         }
                     }
-                    guard agree, !excluded else { continue }
-                    components.join(event.id, other)
                 }
             }
             var attached: [String: String] = [:]
@@ -634,6 +708,30 @@ enum EventClusterer {
                     if !agree { agree = await storyModelAgrees([single], members, common: common) }
                     guard agree else { continue }
                     attached[single.id] = id
+                    break
+                }
+                // Country signal (#737) for a report alone that no name attached: the event sharing a country and the
+                // most keywords with it, when they agree.
+                guard attached[single.id] == nil, let keywords = matchPolicy.storyCountryKeywords, allowsEnergy else {
+                    continue
+                }
+                let own = features(single)
+                let candidates = events.compactMap { event -> (id: String, shared: Int)? in
+                    guard !(countriesOf[event.id] ?? []).isDisjoint(with: own.countries.subtracting(commonCountries))
+                    else { return nil }
+                    let shared = (keywordsOf[event.id] ?? []).intersection(own.keywords).count
+                    return shared >= keywords ? (event.id, shared) : nil
+                }.sorted { ($0.shared, $1.id) > ($1.shared, $0.id) }
+                for candidate in candidates {
+                    let storyMembers = (components.groups.first(where: { $0.contains(candidate.id) }) ?? [candidate.id])
+                        .flatMap { membersOf[$0] ?? [] }
+                    guard let members = membersOf[candidate.id],
+                        exclusions[single.id]?.isDisjoint(with: storyMembers.map(\.id)) != false,
+                        let gap = Self.closestGap([single], members), gap <= candidatePolicy.activeEventLifetime,
+                        await storyCountryAgrees(
+                            [single], members, keywords: keywords, commonCountries: commonCountries)
+                    else { continue }
+                    attached[single.id] = candidate.id
                     break
                 }
             }
