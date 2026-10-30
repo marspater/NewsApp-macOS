@@ -18069,6 +18069,14 @@ struct NewsTests {
             AppSettings.normalizeFeedURL("ftp:user:pass@example.com/rss") == nil,
             "An explicit unsupported scheme is refused before credentials are read")
         assertEqual(
+            AppSettings.addFeedFailureMessage(for: "ftp://example.com/rss"),
+            "Feed not added. ftp: addresses are not supported. Use an http or https feed address.",
+            "Add Feed names a refused scheme")
+        assertEqual(
+            AppSettings.addFeedFailureMessage(for: "https://example.com/rss"),
+            "Feed not added. Check the URL or whether you already subscribe.",
+            "A web address keeps the generic failure text")
+        assertEqual(
             AppSettings.normalizeFeedURL("feed:8443/rss"), "https://feed:8443/rss",
             "feed: followed by a port is a host named feed, not a wrapper")
         let invalidURL = AppSettings.normalizeFeedURL("")

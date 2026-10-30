@@ -1273,7 +1273,7 @@ struct SettingsView: View {
         if feedManager.addFeed(url: trimmed) {
             newFeedURL = ""
         } else {
-            showActionMessage("Feed not added. Check the URL or whether you already subscribe.", failed: true)
+            showActionMessage(AppSettings.addFeedFailureMessage(for: trimmed), failed: true)
         }
     }
 
