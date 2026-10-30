@@ -49,6 +49,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Models/ArticleIdentity.swift \
     Sources/Models/EventOverview.swift \
     Sources/Models/EventFeed.swift \
+    Sources/Models/OnboardingStep.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
     Sources/Storage/MigrationCoordinator.swift \

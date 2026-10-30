@@ -17040,6 +17040,25 @@ struct NewsTests {
     @MainActor
     static func testOnboardingAndPermissionTiming() async {
         print("  - Testing the first-launch setting and the deferred notification request (#562)...")
+        // The flow walks forward and back one step at a time, from Welcome to Done.
+        var walked = [OnboardingStep.welcome]
+        while let next = walked.last?.next { walked.append(next) }
+        assertEqual(walked, OnboardingStep.allCases, "Continue visits every step once, in order")
+        assertEqual(
+            walked.map(\.title),
+            [
+                "Welcome to News", "Choose Your Feeds", "Pick Your Sections", "On-Device Intelligence",
+                "Notifications", "You're All Set",
+            ], "Each step has its own screen")
+        var back = [OnboardingStep.done]
+        while let previous = back.last?.previous { back.append(previous) }
+        assertEqual(back, walked.reversed(), "Back retraces the same steps")
+        assertTrue(OnboardingStep.welcome.previous == nil, "Welcome has no Back")
+        assertTrue(OnboardingStep.done.isLast && !OnboardingStep.notifications.isLast, "Only Done is last")
+        assertEqual(OnboardingStep.done.continueTitle, "Start Reading", "The last step starts reading")
+        assertEqual(OnboardingStep.feeds.continueTitle, "Continue", "Other steps continue")
+        assertEqual(OnboardingStep.feeds.position, "Step 2 of 6", "The indicator names the step and the count")
+        assertTrue(walked.allSatisfy { !$0.tip.isEmpty && $0.companions.count <= 3 }, "Every step has a tip and art")
         func suite(_ name: String, seed: [String: Any] = [:]) -> (String, UserDefaults) {
             let name = testDefaultsSuite(name)
             let defaults = UserDefaults(suiteName: name)!

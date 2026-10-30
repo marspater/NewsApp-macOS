@@ -43,6 +43,7 @@ SWIFT_SOURCES=(
     Sources/Models/ArticleIdentity.swift
     Sources/Models/EventOverview.swift
     Sources/Models/EventFeed.swift
+    Sources/Models/OnboardingStep.swift
     Sources/Storage/DatabaseEngine.swift
     Sources/Storage/DatabaseEngine+Events.swift
     Sources/Storage/MigrationCoordinator.swift
