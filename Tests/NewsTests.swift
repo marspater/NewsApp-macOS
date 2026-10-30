@@ -19386,8 +19386,9 @@ struct NewsTests {
         priority = NotificationService.plan(new: [], pending: [:], delivery: delivery)
         assertEqual(priority.banners.map(\.count), [5], "The waiting keys arrive in the next grouped banner")
         assertEqual(
-            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []), Set((0..<5).map { "major-\($0)" }),
-            "The grouped banner announces every waiting key")
+            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []),
+            Set((0..<5).map { "major-\($0)" } + (priority.banners.first?.members ?? [])),
+            "The grouped banner announces every waiting key and each key's own report (#790)")
         delivery.ledger.priorityLastHalfHour = 0
         delivery.ledger.priorityQueue = []
 
@@ -19635,15 +19636,31 @@ struct NewsTests {
         let event = try await db.createEvent(memberArticleIDs: [first.id, second.id], at: now)
         let later = now.addingTimeInterval(600)
         ledger = try await db.notificationLedger(now: later)
+        let announced = NotificationLedger.Announcement(leadKey: EventFeedSummary.titleKey(first.title), lane: .normal)
         assertEqual(
-            ledger.announced, [event.id: .init(leadKey: EventFeedSummary.titleKey(first.title), lane: .normal)],
-            "The report's announcement moves to the event it joined, under the event's lead headline")
+            ledger.announced, [event.id: announced, first.id: announced],
+            "The report's announcement is copied to the event it joined, under the event's lead headline, and kept")
         let clustered = NotificationService.plan(
             new: [(article: second, score: 0.9)], pending: [:],
             delivery: NotificationDelivery(
                 mode: .full, events: [first.id: event.id, second.id: event.id], publishers: [event.id: 2],
                 leadTitles: [event.id: first.title], now: later, ledger: ledger))
         assertTrue(clustered.banners.isEmpty, "The second outlet's report of the announced event posts no banner")
+
+        // The report keeps its own row: separated into another event, it makes that event announced too.
+        let third = report("n790-c", "Breaking: Mosul dam failure floods villages", hoursAgo: 0.5, source: "Post")
+        _ = try await db.upsertArticles([third])
+        _ = try await db.separateArticle(first.id, fromEvent: event.id)
+        let moved = try await db.createEvent(memberArticleIDs: [first.id, third.id], at: later)
+        ledger = try await db.notificationLedger(now: later.addingTimeInterval(60))
+        assertEqual(
+            ledger.announced[moved.id]?.lane, .normal, "The event the separated report joins inherits its announcement")
+        let separated = NotificationService.plan(
+            new: [(article: third, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(
+                mode: .full, events: [first.id: moved.id, third.id: moved.id], publishers: [moved.id: 2],
+                leadTitles: [moved.id: first.title], now: later.addingTimeInterval(60), ledger: ledger))
+        assertTrue(separated.banners.isEmpty, "The separated report's new event posts no duplicate banner")
         await db.close()
     }
 

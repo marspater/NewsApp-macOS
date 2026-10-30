@@ -3971,16 +3971,17 @@ actor DatabaseEngine {
     /// never makes an announced story new again. An announcement of the last day keeps its time and lane under the
     /// survivor, recorded with the survivor's lead headline now (or the survivor's own recent one), so only a later
     /// change of that headline notifies again. A waiting priority key moves the same way. Merges forward one hop, so
-    /// one pass settles every row. A story announced outside any event (#790) hands its row to the event it joined the
-    /// same way, so the event counts as announced and its next report stays quiet.
+    /// one pass settles every row. A story's own announcement (#790) is copied to the event it is in the same way and
+    /// kept, so the event counts as announced and its next report stays quiet, and so does any event the story later
+    /// moves to.
     private func foldMergedNotifications(since cutoff: TimeInterval) throws {
         let forwarded = "JOIN events e ON e.id = t.event_id WHERE e.merged_into IS NOT NULL"
         let clustered = "JOIN event_members m ON m.article_id = t.event_id"
         let announced = try eventRows(
             """
-            SELECT t.event_id, e.merged_into, t.lead_key, t.notified_at, t.lane FROM event_notifications t \(forwarded)
+            SELECT t.event_id, e.merged_into, t.lead_key, t.notified_at, t.lane, 1 FROM event_notifications t \(forwarded)
             UNION ALL
-            SELECT t.event_id, m.event_id, t.lead_key, t.notified_at, t.lane FROM event_notifications t \(clustered);
+            SELECT t.event_id, m.event_id, t.lead_key, t.notified_at, t.lane, 0 FROM event_notifications t \(clustered);
             """)
         let queued = try eventRows(
             """
@@ -4011,7 +4012,10 @@ actor DatabaseEngine {
                         .real(cutoff),
                     ])
             }
-            try eventRows("DELETE FROM event_notifications WHERE event_id = ?;", [.text(absorbed)])
+            // A report's own row stays: if the reader separates it into another event, that event inherits it too.
+            if row[5] == "1" {
+                try eventRows("DELETE FROM event_notifications WHERE event_id = ?;", [.text(absorbed)])
+            }
         }
         for row in queued {
             guard let absorbed = row[0], let survivor = row[1] else { continue }

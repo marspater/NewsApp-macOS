@@ -511,10 +511,10 @@ private struct LanePlanner {
         NotificationService.leadKey(of: article, event: key(article), delivery: delivery)
     }
 
-    /// The key a banner announces: the story's event, or the story itself outside any event, so a later event it
-    /// joins counts as announced (#790).
+    /// The keys a banner announces: the story itself and its event, if any, so any event the story is in later counts
+    /// as announced (#790).
     func announces(_ article: FeedArticle) -> [String: String] {
-        [key(article): lead(article)]
+        Dictionary([(key(article), lead(article)), (article.id, lead(article))]) { first, _ in first }
     }
 
     func publishers(_ article: FeedArticle) -> Int {
@@ -616,7 +616,9 @@ private struct LanePlanner {
             PlannedBanner(
                 lane: .priority, grouped: true, title: "Major news", headlines: perStory.prefix(2).map(\.title),
                 count: perStory.count, thread: "priority", sound: true,
-                announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first },
+                announces: Dictionary(
+                    overflow.flatMap { [($0.event, $0.leadKey), ($0.story, $0.leadKey)] }.filter { !$0.0.isEmpty }
+                ) { first, _ in first },
                 members: overflow.map(\.story).filter { !$0.isEmpty }))
         taken.formUnion(overflow.map { delivery.stories[$0.event] ?? $0.event })
         return []
