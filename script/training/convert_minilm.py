@@ -4,18 +4,22 @@ Mars's Mac only, never CI: run it from the virtual environment built from `scrip
 
 `convert_minilm.py OUT_DIR [--source hub|shipped]` builds `sentence-transformers/all-MiniLM-L6-v2` (pinned revision,
 downloaded from the Hugging Face Hub at conversion time; the shipped weights derive from it) or the shipped model's own
-weights as a `BertModel`, exports it with a flexible sequence length of 1 to 128 tokens and the two outputs the app
-reads (`last_hidden_state`; `pooler_output` kept for the schema), writes OUT_DIR/minilm.mlpackage and
-OUT_DIR/metadata.json (source, revision, versions, parity), and reports how far the new model is from the shipped one
-on the check texts: the largest hidden-state difference and the smallest cosine between the pooled, normalized vectors
-`SentenceEmbedder.embed` would produce. A model only ships after the Swift replay (`--matcher-regressions`, the tune
-replay) is unchanged and `SentenceEmbedder.modelVersion` is bumped, since stored vectors are recomputed.
-`convert_minilm.py --self-check` exports a tiny random encoder at two lengths without downloads.
+weights as a `BertModel`, exports it as one fixed-length function per sequence length (`length_16` to `length_128`,
+sharing one copy of the weights; #554: a flexible length kept Core ML on the CPU, fixed lengths run on the Neural Engine,
+and the app pads each text to the next length) with the two outputs the app reads (`last_hidden_state`;
+`pooler_output` kept for the schema), writes OUT_DIR/minilm.mlpackage and OUT_DIR/metadata.json (source, revision,
+versions, parity), and reports how far the new model is from the shipped one on the check texts: the largest
+hidden-state difference and the smallest cosine between the pooled, normalized vectors `SentenceEmbedder.embed` would
+produce. A model with new weights only ships after the Swift replay (`--matcher-regressions`, the tune replay) is
+unchanged and `SentenceEmbedder.modelVersion` is bumped, since stored vectors are recomputed.
+`convert_minilm.py --self-check` exports a tiny random encoder at three lengths and checks two padded inputs, without
+downloads.
 """
 import json
 import pathlib
 import platform
 import sys
+import tempfile
 
 import coremltools as ct
 import numpy as np
@@ -29,6 +33,9 @@ from wordpiece import Tokenizer, require
 HUB_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'
 HUB_REVISION = '1110a243fdf4706b3f48f1d95db1a4f5529b4d41'  # as served on 25 October 2026
 MAX_TOKENS = 128  # SentenceEmbedder.maxSequenceLength
+LENGTHS = (16, 32, 64, MAX_TOKENS)  # SentenceEmbedder.sequenceLengths, one function each (#554)
+# What the app runs on (#554): under ALL, Core ML placed the 16- to 64-token functions on the GPU.
+UNITS = ct.ComputeUnit.CPU_AND_NE
 CHECK_TEXTS = (
     'Erdoğan meets Sánchez in Ankara',
     'Magnitude 6.1 earthquake strikes eastern Turkey',
@@ -38,8 +45,11 @@ CHECK_TEXTS = (
 
 
 class Encoder(torch.nn.Module):
-    """The exported function with the sequence length left open: position ids come from the input's own shape, the
-    attention mask is spelled out as the additive form the original conversion used, token types are all zero."""
+    """The exported function: position ids come from the input's own shape, the attention mask is spelled out as the
+    additive form the original conversion used, token types are all zero. Both ids are derived from the input, so a
+    fixed-length export still looks up the whole position (512) and token-type (2) tables instead of folding the rows
+    it uses into constants (#554): the shipped encoder stays a complete `BertModel`, which `train_pair_model.py` reads
+    as the pair model's base."""
 
     def __init__(self, bert):
         super().__init__()
@@ -47,10 +57,11 @@ class Encoder(torch.nn.Module):
 
     def forward(self, input_ids, attention_mask):
         embeddings = self.bert.embeddings
-        positions = torch.arange(input_ids.shape[1], device=input_ids.device).unsqueeze(0)
+        zeros = input_ids * 0
+        positions = torch.arange(input_ids.shape[1], device=input_ids.device).unsqueeze(0) + zeros
         hidden = embeddings.LayerNorm(
             embeddings.word_embeddings(input_ids) + embeddings.position_embeddings(positions)
-            + embeddings.token_type_embeddings(torch.zeros_like(input_ids)))
+            + embeddings.token_type_embeddings(zeros))
         blocked = (1.0 - attention_mask[:, None, None, :].to(hidden.dtype)) * -10000.0
         for layer in self.bert.encoder.layer:
             output = layer(hidden, attention_mask=blocked)
@@ -58,28 +69,64 @@ class Encoder(torch.nn.Module):
         return hidden, self.bert.pooler(hidden)
 
 
-def convert(bert, example_length, max_length):
-    """Traces `bert` at one length and converts it with a flexible sequence dimension."""
+def export_functions(module, inputs, outputs, lengths, path, describe=lambda model: None, compress=lambda model: model):
+    """Traces `module` (int32 inputs named `inputs`, each `(1, length)`) at each fixed length, converts it, applies
+    `compress` (#554: `coremltools.optimize.coreml` refuses a multifunction model, so each function is compressed alone
+    and the join shares the identical result) and joins the conversions as one multifunction package at `path`,
+    function `length_N` per length, the longest the default."""
+    descriptor = ct.utils.MultiFunctionDescriptor()
+    with tempfile.TemporaryDirectory() as scratch:
+        for length in lengths:
+            example = tuple(torch.ones(1, length, dtype=torch.int32) for _ in inputs)
+            mlmodel = ct.convert(
+                torch.jit.trace(module, example),
+                inputs=[ct.TensorType(name=name, shape=(1, length), dtype=np.int32) for name in inputs],
+                outputs=[ct.TensorType(name=name) for name in outputs],
+                convert_to='mlprogram', minimum_deployment_target=ct.target.macOS15,
+                compute_precision=ct.precision.FLOAT16)
+            compress(mlmodel).save(f'{scratch}/{length}.mlpackage')
+            descriptor.add_function(f'{scratch}/{length}.mlpackage', src_function_name='main',
+                                    target_function_name=f'length_{length}')
+        descriptor.default_function_name = f'length_{lengths[-1]}'
+        ct.utils.save_multifunction(descriptor, f'{scratch}/joined.mlpackage')
+        joined = ct.models.MLModel(f'{scratch}/joined.mlpackage', skip_model_load=True)
+        describe(joined)  # the join keeps no description of its parts
+        joined.save(str(path))
+
+
+def convert(bert, lengths, path, describe=lambda model: None, compress=lambda model: model):
+    """The encoder as one fixed-length function per length (`export_functions`). Returns the PyTorch module and the
+    package's functions by length."""
     encoder = Encoder(bert).eval()
-    example = (torch.ones(1, example_length, dtype=torch.int32), torch.ones(1, example_length, dtype=torch.int32))
-    traced = torch.jit.trace(encoder, example)
-    shape = ct.Shape(shape=(1, ct.RangeDim(1, max_length, default=example_length)))
-    mlmodel = ct.convert(
-        traced, inputs=[ct.TensorType(name='input_ids', shape=shape, dtype=np.int32),
-                        ct.TensorType(name='attention_mask', shape=shape, dtype=np.int32)],
-        outputs=[ct.TensorType(name='last_hidden_state'), ct.TensorType(name='pooler_output')],
-        convert_to='mlprogram', minimum_deployment_target=ct.target.macOS15, compute_precision=ct.precision.FLOAT16)
-    return encoder, mlmodel
+    export_functions(encoder, ('input_ids', 'attention_mask'), ('last_hidden_state', 'pooler_output'), lengths, path,
+                     describe, compress)
+    return encoder, {length: ct.models.MLModel(str(path), compute_units=UNITS, function_name=f'length_{length}')
+                     for length in lengths}
 
 
-def predict(model, ids):
-    """`last_hidden_state` of a Core ML model (`.mlpackage` or compiled) for one unpadded token sequence."""
-    return model.predict({'input_ids': np.array([ids], dtype=np.int32),
-                          'attention_mask': np.ones((1, len(ids)), dtype=np.int32)})['last_hidden_state']
+def compiled_functions(path):
+    """A compiled model's functions by length; a model of one flexible-length function (the encoder before #554) under
+    its longest length, which it also accepts."""
+    description = json.loads((path / 'metadata.json').read_text())[0]
+    if 'functions' not in description:
+        return {MAX_TOKENS: ct.models.CompiledMLModel(str(path), compute_units=UNITS)}
+    return {int(function['name'].removeprefix('length_')):
+            ct.models.CompiledMLModel(str(path), compute_units=UNITS, function_name=function['name'])
+            for function in description['functions']}
+
+
+def predict(models, ids):
+    """`last_hidden_state` at the tokens of `ids`, run as `SentenceEmbedder` runs them: padded to the shortest length
+    of `models` that holds them, the padding masked out."""
+    length = min(length for length in models if length >= len(ids))
+    padded, mask = np.zeros((2, 1, length), dtype=np.int32)
+    padded[0, :len(ids)], mask[0, :len(ids)] = ids, 1
+    hidden = models[length].predict({'input_ids': padded, 'attention_mask': mask})['last_hidden_state']
+    return np.asarray(hidden)[:, :len(ids)]
 
 
 def pooled(hidden):
-    """Mean over the tokens, L2-normalized: the vector `SentenceEmbedder.embed` returns for an unpadded input."""
+    """Mean over the tokens, L2-normalized: the vector `SentenceEmbedder.embed` returns."""
     vector = np.asarray(hidden, dtype=np.float32)[0].mean(axis=0)
     return vector / max(float(np.linalg.norm(vector)), 1e-12)
 
@@ -90,7 +137,7 @@ def compare(ours, theirs, texts, tokenizer):
     for text in texts:
         ids = tokenizer.encode_single(text, max_length=MAX_TOKENS)
         a, b = predict(ours, ids), predict(theirs, ids)
-        worst_difference = max(worst_difference, float(np.abs(np.asarray(a) - np.asarray(b)).max()))
+        worst_difference = max(worst_difference, float(np.abs(a - b).max()))
         worst_cosine = min(worst_cosine, float(np.dot(pooled(a), pooled(b))))
     return worst_difference, worst_cosine
 
@@ -105,6 +152,12 @@ def build(source):
     return bert.eval(), str(SHIPPED.relative_to(SHIPPED.parents[3]))
 
 
+def describe(mlmodel):
+    mlmodel.short_description = 'Sentence encoder for story matching: mean-pooled token states (#555, #554)'
+    mlmodel.author = 'News'
+    mlmodel.license = 'Derived from sentence-transformers/all-MiniLM-L6-v2, Apache License 2.0'
+
+
 def main(argv):
     """OUT_DIR [--source hub|shipped]: convert, compare with the shipped model, write metadata.json."""
     import argparse
@@ -117,22 +170,19 @@ def main(argv):
     out.mkdir(parents=True, exist_ok=True)
     bert, source = build(args.source)
     tokenizer = Tokenizer()
-    encoder, mlmodel = convert(bert, example_length=16, max_length=MAX_TOKENS)
-    mlmodel.short_description = 'Sentence encoder for story matching: mean-pooled token states (#555)'
-    mlmodel.author = 'News'
-    mlmodel.license = 'Derived from sentence-transformers/all-MiniLM-L6-v2, Apache License 2.0'
     path = out / 'minilm.mlpackage'
-    mlmodel.save(str(path))
+    shipped = compiled_functions(SHIPPED)  # loaded first: after the conversion it segfaulted (coremltools 9.0)
+    encoder, models = convert(bert, LENGTHS, path, describe)
     torch_difference = 0.0
     for text in CHECK_TEXTS:
         ids = tokenizer.encode_single(text, max_length=MAX_TOKENS)
         with torch.no_grad():
             ours = encoder(torch.tensor([ids], dtype=torch.int32), torch.ones(1, len(ids), dtype=torch.int32))[0]
-        torch_difference = max(torch_difference, float(np.abs(ours.numpy() - predict(mlmodel, ids)).max()))
-    shipped_difference, shipped_cosine = compare(mlmodel, ct.models.CompiledMLModel(str(SHIPPED)), CHECK_TEXTS,
-                                                 tokenizer)
+        torch_difference = max(torch_difference, float(np.abs(ours.numpy() - predict(models, ids)).max()))
+    shipped_difference, shipped_cosine = compare(models, shipped, CHECK_TEXTS, tokenizer)
     metadata = {
         'model': 'minilm', 'source': source, 'max_tokens': MAX_TOKENS,
+        'functions': [f'length_{length}' for length in LENGTHS], 'compute_units': 'cpuAndNeuralEngine',
         'outputs': ['last_hidden_state', 'pooler_output'],
         'check': {'texts': len(CHECK_TEXTS), 'core_ml_vs_torch_max_difference': round(torch_difference, 5),
                   'vs_shipped_max_difference': round(shipped_difference, 5),
@@ -147,17 +197,20 @@ def main(argv):
 
 
 def self_check():
-    """A tiny random encoder converts with a flexible length and agrees with PyTorch at two lengths."""
+    """A tiny random encoder converts to three fixed-length functions; padded to the next length, it agrees with
+    PyTorch on the unpadded tokens at two lengths."""
     torch.manual_seed(555)
     config = BertConfig(vocab_size=200, hidden_size=32, num_hidden_layers=2, num_attention_heads=4,
                         intermediate_size=64, max_position_embeddings=64, attn_implementation='eager')
-    encoder, mlmodel = convert(BertModel(config, add_pooling_layer=True).eval(), example_length=8, max_length=32)
-    for length in (5, 20):
-        ids = list(range(1, length + 1))
-        with torch.no_grad():
-            ours = encoder(torch.tensor([ids], dtype=torch.int32), torch.ones(1, length, dtype=torch.int32))[0]
-        difference = float(np.abs(ours.numpy() - predict(mlmodel, ids)).max())
-        require(difference < 0.02, f'Core ML and PyTorch differ by {difference:.4f} at {length} tokens')
+    with tempfile.TemporaryDirectory() as scratch:
+        encoder, models = convert(BertModel(config, add_pooling_layer=True).eval(), (8, 16, 32),
+                                  pathlib.Path(scratch) / 'tiny.mlpackage')
+        for length in (5, 20):
+            ids = list(range(1, length + 1))
+            with torch.no_grad():
+                ours = encoder(torch.tensor([ids], dtype=torch.int32), torch.ones(1, length, dtype=torch.int32))[0]
+            difference = float(np.abs(ours.numpy() - predict(models, ids)).max())
+            require(difference < 0.02, f'Core ML and PyTorch differ by {difference:.4f} at {length} tokens')
     require(abs(float(np.linalg.norm(pooled(ours.numpy()))) - 1.0) < 1e-5, 'pooled vectors are unit length')
     print('MiniLM conversion self-check passed')
 

@@ -800,7 +800,8 @@ struct OverviewPerspectivesExtractor: Sendable {
         // ambassador to the US, Dina Kawar".
         while segments.count > 1, let first = segments.first,
             first.split(separator: " ").count >= 6
-                || first.split(separator: " ").first { !["the", "a", "an"].contains($0) }?.first?.isLowercase == true
+                || first.split(separator: " ").first(where: { !["the", "a", "an"].contains($0) })?.first?.isLowercase
+                    == true
         {
             segments.removeFirst()
         }

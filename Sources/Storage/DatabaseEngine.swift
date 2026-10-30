@@ -21,8 +21,15 @@ actor DatabaseEngine {
     private var collectionOnlyFeedURLs: [String] = []
     /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
     private(set) var lastStoryPass: Date?
+    /// Story work skipped or interrupted since the last completed pass; retried when energy permits.
+    private(set) var storyPassPending = false
 
-    func recordStoryPass(at date: Date) { lastStoryPass = date }
+    func deferStoryPass() { storyPassPending = true }
+
+    func recordStoryPass(at date: Date) {
+        lastStoryPass = date
+        storyPassPending = false
+    }
     private(set) var healthNotice: String?
 
     func databaseHealthNotice() -> String? {
@@ -2103,6 +2110,7 @@ actor DatabaseEngine {
         var id: String?
         var canonicalURL: String?
         var eventID: String?
+        var wholeStory = false
         var includingOriginals: Bool
         var publicationWindow: ClosedRange<Date>?
         var muting: MuteRules
@@ -2129,9 +2137,20 @@ actor DatabaseEngine {
         }
     }
 
-    private func eventFilterConditions(eventID: String) throws -> (sql: String, params: [QueryParameter]) {
+    private func eventFilterConditions(eventID: String, wholeStory: Bool = false) throws -> (
+        sql: String, params: [QueryParameter]
+    ) {
         let resolvedID = try resolvedEventID(eventID) ?? eventID
-        return (" AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)", [("text", resolvedID)])
+        guard wholeStory else {
+            return (" AND a.id IN (SELECT article_id FROM event_members WHERE event_id = ?)", [("text", resolvedID)])
+        }
+        // Every live event of the event's story (#581), the event itself when it is a story of its own.
+        let sql = """
+             AND a.id IN (SELECT m.article_id FROM event_members m JOIN events e ON e.id = m.event_id
+                WHERE e.merged_into IS NULL
+                    AND coalesce(e.story_id, e.id) = (SELECT coalesce(story_id, id) FROM events WHERE id = ?))
+            """
+        return (sql, [("text", resolvedID)])
     }
 
     private func publicationWindowConditions(_ publicationWindow: ClosedRange<Date>) -> (
@@ -2184,7 +2203,7 @@ actor DatabaseEngine {
             params += filter.params
         }
         if let eventID = criteria.eventID {
-            let filter = try eventFilterConditions(eventID: eventID)
+            let filter = try eventFilterConditions(eventID: eventID, wholeStory: criteria.wholeStory)
             query += filter.sql
             params += filter.params
         }
@@ -2266,6 +2285,7 @@ actor DatabaseEngine {
         id: String? = nil,
         canonicalURL: String? = nil,
         eventID: String? = nil,
+        wholeStory: Bool = false,
         includingOriginals: Bool = false,
         publicationWindow: ClosedRange<Date>? = nil,
         muting: MuteRules = MuteRules(),
@@ -2280,6 +2300,7 @@ actor DatabaseEngine {
             id: id,
             canonicalURL: canonicalURL,
             eventID: eventID,
+            wholeStory: wholeStory,
             includingOriginals: includingOriginals,
             publicationWindow: publicationWindow,
             muting: muting,
@@ -3036,7 +3057,8 @@ actor DatabaseEngine {
     // MARK: - Granular Cache Purging
 
     /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings, stored matcher
-    /// signals and the World Tension history. Articles, events, pair decisions and subscriptions remain intact.
+    /// signals, the pair decisions' stored signals (which resets the verdict calibration, #629) and the World Tension
+    /// history. Articles, events, pair decisions and subscriptions remain intact.
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
         try beginTransaction()
@@ -3046,6 +3068,7 @@ actor DatabaseEngine {
             try clearEventOverviews()
             try executeSimple("DELETE FROM article_embeddings;")
             try executeSimple("DELETE FROM article_features;")
+            try executeSimple("UPDATE pair_assessments SET features = NULL;")
             try commitTransaction()
         } catch {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
@@ -3133,9 +3156,15 @@ actor DatabaseEngine {
         // 1. Pair assessments older than 30 days.
         let pairCutoff = nowTimestamp - 30 * 86400
         var pairStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM pair_assessments WHERE assessed_at < ?;", -1, &pairStmt, nil)
-            == SQLITE_OK
-        {
+        // A pair the reader judged keeps its signals: the verdict calibration (#629) fits on them.
+        let prunePairs = """
+            DELETE FROM pair_assessments WHERE assessed_at < ?
+                AND NOT EXISTS (SELECT 1 FROM event_inclusions i
+                    WHERE i.article_id = pair_assessments.article_id AND i.other_article_id = pair_assessments.other_article_id)
+                AND NOT EXISTS (SELECT 1 FROM event_exclusions x
+                    WHERE x.article_id = pair_assessments.article_id AND x.other_article_id = pair_assessments.other_article_id);
+            """
+        if sqlite3_prepare_v2(db, prunePairs, -1, &pairStmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(pairStmt) }
             sqlite3_bind_double(pairStmt, 1, pairCutoff)
             _ = sqlite3_step(pairStmt)
