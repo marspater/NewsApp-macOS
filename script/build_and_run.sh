@@ -36,21 +36,23 @@ if [[ "$BUILT_ID" != "$BUNDLE_ID" ]]; then
 fi
 
 APP="$PWD/News.app"
+# pgrep and pkill take a regular expression; escape the path so a folder such as "News (copy)" still matches.
+PROCESS_PATTERN="^$(printf '%s' "$APP/Contents/MacOS/News" | sed 's/[][\.*^$()+?{}|]/\\&/g')"
 # Close the previous reader only after a successful build. The development build closes only itself, never the
 # installed app; the real-library build closes every News so two processes never share the real container.
 if [[ "$BUNDLE_ID" == "com.marspater.news" ]]; then
     pkill -x News 2>/dev/null || true
 else
-    pkill -f "^$APP/Contents/MacOS/News" 2>/dev/null || true
+    pkill -f "$PROCESS_PATTERN" 2>/dev/null || true
 fi
 echo "Launching News.app (bundle id: $BUNDLE_ID)..."
 open -n "$APP"
 case "$MODE" in
     --verify)
         sleep 2
-        pgrep -f "^$APP/Contents/MacOS/News"
+        pgrep -f "$PROCESS_PATTERN"
         ;;
-    --debug) lldb -p "$(pgrep -nf "^$APP/Contents/MacOS/News")" ;;
+    --debug) lldb -p "$(pgrep -nf "$PROCESS_PATTERN")" ;;
     --logs | --telemetry) log stream --info --predicate 'subsystem == "com.marspater.news"' ;;
     run) ;;
 esac
