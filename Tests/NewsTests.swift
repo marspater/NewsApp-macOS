@@ -21014,6 +21014,14 @@ struct NewsTests {
         assertEqual(before?.eventID, opened.id, "The story opens its newest event")
         assertEqual(before?.membershipVersion, 3, "The story sums its three events")
         assertEqual(before?.eventVersion, 1, "The overview version is the opened event's own")
+        // The warm-up path stores the overview under the event's version, not the story's sum.
+        let warmStore = ArticleStore(database: db)
+        let warmer = OverviewGenerationCoordinator(
+            store: warmStore, queue: EnrichmentQueue(store: warmStore), allowsEnergy: { true })
+        await warmer.warmVisibleOverviews(store: warmStore, muting: MuteRules())
+        assertEqual(
+            try await db.fetchEventOverview(eventID: opened.id)?.membershipVersion, 1,
+            "Warm-up versions the overview by the opened event, not the story sum")
 
         func overview(_ version: Int, _ hash: String) -> EventOverviewDocument {
             EventOverviewDocument(
