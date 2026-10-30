@@ -551,6 +551,12 @@ enum EpicNE2ETests {
         expectTrue(
             def26.bool(forKey: EpicNContracts.MenuBarModel.userDefaultsKey),
             "showsMenuBarExtra persists true to UserDefaults")
+        // Writing the current value back, as the menu bar item's binding does during view updates, must not publish.
+        var menuBarChanges = 0
+        let menuBarSink = menuBar26.settings.objectWillChange.sink { menuBarChanges += 1 }
+        menuBar26.showsMenuBarExtra = true
+        expectEqual(menuBarChanges, 0, "Writing an unchanged showsMenuBarExtra publishes nothing")
+        menuBarSink.cancel()
         removeTestDefaults(suite26)
         passedCount += 1
 

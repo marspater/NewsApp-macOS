@@ -409,6 +409,9 @@ final class AppSettings: ObservableObject {
     }
 
     func setShowsMenuBarExtra(_ shows: Bool) {
+        // The menu bar item's isInserted binding writes back during view updates; publishing an unchanged value there
+        // re-runs the scene body, which writes again, until the stack overflows at launch.
+        guard shows != showsMenuBarExtra else { return }
         showsMenuBarExtra = shows
         defaults.set(shows, forKey: Self.showsMenuBarExtraKey)
     }
