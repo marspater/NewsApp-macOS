@@ -78,7 +78,7 @@ class JSONFeedParser {
         let webID = item.id.flatMap {
             ["http", "https"].contains(URL(string: $0)?.scheme?.lowercased() ?? "") ? $0 : nil
         }
-        let link = item.url ?? webID ?? ""
+        let link = item.url.flatMap { $0.isEmpty ? nil : $0 } ?? webID ?? ""
         if link.isEmpty && (item.id ?? "").isEmpty { return nil }
 
         let title = item.title ?? "Untitled"
