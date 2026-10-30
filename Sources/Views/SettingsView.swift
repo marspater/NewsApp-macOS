@@ -636,11 +636,16 @@ struct SettingsView: View {
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
                 Toggle(
-                    "Show Unread Count on Dock Icon",
+                    "Show Badge on Dock Icon",
                     isOn: Binding(
                         get: { appSettings.showsDockBadge },
                         set: { appSettings.setShowsDockBadge($0) }
                     ))
+                Text(
+                    "Counts unread stories in today's Briefing and unread stories a notification showed since News opened."
+                )
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
                 Toggle(
                     "Show in Menu Bar",
                     isOn: Binding(
