@@ -1000,7 +1000,7 @@ enum HTMLDOMBuilder {
 /// DOM-aware tree container scoring, link-density filtering, and quality validation.
 final class ContentExtractionPipeline: Sendable {
     static let shared = ContentExtractionPipeline()
-    private let logger = Logger(subsystem: "com.marspater.news", category: "extraction")
+    private let logger = extractionLogger
 
     private let client: SecureHTTPClient
 

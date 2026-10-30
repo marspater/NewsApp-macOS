@@ -76,4 +76,11 @@ No access is requested or granted for:
 
 * **Retention Policies**: Read stories that are not saved are deleted after 30 days by default (Settings › Storage: Never, 30 or 90 days). Saved stories, unread stories and stories cited by an event overview are kept.
 * **Exportability**: You can export your entire feed library at any time via the standard OPML 2.0 format (`File > Export OPML...`).
+* **Diagnostics Export**: Help › Export Diagnostics… writes a zip file to a place you choose. Nothing is sent anywhere; you decide whether to share the file. It contains:
+  * The app's own log entries (subsystem `com.marspater.news`) from **this launch only**. macOS lets a sandboxed app read only its own process's log, so entries from earlier launches are not included. If the app has run for more than a day, only the last 24 hours are included. Values the app logs as private appear as `<private>`.
+  * The app version and build, the macOS version and the library's schema version.
+  * A settings summary: counts of feeds, starred feeds, sections and mute rules; the refresh interval and retention period; and which notification, Dock badge, menu bar, on-device intelligence, insecure HTTP and World Tension options are on.
+  * Feed health per subscription (responding or failing, newest item, text depth), named by host only.
+
+  It never contains story text. Before the zip is written, every URL is cut down to its host (no path, query or credentials), home folder paths are shortened to `~`, and the titles of stories the app has loaded are replaced with `<story>`.
 * **Complete Erasure**: Current application data is stored under `~/Library/Containers/com.marspater.news/`. Quit the app before manually removing its sandbox container. Removing that container does not erase exported OPML files or historical backups stored elsewhere.

@@ -335,6 +335,11 @@ struct KeyboardShortcutsCommands: Commands {
             Button("Keyboard Shortcuts") {
                 openWindow(id: Self.windowID)
             }
+            Button("Export Diagnostics…") {
+                DiagnosticsExport.run(
+                    settings: AppSettings.shared, feedManager: AppContainer.shared.feedManager,
+                    articleStore: ArticleStore.shared)
+            }
             if updateChecker.updateAvailable {
                 Divider()
                 Button(updateMenuItemTitle) {
