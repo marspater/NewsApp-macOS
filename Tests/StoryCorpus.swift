@@ -239,6 +239,9 @@ enum StoryCorpus {
             policy.compatibleShare = value
         }
         if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
+        if let value = environment["NEWS_STORY_COUNTRY"].flatMap(Int.init), value >= 1 {
+            policy.storyCountryKeywords = value
+        }
         if let value = environment["NEWS_STORY_MODEL"].flatMap(Double.init), value.isFinite, (0...1).contains(value) {
             policy.storyModelThreshold = value
         }
