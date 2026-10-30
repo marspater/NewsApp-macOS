@@ -231,7 +231,7 @@ struct FeedCatalogView: View {
                 Text(String(feed.publisher.prefix(1)))
                     .textCase(.uppercase)
                     .font(AppTypography.headline)
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
             )
             .accessibilityHidden(true)
     }
