@@ -408,6 +408,12 @@ final class ArticleStore: ObservableObject {
         try await database.fetchArticles(limit: nil, eventID: eventID)
     }
 
+    /// Every visible report of the story the event leads (#581), for the expanded story card, whose coverage counts
+    /// the whole story.
+    func storyMemberArticles(eventID: String) async throws -> [FeedArticle] {
+        try await database.fetchArticles(limit: nil, eventID: eventID, wholeStory: true)
+    }
+
     /// Earlier events of the same developing story (#314), shown in the event overview: the lexical relation's links
     /// first, then earlier events the matcher kept apart as a different act of the story (#522).
     func relatedStoryEvents(eventID: String) async throws -> [RelatedStoryEvent] {

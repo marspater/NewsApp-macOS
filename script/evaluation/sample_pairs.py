@@ -4,7 +4,8 @@ reviewed labels into weighted training rows (#625).
 
 Rows are sorted by the SHA-256 of the two article ids, so a rerun draws the same rows.
 Usage: sample_pairs.py ~/news-eval/review/pairs-review.csv match 0 200
-       sample_pairs.py EXPORT match 0 200 --labels labels-match.txt --snapshot copy.sqlite3 --out reviewed-pairs.csv
+       sample_pairs.py EXPORT match 0 200 --labels labels-match.txt --snapshot copy.sqlite3 --out reviewed-pairs.csv \
+           --holdout library-holdout.json [--prefix]
 Classes: match (rule matches), pairModel (model confirmations), related (related-act rows), vetoed, borderline.
 The export carries headlines, so it must live outside the checkout; the script refuses a path inside it.
 """
@@ -51,11 +52,16 @@ def main(argv=None):
     parser.add_argument('--labels', type=pathlib.Path, help='index-label lines of this class (#625)')
     parser.add_argument('--snapshot', type=pathlib.Path, help='the library copy the export came from')
     parser.add_argument('--out', type=pathlib.Path, help='training CSV to append the labelled rows to')
+    parser.add_argument('--holdout', type=pathlib.Path,
+                        help='the library holdout JSON (#579): rows naming one of its articles are left out')
+    parser.add_argument('--prefix', action='store_true',
+                        help='prepend the gap-and-publisher words (#626); off, as the app and the exporter default')
     args = parser.parse_args(argv)
     if args.labels:
         if not (args.snapshot and args.out) or inside_checkout(args.out):
             parser.error('--labels needs --snapshot and --out, outside the checkout')
-        written = export_labels(args.export, args.kind, args.labels, args.snapshot, args.out)
+        written = export_labels(args.export, args.kind, args.labels, args.snapshot, args.out, args.holdout,
+                                args.prefix)
         print(f'{args.kind}: {written} rows written')
         return
     with args.export.open(newline='', encoding='utf-8') as handle:
@@ -73,8 +79,13 @@ def main(argv=None):
 
 # --- reviewed labels as training rows (#625) ---------------------------------------------------------------------
 
-def read_labels(labels):
-    """`index label` lines of a labels file as {index: label}; other lines are ignored."""
+HEADER = ['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight', 'marginal']
+LABELS = {'different': 0, 'related': 1, 'same': 2}
+UNKNOWN_DATE = -62_135_769_600.0  # Swift's Date.distantPast, the app's DateParser.unknownDate, in seconds since 1970
+
+
+def read_verdicts(labels):
+    """`index label` lines of a labels file, by index."""
     verdicts = {}
     with labels.open(encoding='utf-8') as handle:
         for line in handle:
@@ -84,26 +95,25 @@ def read_labels(labels):
     return verdicts
 
 
-def export_labels(export, kind, labels, snapshot, out):
-    """Writes the labelled rows of one class as weighted training rows (`--export-pairs` shape, weight 5): `same`
-    is 1, `related` and `different` are 0. Texts come from the library copy (read-only), the pieces from the app's
-    tokenizer port. Never for the library holdout, which stays the gate."""
+def holdout_ids(holdout):
+    """Article ids of the library holdout's pairs; none without a holdout file."""
+    import json
+    if not holdout:
+        return set()
+    return {x for pair in json.loads(holdout.read_text(encoding='utf-8')) for x in (pair['a'], pair['b'])}
+
+
+def library_texts(snapshot):
+    """The matching text (headline and the first 600 plain lead characters) of an article id in the library copy,
+    opened read-only by a validated path: a regular .sqlite3 file outside any app container; None when missing."""
     import re
     import sqlite3
     import urllib.parse
-    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'training'))
-    from wordpiece import Tokenizer
-    tag, space = re.compile(r'<[^>]+>'), re.compile(r'\s+')
-    with export.open(newline='', encoding='utf-8') as handle:
-        rows = [row for row in csv.DictReader(handle) if CLASSES[kind](row)]
-    rows.sort(key=order)
-    verdicts = read_labels(labels)
-    # The copy is opened read-only by a validated path: a regular .sqlite3 file outside any app container.
     copy = pathlib.Path(snapshot).expanduser().resolve()
     if not copy.is_file() or copy.suffix != '.sqlite3' or '/Library/Containers/' in str(copy):
         raise SystemExit(f'{snapshot} is not a library copy')
     db = sqlite3.connect('file:' + urllib.parse.quote(str(copy)) + '?mode=ro', uri=True)
-    tokenizer = Tokenizer()
+    tag, space = re.compile(r'<[^>]+>'), re.compile(r'\s+')
 
     def text(article_id):
         query = "SELECT title, coalesce(description, '') FROM articles WHERE id = ?"
@@ -113,27 +123,67 @@ def export_labels(export, kind, labels, snapshot, out):
         title = space.sub(' ', tag.sub(' ', found[0])).strip()
         lead = space.sub(' ', tag.sub(' ', found[1].replace('&nbsp;', ' ').replace('&amp;', '&')))[:600]
         return title + '\n' + lead
+    return text
 
-    exists = out.exists()
+
+def require_header(out):
+    """An existing training CSV must already have the three-way header; returns whether the file exists."""
+    if not out.exists():
+        return False
+    with out.open(newline='', encoding='utf-8') as handle:
+        if next(csv.reader(handle), None) != HEADER:
+            raise SystemExit(f'{out} has another header; write the three-way rows to a new file')
+    return True
+
+
+def labelled_rows(export, kind, verdicts, held_out):
+    """(index, row, label) of the labelled rows of one class in the fixed order, without library-holdout articles."""
+    with export.open(newline='', encoding='utf-8') as handle:
+        rows = [row for row in csv.DictReader(handle) if CLASSES[kind](row)]
+    rows.sort(key=order)
+    for index, row in enumerate(rows, start=1):
+        verdict = verdicts.get(index)
+        if verdict in LABELS and not {row['article_id'], row['other_article_id']} & held_out:
+            yield index, row, LABELS[verdict]
+
+
+def export_labels(export, kind, labels, snapshot, out, holdout=None, prefixed=False):
+    """Writes the labelled rows of one class as weighted training rows in the three-way contract of
+    `train_pair_model.py` (#627, weight 5): `different` 0, `related` 1, `same` 2, all exact. Texts come from the
+    library copy (read-only), the pieces from the app's tokenizer port. A row naming an article of the library holdout
+    (`holdout`, #579) is left out: the holdout stays the gate."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'training'))
+    from wordpiece import Tokenizer, pair_prefix
+    text, tokenizer = library_texts(snapshot), Tokenizer()
+    exists = require_header(out)
     existing = set()
     if exists:
         # A rerun of the same labels must not double a row's weight; distinct review rounds still append.
         with out.open(newline='', encoding='utf-8') as handle:
             existing = {(row['text_a'], row['text_b']) for row in csv.DictReader(handle)}
+    written = 0
     with out.open('a', newline='', encoding='utf-8') as handle:
         # Local training rows, never opened as a spreadsheet.
         writer = csv.writer(handle)  # nosemgrep: python.lang.security.use-defusedcsv.use-defusedcsv
         if not exists:
-            writer.writerow(['label', 'group', 'text_a', 'text_b', 'pieces_a', 'pieces_b', 'weight'])
-        written = 0
-        for index, row in enumerate(rows, start=1):
-            verdict = verdicts.get(index)
+            writer.writerow(HEADER)
+        for index, row, label in labelled_rows(export, kind, read_verdicts(labels), holdout_ids(holdout)):
             a, b = text(row['article_id']), text(row['other_article_id'])
-            if verdict not in ('same', 'related', 'different') or not a or not b or (a, b) in existing:
+            if not a or not b:
+                continue
+            if prefixed:
+                # The prefix an earlier model read (#626): the pair's gap and whether one publisher wrote both, unknown
+                # for an undated article or an empty publisher, as `--export-pairs` writes them.
+                times = float(row['published_a']), float(row['published_b'])
+                gap = None if min(times) <= UNKNOWN_DATE else abs(times[0] - times[1]) / 3600
+                same = row['source_a'] == row['source_b'] if row['source_a'] and row['source_b'] else None
+                prefix = pair_prefix(gap, same)
+                a, b = prefix + a, prefix + b
+            if (a, b) in existing:  # compared as written, prefix included, so a rerun appends nothing twice
                 continue
             existing.add((a, b))
-            writer.writerow([1 if verdict == 'same' else 0, f'r:{kind}:{index}', a, b,
-                             ' '.join(map(str, tokenizer.pieces(a))), ' '.join(map(str, tokenizer.pieces(b))), 5])
+            writer.writerow([label, f'r:{kind}:{index}', a, b, ' '.join(map(str, tokenizer.pieces(a))),
+                             ' '.join(map(str, tokenizer.pieces(b))), 5, ''])
             written += 1
     out.chmod(0o600)
     return written

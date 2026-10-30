@@ -57,10 +57,21 @@ enum EventClusterer {
         now: Date = Date(),
         limit: Int = 2_000,
         allowsEnergy: Bool = IntelligencePolicy.allowsEnergy(),
-        pairProbability: (@Sendable (String, String) async -> Double?)? = nil
+        pairProbability: (@Sendable (String, String) async -> Double?)? = nil,
+        storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)? = nil
     ) async throws -> EventClusteringReport {
+        let injectedProbability = pairProbability
         let pairProbability = pairProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
+        /// Same-event and related-act probabilities for the story signal (#627): a separate story model when given,
+        /// else the pair model (an injected scorer answers p_same only).
+        func pairProbabilities(_ a: String, _ b: String) async -> (same: Double, related: Double)? {
+            if let storyProbabilities { return await storyProbabilities(a, b) }
+            if let injectedProbability { return await injectedProbability(a, b).map { ($0, 0) } }
+            return await PairScorer.shared.probabilities(a, b)
+        }
         var report = EventClusteringReport()
+        /// The reader's verdicts move the pair model's cutoff by at most ±0.05 (#629); nil, and today's cutoff, below 50.
+        let calibration = allowsEnergy ? PairCalibration.fit((try? await database.calibrationRows()) ?? []) : nil
         /// Under the energy rule (#534) neither model runs: pairs they might have settled stay as the rules left them
         /// and the rows involved are marked one matcher version behind, so the next pass with energy reads them again.
         var deferred = Set<String>()
@@ -212,7 +223,17 @@ enum EventClusterer {
                     }
                     modelScores[key] = await pairProbability(input(a), input(b))
                 }
-                if let probability = modelScores[key] ?? nil, probability >= matchPolicy.pairModelThreshold {
+                let cutoff = { (probability: Double) -> Double in
+                    guard let calibration else { return matchPolicy.pairModelThreshold }
+                    return calibration.cutoff(
+                        matchPolicy.pairModelThreshold,
+                        PairCalibration.features(
+                            pairModel: probability, cosine: pair.embeddingCosine,
+                            sharedSpecific: pair.sharedSpecificAnchors,
+                            gapHours: abs(a.date.timeIntervalSince(b.date)) / 3600,
+                            sameAct: pair.conflict != .differentAct))
+                }
+                if let probability = modelScores[key] ?? nil, probability >= cutoff(probability) {
                     pair = EventMatcher.modelConfirmed(pair, policy: matchPolicy)
                 }
             }
@@ -264,7 +285,8 @@ enum EventClusterer {
             guard !pending.isEmpty else { break }
             await prefetch(pending)
             for row in pending where !handled.contains(row.id) {
-                guard remaining > 0 else { break matching }
+                // Only this batch ends here: the flush below still runs, and the pass ends on the next budget check.
+                guard remaining > 0 else { break }
                 try Task.checkCancellation()
                 deferredCurrentRow = false
                 defer { if deferredCurrentRow { deferred.insert(row.id) } }
@@ -460,6 +482,34 @@ enum EventClusterer {
             }
             return total > 0 && agreeing * 3 >= total * 2
         }
+        /// The pair model's story signal (#627, `storyModelThreshold`): two thirds of the cross pairs between the earliest
+        /// members score p_same + p_related at or above the threshold with p_different at most 0.15, have no conflict
+        /// other than a different act, share one specific name that is not a common actor, and share a keyword or reach
+        /// the semantic veto's cosine. Not asked under the energy rule.
+        func storyModelAgrees(_ a: [EventMatchRow], _ b: [EventMatchRow], common: Set<String>) async -> Bool {
+            guard allowsEnergy, matchPolicy.storyModelThreshold.isFinite else { return false }
+            var agreeing = 0
+            var total = 0
+            for left in a.prefix(Self.storySampleSize) {
+                for right in b.prefix(Self.storySampleSize) {
+                    total += 1
+                    let pair = await ruled(left, right)
+                    let names = features(left).specificAnchors.intersection(features(right).specificAnchors)
+                        .subtracting(common).count
+                    guard pair.neuralEligible, pair.conflict == nil || pair.conflict == .differentAct, names >= 1,
+                        pair.sharedKeywords >= 1 || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
+                    else { continue }
+                    let text = { (row: EventMatchRow) in
+                        EventFeatures.matchingText(title: row.title, description: row.description)
+                    }
+                    guard let p = await pairProbabilities(text(left), text(right)) else { continue }
+                    if p.same + p.related >= matchPolicy.storyModelThreshold, 1 - p.same - p.related <= 0.15 {
+                        agreeing += 1
+                    }
+                }
+            }
+            return total > 0 && agreeing * 3 >= total * 2
+        }
         /// The story pass (#581): two active events sharing at least `storyLinkAnchors` specific names that are not
         /// common actors of the week (`EventStoryRelation.commonActorShare`, the "Earlier in This Story" guard) are one
         /// story when `storyPairsAgree`; a reader's exclusion across the two events vetoes the link. Stories are
@@ -468,7 +518,8 @@ enum EventClusterer {
         /// A report alone in the active window, unclustered or the only member of its event, joins the story of the
         /// event of two or more reports it agrees with best (`storyPairsAgree`, `single`), as a one-member event of its
         /// own, when its headline and one of the event's name a shared specific name; a reader's exclusion against that
-        /// event's members vetoes it.
+        /// event's members vetoes it. With `storyModelThreshold` set, the pair model's story signal (`storyModelAgrees`)
+        /// links two events sharing one such name, or attaches a report alone, where the rules do not (#627).
         func linkStories() async throws -> Set<String> {
             let activeSince = now.addingTimeInterval(-candidatePolicy.activeEventLifetime)
             let active = try await database.activeEventMembers(since: activeSince)
@@ -517,12 +568,26 @@ enum EventClusterer {
                 for anchor in anchorsOf[event.id] ?? [] {
                     for other in eventsByAnchor[anchor] ?? [] where other > event.id { shared[other, default: 0] += 1 }
                 }
-                for (other, count) in shared where count >= matchPolicy.storyLinkAnchors {
+                let minimum = matchPolicy.storyModelThreshold.isFinite ? 1 : matchPolicy.storyLinkAnchors
+                for (other, count) in shared where count >= minimum {
                     guard let a = membersOf[event.id], let b = membersOf[other],
                         !a.contains(where: { member in exclusions[member.id]?.isDisjoint(with: b.map(\.id)) == false }),
-                        let gap = Self.closestGap(a, b), gap <= candidatePolicy.activeEventLifetime,
-                        await storyPairsAgree(a, b, common: common)
+                        let gap = Self.closestGap(a, b), gap <= candidatePolicy.activeEventLifetime
                     else { continue }
+                    var agree = false
+                    if count >= matchPolicy.storyLinkAnchors { agree = await storyPairsAgree(a, b, common: common) }
+                    if !agree { agree = await storyModelAgrees(a, b, common: common) }
+                    // A reader's exclusion anywhere across the two stories keeps them apart, not only between these
+                    // two events: joins are transitive.
+                    let excluded = components.component(of: event.id).contains { left in
+                        (membersOf[left] ?? []).contains { member in
+                            guard let apart = exclusions[member.id] else { return false }
+                            return components.component(of: other).contains { right in
+                                (membersOf[right] ?? []).contains { apart.contains($0.id) }
+                            }
+                        }
+                    }
+                    guard agree, !excluded else { continue }
                     components.join(event.id, other)
                 }
             }
@@ -543,16 +608,22 @@ enum EventClusterer {
                     return dateA != dateB ? dateA < dateB : (a?.id ?? lhs) < (b?.id ?? rhs)
                 }
                 for id in shared.keys.sorted(by: precedes) {
+                    // The exclusion check covers the whole story the event belongs to, not only the event itself.
+                    let storyMembers = (components.groups.first(where: { $0.contains(id) }) ?? [id])
+                        .flatMap { membersOf[$0] ?? [] }
                     guard let members = membersOf[id],
-                        exclusions[single.id]?.isDisjoint(with: members.map(\.id)) != false,
-                        // Its own headline names the story: a live blog's latest entry can carry another one.
-                        features(single).specificAnchors.subtracting(common).contains(where: { name in
-                            Self.headline(single.title, names: name)
-                                && members.contains { Self.headline($0.title, names: name) }
-                        }),
-                        let gap = Self.closestGap([single], members), gap <= candidatePolicy.activeEventLifetime,
-                        await storyPairsAgree([single], members, common: common, single: true)
+                        exclusions[single.id]?.isDisjoint(with: storyMembers.map(\.id)) != false,
+                        let gap = Self.closestGap([single], members), gap <= candidatePolicy.activeEventLifetime
                     else { continue }
+                    // Its own headline names the story: a live blog's latest entry can carry another one.
+                    let named = features(single).specificAnchors.subtracting(common).contains(where: { name in
+                        Self.headline(single.title, names: name)
+                            && members.contains { Self.headline($0.title, names: name) }
+                    })
+                    var agree = false
+                    if named { agree = await storyPairsAgree([single], members, common: common, single: true) }
+                    if !agree { agree = await storyModelAgrees([single], members, common: common) }
+                    guard agree else { continue }
                     attached[single.id] = id
                     break
                 }
@@ -656,7 +727,9 @@ enum EventClusterer {
                         merges.merged += 1
                         merges.changedEvents.insert(survivor.id)
                         merges.changedEvents.insert(candidate.id)
-                        survivor = (survivor.id, merged.membershipVersion, survivor.members + candidate.members)
+                        survivor = DatabaseEngine.ActiveEvent(
+                            id: survivor.id, version: merged.membershipVersion,
+                            members: survivor.members + candidate.members)
                         // The merged members' terms can reach a third fragment the survivor's alone did not.
                         for term in candidateTerms.subtracting(survivorTerms) {
                             for id in eventsByTerm[term] ?? [] where id != survivor.id {
@@ -682,16 +755,21 @@ enum EventClusterer {
         await store()
         // The story pass reads every active event and lone report (#581). It runs when the pass processed a report
         // or changed an event, once per launch, and after a reader verdict; otherwise an unchanged archive stays
-        // at zero work.
+        // at zero work. Skipped work remains pending until a pass with energy completes it.
         let storiesStale: Bool
         if let lastStoryPass = await database.lastStoryPass {
             storiesStale = (try await database.newestVerdict() ?? .distantPast) >= lastStoryPass
         } else {
             storiesStale = true
         }
-        if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale {
-            report.changedEvents.formUnion(try await linkStories())
-            await database.recordStoryPass(at: now)
+        // Without energy there are no vectors, and the story pass would detach attachments it cannot re-check.
+        let storiesPending = await database.storyPassPending
+        if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale || storiesPending {
+            await database.deferStoryPass()
+            if allowsEnergy {
+                report.changedEvents.formUnion(try await linkStories())
+                await database.recordStoryPass(at: now)
+            }
         }
         return report
     }
@@ -714,6 +792,13 @@ enum EventClusterer {
             parent[left] = parent[left] ?? left
             parent[right] = parent[right] ?? right
             if left != right { parent[max(left, right)] = min(left, right) }
+        }
+
+        /// Every id joined with `id`, itself included.
+        func component(of id: String) -> [String] {
+            let root = find(id)
+            let joined = parent.keys.filter { find($0) == root }
+            return joined.isEmpty ? [id] : joined
         }
 
         /// Components with two or more members, each sorted.

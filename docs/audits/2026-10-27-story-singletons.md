@@ -7,7 +7,7 @@ coordinator, who draws the sample from the review sheet independently.
 ## Setup
 
 - Library: a scratch copy of `~/news-eval/library-2026-10-27.sqlite3` (6,400 articles, newest 25 October 18:05 UTC,
-  schema v25, SHA-256 `d8a8095e…cbf4`), never written in place.
+  source schema v25, migrated to v27 in the scratch copy before the run, SHA-256 `d8a8095e…cbf4`), never written in place.
 - `--library-holdout` with `NEWS_HOLDOUT_NOW=1792854000` (the clusterer's clock pinned to 24 October 15:00 UTC, when the
   holdout `bbb4ded1…10b9` was drawn), the pair-model prefix off, pair cutoff 0.9 unless stated.
 - Two windows. The printed share line ("recent stories in a multi-publisher story", `cards`) counts the 1,211 reports

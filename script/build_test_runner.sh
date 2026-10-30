@@ -111,6 +111,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/App/Intents.swift \
     Sources/App/NotificationActionRouter.swift \
     Tests/StoryCorpus.swift \
+    Tests/ImportanceAudit.swift \
     Tests/OverviewQualityAudit.swift \
     Tests/EventEmbeddingTests.swift \
     Tests/EpicNE2ETests.swift \
