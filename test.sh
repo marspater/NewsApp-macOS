@@ -58,7 +58,7 @@ rm -f test_runner
 
 # The standalone headless runners (no window, no Screen Recording): Story Overview sections including Industry
 # Impact (Epic T), reader accessibility and tension calibration. A run with arguments is a single targeted mode.
-if [ $# -eq 0 ]; then
+if [[ $# -eq 0 ]]; then
     script/test_event_overview_accessibility.sh
     script/test_reader_accessibility.sh
     script/test_tension_calibration.sh
