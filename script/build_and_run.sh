@@ -18,23 +18,22 @@ for arg in "$@"; do
     esac
 done
 
+APP="$PWD/News.app"
 if [[ "$BUNDLE_ID" == "com.marspater.news" ]]; then
     ./build.sh
 else
-    # Same build with the development id; the container-migration plist stays out so the first launch can't move
-    # a pre-sandbox library into the development container.
+    # Same build with the development id, written straight to its own bundle so a --real-library launch from this
+    # checkout keeps its News.app and is never matched by the process lookups below. The container-migration plist
+    # stays out so the first launch can't move a pre-sandbox library into the development container.
+    APP="$PWD/News Dev.app"
     BUILD_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/news-dev-build.XXXXXX")
     trap 'rm -f "$BUILD_SCRIPT"' EXIT
+    # The last sed program matches build.sh's literal ${APP_NAME}; nothing in it should expand.
+    # shellcheck disable=SC2016
     sed -e "s|<string>com.marspater.news</string>|<string>$BUNDLE_ID</string>|" \
-        -e "s|^cp container-migration.plist |cp |" build.sh >"$BUILD_SCRIPT"
+        -e "s|^cp container-migration.plist |cp |" \
+        -e 's|^APP_DIR="${APP_NAME}.app"$|APP_DIR="News Dev.app"|' build.sh >"$BUILD_SCRIPT"
     bash "$BUILD_SCRIPT"
-fi
-APP="$PWD/News.app"
-if [[ "$BUNDLE_ID" != "com.marspater.news" ]]; then
-    # Its own bundle path, so the process lookups below never reach a --real-library launch from this checkout.
-    APP="$PWD/News Dev.app"
-    rm -rf "$APP"
-    mv News.app "$APP"
 fi
 BUILT_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")
 if [[ "$BUILT_ID" != "$BUNDLE_ID" ]]; then
@@ -55,12 +54,18 @@ else
 fi
 echo "Launching $(basename "$APP") (bundle id: $BUNDLE_ID)..."
 open -n "$APP"
+[[ "$MODE" == run ]] && exit 0
+# The process this run launched; --real-library and development launches can run side by side.
+for _ in 1 2 3 4 5; do
+    PID=$(pgrep -nf "$PROCESS_PATTERN") && break
+    sleep 1
+done
+[[ -n "$PID" ]] || {
+    echo "❌ $(basename "$APP") did not start." >&2
+    exit 1
+}
 case "$MODE" in
-    --verify)
-        sleep 2
-        pgrep -f "$PROCESS_PATTERN"
-        ;;
-    --debug) lldb -p "$(pgrep -nf "$PROCESS_PATTERN")" ;;
-    --logs | --telemetry) log stream --info --predicate 'subsystem == "com.marspater.news"' ;;
-    *) ;; # run: launch only
+    --verify) echo "$PID" ;;
+    --debug) lldb -p "$PID" ;;
+    *) log stream --info --predicate "subsystem == \"com.marspater.news\" AND processIdentifier == $PID" ;;
 esac
