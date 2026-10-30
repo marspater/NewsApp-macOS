@@ -4291,6 +4291,10 @@ struct NewsTests {
         assertFalse(
             FeedUpdateBuffer.subscriptionAdded(from: ukraine.map(\.url), to: Array(ukraine.map(\.url).dropFirst())),
             "Unsubscribing starts no reader refresh in the list")
+        var held = FeedUpdateBuffer()
+        held.holdsSubscription = true
+        held.replace(with: FeedSnapshot(articles: store.articles))
+        assertFalse(held.holdsSubscription, "Showing the list's stories ends a subscription's hold")
         var holding = FeedUpdateBuffer()
         holding.replace(with: FeedSnapshot(articles: [store.articles.last!]))
         assertEqual(

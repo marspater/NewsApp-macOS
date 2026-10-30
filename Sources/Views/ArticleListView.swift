@@ -293,7 +293,15 @@ struct ArticleListView: View {
             // Subscribing asks for those stories, as Refresh does: the refresh the subscription starts shows them
             // instead of parking them behind the updates button, where the list looked unchanged (#782).
             .onChange(of: appSettings.feedURLs) { previous, current in
-                if FeedUpdateBuffer.subscriptionAdded(from: previous, to: current) { refreshFeeds() }
+                if FeedUpdateBuffer.subscriptionAdded(from: previous, to: current) { refreshFeeds(subscription: true) }
+            }
+            // A subscription's stories held while an article was open appear when the reader closes.
+            .onChange(of: articlePath.isEmpty) { _, isClosed in
+                guard isClosed, buffer.holdsSubscription else { return }
+                showPendingUpdates()
+                buffer.holdsSubscription = false
+                appliesNextUpdate = true
+                refreshReloads += 1
             }
             .focusable()
             .focused($listHasFocus)
@@ -1246,14 +1254,17 @@ struct ArticleListView: View {
 
     /// Refresh means "show me what's new": queued updates appear at once, and results arriving during the refresh
     /// (collection, event grouping, rating) replace the list instead of waiting behind the updates button.
-    private func refreshFeeds() {
+    private func refreshFeeds(subscription: Bool = false) {
         Task {
             if articlePath.isEmpty { showPendingUpdates() }
             isReaderRefreshing = true
             defer { isReaderRefreshing = false }
             await feedManager.fetchFeedsAsync()
-            // An open article keeps the list still; its updates wait as usual.
-            guard articlePath.isEmpty else { return }
+            // An open article keeps the list still; its updates wait as usual, a subscription's until it closes.
+            guard articlePath.isEmpty else {
+                if subscription { buffer.holdsSubscription = true }
+                return
+            }
             appliesNextUpdate = true
             refreshReloads += 1
         }

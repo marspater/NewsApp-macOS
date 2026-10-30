@@ -196,11 +196,14 @@ enum FeedUpdateResult: Equatable, Sendable {
 struct FeedUpdateBuffer: Equatable, Sendable {
     private(set) var displayed = FeedSnapshot()
     private(set) var pending: FeedSnapshot?
+    /// A subscription's refresh finished while an article was open: closing the reader shows it (#782).
+    var holdsSubscription = false
 
     /// A different query, or the reader asked to see the update.
     mutating func replace(with snapshot: FeedSnapshot) {
         displayed = snapshot
         pending = nil
+        holdsSubscription = false
     }
 
     mutating func applyPending() {
