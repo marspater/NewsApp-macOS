@@ -1454,6 +1454,7 @@ actor DatabaseEngine {
         if let target = idTarget ?? urlTarget { return target }
         if let target = try publisherTextTarget(article) { return target }
         if let target = try historicalTarget(article) { return target }
+        if let target = try publisherTitleTarget(article) { return target }
         // Direct legacy callers may still supply an unscoped model. Keep that key
         // only if unused; a GUID already owned by another feed needs its scoped key.
         if let scoped, article.storedID == nil,
@@ -1481,6 +1482,49 @@ actor DatabaseEngine {
             if Self.isDocumentURL(url) { try recordAlias(kind: "url", value: url, articleID: id) }
         }
         try commitTransaction()
+    }
+
+    /// The stored story of the same publisher with the same folded headline, published within
+    /// `publisherTitleWindow` (#583). The publisher's stories of that window are read and compared in Swift, so no alias
+    /// row and no schema change are needed. The lookup uses the publisher name the upsert stores as `source`; for a
+    /// site the catalog does not name, that is the feed's own title ("World news"), so the stored story must also come
+    /// from the same host. Two stored stories with that headline (a pair the window kept apart) make the target
+    /// ambiguous, and the item stays a story of its own.
+    private func publisherTitleTarget(_ article: FeedArticle) throws -> String? {
+        guard article.pubDate != DateParser.unknownDate,
+            let key = ArticleIdentity.publisherTitleKey(title: article.title, source: article.publisherName)
+        else { return nil }
+        var statement: OpaquePointer?
+        let sql = """
+            SELECT id, title, canonical_url FROM articles
+            WHERE source = ? AND published_at BETWEEN ? AND ?
+                AND NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = articles.id)
+            ORDER BY published_at, id;
+            """
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot prepare publisher title lookup"])
+        }
+        defer { sqlite3_finalize(statement) }
+        let published = article.pubDate.timeIntervalSince1970
+        sqlite3_bind_text(statement, 1, article.publisherName, -1, Self.sqliteTransient)
+        sqlite3_bind_double(statement, 2, published - ArticleIdentity.publisherTitleWindow)
+        sqlite3_bind_double(statement, 3, published + ArticleIdentity.publisherTitleWindow)
+        let catalogued = FeedCatalog.publisher(forLink: article.link) != nil
+        let host = MuteRules.linkHost(article.normalizedLink)
+        var matches: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let id = sqlite3_column_text(statement, 0), let title = sqlite3_column_text(statement, 1) else {
+                continue
+            }
+            let storedHost = sqlite3_column_text(statement, 2).flatMap { MuteRules.linkHost(String(cString: $0)) }
+            guard catalogued || (host != nil && storedHost == host) else { continue }
+            if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.publisherName) == key {
+                matches.append(String(cString: id))
+            }
+        }
+        return matches.count == 1 ? matches.first : nil
     }
 
     private func publisherTextTarget(_ article: FeedArticle) throws -> String? {

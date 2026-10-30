@@ -90,6 +90,18 @@ struct ArticleIdentity: Sendable {
         }
     }
 
+    /// Publishers sometimes ship one story under two GUIDs and two URLs minutes apart (#583). The key names the
+    /// publisher and the folded headline words; a new item resolves to a stored story with the same key only within
+    /// `publisherTitleWindow`, so a daily series with one recurring headline ("Cartoon by …", about a day apart) stays separate. Headlines under four
+    /// words are too generic to key.
+    static let publisherTitleWindow: TimeInterval = 12 * 3600
+    static func publisherTitleKey(title: String, source: String) -> String? {
+        let words = MuteRules.foldedWords(title)
+        let publisher = source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard words.count >= 4, !publisher.isEmpty else { return nil }
+        return "publisher-title-v1|" + publisher + "|" + words.joined(separator: " ")
+    }
+
     /// GUIDs identify documents only within the configured subscription URL.
     static func scopedGUID(_ guid: String?, feedURL: String?) -> String? {
         guard let guid = guid?.trimmingCharacters(in: .whitespacesAndNewlines), !guid.isEmpty,

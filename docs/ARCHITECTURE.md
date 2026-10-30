@@ -190,7 +190,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Stored article IDs never change when publisher metadata changes. Homepage and missing URLs are never dedup keys.
 
-- Resolution order: scoped GUID (v6) → document-URL alias (v5) → exact-content alias (v7). URL/GUID evidence wins; conflicting aliases stay ambiguous (NULL target) and are never revived or guessed.
+- Resolution order: scoped GUID (v6) → document-URL alias (v5) → exact-content alias (v7) → historical reconciliation (v9) → publisher-title match (#583: same publisher, same folded headline of four or more words, published within 12 h of a stored story, compared in Swift over that publisher's stories of the window, no alias row; a recurring daily headline a day apart stays separate). URL/GUID evidence wins; conflicting aliases stay ambiguous (NULL target) and are never revived or guessed.
 
 - v9 reconciliation needs an exact document URL plus substantial matching publisher body. Originals stay stored; lists/search/counts hide them; old IDs resolve to the survivor with unioned read/save state. `includingOriginals` retrieves them.
 

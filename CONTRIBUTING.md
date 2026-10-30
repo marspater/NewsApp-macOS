@@ -55,6 +55,7 @@ NEWS_EVENT_DIAGNOSE=1 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # A
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --review-pairs # Local: every stored pair decision of a library copy with headlines, events and corrections, as pairs-review.csv (#551)
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --review-pairs --holdout-candidates # Local: candidate pairs for the library holdout (borderline ≥ 0.6, singletons beside an event, fragment pairs), as holdout-candidates.csv (#579)
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json ./test.sh --library-holdout # Local: re-clusters a temporary copy from scratch and scores the labelled pairs; the gate for matcher changes (#579). NEWS_PAIR_THRESHOLD and NEWS_PAIR_MODEL=0 apply
+NEWS_SNAPSHOT_DB=copy.sqlite3 ./test.sh --duplicate-replay # Local: re-ingests each same-publisher, same-headline pair of a library copy and reports how many become one story (#583)
 NEWS_SNAPSHOT_DB=copy.sqlite3 ./test.sh --fragment-merge-timing # Local: one fragment-merge pass over a temporary copy of a library, timed, with the merge count (#541, #582)
 NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power Mode (#534): no embedding, no pair model; deferred rows counted, not re-read
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)

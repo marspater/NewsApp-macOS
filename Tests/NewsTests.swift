@@ -466,6 +466,71 @@ struct NewsTests {
             }
             return
         }
+        if CommandLine.arguments.contains("--duplicate-replay") {
+            // Local (#583): every same-publisher, same-headline pair of the last seven days of a library copy, re-ingested
+            // into a fresh store as two feed items; prints how many pairs become one story and how many stay two.
+            guard let snapshotPath = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] else {
+                throw StoryCorpus.Failure.invalid("--duplicate-replay needs NEWS_SNAPSHOT_DB")
+            }
+            // Resolved first, so a link outside the container cannot point the replay at the live library.
+            let snapshot = URL(fileURLWithPath: snapshotPath).resolvingSymlinksInPath().path
+            guard !snapshot.contains("/Library/Containers/") else {
+                throw StoryCorpus.Failure.invalid("Replay a copy of the library, never the live file")
+            }
+            let source = DatabaseEngine(path: snapshot)
+            try await source.open()
+            // Every article of the last seven days; the pairs are formed with the resolver's own folded key, so
+            // punctuation and diacritics fold as in production and both sides of a pair lie inside the window.
+            let articles = try await source.eventRows(
+                """
+                SELECT title, source, guid, canonical_url, published_at, id FROM articles
+                WHERE published_at > (SELECT max(published_at) FROM articles) - 7 * 86400
+                ORDER BY published_at, id;
+                """)
+            await source.close()
+            var byKey: [String: [[String?]]] = [:]
+            for row in articles {
+                guard let title = row[0], let publisher = row[1],
+                    let key = ArticleIdentity.publisherTitleKey(title: title, source: publisher)
+                else { continue }
+                byKey[key, default: []].append(row)
+            }
+            var pairs = 0
+            var merged = 0
+            var apart = 0
+            for group in byKey.values.sorted(by: { ($0.first?[5] ?? "") < ($1.first?[5] ?? "") })
+            where group.count >= 2 {
+                for i in group.indices {
+                    for j in group.indices where j > i {
+                        let (x, y) = (group[i], group[j])
+                        guard let title = x[0], let publisher = x[1], let first = x[4].flatMap(Double.init),
+                            let second = y[4].flatMap(Double.init)
+                        else { continue }
+                        pairs += 1
+                        let fresh = DatabaseEngine(path: ":memory:")
+                        try await fresh.open()
+                        let a = FeedArticle(
+                            title: title, link: x[3] ?? "", guid: x[2], description: "",
+                            pubDate: Date(timeIntervalSince1970: first), source: publisher)
+                        let b = FeedArticle(
+                            title: y[0] ?? title, link: y[3] ?? "", guid: y[2], description: "",
+                            pubDate: Date(timeIntervalSince1970: second), source: publisher)
+                        try await fresh.upsertArticles([a])
+                        try await fresh.upsertArticles([b])
+                        let one =
+                            try await fresh.resolvedArticleID(for: a) == (try await fresh.resolvedArticleID(for: b))
+                        await fresh.close()
+                        if one { merged += 1 } else { apart += 1 }
+                        print(
+                            String(
+                                format: "      %@ %.1fh %@: %@", one ? "one story " : "two stories",
+                                abs(second - first) / 3600, publisher, title))
+                    }
+                }
+            }
+            print("    duplicate replay: \(pairs) same-publisher pairs, \(merged) become one story, \(apart) stay two")
+            return
+        }
         if CommandLine.arguments.contains("--library-holdout") {
             let environment = ProcessInfo.processInfo.environment
             guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let holdout = environment["NEWS_LIBRARY_HOLDOUT"]
@@ -674,6 +739,7 @@ struct NewsTests {
         await testOPMLParsingAndExporting()
         await testOfflineCacheAndResilience()
         await testArticleIdentityDeep()
+        try await testPublisherTitleAliases()
         await testDatabaseEnginePersistence()
         try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
         try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
@@ -5104,6 +5170,74 @@ struct NewsTests {
         CacheManager.shared.clearWebCache()
         let sizeAfter = CacheManager.shared.calculateTotalCacheSize()
         assertTrue(sizeAfter >= 0, "Cache clear should succeed non-destructively")
+    }
+
+    /// One publisher, one headline, two GUIDs and two URLs within hours: one story (#583). A recurring headline a day
+    /// apart, another publisher, or a short headline stays separate.
+    static func testPublisherTitleAliases() async throws {
+        print("  - Testing same-publisher duplicate items aliased by headline (#583)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func item(
+            _ guid: String, _ path: String, _ title: String, source: String = "CNA", host: String = "news.invalid",
+            hours: Double
+        ) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://\(host)/\(path)", guid: guid, description: "Lead \(guid).",
+                pubDate: start.addingTimeInterval(hours * 3600), source: source)
+        }
+        let headline = "OpenAI says its AI agents disabled their own safety monitors"
+        let first = item("g1", "world/openai-agents", headline, hours: 0)
+        let second = item("g2", "world/openai-says-agents", headline, hours: 0.5)
+        try await db.upsertArticles([first])
+        try await db.upsertArticles([second])
+        let firstID = try await db.resolvedArticleID(for: first)
+        assertEqual(try await db.resolvedArticleID(for: second), firstID, "The second item aliases to the stored story")
+        assertEqual(try await db.counts().total, 1, "One story is stored")
+        let later = item("g3", "world/openai-later", headline, hours: 20)
+        try await db.upsertArticles([later])
+        assertTrue(
+            try await db.resolvedArticleID(for: later) != firstID, "The same headline 20 hours later is another item")
+        let elsewhere = item("g4", "world/elsewhere", headline, source: "Reuters", hours: 0.2)
+        try await db.upsertArticles([elsewhere])
+        assertTrue(
+            try await db.resolvedArticleID(for: elsewhere) != firstID,
+            "Another publisher's identical headline stays apart")
+        let shortOne = item("g5", "opinion/talking-taxes", "Talking taxes", hours: 0)
+        let shortTwo = item("g6", "opinion/talking-taxes-2", "Talking taxes", hours: 0.1)
+        try await db.upsertArticles([shortOne, shortTwo])
+        assertTrue(
+            try await db.resolvedArticleID(for: shortOne) != (try await db.resolvedArticleID(for: shortTwo)),
+            "A headline under four words never keys an alias")
+        assertEqual(
+            ArticleIdentity.publisherTitleKey(
+                title: "Cartoon by Amjad Rasmi. (Courtesy of Asharq Al-Awsat)", source: "Arab News"),
+            "publisher-title-v1|arab news|cartoon by amjad rasmi courtesy of asharq al awsat",
+            "The key folds case, punctuation and diacritics")
+        // Once two GUIDs point at one story, either GUID resolves to it on the next refresh.
+        assertEqual(try await db.resolvedArticleID(for: second), firstID, "The duplicate's GUID keeps resolving")
+        let hostPairs = [
+            ("example.com", "www.example.com", true),
+            ("www.example.com", "example.com", true),
+            ("WWW.EXAMPLE.COM.", "example.com", true),
+            ("example.com", "other.example.com", false),
+            ("example.com", "another.example", false),
+            ("ft.com", "news.ft.com", true),
+        ]
+        for (index, pair) in hostPairs.enumerated() {
+            let source = "World news \(index)"
+            let original = item(
+                "host-\(index)-1", "original-\(index)", headline, source: source, host: pair.0, hours: 0)
+            let duplicate = item(
+                "host-\(index)-2", "duplicate-\(index)", headline, source: source, host: pair.1, hours: 0.5)
+            try await db.upsertArticles([original])
+            let originalID = try await db.resolvedArticleID(for: original)
+            assertEqual(
+                try await db.resolvedArticleID(for: duplicate) == originalID, pair.2,
+                "Publisher headline matching from \(pair.0) to \(pair.1) respects host normalization and catalog names")
+        }
+        await db.close()
     }
 
     static func testArticleIdentityDeep() async {
