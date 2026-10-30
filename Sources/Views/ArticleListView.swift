@@ -136,7 +136,10 @@ struct ArticleListView: View {
             ? .events : .publications
     }
 
-    private var entries: [FeedEntry] { buffer.displayed.entries(groupingMode) }
+    /// The shown page grouped once per change of page or grouping; the body reads it several times (#778).
+    @State private var groupedEntries = GroupedEntries()
+
+    private var entries: [FeedEntry] { groupedEntries.entries(of: buffer.displayed, mode: groupingMode) }
 
     /// Once stories are on screen they stay put: background collection, grouping and rating queue behind the
     /// updates button instead of reshuffling the list. A refresh the reader started is the exception while the list
@@ -377,8 +380,13 @@ struct ArticleListView: View {
     private func performQueryReload() async {
         let identity = queryIdentity
         let runID = UUID()
-        queryRunID = runID
         if isBriefing {
+            // Bursts of store revisions rebuilt the board once each; they are debounced as in the list. A new or
+            // rolled-over edition (no briefing yet) loads at once.
+            if briefing != nil, loadedQuery == identity, !buffer.displayed.articles.isEmpty {
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+            }
+            queryRunID = runID
             queryError = nil
             isLoadingPage = true
             defer { if queryRunID == runID { isLoadingPage = false } }
@@ -429,7 +437,8 @@ struct ArticleListView: View {
                 let briefingArticles = briefing?.articles ?? []
                 let events = (try? await articleStore.eventFeedSummaries(for: briefingArticles.map(\.id))) ?? []
                 try Task.checkCancellation()
-                buffer.replace(with: FeedSnapshot(articles: briefingArticles, events: events))
+                let snapshot = FeedSnapshot(articles: briefingArticles, events: events)
+                if buffer.displayed != snapshot { buffer.replace(with: snapshot) }
                 hasMoreResults = false
                 mutedCount = 0
                 loadedQuery = identity
@@ -442,6 +451,14 @@ struct ArticleListView: View {
         }
         let isNewQuery = loadedQuery != identity
         let isPaging = !isNewQuery && pageRequest != loadedPageRequest && cursor != nil
+        // The debounce comes before any state changes, so a burst of revisions that keeps restarting it leaves the
+        // list alone instead of re-rendering it for each one (#778).
+        if FeedUpdateBuffer.debouncesReload(
+            isPaging: isPaging, isNewQuery: isNewQuery, hasStories: !buffer.displayed.articles.isEmpty)
+        {
+            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+        }
+        queryRunID = runID
         loadedPageRequest = pageRequest
         if isNewQuery {
             buffer = FeedUpdateBuffer()
@@ -455,11 +472,6 @@ struct ArticleListView: View {
         isLoadingPage = true
         defer { if queryRunID == runID { isLoadingPage = false } }
         do {
-            if FeedUpdateBuffer.debouncesReload(
-                isPaging: isPaging, isNewQuery: isNewQuery, hasStories: !buffer.displayed.articles.isEmpty)
-            {
-                try await Task.sleep(for: .milliseconds(180))
-            }
             let muting = listMuting
             let fetched = try await fetchPage(
                 after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
@@ -1212,6 +1224,24 @@ struct ArticleListView: View {
             appliesNextUpdate = true
             refreshReloads += 1
         }
+    }
+}
+
+/// Memoizes `FeedSnapshot.entries(_:)`. An unchanged snapshot compares in constant time, since its arrays share
+/// storage with the cached one; regrouping a 200-story page on every read showed in scrolling (#778).
+@MainActor
+private final class GroupedEntries {
+    private var snapshot: FeedSnapshot?
+    private var mode: FeedGroupingMode?
+    private var cached: [FeedEntry] = []
+
+    func entries(of snapshot: FeedSnapshot, mode: FeedGroupingMode) -> [FeedEntry] {
+        if snapshot != self.snapshot || mode != self.mode {
+            cached = snapshot.entries(mode)
+            self.snapshot = snapshot
+            self.mode = mode
+        }
+        return cached
     }
 }
 
