@@ -40,13 +40,21 @@ struct OverviewThematicAngleValidator: Sendable {
         "should buy shares", "should sell shares", "buy shares",
     ]
 
+    /// A modal projection of a change ("could rise sharply", "may be cut", "would likely double"): a modal or
+    /// "likely to", up to two words, then a verb of change. The fixed phrases above miss these.
+    private static let modalProjection = try? NSRegularExpression(
+        pattern: #"\b(could|might|may|would|is likely to|are likely to)\s+(\w+\s+){0,2}?"#
+            + #"(rise|rises|fall|falls|increase|decrease|double|triple|drop|climb|surge|jump|soar|decline|slow|"#
+            + #"grow|shrink|hit|halt|cut|disrupt|spike|plunge|tumble|collapse)\b"#)
+
     /// Evaluates whether text contains speculative forecasts or forward-looking projections.
     static func isForecast(_ text: String) -> Bool {
         let lower = text.lowercased()
         for kw in forecastKeywords where lower.contains(kw) {
             return true
         }
-        return false
+        guard let modalProjection else { return false }
+        return modalProjection.firstMatch(in: lower, range: NSRange(lower.startIndex..., in: lower)) != nil
     }
 
     /// Evaluates whether text contains investment advice, stock ratings, or trading directives.

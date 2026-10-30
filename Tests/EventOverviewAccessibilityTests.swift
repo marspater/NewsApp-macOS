@@ -1098,6 +1098,8 @@ extension EventOverviewAccessibilityTests {
             "Police halted the suspect's vehicle at a checkpoint near the border overnight.",
             "Police seized drugs and halted traffic on the main highway overnight.",
             "Soldiers halted the missile launch after the ceasefire talks resumed on Monday.",
+            "Energy prices could rise sharply if the pipeline remains closed through the winter.",
+            "Airlines may cut flights to the region as fuel costs climb this month.",
             "A court order froze the bank accounts of the suspects pending trial next month.",
             "Court orders froze the bank accounts of the suspects pending trial next month.",
             "Restraining orders barred the bank executives from contacting witnesses during the trial.",
