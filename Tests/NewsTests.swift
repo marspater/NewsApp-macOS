@@ -10460,6 +10460,11 @@ struct NewsTests {
         assertEqual(
             await pageFinder.find("https://example.com/late"), StoryImageLookup.none,
             "Only figures within the bounded page prefix are considered")
+        assertEqual(StoryImageFinder.pageURL(""), nil, "An empty link is never requested")
+        assertEqual(StoryImageFinder.pageURL("/relative/story"), nil, "A relative link is never requested")
+        assertEqual(
+            StoryImageFinder.pageURL("http://example.com/story")?.absoluteString, "https://example.com/story",
+            "An http link is requested over https")
         // #818: a refused page is answered as no image (recorded, not retried); rate limits and outages retry.
         for (status, expected) in [
             (403, StoryImageLookup.none), (404, .none), (410, .none), (429, .unreachable), (503, .unreachable),
