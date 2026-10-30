@@ -407,7 +407,7 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// word overlap with coverage headlines; fragments under five words excluded. 10: sentences closed by their
     /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
     /// 11: conditional Industry Impact section (#670).
-    public static let currentAnalysisVersion = 11
+    public static let currentAnalysisVersion = 12
 
     public let id: String
     public let eventID: String
