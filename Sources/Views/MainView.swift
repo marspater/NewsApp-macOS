@@ -45,6 +45,8 @@ struct MainView: View {
     /// The UTC day the reading belongs to; it advances at midnight UTC so the sidebar moves to the new day's reading.
     @State private var tensionDayStart = TensionMethodology.day(containing: Date()).start
     @State private var isWindowDropTargeted = false
+    /// The section shown before the current one, where the Briefing's Back returns (#780).
+    @State private var previousTopic = "Today"
 
     @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
     @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
@@ -121,8 +123,9 @@ struct MainView: View {
             .task(id: mastheadNotice) {
                 await handleMastheadNoticeTimeout()
             }
-            .onChange(of: selectedTopic) { _, _ in
+            .onChange(of: selectedTopic) { old, new in
                 articlePath = NavigationPath()
+                if let old, old != new { previousTopic = old }
             }
             .onChange(of: searchText, handleSearchTextChange)
             .onChange(of: searchTokens, handleSearchTokensChange)
@@ -217,7 +220,9 @@ struct MainView: View {
                     searchText: searchBinding,
                     mastheadNotice: $mastheadNotice,
                     articlePath: $articlePath,
-                    tension: tension
+                    tension: tension,
+                    previousTopic: previousTopic,
+                    isSheetPresented: showsTension
                 )
                 .environmentObject(appSettings)
                 .environmentObject(articleStore)

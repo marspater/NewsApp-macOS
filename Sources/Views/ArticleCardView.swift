@@ -277,38 +277,19 @@ struct ArticleCardView<Footer: View>: View {
 
     // MARK: - Lead card
 
-    /// Below this width-to-height ratio a lead image is framed whole rather than cropped to fill.
-    static var wideLeadImageRatio: CGFloat { 1.25 }
-
     /// Square and portrait lead images (and wide ones only once their size is known) are framed whole.
     static func framesLeadImageWhole(aspectRatio: CGFloat?) -> Bool {
-        aspectRatio.map { $0 < wideLeadImageRatio } ?? false
+        LeadImageFill.framesWhole(aspectRatio: aspectRatio)
     }
 
-    /// Wide images fill the frame anchored to the top, where subjects usually sit above the caption scrim.
-    /// Square and portrait images are shown whole over a blurred copy of themselves, so faces are never cropped.
-    /// A failed image leaves the editorial placeholder at full height; the card clips everything to one radius.
+    /// The image framed by `LeadImageFill`, shared with the Briefing hero. A failed image leaves the editorial
+    /// placeholder at full height; the card clips everything to one radius.
     @available(macOS 26.0, *)
     private func leadSurface(image: Image?, aspectRatio: CGFloat? = nil, failed: Bool = false) -> some View {
         ZStack(alignment: .bottomLeading) {
             Group {
                 if let image {
-                    Color.clear
-                        .overlay(alignment: .top) {
-                            if Self.framesLeadImageWhole(aspectRatio: aspectRatio) {
-                                ZStack(alignment: .top) {
-                                    image.resizable().aspectRatio(contentMode: .fill)
-                                        .blur(radius: AppLayout.leadBackdropBlur)
-                                        .overlay(AppColor.leadBackdropDim)
-                                    image.resizable().aspectRatio(contentMode: .fit)
-                                }
-                            } else {
-                                image.resizable().aspectRatio(contentMode: .fill)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            }
-                        }
-                        .clipped()
-                        .contentShape(Rectangle())
+                    LeadImageFill(image: image, aspectRatio: aspectRatio)
                 } else if failed {
                     editorialPlaceholder
                 } else {

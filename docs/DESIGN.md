@@ -75,7 +75,7 @@ The single design language for News on macOS. It applies to every change that ad
 
 | Area | List | Reader |
 | --- | --- | --- |
-| Leading (`.navigation`) | System sidebar toggle, queued-stories button | Back, Previous Story, Next Story |
+| Leading (`.navigation`) | System sidebar toggle, queued-stories button; in Briefing, Back first | Back, Previous Story, Next Story |
 | Center (`.principal`) | Nothing | Mode picker (Overview, Story, Web) |
 | Trailing (`.primaryAction`) | View options group (group by event, list or grid), Refresh, New Briefing when in Briefing | Save and Share group, Reading options, Web back and forward while in Web mode |
 
@@ -144,9 +144,11 @@ Briefing is a situation board presenting the day's essential intelligence, selec
 | Component | Hierarchy & Tokens | Anatomy & Invariants |
 | --- | --- | --- |
 | Hero carousel | `AppLayout.leadStoryHeight` (360 pt), `AppRadius.card` (12 pt), `AppColor.leadScrim` | Top 3–5 stories ranked by publisher coverage count (`sourceCount` descending). Displays lead image via `bestCardImage` across all member reports. Overlay contains publisher `EyebrowText`, headline in `AppTypography.leadStoryHeadline` (28 pt serif), publisher count `TagView`, timestamp in `caption`, and `UnreadDot`. Left/Right arrow controls and bottom dot indicators. |
-| World Tension strip | `AppColor.surface`, `AppRadius.card`, `AppSpacing.md` (16 pt) inner padding | Top row: current reading in `AppTypography.tensionReading` (44 pt bold rounded), degree symbol, level name with colored dot (`AppColor.tension(level)`), and a 7-day sparkline trend chart (`LineMark`, Catmull-Rom interpolation). Bottom row: three driving headlines (`reading.drivingHeadlines.prefix(3)`) in a 3-column grid with publisher eyebrow and headline. |
+| World Tension strip | `AppColor.surface`, `AppRadius.card`, `AppSpacing.md` (16 pt) inner padding | Headed by the board's one intelligence label ("World Tension", section 9) with the shared state caption under it ("Assessed on this Mac", "Keyword estimate", "Reading from yesterday"), the words the sidebar and the sheet use. Top row: current reading in `AppTypography.tensionReading` (44 pt bold rounded), degree symbol, level name with colored dot (`AppColor.tension(level)`), and a 7-day sparkline trend chart (`LineMark`, Catmull-Rom interpolation). Bottom row: three driving headlines (`reading.drivingHeadlines.prefix(3)`) in a 3-column grid with publisher eyebrow and headline. |
 | Dense story tiles | `AppColor.surface`, `AppRadius.card`, hairline border, resting shadow | Up to 10 stories grouped by region or topic with `AppTypography.sectionTitle` headers. Tile anatomy: publisher eyebrow, timestamp, unread dot; headline in `AppTypography.headline` (unread in `primaryText`, read in `secondaryText`); one deterministic key fact cited from event overview highlights with publisher badge; footer coverage count tag and bookmark glyph. Single click opens the story. |
 | Completion banner | `AppSpacing.lg` padding, centered | Title in `AppTypography.sectionTitle` ("Briefing complete" or "N of 10 stories read"), subtitle in `caption` with edition selection time and next edition arrival time, and "Back to Today" button. |
+
+**Back**: in Briefing the list toolbar carries the reader's Back control (`.navigation`, `chevron.left`, "Back to [section]"), returning to the section shown before the Briefing, Today if none; Navigate › Back does the same.
 
 **Carousel Motion Rules**:
 - The hero carousel is the **only auto-advancing motion permitted in the app**.

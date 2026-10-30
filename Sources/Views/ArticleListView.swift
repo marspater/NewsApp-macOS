@@ -7,6 +7,8 @@ import SwiftUI
 struct ListCommandActions {
     let canGroupStories: Bool
     let newBriefing: (() -> Void)?
+    /// Leaves the Briefing for the destination shown before it (Navigate › Back).
+    var back: (() -> Void)? = nil
 }
 
 private struct ListCommandActionsKey: FocusedValueKey { typealias Value = ListCommandActions }
@@ -46,6 +48,10 @@ struct ArticleListView: View {
     @Binding var articlePath: NavigationPath
     /// The World Tension state the sidebar shows, for the Briefing strip (#781).
     var tension = WorldTensionState()
+    /// Where the Briefing's Back returns: the destination shown before it, Today if none (#780).
+    var previousTopic = "Today"
+    /// A sheet covers the window, so the Briefing carousel holds still.
+    var isSheetPresented = false
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
@@ -62,6 +68,8 @@ struct ArticleListView: View {
     @State private var focusedArticleID: String? = nil
 
     @State private var briefing: FiniteBriefing?
+    /// The Briefing's cited facts and hero images, read from the library once per edition.
+    @State private var briefingDetails = BriefingStoryDetails()
     @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
     /// The stored edition, shared by every window: when it was selected and its story IDs in order.
     @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
@@ -166,7 +174,6 @@ struct ArticleListView: View {
         if !filteredArticles.isEmpty {
             articleGrid(proxy: proxy)
                 .opacity(isSettled ? 1 : 0)
-            if isBriefing { briefingCompletion }
             if hasMoreResults {
                 Button("Load More Stories") { pageRequest += 1 }
                     .disabled(isLoadingPage)
@@ -225,7 +232,9 @@ struct ArticleListView: View {
 
     private var listCommandActions: ListCommandActions? {
         guard articlePath.isEmpty else { return nil }
-        return ListCommandActions(canGroupStories: true, newBriefing: isBriefing ? { startNewBriefing() } : nil)
+        return ListCommandActions(
+            canGroupStories: true, newBriefing: isBriefing ? { startNewBriefing() } : nil,
+            back: isBriefing ? { leaveBriefing() } : nil)
     }
 
     var body: some View {
@@ -683,6 +692,15 @@ struct ArticleListView: View {
 
     @ToolbarContentBuilder
     private func listToolbar(proxy: ScrollViewProxy) -> some ToolbarContent {
+        // The reader's Back, in the same place (DESIGN.md 5, #780).
+        if isBriefing {
+            ToolbarItem(placement: .navigation) {
+                Button(action: leaveBriefing) {
+                    Label("Back to \(previousTopic)", systemImage: "chevron.left")
+                }
+                .help("Back to \(previousTopic)")
+            }
+        }
         if articlePath.isEmpty, buffer.pending != nil {
             ToolbarItem(placement: .navigation) { updatesButton(proxy: proxy) }
         }
@@ -795,31 +813,17 @@ struct ArticleListView: View {
         return articles.isEmpty ? nil : FiniteBriefing(startedAt: selectedAt, articles: articles)
     }
 
-    private var nextEditionText: String {
-        FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour)
-            .formatted(date: .omitted, time: .shortened)
+    private func leaveBriefing() {
+        selectedTopic = previousTopic
     }
 
-    private var briefingCompletion: some View {
-        VStack(spacing: AppSpacing.sm) {
-            if let briefing {
-                Text(
-                    briefing.isComplete(readManager.readArticles)
-                        ? "Briefing complete"
-                        : "\(briefing.readCount(readManager.readArticles)) of \(briefing.articles.count) stories read"
-                )
-                .font(AppTypography.sectionTitle)
-                Text(
-                    "Briefing selected at \(briefing.startedAt.formatted(date: .omitted, time: .shortened)). The next briefing arrives at \(nextEditionText). New stories stay in Today."
-                )
-                .font(AppTypography.caption)
-                .foregroundStyle(AppColor.secondaryText)
-                Button("Back to Today") { selectedTopic = "Today" }
-            }
-        }
-        .padding(AppSpacing.lg)
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .contain)
+    /// The Briefing's saved stories, as a plain set for the board.
+    private func briefingSavedIDs(_ entries: [FeedEntry]) -> Set<String> {
+        Set(entries.map(\.representative).filter { savedStories.isSaved($0) }.map(\.id))
+    }
+
+    private func toggleSaved(_ article: FeedArticle) {
+        if savedStories.isSaved(article) { savedStories.remove(article) } else { savedStories.save(article) }
     }
 
     // MARK: - Article Grid
@@ -834,6 +838,12 @@ struct ArticleListView: View {
                 entries: listed,
                 briefing: briefing,
                 tension: tension,
+                details: briefingDetails,
+                readIDs: readManager.readArticles,
+                savedIDs: briefingSavedIDs(listed),
+                focusedID: listHasFocus ? focusedArticleID : nil,
+                isMotionPaused: !articlePath.isEmpty || isSheetPresented,
+                nextEdition: FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour),
                 actions: BriefingActions(
                     onOpenArticle: { article in openArticle(article) },
                     onOpenEvent: { event in
@@ -849,9 +859,17 @@ struct ArticleListView: View {
                         }
                     },
                     onStartNewBriefing: { startNewBriefing() },
-                    onBackToToday: { selectedTopic = "Today" }
+                    onBackToToday: { selectedTopic = "Today" },
+                    onToggleRead: { readManager.toggleRead($0.id) },
+                    onToggleSave: { toggleSaved($0) }
                 )
             )
+            // Stored overview highlights and each hero event's best image; nothing is generated here.
+            .task(id: listed.map(\.id)) {
+                let loaded = await BriefingStoryDetails.load(
+                    for: listed, heroIDs: Set(BriefingView.heroEntries(listed).map(\.id)), store: articleStore)
+                if !Task.isCancelled { briefingDetails = loaded }
+            }
             .allowsWindowActivationEvents(true)
         } else {
             let leadID: String? = {
