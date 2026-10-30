@@ -191,7 +191,9 @@ enum EventClusterer {
                 // model may have confirmed a borderline pair: such pairs stay open and are decided again later.
                 let unvetted =
                     pair.embeddingCosine == nil && pair.neuralEligible && pair.conflict == nil
-                    && pair.sharedSpecificAnchors >= 1
+                    && (pair.sharedSpecificAnchors >= 1
+                        || (matchPolicy.anchorlessModelCosine.isFinite && pair.sharedAnchors == 0
+                            && abs(a.date.timeIntervalSince(b.date)) <= matchPolicy.anchorlessModelGap))
                 if unvetted || EventMatcher.needsPairModel(pair) {
                     deferredCurrentRow = true
                     if pair.isMatch { pair = EventMatcher.unvetted(pair) }
@@ -491,8 +493,15 @@ enum EventClusterer {
                     holders[anchor, default: 0] += 1
                 }
             }
-            let common = try await database.commonStoryTerms(
-                Set(holders.filter { $0.value >= 2 }.keys), before: now, share: EventStoryRelation.commonActorShare)
+            // `commonStoryTerms` classifies at most 64 names per call, so the candidates are checked in sorted chunks.
+            let candidates = holders.filter { $0.value >= 2 }.keys.sorted()
+            var common = Set<String>()
+            for start in stride(from: 0, to: candidates.count, by: 64) {
+                common.formUnion(
+                    try await database.commonStoryTerms(
+                        Set(candidates[start..<min(start + 64, candidates.count)]), before: now,
+                        share: EventStoryRelation.commonActorShare))
+            }
             let anchorsOf = allAnchors.mapValues { $0.subtracting(common) }
             var eventsByAnchor: [String: Set<String>] = [:]
             for (id, anchors) in anchorsOf {
@@ -671,7 +680,19 @@ enum EventClusterer {
         report.merged = merges.merged
         report.changedEvents.formUnion(merges.changedEvents)
         await store()
-        report.changedEvents.formUnion(try await linkStories())
+        // The story pass reads every active event and lone report (#581). It runs when the pass processed a report
+        // or changed an event, once per launch, and after a reader verdict; otherwise an unchanged archive stays
+        // at zero work.
+        let storiesStale: Bool
+        if let lastStoryPass = await database.lastStoryPass {
+            storiesStale = (try await database.newestVerdict() ?? .distantPast) >= lastStoryPass
+        } else {
+            storiesStale = true
+        }
+        if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale {
+            report.changedEvents.formUnion(try await linkStories())
+            await database.recordStoryPass(at: now)
+        }
         return report
     }
 

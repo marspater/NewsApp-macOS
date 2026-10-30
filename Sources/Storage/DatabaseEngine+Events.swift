@@ -1127,6 +1127,17 @@ extension DatabaseEngine {
         return try eventExclusions(for: [member])[member] ?? []
     }
 
+    /// When the newest reader verdict (an inclusion or an exclusion) was recorded; nil without any (#581).
+    func newestVerdict() throws -> Date? {
+        try eventRows(
+            """
+            SELECT max(created_at) FROM (
+                SELECT created_at FROM event_inclusions UNION ALL SELECT created_at FROM event_exclusions
+            );
+            """
+        ).first?.first.flatMap { $0 }.flatMap(Double.init).map { Date(timeIntervalSince1970: $0) }
+    }
+
     /// A symmetric exclusion snapshot for stored member IDs, in bounded SQLite batches.
     func eventExclusions(for articleIDs: [String]) throws -> [String: Set<String>] {
         try correctedPairs(in: "event_exclusions", for: articleIDs)
@@ -1417,6 +1428,11 @@ extension DatabaseEngine {
                     AND NOT EXISTS (SELECT 1 FROM event_overviews o WHERE o.event_id = events.id);
                 """)
         }
+        // A story named by a pruned lead event would otherwise carry that id on its inactive siblings (#581);
+        // `assignStories` rewrites active events only.
+        try executeSimple(
+            "UPDATE events SET story_id = NULL WHERE story_id IS NOT NULL AND story_id NOT IN (SELECT id FROM events);"
+        )
     }
 
     // MARK: - Article Features and Pair Decisions (#522)
