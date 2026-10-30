@@ -257,11 +257,24 @@ final class AppSettings: ObservableObject {
     /// the address: some publishers serve the feed only with it, and answer the slashless form with 403, 404 or a
     /// redirect that downgrades to HTTP.
     nonisolated static func normalizeFeedURL(_ raw: String, allowInsecureHTTP: Bool = false) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A pasted `feed:` address wraps the real one: feed://host/path or feed:https://host/path (#797).
+        if trimmed.lowercased().hasPrefix("feed:") {
+            trimmed = String(trimmed.dropFirst(5))
+            if trimmed.hasPrefix("//") { trimmed = String(trimmed.dropFirst(2)) }
+        }
         guard !trimmed.isEmpty else { return nil }
 
         let lower = trimmed.lowercased()
         let hasScheme = lower.hasPrefix("https://") || lower.hasPrefix("http://")
+        if !hasScheme {
+            // Any other scheme (ftp://, webcal://, file:, javascript:) is not a feed address; host:port still is.
+            let head = lower.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+            if let colon = head.firstIndex(of: ":") {
+                let port = head[head.index(after: colon)...]
+                if port.isEmpty || !port.allSatisfy(\.isNumber) { return nil }
+            }
+        }
         let withScheme = hasScheme ? trimmed : "https://" + trimmed
 
         guard let url = URL(string: withScheme),

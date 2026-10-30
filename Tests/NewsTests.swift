@@ -17992,6 +17992,21 @@ struct NewsTests {
         assertEqual(
             normalizedBare, "https://example.com", "Bare domain should gain https scheme and drop the root slash")
 
+        // #797: a pasted feed: address is unwrapped; any other explicit scheme is refused, not prefixed.
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed://example.com/rss"), "https://example.com/rss",
+            "feed:// addresses are unwrapped")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed:https://example.com/rss"), "https://example.com/rss",
+            "feed:https:// addresses are unwrapped")
+        for refused in [
+            "ftp://example.com/rss", "webcal://example.com/cal", "file:///etc/passwd", "javascript:alert(1)",
+        ] {
+            assertTrue(AppSettings.normalizeFeedURL(refused) == nil, "\(refused) is not a feed address")
+        }
+        assertEqual(
+            AppSettings.normalizeFeedURL("example.com:8443/feed"), "https://example.com:8443/feed",
+            "A host with a port still gets https")
         let invalidURL = AppSettings.normalizeFeedURL("")
         assertEqual(invalidURL, nil, "Empty string should return nil")
 
