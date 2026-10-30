@@ -347,6 +347,11 @@ struct MainView: View {
                 aiEnabled: aiEnabled, collectionEnabled: collectionEnabled, problem: libraryFailure)
             return
         }
+        // The settings and the day apply at once, so turning AI on or crossing midnight UTC never shows the old state
+        // for as long as the assessment runs.
+        tension.state.aiEnabled = aiEnabled
+        tension.state.collectionEnabled = collectionEnabled
+        tension.state.loadedAt = Date()
         tension.state.isLoading = aiEnabled && collectionEnabled
         // Only cancellation throws; the reload that cancelled this one replaces the state and keeps a pending Reassess.
         guard
