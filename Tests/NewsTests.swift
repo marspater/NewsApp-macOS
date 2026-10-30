@@ -21048,6 +21048,7 @@ struct NewsTests {
             report("v789-b1", "Three", hoursAgo: 5), report("v789-b2", "Four", hoursAgo: 5),
             report("v789-c1", "Five", hoursAgo: 6), report("v789-c2", "Six", hoursAgo: 6),
             report("v789-d1", "Seven", hoursAgo: 7), report("v789-d2", "Eight", hoursAgo: 7),
+            report("v789-e1", "Nine", hoursAgo: 8), report("v789-e2", "Ten", hoursAgo: 8),
         ]
         _ = try await db.upsertArticles(reports)
         let opened = try await db.createEvent(memberArticleIDs: ["v789-a1", "v789-a2"], at: now)
@@ -21098,7 +21099,40 @@ struct NewsTests {
         assertEqual(
             try await db.fetchEventOverview(eventID: opened.id)?.version.inputTextHash, "regenerated",
             "The refused result leaves the stored overview")
+        let fresh = try await db.createEvent(memberArticleIDs: ["v789-e1"], at: now)
+        let joiner = try await db.createEvent(memberArticleIDs: ["v789-e2"], at: now)
+        _ = try await db.mergeEvents(joiner.id, into: fresh.id, at: now)
+        assertFalse(
+            try await db.recordEventOverview(
+                EventOverviewDocument(
+                    eventID: fresh.id, version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "early"),
+                    content: OverviewContent(title: "Story", summary: "", facts: [], citations: []),
+                    provenance: OverviewProvenance(memberArticleIDs: ["v789-e1"], kind: .fallbackExcerpts))),
+            "A first overview started before the event gained a member is refused")
         await db.close()
+
+        // A row stored under a story sum before #789 is dropped on open, so an equal event version later cannot
+        // read it as current.
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("v789-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let legacy = DatabaseEngine(path: path)
+        try await legacy.open()
+        _ = try await legacy.upsertArticles([reports[0], reports[1]])
+        let legacyEvent = try await legacy.createEvent(memberArticleIDs: ["v789-a1", "v789-a2"], at: now)
+        let summed = EventOverviewDocument(
+            eventID: legacyEvent.id, version: OverviewVersionContext(membershipVersion: 3, inputTextHash: "legacy"),
+            content: OverviewContent(title: "Story", summary: "", facts: [], citations: []),
+            provenance: OverviewProvenance(memberArticleIDs: ["v789-a1", "v789-a2"], kind: .fallbackExcerpts))
+        assertTrue(try await legacy.recordEventOverview(summed), "Seed a row above its event's version")
+        await legacy.close()
+        let reopened = DatabaseEngine(path: path)
+        try await reopened.open()
+        assertEqual(
+            try await reopened.fetchEventOverview(eventID: legacyEvent.id), nil,
+            "A row above its event's version is dropped on open")
+        await reopened.close()
     }
 
     static func testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: String = "example.com") async throws {

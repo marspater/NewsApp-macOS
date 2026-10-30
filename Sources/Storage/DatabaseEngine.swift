@@ -262,6 +262,13 @@ actor DatabaseEngine {
                 try executeSimple(
                     "ALTER TABLE notification_priority_queue ADD COLUMN story_id TEXT NOT NULL DEFAULT '';")
             }
+            // Overviews stored under a story's summed version before #789 sit above their event's own version; a later
+            // event version could equal it with unchanged inputs and read as current, so they regenerate instead.
+            try executeSimple(
+                """
+                DELETE FROM event_overviews WHERE membership_version >
+                    (SELECT e.membership_version FROM events e WHERE e.id = event_overviews.event_id);
+                """)
             // Ensure article_embeddings table exists on all databases (including pre-existing v21 databases) (#127, #307)
             try executeSimple(
                 """
