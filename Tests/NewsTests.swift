@@ -16540,7 +16540,7 @@ struct NewsTests {
             assertEqual(markStore.unreadCount, 0, "Unread count is 0 after MarkAllAsReadIntent")
             let dialogMark = extractDialogText(from: resMark)
             assertTrue(
-                dialogMark != nil && dialogMark!.contains("All stories marked as read"),
+                dialogMark != nil && dialogMark!.contains("All visible stories marked as read"),
                 "MarkAllAsReadIntent returns confirmation dialog")
         } catch {
             assertTrue(false, "MarkAllAsReadIntent perform threw: \(error)")
@@ -16552,7 +16552,7 @@ struct NewsTests {
             assertEqual(markStore.unreadCount, 0, "Unread count remains 0 on repeat MarkAllAsReadIntent")
             let dialogMark2 = extractDialogText(from: resMark2)
             assertTrue(
-                dialogMark2 != nil && dialogMark2!.contains("All stories marked as read"),
+                dialogMark2 != nil && dialogMark2!.contains("All visible stories marked as read"),
                 "Confirmation dialog returned on idempotent run")
         } catch {
             assertTrue(false, "MarkAllAsReadIntent repeat threw: \(error)")
@@ -16566,7 +16566,7 @@ struct NewsTests {
             let resAmbientMark = try await ambientMarkIntent.perform()
             let dialogAmbient = extractDialogText(from: resAmbientMark)
             assertTrue(
-                dialogAmbient != nil && dialogAmbient!.contains("All stories marked as read"),
+                dialogAmbient != nil && dialogAmbient!.contains("All visible stories marked as read"),
                 "Ambient MarkAllAsReadIntent succeeds via resolver")
         } catch {
             assertTrue(false, "Ambient MarkAllAsReadIntent threw: \(error)")
