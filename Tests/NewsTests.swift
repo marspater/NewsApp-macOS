@@ -1283,6 +1283,16 @@ struct NewsTests {
             try await shrinkDB.upsertArticles([bulkyArticles[0]]).isEmpty,
             "A pruned story keeps its stored ID's tombstone")
         assertTrue(try await shrinkDB.fetchArticles(limit: 10).isEmpty, "Pruned stories stay out of every list")
+        let sameAddress = FeedArticle(
+            title: "Next edition", link: served.link, guid: "served-guid-2", description: "A new edition",
+            pubDate: now, source: "Archival Press")
+        assertEqual(
+            try await shrinkDB.upsertArticles([sameAddress], feedUrl: servedFeed).count, 1,
+            "A new story at a pruned story's address still arrives")
+        try await shrinkDB.upsertArticles([bulkyArticles[1]], preservingStoredContent: true)
+        assertTrue(
+            try await shrinkDB.fetchArticles(limit: 10).contains { $0.id == bulkyArticles[1].id },
+            "Saving a pruned story explicitly stores it again")
         await shrinkDB.checkpointAndOptimize()
         await shrinkDB.close()
         let sizeAfterPrune =
@@ -10556,6 +10566,21 @@ struct NewsTests {
         try await db.markRead(articleId: "unread", isRead: false)
         try await db.markAllRead(feedUrl: panelURL)
         assertTrue(readAt("panel") == nil, "A panel feed's own Mark All as Read leaves its hidden reports alone")
+        assertTrue(readAt("unread") == nil, "Another feed's Mark All as Read leaves this feed's stories unread")
+        try await db.markAllRead(feedUrl: "https://example.com/rss")
+        assertTrue(readAt("unread") != nil, "A feed's Mark All as Read marks its own unread stories")
+        // Muted stories are not in the list, so they stay unread rather than becoming reading interests.
+        try await db.upsertArticles(
+            [
+                FeedArticle(
+                    storedID: "muted", title: "Muted report", link: "https://muted.example/story", guid: "muted",
+                    description: "Report.", pubDate: Date(), source: "Muted Publisher")
+            ],
+            feedUrl: "https://example.com/rss")
+        var muting = MuteRules()
+        _ = muting.addSource("muted.example")
+        try await db.markAllRead(muting: muting)
+        assertTrue(readAt("muted") == nil, "Mark All as Read leaves muted stories unread")
         await db.close()
     }
 
@@ -10734,7 +10759,7 @@ struct NewsTests {
             }
             // The spill comes later on a loaded machine, so wait for it or for the write to end, never a wall clock
             // alone (#692); a write that ends first fails the next assertion.
-            await eventually("Actual transaction spills pages to the WAL before cancellation", timeout: .seconds(900)) {
+            await eventually("Actual transaction spills pages to the WAL before cancellation", timeout: .seconds(300)) {
                 let size =
                     (try? FileManager.default.attributesOfItem(atPath: path + "-wal")[.size] as? NSNumber)?.intValue
                     ?? 0
