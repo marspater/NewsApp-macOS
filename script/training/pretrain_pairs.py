@@ -150,7 +150,7 @@ class Writer:
         self.part = path.with_name(f'{path.name}.{os.getpid()}.part')  # one partial file per build
         self.handle = self.part.open('w', newline='', encoding='utf-8')
         os.chmod(self.part, 0o600)
-        self.csv = csv.writer(self.handle)
+        self.csv = csv.writer(self.handle)  # nosemgrep: python.lang.security.use-defusedcsv.use-defusedcsv
         self.csv.writerow(HEADER)
         self.tokenizer = tokenizer
         self.rows = 0
@@ -339,15 +339,19 @@ def gdelt_candidates(events, mentions, titles):
         title = gdelt_title(event_id, mentions, titles)
         if title and (when := yyyymmdd(day)):
             groups.setdefault((actor1, actor2, country), []).append((event_id, when, title, names_in(title)))
-    candidates = []
-    for members in groups.values():
-        members = sorted(members)[:GDELT_SAMPLE]
-        for n, (a_id, a_day, a_title, a_names) in enumerate(members):
-            for b_id, b_day, b_title, b_names in members[n + 1:]:
-                gap = abs((a_day - b_day).days)
-                if 1 <= gap <= 7 and a_title.lower() != b_title.lower() and a_names & b_names:
-                    candidates.append((a_id, b_id, a_title, b_title))
+    candidates = [pair for members in groups.values() for pair in gdelt_group_pairs(sorted(members)[:GDELT_SAMPLE])]
     return sorted(candidates, key=lambda c: order(c[0], c[1]))
+
+
+def gdelt_group_pairs(members):
+    """The pairs of one actor group one to seven days apart whose different headlines share a name."""
+    pairs = []
+    for n, (a_id, a_day, a_title, a_names) in enumerate(members):
+        for b_id, b_day, b_title, b_names in members[n + 1:]:
+            gap = abs((a_day - b_day).days)
+            if 1 <= gap <= 7 and a_title.lower() != b_title.lower() and a_names & b_names:
+                pairs.append((a_id, b_id, a_title, b_title))
+    return pairs
 
 
 def build_gdelt(events, mentions, titles, writer, cap):

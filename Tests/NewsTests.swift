@@ -13340,8 +13340,38 @@ struct NewsTests {
             }
             let negatives = candidates.sorted { order($0) < order($1) }.prefix(2 * positives)
             for pair in negatives { append(0, "n:" + rows[pair[0]].id, pair[0], pair[1]) }
+            // Same-day negatives (#625): two reports sharing a specific anchor within 36 h that sit in different
+            // events of two or more members each, the same-topic-different-story case the model confuses. They
+            // repeat the matcher's own separations, so they weigh 2, not 5 like a reviewed label, and are capped at
+            // the number of positives.
+            let eventSizes = Dictionary(grouping: rows.indices.filter { rows[$0].event != nil }) {
+                rows[$0].event ?? ""
+            }
+            .mapValues(\.count)
+            var sameDay = Set<[Int]>()
+            for indices in byAnchor.values {
+                let sample =
+                    indices.count > 80 ? Array(indices.sorted { rows[$0].id < rows[$1].id }.prefix(80)) : indices
+                for (n, i) in sample.enumerated() {
+                    for j in sample[(n + 1)...] where rows[i].source != rows[j].source {
+                        guard let a = rows[i].event, let b = rows[j].event, a != b, (eventSizes[a] ?? 0) >= 2,
+                            (eventSizes[b] ?? 0) >= 2, rows[i].date != DateParser.unknownDate,
+                            rows[j].date != DateParser.unknownDate,
+                            abs(rows[i].date.timeIntervalSince(rows[j].date)) <= 36 * 3600
+                        else { continue }
+                        sameDay.insert(i < j ? [i, j] : [j, i])
+                    }
+                }
+            }
+            var sameDayWritten = 0
+            for pair in sameDay.sorted(by: { order($0) < order($1) }) where sameDayWritten < positives {
+                let before = lines.count
+                append(0, "s:" + rows[pair[0]].id, pair[0], pair[1], weight: 2)
+                sameDayWritten += lines.count - before
+            }
             print(
-                "    \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) English articles, \(positives) positives, \(negatives.count) negatives"
+                "    \(URL(fileURLWithPath: path).lastPathComponent): \(rows.count) English articles, \(positives) positives, "
+                    + "\(negatives.count) negatives, \(sameDayWritten) same-day negatives (#625)"
             )
         }
         try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
