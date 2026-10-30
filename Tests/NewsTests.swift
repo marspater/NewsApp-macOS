@@ -3733,6 +3733,12 @@ struct NewsTests {
         assertEqual(
             FeedFetcher.webArticles(linkless ?? []).map(\.guid), ["123"],
             "A JSON Feed item without a URL is kept by its ID")
+        let emptyURL = JSONFeedParser.parse(
+            data: Data(
+                #"{"version":"https://jsonfeed.org/version/1.1","title":"T","items":[{"id":"https://example.com/a","url":"","content_text":"Story"}]}"#
+                    .utf8),
+            feedURL: "https://example.com/feed.json")
+        assertEqual(emptyURL?.first?.link, "https://example.com/a", "An empty url falls back to a web ID")
         let fetcher = FeedFetcher(client: client)
         var notified = 0
         // No image lookup: it outlives fetchFeedsAsync and its write transaction would hold the lock the trigger edits need.
