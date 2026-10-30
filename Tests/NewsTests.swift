@@ -10556,10 +10556,12 @@ struct NewsTests {
                     description: "Report.", pubDate: Date(), source: "Muted Publisher")
             ],
             feedUrl: "https://example.com/rss")
+        try await db.markRead(articleId: "unread", isRead: false)
         var muting = MuteRules()
         _ = muting.addSource("muted.example")
         try await db.markAllRead(muting: muting)
         assertTrue(readAt("muted") == nil, "Mark All as Read leaves muted stories unread")
+        assertTrue(readAt("unread") != nil, "Mute rules still let unmuted stories be marked")
         await db.close()
     }
 
