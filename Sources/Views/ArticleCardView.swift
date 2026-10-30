@@ -12,6 +12,9 @@ struct ArticleCardView<Footer: View>: View {
     var imageFallbacks: [FeedArticle] = []
     /// Opt-in to the macOS 26 image-backed lead treatment.
     var isLead = false
+    /// A grid card without coverage keeps the coverage row's height inside its button, so it ends level with the
+    /// event cards of its row and the whole card still opens the story (#779).
+    var reservesCoverageRow = false
     let action: () -> Void
     /// Rows that share the card surface below the story, such as an event's coverage; `EmptyView()` for none.
     let footer: Footer
@@ -79,7 +82,11 @@ struct ArticleCardView<Footer: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: action) {
-                cardFace
+                VStack(spacing: 0) {
+                    cardFace
+                    if reservesCoverageRow { CoverageRowSpace() }
+                }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .buttonBorderShape(.roundedRectangle(radius: radius))
@@ -415,6 +422,62 @@ struct ArticleCardView<Footer: View>: View {
         let savedState = isSaved ? ", saved in your library" : ""
         let dateFormatted = article.publicationDateText
         return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
+    }
+}
+
+/// The coverage row: symbol, coverage, last update, "Updated" tag and chevron. In a grid it keeps one line, an
+/// abbreviated update and the tag's height with or without the tag, so every collapsed event card of a grid row is as
+/// tall as the others (#779); list and lead cards keep the full text.
+struct CoverageRowLabel: View {
+    let coverageText: String
+    let latestDate: Date?
+    let hasUpdate: Bool
+    let isExpanded: Bool
+    let isGrid: Bool
+
+    @Environment(\.effectiveContrast) private var contrast
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            if isGrid { TagView(title: "Updated", tint: AppColor.accent).hidden() }
+            HStack(spacing: AppSpacing.xs) {
+                Image(systemName: "square.stack.3d.up")
+                    .font(AppTypography.label)
+                Text(coverageText)
+                    .font(AppTypography.label)
+                    .layoutPriority(1)
+                if let latestDate {
+                    Text(
+                        "· updated \(latestDate, format: .relative(presentation: .named, unitsStyle: isGrid ? .abbreviated : .wide))"
+                    )
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.tertiaryText(for: contrast))
+                    .monospacedDigit()
+                }
+                if hasUpdate {
+                    TagView(title: "Updated", tint: AppColor.accent)
+                }
+                Spacer(minLength: AppSpacing.xs)
+                Image(systemName: "chevron.down")
+                    .font(AppTypography.eyebrow)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+            .lineLimit(isGrid ? 1 : nil)
+        }
+        .foregroundStyle(AppColor.secondaryText)
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, AppSpacing.xs)
+    }
+}
+
+/// The room a grid story card without coverage keeps below its story: a hidden coverage row, so the collapsed cards
+/// of a row end level whether or not they are events (#779).
+struct CoverageRowSpace: View {
+    var body: some View {
+        Divider().hidden()
+        CoverageRowLabel(coverageText: " ", latestDate: nil, hasUpdate: false, isExpanded: false, isGrid: true)
+            .hidden()
+            .accessibilityHidden(true)
     }
 }
 
