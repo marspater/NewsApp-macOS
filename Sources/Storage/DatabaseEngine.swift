@@ -32,6 +32,8 @@ actor DatabaseEngine {
         storyPassPending = false
     }
     private(set) var healthNotice: String?
+    /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
+    static let schemaVersion = 27
 
     func databaseHealthNotice() -> String? {
         healthNotice
@@ -161,27 +163,35 @@ actor DatabaseEngine {
             logger.error(
                 "SQLite quick_check reported an integrity issue at \(self.dbPath, privacy: .public): \(issue, privacy: .public)"
             )
-            sqlite3_close_v2(openDb)
-            self.db = nil
-            var roHandle: OpaquePointer?
-            let roFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
-            if sqlite3_open_v2(dbPath, &roHandle, roFlags, nil) == SQLITE_OK, let roDb = roHandle {
-                self.db = roDb
-                do {
-                    try registerFunctions()
-                } catch {
-                    logger.error(
-                        "Failed to register functions on read-only fallback database: \(error.localizedDescription)")
-                }
-            } else if let roHandle = roHandle {
-                sqlite3_close_v2(roHandle)
-            }
+            reopenReadOnly(closing: openDb)
             return
         }
 
         do {
+            let version = try getUserVersion()
+            // A library from a newer build is never migrated or written to by this one (#747).
+            if version > Self.schemaVersion {
+                healthNotice =
+                    "This library was saved by a newer version of News (schema \(version); this version knows \(Self.schemaVersion)). It is open read-only and unchanged. Install the newer version to keep using it."
+                logger.error(
+                    "Library schema \(version) is newer than this build's \(Self.schemaVersion); opening read-only")
+                reopenReadOnly(closing: openDb)
+                return
+            }
+            // An existing library is copied before any migration step runs; a brand-new file has nothing to keep (#746).
+            if version < Self.schemaVersion, try hasTables() {
+                do {
+                    try backUpBeforeMigration(from: version)
+                } catch {
+                    healthNotice =
+                        "News couldn't back up the library before upgrading it (\(error.localizedDescription)), so it is open read-only and unchanged. Free some disk space and reopen News."
+                    logger.error("Pre-migration backup failed: \(error.localizedDescription, privacy: .public)")
+                    reopenReadOnly(closing: openDb)
+                    return
+                }
+            }
             // Configure incremental auto-vacuum before first-page allocation on brand-new databases (#536).
-            if loggedOptional("getUserVersion", { try getUserVersion() }) == 0 {
+            if version == 0 {
                 try executeSimple("PRAGMA auto_vacuum = INCREMENTAL;")
             }
             // Optimize SQLite for high concurrency and safety
@@ -252,6 +262,99 @@ actor DatabaseEngine {
             throw error
         }
 
+    }
+
+    /// Closes the writable handle and reopens the library read-only, keeping the health notice already set.
+    private func reopenReadOnly(closing openDb: OpaquePointer) {
+        sqlite3_close_v2(openDb)
+        self.db = nil
+        var roHandle: OpaquePointer?
+        let roFlags = SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX
+        if sqlite3_open_v2(dbPath, &roHandle, roFlags, nil) == SQLITE_OK, let roDb = roHandle {
+            self.db = roDb
+            do {
+                try registerFunctions()
+            } catch {
+                logger.error(
+                    "Failed to register functions on read-only fallback database: \(error.localizedDescription)")
+            }
+        } else if let roHandle = roHandle {
+            sqlite3_close_v2(roHandle)
+        }
+    }
+
+    private func hasTables() throws -> Bool {
+        guard let db = db else { return false }
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT count(*) FROM sqlite_master;", -1, &stmt, nil) == SQLITE_OK,
+            sqlite3_step(stmt) == SQLITE_ROW
+        else {
+            sqlite3_finalize(stmt)
+            throw sqliteError(db, "Could not read the database schema")
+        }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_column_int(stmt, 0) > 0
+    }
+
+    /// Copies the library with the SQLite online backup API to `<name>-before-v<old>-<yyyy-MM-dd>.sqlite3` beside it,
+    /// keeping the newest two such copies (#746). The copy is written under a temporary name and renamed when complete.
+    private func backUpBeforeMigration(from version: Int) throws {
+        guard let db = db, dbPath != ":memory:" else { return }
+        let library = URL(fileURLWithPath: dbPath)
+        let folder = library.deletingLastPathComponent()
+        let prefix = "\(library.deletingPathExtension().lastPathComponent)-before-v"
+        let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+        let target = folder.appendingPathComponent("\(prefix)\(version)-\(day).sqlite3")
+        let partial = folder.appendingPathComponent(".\(target.lastPathComponent).partial")
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(at: partial)
+
+        var copy: OpaquePointer?
+        guard sqlite3_open_v2(partial.path, &copy, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK,
+            let copy
+        else {
+            sqlite3_close_v2(copy)
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Could not create \(partial.lastPathComponent)"])
+        }
+        let backup = sqlite3_backup_init(copy, "main", db, "main")
+        var status = backup.map { backup in
+            let step = sqlite3_backup_step(backup, -1)
+            let finish = sqlite3_backup_finish(backup)
+            return step == SQLITE_DONE ? finish : step
+        }
+        // The copy inherits the library's WAL header; rollback mode keeps it one self-contained file.
+        if status == SQLITE_OK { status = sqlite3_exec(copy, "PRAGMA journal_mode = DELETE;", nil, nil, nil) }
+        let failure = (backup == nil || status != SQLITE_OK) ? sqliteError(copy, "Library backup failed") : nil
+        sqlite3_close_v2(copy)
+        // Leaving WAL mode can leave an empty shared-memory file behind.
+        for sidecar in ["-wal", "-shm"] { try? fileManager.removeItem(atPath: partial.path + sidecar) }
+        if let failure {
+            try? fileManager.removeItem(at: partial)
+            throw failure
+        }
+        if fileManager.fileExists(atPath: target.path) { try fileManager.removeItem(at: target) }
+        try fileManager.moveItem(at: partial, to: target)
+        logger.info("Backed up schema v\(version) library to \(target.lastPathComponent, privacy: .public)")
+
+        // Pruning is best-effort: a leftover copy never blocks the migration.
+        let listing = try? fileManager.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
+        let copies = (listing ?? [])
+            .filter { $0.lastPathComponent.hasPrefix(prefix) && $0.pathExtension == "sqlite3" }
+            .sorted { lhs, rhs in
+                let left =
+                    (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                    ?? .distantPast
+                let right =
+                    (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+                    ?? .distantPast
+                return left > right
+            }
+        for old in copies.dropFirst(2) where old != target {
+            try? fileManager.removeItem(at: old)
+        }
     }
 
     private func migrateSchemaIfNeeded() throws {
