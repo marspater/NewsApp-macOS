@@ -147,7 +147,7 @@ This section maps News directly against Apple's **App Store Review Guidelines**.
   - The application is 100% free with no in-app purchases or paywalls.
   - Future StoreKit 2 monetization (Epic Parked #657) is completely isolated and omitted from this release.
 * **3.1.3 Reader App & External Content**:
-  - Unrestricted data export: users can export their entire subscription library to open OPML 2.0 format (`File > Export Subscriptions...`).
+  - Unrestricted data export: users can export their entire subscription library to open OPML 2.0 format (`File > Export Subscriptions...`). Saved stories and read history export as JSON or Markdown (`File > Export Saved Stories`, `File > Export History`).
 
 ### Guideline 4: Design & Human Interface Guidelines (HIG)
 

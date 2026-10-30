@@ -167,6 +167,24 @@ public enum OPMLDialogs {
         }
     }
 
+    /// File › Export Saved Stories and Export History (#565): writes the stories as JSON or Markdown.
+    static func exportStories(_ entries: [StoryExportEntry], title: String, markdown: Bool) {
+        let panel = NSSavePanel()
+        panel.title = "Export \(title)"
+        panel.prompt = "Export"
+        let fileExtension = markdown ? "md" : "json"
+        panel.nameFieldStringValue = title + "." + fileExtension
+        panel.allowedContentTypes = [UTType(filenameExtension: fileExtension) ?? .plainText]
+        if panel.runModal() == .OK, let url = panel.url {
+            do {
+                let data = markdown ? StoryExport.markdown(entries, title: title) : try StoryExport.json(entries)
+                try data.write(to: url, options: .atomic)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
     public static func exportOPML(xmlString: String) {
         let panel = NSSavePanel()
         panel.title = "Export OPML Subscriptions"
@@ -182,5 +200,41 @@ public enum OPMLDialogs {
                 NSAlert(error: error).runModal()
             }
         }
+    }
+}
+
+/// One story in File › Export Saved Stories or Export History (#565). `savedAt` or `readAt` is filled, as exported.
+struct StoryExportEntry: Codable, Equatable, Sendable {
+    let title: String
+    let publisher: String
+    let url: String
+    /// Absent when the feed gave no usable date.
+    let published: Date?
+    var savedAt: Date? = nil
+    var readAt: Date? = nil
+}
+
+/// Both formats are UTF-8 without a byte order mark; an empty list stays an empty list.
+enum StoryExport {
+    static func json(_ entries: [StoryExportEntry]) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(entries)
+    }
+
+    static func markdown(_ entries: [StoryExportEntry], title: String) -> Data {
+        var lines = ["# \(title)", ""]
+        for entry in entries {
+            // Brackets would end the link text early; an angle-bracketed destination keeps any URL whole.
+            let name = entry.title.replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
+            var details = [entry.publisher]
+            if let published = entry.published { details.append("published " + published.formatted(.iso8601)) }
+            if let saved = entry.savedAt { details.append("saved " + saved.formatted(.iso8601)) }
+            if let read = entry.readAt { details.append("read " + read.formatted(.iso8601)) }
+            lines.append("- [\(name)](<\(entry.url)>) · " + details.joined(separator: " · "))
+        }
+        return Data((lines.joined(separator: "\n") + "\n").utf8)
     }
 }

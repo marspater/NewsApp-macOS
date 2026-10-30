@@ -38,6 +38,17 @@ struct NewsApp: App {
         alert.runModal()
     }
 
+    @MainActor private func exportStories(saved: Bool, markdown: Bool) {
+        Task { @MainActor in
+            do {
+                let entries = try await articleStore.database.exportedStories(saved: saved)
+                OPMLDialogs.exportStories(entries, title: saved ? "Saved Stories" : "History", markdown: markdown)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
     var body: some Scene {
         Window("News", id: "main") {
             MainView()
@@ -93,6 +104,15 @@ struct NewsApp: App {
                     OPMLDialogs.exportOPML(xmlString: opml)
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+                Divider()
+                Menu("Export Saved Stories") {
+                    Button("JSON…") { exportStories(saved: true, markdown: false) }
+                    Button("Markdown…") { exportStories(saved: true, markdown: true) }
+                }
+                Menu("Export History") {
+                    Button("JSON…") { exportStories(saved: false, markdown: false) }
+                    Button("Markdown…") { exportStories(saved: false, markdown: true) }
+                }
             }
             ListViewCommands(themeManager: themeManager)
             CommandGroup(after: .sidebar) {
