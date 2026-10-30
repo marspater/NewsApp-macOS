@@ -8030,6 +8030,34 @@ struct NewsTests {
         assertFalse(
             EventMatcher.assess(seriesFirst, seriesSecond, samePublisher: true).isMatch,
             "Inside one publisher's series its name is no shared evidence")
+        // #741: storm names, and Title Case verbs that are not names.
+        assertEqual(
+            EventFeatures.stormNames(in: "Storm Darragh leaves 2,000 homes without power"), ["darragh"],
+            "A named storm is read from the headline")
+        assertEqual(
+            EventFeatures.stormNames(in: "Storm Ellen Leaves Thousands Without Power"), ["ellen"],
+            "A storm name in a Title Case headline is read too")
+        assertTrue(
+            EventFeatures.stormNames(in: "Winter Storm Brings Snow to Chicago").isEmpty
+                && EventFeatures.stormNames(in: "Winter Storm Dumps Snow on Chicago").isEmpty
+                && EventFeatures.stormNames(in: "Storm Will Hit the Coast Tonight").isEmpty,
+            "A Title Case verb after Storm is no storm name")
+        // #739: the different-day veto covers only series items with no headline date or edition word.
+        var roundUpOne = quake
+        roundUpOne.series = "deals"
+        roundUpOne.titleSpecificAnchors = []
+        var roundUpTwo = quakeLater
+        roundUpTwo.series = "deals"
+        roundUpTwo.titleSpecificAnchors = []
+        roundUpTwo.date = roundUpOne.date.addingTimeInterval(30 * 3600)
+        assertEqual(
+            EventMatcher.assess(roundUpOne, roundUpTwo, samePublisher: true).conflict, .calendarDay,
+            "Dateless round-ups of one series on different days are two items")
+        roundUpOne.editions = ["evening"]
+        roundUpTwo.editions = ["evening"]
+        assertTrue(
+            EventMatcher.assess(roundUpOne, roundUpTwo, samePublisher: true).conflict != .calendarDay,
+            "Items with an edition word are left to the edition check")
 
         let followUpTerms: Set<String> = ["earthquake", "damage", "rescue", "tent", "camp", "aid", "shelter", "winter"]
         assertTrue(
