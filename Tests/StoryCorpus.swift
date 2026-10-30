@@ -126,9 +126,9 @@ enum StoryCorpus {
     /// Resolved single documents share a membership even when they have no multi-document event.
     /// Evaluation commands may select story cards; event-level tests keep the default event memberships.
     static func eventMemberships(
-        articles: [FeedArticle], scoreStories: Bool = false, onPass: ((EventClusteringReport) -> Void)? = nil
+        articles: [FeedArticle], onPass: ((EventClusteringReport) -> Void)? = nil
     ) async throws -> [String: String] {
-        try await memberships(articles: articles, onPass: onPass).mapValues { scoreStories ? $0.story : $0.event }
+        try await memberships(articles: articles, onPass: onPass).mapValues(\.event)
     }
 
     /// The same replay with each item's story card as well (#581): its event's story, else the item alone.
@@ -172,7 +172,7 @@ enum StoryCorpus {
                 let event = try await db.eventID(forArticle: resolved)
                 var story = "document:" + resolved
                 if let event { story = "story:" + (try await db.storyID(forEvent: event) ?? event) }
-                // `.event` stays the event; story-level scoring (NEWS_SCORE_STORIES=1, #627) reads `.story`.
+                // `.event` stays the event; the story regressions (#581) read `.story` against their story labels.
                 result[item.id] = (event.map { "event:" + $0 } ?? "document:" + resolved, story)
             }
             await db.close()
@@ -215,7 +215,11 @@ enum StoryCorpus {
     {
         guard let path = ProcessInfo.processInfo.environment["NEWS_STORY_MODEL_PATH"] else { return nil }
         let model = PairScorer(modelURL: URL(fileURLWithPath: path))
-        return { @Sendable a, b in await model.probabilities(a, b) }
+        // A story model that cannot score fails the evaluation instead of handing it rules-only links.
+        return { @Sendable a, b in
+            guard await model.isAvailable else { preconditionFailure("NEWS_STORY_MODEL_PATH \(path) cannot score") }
+            return await model.probabilities(a, b)
+        }
     }
 
     static func policyFromEnvironment() -> EventMatchPolicy {
@@ -480,6 +484,13 @@ enum StoryCorpus {
     static func capturePairKey(_ first: String, _ second: String) -> String {
         let (left, right) = first < second ? (first, second) : (second, first)
         return String(ArticleIdentity.sha256Hex("news-capture-pair-v1:" + left + "\n" + right).prefix(16))
+    }
+
+    /// A private, writable copy of a library snapshot: eval backups are kept read-only (0444), and a copy would inherit
+    /// that mode, so opening it (WAL, migrations, re-clustering) would fail.
+    static func writableCopy(of snapshot: String, to copy: String) throws {
+        try FileManager.default.copyItem(atPath: snapshot, toPath: copy)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy)
     }
 
     /// Publisher text stays in an existing directory that belongs to the user, is closed to everyone else

@@ -629,9 +629,9 @@ extension DatabaseEngine {
             ) v
             JOIN pair_assessments p ON p.article_id = v.article_id AND p.other_article_id = v.other_article_id
             JOIN articles a ON a.id = v.article_id JOIN articles b ON b.id = v.other_article_id
-            WHERE json_extract(p.features, '$.pairModel') IS NOT NULL ORDER BY v.article_id, v.other_article_id
-            LIMIT ?;
-            """, [.integer(limit)]
+            WHERE json_extract(p.features, '$.pairModel') IS NOT NULL AND p.matcher_version = ?
+            ORDER BY v.article_id, v.other_article_id LIMIT ?;
+            """, [.integer(EventMatcher.version), .integer(limit)]
         ).compactMap { row -> PairCalibration.Row? in
             guard let json = row[1], let gap = row[2].flatMap(Double.init),
                 let signals = try? decoder.decode(EventPairFeatures.self, from: Data(json.utf8)),
@@ -643,7 +643,9 @@ extension DatabaseEngine {
                     gapHours: gap / 3600, sameAct: signals.conflict != EventConflict.differentAct.rawValue),
                 same: row[0] == "1")
         }
-        // Rows without a model score are filtered in SQL, so the limit counts usable rows and bounds the work.
+        // Rows without a model score, or scored by an older matcher whose scores need not match the current scorer, are
+        // filtered in SQL, so the limit counts usable rows and bounds the work. Their verdicts stay; only the scores
+        // are not fitted.
     }
 
     /// Events of one report that belong to a story (#581): reports the story pass attached as acts of their own.

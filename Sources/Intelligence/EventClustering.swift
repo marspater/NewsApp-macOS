@@ -58,7 +58,8 @@ enum EventClusterer {
         limit: Int = 2_000,
         allowsEnergy: Bool = IntelligencePolicy.allowsEnergy(),
         pairProbability: (@Sendable (String, String) async -> Double?)? = nil,
-        storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)? = nil
+        storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)? = nil,
+        calibrationRows: [PairCalibration.Row]? = nil
     ) async throws -> EventClusteringReport {
         let injectedProbability = pairProbability
         let pairProbability = pairProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
@@ -71,7 +72,10 @@ enum EventClusterer {
         }
         var report = EventClusteringReport()
         /// The reader's verdicts move the pair model's cutoff by at most ±0.05 (#629); nil, and today's cutoff, below 50.
-        let calibration = allowsEnergy ? PairCalibration.fit((try? await database.calibrationRows()) ?? []) : nil
+        // The reader's verdicts as stored, unless an evaluation supplies the rows it read before clearing them (#629).
+        let storedRows =
+            allowsEnergy && calibrationRows == nil ? ((try? await database.calibrationRows()) ?? []) : []
+        let calibration = allowsEnergy ? PairCalibration.fit(calibrationRows ?? storedRows) : nil
         /// Under the energy rule (#534) neither model runs: pairs they might have settled stay as the rules left them
         /// and the rows involved are marked one matcher version behind, so the next pass with energy reads them again.
         var deferred = Set<String>()
@@ -494,8 +498,13 @@ enum EventClusterer {
                 for right in b.prefix(Self.storySampleSize) {
                     total += 1
                     let pair = await ruled(left, right)
-                    let names = features(left).specificAnchors.intersection(features(right).specificAnchors)
-                        .subtracting(common).count
+                    // A shared series title of one publisher is no shared name, as in `storyPairsAgree`.
+                    let template =
+                        EventFeatures.sharedSeriesTerms(
+                            features(left), features(right),
+                            samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
+                    let names = features(left).without(template).specificAnchors
+                        .intersection(features(right).without(template).specificAnchors).subtracting(common).count
                     guard pair.neuralEligible, pair.conflict == nil || pair.conflict == .differentAct, names >= 1,
                         pair.sharedKeywords >= 1 || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
                     else { continue }
