@@ -106,14 +106,19 @@ struct ArticleCardView<Footer: View>: View {
 
             footer
         }
-        .background(AppColor.surface)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .containerShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        // The shadow is cast by the filled card shape rather than the composited card, whose shadow needed an
+        // offscreen pass per card on every scrolled frame (#778). The card is opaque, so it looks the same.
+        .background {
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(AppColor.surface)
+                .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
+        }
         .overlay(
             RoundedRectangle(cornerRadius: radius, style: .continuous)
                 .strokeBorder(appearance.border, lineWidth: appearance.width)
         )
-        .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
         .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
         .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
         .onHover { isHovered = $0 }
@@ -235,7 +240,7 @@ struct ArticleCardView<Footer: View>: View {
     @ViewBuilder
     private var regularDescription: some View {
         if !article.description.isEmpty {
-            let cleanDesc = ArticleContentRedactor.cleanText(article.description)
+            let cleanDesc = CardText.cleaned(article.description)
             if !cleanDesc.isEmpty {
                 Text(cleanDesc)
                     .font(AppTypography.body)
@@ -343,7 +348,7 @@ struct ArticleCardView<Footer: View>: View {
                 .multilineTextAlignment(.leading)
                 .layoutPriority(1)
 
-            let cleanDescription = ArticleContentRedactor.cleanText(article.description)
+            let cleanDescription = CardText.cleaned(article.description)
             if !cleanDescription.isEmpty {
                 Text(cleanDescription)
                     .font(AppTypography.body)
@@ -387,6 +392,24 @@ struct ArticleCardView<Footer: View>: View {
         let savedState = isSaved ? ", saved in your library" : ""
         let dateFormatted = article.publicationDateText
         return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
+    }
+}
+
+/// Feed summaries cleaned for cards, by raw text: card bodies run on every update while scrolling, the cleaning
+/// regular expressions once per summary (#778).
+@MainActor
+private enum CardText {
+    private static let cache: NSCache<NSString, NSString> = {
+        let cache = NSCache<NSString, NSString>()
+        cache.countLimit = 2000
+        return cache
+    }()
+
+    static func cleaned(_ raw: String) -> String {
+        if let cached = cache.object(forKey: raw as NSString) { return cached as String }
+        let cleaned = ArticleContentRedactor.cleanText(raw)
+        cache.setObject(cleaned as NSString, forKey: raw as NSString)
+        return cleaned
     }
 }
 
