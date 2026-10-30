@@ -485,21 +485,32 @@ actor DatabaseEngine {
 
     /// Replaces the library with the backup at `archive` and returns the settings it carries, if any (#563).
     ///
-    /// The archive is checked on a staging copy first: a damaged file, or one saved by a newer build (the #747 rule), is
-    /// refused with the library untouched. The current library is first kept beside it as
+    /// The archive is checked on a staging copy first: a damaged file, one saved by a newer build (the #747 rule), or one
+    /// this build can't open and migrate is refused with the library untouched. The current library is first kept as
     /// `<name>-before-restore-<yyyy-MM-dd>.sqlite3` (newest two kept), so a mistaken restore can be undone. On success
     /// the library stays closed; the caller relaunches the app.
-    func restoreBackup(from archive: URL) throws -> Data? {
+    func restoreBackup(from archive: URL) async throws -> Data? {
         guard dbPath != ":memory:" else { throw CocoaError(.fileNoSuchFile) }
         let fileManager = FileManager.default
         let library = URL(fileURLWithPath: dbPath)
-        let staging = URL(fileURLWithPath: dbPath + ".restoring")
-        defer { for file in [staging.path, staging.path + "-journal"] { try? fileManager.removeItem(atPath: file) } }
-        try? fileManager.removeItem(at: staging)
+        // A folder of its own beside the library: the trial open below writes its lock and any migration copy there.
+        let stagingFolder = library.deletingLastPathComponent().appendingPathComponent(
+            ".\(library.lastPathComponent).restoring-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        let staging = stagingFolder.appendingPathComponent(library.lastPathComponent)
+        defer { try? fileManager.removeItem(at: stagingFolder) }
+        try? fileManager.removeItem(at: stagingFolder)
+        try fileManager.createDirectory(at: stagingFolder, withIntermediateDirectories: false)
         try fileManager.copyItem(at: archive, to: staging)
         // The restored library gets the current one's permissions, not whatever the chosen file had.
-        let permissions = (try? fileManager.attributesOfItem(atPath: dbPath)[.posixPermissions]) ?? 0o600
+        let resolvedPath = library.resolvingSymlinksInPath().path
+        let permissions = (try? fileManager.attributesOfItem(atPath: resolvedPath)[.posixPermissions]) ?? 0o600
         try fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: staging.path)
+        let damaged = NSError(
+            domain: "DatabaseEngine", code: -1,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "This file is damaged or isn't a News library backup, so nothing was restored."
+            ])
 
         let extras = try withConnection(to: staging) { copy -> [String: Data] in
             func value(_ sql: String) -> String? {
@@ -513,14 +524,7 @@ actor DatabaseEngine {
             guard value("PRAGMA integrity_check(1);") == "ok",
                 value("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'articles';") == "1",
                 let version = value("PRAGMA user_version;").flatMap({ Int($0) })
-            else {
-                throw NSError(
-                    domain: "DatabaseEngine", code: -1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "This file is damaged or isn't a News library backup, so nothing was restored."
-                    ])
-            }
+            else { throw damaged }
             guard version <= Self.schemaVersion else {
                 throw NSError(
                     domain: "DatabaseEngine", code: -1,
@@ -546,12 +550,36 @@ actor DatabaseEngine {
             }
             return extras
         }
+        // The staged copy must open and migrate here, exactly as the swapped-in library will on relaunch; a file with the
+        // right table names but the wrong columns fails now instead of after the swap.
+        let trial = DatabaseEngine(path: staging.path)
+        do {
+            try await trial.open()
+        } catch {
+            await trial.close()
+            throw damaged
+        }
+        let trialNotice = await trial.databaseHealthNotice()
+        await trial.close()
+        guard trialNotice == nil else { throw damaged }
 
         // Nothing is swapped in until the current library is kept; a library too damaged to copy online is copied as a file.
         if fileManager.fileExists(atPath: dbPath) {
             let kept = try keepCopyBeside(label: "before-restore", group: "before-restore", fallingBackToFile: true)
             try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path)
         }
+        // The side file goes before the library: it is small, and the old one is put back from memory if the swap fails.
+        let previousTension = try? Data(contentsOf: worldTensionURL)
+        func putTension(_ data: Data?) throws {
+            if let data {
+                try data.write(to: worldTensionURL, options: .atomic)
+            } else if fileManager.fileExists(atPath: worldTensionURL.path) {
+                try fileManager.removeItem(at: worldTensionURL)
+            }
+        }
+        // A plain library file carries no extras and leaves the side file as it is.
+        if !extras.isEmpty { try putTension(extras["world-tension"]) }
+
         close()
         for sidecar in ["-wal", "-shm"] { try? fileManager.removeItem(atPath: dbPath + sidecar) }
         do {
@@ -561,16 +589,10 @@ actor DatabaseEngine {
                 try fileManager.moveItem(at: staging, to: library)
             }
         } catch {
-            // A failed atomic replace leaves the library in place.
+            // A failed atomic replace leaves the library in place; its side file goes back too.
+            if !extras.isEmpty { try? putTension(previousTension) }
             try? open()
             throw error
-        }
-        if let tension = extras["world-tension"] {
-            do { try tension.write(to: worldTensionURL, options: .atomic) } catch {
-                logger.error("Could not restore the World Tension history: \(error.localizedDescription)")
-            }
-        } else if !extras.isEmpty {
-            try? fileManager.removeItem(at: worldTensionURL)
         }
         logger.info("Restored the library from a backup")
         return extras["settings"]

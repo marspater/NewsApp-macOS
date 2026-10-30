@@ -479,8 +479,15 @@ extension NewsApp {
             }
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.createsNewApplicationInstance = true
-            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
-                DispatchQueue.main.async { NSApp.terminate(nil) }
+            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
+                let launched = app != nil && error == nil
+                Task { @MainActor in
+                    // This instance quits only once the new one is running, so News never just disappears.
+                    guard launched else {
+                        return showAlert("The library was restored. Quit and reopen News to use it.")
+                    }
+                    NSApp.terminate(nil)
+                }
             }
         }
     }

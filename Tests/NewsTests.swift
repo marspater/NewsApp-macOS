@@ -1624,18 +1624,27 @@ struct NewsTests {
         defaults.set(true, forKey: AppSettings.allowInsecureHTTPKey)
         defaults.set(AppSettings.NotificationMode.full.rawValue, forKey: AppSettings.notificationModeKey)
 
-        // A damaged file and a backup from a newer build are refused; the live library stays open and unchanged.
+        // A damaged file, a foreign file with an articles table this build can't migrate, and a backup from a newer build
+        // are refused; the live library stays open and unchanged.
+        let foreign = directory.appendingPathComponent("foreign.sqlite3")
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(foreign.path, &handle), SQLITE_OK, "Create the foreign fixture")
+        assertEqual(
+            sqlite3_exec(handle, "CREATE TABLE articles (headline TEXT);", nil, nil, nil), SQLITE_OK,
+            "Give the foreign fixture an articles table with other columns")
+        sqlite3_close(handle)
         let corrupt = directory.appendingPathComponent("corrupt.sqlite3")
         try Data(repeating: 0x5A, count: 8192).write(to: corrupt)
         let newer = directory.appendingPathComponent("newer.sqlite3")
         try fileManager.copyItem(at: archive, to: newer)
-        var handle: OpaquePointer?
         assertEqual(sqlite3_open(newer.path, &handle), SQLITE_OK, "Open the newer-backup fixture")
         assertEqual(
             sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil),
             SQLITE_OK, "Mark the fixture as saved by a newer build")
         sqlite3_close(handle)
-        for (name, file, message) in [("damaged", corrupt, "damaged"), ("newer", newer, "newer version")] {
+        for (name, file, message) in [
+            ("damaged", corrupt, "damaged"), ("foreign", foreign, "damaged"), ("newer", newer, "newer version"),
+        ] {
             do {
                 _ = try await db.restoreBackup(from: file)
                 assertTrue(false, "A \(name) backup is refused")
@@ -1652,6 +1661,17 @@ struct NewsTests {
         assertEqual(defaults.stringArray(forKey: AppSettings.feedURLsKey), ["https://other.test/feed"], "Settings kept")
 
         // The restore swaps the backup in, closes the library and hands back the settings.
+        // A side file that can't be written stops the restore before the swap: the library stays open and unchanged.
+        try fileManager.removeItem(at: sideFile)
+        try fileManager.createDirectory(at: sideFile, withIntermediateDirectories: false)
+        do {
+            _ = try await db.restoreBackup(from: archive)
+            assertTrue(false, "A restore whose side file can't be written fails")
+        } catch {}
+        assertEqual(try await db.fetchArticles(limit: nil).count, 3, "A failed side file leaves the library in place")
+        try fileManager.removeItem(at: sideFile)
+        try Data("[\"after\"]".utf8).write(to: sideFile)
+
         // Two older copies of replaced libraries exist; the restore keeps the newer one and its own.
         for (name, age) in [
             ("news-before-restore-2026-01-01.sqlite3", 200.0), ("news-before-restore-2026-02-01.sqlite3", 100.0),
