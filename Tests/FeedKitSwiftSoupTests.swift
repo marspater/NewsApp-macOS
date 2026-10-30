@@ -255,6 +255,15 @@ enum FeedKitSwiftSoupTests {
             FeedXMLParser(data: Data(sourcedContent.utf8), feedURL: base).parse().first?.fullContent?
                 .contains("Origin feed text") != true,
             "Content inside an Atom entry's source stays out of the entry's text")
+        let sourcedLink = """
+            <feed xmlns="http://www.w3.org/2005/Atom"><title>Planet</title><entry><title>Linked</title>
+            <id>urn:linked</id><source><link href="https://origin.example/"/><title>Origin</title></source>
+            <link href="https://example.com/linked"/></entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(sourcedLink.utf8), feedURL: base).parse().first?.link
+                == "https://example.com/linked",
+            "A link inside an Atom entry's source does not become the entry's link")
 
         let malicious =
             "<!DOCTYPE rss [<!ENTITY payload 'expanded'>]><rss><channel><item><title>&payload;</title></item></channel></rss>"
@@ -344,6 +353,7 @@ enum FeedKitSwiftSoupTests {
         check(
             DateParser.parse("Fri, 31 Dec 99 23:30:00 -0500") == utc("2100-01-01T04:30:00Z"),
             "A zone offset that crosses the year boundary keeps the widened century")
+        check(DateParser.parse("Oct 30, 26") == utc("2026-10-30T00:00:00Z"), "A month-first two-digit year too")
         for (zone, instant) in [
             ("BST", "2026-10-30T09:00:00Z"), ("CET", "2026-10-30T09:00:00Z"), ("CEST", "2026-10-30T08:00:00Z"),
             ("IST", "2026-10-30T04:30:00Z"), ("AEST", "2026-10-30T00:00:00Z"), ("GMT", "2026-10-30T10:00:00Z"),

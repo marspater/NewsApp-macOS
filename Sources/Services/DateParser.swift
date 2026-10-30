@@ -73,9 +73,10 @@ struct DateParser {
     /// RFC 822 and RSS 2.0 allow two-digit years, which the four-digit patterns read as years 0-99. The year is
     /// widened in the text, before parsing, so a zone offset cannot carry year 99 into year 100 first.
     private static func fourDigitYear(_ text: String) -> String {
-        // With two groups, "$120" is group 1 followed by "20".
+        // Day first ("Fri, 30 Oct 26 10:00") or month first ("Oct 30, 26"). With two groups, "$120" is group 1
+        // followed by "20".
         text.replacingOccurrences(
-            of: #"^((?:[A-Za-z]+,\s*)?\d{1,2}\s+[A-Za-z]+\s+)(\d{2})(?=\s)"#, with: "$120$2",
-            options: .regularExpression)
+            of: #"^((?:[A-Za-z]+,\s*)?\d{1,2}\s+[A-Za-z]+\s+|[A-Za-z]+\s+\d{1,2},\s*)(\d{2})(?=\s|$)"#,
+            with: "$120$2", options: .regularExpression)
     }
 }

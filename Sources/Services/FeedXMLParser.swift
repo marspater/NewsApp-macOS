@@ -179,11 +179,11 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             return " \(key)=\"\(escapeHTML(value))\""
         }.joined()
         appendItemXML("<\(elementName)\(attributes)>")
+        // An Atom entry's <source> describes the feed it was copied from: none of its elements (link, content,
+        // category, media) set the entry's own fields (#795). A <source> inside XHTML content is markup.
+        if isAtom, !isCollectingContentEncoded, elementStack.contains("source") { return }
 
-        // Content inside an Atom entry's <source> belongs to the origin feed, not the entry (#795).
-        if (elementName == "content:encoded" || elementName == "content") && contentDepth == nil
-            && !(isAtom && elementStack.dropLast().contains("source"))
-        {
+        if (elementName == "content:encoded" || elementName == "content") && contentDepth == nil {
             isCollectingContentEncoded = true
             itemContentEncoded = ""
             contentDepth = currentNestingDepth
