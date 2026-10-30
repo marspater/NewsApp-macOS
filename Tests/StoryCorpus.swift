@@ -199,6 +199,11 @@ enum StoryCorpus {
         }
         if environment["NEWS_SAME_PUBLISHER"] == "1" { policy.samePublisherRequiresMatch = true }
         if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
+        // The semantic veto and rescue cutoffs (#628), swept when the sentence encoder changes.
+        if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init) { policy.semanticVetoThreshold = value }
+        if let value = environment["NEWS_SEMANTIC_RESCUE"].flatMap(Double.init) {
+            policy.semanticMatchThreshold = value
+        }
         return policy
     }
 
