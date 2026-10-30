@@ -46,6 +46,7 @@ NEWS_READING_FULL_APP=1 ./script/native_performance_baseline.sh # Live: sandboxe
 ./script/test_notification_live.sh DIR # Opt-in real OS notifications with synthetic reports, temporary settings and in-memory SQLite; existing News authorization required
 ./script/test_native_ui_qa.sh        # Automated Native UI QA checks with system settings overrides (#155, #123)
 ./script/appearance_matrix.sh [DIR]  # Window captures of list, grid, reader and overview in light, dark and Increase Contrast; needs Screen Recording
+NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift script/native_performance_baseline.sh DIR # Story Overview with every Epic T section rendered offscreen (no window, no Screen Recording) at 900 and 1,400 pt, text size 1.0 and 1.3, light, dark and Increase Contrast, each also in gray
 make run                             # Build and launch "News Dev.app" as com.marspater.news.dev: its own container, library and settings; the real library is never opened (#749)
 ./script/build_and_run.sh --real-library # Build and launch with the installed app's id: opens and migrates the real library, closing any running News first
 ./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver

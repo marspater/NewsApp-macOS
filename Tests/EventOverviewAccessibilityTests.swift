@@ -351,6 +351,25 @@ struct EventOverviewAccessibilityTests {
             sourceName: "Reuters", quote: "Targets were agreed unanimously.")
         assertEqual(
             citLabel, "Citation from Reuters: Targets were agreed unanimously.", "Citation pill label is descriptive")
+        let unknownPublisher = FeedArticle(
+            storedID: "u", title: "Retailers warn of delays", link: "https://example.com/u", guid: "u",
+            description: "", pubDate: Date(timeIntervalSince1970: 0), source: "")
+        assertEqual(
+            EventOverviewReaderView.citationLabel(sourceName: nil, match: unknownPublisher), "Source",
+            "A citation from an unknown publisher shows a named pill, never a blank one")
+        assertEqual(
+            EventOverviewReaderView.citationLabel(sourceName: " ", match: nil), "Source",
+            "A blank source name falls back")
+        assertEqual(
+            EventOverviewReaderView.citationLabel(sourceName: "Reuters", match: unknownPublisher), "Reuters",
+            "The cited publisher comes first")
+        let knownPublisher = FeedArticle(
+            storedID: "k", title: "Ports close", link: "https://example.com/k", guid: "k", description: "",
+            pubDate: Date(timeIntervalSince1970: 0), source: "The Guardian")
+        assertEqual(
+            EventOverviewReaderView.citationLabel(sourceName: "", match: knownPublisher), knownPublisher.publisherName,
+            "A blank cited name falls back to the matched report's publisher")
+        assertFalse(knownPublisher.publisherName.isEmpty, "The matched report names its publisher")
 
         // Source article action labels
         let readLabel = EventOverviewReaderView.readArticleAccessibilityLabel(title: "Summit Treaty", source: "Reuters")
