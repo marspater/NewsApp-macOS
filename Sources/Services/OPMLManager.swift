@@ -227,7 +227,9 @@ enum StoryExport {
         var lines = ["# \(title)", ""]
         for entry in entries {
             // Brackets would end the link text early; an angle-bracketed destination keeps any URL whole.
-            let name = entry.title.replacingOccurrences(of: "\\", with: "\\\\")
+            // A line break would end the list item; CR, LF and CRLF all become one space.
+            let name = entry.title.split(whereSeparator: \.isNewline).joined(separator: " ")
+                .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "[", with: "\\[").replacingOccurrences(of: "]", with: "\\]")
             var details = [entry.publisher]
             if let published = entry.published { details.append("published " + published.formatted(.iso8601)) }

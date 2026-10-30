@@ -5285,6 +5285,12 @@ struct NewsTests {
         assertTrue(markdown.contains(cafeLine), "Markdown escapes brackets in titles and links the story")
         let undatedLine = "- [Undated item](<https://example.com/news/undated>) · Example News · read "
         assertTrue(markdown.contains(undatedLine), "Undated stories list the read time only")
+        let broken = StoryExportEntry(
+            title: "Line one\r\nline two\rthree\nfour", publisher: "P", url: "https://example.com/x", published: nil)
+        let brokenMarkdown = String(decoding: StoryExport.markdown([broken], title: "History"), as: UTF8.self)
+        assertEqual(
+            brokenMarkdown, "# History\n\n- [Line one line two three four](<https://example.com/x>) · P\n",
+            "Line breaks in a title stay inside one list item")
     }
 
     static func testOPMLParsingAndExporting() async {
