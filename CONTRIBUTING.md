@@ -78,6 +78,7 @@ NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR NEWS_EVENT_CORPUS=corpus.jso
 python3 script/training/pretrain_pairs.py --self-check # Synthetic clusters and events through the builders, no downloads; runs in ./test.sh
 ~/news-eval/venv/bin/python script/training/convert_minilm.py OUT [--source hub|shipped] # Local only (#555): rebuild minilm.mlpackage from the pinned Hub revision or the shipped weights and report its parity with the shipped model; a new model bumps SentenceEmbedder.modelVersion
 ~/news-eval/venv/bin/python script/training/convert_minilm.py --self-check # A tiny random encoder through the flexible-length export, no downloads
+NEWS_EVENT_OUTPUT=DIR ./test.sh --embedding-vectors # Writes the sentence embedding of every authored-corpus article to DIR/embedding-vectors.json (#540); compare two dumps vector by vector before a SentenceEmbedder change ships (one directory per revision; an existing dump is never overwritten)
 python3 script/evaluation/sample_pairs.py EXPORT match 0 0 --labels labels-match.txt --snapshot copy.sqlite3 --out reviewed-pairs.csv # Local (#625): a reviewed sample's labels as weight-5 training rows (same → 1, related and different → 0); never the library holdout
 NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through the app's own networking and parsers
 ./test.sh --catalog-reader-access # Opt-in, live: open each catalog feed's newest stories in the app's reader extraction (NEWS_CATALOG_FEEDS=id,… NEWS_CATALOG_SAMPLE=N)
