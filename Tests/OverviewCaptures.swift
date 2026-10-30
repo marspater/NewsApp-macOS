@@ -352,6 +352,13 @@ enum GridRowCaptures {
                     failures += 1
                 }
                 report[file] = heights.values
+                // The bug this capture guards (#779): showing the event's sources must not change any other card.
+                if expanded, let collapsed = report["grid-row-collapsed-\(variant.name)"] {
+                    for entry in entries where entry.id != event && heights.values[entry.id] != collapsed[entry.id] {
+                        print("  \(file): \(entry.id) changed height when the event card expanded")
+                        failures += 1
+                    }
+                }
                 print(
                     "  \(file): " + entries.map { "\($0.id)=\(Int(heights.values[$0.id] ?? 0))" }.joined(separator: " ")
                 )
