@@ -413,7 +413,7 @@ actor OverviewGenerationCoordinator {
             guard let first = members.first else { continue }
             _ = await requestOverview(
                 eventID: event.eventID, eventTitle: first.title,
-                membershipVersion: event.membershipVersion, articles: members, priority: .background, store: store)
+                membershipVersion: event.eventVersion, articles: members, priority: .background, store: store)
         }
     }
 

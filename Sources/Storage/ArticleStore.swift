@@ -103,10 +103,10 @@ final class ArticleStore: ObservableObject {
     )
         async -> Set<String>
     {
-        guard !newArticles.isEmpty else { return [] }
+        guard !newArticles.isEmpty || validators != nil else { return [] }
         do {
             let insertedIDs = try await database.upsertArticles(newArticles, feedUrl: feedUrl, validators: validators)
-            if publish { await refreshState() }
+            if publish, !newArticles.isEmpty { await refreshState() }
             return insertedIDs
         } catch is CancellationError {
             // Superseded refreshes must not publish stale snapshots.
@@ -216,13 +216,24 @@ final class ArticleStore: ObservableObject {
         }
     }
 
-    func markAllAsRead(feedUrl: String? = nil) async {
+    /// Returns whether the stories were marked, so a Shortcut can report a failure.
+    @discardableResult
+    func markAllAsRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) async -> Bool {
+        // A Shortcut can run during launch: wait for initialize to set the collection-only feeds, or panel reports
+        // would be marked read and surface in History. ponytail: polls up to 10 s; await the init task if it grows.
+        for _ in 0..<100 where !isReady { try? await Task.sleep(for: .milliseconds(100)) }
+        guard isReady else {
+            operationError = "Could not mark articles as read. Please try again."
+            return false
+        }
         do {
-            try await database.markAllRead(feedUrl: feedUrl)
+            try await database.markAllRead(feedUrl: feedUrl, muting: muting)
             await refreshState()
+            return true
         } catch {
             operationError = "Could not mark articles as read. Please try again."
             logger.error("Failed to mark all as read: \(error.localizedDescription)")
+            return false
         }
     }
 
