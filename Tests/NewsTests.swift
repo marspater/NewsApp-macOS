@@ -8580,16 +8580,16 @@ struct NewsTests {
         let all = try await db.fetchArticles(limit: nil)
         let active = all.filter { $0.pubDate >= activeSince }
         var ratings: [[String: String]] = []
-        let judge = StoryImportanceJudge { report in
-            await OnDeviceImportanceJudge.shared.rate(report)
-        }
         for pass in 1...100 {
             let before = ratings.count
             let pending = try await db.pendingImportanceRows(activeSince: activeSince, limit: 60)
             if pending.isEmpty { break }
             for row in pending {
                 try Task.checkCancellation()
-                guard let importance = await judge.rate(OnDeviceImportanceJudge.report(row)) else { continue }
+                guard let importance = await OnDeviceImportanceJudge.shared.rate(OnDeviceImportanceJudge.report(row))
+                else {
+                    continue
+                }
                 if try await db.recordImportance(
                     row.id, importance, at: clock, expectedTitle: row.title, expectedDescription: row.description)
                 {
@@ -8767,7 +8767,7 @@ struct NewsTests {
         var found = 0
         for pass in 1...10 {
             let report = try await StoryCurator.run(
-                in: db, judge: .unavailable, imageFinder: .publisherPages, now: clock)
+                in: db, imageFinder: .publisherPages, now: clock)
             checks += report.imagesChecked
             found += report.imagesFound
             print("IMAGE_PASS \(pass) checked=\(report.imagesChecked) found=\(report.imagesFound)")
@@ -9455,25 +9455,19 @@ struct NewsTests {
             try await panel.fetchArticles(limit: nil, hidingWaitingStories: true).count, 2,
             "Panel and ordinary stories remain visible")
         let collectionOff = try await StoryCurator.run(
-            in: panel, judge: .unavailable, now: now.addingTimeInterval(26 * 3600))
+            in: panel, now: now.addingTimeInterval(26 * 3600))
         assertEqual(
             collectionOff.expired, 0, "Image/audit curation never expires a story, regardless of collection")
         await panel.close()
 
-        // The curator rates unrated stories within its budget; without a model nothing is rated and nothing hides.
+        // Audit ratings (the opt-in live curation measurement) never hide a story.
         let curated = DatabaseEngine(path: ":memory:")
         try await curated.open()
         try await curated.upsertArticles([story("c1", "One"), story("c2", "Two"), story("c3", "Three")])
-        let unrated = try await StoryCurator.run(in: curated, judge: .unavailable, now: now)
-        assertEqual(unrated.rated, 0, "Without a model nothing is rated")
         assertEqual(
             try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).count, 3, "Unrated stories show")
-        let rater = StoryImportanceJudge { $0.id == "c1" ? .major : .minor }
-        let first = try await StoryCurator.run(in: curated, judge: rater, budget: 2, now: now)
-        assertEqual(first.rated, 2, "Rating stays within its budget")
-        assertEqual(
-            try await StoryCurator.run(in: curated, judge: rater, budget: 2, now: now).rated, 1,
-            "A later pass rates the rest")
+        try await curated.recordImportance("c1", .major, at: now)
+        for id in ["c2", "c3"] { try await curated.recordImportance(id, .minor, at: now) }
         assertEqual(
             Set(try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id)), ["c1", "c2", "c3"],
             "Explicit audit ratings cannot hide stories")
@@ -9517,10 +9511,6 @@ struct NewsTests {
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, reports, nil, nil) } },
             notifyBatch: { articles, _ in notified += articles.map(\.title) },
-            importanceJudge: StoryImportanceJudge { _ in
-                assertTrue(false, "Refresh must not schedule importance ratings")
-                return nil
-            },
             imageFinder: StoryImageFinder { _ in
                 await pages.wait()
                 return .none
@@ -9775,7 +9765,7 @@ struct NewsTests {
             if link.hasSuffix("/waiting") { return .found("https://cdn.example/waiting.jpg") }
             return .found("https://cdn.example/found.jpg")
         }
-        let report = try await StoryCurator.run(in: db, judge: .unavailable, imageFinder: finder, now: now)
+        let report = try await StoryCurator.run(in: db, imageFinder: finder, now: now)
         assertEqual(report.imagesFound, 2, "Both an event and a minor singleton receive images")
         assertEqual(
             try await db.storyImages(for: ["e1", "e2", "plain"]).count, 1,
