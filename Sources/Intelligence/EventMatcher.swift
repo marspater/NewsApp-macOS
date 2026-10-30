@@ -152,21 +152,30 @@ extension EventFeatures {
     private static let editionWords: Set<String> = ["morning", "midday", "afternoon", "evening", "night", "overnight"]
 
     private static let stormRegex = try? NSRegularExpression(
-        pattern: #"\b(?:Storm|Hurricane|Typhoon|Cyclone)\s+([A-Z][a-z]+)\b"#)
-    /// Capitalized words after "Storm" that are not names ("Storm Warning", "Storm Season").
+        pattern: #"\b(?:Storm|Hurricane|Typhoon|Cyclone)\s+(\p{Lu}\p{Ll}+)"#)
+    /// Capitalized words after "Storm" that are not names ("Storm Warning", "Storm Season", "Storm Will Hit").
     private static let stormNonNames: Set<String> = [
         "warning", "warnings", "watch", "season", "damage", "surge", "center", "centre", "front", "clouds", "tracker",
-        "chasers", "system", "update", "updates",
+        "chasers", "system", "update", "updates", "will", "could", "may", "might", "should", "set", "is", "was",
     ]
 
     /// Lowercased storm names in a headline: "Storm Arlo", "Hurricane Milton", "Typhoon Kong-rey" (first part).
+    /// A Title Case verb after "Storm" ("Winter Storm Brings Snow") is no name: its lemma is a different, lowercase
+    /// word ("bring"), while a name keeps itself as its lemma ("Ellen") or has none ("Darragh").
     static func stormNames(in title: String) -> Set<String> {
         guard let stormRegex else { return [] }
+        let matches = stormRegex.matches(in: title, range: NSRange(title.startIndex..., in: title))
+        guard !matches.isEmpty else { return [] }
+        let tagger = NLTagger(tagSchemes: [.lemma])
+        tagger.string = title
         return Set(
-            stormRegex.matches(in: title, range: NSRange(title.startIndex..., in: title)).compactMap { match in
+            matches.compactMap { match in
                 guard let range = Range(match.range(at: 1), in: title) else { return nil }
-                let name = title[range].lowercased()
-                return stormNonNames.contains(name) ? nil : name
+                let word = String(title[range])
+                let lemma = tagger.tag(at: range.lowerBound, unit: .word, scheme: .lemma).0?.rawValue
+                guard !stormNonNames.contains(word.lowercased()), lemma == nil || lemma == word else { return nil }
+                // "Éowyn" and "Eowyn" are one storm.
+                return word.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
             })
     }
     private static let numberWords: [String: String] = [
@@ -761,8 +770,10 @@ enum EventMatcher {
         // Morning and evening bulletins of one series are two items however alike their template reads (#688).
         if sameSeries && disjoint(a.editions, b.editions) { return .edition }
         // Without a date or an edition word, two items of one series whose headlines share no specific name and that
-        // appeared on different days are two items ("Deals: …" round-ups, #739).
-        if sameSeries && a.titleSpecificAnchors.isDisjoint(with: b.titleSpecificAnchors) && !sameUTCDay(a.date, b.date)
+        // appeared on different days are two items ("Deals: …" round-ups, #739). Items with a date or an edition word
+        // are left to the checks above.
+        if sameSeries && a.calendarDays.isEmpty && b.calendarDays.isEmpty && a.editions.isEmpty && b.editions.isEmpty
+            && a.titleSpecificAnchors.isDisjoint(with: b.titleSpecificAnchors) && !sameUTCDay(a.date, b.date)
         {
             return .calendarDay
         }
