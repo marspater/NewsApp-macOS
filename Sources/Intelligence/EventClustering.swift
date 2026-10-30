@@ -597,14 +597,13 @@ enum EventClusterer {
             /// A reader's exclusion anywhere across the two stories keeps them apart, not only between two events: joins
             /// are transitive.
             func storiesExcluded(_ first: String, _ second: String) -> Bool {
-                components.component(of: first).contains { left in
-                    (membersOf[left] ?? []).contains { member in
-                        guard let apart = exclusions[member.id] else { return false }
-                        return components.component(of: second).contains { right in
-                            (membersOf[right] ?? []).contains { apart.contains($0.id) }
-                        }
+                let other = Set(components.component(of: second).flatMap { membersOf[$0] ?? [] }.map(\.id))
+                for event in components.component(of: first) {
+                    for member in membersOf[event] ?? [] where exclusions[member.id]?.isDisjoint(with: other) == false {
+                        return true
                     }
                 }
+                return false
             }
             for event in events {
                 try Task.checkCancellation()
