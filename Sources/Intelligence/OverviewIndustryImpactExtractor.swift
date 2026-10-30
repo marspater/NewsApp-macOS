@@ -95,13 +95,13 @@ struct OverviewIndustryImpactExtractor: Sendable {
             case .telecommunications:
                 return [
                     "telecom", "telecoms", "telecommunications", "wireless", "broadband", "mobile network",
-                    "mobile networks", "cellular", "5g", "spectrum",
+                    "mobile networks", "cellular", "5g", "wireless spectrum", "spectrum auction",
                 ]
             case .realEstate:
                 return [
                     "real estate", "construction", "commercial property", "homebuilders", "housing market",
-                    "developers", "residential property", "office space", "mortgage rates", "contractors",
-                    "building materials",
+                    "property developers", "residential property", "office space", "mortgage rates",
+                    "building contractors", "building materials",
                 ]
             case .defenseAndAerospace:
                 return [
@@ -138,6 +138,12 @@ struct OverviewIndustryImpactExtractor: Sendable {
         "outage", "outages", "disruption", "disruptions", "grounded",
     ]
 
+    /// Phrases whose words would otherwise read as an industry ("West Bank" is not banking, "political spectrum" is
+    /// not telecommunications, "military aircraft" is not transportation); removed before the industry is chosen.
+    private static let industryHomonyms: [String] = [
+        "west bank", "political spectrum", "in the pipeline", "military aircraft", "military flights",
+    ]
+
     /// Legal orders do not establish customer demand or a practical industry implication.
     private static let legalOrderCues: [String] = [
         "court order", "court orders", "restraining order", "restraining orders", "executive order", "executive orders",
@@ -145,7 +151,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
 
     private static let multiWordRegexes: [String: NSRegularExpression] = {
         var dict: [String: NSRegularExpression] = [:]
-        var allCues: [String] = implicationCues + legalOrderCues
+        var allCues: [String] = implicationCues + legalOrderCues + industryHomonyms
         for industry in StandardIndustry.allCases {
             allCues.append(contentsOf: industry.cues)
         }
@@ -182,6 +188,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
         let passage: EvidencePassage
         let article: FeedArticle
         let sourceMeta: OverviewSourceMetadata
+        /// Content words of the event's member headlines: an implication has to be about this story (#670).
+        let storyTerms: Set<String>
     }
 
     private struct ExtractionState {
@@ -292,7 +300,10 @@ struct OverviewIndustryImpactExtractor: Sendable {
                     article: context.article,
                     excludeStrings: exclusions.strings,
                     excludeWordsList: exclusions.wordsList
-                )
+                ),
+                concernsStory(sentence, storyTerms: context.storyTerms),
+                !isOpinionFraming(sentence),
+                !describesEarlierPeriod(sentence, publishedAt: context.article.pubDate)
             else { continue }
 
             if let match = evaluateCandidateSentence(
@@ -329,11 +340,13 @@ struct OverviewIndustryImpactExtractor: Sendable {
         let articlesByID = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let exclusions = buildExclusions(from: excludeSentences)
         let passageToCitation = buildPassageCitationMap(from: existingCitations)
+        let storyTerms = articles.reduce(into: Set<String>()) { $0.formUnion(contentTerms($1.title)) }
 
         for passage in passages where state.results.count < 4 {
             guard let article = articlesByID[passage.articleID] else { continue }
             let sourceMeta = sourceMetadata(for: passage, article: article, citations: passageToCitation)
-            let context = PassageContext(passage: passage, article: article, sourceMeta: sourceMeta)
+            let context = PassageContext(
+                passage: passage, article: article, sourceMeta: sourceMeta, storyTerms: storyTerms)
             processPassageSentences(context: context, exclusions: exclusions, state: &state)
         }
 
@@ -446,14 +459,109 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return true
     }
 
-    /// Returns the first industry in taxonomy order whose cue matches the lowercased text and word set.
-    private static func identifyIndustry(for text: String, words: Set<String>) -> StandardIndustry? {
-        for industry in StandardIndustry.allCases {
-            for cue in industry.cues where matchesCue(cue, in: text, words: words) {
-                return industry
+    /// Common words that carry no story identity; the rest of a headline's words of four letters or more are its terms.
+    private static let headlineStopwords: Set<String> = [
+        "about", "after", "again", "against", "amid", "also", "been", "before", "being", "could", "does", "during",
+        "from", "have", "here", "into", "just", "like", "live", "more", "most", "news", "over", "said", "says",
+        "some", "than", "that", "their", "them", "then", "there", "these", "they", "this", "those", "through",
+        "under", "until", "update", "updates", "very", "were", "what", "when", "where", "which", "while", "will",
+        "with", "would", "year", "years",
+    ]
+
+    /// Lowercased words of four letters or more, without common words, reduced to a light stem ("attacks" and
+    /// "attack", "announced" and "announce" agree). "Oil" is too short to tie a sentence to a story on its own.
+    private static func contentTerms(_ text: String) -> Set<String> {
+        Set(
+            wordsSet(from: text.lowercased()).compactMap { word -> String? in
+                guard word.count >= 4, !headlineStopwords.contains(word) else { return nil }
+                for suffix in ["ing", "ed", "es", "s", "e"]
+                where word.hasSuffix(suffix) && word.count - suffix.count >= 4 {
+                    return String(word.dropLast(suffix.count))
+                }
+                return word
+            })
+    }
+
+    /// Stems of the single words in every industry cue: a sentence that shares only its industry word with a headline
+    /// ("crude" in a story about oil prices) is not tied to the story by it.
+    private static let industryCueTerms: Set<String> = contentTerms(
+        StandardIndustry.allCases.flatMap(\.cues).joined(separator: " "))
+
+    /// An implication must be about the story: the sentence shares a content word other than an industry word with one
+    /// of the member headlines (#670). A background fact or an off-story remark from the same article shares none.
+    private static func concernsStory(_ sentence: String, storyTerms: Set<String>) -> Bool {
+        !contentTerms(sentence).subtracting(industryCueTerms).isDisjoint(with: storyTerms)
+    }
+
+    /// Someone's view framed as one ("emphasized that", "argued that") is commentary, not a stated implication. Plain
+    /// "said that" stays, since a company's stated plan is usually reported that way.
+    private static let opinionFramingRegex = try? NSRegularExpression(
+        pattern: #"\b(emphasi[sz]ed|argued|stressed|insisted|claimed|believes|contended|maintained) that\b"#,
+        options: [.caseInsensitive])
+
+    /// Also a sentence that opens with a quotation mark: a speaker's words, not a reported effect.
+    private static func isOpinionFraming(_ sentence: String) -> Bool {
+        if let first = sentence.first, "\"“„«‘'".contains(first) { return true }
+        return opinionFramingRegex?.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence))
+            != nil
+    }
+
+    private static let earlierPeriodRegex = try? NSRegularExpression(
+        pattern:
+            #"\b(last (year|month|quarter|decade)|(years|decades|months) ago|earlier this year|in (19|20)\d\d|"#
+            + #"in (january|february|march|april|may|june|july|august|september|october|november|december))\b"#,
+        options: [.caseInsensitive])
+
+    /// A sentence placed in an earlier period ("In July", "last year", "in 2023") is background, not an implication of
+    /// this story. A month or year is earlier when it is before the report's own month or year.
+    private static func describesEarlierPeriod(_ sentence: String, publishedAt: Date) -> Bool {
+        guard let earlierPeriodRegex else { return false }
+        let calendar = Calendar(identifier: .gregorian)
+        let reportYear = calendar.component(.year, from: publishedAt)
+        let reportMonth = calendar.component(.month, from: publishedAt)
+        let months = [
+            "january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+            "november", "december",
+        ]
+        for match in earlierPeriodRegex.matches(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) {
+            guard let range = Range(match.range, in: sentence) else { continue }
+            let phrase = sentence[range].lowercased()
+            if let year = Int(phrase.suffix(4)), phrase.hasPrefix("in ") {
+                if year < reportYear { return true }
+            } else if phrase.hasPrefix("in "), let index = months.firstIndex(of: String(phrase.dropFirst(3))) {
+                if index + 1 < reportMonth { return true }
+            } else {
+                return true
             }
         }
-        return nil
+        return false
+    }
+
+    /// Returns the industry with the most matching cues, longer cues breaking ties, then taxonomy order. Homonym
+    /// phrases are removed first. Picking the first industry in taxonomy order mislabelled stories whose sentence
+    /// held a weak cue for an early industry ("contractors" as Real Estate).
+    private static func identifyIndustry(for text: String, words: Set<String>) -> StandardIndustry? {
+        var remaining = text
+        for phrase in industryHomonyms {
+            if let regex = multiWordRegexes[phrase] {
+                remaining = regex.stringByReplacingMatches(
+                    in: remaining, range: NSRange(remaining.startIndex..., in: remaining), withTemplate: " ")
+            }
+        }
+        let remainingWords = remaining == text ? words : wordsSet(from: remaining)
+        var best: (industry: StandardIndustry, count: Int, length: Int)?
+        for industry in StandardIndustry.allCases {
+            let matched = industry.cues.filter { matchesCue($0, in: remaining, words: remainingWords) }
+            guard !matched.isEmpty else { continue }
+            let length = matched.map(\.count).max() ?? 0
+            if let current = best,
+                current.count > matched.count || (current.count == matched.count && current.length >= length)
+            {
+                continue
+            }
+            best = (industry, matched.count, length)
+        }
+        return best?.industry
     }
 
     /// Checks a nonblank implication with an exact standard industry name against every listed citation.

@@ -91,7 +91,7 @@ NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through
 ./build_release.sh                # Optimized arm64 verification bundle
 ```
 
-Further opt-in variables: `NEWS_SNAPSHOT_DB=path` makes the default run open a copied library after the suite and check that it lists stories; `NEWS_OVERVIEWS_MAX_EVENTS=N` (default 120) and `NEWS_OVERVIEWS_RUN_NAME=name` bound and label an `--overviews-live` run; `NEWS_WORLD_TENSION_INTERACTIVE=1` keeps the World Tension harness window open for ten minutes; `NEWS_SETTLE_SECONDS=N` (default 5) is the wait before `launch_baseline.sh` samples settled memory.
+Further opt-in variables: `NEWS_SNAPSHOT_DB=path` makes the default run open a copied library after the suite and check that it lists stories; `NEWS_OVERVIEWS_MAX_EVENTS=N` (default 120) and `NEWS_OVERVIEWS_RUN_NAME=name` bound and label an `--overviews-live` run, and `NEWS_OVERVIEWS_NOW=<epoch>` pins its 72 h window so a rerun on the same copy measures the same events; `NEWS_WORLD_TENSION_INTERACTIVE=1` keeps the World Tension harness window open for ten minutes; `NEWS_SETTLE_SECONDS=N` (default 5) is the wait before `launch_baseline.sh` samples settled memory.
 
 SwiftSoup and FeedKit are resolved by `Package.swift` and the committed `Package.resolved`. Native app and QA scripts source `script/swiftpm_dependencies.sh`, which builds one static dependency archive with SwiftPM and supplies its module and link paths to the existing compiler commands. No separate dependency installation or system library search path is needed. Bundles include `Sources/ThirdPartyNotices.txt`.
 
