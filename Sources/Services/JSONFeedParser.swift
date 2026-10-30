@@ -74,8 +74,12 @@ class JSONFeedParser {
     }
 
     private static func article(from item: FeedKit.JSONFeedItem, sourceName: String) -> FeedArticle? {
-        let link = item.url ?? item.id ?? ""
-        if link.isEmpty { return nil }
+        // An item without a URL keeps its ID as identity; the ID is its link only when it is a web address (#799).
+        let webID = item.id.flatMap {
+            ["http", "https"].contains(URL(string: $0)?.scheme?.lowercased() ?? "") ? $0 : nil
+        }
+        let link = item.url ?? webID ?? ""
+        if link.isEmpty && (item.id ?? "").isEmpty { return nil }
 
         let title = item.title ?? "Untitled"
 
