@@ -151,12 +151,20 @@ enum DiagnosticsExport {
             zip in zipped = Result { try Data(contentsOf: zip) }
         }
         if let coordinationError { throw coordinationError }
-        // An atomic write replaces an earlier export only once the new archive is complete. It needs a temporary
-        // file beside the destination, which the sandbox can refuse (an external volume); the whole archive is
-        // already in memory, so a direct write is then the fallback, never a delete first.
+        // The archive is staged beside the destination and swapped in only once complete, so a failure keeps an
+        // earlier export. The sandbox can refuse that sibling file (only the chosen file is granted, as on some
+        // external volumes); then the archive, already whole in memory, is written to the chosen file directly.
         let data = try zipped.get()
+        let staged = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).\(UUID().uuidString)")
+        defer { try? manager.removeItem(at: staged) }
         do {
-            try data.write(to: destination, options: .atomic)
+            try data.write(to: staged)
+            if manager.fileExists(atPath: destination.path) {
+                _ = try manager.replaceItemAt(destination, withItemAt: staged)
+            } else {
+                try manager.moveItem(at: staged, to: destination)
+            }
         } catch let error as CocoaError where error.code == .fileWriteNoPermission {
             try data.write(to: destination)
         }
