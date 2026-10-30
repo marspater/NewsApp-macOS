@@ -1,4 +1,5 @@
 import AppIntents
+import AppKit
 import CryptoKit
 import Darwin
 import Foundation
@@ -6,6 +7,7 @@ import ImageIO
 import NaturalLanguage
 import Network
 import SQLite3
+import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
@@ -14176,14 +14178,14 @@ struct NewsTests {
                 let countrySets = groups.map { headlineCountries($0) }
                 let cross = disjointCountries(countrySets)
                 if cross { crossCountryStories += 1 }
-                lines.append(
-                    [
-                        story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
-                        "\"" + countrySets.map { $0.sorted().joined(separator: " ") }.sorted().joined(separator: " | ")
-                            + "\"",
-                        "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
-                    ]
-                    .joined(separator: ","))
+                let countries: String = countrySets.map { $0.sorted().joined(separator: " ") }.sorted()
+                    .joined(separator: " | ")
+                let headlines: String = acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"")
+                let fields: [String] = [
+                    story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
+                    "\"\(countries)\"", "\"\(headlines)\"",
+                ]
+                lines.append(fields.joined(separator: ","))
             }
             let crossCountryEvents = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }.values
                 .filter { group in disjointCountries(group.map { headlineCountries([$0]) }) }
@@ -15186,6 +15188,67 @@ struct NewsTests {
         await queue.enqueue(articles: [], priority: .background, allowHTTP: false)
     }
 
+    /// Runs on the main actor: resolving an AppKit-backed Color off the main thread waits on SwiftUI's main-thread
+    /// lock, which this runner's main executor never grants, so the check hung.
+    @MainActor
+    static func testTagTextContrast() {
+        // Tinted tag text keeps 4.5:1 on its wash over the page, light and dark, with and without Increase Contrast
+        // (#754). The accent path mixes from accent text, so each system accent is checked through that math.
+        func srgb(_ color: Color, _ environment: EnvironmentValues, over page: Color.Resolved? = nil) -> NSColor {
+            let top = color.resolve(in: environment)
+            let alpha = page == nil ? 1 : top.opacity
+            func channel(_ value: Float, _ under: Float?) -> CGFloat {
+                CGFloat(value * alpha + (under ?? 0) * (1 - alpha))
+            }
+            return NSColor(
+                srgbRed: channel(top.red, page?.red), green: channel(top.green, page?.green),
+                blue: channel(top.blue, page?.blue), alpha: 1)
+        }
+        let accents: [NSColor] = [
+            .systemBlue, .systemPurple, .systemPink, .systemRed, .systemOrange, .systemYellow, .systemGreen,
+            .systemGray,
+        ]
+        for scheme in [ColorScheme.light, .dark] {
+            for contrast in [ColorSchemeContrast.standard, .increased] {
+                // System colors resolve differently with Increase Contrast, so each pass resolves under its own setting.
+                var environment = EnvironmentValues()
+                environment.colorScheme = scheme
+                environment._colorSchemeContrast = contrast
+                let page = AppColor.background.resolve(in: environment)
+                let reference = scheme == .dark ? srgb(AppColor.background, environment) : .white
+                // The accent branch mixes from accent text, whatever accent the runner has.
+                assertEqual(
+                    TagView.textColor(tint: AppColor.accent, contrast: contrast).resolve(in: environment),
+                    TagView.textColor(tint: AppColor.accentText, contrast: contrast).resolve(in: environment),
+                    "Accent tag text mixes from accent text (\(scheme), \(contrast))")
+                var pairs: [(String, Color, Color)] = [
+                    ("current accent", TagView.textColor(tint: AppColor.accent, contrast: contrast), AppColor.accent)
+                ]
+                // readableAccent reads the system colors under the current AppKit appearance, so it matches the pass.
+                let appearance = NSAppearance(
+                    named: scheme == .dark
+                        ? (contrast == .increased ? .accessibilityHighContrastDarkAqua : .darkAqua)
+                        : (contrast == .increased ? .accessibilityHighContrastAqua : .aqua))
+                assertTrue(appearance != nil, "Appearance for \(scheme), \(contrast) exists")
+                for accent in accents {
+                    var readable = accent
+                    appearance?.performAsCurrentDrawingAppearance {
+                        readable = AppColor.readableAccent(accent, dark: scheme == .dark, on: reference)
+                    }
+                    let base = Color(nsColor: readable)
+                    pairs.append(
+                        ("\(accent)", TagView.textColor(tint: base, contrast: contrast), Color(nsColor: accent)))
+                }
+                for (name, text, tint) in pairs {
+                    let wash = srgb(TagView.fill(tint: tint, contrast: contrast), environment, over: page)
+                    assertTrue(
+                        AppColor.contrastRatio(srgb(text, environment), wash) >= 4.5,
+                        "Tag text on its \(name) wash keeps 4.5:1 (\(scheme), \(contrast))")
+                }
+            }
+        }
+    }
+
     static func testDesignSystemAndArticleFilter() async {
         print("  - Testing Phase 4 Design System Tokens and Article Filter Query Parser...")
 
@@ -15217,6 +15280,8 @@ struct NewsTests {
         assertEqual(AppTypography.bodyLineSpacing(for: .casper), 10.0, "Casper theme line spacing should be 10")
         assertEqual(AppTypography.bodyLineSpacing(for: .edition), 8.0, "Edition theme line spacing should be 8")
         assertEqual(AppTypography.bodyLineSpacing(for: .alto), 12.0, "Alto theme line spacing should be 12")
+
+        await testTagTextContrast()
 
         // 4. ArticleFilterQuery structured parsing
         let complexQuery = "source:Bloomberg category:Tech is:unread apple silicon"
