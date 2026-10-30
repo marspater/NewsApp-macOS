@@ -303,7 +303,7 @@ actor DatabaseEngine {
 
     /// An exclusive `flock` on `<library>.migration-lock`; closing the descriptor releases it.
     private func lockForMigration() throws -> Int32 {
-        let descriptor = Darwin.open(dbPath + ".migration-lock", O_CREAT | O_RDWR | O_CLOEXEC, 0o644)
+        let descriptor = Darwin.open(dbPath + ".migration-lock", O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw CocoaError(.fileWriteNoPermission) }
         guard flock(descriptor, LOCK_EX) == 0 else {
             Darwin.close(descriptor)
@@ -326,19 +326,34 @@ actor DatabaseEngine {
     }
 
     /// Copies the library with the SQLite online backup API to `<name>-before-v<old>-<yyyy-MM-dd>.sqlite3` beside it,
-    /// keeping the newest two such copies (#746). The copy is written under a temporary name and renamed when complete.
+    /// keeping the newest two such copies (#746).
     private func backUpBeforeMigration(from version: Int) throws {
         guard db != nil, dbPath != ":memory:" else { return }
+        let target = try keepCopyBeside(label: "before-v\(version)", group: "before-v")
+        logger.info("Backed up schema v\(version) library to \(target.lastPathComponent, privacy: .public)")
+    }
+
+    /// Copies the library to `<name>-<label>-<yyyy-MM-dd>.sqlite3` beside it and keeps the newest two copies whose names
+    /// start with `<name>-<group>`. The copy is written under a temporary name and renamed when complete; a same-day
+    /// copy is replaced atomically, so it survives if the new one can't be put in place. With `fallingBackToFile`, a
+    /// library that can't be copied online (closed, or too damaged) is copied as a file instead.
+    @discardableResult
+    private func keepCopyBeside(label: String, group: String, fallingBackToFile: Bool = false) throws -> URL {
         let library = URL(fileURLWithPath: dbPath)
         let folder = library.deletingLastPathComponent()
-        let prefix = "\(library.deletingPathExtension().lastPathComponent)-before-v"
+        let prefix = "\(library.deletingPathExtension().lastPathComponent)-\(group)"
         let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
-        let target = folder.appendingPathComponent("\(prefix)\(version)-\(day).sqlite3")
+        let target = folder.appendingPathComponent(
+            "\(library.deletingPathExtension().lastPathComponent)-\(label)-\(day).sqlite3")
         let partial = folder.appendingPathComponent(
             ".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier).partial")
         let fileManager = FileManager.default
-        try copyLibrary(to: partial)
-        // A same-day copy is replaced atomically, so it survives if the new one can't be put in place.
+        do {
+            try copyLibrary(to: partial)
+        } catch  where fallingBackToFile {
+            try? fileManager.removeItem(at: partial)
+            try fileManager.copyItem(at: library, to: partial)
+        }
         do {
             if fileManager.fileExists(atPath: target.path) {
                 _ = try fileManager.replaceItemAt(target, withItemAt: partial)
@@ -349,9 +364,8 @@ actor DatabaseEngine {
             try? fileManager.removeItem(at: partial)
             throw error
         }
-        logger.info("Backed up schema v\(version) library to \(target.lastPathComponent, privacy: .public)")
 
-        // Pruning is best-effort: a leftover copy never blocks the migration.
+        // Pruning is best-effort: a leftover copy never blocks the caller.
         let listing = try? fileManager.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: [.contentModificationDateKey])
         let copies = (listing ?? [])
@@ -368,6 +382,7 @@ actor DatabaseEngine {
         for old in copies.dropFirst(2) where old != target {
             try? fileManager.removeItem(at: old)
         }
+        return target
     }
 
     /// Writes a consistent, self-contained copy of the open library to `partial` with the SQLite online backup API,
@@ -379,6 +394,15 @@ actor DatabaseEngine {
         }
         let fileManager = FileManager.default
         try? fileManager.removeItem(at: partial)
+        // The copy holds the same reading history as the library, so it gets the library's permissions, not the
+        // default ones; SQLite then opens the empty file as a new database.
+        let permissions = (try? fileManager.attributesOfItem(atPath: dbPath)[.posixPermissions]) ?? 0o600
+        guard fileManager.createFile(atPath: partial.path, contents: nil, attributes: [.posixPermissions: permissions])
+        else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Could not create \(partial.lastPathComponent)"])
+        }
 
         var copy: OpaquePointer?
         guard sqlite3_open_v2(partial.path, &copy, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK,
@@ -447,8 +471,10 @@ actor DatabaseEngine {
                 }
             }
         }
+        // A backup holds the reader's whole history, so only its owner can read it.
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: partial.path)
         if fileManager.fileExists(atPath: destination.path) {
-            _ = try fileManager.replaceItemAt(destination, withItemAt: partial)
+            _ = try fileManager.replaceItemAt(destination, withItemAt: partial, options: .usingNewMetadataOnly)
         } else {
             try fileManager.moveItem(at: partial, to: destination)
         }
@@ -458,17 +484,20 @@ actor DatabaseEngine {
     /// Replaces the library with the backup at `archive` and returns the settings it carries, if any (#563).
     ///
     /// The archive is checked on a staging copy first: a damaged file, or one saved by a newer build (the #747 rule), is
-    /// refused with the library untouched. The current library is copied aside until the swap succeeds. On success the
-    /// library stays closed; the caller relaunches the app.
+    /// refused with the library untouched. The current library is first kept beside it as
+    /// `<name>-before-restore-<yyyy-MM-dd>.sqlite3` (newest two kept), so a mistaken restore can be undone. On success
+    /// the library stays closed; the caller relaunches the app.
     func restoreBackup(from archive: URL) throws -> Data? {
         guard dbPath != ":memory:" else { throw CocoaError(.fileNoSuchFile) }
         let fileManager = FileManager.default
         let library = URL(fileURLWithPath: dbPath)
         let staging = URL(fileURLWithPath: dbPath + ".restoring")
-        let previous = URL(fileURLWithPath: dbPath + ".before-restore")
         defer { for file in [staging.path, staging.path + "-journal"] { try? fileManager.removeItem(atPath: file) } }
         try? fileManager.removeItem(at: staging)
         try fileManager.copyItem(at: archive, to: staging)
+        // The restored library gets the current one's permissions, not whatever the chosen file had.
+        let permissions = (try? fileManager.attributesOfItem(atPath: dbPath)[.posixPermissions]) ?? 0o600
+        try fileManager.setAttributes([.posixPermissions: permissions], ofItemAtPath: staging.path)
 
         let extras = try withConnection(to: staging) { copy -> [String: Data] in
             func value(_ sql: String) -> String? {
@@ -516,10 +545,10 @@ actor DatabaseEngine {
             return extras
         }
 
-        // The current library is set aside first; a library too damaged to copy online is copied as a file.
-        if (try? copyLibrary(to: previous)) == nil, fileManager.fileExists(atPath: dbPath) {
-            try? fileManager.removeItem(at: previous)
-            try fileManager.copyItem(at: library, to: previous)
+        // Nothing is swapped in until the current library is kept; a library too damaged to copy online is copied as a file.
+        if fileManager.fileExists(atPath: dbPath) {
+            let kept = try keepCopyBeside(label: "before-restore", group: "before-restore", fallingBackToFile: true)
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path)
         }
         close()
         for sidecar in ["-wal", "-shm"] { try? fileManager.removeItem(atPath: dbPath + sidecar) }
@@ -530,7 +559,7 @@ actor DatabaseEngine {
                 try fileManager.moveItem(at: staging, to: library)
             }
         } catch {
-            // A failed atomic replace leaves the library in place; the copy aside stays for recovery.
+            // A failed atomic replace leaves the library in place.
             try? open()
             throw error
         }
@@ -541,7 +570,6 @@ actor DatabaseEngine {
         } else if !extras.isEmpty {
             try? fileManager.removeItem(at: worldTensionURL)
         }
-        try? fileManager.removeItem(at: previous)
         logger.info("Restored the library from a backup")
         return extras["settings"]
     }

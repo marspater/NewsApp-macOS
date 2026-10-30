@@ -1487,6 +1487,7 @@ struct NewsTests {
             try FileManager.default.setAttributes(
                 [.modificationDate: Date().addingTimeInterval(-age * 86400)], ofItemAtPath: url.path)
         }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: library.path)
         let db = DatabaseEngine(path: library.path)
         try await db.open()
         let notice = await db.databaseHealthNotice()
@@ -1516,6 +1517,8 @@ struct NewsTests {
         let backup = "news-before-v25-\(day).sqlite3"
         assertEqual(backups, ["news-before-v21-2026-02-01.sqlite3", backup], "Only the newest two backups are kept")
         let backupURL = directory.appendingPathComponent(backup)
+        let backupMode = try FileManager.default.attributesOfItem(atPath: backupURL.path)[.posixPermissions] as? Int
+        assertEqual(backupMode, 0o600, "The backup keeps the library's file permissions")
         assertEqual(value(backupURL, "PRAGMA user_version;"), "25", "The backup keeps the old schema version")
         assertEqual(value(backupURL, "SELECT count(*) FROM articles;"), "3", "The backup keeps every article")
         assertEqual(value(backupURL, "PRAGMA quick_check;"), "ok", "The backup is a sound database")
@@ -1602,6 +1605,10 @@ struct NewsTests {
         let archive = directory.appendingPathComponent("News Backup.sqlite3")
         try Data("an older file the reader chose to replace".utf8).write(to: archive)
         try await db.writeBackup(to: archive, settings: AppSettings.backupSettings(from: defaults))
+        func permissions(_ file: URL) throws -> Int? {
+            try fileManager.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
+        }
+        assertEqual(try permissions(archive), 0o600, "A backup is readable by its owner only")
 
         // Everything changes after the backup.
         try await db.upsertArticles([article("c")])
@@ -1642,12 +1649,31 @@ struct NewsTests {
         assertEqual(defaults.stringArray(forKey: AppSettings.feedURLsKey), ["https://other.test/feed"], "Settings kept")
 
         // The restore swaps the backup in, closes the library and hands back the settings.
+        // Two older copies of replaced libraries exist; the restore keeps the newer one and its own.
+        for (name, age) in [
+            ("news-before-restore-2026-01-01.sqlite3", 200.0), ("news-before-restore-2026-02-01.sqlite3", 100.0),
+        ] {
+            let url = directory.appendingPathComponent(name)
+            try Data("old copy".utf8).write(to: url)
+            try fileManager.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-age * 86400)], ofItemAtPath: url.path)
+        }
         let settings = try await db.restoreBackup(from: archive)
         try AppSettings.restoreSettings(settings ?? Data(), to: defaults)
+        let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+        let kept = directory.appendingPathComponent("news-before-restore-\(day).sqlite3")
         assertEqual(
             try fileManager.contentsOfDirectory(atPath: directory.path).filter {
-                $0.contains(".restoring") || $0.contains(".before-restore")
-            }, [], "No staging or set-aside copy is left after a restore")
+                $0.contains(".restoring") || $0.hasPrefix("news-before-restore-")
+            }.sorted(), ["news-before-restore-2026-02-01.sqlite3", kept.lastPathComponent],
+            "A restore keeps the replaced library and prunes to the newest two copies")
+        assertEqual(try permissions(kept), 0o600, "The kept library is readable by its owner only")
+        let undo = DatabaseEngine(path: kept.path)
+        try await undo.open()
+        assertEqual(
+            try await undo.fetchArticles(limit: nil).count, 3, "The kept copy holds the replaced library, for undo")
+        assertTrue(try await undo.isRead(articleId: "restore-b"), "The kept copy holds the replaced read state")
+        await undo.close()
         let restored = DatabaseEngine(path: library.path)
         try await restored.open()
         let notice = await restored.databaseHealthNotice()

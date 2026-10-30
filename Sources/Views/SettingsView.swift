@@ -972,6 +972,22 @@ struct SettingsView: View {
                 }
             }
 
+            Section(header: sectionHeader("Backup")) {
+                storageRow(
+                    "Back Up Library", detail: nil,
+                    description: "Saves stories, read history, saved stories and settings to one file you choose."
+                ) {
+                    Button("Back Up Library…") { NewsApp.backUpLibrary() }
+                }
+                storageRow(
+                    "Restore Library", detail: nil,
+                    description:
+                        "Replaces the library and settings with a backup, then relaunches. The current library is kept beside it."
+                ) {
+                    Button("Restore Library…") { NewsApp.restoreLibrary() }
+                }
+            }
+
             Section(header: sectionHeader("Retention")) {
                 retentionRow
             }
