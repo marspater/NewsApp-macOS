@@ -737,7 +737,7 @@ enum EventClusterer {
                     else { return nil }
                     let shared = (keywordsOf[event.id] ?? []).intersection(own.keywords).count
                     return shared >= keywords ? (event.id, shared) : nil
-                }.sorted { ($0.shared, $1.id) > ($1.shared, $0.id) }
+                }.sorted { $0.shared != $1.shared ? $0.shared > $1.shared : joinsFirst($0.id, $1.id) }
                 for candidate in candidates {
                     let storyMembers = (components.groups.first(where: { $0.contains(candidate.id) }) ?? [candidate.id])
                         .flatMap { membersOf[$0] ?? [] }
