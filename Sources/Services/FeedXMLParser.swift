@@ -179,9 +179,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             return " \(key)=\"\(escapeHTML(value))\""
         }.joined()
         appendItemXML("<\(elementName)\(attributes)>")
-        // An Atom entry's <source> describes the feed it was copied from: none of its elements (link, content,
-        // category, media) set the entry's own fields (#795). A <source> inside XHTML content is markup.
-        if isAtom, !isCollectingContentEncoded, elementStack.contains("source") { return }
+        // An Atom entry's <source> describes the feed it was copied from, and a foreign element (vendor:details) is
+        // another vocabulary: nothing inside either sets the entry's own fields (#795). Inside XHTML content it is markup.
+        if !isCollectingContentEncoded, insideForeignBlock { return }
 
         if (elementName == "content:encoded" || elementName == "content") && contentDepth == nil {
             isCollectingContentEncoded = true
@@ -285,8 +285,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
 
         guard insideItem else { return }
-        // An Atom entry's <source> describes the feed it was copied from; its title is not the entry's (#795).
-        if isAtom, elementStack.contains("source") { return }
+        // Text inside an Atom <source> or a foreign element is not the entry's (#795).
+        if insideForeignBlock { return }
         if currentElement == "media:credit", !itemImageCandidates.isEmpty {
             let index = itemImageCandidates.count - 1
             itemImageCandidates[index].credit = String(((itemImageCandidates[index].credit ?? "") + string).prefix(500))
@@ -331,10 +331,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
         if insideItem {
             appendItemXML("</\(elementName)>")
-            // A category inside an Atom <source> is the origin feed's; it must not block the entry's own term.
-            if ["category", "dc:subject"].contains(elementName), !isCollectingContentEncoded,
-                !(isAtom && elementStack.contains("source"))
-            {
+            // A category inside an Atom <source> or a foreign element must not block the entry's own term.
+            if ["category", "dc:subject"].contains(elementName), !isCollectingContentEncoded, !insideForeignBlock {
                 itemCategory += "\n"
             }
             if elementName == "link", !isCollectingContentEncoded { itemLink = resolvedURL(itemLink) }
@@ -596,6 +594,11 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private func escapeHTML(_ text: String) -> String {
         text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
+    /// Inside an Atom entry's <source> or an element of another vocabulary, which never fill the item's fields (#795).
+    private var insideForeignBlock: Bool {
+        (isAtom && elementStack.contains("source")) || elementStack.contains { $0.hasPrefix("ext:") }
     }
 
     private func normalizedElement(_ name: String, namespaceURI: String?) -> String {

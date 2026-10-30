@@ -272,6 +272,15 @@ enum FeedKitSwiftSoupTests {
         check(
             FeedXMLParser(data: Data(sourcedCategory.utf8), feedURL: base).parse().first?.category == "News",
             "A category inside an Atom entry's source does not block the entry's own category")
+        let vendorNested = """
+            <rss version="2.0" xmlns:vendor="https://vendor.example/ns"><channel><title>Feed</title><item>
+            <title>Own title</title><vendor:details><title>Other</title><category>Vendor</category></vendor:details>
+            <category>News</category><link>https://example.com/own</link></item></channel></rss>
+            """
+        let vendorItem = FeedXMLParser(data: Data(vendorNested.utf8), feedURL: base).parse().first
+        check(
+            vendorItem?.title == "Own title" && vendorItem?.category == "News",
+            "Fields nested inside a foreign element do not fill the item's title or category")
 
         let malicious =
             "<!DOCTYPE rss [<!ENTITY payload 'expanded'>]><rss><channel><item><title>&payload;</title></item></channel></rss>"
