@@ -138,6 +138,11 @@ struct BriefingTensionStripView: View {
                     Spacer(minLength: AppSpacing.md)
                     trendSparkline
                 }
+                // Why the reading is an estimate, stale or not refreshed, in the sheet's words.
+                if let explanation = state.explanation {
+                    Text(explanation).font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Divider()
 
