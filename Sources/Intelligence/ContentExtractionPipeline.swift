@@ -1890,7 +1890,13 @@ final class ContentExtractionPipeline: Sendable {
     /// UTF-8 with invalid sequences replaced by U+FFFD, counting them and the valid multi-byte characters, after
     /// dropping a multi-byte sequence cut off at the end, as a 256 KiB prefix fetch can leave it. Only a true
     /// prefix is dropped: a lead byte (C2–F4) followed by fewer continuation bytes than it announces.
-    static func lenientUTF8(_ data: Data) -> (text: String, invalid: Int, multibyte: Int) {
+    struct LenientUTF8 {
+        let text: String
+        let invalid: Int
+        let multibyte: Int
+    }
+
+    static func lenientUTF8(_ data: Data) -> LenientUTF8 {
         var end = data.endIndex
         for index in data.indices.reversed().prefix(4) where data[index] & 0xC0 != 0x80 {
             let lead = data[index]
@@ -1900,7 +1906,8 @@ final class ContentExtractionPipeline: Sendable {
         }
         let bytes = data[data.startIndex..<end]
         if let strict = String(bytes: bytes, encoding: .utf8) {
-            return (strict, 0, strict.unicodeScalars.lazy.filter { $0.value > 0x7F }.count)
+            return LenientUTF8(
+                text: strict, invalid: 0, multibyte: strict.unicodeScalars.lazy.filter { $0.value > 0x7F }.count)
         }
         var scalars = String.UnicodeScalarView()
         var invalid = 0
@@ -1919,7 +1926,7 @@ final class ContentExtractionPipeline: Sendable {
                 break decoding
             }
         }
-        return (String(scalars), invalid, multibyte)
+        return LenientUTF8(text: String(scalars), invalid: invalid, multibyte: multibyte)
     }
 
     private static let headerCharsetRegex = loggedExtraction("compileHeaderCharsetRegex") {
