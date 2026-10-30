@@ -37,10 +37,17 @@ The combined tree of every open v2 branch (all of the above except #768, which i
 | Saved | 0 | 0 |
 | Pre-migration backup | — | `news-before-v25-2026-10-30.sqlite3` beside the library, owner-only (0600), plus an empty `news.sqlite3.migration-lock` |
 
-The owner's library was backed up read-only first to `~/news-eval/library-pre-v2-2026-10-30.sqlite3` (0444), with `library-pre-v2-2026-10-30.world-tension-v2.json` and `com.marspater.news-pre-v2-2026-10-30.plist` beside it.
+The owner's library was first copied with SQLite's online backup API, which includes pages still in the write-ahead log: `sqlite3 "file:…/news.sqlite3?mode=ro" ".backup ~/news-eval/library-pre-v2-2026-10-30.sqlite3"` (made read-only, 0444; integrity check ok, schema 25). The tension file and preferences plist were copied beside it. News may have been running; the online backup is consistent either way. The install below takes a fresh copy with News quit.
 
 ## Install (after the merges)
 
+0. Quit News and take a fresh copy of the library with the online backup API:
+
+   ```bash
+   sqlite3 "file:$HOME/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-pre-v2-install.sqlite3"
+   ```
+
+   Then, on the merged `main` (which now contains every v2 branch, #768 and #770 included), run the combined check on a writable copy of it: `NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=<copy> ./test.sh`. Install only if it passes and the copy reads schema 27 with the same story, read and saved counts.
 1. On a clean checkout of the merged `main`, run `git tag v2.0.0`. **Do not push the tag:** pushing runs `release.yml`.
 2. Run `./build_release.sh` and check that `News.app/Contents/Info.plist` says 2.0.0.
 3. Quit News, then replace the installed app:
@@ -53,7 +60,7 @@ The owner's library was backed up read-only first to `~/news-eval/library-pre-v2
 5. Check that Shortcuts lists the News actions (#748).
 6. Remove stray copies (`~/Projects/News/News.app`, worktree builds) so `feed://` and `news://` open the installed app.
 
-**Rollback:** quit News, copy `~/news-eval/library-pre-v2-2026-10-30.sqlite3` over `news.sqlite3` (and remove `news.sqlite3-wal` and `news.sqlite3-shm`), restore the tension file, and reinstall the previous app. The newer-schema guard (#751) keeps an older build from writing to a v27 library.
+**Rollback:** quit News, copy `~/news-eval/library-pre-v2-install.sqlite3` (or the 30 October copy) over `news.sqlite3` (and remove `news.sqlite3-wal` and `news.sqlite3-shm`), restore the tension file, and reinstall the previous app. The newer-schema guard (#751) keeps an older build from writing to a v27 library.
 
 ## Close-out
 
