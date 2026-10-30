@@ -85,7 +85,7 @@ struct EventCardView: View {
         } label: {
             CoverageRowLabel(
                 coverageText: summary.coverageText, latestDate: summary.latestDate,
-                hasUpdate: summary.hasSubstantiveUpdate, isExpanded: isExpanded
+                hasUpdate: summary.hasSubstantiveUpdate, isExpanded: isExpanded, isGrid: !compact && !isLead
             )
             .contentShape(Rectangle())
         }
@@ -159,19 +159,21 @@ struct EventCardView: View {
     }
 }
 
-/// The coverage row: symbol, coverage, last update, "Updated" tag and chevron. It keeps one line and the tag's height
-/// with or without the tag, so every collapsed event card of a grid row is as tall as the others (#779).
+/// The coverage row: symbol, coverage, last update, "Updated" tag and chevron. In a grid it keeps one line, an
+/// abbreviated update and the tag's height with or without the tag, so every collapsed event card of a grid row is as
+/// tall as the others (#779); list and lead cards keep the full text.
 private struct CoverageRowLabel: View {
     let coverageText: String
     let latestDate: Date?
     let hasUpdate: Bool
     let isExpanded: Bool
+    let isGrid: Bool
 
     @Environment(\.effectiveContrast) private var contrast
 
     var body: some View {
         ZStack(alignment: .leading) {
-            TagView(title: "Updated", tint: AppColor.accent).hidden()
+            if isGrid { TagView(title: "Updated", tint: AppColor.accent).hidden() }
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "square.stack.3d.up")
                     .font(AppTypography.label)
@@ -179,10 +181,12 @@ private struct CoverageRowLabel: View {
                     .font(AppTypography.label)
                     .layoutPriority(1)
                 if let latestDate {
-                    Text("· updated \(latestDate, format: .relative(presentation: .named, unitsStyle: .abbreviated))")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.tertiaryText(for: contrast))
-                        .monospacedDigit()
+                    Text(
+                        "· updated \(latestDate, format: .relative(presentation: .named, unitsStyle: isGrid ? .abbreviated : .wide))"
+                    )
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.tertiaryText(for: contrast))
+                    .monospacedDigit()
                 }
                 if hasUpdate {
                     TagView(title: "Updated", tint: AppColor.accent)
@@ -192,7 +196,7 @@ private struct CoverageRowLabel: View {
                     .font(AppTypography.eyebrow)
                     .rotationEffect(.degrees(isExpanded ? 180 : 0))
             }
-            .lineLimit(1)
+            .lineLimit(isGrid ? 1 : nil)
         }
         .foregroundStyle(AppColor.secondaryText)
         .padding(.horizontal, AppSpacing.sm)
@@ -205,7 +209,7 @@ private struct CoverageRowLabel: View {
 struct CoverageRowSpace: View {
     var body: some View {
         Divider().hidden()
-        CoverageRowLabel(coverageText: " ", latestDate: nil, hasUpdate: false, isExpanded: false)
+        CoverageRowLabel(coverageText: " ", latestDate: nil, hasUpdate: false, isExpanded: false, isGrid: true)
             .hidden()
             .accessibilityHidden(true)
     }
