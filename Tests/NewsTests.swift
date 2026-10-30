@@ -6873,8 +6873,11 @@ struct NewsTests {
             (401, ExtractionOutcome.subscriberOnly), (402, .subscriberOnly), (403, .httpError(status: 403)),
         ] {
             MockURLProtocol.requestHandler = { request in
+                // A paywall page announcing more than the article limit still reports its status (#816).
                 (
-                    HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!,
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: status, httpVersion: nil,
+                        headerFields: ["Content-Length": "\(SecureHTTPClient.defaultArticleLimit + 1)"])!,
                     Data("<html><body>Subscribe</body></html>".utf8)
                 )
             }
@@ -10462,6 +10465,9 @@ struct NewsTests {
             "Only figures within the bounded page prefix are considered")
         assertEqual(StoryImageFinder.pageURL(""), nil, "An empty link is never requested")
         assertEqual(StoryImageFinder.pageURL("/relative/story"), nil, "A relative link is never requested")
+        assertEqual(
+            StoryImageFinder.pageURL("https://example.com:22/story"), nil, "A link on a refused port is never requested"
+        )
         assertEqual(
             StoryImageFinder.pageURL("http://example.com/story")?.absoluteString, "https://example.com/story",
             "An http link is requested over https")

@@ -37,11 +37,10 @@ enum StoryCurator {
             where lookedUp.count < imageBudget {
                 try Task.checkCancellation()
                 if let event = row.eventID, lookedUp.contains(event) { continue }
-                // A link that can never be requested is recorded without spending the budget on it (#818).
-                guard StoryImageFinder.pageURL(row.link) != nil else {
-                    try await database.recordStoryImage(row.id, imageURL: nil, at: now, expectedLink: row.link)
-                    continue
-                }
+                // A link the client would refuse before any request spends no budget. Nothing is recorded, so a story
+                // whose link is later corrected under the same id is still looked up (#818).
+                // ponytail: such rows are skipped on every pass; record them if they ever crowd the candidate limit.
+                guard StoryImageFinder.pageURL(row.link) != nil else { continue }
                 lookedUp.insert(row.eventID ?? row.id)
                 switch await imageFinder.find(row.link) {
                 case .found(let url):
@@ -81,12 +80,15 @@ struct StoryImageFinder: Sendable {
     /// The article page through the protected client; http links are requested over https.
     static let publisherPages = publisherPages(using: .shared)
 
-    /// The page address a lookup requests: an absolute http(s) link with a host, http upgraded to https.
+    /// The page address a lookup requests: an absolute http(s) link with a host on a port the client allows, http
+    /// upgraded to https.
     static func pageURL(_ link: String) -> URL? {
         guard var components = URLComponents(string: link),
             ["http", "https"].contains(components.scheme?.lowercased() ?? ""), !(components.host ?? "").isEmpty
         else { return nil }
         components.scheme = "https"
+        if components.port == 80 { components.port = nil }
+        guard SecureHTTPClient.allowedPorts.contains(components.port ?? 443) else { return nil }
         return components.url
     }
 
@@ -97,6 +99,9 @@ struct StoryImageFinder: Sendable {
             let response: HTTPURLResponse
             do {
                 (data, response) = try await client.fetchArticleHead(from: url)
+            } catch FeedError.blockedHost, FeedError.blockedPort, FeedError.insecureScheme {
+                // The protected client refuses this page before any request; asking again would not change that.
+                return Task.isCancelled ? .unreachable : .none
             } catch FeedError.httpStatus(let status) where (400..<500).contains(status) && status != 429 {
                 // A refusal (403, 404, 410) is an answer: recorded as no image so the page is not asked again each
                 // pass, spending the lookup budget other imageless stories need (#818).
