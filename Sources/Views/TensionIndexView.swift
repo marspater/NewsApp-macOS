@@ -170,7 +170,9 @@ struct TensionIndexView: View {
         return text.isEmpty ? nil : text
     }
 
+    /// A keyword estimate counts cues, so it is not ranked against assessments.
     private func ranking(_ reading: WorldTensionReading) -> String? {
+        guard reading.assessment.isEstimate != true else { return nil }
         let others = state.history.filter {
             $0.id < reading.id && $0.id > reading.id.addingTimeInterval(-30 * 86400)
                 && $0.modelGeneration == reading.modelGeneration && $0.assessment.isEstimate != true
@@ -324,7 +326,8 @@ struct TensionTrendChart: View {
     @Binding var selection: Date?
 
     private static let utcCalendar: Calendar = {
-        var calendar = Calendar(identifier: .gregorian)
+        // The reader's calendar (date format, first weekday) in UTC.
+        var calendar = Calendar.autoupdatingCurrent
         calendar.timeZone = .gmt
         return calendar
     }()
