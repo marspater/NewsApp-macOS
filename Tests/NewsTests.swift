@@ -10715,7 +10715,7 @@ struct NewsTests {
             }
             // The spill comes later on a loaded machine, so wait for it or for the write to end, never a wall clock
             // alone (#692); a write that ends first fails the next assertion.
-            await eventually("Actual transaction spills pages to the WAL before cancellation", timeout: .seconds(900)) {
+            await eventually("Actual transaction spills pages to the WAL before cancellation", timeout: .seconds(300)) {
                 let size =
                     (try? FileManager.default.attributesOfItem(atPath: path + "-wal")[.size] as? NSNumber)?.intValue
                     ?? 0
