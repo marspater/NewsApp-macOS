@@ -564,7 +564,16 @@ struct NewsTests {
             return
         }
         if CommandLine.arguments.contains("--export-pairs") {
-            try await exportTrainingPairs()
+            let environment = ProcessInfo.processInfo.environment
+            guard let snapshots = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"],
+                let corpusPath = environment["NEWS_EVENT_CORPUS"]
+            else {
+                throw StoryCorpus.Failure.invalid(
+                    "--export-pairs needs NEWS_SNAPSHOT_DB, NEWS_EVENT_OUTPUT and NEWS_EVENT_CORPUS")
+            }
+            try await exportTrainingPairs(
+                snapshots: snapshots, output: output, corpusPath: corpusPath,
+                verdictsOnly: CommandLine.arguments.contains("--verdicts-only"))
             return
         }
         if CommandLine.arguments.contains("--export-categories") {
@@ -667,6 +676,7 @@ struct NewsTests {
             try await testEventClustering(fixtureRoot: fixtureRoot)
             try await testArticleSignalsRoundTrip()
             try await testPairAssessmentsRecorded()
+            try await testReaderVerdictsExportAndGate()
             try await testStoryLayer()
             try await testEventInclusions()
             try await testPairModelGreyZone()
@@ -777,6 +787,7 @@ struct NewsTests {
         try await testEventClustering(fixtureRoot: fixtureRoot)
         try await testArticleSignalsRoundTrip()
         try await testPairAssessmentsRecorded()
+        try await testReaderVerdictsExportAndGate()
         try await testStoryLayer()
         try await testEventInclusions()
         try await testPairModelGreyZone()
@@ -11731,6 +11742,78 @@ struct NewsTests {
         assertTrue(refused, "The live library is refused")
     }
 
+    /// Reader verdicts (#552): "Same Event" and "Not the Same Event" pairs leave the library as weight-5 training rows
+    /// ahead of the mined ones, and the holdout harness fails when a re-clustering violates one.
+    static func testReaderVerdictsExportAndGate() async throws {
+        print("  - Testing reader verdicts as training rows and as the gate (#552)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(
+            at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://verdict.invalid/\(id)", guid: "verdict-\(id)",
+                description: "A report on the Ljubljana parliament and its prime minister.",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let stories = [
+            story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana", hours: 0),
+            story(2, "Parliament in Ljubljana votes to oust Prime Minister Novak", hours: 1),
+            story(3, "Thousands protest in Ljubljana after parliament votes to oust Novak", hours: 5),
+        ]
+        try await db.upsertArticles(stories)
+        let now = start.addingTimeInterval(7 * 3600)
+        _ = try await EventClusterer.run(in: db, now: now)
+        var ids: [String] = []
+        for article in stories { ids.append(try await db.resolvedArticleID(for: article)) }
+        guard let vote = try await db.eventID(forArticle: ids[0]), vote == (try await db.eventID(forArticle: ids[1]))
+        else {
+            assertTrue(false, "The two vote reports form an event")
+            return
+        }
+        // "Not the Same Event" between the two vote reports, "Same Event" between a vote report and the protest.
+        try await db.separateArticle(ids[1], fromEvent: vote)
+        if let protest = try await db.eventID(forArticle: ids[2]) {
+            try await db.includeEvent(protest, inEvent: vote)
+        } else {
+            let pair = ids[0] < ids[2] ? (ids[0], ids[2]) : (ids[2], ids[0])
+            try await db.eventRows(
+                "INSERT INTO event_inclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                [.text(pair.0), .text(pair.1), .real(now.timeIntervalSince1970)])
+        }
+        await db.close()
+        let corpus = directory.appendingPathComponent("corpus.json")
+        try Data(#"{"articles":[{"title":"Unrelated corpus item","published":"2010-01-01T00:00:00Z"}]}"#.utf8)
+            .write(to: corpus)
+        try await exportTrainingPairs(
+            snapshots: path, output: directory.path, corpusPath: corpus.path, verdictsOnly: true)
+        let csv = try String(contentsOf: directory.appendingPathComponent("verdicts.csv"), encoding: .utf8)
+        // Texts carry newlines, so the rows are checked by their markers rather than split by line.
+        assertTrue(
+            csv.hasPrefix("label,group,text_a,text_b,pieces_a,pieces_b,weight\n"), "The export has a weight column")
+        assertEqual(csv.components(separatedBy: ",\"v:").count - 1, 2, "One row per verdict")
+        assertEqual(
+            csv.components(separatedBy: ",5\n").count - 1 + (csv.hasSuffix(",5") ? 1 : 0), 2, "Verdict rows weigh five")
+        assertTrue(
+            csv.contains("\n0,\"v:") && csv.contains("\n1,\"v:"), "An exclusion is a negative, an inclusion a positive")
+        // The gate: re-clustering the copy without corrections re-merges the excluded vote pair, so the harness fails.
+        let holdout = directory.appendingPathComponent("holdout.json")
+        try Data("[]".utf8).write(to: holdout)
+        var failure = ""
+        do {
+            try await evaluateLibraryHoldout(snapshot: path, holdout: holdout.path)
+        } catch {
+            failure = "\(error)"
+        }
+        assertTrue(
+            failure.contains("reader verdicts violated"), "A violated verdict fails the library holdout run: \(failure)"
+        )
+    }
+
     /// The story layer (#581): two events of one story (a vote and the protest after it) become one card, versions and
     /// seen state add up across the story, "Not the Same Event" through the story works on the article's own event,
     /// and an exclusion across the two events keeps them apart.
@@ -12789,6 +12872,17 @@ struct NewsTests {
         try FileManager.default.copyItem(atPath: snapshot, toPath: copy)
         let db = DatabaseEngine(path: copy)
         try await db.open()
+        // The reader's verdicts (#552) are read before the corrections are cleared: the matcher alone must keep every
+        // "Same Event" pair together and every "Not the Same Event" pair apart, or the change fails the gate.
+        let verdicts = try await db.eventRows(
+            """
+            SELECT article_id, other_article_id, 1 FROM event_inclusions
+            UNION ALL SELECT article_id, other_article_id, 0 FROM event_exclusions;
+            """
+        ).compactMap { row -> (a: String, b: String, same: Bool)? in
+            guard let a = row[0], let b = row[1] else { return nil }
+            return (a, b, row[2] == "1")
+        }
         for table in [
             "event_overview_citations", "event_overviews", "event_state", "event_members", "event_match_state",
             "pair_assessments", "event_exclusions", "event_inclusions", "events",
@@ -12814,7 +12908,16 @@ struct NewsTests {
             if report.processed == 0 || passes >= 20 { break }
         } while true
         let elapsed = Date().timeIntervalSince(started)
-        let memberships = try await db.eventIDs(forArticles: pairs.flatMap { [$0.a, $0.b] })
+        let memberships = try await db.eventIDs(
+            forArticles: pairs.flatMap { [$0.a, $0.b] } + verdicts.flatMap { [$0.a, $0.b] })
+        var verdictFailures: [String] = []
+        for verdict in verdicts {
+            let linked = memberships[verdict.a] != nil && memberships[verdict.a] == memberships[verdict.b]
+            if linked != verdict.same {
+                verdictFailures.append(
+                    "\(verdict.same ? "inclusion separated" : "exclusion re-merged"): \(verdict.a) + \(verdict.b)")
+            }
+        }
         var truePairs = 0
         var falsePairs = 0
         var missed = 0
@@ -12895,6 +12998,10 @@ struct NewsTests {
                 format:
                     "    stories: %d (%.0f%%) recent stories in a multi-publisher story; %d stories join two or more events",
                 multiStory, recent.isEmpty ? 0 : 100 * Double(multiStory) / Double(recent.count), joinedStories.count))
+        if !verdicts.isEmpty {
+            print("    verdicts (#552): \(verdicts.count) in the copy, \(verdictFailures.count) violated")
+            for failure in verdictFailures { print("      \(failure)") }
+        }
         print(
             String(
                 format:
@@ -12911,6 +13018,9 @@ struct NewsTests {
                 total.processed, total.joined, total.created, total.merged, elapsed, EventMatcher.version,
                 policy.pairModelThreshold,
                 modelOff ? ", pair model off" : (candidate.map { ", pair model \($0)" } ?? "")))
+        guard verdictFailures.isEmpty else {
+            throw StoryCorpus.Failure.invalid("\(verdictFailures.count) reader verdicts violated (#552)")
+        }
     }
 
     /// Opt-in, local: times one fragment-merge pass (`limit: 0`) over a temporary copy of `NEWS_SNAPSHOT_DB`, with
@@ -13078,15 +13188,14 @@ struct NewsTests {
     /// (`NEWS_EVENT_CORPUS`, tune and holdout) are left out by URL and headline, and every article from a day around the
     /// corpus dates, so no other report of a corpus event is trained on. The CSV carries headline and lead
     /// text, so it is written only to the private directory and never overwritten.
-    static func exportTrainingPairs() async throws {
-        let environment = ProcessInfo.processInfo.environment
-        guard let snapshots = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"],
-            let corpusPath = environment["NEWS_EVENT_CORPUS"]
-        else {
-            throw StoryCorpus.Failure.invalid(
-                "--export-pairs needs NEWS_SNAPSHOT_DB, NEWS_EVENT_OUTPUT and NEWS_EVENT_CORPUS")
-        }
-        let file = try StoryCorpus.privateDirectory(output).appendingPathComponent("pairs.csv")
+    /// The reader's verdicts (#552) come first with weight 5: every "Same Event" pair as a positive and every "Not the
+    /// Same Event" pair as a negative, group `v:<low id>`; a mined row of the same pair is then skipped. With
+    /// `verdictsOnly` only those rows are written, as `verdicts.csv`.
+    static func exportTrainingPairs(
+        snapshots: String, output: String, corpusPath: String, verdictsOnly: Bool = false
+    ) async throws {
+        let file = try StoryCorpus.privateDirectory(output)
+            .appendingPathComponent(verdictsOnly ? "verdicts.csv" : "pairs.csv")
         struct Corpus: Decodable {
             struct Item: Decodable {
                 let title: String, url: String?, published: Date
@@ -13113,9 +13222,10 @@ struct NewsTests {
         // The app's own word pieces travel with each text, so training sees exactly the ids the app will send.
         let tokenizer = try BertWordPieceTokenizer(vocabURL: URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt"))
         func pieces(_ text: String) -> String { tokenizer.pieces(text).map { String($0) }.joined(separator: " ") }
-        var lines = ["label,group,text_a,text_b,pieces_a,pieces_b"]
+        var lines = ["label,group,text_a,text_b,pieces_a,pieces_b,weight"]
         var seen = Set<String>()
         var excluded = 0
+        var verdicts = 0
         for path in snapshots.split(separator: ":").map(String.init) {
             guard !path.contains("/Library/Containers/") else {
                 throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
@@ -13146,18 +13256,42 @@ struct NewsTests {
                     date: Date(timeIntervalSince1970: published), event: values[6])
                 if EventMatchKey.language(of: row.title + "\n" + row.description) == "en" { rows.append(row) }
             }
+            let corrections = try await db.eventRows(
+                """
+                SELECT article_id, other_article_id, 1 FROM event_inclusions
+                UNION ALL SELECT article_id, other_article_id, 0 FROM event_exclusions;
+                """)
             await db.close()
             let features = rows.map { EventFeatures(title: $0.title, description: $0.description, date: $0.date) }
-            func append(_ label: Int, _ group: String, _ i: Int, _ j: Int) {
+            func append(_ label: Int, _ group: String, _ i: Int, _ j: Int, weight: Int = 1) {
                 let pairKey = [key(rows[i].title) + "|" + rows[i].source, key(rows[j].title) + "|" + rows[j].source]
                     .sorted().joined(separator: "\n")
-                guard seen.insert(pairKey).inserted else { return }
+                if weight == 5 {
+                    // A verdict is one article pair: keyed by ids, so two pairs with the same headlines stay
+                    // distinct; the text key is taken as well, so the mined row of that pair is skipped.
+                    guard seen.insert([rows[i].id, rows[j].id].sorted().joined(separator: "\n")).inserted else {
+                        return
+                    }
+                    seen.insert(pairKey)
+                } else {
+                    guard seen.insert(pairKey).inserted else { return }
+                }
                 lines.append(
                     [
                         String(label), quoted(group), quoted(rows[i].text), quoted(rows[j].text), pieces(rows[i].text),
-                        pieces(rows[j].text),
+                        pieces(rows[j].text), String(weight),
                     ].joined(separator: ","))
             }
+            let indexByID = Dictionary(rows.indices.map { (rows[$0].id, $0) }, uniquingKeysWith: { a, _ in a })
+            for correction in corrections {
+                guard let low = correction[0].flatMap({ indexByID[$0] }),
+                    let high = correction[1].flatMap({ indexByID[$0] })
+                else { continue }
+                let before = lines.count
+                append(correction[2] == "1" ? 1 : 0, "v:" + rows[low].id, low, high, weight: 5)
+                verdicts += lines.count - before
+            }
+            if verdictsOnly { continue }
             // Positives: events, scored with the same embedding the clusterer uses.
             let members = Dictionary(grouping: rows.indices.filter { rows[$0].event != nil }) { rows[$0].event ?? "" }
             var vectors: [Int: [Float]] = [:]
@@ -13212,7 +13346,8 @@ struct NewsTests {
         }
         try StoryCorpus.writePrivate(Data(lines.joined(separator: "\n").utf8), to: file, replacing: false)
         print(
-            "    exported \(lines.count - 1) pairs for the pair model (#525); \(excluded) corpus or corpus-window articles left out"
+            "    exported \(lines.count - 1) pairs for the pair model (#525), \(verdicts) of them reader verdicts (#552); "
+                + "\(excluded) corpus or corpus-window articles left out"
         )
     }
 
