@@ -863,7 +863,7 @@ struct EventOverviewReaderView: View {
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             EyebrowText(
                                 article.publisherName,
-                                color: AppColor.accent,
+                                color: AppColor.accentText,
                                 font: AppTypography.overviewFont(.eyebrow, scale: textScale)
                             )
 

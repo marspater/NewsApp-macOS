@@ -816,6 +816,24 @@ struct NativeUIQAChecks {
         for (name, color) in tokens {
             assertTrue(resolved(color, .light) != resolved(color, .dark), "AppColor.\(name) adapts to light and dark")
         }
+
+        // Accent text reaches 4.5:1 for every system accent, bright yellow included (#754).
+        let darkPage = NSColor(srgbRed: 0.2, green: 0.2, blue: 0.2, alpha: 1)
+        let accents: [NSColor] = [
+            .systemBlue, .systemPurple, .systemPink, .systemRed, .systemOrange, .systemYellow,
+            .systemGreen, .systemGray,
+        ]
+        for accent in accents {
+            for (dark, page) in [(false, NSColor.white), (true, darkPage)] {
+                let text = AppColor.readableAccent(accent, dark: dark, on: page)
+                assertTrue(
+                    AppColor.contrastRatio(text, page) >= 4.5, "Accent text \(accent) keeps 4.5:1 (dark: \(dark))")
+            }
+        }
+        let blue = NSColor(srgbRed: 0, green: 0.48, blue: 1, alpha: 1)
+        assertEqual(
+            AppColor.readableAccent(blue, dark: false, on: .white), blue.blended(withFraction: 0.15, of: .black),
+            "Accent text keeps the 15 % blend where it already reaches 4.5:1")
     }
 
     // MARK: - Phase 4 Shared Components

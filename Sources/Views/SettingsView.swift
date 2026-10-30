@@ -339,7 +339,7 @@ struct SettingsView: View {
                         } label: {
                             Image(systemName: starred ? "star.fill" : "star")
                                 .font(AppTypography.label)
-                                .foregroundStyle(starred ? AppColor.accent : AppColor.secondaryText)
+                                .foregroundStyle(starred ? AppColor.accentText : AppColor.secondaryText)
                         }
                         .buttonStyle(.plain)
                         .disabled(!starred && starLimitReached)
@@ -667,7 +667,7 @@ struct SettingsView: View {
                     HStack(spacing: AppSpacing.xs) {
                         Image(systemName: appSettings.notificationMode == .privacy ? "lock.fill" : "info.circle")
                             .foregroundStyle(
-                                appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accent)
+                                appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accentText)
                         Text(appSettings.notificationMode.detail)
                             .font(AppTypography.caption)
                             .foregroundStyle(AppColor.secondaryText)
