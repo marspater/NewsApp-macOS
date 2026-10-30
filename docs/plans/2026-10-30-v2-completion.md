@@ -8,7 +8,7 @@ On 30 October the release scope moved: **v2 = J, L, M, N, R (done) + O (#576), Q
 | --- | --- | --- |
 | T · Story Overview (#669) | #750 overview runners in `./test.sh` and CI · #753 Industry Impact precision (#670) · #755 "Earlier in This Story" lists the story's events (#671) · #756 offscreen captures (#669–#673) · #758 accent and tag text contrast (#754) | Captures sent; needs the owner's approval of DESIGN.md §11 and §17 and of the captures |
 | Y · Improvements (#744) | #751 library backup before migration, newer-schema guard, busy timeout, migration lock (#746, #747) · #752 `make run` uses a development bundle (#749) · #757 App Intents metadata in swiftc builds (#748) · #760 replay calibration accepted (#742) · #761 matcher v14: named storms and dated round-ups (#741, #739) · #763 notify once per story (#740) · #766 carry-in measured, rule stays (#738) · #768 story country signal, off (part of #737) | #737 needs the owner's decision (see below); #769 (a load-sensitive socket test) is in the backlog |
-| O · Data and onboarding (#576) | #759 export saved stories and history (#565) · #767 diagnostics export (#564, replaces #762) · #765 onboarding and permission timing (#562) · backup and restore (#563, stacked on #751) | #563 in progress |
+| O · Data and onboarding (#576) | #759 export saved stories and history (#565) · #767 diagnostics export (#564, replaces #762) · #765 onboarding and permission timing (#562) · #770 back up and restore the library (#563, stacked on #751) | Ready once #751 merges |
 | Q · Briefing (#607) | #764 Dock badge counts today's Briefing and notified stories (#584) | Ready |
 
 ## Decisions for the owner
@@ -22,12 +22,12 @@ On 30 October the release scope moved: **v2 = J, L, M, N, R (done) + O (#576), Q
 All open v2 branches merge into one tree with a single trivial conflict in `CONTRIBUTING.md` (#752 and #756 each add a line in the same place; keep both). Order constraints:
 
 1. #761 before #768 (#768 is stacked on #761).
-2. #751 before the backup-and-restore PR for #563 (stacked on #751).
+2. #751 before #770 (#563 backup and restore, stacked on #751).
 3. Everything else in any order.
 
 ## Verified before merging
 
-The combined tree of every open v2 branch (all of the above except #768, which is off by default, and #563) passed `NEWS_TEST_FORCE=1 ./test.sh`, including the three standalone headless runners, with `NEWS_SNAPSHOT_DB` set to a copy of the owner's library:
+The combined tree of every open v2 branch (all of the above except #768, which is off by default, and #770, which came later; #770 passed the full suite on its own branch) passed `NEWS_TEST_FORCE=1 ./test.sh`, including the three standalone headless runners, with `NEWS_SNAPSHOT_DB` set to a copy of the owner's library:
 
 | Library copy | Before | After |
 | --- | --- | --- |
