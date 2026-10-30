@@ -15,6 +15,7 @@ python3 script/evaluation/importance_review.py
 python3 script/evaluation/relation_review.py
 python3 script/evaluation/catalog_review.py
 python3 script/evaluation/fit_pair_head.py
+python3 script/training/pretrain_pairs.py --self-check
 
 # Content key of everything the Swift runner compiles or reads: the working tree (tracked and new files) without
 # docs, Markdown other than PRIVACY.md and the Python tooling checked above, plus toolchain, OS and NEWS_* settings.
