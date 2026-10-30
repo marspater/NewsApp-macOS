@@ -604,6 +604,7 @@ struct NewsTests {
             try await testDatabaseHealthAndDerivedRetention()
             try await testRealLibraryMigrationFixture()
             try await testLibraryBackupAndFutureSchemaGuard()
+            try await testLibraryBackupRestore()
             return
         }
         if CommandLine.arguments.contains("--export-pairs") {
@@ -862,6 +863,7 @@ struct NewsTests {
         try await testDatabaseHealthAndDerivedRetention()
         try await testRealLibraryMigrationFixture()
         try await testLibraryBackupAndFutureSchemaGuard()
+        try await testLibraryBackupRestore()
         try await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
         await testContentExtractionPipelineDeep()
@@ -1562,6 +1564,114 @@ struct NewsTests {
         await newer.close()
         assertEqual(try Data(contentsOf: future), futureBytes, "A newer library is never migrated or written")
         assertEqual(try files("future-before-"), [], "A newer library is never backed up")
+    }
+
+    @MainActor
+    static func testLibraryBackupRestore() async throws {
+        print("  - Testing library backup and restore (#563)...")
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-restore-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = testDefaultsSuite("test.backup")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer {
+            removeTestDefaults(suite)
+            try? fileManager.removeItem(at: directory)
+        }
+        func article(_ name: String) -> FeedArticle {
+            FeedArticle(
+                storedID: "restore-\(name)", title: "Restore report \(name)", link: "https://restore.test/\(name)",
+                guid: "restore-guid-\(name)", description: "Restore body \(name)", pubDate: Date(),
+                source: "Restore Publisher")
+        }
+        let library = directory.appendingPathComponent("news.sqlite3")
+        let sideFile = URL(fileURLWithPath: library.path + ".world-tension-v2.json")
+        let db = DatabaseEngine(path: library.path)
+        try await db.open()
+        try await db.upsertArticles([article("a"), article("b")])
+        try await db.markRead(articleId: "restore-a", isRead: true)
+        try await db.setSaved(articleId: "restore-b", isSaved: true)
+        try Data("[\"before\"]".utf8).write(to: sideFile)
+        defaults.set(["https://restore.test/feed"], forKey: AppSettings.feedURLsKey)
+        defaults.set(["Tech"], forKey: AppSettings.userSectionsKey)
+        defaults.set(["muted.test"], forKey: AppSettings.mutedSourcesKey)
+        defaults.set(["https://restore.test/feed"], forKey: AppSettings.starredFeedURLsKey)
+        defaults.set(["https://restore.test/feed": 1_700_000_000.0], forKey: AppSettings.starredFeedTimesKey)
+        defaults.set(AppSettings.NotificationMode.minimal.rawValue, forKey: AppSettings.notificationModeKey)
+
+        let archive = directory.appendingPathComponent("News Backup.sqlite3")
+        try Data("an older file the reader chose to replace".utf8).write(to: archive)
+        try await db.writeBackup(to: archive, settings: AppSettings.backupSettings(from: defaults))
+
+        // Everything changes after the backup.
+        try await db.upsertArticles([article("c")])
+        try await db.markRead(articleId: "restore-a", isRead: false)
+        try await db.markRead(articleId: "restore-b", isRead: true)
+        try await db.setSaved(articleId: "restore-b", isSaved: false)
+        try Data("[\"after\"]".utf8).write(to: sideFile)
+        defaults.set(["https://other.test/feed"], forKey: AppSettings.feedURLsKey)
+        defaults.removeObject(forKey: AppSettings.userSectionsKey)
+        defaults.set(true, forKey: AppSettings.allowInsecureHTTPKey)
+        defaults.set(AppSettings.NotificationMode.full.rawValue, forKey: AppSettings.notificationModeKey)
+
+        // A damaged file and a backup from a newer build are refused; the live library stays open and unchanged.
+        let corrupt = directory.appendingPathComponent("corrupt.sqlite3")
+        try Data(repeating: 0x5A, count: 8192).write(to: corrupt)
+        let newer = directory.appendingPathComponent("newer.sqlite3")
+        try fileManager.copyItem(at: archive, to: newer)
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(newer.path, &handle), SQLITE_OK, "Open the newer-backup fixture")
+        assertEqual(
+            sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil),
+            SQLITE_OK, "Mark the fixture as saved by a newer build")
+        sqlite3_close(handle)
+        for (name, file, message) in [("damaged", corrupt, "damaged"), ("newer", newer, "newer version")] {
+            do {
+                _ = try await db.restoreBackup(from: file)
+                assertTrue(false, "A \(name) backup is refused")
+            } catch {
+                assertTrue(
+                    error.localizedDescription.contains(message), "A \(name) backup is refused with a plain message")
+            }
+            assertEqual(
+                try await db.fetchArticles(limit: nil).count, 3, "A refused \(name) backup leaves the library open")
+        }
+        assertTrue(try await db.isRead(articleId: "restore-b"), "A refused backup leaves read state alone")
+        assertEqual(
+            try Data(contentsOf: sideFile), Data("[\"after\"]".utf8), "A refused backup leaves side files alone")
+        assertEqual(defaults.stringArray(forKey: AppSettings.feedURLsKey), ["https://other.test/feed"], "Settings kept")
+
+        // The restore swaps the backup in, closes the library and hands back the settings.
+        let settings = try await db.restoreBackup(from: archive)
+        try AppSettings.restoreSettings(settings ?? Data(), to: defaults)
+        assertEqual(
+            try fileManager.contentsOfDirectory(atPath: directory.path).filter {
+                $0.contains(".restoring") || $0.contains(".before-restore")
+            }, [], "No staging or set-aside copy is left after a restore")
+        let restored = DatabaseEngine(path: library.path)
+        try await restored.open()
+        let notice = await restored.databaseHealthNotice()
+        assertEqual(notice, nil, "A restored library opens writable")
+        assertEqual(
+            Set(try await restored.fetchArticles(limit: nil).map(\.id)), ["restore-a", "restore-b"],
+            "The restore brings back the backed-up stories")
+        assertTrue(try await restored.isRead(articleId: "restore-a"), "The restore brings back read state")
+        assertTrue(!(try await restored.isRead(articleId: "restore-b")), "The restore brings back unread state")
+        assertTrue(try await restored.isSaved(articleId: "restore-b"), "The restore brings back saved state")
+        await restored.close()
+        assertEqual(try Data(contentsOf: sideFile), Data("[\"before\"]".utf8), "The restore brings back World Tension")
+        assertEqual(sqlite3_open_v2(library.path, &handle, SQLITE_OPEN_READONLY, nil), SQLITE_OK, "Inspect restore")
+        assertEqual(
+            sqlite3_exec(handle, "SELECT * FROM \(DatabaseEngine.backupExtrasTable);", nil, nil, nil) == SQLITE_OK,
+            false, "The restored library doesn't keep the backup's extras table")
+        sqlite3_close(handle)
+        let reloaded = AppSettings(defaults: defaults)
+        assertEqual(reloaded.feedURLs, ["https://restore.test/feed"], "The restore brings back subscriptions")
+        assertEqual(reloaded.userSections, ["Tech"], "The restore brings back sections")
+        assertEqual(reloaded.muteRules.sources, ["muted.test"], "The restore brings back mute rules")
+        assertEqual(reloaded.starredFeedURLs, ["https://restore.test/feed"], "The restore brings back starred feeds")
+        assertEqual(reloaded.notificationMode, .minimal, "The restore brings back the notification mode")
+        assertEqual(reloaded.allowInsecureHTTP, false, "A setting the backup lacked returns to its default")
     }
 
     static func testRealLibraryMigrationFixture() async throws {

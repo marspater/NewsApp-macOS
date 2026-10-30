@@ -328,7 +328,7 @@ actor DatabaseEngine {
     /// Copies the library with the SQLite online backup API to `<name>-before-v<old>-<yyyy-MM-dd>.sqlite3` beside it,
     /// keeping the newest two such copies (#746). The copy is written under a temporary name and renamed when complete.
     private func backUpBeforeMigration(from version: Int) throws {
-        guard let db = db, dbPath != ":memory:" else { return }
+        guard db != nil, dbPath != ":memory:" else { return }
         let library = URL(fileURLWithPath: dbPath)
         let folder = library.deletingLastPathComponent()
         let prefix = "\(library.deletingPathExtension().lastPathComponent)-before-v"
@@ -337,34 +337,7 @@ actor DatabaseEngine {
         let partial = folder.appendingPathComponent(
             ".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier).partial")
         let fileManager = FileManager.default
-        try? fileManager.removeItem(at: partial)
-
-        var copy: OpaquePointer?
-        guard sqlite3_open_v2(partial.path, &copy, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK,
-            let copy
-        else {
-            sqlite3_close_v2(copy)
-            throw NSError(
-                domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Could not create \(partial.lastPathComponent)"])
-        }
-        sqlite3_busy_timeout(copy, Self.busyTimeoutMilliseconds)
-        let backup = sqlite3_backup_init(copy, "main", db, "main")
-        var status = backup.map { backup in
-            let step = sqlite3_backup_step(backup, -1)
-            let finish = sqlite3_backup_finish(backup)
-            return step == SQLITE_DONE ? finish : step
-        }
-        // The copy inherits the library's WAL header; rollback mode keeps it one self-contained file.
-        if status == SQLITE_OK { status = sqlite3_exec(copy, "PRAGMA journal_mode = DELETE;", nil, nil, nil) }
-        let failure = (backup == nil || status != SQLITE_OK) ? sqliteError(copy, "Library backup failed") : nil
-        sqlite3_close_v2(copy)
-        // Leaving WAL mode can leave an empty shared-memory file behind.
-        for sidecar in ["-wal", "-shm"] { try? fileManager.removeItem(atPath: partial.path + sidecar) }
-        if let failure {
-            try? fileManager.removeItem(at: partial)
-            throw failure
-        }
+        try copyLibrary(to: partial)
         // A same-day copy is replaced atomically, so it survives if the new one can't be put in place.
         do {
             if fileManager.fileExists(atPath: target.path) {
@@ -394,6 +367,201 @@ actor DatabaseEngine {
             }
         for old in copies.dropFirst(2) where old != target {
             try? fileManager.removeItem(at: old)
+        }
+    }
+
+    /// Writes a consistent, self-contained copy of the open library to `partial` with the SQLite online backup API,
+    /// replacing any file there; a failed copy leaves nothing behind (#746, #563).
+    private func copyLibrary(to partial: URL) throws {
+        guard let db = db else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        let fileManager = FileManager.default
+        try? fileManager.removeItem(at: partial)
+
+        var copy: OpaquePointer?
+        guard sqlite3_open_v2(partial.path, &copy, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) == SQLITE_OK,
+            let copy
+        else {
+            sqlite3_close_v2(copy)
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Could not create \(partial.lastPathComponent)"])
+        }
+        sqlite3_busy_timeout(copy, Self.busyTimeoutMilliseconds)
+        let backup = sqlite3_backup_init(copy, "main", db, "main")
+        var status = backup.map { backup in
+            let step = sqlite3_backup_step(backup, -1)
+            let finish = sqlite3_backup_finish(backup)
+            return step == SQLITE_DONE ? finish : step
+        }
+        // The copy inherits the library's WAL header; rollback mode keeps it one self-contained file.
+        if status == SQLITE_OK { status = sqlite3_exec(copy, "PRAGMA journal_mode = DELETE;", nil, nil, nil) }
+        let failure = (backup == nil || status != SQLITE_OK) ? sqliteError(copy, "Library backup failed") : nil
+        sqlite3_close_v2(copy)
+        // Leaving WAL mode can leave an empty shared-memory file behind.
+        for sidecar in ["-wal", "-shm"] { try? fileManager.removeItem(atPath: partial.path + sidecar) }
+        if let failure {
+            try? fileManager.removeItem(at: partial)
+            throw failure
+        }
+    }
+
+    /// The table a user backup keeps the reader's settings and the World Tension history in (#563).
+    static let backupExtrasTable = "news_backup"
+
+    /// Writes a user backup to `destination` (#563): an online copy of the library that also carries `settings` and the
+    /// World Tension history in ``backupExtrasTable``. It is built in a scratch folder on the destination's volume and
+    /// moved into place whole, so a file already there is only ever replaced by a complete backup.
+    func writeBackup(to destination: URL, settings: Data) throws {
+        guard dbPath != ":memory:" else { throw CocoaError(.fileNoSuchFile) }
+        let fileManager = FileManager.default
+        let scratch =
+            (try? fileManager.url(
+                for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: destination, create: true))
+            ?? fileManager.temporaryDirectory.appendingPathComponent("news-backup-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: scratch) }
+        let partial = scratch.appendingPathComponent(destination.lastPathComponent)
+        try copyLibrary(to: partial)
+        var extras = ["settings": settings]
+        extras["world-tension"] = try? Data(contentsOf: worldTensionURL)
+        try withConnection(to: partial) { copy in
+            try exec(copy, "CREATE TABLE \(Self.backupExtrasTable) (name TEXT PRIMARY KEY, value BLOB);")
+            var statement: OpaquePointer?
+            guard
+                sqlite3_prepare_v2(
+                    copy, "INSERT INTO \(Self.backupExtrasTable) (name, value) VALUES (?, ?);", -1, &statement, nil)
+                    == SQLITE_OK
+            else { throw sqliteError(copy, "Could not write the backup") }
+            defer { sqlite3_finalize(statement) }
+            for (name, value) in extras {
+                sqlite3_reset(statement)
+                sqlite3_bind_text(statement, 1, name, -1, Self.sqliteTransient)
+                _ = value.withUnsafeBytes {
+                    sqlite3_bind_blob(statement, 2, $0.baseAddress, Int32($0.count), Self.sqliteTransient)
+                }
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw sqliteError(copy, "Could not write the backup")
+                }
+            }
+        }
+        if fileManager.fileExists(atPath: destination.path) {
+            _ = try fileManager.replaceItemAt(destination, withItemAt: partial)
+        } else {
+            try fileManager.moveItem(at: partial, to: destination)
+        }
+        logger.info("Wrote a library backup")
+    }
+
+    /// Replaces the library with the backup at `archive` and returns the settings it carries, if any (#563).
+    ///
+    /// The archive is checked on a staging copy first: a damaged file, or one saved by a newer build (the #747 rule), is
+    /// refused with the library untouched. The current library is copied aside until the swap succeeds. On success the
+    /// library stays closed; the caller relaunches the app.
+    func restoreBackup(from archive: URL) throws -> Data? {
+        guard dbPath != ":memory:" else { throw CocoaError(.fileNoSuchFile) }
+        let fileManager = FileManager.default
+        let library = URL(fileURLWithPath: dbPath)
+        let staging = URL(fileURLWithPath: dbPath + ".restoring")
+        let previous = URL(fileURLWithPath: dbPath + ".before-restore")
+        defer { for file in [staging.path, staging.path + "-journal"] { try? fileManager.removeItem(atPath: file) } }
+        try? fileManager.removeItem(at: staging)
+        try fileManager.copyItem(at: archive, to: staging)
+
+        let extras = try withConnection(to: staging) { copy -> [String: Data] in
+            func value(_ sql: String) -> String? {
+                var statement: OpaquePointer?
+                defer { sqlite3_finalize(statement) }
+                guard sqlite3_prepare_v2(copy, sql, -1, &statement, nil) == SQLITE_OK,
+                    sqlite3_step(statement) == SQLITE_ROW
+                else { return nil }
+                return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+            }
+            guard value("PRAGMA integrity_check(1);") == "ok",
+                value("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'articles';") == "1",
+                let version = value("PRAGMA user_version;").flatMap({ Int($0) })
+            else {
+                throw NSError(
+                    domain: "DatabaseEngine", code: -1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "This file is damaged or isn't a News library backup, so nothing was restored."
+                    ])
+            }
+            guard version <= Self.schemaVersion else {
+                throw NSError(
+                    domain: "DatabaseEngine", code: -1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "This backup was saved by a newer version of News (schema \(version); this version knows \(Self.schemaVersion)), so nothing was restored. Install the newer version to restore it."
+                    ])
+            }
+            var extras: [String: Data] = [:]
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            // A plain library file (an older pre-migration copy) has no extras and restores without settings.
+            if sqlite3_prepare_v2(copy, "SELECT name, value FROM \(Self.backupExtrasTable);", -1, &statement, nil)
+                == SQLITE_OK
+            {
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    guard let name = sqlite3_column_text(statement, 0).map({ String(cString: $0) }) else { continue }
+                    let bytes = sqlite3_column_blob(statement, 1)
+                    extras[name] =
+                        bytes.map { Data(bytes: $0, count: Int(sqlite3_column_bytes(statement, 1))) } ?? Data()
+                }
+                try exec(copy, "DROP TABLE \(Self.backupExtrasTable);")
+            }
+            return extras
+        }
+
+        // The current library is set aside first; a library too damaged to copy online is copied as a file.
+        if (try? copyLibrary(to: previous)) == nil, fileManager.fileExists(atPath: dbPath) {
+            try? fileManager.removeItem(at: previous)
+            try fileManager.copyItem(at: library, to: previous)
+        }
+        close()
+        for sidecar in ["-wal", "-shm"] { try? fileManager.removeItem(atPath: dbPath + sidecar) }
+        do {
+            if fileManager.fileExists(atPath: dbPath) {
+                _ = try fileManager.replaceItemAt(library, withItemAt: staging)
+            } else {
+                try fileManager.moveItem(at: staging, to: library)
+            }
+        } catch {
+            // A failed atomic replace leaves the library in place; the copy aside stays for recovery.
+            try? open()
+            throw error
+        }
+        if let tension = extras["world-tension"] {
+            do { try tension.write(to: worldTensionURL, options: .atomic) } catch {
+                logger.error("Could not restore the World Tension history: \(error.localizedDescription)")
+            }
+        } else if !extras.isEmpty {
+            try? fileManager.removeItem(at: worldTensionURL)
+        }
+        try? fileManager.removeItem(at: previous)
+        logger.info("Restored the library from a backup")
+        return extras["settings"]
+    }
+
+    /// Runs `body` on a separate read-write connection to `file`, closed afterwards.
+    private func withConnection<T>(to file: URL, _ body: (OpaquePointer) throws -> T) throws -> T {
+        var handle: OpaquePointer?
+        defer { sqlite3_close_v2(handle) }
+        guard sqlite3_open_v2(file.path, &handle, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let handle else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Could not open \(file.lastPathComponent)"])
+        }
+        sqlite3_busy_timeout(handle, Self.busyTimeoutMilliseconds)
+        return try body(handle)
+    }
+
+    private func exec(_ handle: OpaquePointer, _ sql: String) throws {
+        guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else {
+            throw sqliteError(handle, "Backup step failed")
         }
     }
 
