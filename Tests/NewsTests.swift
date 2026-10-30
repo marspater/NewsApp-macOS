@@ -18407,6 +18407,29 @@ struct NewsTests {
             NotificationService.plan(new: [(stormMajor, 0.9)], pending: [:], delivery: storyDelivery).banners.map(
                 \.lane), [.priority],
             "A new event of an announced story notifies when it reaches a higher lane")
+        // Both events announced: the stronger one unchanged, the other with a new lead headline. The new lead posts.
+        var bothAnnounced = storyDelivery
+        bothAnnounced.ledger.announced["storm-b"] = .init(leadKey: "an older lead", lane: .normal)
+        bothAnnounced.ledger.announced["storm-a"] = .init(
+            leadKey: EventFeedSummary.titleKey(stormFirst.title), lane: .normal)
+        assertEqual(
+            NotificationService.plan(
+                new: [(stormFirst, 0.8), (stormSecond, 0.75)], pending: [:], delivery: bothAnnounced
+            ).banners.map { $0.article?.title ?? "" }, ["Storm leaves thousands without power"],
+            "An unchanged event of a story does not hide the other event's new lead")
+        // A waiting priority key of the story drops out when another of its events gets a banner this pass.
+        var queuedStory = NotificationDelivery(mode: .full)
+        let shelterBlast = report(803, "Explosion at a storm shelter kills four")
+        queuedStory.events = [shelterBlast.id: "storm-c"]
+        queuedStory.stories = ["storm-b": "storm-a", "storm-c": "storm-a"]
+        queuedStory.publishers = ["storm-c": 5]
+        queuedStory.ledger.priorityQueue = [
+            QueuedPriority(event: "storm-b", title: "Storm leaves thousands without power", score: 0.8, leadKey: "x")
+        ]
+        let queuedPass = NotificationService.plan(new: [(shelterBlast, 0.9)], pending: [:], delivery: queuedStory)
+        assertEqual(
+            queuedPass.banners.map(\.grouped), [false],
+            "A story's waiting key is covered by its new individual banner, not grouped beside it")
 
         // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
         let rising = report(800, "Explosion levels block")

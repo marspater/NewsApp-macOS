@@ -22,9 +22,10 @@ a second pass waits until the first has finished posting.
 ## Scores and the dedupe key
 
 - **Score**: `NotificationService.computeImportance`, computed once per story (#545).
-- **Dedupe key**: the story (#581, #740) the report's event belongs to, otherwise the report's own id. Two events of
-  one story share a key, so a story yields at most one banner per pass, in exactly one lane, threaded under the story.
-  Announcements and waiting priority keys stay recorded per event.
+- **Dedupe key**: the story (#581, #740) the report's event belongs to; the event id when the event is its own
+  story; otherwise, for a report outside any event, the report's id. Two events of one story share a key, so a story
+  yields at most one banner per pass, in exactly one lane, threaded under the story. Announcements and waiting
+  priority keys stay recorded per event; a waiting key drops out when its story is covered.
 - **Full-weight signal word**: a word of weight 1 in `breakingSignals` ("breaking", "killed", "earthquake", …), not
   the half-weight announcement words.
 

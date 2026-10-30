@@ -557,11 +557,15 @@ private struct LanePlanner {
         var priority: [ScoredStory] = []
         var normal: [ScoredStory] = []
         for id in order {
+            // The representative is the strongest story of the key's lane that may still post: in a story of two
+            // events, an unchanged announced event must not hide the other event's new lead headline (#740).
             let items = members[id, default: []].sorted { $0.score > $1.score }
-            if let best = items.first(where: isPriority) {
-                if fresh(best.article, in: .priority) { priority.append(best) }
-            } else if !items.contains(where: { isStarred($0.article) }), let best = items.first(where: isNormal),
-                fresh(best.article, in: .normal)
+            if items.contains(where: isPriority) {
+                if let best = items.first(where: { isPriority($0) && fresh($0.article, in: .priority) }) {
+                    priority.append(best)
+                }
+            } else if !items.contains(where: { isStarred($0.article) }),
+                let best = items.first(where: { isNormal($0) && fresh($0.article, in: .normal) })
             {
                 normal.append(best)
             }
@@ -586,8 +590,14 @@ private struct LanePlanner {
                 event: key($0.article), title: $0.article.title, score: $0.score, leadKey: lead($0.article),
                 story: $0.article.id)
         }
+        // A waiting key drops out when this pass already covers its story, by a banner or a new key of another of
+        // the story's events, or when the story was announced in the priority lane (#740).
+        let stories = delivery.stories
+        let story = { (event: String) in stories[event] ?? event }
+        let newStories = Set(newOverflow.map { story($0.event) })
         let waiting = ledger.priorityQueue.filter { item in
-            !newOverflow.contains { $0.event == item.event } && ledger.announced[item.event]?.lane != .priority
+            !newStories.contains(story(item.event)) && !taken.contains(story(item.event))
+                && storyLanes[story(item.event)] != .priority
         }
         let overflow = (newOverflow + waiting).sorted { $0.score > $1.score }
         guard !overflow.isEmpty else { return [] }
