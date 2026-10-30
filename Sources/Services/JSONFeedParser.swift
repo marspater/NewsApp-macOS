@@ -43,14 +43,13 @@ class JSONFeedParser {
             if item["summary"] == nil || item["summary"] is NSNull {
                 item["summary"] = FeedXMLParser.stripHTMLSimple(item["description"] as? String ?? "")
             }
-            if let rawDate = item["date_published"] as? String {
-                if let parsed = DateParser.parse(rawDate) {
-                    let formatter = ISO8601DateFormatter()
-                    formatter.formatOptions = [.withInternetDateTime]
-                    item["date_published"] = formatter.string(from: parsed)
-                } else {
-                    item.removeValue(forKey: "date_published")
-                }
+            // An item with only a modification date is dated by it, as RSS and Atom fall back to `updated` (#796).
+            if let parsed = [item["date_published"], item["date_modified"]].lazy
+                .compactMap({ ($0 as? String).flatMap { DateParser.parse($0) } }).first
+            {
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime]
+                item["date_published"] = formatter.string(from: parsed)
             } else {
                 item.removeValue(forKey: "date_published")
             }

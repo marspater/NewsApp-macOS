@@ -133,6 +133,8 @@ actor SecureHTTPClient {
         return image
     }
 
+    static let allowedPorts: Set<Int> = [80, 443, 8080, 8443]
+
     /// Shared navigation/ingestion preflight. Blocking DNS work runs off this actor and off the UI actor.
     func validateDestination(_ url: URL, allowHTTP: Bool = false) async throws {
         // 1. Scheme & Port Validation
@@ -144,8 +146,7 @@ actor SecureHTTPClient {
         }
 
         let port = url.port ?? (scheme == "https" ? 443 : 80)
-        let allowedPorts: Set<Int> = [80, 443, 8080, 8443]
-        guard allowedPorts.contains(port) else {
+        guard Self.allowedPorts.contains(port) else {
             throw FeedError.blockedPort(port)
         }
 
@@ -215,13 +216,24 @@ actor SecureHTTPClient {
             throw FeedError.network("Invalid non-HTTP response received")
         }
 
-        // 5. Pre-check Content-Length header if available
+        // 5. Verify HTTP status before reading the body, so a large error page reports its status, not its size
+        if reportsBackpressure, httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
+            throw FeedError.serverBusy(
+                status: httpResponse.statusCode,
+                retryAfter: FeedRetryPolicy.retryAfter(
+                    header: httpResponse.value(forHTTPHeaderField: "Retry-After"), now: Date()))
+        }
+        guard (200...299).contains(httpResponse.statusCode) || (isConditional && httpResponse.statusCode == 304) else {
+            throw FeedError.httpStatus(httpResponse.statusCode)
+        }
+
+        // 6. Pre-check Content-Length header if available
         let expectedLength = httpResponse.expectedContentLength
         if !prefixOnly && expectedLength > 0 && expectedLength > maxBytes {
             throw FeedError.responseTooLarge(bytes: expectedLength, maxAllowed: maxBytes)
         }
 
-        // 6. Progressive byte accumulation
+        // 7. Progressive byte accumulation
         var buffer = Data()
         buffer.reserveCapacity(min(Int(maxBytes), expectedLength > 0 ? Int(expectedLength) : 65536))
 
@@ -231,17 +243,6 @@ actor SecureHTTPClient {
             if Int64(buffer.count) > maxBytes {
                 throw FeedError.responseTooLarge(bytes: Int64(buffer.count), maxAllowed: maxBytes)
             }
-        }
-
-        // 7. Verify HTTP Status Code
-        if reportsBackpressure, httpResponse.statusCode == 429 || httpResponse.statusCode == 503 {
-            throw FeedError.serverBusy(
-                status: httpResponse.statusCode,
-                retryAfter: FeedRetryPolicy.retryAfter(
-                    header: httpResponse.value(forHTTPHeaderField: "Retry-After"), now: Date()))
-        }
-        guard (200...299).contains(httpResponse.statusCode) || (isConditional && httpResponse.statusCode == 304) else {
-            throw FeedError.httpStatus(httpResponse.statusCode)
         }
 
         return (buffer, httpResponse)

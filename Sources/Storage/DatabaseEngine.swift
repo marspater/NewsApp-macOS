@@ -4223,7 +4223,12 @@ actor DatabaseEngine {
 
     /// Shown, recent stories without any image in their event and not looked up yet: clustered stories first, then the
     /// newest. Each row carries its event so a pass looks up one report per event.
-    func imagelessStoryRows(activeSince: Date, limit: Int, muting: MuteRules = MuteRules()) throws -> [(
+    /// `isRequestable` drops links the image client would refuse before they count toward `limit`, so they cannot
+    /// crowd out stories behind them on every pass (#818).
+    func imagelessStoryRows(
+        activeSince: Date, limit: Int, muting: MuteRules = MuteRules(),
+        isRequestable: @Sendable (String) -> Bool = { _ in true }
+    ) throws -> [(
         id: String, link: String, eventID: String?
     )] {
         // ponytail: at most 2,000 recent candidates per pass, matching the clustering bound.
@@ -4245,7 +4250,7 @@ actor DatabaseEngine {
         for row in rows {
             try Task.checkCancellation()
             guard results.count < limit else { break }
-            guard let id = row[0], let link = row[1] else { continue }
+            guard let id = row[0], let link = row[1], isRequestable(link) else { continue }
             let key = row[2] ?? id
             let pictured: Bool
             if let cached = picturedEvents[key] {

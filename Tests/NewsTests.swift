@@ -2537,6 +2537,37 @@ struct NewsTests {
                 pipeline.decodeHTML(data: document.data(using: .isoLatin1)!), document,
                 "Cached meta regexes preserve both charset declarations")
         }
+        // #819: one stray byte in a UTF-8 page, and a prefix fetch cut inside a character, keep UTF-8 text.
+        var strayByte = Data("<p>It\u{2019}s caf\u{00e9} ".utf8)
+        strayByte.append(0xFF)
+        strayByte.append(contentsOf: Data("na\u{00ef}ve</p>".utf8))
+        assertEqual(
+            pipeline.decodeHTML(data: strayByte), "<p>It\u{2019}s caf\u{00e9} \u{FFFD}na\u{00ef}ve</p>",
+            "An undeclared UTF-8 page with one invalid byte is not decoded as Latin-1")
+        let utf8Response = HTTPURLResponse(
+            url: URL(string: "https://example.com/article")!,
+            statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/html; charset=utf-8"])!
+        assertEqual(
+            pipeline.decodeHTML(data: strayByte, response: utf8Response),
+            "<p>It\u{2019}s caf\u{00e9} \u{FFFD}na\u{00ef}ve</p>", "A declared UTF-8 page decodes leniently")
+        let cut = Data("<p>caf\u{00e9} \u{2019}".utf8).dropLast(2)
+        assertEqual(
+            pipeline.decodeHTML(data: Data(cut), response: utf8Response), "<p>caf\u{00e9} ",
+            "A trailing partial sequence from a prefix fetch is trimmed")
+        assertEqual(
+            pipeline.decodeHTML(data: "<p>caf\u{00e9} na\u{00ef}ve</p>".data(using: .isoLatin1)!),
+            "<p>caf\u{00e9} na\u{00ef}ve</p>", "An undeclared Latin-1 page still decodes as Latin-1")
+        assertEqual(
+            pipeline.decodeHTML(data: Data("<p>caf\u{00e9} \u{FFFD}</p>".utf8)), "<p>caf\u{00e9} \u{FFFD}</p>",
+            "Valid UTF-8 containing a literal replacement character stays UTF-8")
+        var tied = Data("<p>caf\u{00e9} ".utf8)
+        tied.append(0xFF)
+        assertEqual(
+            pipeline.decodeHTML(data: tied), "<p>caf\u{00e9} \u{FFFD}",
+            "One valid multi-byte character against one invalid byte keeps UTF-8")
+        assertEqual(
+            pipeline.decodeHTML(data: "<p>na\u{00ef}ve \u{00ff}".data(using: .isoLatin1)!), "<p>na\u{00ef}ve \u{00ff}",
+            "A trailing byte that cannot start a UTF-8 sequence is not trimmed from a Latin-1 page")
         let inline = "<p>The <strong>central bank</strong> raised <a href='/rate'>rates</a> today.</p>"
         assertEqual(
             HTMLDOMBuilder.parse(html: inline).combinedText(), "The central bank raised rates today.",
@@ -6878,6 +6909,22 @@ struct NewsTests {
         assertTrue(
             await pipeline.extractArticleWithIdentity(from: insecureStory.url!.absoluteString).outcome.isSuccess,
             "An http:// story link is read over https")
+        for (status, expected) in [
+            (401, ExtractionOutcome.subscriberOnly), (402, .subscriberOnly), (403, .httpError(status: 403)),
+        ] {
+            MockURLProtocol.requestHandler = { request in
+                // A paywall page announcing more than the article limit still reports its status (#816).
+                (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: status, httpVersion: nil,
+                        headerFields: ["Content-Length": "\(SecureHTTPClient.defaultArticleLimit + 1)"])!,
+                    Data("<html><body>Subscribe</body></html>".utf8)
+                )
+            }
+            assertEqual(
+                await pipeline.extractArticleWithIdentity(from: desktop.absoluteString).outcome, expected,
+                "HTTP \(status) from the publisher maps to its reader state over the network path")
+        }
         for path in ["baseline/mobile/story", "baseline/amp/story"] {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
@@ -10456,6 +10503,25 @@ struct NewsTests {
         assertEqual(
             await pageFinder.find("https://example.com/late"), StoryImageLookup.none,
             "Only figures within the bounded page prefix are considered")
+        assertEqual(StoryImageFinder.pageURL(""), nil, "An empty link is never requested")
+        assertEqual(StoryImageFinder.pageURL("/relative/story"), nil, "A relative link is never requested")
+        assertEqual(
+            StoryImageFinder.pageURL("https://example.com:22/story"), nil, "A link on a refused port is never requested"
+        )
+        assertEqual(
+            StoryImageFinder.pageURL("http://example.com/story")?.absoluteString, "https://example.com/story",
+            "An http link is requested over https")
+        // #818: a refused page is answered as no image (recorded, not retried); rate limits and outages retry.
+        for (status, expected) in [
+            (403, StoryImageLookup.none), (404, .none), (410, .none), (429, .unreachable), (503, .unreachable),
+        ] {
+            MockURLProtocol.requestHandler = { request in
+                (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!, Data())
+            }
+            assertEqual(
+                await pageFinder.find("https://example.com/refused"), expected,
+                "HTTP \(status) from a publisher page maps to its lookup state")
+        }
         MockURLProtocol.requestHandler = nil
 
         var small = FeedArticle(
@@ -10529,6 +10595,12 @@ struct NewsTests {
             "Minor-rated stories retain image eligibility; pictured events need no lookup"
         )
         assertTrue(rows.first.map { ["e1", "e2"].contains($0.id) } == true, "Clustered stories come first")
+        let pastRefused = try await db.imagelessStoryRows(
+            activeSince: now.addingTimeInterval(-86_400), limit: 1,
+            isRequestable: { !$0.hasSuffix("/e1") && !$0.hasSuffix("/e2") })
+        assertTrue(
+            pastRefused.count == 1 && !["e1", "e2"].contains(pastRefused[0].id),
+            "Links the client would refuse do not use up the candidate limit (#818)")
         assertEqual(
             rows.first(where: { $0.id == "plain" })?.link, story("plain", "One").link,
             "A freshly ingested story has a usable URL before reader extraction")
