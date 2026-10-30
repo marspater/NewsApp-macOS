@@ -170,6 +170,11 @@ struct BriefingTensionStripView: View {
                         BriefingTensionSparklineView(readings: state.trend(days: 7), baseline: reading.assessment.score)
                     }
                 }
+                // Why the reading is an estimate, stale or not refreshed, in the sheet's words.
+                if let explanation = state.explanation {
+                    Text(explanation).font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 let drivers = Array(reading.drivingHeadlines.prefix(3))
                 if !drivers.isEmpty {
                     Divider()
