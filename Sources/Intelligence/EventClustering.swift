@@ -476,7 +476,9 @@ enum EventClusterer {
                     let names = l.specificAnchors.intersection(r.specificAnchors).subtracting(common).count
                     let sharesFigure = !l.titleNumbers.isDisjoint(with: r.titleNumbers)
                     let figure = single && names >= 1 && pair.sharedKeywords >= 2 && sharesFigure
-                    if (pair.conflict == nil || pair.conflict == .differentAct)
+                    // A story may span places (Ebola cases in two countries), so different headline places do not
+                    // veto a story link the way they veto one event (#737).
+                    if (pair.conflict == nil || pair.conflict == .differentAct || pair.conflict == .headlinePlaces)
                         && (names >= matchPolicy.storyLinkAnchors || figure) && pair.sharedKeywords >= 1
                         && (!single || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold)
                     {
@@ -505,7 +507,9 @@ enum EventClusterer {
                             samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
                     let names = features(left).without(template).specificAnchors
                         .intersection(features(right).without(template).specificAnchors).subtracting(common).count
-                    guard pair.neuralEligible, pair.conflict == nil || pair.conflict == .differentAct, names >= 1,
+                    guard pair.neuralEligible,
+                        pair.conflict == nil || pair.conflict == .differentAct || pair.conflict == .headlinePlaces,
+                        names >= 1,
                         pair.sharedKeywords >= 1 || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
                     else { continue }
                     let text = { (row: EventMatchRow) in
@@ -638,7 +642,9 @@ enum EventClusterer {
                 }, uniquingKeysWith: { a, _ in a })
             // A country in more than the common-actor share of active events (a war's country, the US) is the
             // backdrop of many stories, not a link between two of them.
-            // Counted over every active event, one-report events included.
+            // Counted over every active event, one-report events included. A country needs at least three holders to be
+            // common: in a small window two events naming one country (a Jordan attack and the King's response) are the
+            // signal itself, not a backdrop.
             var countryHolders: [String: Int] = [:]
             for event in active {
                 let countries = event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).countries) }

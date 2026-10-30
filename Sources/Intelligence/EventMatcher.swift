@@ -6,7 +6,7 @@ import NaturalLanguage
 /// `storageVersion` and recomputes them when the version changes or the title or description does (#522).
 struct EventFeatures: Hashable, Sendable, Codable {
     /// Bump when extraction changes; stored records of older versions are recomputed on first use.
-    static let storageVersion = 4
+    static let storageVersion = 5
     /// Dominant language when the recognizer is reasonably sure; nil otherwise.
     var language: String?
     // Who
@@ -49,6 +49,10 @@ struct EventFeatures: Hashable, Sendable, Codable {
     /// Specific names that appear in the headline itself, not only in the description: a publisher's own name in its
     /// standard sign-off ("picked by Gadget Nine") is no shared name between two of its round-ups (#739).
     var titleSpecificAnchors: Set<String> = []
+    /// Places (countries as `@` codes, and cities or regions) and people named in the headline itself (#737). Headline
+    /// places that differ separate two reports even when each description mentions the other's place.
+    var titlePlaces: Set<String> = []
+    var titlePeople: Set<String> = []
 
     var anchors: Set<String> { people.union(organizations).union(places).union(names) }
     /// Places that name a country, canonicalized to a region code (`@US`).
@@ -75,6 +79,8 @@ struct EventFeatures: Hashable, Sendable, Codable {
         copy.titleNumbers.subtract(terms)
         copy.primaryTitleTerms.subtract(terms)
         copy.titleSpecificAnchors.subtract(terms)
+        copy.titlePlaces.subtract(terms)
+        copy.titlePeople.subtract(terms)
         return copy
     }
 }
@@ -521,6 +527,22 @@ extension EventFeatures {
         collector.features.titleSpecificAnchors = collector.features.specificAnchors.filter { anchor in
             anchor.split(separator: " ").allSatisfy { headlineWords.contains(String($0)) }
         }
+        func inHeadline(_ name: String) -> Bool {
+            name.split(separator: " ").allSatisfy { headlineWords.contains(String($0)) }
+        }
+        // Countries by every one-, two- and three-word phrase of the headline ("South Korea", "Ukrainian").
+        let headlineSequence = title.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map {
+            Self.normalized(String($0))
+        }
+        var headlineCountries = Set<String>()
+        for length in 1...3 where headlineSequence.count >= length {
+            for start in 0...(headlineSequence.count - length) {
+                let place = EventPlaces.canonical(headlineSequence[start..<start + length].joined(separator: " "))
+                if place.hasPrefix("@"), collector.features.places.contains(place) { headlineCountries.insert(place) }
+            }
+        }
+        collector.features.titlePlaces = headlineCountries.union(collector.features.localPlaces.filter(inHeadline))
+        collector.features.titlePeople = collector.features.people.filter(inHeadline)
         if let cut = title.firstIndex(where: { "|:—".contains($0) }),
             title[title.index(after: cut)...].contains(where: { $0.isLetter || $0.isNumber }),
             case let prefix = String(title[..<cut]), !Self.normalized(prefix).isEmpty
@@ -721,7 +743,7 @@ struct PairCalibration: Sendable, Equatable {
 /// Facts that rule a pair out regardless of how similar the rest of the text is.
 enum EventConflict: String, Sendable, Equatable {
     case language, unknownDate, timeGap, period, year, weekday, calendarDay, edition, namedStorm, differentAct,
-        titleNumbers, places, excluded, semanticDivergence
+        titleNumbers, places, headlinePlaces, excluded, semanticDivergence
 }
 
 struct EventPairAssessment: Sendable, Equatable {
@@ -747,7 +769,7 @@ struct EventPairAssessment: Sendable, Equatable {
 enum EventMatcher {
     /// Bump when matching changes, a retrained pair model included; recent articles and active memberships are
     /// revalidated. Unchanged archived memberships remain intact.
-    static let version = 14
+    static let version = 15
 
     private static func pairConflict(
         _ a: EventFeatures, _ b: EventFeatures, gap: TimeInterval, maximumTimeGap: TimeInterval, sameSeries: Bool
@@ -784,6 +806,21 @@ enum EventMatcher {
             && (disjoint(a.countries, b.countries) || disjoint(a.localPlaces, b.localPlaces))
         {
             return .places
+        }
+        // Headlines that place the reports in different countries or cities, with no place, person or two specific
+        // names in common, report different events however much the descriptions mention each other's places (#737:
+        // firefighters in Kyiv and in Kramatorsk; Saudi air defence and Yemeni strikes).
+        let headlineCountries = { (f: EventFeatures) in f.titlePlaces.filter { $0.hasPrefix("@") } }
+        let headlineLocal = { (f: EventFeatures) in f.titlePlaces.filter { !$0.hasPrefix("@") } }
+        // Places compare by their words: "Westfield" and "Westfield Bondi Junction", "Malatya" and "Turkey's Malatya".
+        let placeWords = { (f: EventFeatures) in
+            Set(f.titlePlaces.flatMap { $0.split(separator: " ").map(String.init) })
+        }
+        if placeWords(a).isDisjoint(with: placeWords(b)) && a.titlePeople.isDisjoint(with: b.titlePeople)
+            && a.titleSpecificAnchors.intersection(b.titleSpecificAnchors).count < 2
+            && (disjoint(headlineCountries(a), headlineCountries(b)) || disjoint(headlineLocal(a), headlineLocal(b)))
+        {
+            return .headlinePlaces
         }
         // Last, so a different act is only reported when nothing else contradicts: it is a related-act candidate.
         if a.actClass.conflicts(with: b.actClass) { return .differentAct }

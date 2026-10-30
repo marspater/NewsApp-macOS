@@ -8049,6 +8049,34 @@ struct NewsTests {
                 && EventFeatures.stormNames(in: "Winter Storm Dumps Snow on Chicago").isEmpty
                 && EventFeatures.stormNames(in: "Storm Will Hit the Coast Tonight").isEmpty,
             "A Title Case verb after Storm is no storm name")
+        // #737: different places in the headlines separate reports whose descriptions mention both places.
+        let kyivFire = EventFeatures(
+            title: "Ukraine: firefighters battle flames and rescue dog from Kyiv ruins",
+            description: "Russian strikes hit Kyiv overnight; in Kramatorsk crews also fought fires.", date: now)
+        let kramatorskFire = EventFeatures(
+            title: "Russians attack firefighters while they tackle blaze in Kramatorsk",
+            description: "The attack came hours after Kyiv was hit and firefighters rescued a dog.",
+            date: now.addingTimeInterval(3600))
+        assertEqual(
+            EventMatcher.assess(kyivFire, kramatorskFire).conflict, .headlinePlaces,
+            "Fires in Kyiv and in Kramatorsk are two events though each description names the other city")
+        let ceutaA = EventFeatures(
+            title: "Moroccan police intercept migrant swimming back towards Ceuta",
+            description: "Spain has deported migrants from Ceuta this week.", date: now)
+        let ceutaB = EventFeatures(
+            title: "Spain deports migrants from Ceuta in move criticised by rights group",
+            description: "Moroccan police intercepted a migrant swimming back.", date: now.addingTimeInterval(3600))
+        assertTrue(
+            EventMatcher.assess(ceutaA, ceutaB).conflict != .headlinePlaces,
+            "Headlines that share a place (Ceuta) are not split by their countries")
+        let dieselA = EventFeatures(
+            title: "Trump administration may let more Russian diesel onto market", description: "", date: now)
+        let dieselB = EventFeatures(
+            title: "Trump-Putin diesel deal has not lowered US fuel prices", description: "",
+            date: now.addingTimeInterval(3600))
+        assertTrue(
+            EventMatcher.assess(dieselA, dieselB).conflict != .headlinePlaces,
+            "Headlines that share a person (Trump) are not split by their countries")
         // #739: the different-day veto covers only series items with no headline date or edition word.
         var roundUpOne = quake
         roundUpOne.series = "deals"
@@ -13588,20 +13616,62 @@ struct NewsTests {
                 replacing: false)
             // One line per story that joins two or more events: each event's earliest headline within the window,
             // for the group review.
-            var lines = ["story_id,events,recent_members,recent_acts"]
+            // Countries named in headlines (#737): a story whose events name disjoint countries ("Jordan" beside "US")
+            // is flagged cross_country for the review; so is an event whose reports do.
+            func headlineCountries(_ rows: [LibraryRow]) -> Set<String> {
+                rows.reduce(into: Set<String>()) {
+                    $0.formUnion(EventFeatures(title: $1.title, description: "", date: $1.date).countries)
+                }
+            }
+            func disjointCountries(_ sets: [Set<String>]) -> Bool {
+                let named = sets.filter { !$0.isEmpty }
+                return named.indices.contains { i in named.indices.contains { j in named[i].isDisjoint(with: named[j]) }
+                }
+            }
+            var crossCountryStories = 0
+            var lines = ["story_id,events,recent_members,cross_country,countries,recent_acts"]
             for (story, rows) in joinedStories.sorted(by: { $0.key < $1.key }) {
-                let acts = Dictionary(grouping: rows) { $0.event ?? "" }.values
+                let groups = Dictionary(grouping: rows) { $0.event ?? "" }.values
+                let acts =
+                    groups
                     .compactMap { group in
                         group.min(by: { $0.date < $1.date }).map { "\(group.count)× \($0.source): \($0.title)" }
                     }
                     .sorted()
+                let countrySets = groups.map { headlineCountries($0) }
+                let cross = disjointCountries(countrySets)
+                if cross { crossCountryStories += 1 }
                 lines.append(
                     [
-                        story, String(eventsOf[story] ?? acts.count), String(rows.count),
+                        story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
+                        "\"" + countrySets.map { $0.sorted().joined(separator: " ") }.sorted().joined(separator: " | ")
+                            + "\"",
                         "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
                     ]
                     .joined(separator: ","))
             }
+            let crossCountryEvents = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }.values
+                .filter { group in disjointCountries(group.map { headlineCountries([$0]) }) }
+            print(
+                "    cross-country (headline countries disjoint): \(crossCountryStories) of \(joinedStories.count) story groups, "
+                    + "\(crossCountryEvents.count) events")
+            var eventLines = ["event,reports,countries,headlines"]
+            for group in crossCountryEvents {
+                eventLines.append(
+                    [
+                        group.first?.event ?? "", String(group.count),
+                        "\""
+                            + group.map { headlineCountries([$0]).sorted().joined(separator: " ") }.joined(
+                                separator: " | ") + "\"",
+                        "\""
+                            + group.map { "\($0.source): \($0.title)" }.joined(separator: " || ")
+                            .replacingOccurrences(of: "\"", with: "\"\"") + "\"",
+                    ].joined(separator: ","))
+            }
+            try StoryCorpus.writePrivate(
+                Data(eventLines.joined(separator: "\n").utf8),
+                to: try StoryCorpus.privateDirectory(output).appendingPathComponent("cross-country-events.csv"),
+                replacing: false)
             try StoryCorpus.writePrivate(
                 Data(lines.joined(separator: "\n").utf8),
                 to: try StoryCorpus.privateDirectory(output).appendingPathComponent("story-groups.csv"),
