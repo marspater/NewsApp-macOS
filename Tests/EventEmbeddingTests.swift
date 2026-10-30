@@ -798,33 +798,48 @@ extension NewsTests {
                 "batch_49_ms": corpusBatch, "batch_2000_ms": largeBatch,
             ]
 
-            let configuration = MLModelConfiguration()
-            configuration.computeUnits = unit
+            // The pair model's functions as `PairScorer` loads them, or its one 256-token function (#554).
+            func loadPair(_ function: String?) throws -> MLModel {
+                let configuration = MLModelConfiguration()
+                configuration.computeUnits = unit
+                configuration.functionName = function
+                return try MLModel(contentsOf: pairscorer, configuration: configuration)
+            }
             start = ProcessInfo.processInfo.systemUptime
-            let model = try MLModel(contentsOf: pairscorer, configuration: configuration)
+            var pairModels: [Int: MLModel] = [:]
+            for length in PairScorer.sequenceLengths { pairModels[length] = try? loadPair("length_\(length)") }
+            if pairModels.count < PairScorer.sequenceLengths.count {
+                pairModels = [PairScorer.maxSequenceLength: try loadPair(nil)]
+            }
             let pairLoad = milliseconds(since: start)
             let providers = try zip(texts, texts.dropFirst()).map { a, b in
                 let encoded = tokenizer.encodePair(a, b, maxSequenceLength: PairScorer.maxSequenceLength)
+                let tokens = encoded.attentionMask.filter { $0 == 1 }.count
+                let length = pairModels.keys.sorted().first { $0 >= tokens } ?? PairScorer.maxSequenceLength
                 var inputs: [String: MLFeatureValue] = [:]
                 for (name, values) in [
                     ("input_ids", encoded.inputIDs), ("attention_mask", encoded.attentionMask),
                     ("token_type_ids", encoded.tokenTypeIDs),
                 ] {
-                    let array = try MLMultiArray(shape: [1, NSNumber(value: values.count)], dataType: .int32)
+                    let array = try MLMultiArray(shape: [1, NSNumber(value: length)], dataType: .int32)
                     array.withUnsafeMutableBufferPointer(ofType: Int32.self) { buffer, _ in
-                        _ = buffer.initialize(from: values)
+                        _ = buffer.initialize(from: values.prefix(length))
                     }
                     inputs[name] = MLFeatureValue(multiArray: array)
                 }
-                return try MLDictionaryFeatureProvider(dictionary: inputs)
+                return (length, try MLDictionaryFeatureProvider(dictionary: inputs))
             }
             // Synchronous, as `PairScorer` calls it: in an async context `prediction(from:)` picks the async overload.
-            func timed(_ providers: [MLFeatureProvider]) throws -> Double {
+            // A batch runs one Core ML batch per length.
+            func timed(_ providers: [(Int, MLDictionaryFeatureProvider)]) throws -> Double {
                 let start = ProcessInfo.processInfo.systemUptime
-                if providers.count == 1 {
-                    _ = try model.prediction(from: providers[0])
-                } else {
-                    _ = try model.predictions(fromBatch: MLArrayBatchProvider(array: providers))
+                for (length, model) in pairModels {
+                    let batch = providers.filter { $0.0 == length }.map(\.1)
+                    if batch.count == 1 {
+                        _ = try model.prediction(from: batch[0])
+                    } else if !batch.isEmpty {
+                        _ = try model.predictions(fromBatch: MLArrayBatchProvider(array: batch))
+                    }
                 }
                 return milliseconds(since: start)
             }

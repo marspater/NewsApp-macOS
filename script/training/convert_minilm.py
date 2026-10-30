@@ -69,23 +69,22 @@ class Encoder(torch.nn.Module):
         return hidden, self.bert.pooler(hidden)
 
 
-def convert(bert, lengths, path, describe=lambda model: None):
-    """Converts `bert` at each fixed length and joins the conversions as one multifunction package at `path`, function
-    `length_N` per length (the longest is the default), sharing one copy of the weights. Returns the PyTorch module and
-    the package's functions by length."""
-    encoder = Encoder(bert).eval()
+def export_functions(module, inputs, outputs, lengths, path, describe=lambda model: None, compress=lambda model: model):
+    """Traces `module` (int32 inputs named `inputs`, each `(1, length)`) at each fixed length, converts it, applies
+    `compress` (#554: `coremltools.optimize.coreml` refuses a multifunction model, so each function is compressed alone
+    and the join shares the identical result) and joins the conversions as one multifunction package at `path`,
+    function `length_N` per length, the longest the default."""
     descriptor = ct.utils.MultiFunctionDescriptor()
     with tempfile.TemporaryDirectory() as scratch:
         for length in lengths:
-            example = (torch.ones(1, length, dtype=torch.int32), torch.ones(1, length, dtype=torch.int32))
+            example = tuple(torch.ones(1, length, dtype=torch.int32) for _ in inputs)
             mlmodel = ct.convert(
-                torch.jit.trace(encoder, example),
-                inputs=[ct.TensorType(name='input_ids', shape=(1, length), dtype=np.int32),
-                        ct.TensorType(name='attention_mask', shape=(1, length), dtype=np.int32)],
-                outputs=[ct.TensorType(name='last_hidden_state'), ct.TensorType(name='pooler_output')],
+                torch.jit.trace(module, example),
+                inputs=[ct.TensorType(name=name, shape=(1, length), dtype=np.int32) for name in inputs],
+                outputs=[ct.TensorType(name=name) for name in outputs],
                 convert_to='mlprogram', minimum_deployment_target=ct.target.macOS15,
                 compute_precision=ct.precision.FLOAT16)
-            mlmodel.save(f'{scratch}/{length}.mlpackage')
+            compress(mlmodel).save(f'{scratch}/{length}.mlpackage')
             descriptor.add_function(f'{scratch}/{length}.mlpackage', src_function_name='main',
                                     target_function_name=f'length_{length}')
         descriptor.default_function_name = f'length_{lengths[-1]}'
@@ -93,6 +92,14 @@ def convert(bert, lengths, path, describe=lambda model: None):
         joined = ct.models.MLModel(f'{scratch}/joined.mlpackage', skip_model_load=True)
         describe(joined)  # the join keeps no description of its parts
         joined.save(str(path))
+
+
+def convert(bert, lengths, path, describe=lambda model: None, compress=lambda model: model):
+    """The encoder as one fixed-length function per length (`export_functions`). Returns the PyTorch module and the
+    package's functions by length."""
+    encoder = Encoder(bert).eval()
+    export_functions(encoder, ('input_ids', 'attention_mask'), ('last_hidden_state', 'pooler_output'), lengths, path,
+                     describe, compress)
     return encoder, {length: ct.models.MLModel(str(path), compute_units=UNITS, function_name=f'length_{length}')
                      for length in lengths}
 
