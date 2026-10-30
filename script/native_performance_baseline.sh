@@ -49,11 +49,25 @@ PY_REPORT
     echo "Combined app workload evidence: $OUTPUT"
     exit "$WORKLOAD_STATUS"
 fi
-sed '/^@main$/d' Sources/App/NewsApp.swift > "$STAGE/NewsApp.swift"
+SOURCE_DIR=Sources
+if [[ "${NEWS_NATIVE_BODY_COUNTS:-0}" == "1" ]]; then
+    # Counted views (#778, Tests/ListInvalidationBaseline.swift): a staged copy of the sources ticks the harness's
+    # BodyCount at the top of each view body, the list's page fetch and the reader's revision query. Shipping sources
+    # carry no counters.
+    cp -R Sources "$STAGE/Sources"
+    for view in MainView SidebarView ArticleListView ArticleCardView EventCardView ArticleDetailView; do
+        perl -0pi -e "s/(var body: some View \{)/\$1 let _ = BodyCount.tick(\"$view\");/" "$STAGE/Sources/Views/$view.swift"
+    done
+    perl -0pi -e 's/(private func fetchPage\([^{]*\{)/$1 BodyCount.tick("ListFetch");/' "$STAGE/Sources/Views/ArticleListView.swift"
+    perl -0pi -e 's/(let revisions = try\? await articleStore\.database\.publisherContentRevisions)/BodyCount.tick("ReaderRevisionQuery"); $1/' \
+        "$STAGE/Sources/Views/ArticleDetailView.swift"
+    SOURCE_DIR="$STAGE/Sources"
+fi
+sed '/^@main$/d' "$SOURCE_DIR/App/NewsApp.swift" > "$STAGE/NewsApp.swift"
 SOURCES=()
 while IFS= read -r source; do
-    if [[ "$source" != "Sources/App/NewsApp.swift" ]]; then SOURCES+=("$source"); fi
-done < <(find Sources -name '*.swift' -print | sort)
+    if [[ "$source" != "$SOURCE_DIR/App/NewsApp.swift" ]]; then SOURCES+=("$source"); fi
+done < <(find "$SOURCE_DIR" -name '*.swift' -print | sort)
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 NEWS_DEPENDENCY_ARCH=arm64
