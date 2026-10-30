@@ -288,6 +288,7 @@ enum GridRowCaptures {
 
         var failures = 0
         var report: [String: [String: Double]] = [:]
+        var collapsedEventHeight: Double?
         let variants: [(name: String, appearance: NSAppearance.Name, scheme: ColorScheme)] = [
             ("light", .aqua, .light), ("dark", .darkAqua, .dark),
         ]
@@ -305,10 +306,32 @@ enum GridRowCaptures {
                 let appearance = NSAppearance(named: variant.appearance) ?? NSAppearance.currentDrawing()
                 view.appearance = appearance
                 view.frame = NSRect(x: 0, y: 0, width: 1040, height: 1200)
-                // The expanded card loads its sources from the store; its task needs a few updates to finish.
-                for _ in 0..<60 {
+                // The expanded card loads its sources from the store. Wait until its height has grown past the
+                // collapsed card's by more than the loading row and then held for ten updates; five seconds without
+                // that is a failed capture, not a picture of the spinner.
+                let event = entries[1].id
+                var settled = !expanded
+                var stableUpdates = 0
+                var lastHeight = 0.0
+                for _ in 0..<300 where !settled {
                     try await Task.sleep(for: .milliseconds(16))
                     appearance.performAsCurrentDrawingAppearance { view.layoutSubtreeIfNeeded() }
+                    let height = heights.values[event] ?? 0
+                    stableUpdates = height == lastHeight ? stableUpdates + 1 : 0
+                    lastHeight = height
+                    settled = height > (collapsedEventHeight ?? .infinity) + 100 && stableUpdates >= 10
+                }
+                if !expanded {
+                    for _ in 0..<30 {
+                        try await Task.sleep(for: .milliseconds(16))
+                        appearance.performAsCurrentDrawingAppearance { view.layoutSubtreeIfNeeded() }
+                    }
+                    collapsedEventHeight = heights.values[event]
+                }
+                guard settled else {
+                    print("  sources did not load: grid-row-expanded-\(variant.name)")
+                    failures += 1
+                    continue
                 }
                 var rendered: NSBitmapImageRep?
                 appearance.performAsCurrentDrawingAppearance {
