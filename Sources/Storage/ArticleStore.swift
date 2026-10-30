@@ -217,6 +217,13 @@ final class ArticleStore: ObservableObject {
     }
 
     func markAllAsRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) async {
+        // A Shortcut can run during launch: wait for initialize to set the collection-only feeds, or panel reports
+        // would be marked read and surface in History. ponytail: polls up to 10 s; await the init task if it grows.
+        for _ in 0..<100 where !isReady { try? await Task.sleep(for: .milliseconds(100)) }
+        guard isReady else {
+            operationError = "Could not mark articles as read. Please try again."
+            return
+        }
         do {
             try await database.markAllRead(feedUrl: feedUrl, muting: muting)
             await refreshState()
