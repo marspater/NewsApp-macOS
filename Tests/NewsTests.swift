@@ -667,6 +667,7 @@ struct NewsTests {
             try await testEventClustering(fixtureRoot: fixtureRoot)
             try await testArticleSignalsRoundTrip()
             try await testPairAssessmentsRecorded()
+            try await testStoryLayer()
             try await testEventInclusions()
             try await testPairModelGreyZone()
             try await testEventEmbeddingIntegration()
@@ -776,6 +777,7 @@ struct NewsTests {
         try await testEventClustering(fixtureRoot: fixtureRoot)
         try await testArticleSignalsRoundTrip()
         try await testPairAssessmentsRecorded()
+        try await testStoryLayer()
         try await testEventInclusions()
         try await testPairModelGreyZone()
         try await testEventEmbeddingIntegration()
@@ -1058,7 +1060,7 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "26", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "27", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
@@ -1128,7 +1130,7 @@ struct NewsTests {
         let shrinkPath = directory.appendingPathComponent("shrink.sqlite3").path
         let shrinkDB = DatabaseEngine(path: shrinkPath)
         try await shrinkDB.open()
-        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "26", "New database opens at schema v26")
+        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "27", "New database opens at schema v27")
         assertEqual(value(shrinkPath, "PRAGMA auto_vacuum;"), "2", "New database uses incremental auto_vacuum (2)")
 
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -1319,7 +1321,7 @@ struct NewsTests {
         let db = DatabaseEngine(path: workingCopy.path)
         try await db.open()
         assertEqual(
-            value(workingCopy.path, "PRAGMA user_version;"), "26",
+            value(workingCopy.path, "PRAGMA user_version;"), "27",
             "Fixture migrates cleanly to current schema v26 (#539)"
         )
         assertEqual(
@@ -5733,7 +5735,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "26", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "27", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -5986,7 +5988,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "26", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -7315,7 +7317,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "26", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -9762,7 +9764,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "26", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "27", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -10504,7 +10506,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "26", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -11498,7 +11500,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "26", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -11727,6 +11729,104 @@ struct NewsTests {
             refused = true
         }
         assertTrue(refused, "The live library is refused")
+    }
+
+    /// The story layer (#581): two events of one story (a vote and the protest after it) become one card, versions and
+    /// seen state add up across the story, "Not the Same Event" through the story works on the article's own event,
+    /// and an exclusion across the two events keeps them apart.
+    static func testStoryLayer() async throws {
+        print("  - Testing the story layer: one card per story across related acts (#581)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://story.invalid/\(id)", guid: "story-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let stories = [
+            story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana", hours: 0),
+            story(2, "Parliament in Ljubljana votes to oust Prime Minister Novak", hours: 1),
+            story(3, "Thousands protest in Ljubljana after parliament votes to oust Novak", hours: 5),
+            story(4, "Thousands protest in Ljubljana streets after parliament votes to oust Novak", hours: 6),
+        ]
+        try await db.upsertArticles(stories)
+        let now = start.addingTimeInterval(7 * 3600)
+        let report = try await EventClusterer.run(in: db, now: now)
+        var ids: [String] = []
+        for article in stories { ids.append(try await db.resolvedArticleID(for: article)) }
+        guard let vote = try await db.eventID(forArticle: ids[0]),
+            let protest = try await db.eventID(forArticle: ids[2]),
+            vote != protest
+        else {
+            assertTrue(false, "The vote and the protest are two events")
+            return
+        }
+        let storyID = try await db.storyID(forEvent: vote)
+        assertEqual(storyID, try await db.storyID(forEvent: protest), "Two acts of one story share a story")
+        assertTrue(storyID == vote || storyID == protest, "The story is named by one of its events")
+        assertTrue(
+            report.changedEvents.contains(vote) && report.changedEvents.contains(protest), "Story changes are reported")
+        assertEqual(try await db.storyEventIDs(storyID ?? "").sorted(), [vote, protest].sorted(), "Both events belong")
+        var summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
+        assertEqual(summaries.count, 1, "One card for the story")
+        assertEqual(summaries.first?.eventID, storyID, "The card carries the story id")
+        assertEqual(summaries.first?.members.count, 4, "All four reports are on the card")
+        assertEqual(summaries.first?.membershipVersion, 2, "The story version is the sum of its events' versions")
+        assertEqual(summaries.first?.seenVersion, nil, "Never opened")
+        assertEqual(try await db.markEventSeen(storyID ?? ""), 2, "Seeing the story marks every event")
+        summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
+        assertEqual(summaries.first?.seenVersion, 2, "Seen versions add up")
+        assertFalse(summaries.first?.hasSubstantiveUpdate ?? true, "Nothing new since the reader looked")
+        try await db.upsertArticles([
+            story(5, "Thousands protest in central Ljubljana after parliament votes to oust Novak", hours: 6.5)
+        ])
+        _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(60))
+        summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
+        assertEqual(summaries.first?.members.count, 5, "The late protest report joins the story")
+        assertTrue(summaries.first?.hasSubstantiveUpdate ?? false, "A report that joined after the look is an update")
+        // "Not the Same Event" through the story: the protest report leaves its own event, not the lead's.
+        let separated = try await db.separateArticle(ids[2], fromEvent: storyID ?? "")
+        assertEqual(separated.id, protest, "The article leaves the event that held it")
+        assertEqual(try await db.eventID(forArticle: ids[2]), nil, "It is in no event afterwards")
+        let exclusions = try await db.eventExclusions(of: ids[2])
+        assertTrue(
+            exclusions.isSuperset(of: [ids[0], ids[1], ids[3]]), "It is excluded from every member of the story")
+        // An exclusion across the two events keeps them apart as stories.
+        let apart = DatabaseEngine(path: ":memory:")
+        try await apart.open()
+        try await apart.upsertArticles(stories)
+        _ = try await EventClusterer.run(in: apart, now: now)
+        var apartIDs: [String] = []
+        for article in stories { apartIDs.append(try await apart.resolvedArticleID(for: article)) }
+        guard let voteApart = try await apart.eventID(forArticle: apartIDs[0]),
+            let protestApart = try await apart.eventID(forArticle: apartIDs[2])
+        else {
+            assertTrue(false, "The vote and the protest are two events in the exclusion fixture")
+            await apart.close()
+            await db.close()
+            return
+        }
+        assertEqual(
+            try await apart.storyID(forEvent: voteApart), try await apart.storyID(forEvent: protestApart),
+            "Linked before the exclusion")
+        // A reader's exclusion between one vote report and one protest report, both staying in their events.
+        let (low, high) = apartIDs[0] < apartIDs[2] ? (apartIDs[0], apartIDs[2]) : (apartIDs[2], apartIDs[0])
+        try await apart.eventRows(
+            "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+            [.text(low), .text(high), .real(now.timeIntervalSince1970)])
+        _ = try await EventClusterer.run(in: apart, now: now.addingTimeInterval(120))
+        assertTrue(
+            try await apart.storyID(forEvent: voteApart) != (try await apart.storyID(forEvent: protestApart)),
+            "An exclusion across the events vetoes the story link")
+        // A story id naming an event that pruning removed is cleared with it.
+        try await apart.eventRows("UPDATE events SET story_id = 'pruned-lead' WHERE id = ?;", [.text(protestApart)])
+        try await apart.pruneEmptyEvents()
+        assertEqual(
+            try await apart.eventRows("SELECT story_id FROM events WHERE id = ?;", [.text(protestApart)]).first?[0],
+            nil, "A dangling story id is cleared when its lead event is gone")
+        await apart.close()
+        await db.close()
     }
 
     /// The pair model (#525) is asked only about borderline pairs. A confident answer joins two reports that share no
@@ -12751,12 +12851,49 @@ struct NewsTests {
         }
         let precision = truePairs + falsePairs == 0 ? 0 : Double(truePairs) / Double(truePairs + falsePairs)
         let recall = truePairs + missed == 0 ? 0 : Double(truePairs) / Double(truePairs + missed)
-        // Story-level view: recent stories shown in an event with two or more publishers.
+        // Story-level view: recent stories shown in an event with two or more publishers, and in a story (#581).
         let recent = try await recentLibraryRows(db).rows
         let sources = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }
             .mapValues { Set($0.map(\.source)).count }
         let multi = recent.filter { ($0.event.flatMap { sources[$0] } ?? 0) >= 2 }.count
+        var storyOf: [String: String] = [:]
+        for row in try await db.eventRows("SELECT id, coalesce(story_id, id) FROM events WHERE merged_into IS NULL;") {
+            if let id = row[0], let story = row[1] { storyOf[id] = story }
+        }
+        let byStory = Dictionary(grouping: recent.filter { $0.event != nil }) { storyOf[$0.event ?? ""] ?? "" }
+        let storySources = byStory.mapValues { Set($0.map(\.source)).count }
+        let multiStory = recent.filter { ($0.event.flatMap { storySources[storyOf[$0] ?? ""] } ?? 0) >= 2 }.count
+        // Events per story over every event, not only those with reports in the audit window.
+        let eventsOf = Dictionary(grouping: storyOf.keys) { storyOf[$0] ?? "" }.mapValues(\.count)
+        let joinedStories = byStory.filter { (eventsOf[$0.key] ?? 0) >= 2 }
+        if let output = ProcessInfo.processInfo.environment["NEWS_EVENT_OUTPUT"] {
+            // One line per story that joins two or more events: each event's earliest headline within the window,
+            // for the group review.
+            var lines = ["story_id,events,recent_members,recent_acts"]
+            for (story, rows) in joinedStories.sorted(by: { $0.key < $1.key }) {
+                let acts = Dictionary(grouping: rows) { $0.event ?? "" }.values
+                    .compactMap { group in
+                        group.min(by: { $0.date < $1.date }).map { "\(group.count)× \($0.source): \($0.title)" }
+                    }
+                    .sorted()
+                lines.append(
+                    [
+                        story, String(eventsOf[story] ?? acts.count), String(rows.count),
+                        "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
+                    ]
+                    .joined(separator: ","))
+            }
+            try StoryCorpus.writePrivate(
+                Data(lines.joined(separator: "\n").utf8),
+                to: try StoryCorpus.privateDirectory(output).appendingPathComponent("story-groups.csv"),
+                replacing: false)
+        }
         await db.close()
+        print(
+            String(
+                format:
+                    "    stories: %d (%.0f%%) recent stories in a multi-publisher story; %d stories join two or more events",
+                multiStory, recent.isEmpty ? 0 : 100 * Double(multiStory) / Double(recent.count), joinedStories.count))
         print(
             String(
                 format:

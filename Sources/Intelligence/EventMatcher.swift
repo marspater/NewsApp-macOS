@@ -531,6 +531,9 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// Two reports from one publisher are compatible for admission only when they match each other (#582). Measured on
     /// the library holdout: one wrong link fewer, one true link (a live blog beside its report) fewer; off by default.
     var samePublisherRequiresMatch = false
+    /// A related-act pair links two events into one story when it shares at least this many specific names (#581):
+    /// a country or a common name alone linked unrelated stories in 35 of 56 reviewed related-act rows.
+    var storyLinkAnchors = 2
     static let standard = EventMatchPolicy()
 }
 

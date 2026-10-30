@@ -19,6 +19,10 @@ actor DatabaseEngine {
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
+    /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
+    private(set) var lastStoryPass: Date?
+
+    func recordStoryPass(at date: Date) { lastStoryPass = date }
     private(set) var healthNotice: String?
 
     func databaseHealthNotice() -> String? {
@@ -1104,6 +1108,25 @@ actor DatabaseEngine {
             }
             try Task.checkCancellation()
             try setUserVersion(26)
+        }
+        if version < 27 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // The story layer (#581): a live event may belong to a story, named by the id of its earliest event.
+                // The clusterer's story pass rewrites it for active events; NULL means the event is a story of its own.
+                // A fixture that re-runs the migrations from an older version may already carry the column.
+                if !(try columnNames(of: "events")).contains("story_id") {
+                    try executeSimple("ALTER TABLE events ADD COLUMN story_id TEXT;")
+                }
+                try executeSimple("CREATE INDEX IF NOT EXISTS idx_events_story ON events(story_id);")
+                try Task.checkCancellation()
+                try setUserVersion(27)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
         }
     }
 
