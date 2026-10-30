@@ -403,12 +403,11 @@ struct BriefingCompletionBanner: View {
 
 /// Root Situation Board view presenting the finite daily Briefing (Epic R): the hero carousel, the World Tension strip,
 /// the stories as tiles grouped by topic, and the completion banner. It scrolls with the list's masthead inside the
-/// list's own scroll view and takes plain values; the list loads them.
+/// list's own scroll view and takes plain values; the list loads them. Only the strip reads the window's World
+/// Tension model.
 struct BriefingView: View {
     let entries: [FeedEntry]
     let briefing: FiniteBriefing?
-    /// The World Tension state the sidebar and the sheet show (#781).
-    let tension: WorldTensionState
     /// One cited fact and the best image per story, read from the library by the list.
     var details = BriefingStoryDetails()
     var readIDs: Set<String> = []
@@ -424,7 +423,6 @@ struct BriefingView: View {
     init(
         entries: [FeedEntry],
         briefing: FiniteBriefing?,
-        tension: WorldTensionState,
         details: BriefingStoryDetails = BriefingStoryDetails(),
         readIDs: Set<String> = [],
         savedIDs: Set<String> = [],
@@ -436,7 +434,6 @@ struct BriefingView: View {
     ) {
         self.entries = entries
         self.briefing = briefing
-        self.tension = tension
         self.details = details
         self.readIDs = readIDs
         self.savedIDs = savedIDs
@@ -484,7 +481,8 @@ struct BriefingView: View {
                     entries: hero, images: details.images, readIDs: readIDs, clock: clock,
                     isReaderOpen: isMotionPaused, onOpen: actions.open)
             }
-            BriefingTensionStripView(state: tension)
+            // Reads the window's World Tension model, as the sidebar does (#781).
+            BriefingTensionStripView()
             BriefingTileGridView(
                 sections: Self.sections(entries), facts: details.facts, readIDs: readIDs, savedIDs: savedIDs,
                 focusedID: focusedID, actions: actions)

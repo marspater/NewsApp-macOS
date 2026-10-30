@@ -37,13 +37,15 @@ struct MainView: View {
 
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     /// The one World Tension state the sidebar, the Briefing strip and the sheet show (#781).
-    @State private var tension = WorldTensionState()
+    @State private var tension = WorldTensionModel()
     @State private var showsTension = false
     /// Reassess requests from the sheet; one newer than the last handled forces a fresh assessment.
     @State private var tensionReassessments = 0
     @State private var handledTensionReassessments = 0
     /// The UTC day the reading belongs to; it advances at midnight UTC so the sidebar moves to the new day's reading.
     @State private var tensionDayStart = TensionMethodology.day(containing: Date()).start
+    /// Why the library did not open, kept after its alert is dismissed, so World Tension says why it has nothing.
+    @State private var libraryFailure: String?
     @State private var isWindowDropTargeted = false
     /// The section shown before the current one, where the Briefing's Back returns (#780).
     @State private var previousTopic = "Today"
@@ -76,6 +78,8 @@ struct MainView: View {
 
     var body: some View {
         splitView
+            // Injected once: the sidebar foot, the Briefing strip and the sheet read it (#781).
+            .environment(tension)
             .alert(
                 "Operation failed",
                 isPresented: operationErrorBinding
@@ -99,6 +103,9 @@ struct MainView: View {
             }
             .task(id: tensionReloadKey) {
                 await reloadTension()
+            }
+            .onChange(of: articleStore.operationError, initial: true) { _, error in
+                if !articleStore.isReady, let error { libraryFailure = error }
             }
             .task(id: tensionDayStart) {
                 await scheduleTensionDayRollover()
@@ -200,7 +207,6 @@ struct MainView: View {
             selectedTopic: Binding(get: { selectedTopic }, set: { showSection($0 ?? "Today") }),
             mastheadNotice: $mastheadNotice,
             showsTensionReading: appSettings.tensionCollectionOptIn,
-            tension: tension,
             openTension: { showsTension = true }
         )
         .environmentObject(appSettings)
@@ -220,7 +226,6 @@ struct MainView: View {
                     searchText: searchBinding,
                     mastheadNotice: $mastheadNotice,
                     articlePath: $articlePath,
-                    tension: tension,
                     previousTopic: previousTopic,
                     isSheetPresented: showsTension
                 )
@@ -258,7 +263,8 @@ struct MainView: View {
 
     @ViewBuilder
     private func tensionSheetContent() -> some View {
-        TensionIndexView(state: tension, reassess: { tensionReassessments += 1 })
+        TensionIndexView(reassess: { tensionReassessments += 1 })
+            .environment(tension)
     }
 
     // MARK: - Bindings & State Helpers
@@ -336,10 +342,12 @@ struct MainView: View {
         let aiEnabled = appSettings.aiEnabled
         let collectionEnabled = appSettings.tensionCollectionOptIn
         guard articleStore.isReady else {
-            tension = WorldTensionState(aiEnabled: aiEnabled, collectionEnabled: collectionEnabled)
+            // Opening, or failed to open: the failure is the reason there is nothing, instead of "Assessing" forever.
+            tension.state = WorldTensionState(
+                aiEnabled: aiEnabled, collectionEnabled: collectionEnabled, problem: libraryFailure)
             return
         }
-        tension.isLoading = aiEnabled && collectionEnabled
+        tension.state.isLoading = aiEnabled && collectionEnabled
         // Only cancellation throws; the reload that cancelled this one replaces the state and keeps a pending Reassess.
         guard
             let loaded = try? await WorldTensionState.load(
@@ -347,7 +355,7 @@ struct MainView: View {
                 collectionEnabled: collectionEnabled, force: requested > handledTensionReassessments)
         else { return }
         handledTensionReassessments = requested
-        tension = loaded
+        tension.state = loaded
     }
 
     private func scheduleTensionDayRollover() async {
@@ -428,7 +436,7 @@ struct MainView: View {
     /// World Tension is rescored when collection or AI is turned on, after each refresh, when a new UTC day begins and
     /// when the sheet asks to reassess.
     private var tensionReloadKey: String {
-        "\(appSettings.tensionCollectionOptIn):\(appSettings.aiEnabled):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0):\(tensionDayStart.timeIntervalSince1970):\(tensionReassessments)"
+        "\(appSettings.tensionCollectionOptIn):\(appSettings.aiEnabled):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0):\(tensionDayStart.timeIntervalSince1970):\(tensionReassessments):\(libraryFailure ?? "")"
     }
 
     // MARK: - Search Operators

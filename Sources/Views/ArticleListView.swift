@@ -46,8 +46,6 @@ struct ArticleListView: View {
     @Binding var searchText: String
     @Binding var mastheadNotice: MastheadNotice?
     @Binding var articlePath: NavigationPath
-    /// The World Tension state the sidebar shows, for the Briefing strip (#781).
-    var tension = WorldTensionState()
     /// Where the Briefing's Back returns: the destination shown before it, Today if none (#780).
     var previousTopic = "Today"
     /// A sheet covers the window, so the Briefing carousel holds still.
@@ -837,7 +835,6 @@ struct ArticleListView: View {
             BriefingView(
                 entries: listed,
                 briefing: briefing,
-                tension: tension,
                 details: briefingDetails,
                 readIDs: readManager.readArticles,
                 savedIDs: briefingSavedIDs(listed),

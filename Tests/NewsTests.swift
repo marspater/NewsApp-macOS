@@ -4701,6 +4701,30 @@ struct NewsTests {
         assertEqual(stale.status, .stale, "A reading of an earlier UTC day is stale")
         assertTrue(stale.note?.hasPrefix("Reading from ") == true, "A stale reading says how old it is")
         assertEqual(stale.reading?.assessment.score, 30, "… and is still shown")
+        // UTC days decide staleness and its wording: at 00:05 UTC a reading made 35 minutes earlier is yesterday's.
+        let lateReading = WorldTensionReading(
+            evaluatedAt: today.addingTimeInterval(-30 * 60), inputHash: "late", modelGeneration: "generation",
+            headlines: [WorldTensionHeadline(id: "C1", title: "Peace talks resume", publisher: "Panel")],
+            assessment: WorldTensionAssessment(
+                score: 30, summary: "Ceasefire talks continue between the parties.", reasons: reasons))
+        let justAfterMidnight = WorldTensionState(history: [lateReading], loadedAt: today.addingTimeInterval(5 * 60))
+        assertEqual(justAfterMidnight.status, .stale, "Yesterday's 23:30 UTC reading is stale at 00:05 UTC")
+        assertEqual(justAfterMidnight.note, "Reading from yesterday", "… and says yesterday, not minutes ago")
+        let lateSameDay = WorldTensionState(history: [lateReading], loadedAt: today.addingTimeInterval(-5 * 60))
+        assertEqual(lateSameDay.status, .assessed, "Five minutes before midnight UTC it is still today's")
+        let older = WorldTensionState(history: [reading(-3, 20)], loadedAt: today.addingTimeInterval(23 * 3600))
+        assertEqual(older.note, "Reading from \(reading(-3, 20).dayText)", "An older reading names its UTC day")
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        assertTrue(
+            lateReading.dayText.contains(String(utc.component(.day, from: lateReading.id))),
+            "A reading's day is its UTC day, whatever the local time zone")
+        var reloading = stale
+        reloading.problem = WorldTensionError.deferred.errorDescription
+        reloading.isLoading = true
+        assertTrue(
+            reloading.explanation?.contains("being assessed") == true,
+            "A running assessment is described, not the previous run's failure")
         let gapped = [
             reading(-9, 10), reading(-6, 20), reading(-5, 30), reading(-3, 40), reading(-2, 50, generation: "next"),
             reading(-1, 60, generation: "next"), reading(0, 70, generation: "next"),

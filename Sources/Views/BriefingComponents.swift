@@ -145,7 +145,9 @@ struct BriefingStoryDetails: Equatable, Sendable {
 /// in the words the sidebar and the sheet use (#781), the 7-day trend and up to three driving headlines. Without a
 /// reading it says why, in the same words.
 struct BriefingTensionStripView: View {
-    let state: WorldTensionState
+    /// The window's model, so the strip cannot be handed anything but what the sidebar shows (#781).
+    @Environment(WorldTensionModel.self) private var model
+    private var state: WorldTensionState { model.state }
 
     @Environment(\.effectiveContrast) private var contrast
     @Environment(\.openURL) private var openURL
