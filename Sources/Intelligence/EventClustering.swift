@@ -180,7 +180,9 @@ enum EventClusterer {
             } else {
                 sim = nil
             }
-            return EventMatcher.assess(features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim)
+            return EventMatcher.assess(
+                features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim,
+                samePublisher: !a.source.isEmpty && a.source == b.source)
         }
         func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async -> EventPairAssessment {
             var pair = await ruled(a, b)
