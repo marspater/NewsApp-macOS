@@ -3964,14 +3964,23 @@ actor DatabaseEngine {
     /// never makes an announced story new again. An announcement of the last day keeps its time and lane under the
     /// survivor, recorded with the survivor's lead headline now (or the survivor's own recent one), so only a later
     /// change of that headline notifies again. A waiting priority key moves the same way. Merges forward one hop, so
-    /// one pass settles every row.
+    /// one pass settles every row. A story announced outside any event (#790) hands its row to the event it joined the
+    /// same way, so the event counts as announced and its next report stays quiet.
     private func foldMergedNotifications(since cutoff: TimeInterval) throws {
         let forwarded = "JOIN events e ON e.id = t.event_id WHERE e.merged_into IS NOT NULL"
+        let clustered = "JOIN event_members m ON m.article_id = t.event_id"
         let announced = try eventRows(
-            "SELECT t.event_id, e.merged_into, t.lead_key, t.notified_at, t.lane FROM event_notifications t \(forwarded);"
-        )
+            """
+            SELECT t.event_id, e.merged_into, t.lead_key, t.notified_at, t.lane FROM event_notifications t \(forwarded)
+            UNION ALL
+            SELECT t.event_id, m.event_id, t.lead_key, t.notified_at, t.lane FROM event_notifications t \(clustered);
+            """)
         let queued = try eventRows(
-            "SELECT t.event_id, e.merged_into, t.lead_key FROM notification_priority_queue t \(forwarded);")
+            """
+            SELECT t.event_id, e.merged_into, t.lead_key FROM notification_priority_queue t \(forwarded)
+            UNION ALL
+            SELECT t.event_id, m.event_id, t.lead_key FROM notification_priority_queue t \(clustered);
+            """)
         guard !announced.isEmpty || !queued.isEmpty else { return }
         let leads = try eventLeadTitles(Set((announced + queued).compactMap { $0[1] }))
         func leadKey(_ row: [String?]) -> String {

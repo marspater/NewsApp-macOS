@@ -180,7 +180,9 @@ Mars approved for #545 on 26 Oct):
 
 - `event_notifications(event_id PRIMARY KEY, notified_at, lead_key, lane)`: exists (#545). Gains `lane`: 0 normal,
   1 starred, 2 priority. A database from an earlier build gets the column through one guarded `ALTER TABLE`. Written
-  for every event a banner covers, including each event in a grouped banner. Within 24 h it keeps the highest lane.
+  for every event a banner covers, including each event in a grouped banner, and under the report's own id for a
+  report outside any event (#790); when that report later joins an event, the row moves to the event on the next read,
+  as a merged event's row does, so the event counts as announced. Within 24 h it keeps the highest lane.
 - `notification_deliveries(id INTEGER PRIMARY KEY, lane INTEGER NOT NULL, grouped INTEGER NOT NULL, feed_url TEXT,
   story_count INTEGER NOT NULL, delivered_at REAL NOT NULL)`: one row per posted banner. `feed_url` is set for starred
   banners. Rows older than 7 days are pruned on write.

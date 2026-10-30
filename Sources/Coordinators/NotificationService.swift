@@ -511,8 +511,10 @@ private struct LanePlanner {
         NotificationService.leadKey(of: article, event: key(article), delivery: delivery)
     }
 
+    /// The key a banner announces: the story's event, or the story itself outside any event, so a later event it
+    /// joins counts as announced (#790).
     func announces(_ article: FeedArticle) -> [String: String] {
-        delivery.events[article.id].map { [$0: lead(article)] } ?? [:]
+        [key(article): lead(article)]
     }
 
     func publishers(_ article: FeedArticle) -> Int {
@@ -522,8 +524,7 @@ private struct LanePlanner {
     /// Whether the story's key may post in `lane`: not announced, a new lead headline, or a higher lane. A new event of
     /// a story another of whose events was announced adds to that story and posts only in a higher lane (#740).
     func fresh(_ article: FeedArticle, in lane: NotificationLane) -> Bool {
-        guard let event = delivery.events[article.id] else { return true }
-        if let seen = delivery.ledger.announced[event] {
+        if let seen = delivery.ledger.announced[key(article)] {
             // A new lead notifies again; a higher lane only above the story's highest announced lane.
             return seen.leadKey != lead(article) || lane > max(seen.lane, storyLanes[story(article)] ?? seen.lane)
         }
