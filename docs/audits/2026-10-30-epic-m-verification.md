@@ -81,3 +81,12 @@ The 20-pair spot-checks noted as pending in `2026-10-24-pair-decision-review.md`
 | README still says matcher v11 and "zero false pairs" | #569 |
 | Performance budgets after the story pass | #543, #691 |
 | Active-work cancellation test flaky under load | #692 |
+
+## Accepted limitation: replay calibration (#742)
+
+Evaluation replays (`reclusteredLibraryCopy`, the library-holdout run) fit the verdict calibration (#629) once, from the copy's final verdicts, and apply it at every replay step. Production fits only from the verdicts that exist at the time. This is accepted for v2:
+
+- The calibration stays dormant below 50 verdicts, and no evaluated library has that many (the 29 October copy has none), so every replay so far ran without it.
+- Refitting per step needs article identity on `PairCalibration.Row` and stored features for excluded pairs the replay never scores.
+
+Revisit when a library with 50 or more verdicts is evaluated; until then a replay result is not affected.
