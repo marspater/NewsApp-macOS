@@ -7,7 +7,7 @@ import os
 /// atomic batch transactions, and retention pruning.
 actor DatabaseEngine {
     static let shared = DatabaseEngine()
-    let logger = Logger(subsystem: "com.marspater.news", category: "DatabaseEngine")
+    let logger = NewsSignposts.databaseLog
     private struct DBConnection: @unchecked Sendable {
         var handle: OpaquePointer?
     }
@@ -1334,6 +1334,9 @@ actor DatabaseEngine {
         }
         return Int(sqlite3_column_int(stmt, 0))
     }
+
+    /// The open library's schema version (`PRAGMA user_version`), for Help › Export Diagnostics (#564).
+    func storedSchemaVersion() throws -> Int { try getUserVersion() }
 
     private func sqliteError(_ db: OpaquePointer, _ context: String) -> NSError {
         NSError(

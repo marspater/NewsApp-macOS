@@ -106,6 +106,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Views/ReaderSupportViews.swift \
     Sources/Views/EventOverviewReaderView.swift \
     Sources/App/NewsSignposts.swift \
+    Sources/App/DiagnosticsExport.swift \
     Sources/App/UpdateChecker.swift \
     Sources/App/NewsURLParser.swift \
     Sources/App/Intents.swift \

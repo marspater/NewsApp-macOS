@@ -8,7 +8,7 @@ import os
 /// Orchestration layer coordinating feed fetching, article caching, enrichment, and section filtering.
 @MainActor
 class FeedManager: NSObject, ObservableObject {
-    private let logger = Logger(subsystem: "com.marspater.news", category: "FeedManager")
+    private let logger = NewsSignposts.feedsLog
 
     enum FeedStatus: Equatable, Sendable {
         case idle
