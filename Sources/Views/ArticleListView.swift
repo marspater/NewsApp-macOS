@@ -669,7 +669,9 @@ struct ArticleListView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        // Aligned with the content column: the centred list and Briefing measure, or the full-width grid.
+        .frame(maxWidth: gridLayout && !isBriefing ? .infinity : AppLayout.listMaxWidth, alignment: .leading)
+        .frame(maxWidth: .infinity)
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, AppSpacing.md)
         .padding(.bottom, AppLayout.cardGap)
