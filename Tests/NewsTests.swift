@@ -19768,7 +19768,7 @@ struct NewsTests {
             assertTrue(!text.contains(hidden), "The export leaves out \(hidden)")
         }
         let tricky = DiagnosticsExport.redact(
-            "a https://news.example.com/private'token b https://user:pass@word@news.example.com:8443/p c", titles: [])
+            "a https://news.example.com/private'token b https://reader@mail@news.example.com:8443/p c", titles: [])
         assertEqual(tricky, "a news.example.com b news.example.com c", "Quotes and repeated @ never keep URL text")
         let logText = files["log.txt"] ?? ""
         assertTrue(logText.contains("Fetch failed for news.example.com after 3 tries"), "URLs keep their host")
