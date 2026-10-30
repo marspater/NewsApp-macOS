@@ -598,6 +598,14 @@ enum EventClusterer {
                 events.map { ($0.id, $0.members.sorted { ($0.date, $0.id) < ($1.date, $1.id) }) },
                 uniquingKeysWith: { a, _ in a })
             var components = StoryComponents()
+            /// Joins run earliest first report first (date, then article ID; event IDs are random): an exclusion makes the
+            /// join order decide which of two links forms, so it must not follow dictionary or input order (#791).
+            func joinsFirst(_ lhs: String, _ rhs: String) -> Bool {
+                let (a, b) = (membersOf[lhs]?.first, membersOf[rhs]?.first)
+                let (dateA, dateB) = (a?.date ?? .distantFuture, b?.date ?? .distantFuture)
+                if dateA != dateB { return dateA < dateB }
+                return (a?.id ?? lhs, lhs) < (b?.id ?? rhs, rhs)
+            }
             /// A reader's exclusion anywhere across the two stories keeps them apart, not only between two events: joins
             /// are transitive.
             func storiesExcluded(_ first: String, _ second: String) -> Bool {
@@ -609,14 +617,16 @@ enum EventClusterer {
                 }
                 return false
             }
-            for event in events {
+            for event in events.sorted(by: { joinsFirst($0.id, $1.id) }) {
                 try Task.checkCancellation()
                 var shared: [String: Int] = [:]
                 for anchor in anchorsOf[event.id] ?? [] {
-                    for other in eventsByAnchor[anchor] ?? [] where other > event.id { shared[other, default: 0] += 1 }
+                    for other in eventsByAnchor[anchor] ?? [] where joinsFirst(event.id, other) {
+                        shared[other, default: 0] += 1
+                    }
                 }
                 let minimum = matchPolicy.storyModelThreshold.isFinite ? 1 : matchPolicy.storyLinkAnchors
-                for (other, count) in shared where count >= minimum {
+                for (other, count) in shared.sorted(by: { joinsFirst($0.key, $1.key) }) where count >= minimum {
                     guard let a = membersOf[event.id], let b = membersOf[other],
                         !a.contains(where: { member in exclusions[member.id]?.isDisjoint(with: b.map(\.id)) == false }),
                         let gap = Self.closestGap(a, b), gap <= candidatePolicy.activeEventLifetime
@@ -662,8 +672,8 @@ enum EventClusterer {
                     }
                 }
                 var checked = Set<[String]>()
-                for ids in eventsByCountry.values {
-                    let sorted = ids.sorted()
+                for country in eventsByCountry.keys.sorted() {
+                    let sorted = (eventsByCountry[country] ?? []).sorted(by: joinsFirst)
                     for (index, first) in sorted.enumerated() {
                         for second in sorted[(index + 1)...] {
                             try Task.checkCancellation()

@@ -726,6 +726,7 @@ struct NewsTests {
             try await testPairAssessmentsRecorded()
             try await testReaderVerdictsExportAndGate()
             try await testStoryLayer()
+            try await testStoryPassOrderIndependent()
             try await testEventInclusions()
             try await testPairModelGreyZone()
             try await testEventEmbeddingIntegration()
@@ -842,6 +843,7 @@ struct NewsTests {
         try await testPairAssessmentsRecorded()
         try await testReaderVerdictsExportAndGate()
         try await testStoryLayer()
+        try await testStoryPassOrderIndependent()
         try await testEventInclusions()
         try await testPairModelGreyZone()
         try await testEventEmbeddingIntegration()
@@ -12773,6 +12775,58 @@ struct NewsTests {
         assertTrue(
             failure.contains("reader verdicts violated"), "A violated verdict fails the library holdout run: \(failure)"
         )
+    }
+
+    /// #791: with a reader's exclusion between two events that each agree with a third, which pair forms a story must
+    /// not depend on dictionary or input order: every insertion order and every run of the pass gives the same stories.
+    static func testStoryPassOrderIndependent() async throws {
+        print("  - Testing the story pass is independent of iteration and input order (#791)...")
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        func story(_ id: Int, _ title: String, hours: Double) -> FeedArticle {
+            FeedArticle(
+                title: title, link: "https://order.invalid/\(id)", guid: "order-\(id)", description: "",
+                pubDate: start.addingTimeInterval(hours * 3600), source: "Publisher \(id)")
+        }
+        let stories = [
+            story(1, "Parliament votes to oust Prime Minister Novak in Ljubljana", hours: 0),
+            story(2, "Parliament in Ljubljana votes to oust Prime Minister Novak", hours: 1),
+            story(3, "Novak's party appoints interim leader in Ljubljana after parliament ousts him", hours: 3),
+            story(4, "Novak's party names interim leader in Ljubljana after parliament ousts him", hours: 3.5),
+            story(5, "Thousands protest in Ljubljana after parliament votes to oust Novak", hours: 5),
+            story(6, "Thousands protest in Ljubljana streets after parliament votes to oust Novak", hours: 6),
+        ]
+        let now = start.addingTimeInterval(7 * 3600)
+        var generator = SystemRandomNumberGenerator()
+        var groupings = Set<[[Int]]>()
+        for _ in 0..<8 {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles(stories.shuffled(using: &generator))
+            _ = try await EventClusterer.run(in: db, now: now)
+            var ids: [String] = []
+            for article in stories { ids.append(try await db.resolvedArticleID(for: article)) }
+            // The reader excluded an appointment report against a protest report.
+            let (low, high) = ids[2] < ids[4] ? (ids[2], ids[4]) : (ids[4], ids[2])
+            try await db.eventRows(
+                "INSERT INTO event_exclusions(article_id, other_article_id, created_at) VALUES (?, ?, ?);",
+                [.text(low), .text(high), .real(now.addingTimeInterval(100).timeIntervalSince1970)])
+            _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(120))
+            var storyOf: [String] = []
+            for id in ids {
+                if let event = try await db.eventID(forArticle: id) {
+                    storyOf.append(try await db.storyID(forEvent: event) ?? event)
+                } else {
+                    storyOf.append(id)
+                }
+            }
+            let groups = Dictionary(grouping: storyOf.indices, by: { storyOf[$0] }).values.map { $0.sorted() }
+            groupings.insert(groups.sorted { $0.first ?? 0 < $1.first ?? 0 })
+            await db.close()
+        }
+        assertEqual(groupings.count, 1, "Every input order gives the same stories: \(groupings)")
+        assertEqual(
+            groupings.first, [[0, 1, 2, 3], [4, 5]],
+            "The vote joins the appointment, whose first report came first; the excluded protest stays apart")
     }
 
     /// The story layer (#581): two events of one story (a vote and the protest after it) become one card, versions and
