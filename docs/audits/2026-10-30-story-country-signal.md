@@ -32,3 +32,17 @@ Strict event results are unchanged in every row (6 same / 3 related / 3 differen
 No setting meets every target. The best one (K = 2, common countries excluded) raises story precision and doubles story recall on the labelled pairs and fixes the Jordan case, but it leaves 2.6 % wrong groups against 2 % and moves the multi-publisher share by 0.6 points against a 60 % target. The signal ships off by default as an evaluation knob so it can be re-measured on the next holdout. The remaining recall work, and whether it stays in v2, is the owner's call.
 
 Next levers seen in the labels: a disjoint sub-national place ("Karnataka" against "UP") as a veto for the country signal, and the matcher's own event-level misses (two reports of Harry Kane's Ballon d'Or were two events, which the story pass then joined).
+
+## Cross-country check (owner's request: an event about one country must not land in another's story)
+
+`--library-holdout` with `NEWS_EVENT_OUTPUT` now flags every story group and every event whose members' headlines name disjoint countries (`cross_country` in `story-groups.csv`, and `cross-country-events.csv`), and prints the counts. Headline countries are a coarse signal, so each flagged case was read.
+
+| Setting | Story groups with disjoint headline countries | Events with disjoint headline countries |
+| --- | --- | --- |
+| v14 (off) | 1 of 25 | 15 |
+| K = 2, common countries excluded | 2 of 39 | 15 |
+
+- **Stories:** no unrelated-country joins. The flagged groups are Flavio Bolsonaro leaving Brazil for the US (one story) and the Saudi–Houthi war (one conflict).
+- **Events:** of the 15, about nine are one event reported from two countries' side (Ceuta migrants: Morocco and Spain; the RAF Fairford plot: UK and Iran; Russian diesel and US prices; the Israeli ban on a UK delegation). About six are real mix-ups inside one conflict or region: Kyiv firefighters joined with Kramatorsk, a Ukrainian evacuation joined with Russian strikes on Kyiv, three different Houthi/Saudi acts, Senegal's Youth Olympics opening with Kenyan athletes.
+
+So a plain "disjoint countries conflict" rule would split the nine true events. The next country work is event-level: different named places inside one conflict (Kyiv against Kramatorsk) and different incidents under one live-blog series, each measured on the holdout before it ships.

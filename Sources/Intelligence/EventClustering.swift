@@ -638,7 +638,9 @@ enum EventClusterer {
                 }, uniquingKeysWith: { a, _ in a })
             // A country in more than the common-actor share of active events (a war's country, the US) is the
             // backdrop of many stories, not a link between two of them.
-            // Counted over every active event, one-report events included.
+            // Counted over every active event, one-report events included. A country needs at least three holders to be
+            // common: in a small window two events naming one country (a Jordan attack and the King's response) are the
+            // signal itself, not a backdrop.
             var countryHolders: [String: Int] = [:]
             for event in active {
                 let countries = event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).countries) }

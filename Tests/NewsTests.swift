@@ -13588,20 +13588,62 @@ struct NewsTests {
                 replacing: false)
             // One line per story that joins two or more events: each event's earliest headline within the window,
             // for the group review.
-            var lines = ["story_id,events,recent_members,recent_acts"]
+            // Countries named in headlines (#737): a story whose events name disjoint countries ("Jordan" beside "US")
+            // is flagged cross_country for the review; so is an event whose reports do.
+            func headlineCountries(_ rows: [LibraryRow]) -> Set<String> {
+                rows.reduce(into: Set<String>()) {
+                    $0.formUnion(EventFeatures(title: $1.title, description: "", date: $1.date).countries)
+                }
+            }
+            func disjointCountries(_ sets: [Set<String>]) -> Bool {
+                let named = sets.filter { !$0.isEmpty }
+                return named.indices.contains { i in named.indices.contains { j in named[i].isDisjoint(with: named[j]) }
+                }
+            }
+            var crossCountryStories = 0
+            var lines = ["story_id,events,recent_members,cross_country,countries,recent_acts"]
             for (story, rows) in joinedStories.sorted(by: { $0.key < $1.key }) {
-                let acts = Dictionary(grouping: rows) { $0.event ?? "" }.values
+                let groups = Dictionary(grouping: rows) { $0.event ?? "" }.values
+                let acts =
+                    groups
                     .compactMap { group in
                         group.min(by: { $0.date < $1.date }).map { "\(group.count)× \($0.source): \($0.title)" }
                     }
                     .sorted()
+                let countrySets = groups.map { headlineCountries($0) }
+                let cross = disjointCountries(countrySets)
+                if cross { crossCountryStories += 1 }
                 lines.append(
                     [
-                        story, String(eventsOf[story] ?? acts.count), String(rows.count),
+                        story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
+                        "\"" + countrySets.map { $0.sorted().joined(separator: " ") }.sorted().joined(separator: " | ")
+                            + "\"",
                         "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
                     ]
                     .joined(separator: ","))
             }
+            let crossCountryEvents = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }.values
+                .filter { group in disjointCountries(group.map { headlineCountries([$0]) }) }
+            print(
+                "    cross-country (headline countries disjoint): \(crossCountryStories) of \(joinedStories.count) story groups, "
+                    + "\(crossCountryEvents.count) events")
+            var eventLines = ["event,reports,countries,headlines"]
+            for group in crossCountryEvents {
+                eventLines.append(
+                    [
+                        group.first?.event ?? "", String(group.count),
+                        "\""
+                            + group.map { headlineCountries([$0]).sorted().joined(separator: " ") }.joined(
+                                separator: " | ") + "\"",
+                        "\""
+                            + group.map { "\($0.source): \($0.title)" }.joined(separator: " || ")
+                            .replacingOccurrences(of: "\"", with: "\"\"") + "\"",
+                    ].joined(separator: ","))
+            }
+            try StoryCorpus.writePrivate(
+                Data(eventLines.joined(separator: "\n").utf8),
+                to: try StoryCorpus.privateDirectory(output).appendingPathComponent("cross-country-events.csv"),
+                replacing: false)
             try StoryCorpus.writePrivate(
                 Data(lines.joined(separator: "\n").utf8),
                 to: try StoryCorpus.privateDirectory(output).appendingPathComponent("story-groups.csv"),
