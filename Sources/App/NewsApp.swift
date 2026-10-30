@@ -461,7 +461,7 @@ extension NewsApp {
         let confirm = NSAlert()
         confirm.messageText = "Replace your library with this backup?"
         confirm.informativeText =
-            "Your current stories, read history, saved stories and settings are replaced by the backup's, then News relaunches."
+            "Your current stories, read history and saved stories are replaced by the backup's, and your settings too if the backup includes them. The current library is kept beside it, then News relaunches."
         confirm.addButton(withTitle: "Restore")
         confirm.addButton(withTitle: "Cancel")
         guard confirm.runModal() == .alertFirstButtonReturn else { return }

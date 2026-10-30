@@ -982,7 +982,7 @@ struct SettingsView: View {
                 storageRow(
                     "Restore Library", detail: nil,
                     description:
-                        "Replaces the library and settings with a backup, then relaunches. The current library is kept beside it."
+                        "Replaces the library with a backup, and settings if the backup includes them, then relaunches. The current library is kept beside it."
                 ) {
                     Button("Restore Library…") { NewsApp.restoreLibrary() }
                 }

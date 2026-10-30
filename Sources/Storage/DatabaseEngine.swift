@@ -333,18 +333,23 @@ actor DatabaseEngine {
         logger.info("Backed up schema v\(version) library to \(target.lastPathComponent, privacy: .public)")
     }
 
-    /// Copies the library to `<name>-<label>-<yyyy-MM-dd>.sqlite3` beside it and keeps the newest two copies whose names
-    /// start with `<name>-<group>`. The copy is written under a temporary name and renamed when complete; a same-day
-    /// copy is replaced atomically, so it survives if the new one can't be put in place. With `fallingBackToFile`, a
-    /// library that can't be copied online (closed, or too damaged) is copied as a file instead.
+    /// Copies the library to `<name>-<label>-<yyyy-MM-dd>.sqlite3` beside it (`<yyyy-MM-dd-HHmmss>` with `withTime`) and
+    /// keeps the newest two copies whose names start with `<name>-<group>`. The copy is written under a temporary name
+    /// and renamed when complete; a copy with the same name is replaced atomically, so it survives if the new one can't
+    /// be put in place. With `fallingBackToFile`, a library that can't be copied online (closed, or too damaged) is
+    /// copied as a file instead.
     @discardableResult
-    private func keepCopyBeside(label: String, group: String, fallingBackToFile: Bool = false) throws -> URL {
+    private func keepCopyBeside(
+        label: String, group: String, withTime: Bool = false, fallingBackToFile: Bool = false
+    ) throws -> URL {
         let library = URL(fileURLWithPath: dbPath)
         let folder = library.deletingLastPathComponent()
         let prefix = "\(library.deletingPathExtension().lastPathComponent)-\(group)"
-        let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+        let stamp = DateFormatter()
+        stamp.locale = Locale(identifier: "en_US_POSIX")
+        stamp.dateFormat = withTime ? "yyyy-MM-dd-HHmmss" : "yyyy-MM-dd"
         let target = folder.appendingPathComponent(
-            "\(library.deletingPathExtension().lastPathComponent)-\(label)-\(day).sqlite3")
+            "\(library.deletingPathExtension().lastPathComponent)-\(label)-\(stamp.string(from: Date())).sqlite3")
         let partial = folder.appendingPathComponent(
             ".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier).partial")
         let fileManager = FileManager.default
@@ -443,6 +448,28 @@ actor DatabaseEngine {
     func writeBackup(to destination: URL, settings: Data) throws {
         guard dbPath != ":memory:" else { throw CocoaError(.fileNoSuchFile) }
         let fileManager = FileManager.default
+        // Replacing the library (or its WAL files) with its own backup would destroy it: compare resolved paths, and the
+        // file identity for an existing file, so a symbolic or hard link to the library is refused too.
+        func identity(_ path: String) -> (resolved: String, file: [Int]?) {
+            let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            let attributes = try? fileManager.attributesOfItem(atPath: resolved)
+            let file = (attributes?[.systemNumber] as? Int).flatMap { device in
+                (attributes?[.systemFileNumber] as? Int).map { [device, $0] }
+            }
+            return (resolved, file)
+        }
+        let target = identity(destination.path)
+        for path in [dbPath, dbPath + "-wal", dbPath + "-shm"] {
+            let live = identity(path)
+            guard target.resolved != live.resolved, target.file == nil || target.file != live.file else {
+                throw NSError(
+                    domain: "DatabaseEngine", code: -1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "That file is the News library itself. Choose another name or folder for the backup."
+                    ])
+            }
+        }
         let scratch =
             (try? fileManager.url(
                 for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: destination, create: true))
@@ -565,7 +592,8 @@ actor DatabaseEngine {
 
         // Nothing is swapped in until the current library is kept; a library too damaged to copy online is copied as a file.
         if fileManager.fileExists(atPath: dbPath) {
-            let kept = try keepCopyBeside(label: "before-restore", group: "before-restore", fallingBackToFile: true)
+            let kept = try keepCopyBeside(
+                label: "before-restore", group: "before-restore", withTime: true, fallingBackToFile: true)
             try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path)
         }
         // The side file goes before the library: it is small, and the old one is put back from memory if the swap fails.
