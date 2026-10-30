@@ -3705,6 +3705,16 @@ struct NewsTests {
         let feed = feedURL.absoluteString
         settings.feedURLs = [feed]
         settings.aiEnabled = false
+        // #799: only web links enter the library; an item without a link keeps its GUID identity.
+        let linked = [
+            "smb://evil.example/share", "x-apple.systempreferences:com.apple.preference.security",
+            "file:///etc/passwd", "https://example.com/story", "http://example.com/older", "",
+        ].map {
+            FeedArticle(title: "Item", link: $0, guid: $0, description: "", pubDate: Date(), source: "Publisher")
+        }
+        assertEqual(
+            FeedFetcher.webArticles(linked).map(\.link), ["https://example.com/story", "http://example.com/older", ""],
+            "Feed items whose links are not web addresses are dropped")
         let fetcher = FeedFetcher(client: client)
         var notified = 0
         // No image lookup: it outlives fetchFeedsAsync and its write transaction would hold the lock the trigger edits need.
