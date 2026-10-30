@@ -14176,14 +14176,14 @@ struct NewsTests {
                 let countrySets = groups.map { headlineCountries($0) }
                 let cross = disjointCountries(countrySets)
                 if cross { crossCountryStories += 1 }
-                lines.append(
-                    [
-                        story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
-                        "\"" + countrySets.map { $0.sorted().joined(separator: " ") }.sorted().joined(separator: " | ")
-                            + "\"",
-                        "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
-                    ]
-                    .joined(separator: ","))
+                let countries: String = countrySets.map { $0.sorted().joined(separator: " ") }.sorted()
+                    .joined(separator: " | ")
+                let headlines: String = acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"")
+                let fields: [String] = [
+                    story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
+                    "\"\(countries)\"", "\"\(headlines)\"",
+                ]
+                lines.append(fields.joined(separator: ","))
             }
             let crossCountryEvents = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }.values
                 .filter { group in disjointCountries(group.map { headlineCountries([$0]) }) }
