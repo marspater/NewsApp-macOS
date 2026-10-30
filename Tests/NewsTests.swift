@@ -1179,6 +1179,11 @@ struct NewsTests {
         assertEqual(
             value(copy, "SELECT count(*) FROM articles WHERE category IS NOT NULL;"), "0",
             "A library from before v22 keeps none of the classifier labels v22 wrote into the publisher column (#817)")
+        assertEqual(
+            value(
+                copy,
+                "SELECT count(*) FROM articles a WHERE NOT EXISTS (SELECT 1 FROM article_enrichment ae WHERE ae.article_id = a.id AND ae.category IS NOT NULL);"
+            ), "0", "Every article from before v22 keeps a classifier category in article_enrichment (#817)")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,

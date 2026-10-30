@@ -1550,7 +1550,14 @@ actor DatabaseEngine {
                 let labels = NewsCategory.allCases.map { "'\($0.rawValue)'" }.joined(separator: ", ")
                 try executeSimple(
                     version < 22
-                        ? "UPDATE articles SET category = NULL WHERE category IS NOT NULL;"
+                        // An article without an enrichment row keeps v22's label there, since the open-time backfill
+                        // fills existing rows only.
+                        ? """
+                        INSERT INTO article_enrichment (article_id, category)
+                            SELECT id, category FROM articles WHERE category IS NOT NULL
+                            ON CONFLICT(article_id) DO NOTHING;
+                        UPDATE articles SET category = NULL WHERE category IS NOT NULL;
+                        """
                         : """
                         UPDATE articles SET category = NULL WHERE category IS NOT NULL AND category = (
                             SELECT ae.category FROM article_enrichment ae WHERE ae.article_id = articles.id)
