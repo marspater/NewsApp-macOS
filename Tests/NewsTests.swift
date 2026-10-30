@@ -12653,6 +12653,9 @@ struct NewsTests {
             report.changedEvents.contains(vote) && report.changedEvents.contains(protest), "Story changes are reported")
         assertEqual(try await db.storyEventIDs(storyID ?? "").sorted(), [vote, protest].sorted(), "Both events belong")
         assertEqual(try await db.storyEventIDs(protest).sorted(), [vote, protest].sorted(), "… from either event")
+        assertEqual(
+            try await db.storyIDs(forEvents: [vote, protest]), [protest: vote],
+            "Notifications map a later event to its story; the story's own event is absent (#740)")
         var summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
         assertEqual(summaries.count, 1, "One card for the story")
         assertEqual(summaries.first?.eventID, protest, "The card opens the story's newest event")
@@ -18987,6 +18990,124 @@ struct NewsTests {
         assertEqual(
             together.banners.map(\.lane), [.priority, .starred, .normal, .normal, .normal],
             "Simultaneous arrivals post priority, then the starred group, then normal stories")
+
+        // Two events of one story (#740): one banner per pass, threaded by the story; a later event of an announced
+        // story adds to it without notifying again, unless it reaches a higher lane.
+        var storyDelivery = NotificationDelivery(mode: .full)
+        let stormFirst = report(800, "Storm reaches the coast")
+        let stormSecond = report(801, "Storm leaves thousands without power")
+        let stormMajor = report(802, "Explosion at a storm shelter")
+        storyDelivery.events = [stormFirst.id: "storm-a", stormSecond.id: "storm-b", stormMajor.id: "storm-c"]
+        storyDelivery.stories = ["storm-b": "storm-a", "storm-c": "storm-a"]
+        storyDelivery.publishers = ["storm-c": 5]
+        let storyPass = NotificationService.plan(
+            new: [(stormFirst, 0.7), (stormSecond, 0.75)], pending: [:], delivery: storyDelivery
+        ).banners
+        assertEqual(
+            storyPass.map { $0.article?.title ?? "" }, ["Storm leaves thousands without power"],
+            "Two events of one story post one banner, by the stronger report")
+        assertEqual(storyPass.first?.thread, "storm-a", "A story's banners share the story's thread")
+        storyDelivery.ledger.announced["storm-a"] = .init(
+            leadKey: EventFeedSummary.titleKey(stormFirst.title), lane: .normal)
+        assertTrue(
+            NotificationService.plan(new: [(stormSecond, 0.75)], pending: [:], delivery: storyDelivery).banners
+                .isEmpty,
+            "A new event of an announced story does not notify again")
+        assertEqual(
+            NotificationService.plan(new: [(stormMajor, 0.9)], pending: [:], delivery: storyDelivery).banners.map(
+                \.lane), [.priority],
+            "A new event of an announced story notifies when it reaches a higher lane")
+        // Both events announced: the stronger one unchanged, the other with a new lead headline. The new lead posts.
+        var bothAnnounced = storyDelivery
+        bothAnnounced.ledger.announced["storm-b"] = .init(leadKey: "an older lead", lane: .normal)
+        bothAnnounced.ledger.announced["storm-a"] = .init(
+            leadKey: EventFeedSummary.titleKey(stormFirst.title), lane: .normal)
+        assertEqual(
+            NotificationService.plan(
+                new: [(stormFirst, 0.8), (stormSecond, 0.75)], pending: [:], delivery: bothAnnounced
+            ).banners.map { $0.article?.title ?? "" }, ["Storm leaves thousands without power"],
+            "An unchanged event of a story does not hide the other event's new lead")
+        // A waiting priority key of the story drops out when another of its events gets a banner this pass.
+        var queuedStory = NotificationDelivery(mode: .full)
+        let shelterBlast = report(803, "Explosion at a storm shelter kills four")
+        queuedStory.events = [shelterBlast.id: "storm-c"]
+        queuedStory.stories = ["storm-b": "storm-a", "storm-c": "storm-a"]
+        queuedStory.publishers = ["storm-c": 5]
+        queuedStory.ledger.priorityQueue = [
+            QueuedPriority(event: "storm-b", title: "Storm leaves thousands without power", score: 0.8, leadKey: "x")
+        ]
+        let queuedPass = NotificationService.plan(new: [(shelterBlast, 0.9)], pending: [:], delivery: queuedStory)
+        assertEqual(
+            queuedPass.banners.map(\.grouped), [false],
+            "A story's waiting key is covered by its new individual banner, not grouped beside it")
+        // Two waiting keys of one story, left by earlier passes, count once in the next grouped banner.
+        var twoQueued = NotificationDelivery(mode: .full)
+        twoQueued.stories = ["storm-b": "storm-a", "storm-c": "storm-a"]
+        twoQueued.ledger.priorityQueue = [
+            QueuedPriority(event: "storm-c", title: "Explosion at a storm shelter", score: 0.9, leadKey: "c"),
+            QueuedPriority(event: "storm-b", title: "Storm leaves thousands without power", score: 0.8, leadKey: "b"),
+            QueuedPriority(event: "quake", title: "Earthquake strikes the north", score: 0.85, leadKey: "q"),
+        ]
+        let groupedOnce = NotificationService.plan(new: [], pending: [:], delivery: twoQueued).banners
+        assertEqual(groupedOnce.map(\.count), [2], "A story queued twice counts once in the grouped banner")
+        assertEqual(
+            Set(groupedOnce.first.map { Array($0.announces.keys) } ?? []), ["storm-b", "storm-c", "quake"],
+            "The grouped banner still announces every waiting key")
+        // A waiting key whose own event was announced under another lead still posts after a priority announcement.
+        twoQueued.ledger.priorityQueue = [
+            QueuedPriority(event: "storm-b", title: "Storm death toll rises", score: 0.8, leadKey: "new lead")
+        ]
+        twoQueued.ledger.announced["storm-b"] = .init(leadKey: "old lead", lane: .priority)
+        assertEqual(
+            NotificationService.plan(new: [], pending: [:], delivery: twoQueued).banners.map(\.count), [1],
+            "A waiting key with a changed lead survives the story's priority announcement")
+        // An event announced in the normal lane whose story another event announced in priority does not post again
+        // in the starred lane without a new lead.
+        var laneDelivery = NotificationDelivery(mode: .full)
+        var starredStorm = stormFirst
+        starredStorm.identityFeedURL = "https://starred.invalid/feed"
+        laneDelivery.starredFeedURLs = ["https://starred.invalid/feed"]
+        laneDelivery.events = [starredStorm.id: "storm-a"]
+        laneDelivery.stories = ["storm-c": "storm-a"]
+        laneDelivery.ledger.announced = [
+            "storm-a": .init(leadKey: EventFeedSummary.titleKey(stormFirst.title), lane: .normal),
+            "storm-c": .init(leadKey: "c", lane: .priority),
+        ]
+        assertTrue(
+            NotificationService.plan(
+                new: [(starredStorm, 0.5)], pending: ["https://starred.invalid/feed": [(starredStorm, 0.5)]],
+                delivery: laneDelivery
+            ).banners.isEmpty,
+            "A story announced in priority does not post again in the starred lane")
+        // A stale starred event does not hide a fresh normal event of the same story.
+        var staleStarred = NotificationDelivery(mode: .full)
+        staleStarred.starredFeedURLs = ["https://starred.invalid/feed"]
+        staleStarred.events = [starredStorm.id: "storm-a", stormSecond.id: "storm-b"]
+        staleStarred.stories = ["storm-b": "storm-a"]
+        staleStarred.ledger.announced = [
+            "storm-a": .init(leadKey: EventFeedSummary.titleKey(stormFirst.title), lane: .starred),
+            "storm-b": .init(leadKey: "an older lead", lane: .normal),
+        ]
+        assertEqual(
+            NotificationService.plan(
+                new: [(starredStorm, 0.5), (stormSecond, 0.75)],
+                pending: ["https://starred.invalid/feed": [(starredStorm, 0.5)]], delivery: staleStarred
+            ).banners.map { $0.article?.title ?? "" }, ["Storm leaves thousands without power"],
+            "A fresh normal event posts beside a stale starred sibling")
+        // A stale priority event does not hide a fresh normal event of the same story.
+        var stalePriority = NotificationDelivery(mode: .full)
+        stalePriority.events = [stormMajor.id: "storm-c", stormSecond.id: "storm-b"]
+        stalePriority.stories = ["storm-b": "storm-a", "storm-c": "storm-a"]
+        stalePriority.publishers = ["storm-c": 5]
+        stalePriority.ledger.announced = [
+            "storm-c": .init(leadKey: EventFeedSummary.titleKey(stormMajor.title), lane: .priority),
+            "storm-b": .init(leadKey: "an older lead", lane: .normal),
+        ]
+        assertEqual(
+            NotificationService.plan(
+                new: [(stormMajor, 0.9), (stormSecond, 0.75)], pending: [:], delivery: stalePriority
+            ).banners.map { $0.article?.title ?? "" }, ["Storm leaves thousands without power"],
+            "A fresh normal event posts beside a stale priority sibling with a new lead")
 
         // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
         let rising = report(800, "Explosion levels block")
