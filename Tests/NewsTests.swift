@@ -2218,16 +2218,15 @@ struct NewsTests {
         let burstRevision = store.revision
         var burstPublications = 0
         let burstObservation = store.$articles.dropFirst().sink { _ in burstPublications += 1 }
+        // The batch waits longer than the writes take on a loaded machine; the test publishes it explicitly.
+        store.coalescedPublicationDelay = .seconds(600)
         for article in burst {
             await store.updateEnrichment(id: article.id, category: "Science", coalescesPublication: true)
         }
         await store.updateEnrichment(id: burst[0].id, category: "World", coalescesPublication: true)
         assertEqual(burstPublications, 0, "Background classification waits to be published together")
         assertEqual(store.revision, burstRevision, "Waiting classification does not reload queries yet")
-        let deadline = Date().addingTimeInterval(5)
-        while store.revision == burstRevision && Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await store.flushPendingPublications()
         assertEqual(burstPublications, 1, "A classification burst publishes the article collection once")
         assertEqual(store.revision, burstRevision + 1, "A classification burst reloads queries once")
         assertEqual(

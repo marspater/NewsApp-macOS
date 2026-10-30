@@ -22,7 +22,7 @@ actor DatabaseEngine {
     private var spellingCache: (key: String, words: [String: Int])?
     /// `repeatedImageURLs` by publisher. Every curated fetch asks for it, single-story fetches included, and the query
     /// reads every reader document of the publisher (10–40 ms on a real library), so classification writes and list
-    /// reloads queued behind it (#778). Dropped when stories are stored or their images or documents change.
+    /// reloads queued behind it (#778). Dropped when stories are stored, deleted, or their images or documents change.
     private var repeatedImageCache: [String: Set<String>] = [:]
     /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
     private(set) var lastStoryPass: Date?
@@ -3185,8 +3185,6 @@ actor DatabaseEngine {
     // ponytail: flag three distinct documents, return at most 64 recurring URLs per publisher.
     // This rejects repeated furniture heuristically; a publisher-specific allowlist needs corpus evidence.
     /// Recurrence is publisher-local and counts distinct documents, not GUID copies.
-    /// ponytail: retention deletes keep the cached set until the next stored batch (at most one refresh interval), so a
-    /// recurring image whose third story was pruned stays filtered that long; drop the cache in the prune if it matters.
     func repeatedImageURLs(source: String) throws -> Set<String> {
         if let cached = repeatedImageCache[source] { return cached }
         let sql = """
@@ -3661,7 +3659,10 @@ actor DatabaseEngine {
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention pruning failed") }
         let changes = Int(sqlite3_changes(db))
         // The only delete of stories: SQLite may reuse a deleted top rowid, so the spelling cache key could repeat.
-        if changes > 0 { spellingCache = nil }
+        if changes > 0 {
+            spellingCache = nil
+            repeatedImageCache = [:]
+        }
         try pruneEmptyEvents()
 
         // Prune derived intelligence rows that are no longer needed for active clustering (#537):
