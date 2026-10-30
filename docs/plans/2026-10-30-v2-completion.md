@@ -62,7 +62,21 @@ The owner's library was first copied with SQLite's online backup API, which incl
 5. Check that Shortcuts lists the News actions (#748).
 6. Remove stray copies (`~/Projects/News/News.app`, worktree builds) so `feed://` and `news://` open the installed app.
 
-**Rollback:** quit News and do not open it until these steps are done; copy `~/news-eval/library-pre-v2-install.sqlite3` (or the 30 October copy) over `news.sqlite3` and remove `news.sqlite3-wal` and `news.sqlite3-shm`; copy `library-pre-v2-install.world-tension-v2.json` back as `news.sqlite3.world-tension-v2.json`; copy `com.marspater.news-pre-v2-install.plist` back to the container's `Preferences` folder and run `killall cfprefsd`; check that the restored library reads schema 25 (`sqlite3 "file:…/news.sqlite3?mode=ro" "PRAGMA user_version;"`); only then reinstall the previous app. Builds before #751 have no newer-schema guard, so the previous app must never open the v27 library.
+**Rollback:** quit News and do not open it until these steps are done. Then run, using the install backup (or substitute the 30 October copies):
+
+```bash
+L="$HOME/Library/Containers/com.marspater.news/Data/Library"
+DB="$L/Application Support/com.marspater.news/news.sqlite3"
+B="$HOME/news-eval"
+install -m 600 "$B/library-pre-v2-install.sqlite3" "$DB"
+rm -f "$DB-wal" "$DB-shm"
+install -m 600 "$B/library-pre-v2-install.world-tension-v2.json" "$DB.world-tension-v2.json"
+install -m 600 "$B/com.marspater.news-pre-v2-install.plist" "$L/Preferences/com.marspater.news.plist"
+killall cfprefsd
+sqlite3 "file:$DB?mode=ro" "PRAGMA user_version;"
+```
+
+Reinstall the previous app only if the last line prints `25`. Builds before #751 have no newer-schema guard, so the previous app must never open the v27 library.
 
 ## Close-out
 
