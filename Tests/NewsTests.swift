@@ -1176,6 +1176,9 @@ struct NewsTests {
         try await db.open()
         assertEqual(
             value(copy, "PRAGMA user_version;"), "28", "Copied v14 library upgrades through v15 to the current schema")
+        assertEqual(
+            value(copy, "SELECT count(*) FROM articles WHERE category IS NOT NULL;"), "0",
+            "A library from before v22 keeps none of the classifier labels v22 wrote into the publisher column (#817)")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
