@@ -27,6 +27,29 @@ final class AppSettings: ObservableObject {
     static let tensionCollectionOptInKey = "tension_collection_opt_in"
     static let retiredFeedsVersionKey = "retired_feeds_version"
     static let dismissedAdvisoriesKey = "dismissed_advisories"
+    static let firstLaunchCompletedKey = "first_launch_completed"
+
+    /// Everything this class persists; a library backup carries these values (#563).
+    static let backedUpKeys = [
+        feedURLsKey, userSectionsKey, fetchIntervalKey, articleRetentionDaysKey, notificationsEnabledKey,
+        showsDockBadgeKey, showsMenuBarExtraKey, aiEnabledKey, privateNotificationsEnabledKey, notificationModeKey,
+        allowInsecureHTTPKey, mutedSourcesKey, mutedTopicsKey, mutedTopicSetsKey, starredFeedURLsKey,
+        starredFeedTimesKey, tensionCollectionOptInKey, retiredFeedsVersionKey, dismissedAdvisoriesKey,
+    ]
+
+    /// The backed-up keys' stored values as a binary property list.
+    static func backupSettings(from defaults: UserDefaults) throws -> Data {
+        let values = backedUpKeys.reduce(into: [String: Any]()) { $0[$1] = defaults.object(forKey: $1) }
+        return try PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0)
+    }
+
+    /// Writes a backup's values back; a key the backup didn't have returns to its default. Takes effect on relaunch.
+    static func restoreSettings(_ data: Data, to defaults: UserDefaults) throws {
+        guard let values = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            throw CocoaError(.propertyListReadCorrupt)
+        }
+        for key in backedUpKeys { defaults.set(values[key], forKey: key) }
+    }
 
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"  // Headlines + snippets + images
@@ -89,7 +112,7 @@ final class AppSettings: ObservableObject {
     /// Days a read, unsaved story stays before retention deletes it; 0 keeps every story.
     @Published private(set) var articleRetentionDays: Int
     @Published var notificationsEnabled: Bool
-    /// The Dock icon shows the unread count.
+    /// The Dock icon shows the unread stories of today's Briefing and of notifications since launch (#584).
     @Published private(set) var showsDockBadge: Bool
     /// The macOS menu bar shows an optional unread item (off by default).
     @Published private(set) var showsMenuBarExtra: Bool
@@ -105,9 +128,24 @@ final class AppSettings: ObservableObject {
     private(set) var starredFeedTimes: [String: Date]
     /// Mapping of normalized feed URL to the latest advisory date dismissed by the reader.
     @Published private(set) var dismissedAdvisories: [String: String]
+    /// The first-launch sheet has been completed (#562). Settings written by an earlier version count as completed.
+    @Published private(set) var firstLaunchCompleted: Bool
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+
+        // Read before this initializer writes any key. Subscriptions or a notification mode (written on every first
+        // load) mean an earlier version ran, so people upgrading never see the sheet; a fresh install stores false
+        // and keeps seeing it until it is completed.
+        if let completed = defaults.object(forKey: Self.firstLaunchCompletedKey) as? Bool {
+            self.firstLaunchCompleted = completed
+        } else {
+            let upgraded =
+                defaults.object(forKey: Self.feedURLsKey) != nil
+                || defaults.object(forKey: Self.notificationModeKey) != nil
+            self.firstLaunchCompleted = upgraded
+            defaults.set(upgraded, forKey: Self.firstLaunchCompletedKey)
+        }
 
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
             // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
@@ -373,6 +411,11 @@ final class AppSettings: ObservableObject {
     func setShowsMenuBarExtra(_ shows: Bool) {
         showsMenuBarExtra = shows
         defaults.set(shows, forKey: Self.showsMenuBarExtraKey)
+    }
+
+    func completeFirstLaunch() {
+        firstLaunchCompleted = true
+        defaults.set(true, forKey: Self.firstLaunchCompletedKey)
     }
 
     func setAIEnabled(_ enabled: Bool) {

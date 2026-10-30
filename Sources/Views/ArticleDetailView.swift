@@ -318,14 +318,14 @@ struct ArticleDetailView: View {
                                 HStack(alignment: .top, spacing: AppSpacing.xs) {
                                     Image(systemName: "quote.bubble.fill")
                                         .font(AppTypography.body)
-                                        .foregroundStyle(AppColor.accent)
+                                        .foregroundStyle(AppColor.accentText)
                                         .padding(.top, AppSpacing.textStack)
                                         .accessibilityHidden(true)
 
                                     VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                                         Text("Cited in Event Overview")
                                             .font(AppTypography.eyebrow)
-                                            .foregroundStyle(AppColor.accent)
+                                            .foregroundStyle(AppColor.accentText)
 
                                         Text("“\(passage)”")
                                             .font(AppTypography.readerCitation)

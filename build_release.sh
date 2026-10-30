@@ -43,6 +43,7 @@ SWIFT_SOURCES=(
     Sources/Models/ArticleIdentity.swift
     Sources/Models/EventOverview.swift
     Sources/Models/EventFeed.swift
+    Sources/Models/OnboardingStep.swift
     Sources/Storage/DatabaseEngine.swift
     Sources/Storage/DatabaseEngine+Events.swift
     Sources/Storage/MigrationCoordinator.swift
@@ -104,6 +105,7 @@ SWIFT_SOURCES=(
     Sources/Views/MainView.swift
     Sources/Views/SettingsView.swift
     Sources/Views/FeedCatalogView.swift
+    Sources/Views/OnboardingView.swift
     Sources/Views/FeedHealthLine.swift
     Sources/Storage/SavedStoriesManager.swift
     Sources/Services/OPMLManager.swift
@@ -119,10 +121,12 @@ SWIFT_SOURCES=(
 echo "⚙️ Compiling arm64 slice..."
 NEWS_DEPENDENCY_ARCH=arm64
 source script/swiftpm_dependencies.sh
-swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -whole-module-optimization -parse-as-library \
-    -target "arm64-apple-macos${TARGET_MACOS}" \
+source script/app_intents_metadata.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${NEWS_APP_INTENTS_FLAGS[@]}" -swift-version 6 -O -whole-module-optimization \
+    -parse-as-library -target "arm64-apple-macos${TARGET_MACOS}" \
     "${SWIFT_SOURCES[@]}" \
     -o "${BUILD_TMP}/News_arm64"
+news_app_intents_metadata "${RESOURCES_DIR}" "${TARGET_MACOS}"
 
 echo "📋 Verifying arm64 binary..."
 cp "${BUILD_TMP}/News_arm64" "${MACOS_DIR}/${APP_NAME}"
