@@ -63,7 +63,7 @@ enum StoryImageLookup: Equatable, Sendable {
     case found(String)
     /// The page was read and declares no usable image.
     case none
-    /// The page could not be read (offline, refused); try again on a later pass.
+    /// The page could not be read (offline, rate-limited, server error); try again on a later pass.
     case unreachable
 }
 
@@ -80,10 +80,18 @@ struct StoryImageFinder: Sendable {
         StoryImageFinder { link in
             guard var components = URLComponents(string: link) else { return .none }
             if components.scheme?.lowercased() == "http" { components.scheme = "https" }
-            guard let url = components.url,
-                let (data, response) = try? await client.fetchArticleHead(from: url),
-                response.statusCode < 400
-            else { return .unreachable }
+            guard let url = components.url else { return .none }
+            let data: Data
+            let response: HTTPURLResponse
+            do {
+                (data, response) = try await client.fetchArticleHead(from: url)
+            } catch FeedError.httpStatus(let status) where (400..<500).contains(status) && status != 429 {
+                // A refusal (403, 404, 410) is an answer: recorded as no image so the page is not asked again each
+                // pass, spending the lookup budget other imageless stories need (#818).
+                return Task.isCancelled ? .unreachable : .none
+            } catch {
+                return .unreachable
+            }
             guard !Task.isCancelled else { return .unreachable }
             return leadImage(
                 in: ContentExtractionPipeline.shared.decodeHTML(data: data, response: response),

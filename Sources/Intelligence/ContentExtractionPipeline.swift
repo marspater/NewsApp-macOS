@@ -1032,14 +1032,8 @@ final class ContentExtractionPipeline: Sendable {
         let host = url.host ?? "unknown"
 
         do {
+            // fetchData throws `FeedError.httpStatus` for every non-2xx status, so the status is mapped in the catch.
             let (data, response) = try await client.fetchArticleHTML(from: url, allowHTTP: allowHTTP)
-
-            if response.statusCode == 401 || response.statusCode == 402 { return (.subscriberOnly, nil) }
-            if response.statusCode >= 400 {
-                logger.warning("[Extraction] Host: \(host, privacy: .public) | HTTP Error: \(response.statusCode)")
-                return (.httpError(status: response.statusCode), nil)
-            }
-
             let html = decodeHTML(data: data, response: response)
             guard !html.isEmpty else {
                 logger.warning("[Extraction] Host: \(host, privacy: .public) | Empty response body")
@@ -1074,7 +1068,10 @@ final class ContentExtractionPipeline: Sendable {
             return (outcome, evidence)
         } catch let error as FeedError {
             switch error {
+            case .httpStatus(let status) where status == 401 || status == 402:
+                return (.subscriberOnly, nil)
             case .httpStatus(let status):
+                logger.warning("[Extraction] Host: \(host, privacy: .public) | HTTP Error: \(status)")
                 return (.httpError(status: status), nil)
             case .blockedHost(let h, let reason):
                 logger.warning("[Extraction] Host \(h, privacy: .public) blocked: \(reason, privacy: .public)")
@@ -1873,7 +1870,11 @@ final class ContentExtractionPipeline: Sendable {
             return decoded
         }
 
-        if let utf8 = String(data: data, encoding: .utf8) {
+        // A UTF-8 page with a stray byte keeps its UTF-8 text: the bad byte becomes U+FFFD instead of the whole page
+        // turning into Latin-1 mojibake. Mostly invalid sequences mean a legacy single-byte page.
+        let utf8 = Self.lenientUTF8(data)
+        let replaced = utf8.unicodeScalars.lazy.filter { $0 == "\u{FFFD}" }.count
+        if replaced == 0 || replaced < utf8.unicodeScalars.lazy.filter({ $0.value > 0x7F }).count - replaced {
             return utf8
         }
         if let latin1 = String(data: data, encoding: .isoLatin1) {
@@ -1884,6 +1885,19 @@ final class ContentExtractionPipeline: Sendable {
         }
 
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// UTF-8 with invalid bytes replaced, after dropping a multi-byte sequence cut off at the end, as a 256 KiB
+    /// prefix fetch can leave it.
+    static func lenientUTF8(_ data: Data) -> String {
+        var end = data.endIndex
+        for index in data.indices.reversed().prefix(4) where data[index] & 0xC0 != 0x80 {
+            let lead = data[index]
+            let length = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1
+            if data.distance(from: index, to: data.endIndex) < length { end = index }
+            break
+        }
+        return String(decoding: data[data.startIndex..<end], as: UTF8.self)
     }
 
     private static let headerCharsetRegex = loggedExtraction("compileHeaderCharsetRegex") {
@@ -1922,7 +1936,7 @@ final class ContentExtractionPipeline: Sendable {
     private func decode(data: Data, charset: String) -> String? {
         switch charset {
         case "utf-8", "utf8":
-            return String(data: data, encoding: .utf8)
+            return Self.lenientUTF8(data)
         case "iso-8859-1", "latin1":
             return String(data: data, encoding: .isoLatin1)
         case "windows-1252", "cp1252":
