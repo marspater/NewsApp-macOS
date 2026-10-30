@@ -55,6 +55,16 @@ struct MainView: View {
             hour: briefingEditionHour, notified: feedManager.notifiedStoryIDs, read: readManager.readArticles)
     }
 
+    /// Advanced at each edition hour, on wake and on a time-zone change; it re-evaluates the view, so the badge
+    /// drops an edition that stopped being current even when nothing else changed.
+    @State private var badgeClock = 0
+
+    private func waitForEditionRollover() async {
+        let next = FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour)
+        try? await Task.sleep(for: .seconds(max(1, next.timeIntervalSinceNow)))
+        if !Task.isCancelled { badgeClock += 1 }
+    }
+
     /// The Dock icon carries the count while the setting is on; zero or the setting off removes the badge.
     private func updateDockBadge(_ count: Int) {
         NSApp.dockTile.badgeLabel = appSettings.showsDockBadge && count > 0 ? String(count) : nil
@@ -75,6 +85,11 @@ struct MainView: View {
             .sheet(isPresented: $showsTension, content: tensionSheetContent)
             .onChange(of: dockBadgeCount, initial: true) { _, count in updateDockBadge(count) }
             .onChange(of: appSettings.showsDockBadge) { _, _ in updateDockBadge(dockBadgeCount) }
+            .task(id: "\(briefingEditionHour):\(badgeClock)") { await waitForEditionRollover() }
+            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+                badgeClock += 1
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .NSSystemTimeZoneDidChange)) { _ in badgeClock += 1 }
             .onReceive(NotificationCenter.default.publisher(for: .showNewsTensionCommand)) { _ in
                 handleNewsTensionCommand()
             }
