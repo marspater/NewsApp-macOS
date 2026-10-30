@@ -61,8 +61,16 @@ struct TensionIndexView: View {
                         if trend.count > 1 {
                             group("Past 30 Days") { TensionTrendChart(readings: trend, selection: $selectedDay) }
                         }
+                    } else if let selectedDay, state.reading != nil {
+                        // A day without a reading is a gap: it shows no other day's reasoning.
+                        ContentUnavailableView(
+                            "No Reading", systemImage: "calendar",
+                            description: Text(
+                                "\(selectedDay.formatted(Date.FormatStyle(date: .abbreviated, time: .omitted, timeZone: .gmt))) has no assessment."
+                            ))
+                        group("Past 30 Days") { TensionTrendChart(readings: trend, selection: $selectedDay) }
                     } else if state.status == .assessing {
-                        ProgressView("Assessing international headlines…").frame(maxWidth: .infinity)
+                        ProgressView(state.explanation ?? "").frame(maxWidth: .infinity)
                     } else {
                         ContentUnavailableView(
                             state.heading, systemImage: "globe", description: Text(state.explanation ?? ""))
@@ -108,8 +116,7 @@ struct TensionIndexView: View {
     private var selected: WorldTensionReading? {
         guard let current = state.reading else { return nil }
         guard let selectedDay else { return current }
-        return trend.min { abs($0.id.timeIntervalSince(selectedDay)) < abs($1.id.timeIntervalSince(selectedDay)) }
-            ?? current
+        return WorldTensionReading.reading(on: selectedDay, in: trend)
     }
 
     private func notice(_ text: String) -> some View {
