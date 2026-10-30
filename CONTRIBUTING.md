@@ -45,6 +45,7 @@ NEWS_READING_FULL_APP=1 ./script/native_performance_baseline.sh # Live: sandboxe
 ./script/test_notification_live.sh DIR # Opt-in real OS notifications with synthetic reports, temporary settings and in-memory SQLite; existing News authorization required
 ./script/test_native_ui_qa.sh        # Automated Native UI QA checks with system settings overrides (#155, #123)
 ./script/appearance_matrix.sh [DIR]  # Window captures of list, grid, reader and overview in light, dark and Increase Contrast; needs Screen Recording
+NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift script/native_performance_baseline.sh DIR # Story Overview with every Epic T section rendered offscreen (no window, no Screen Recording) at 900 and 1,400 pt, text size 1.0 and 1.3, light, dark and Increase Contrast, each also in gray
 ./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver
 ./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
