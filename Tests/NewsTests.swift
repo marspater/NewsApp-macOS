@@ -5259,15 +5259,40 @@ struct NewsTests {
         try await db.setSaved(articleId: cafe.id, isSaved: true)
         try await db.markRead(articleId: undated.id, isRead: true)
         try await db.markRead(articleId: cafe.id, isRead: true)
+        // A reconciled duplicate, saved and read most recently, is never exported; exact times decide the order.
+        let copy = FeedArticle(
+            title: "Café [live] reopens (copy)", link: "https://example.com/news/cafe-copy", guid: "cafe-copy",
+            description: "Report", pubDate: cafe.pubDate, source: "Example News")
+        try await db.upsertArticles([copy], feedUrl: "https://example.com/feed")
+        try await db.setSaved(articleId: copy.id, isSaved: true)
+        try await db.markRead(articleId: copy.id, isRead: true)
+        let stored = Dictionary(
+            try await db.fetchArticles(limit: nil, includingOriginals: true).map { ($0.title, $0.id) },
+            uniquingKeysWith: { first, _ in first })
+        let cafeID = stored[cafe.title]!
+        let undatedID = stored[undated.title]!
+        let copyID = stored[copy.title]!
+        try await db.executeSimple(
+            """
+            UPDATE article_state SET saved_at = 2000, read_at = 3000 WHERE article_id = '\(cafeID)';
+            UPDATE article_state SET read_at = 3500 WHERE article_id = '\(undatedID)';
+            UPDATE article_state SET saved_at = 9000, read_at = 9000 WHERE article_id = '\(copyID)';
+            INSERT INTO article_reconciliations (duplicate_id, survivor_id, canonical_url, fingerprint)
+                VALUES ('\(copyID)', '\(cafeID)', '\(cafe.link)', 'test');
+            """)
 
         let saved = try await db.exportedStories(saved: true)
         assertEqual(saved.map(\.title), [cafe.title], "Only saved stories are exported as saved")
         assertEqual(saved.first?.publisher, "Example News", "The publisher is the feed's first title line")
         assertEqual(saved.first?.published, cafe.pubDate, "The publication date is exported")
-        assertTrue(saved.first?.savedAt != nil && saved.first?.readAt == nil, "Saved export carries the save time")
+        assertEqual(saved.first?.savedAt, Date(timeIntervalSince1970: 2000), "Saved export carries the exact save time")
+        assertTrue(saved.first?.readAt == nil, "Saved export names no read time")
         let history = try await db.exportedStories(saved: false)
-        assertEqual(history.count, 2, "History exports every read story")
-        assertTrue(history.allSatisfy { $0.readAt != nil && $0.savedAt == nil }, "History carries the read time")
+        assertEqual(history.map(\.title), [undated.title, cafe.title], "History lists every read story, newest first")
+        assertEqual(
+            history.map(\.readAt), [Date(timeIntervalSince1970: 3500), Date(timeIntervalSince1970: 3000)],
+            "History carries the exact read times")
+        assertTrue(history.allSatisfy { $0.savedAt == nil }, "History names no save time")
         assertTrue(history.contains { $0.title == undated.title && $0.published == nil }, "Unknown dates are left out")
 
         let json = try StoryExport.json(saved)
