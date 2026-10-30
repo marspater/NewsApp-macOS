@@ -11,7 +11,6 @@ struct ArticleDetailView: View {
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
-    @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var themeManager: ThemeManager
@@ -168,7 +167,9 @@ struct ArticleDetailView: View {
                 guard summaryExpanded else { return }
                 await startArticleAnalysis()
             }
-            .task(id: "\(activeArticle.id):\(articleStore.revision)") {
+            // Publisher updates are recorded only when the story's publisher input changes; other stories'
+            // writes leave them as they are (#778).
+            .task(id: "\(activeArticle.id):\(currentArticle.publisherInputHash)") {
                 let id = activeArticle.id
                 let revisions = try? await articleStore.database.publisherContentRevisions(for: id)
                 guard !Task.isCancelled, activeArticle.id == id else { return }
