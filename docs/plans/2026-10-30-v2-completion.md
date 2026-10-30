@@ -62,7 +62,7 @@ The owner's library was first copied with SQLite's online backup API, which incl
 5. Check that Shortcuts lists the News actions (#748).
 6. Remove stray copies (`~/Projects/News/News.app`, worktree builds) so `feed://` and `news://` open the installed app.
 
-**Rollback:** quit News and do not open it until these steps are done. Then run, using the install backup (or substitute the 30 October copies):
+**Rollback:** quit News and do not open it until these steps are done. Then run the script below with the install backup set. To roll back to the 30 October set instead, replace all three source names together: `library-pre-v2-2026-10-30.sqlite3`, `library-pre-v2-2026-10-30.world-tension-v2.json` and `com.marspater.news-pre-v2-2026-10-30.plist`.
 
 ```bash
 L="$HOME/Library/Containers/com.marspater.news/Data/Library"
