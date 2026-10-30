@@ -13155,7 +13155,8 @@ struct NewsTests {
         repeat {
             let report = try await EventClusterer.run(
                 in: db, matchPolicy: policy, now: newest, allowsEnergy: true,
-                pairProbability: StoryCorpus.pairProbabilityFromEnvironment())
+                pairProbability: StoryCorpus.pairProbabilityFromEnvironment(),
+                storyProbabilities: StoryCorpus.storyProbabilitiesFromEnvironment())
             passes += 1
             total.processed += report.processed
             total.joined += report.joined
@@ -13464,7 +13465,8 @@ struct NewsTests {
             repeat {
                 let report = try await EventClusterer.run(
                     in: db, matchPolicy: policy, now: Date(timeIntervalSince1970: clock), allowsEnergy: true,
-                    pairProbability: StoryCorpus.pairProbabilityFromEnvironment())
+                    pairProbability: StoryCorpus.pairProbabilityFromEnvironment(),
+                    storyProbabilities: StoryCorpus.storyProbabilitiesFromEnvironment())
                 total.processed += report.processed
                 total.created += report.created
                 total.merged += report.merged
