@@ -24,50 +24,26 @@ enum NewsTensionRequest {
     }
 }
 
-/// World Tension v2: an on-device assessment of international headlines, with its own history.
+/// World Tension v2: an on-device assessment of international headlines, with its own history. The sheet shows the
+/// state `MainView` loads for every surface (#781) and asks it for a fresh assessment; it assesses nothing itself.
 struct TensionIndexView: View {
     static let navigationTitleText = "World Tension"
-    @EnvironmentObject var articleStore: ArticleStore
-    @EnvironmentObject var appSettings: AppSettings
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.effectiveReduceMotion) private var reduceMotion
-    @State private var history: [WorldTensionReading]
-    @State private var loading = false
-    @State private var errorMessage: String?
-    @State private var unscoredHeadlines: [WorldTensionHeadline] = []
-    @State private var selectedDay: Date?
-    @State private var reassessment = 0
-    private let service: WorldTensionService
-    private let onUpdate: ([WorldTensionReading]) -> Void
-
-    init(
-        history: [WorldTensionReading] = [], service: WorldTensionService = .shared,
-        onUpdate: @escaping ([WorldTensionReading]) -> Void = { _ in
-            // Default no-op handler
-        }
-    ) {
-        _history = State(initialValue: history)
-        self.service = service
-        self.onUpdate = onUpdate
+    let state: WorldTensionState
+    /// Asks the owner of `state` for an assessment that ignores the saved one.
+    var reassess: () -> Void = {
+        // Captures have nothing to reassess.
     }
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedDay: Date?
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                // The sheet title carries the page's one intelligence glyph (DESIGN.md 8.6).
-                IntelligenceLabel(Self.navigationTitleText).font(AppTypography.sectionTitle)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                // The same header as the feed catalog: title and Done.
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-            }
-            .padding(AppLayout.pageInset)
-            .onExitCommand { dismiss() }
+            header
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     if let reading = selected {
+                        if let explanation = state.explanation { notice(explanation) }
                         group("Assessment") {
                             readingHeader(reading)
                             summary(reading)
@@ -81,26 +57,23 @@ struct TensionIndexView: View {
                             }
                         }
                         evidence(reading)
-                        if history.count > 1 { group("Past 30 Days") { trend } }
-                    } else if loading {
+                        if trend.count > 1 {
+                            group("Past 30 Days") { TensionTrendChart(readings: trend, selection: $selectedDay) }
+                        }
+                    } else if state.status == .assessing {
                         ProgressView("Assessing international headlines…").frame(maxWidth: .infinity)
                     } else {
                         ContentUnavailableView(
-                            errorMessage == nil ? "No Assessment Yet" : "Assessment Unavailable", systemImage: "globe",
-                            description: Text(
-                                errorMessage ?? "Enable on-device AI and international panel collection in Settings."))
+                            state.heading, systemImage: "globe", description: Text(state.explanation ?? ""))
                     }
-                    if appSettings.aiEnabled, appSettings.tensionCollectionOptIn,
-                        !unscoredHeadlines.isEmpty
-                    {
+                    if !state.panelHeadlines.isEmpty {
                         group("Current Panel Headlines") {
-                            Text("No score was saved. These publisher headlines remain available to inspect.")
-                                .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
-                            headlineTable(unscoredHeadlines)
+                            Text(
+                                "Today has no reading yet. These publisher headlines are what the next assessment reads."
+                            )
+                            .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                            headlineTable(state.panelHeadlines)
                         }
-                    }
-                    if selected != nil, let errorMessage {
-                        Text(errorMessage).font(AppTypography.caption).foregroundStyle(AppColor.caution)
                     }
                     footer
                 }
@@ -108,15 +81,46 @@ struct TensionIndexView: View {
             }
         }
         .frame(width: AppLayout.tensionSheetWidth, height: AppLayout.tensionSheetHeight)
-        .task(id: "\(appSettings.aiEnabled):\(appSettings.tensionCollectionOptIn):\(reassessment)") {
-            await load(force: reassessment > 0)
-        }
     }
 
+    /// The sheet title carries the page's one intelligence glyph; how the reading was made is a caption under it
+    /// (DESIGN.md 8.6), in the words the sidebar and the Briefing strip use.
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                IntelligenceLabel(Self.navigationTitleText).font(AppTypography.title)
+                    .accessibilityAddTraits(.isHeader)
+                Text(state.note ?? "Assessed on this Mac")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+            }
+            Spacer()
+            // The same header as the feed catalog: title and Done.
+            Button("Done") { dismiss() }
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(AppLayout.pageInset)
+        .onExitCommand { dismiss() }
+    }
+
+    private var trend: [WorldTensionReading] { state.trend(days: 30) }
+
     private var selected: WorldTensionReading? {
-        guard appSettings.aiEnabled, appSettings.tensionCollectionOptIn else { return nil }
-        guard let selectedDay else { return history.last }
-        return history.min { abs($0.id.timeIntervalSince(selectedDay)) < abs($1.id.timeIntervalSince(selectedDay)) }
+        guard let current = state.reading else { return nil }
+        guard let selectedDay else { return current }
+        return trend.min { abs($0.id.timeIntervalSince(selectedDay)) < abs($1.id.timeIntervalSince(selectedDay)) }
+            ?? current
+    }
+
+    private func notice(_ text: String) -> some View {
+        NoticeView {
+            Label {
+                Text(text).font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "info.circle").foregroundStyle(AppColor.secondaryText)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func readingHeader(_ reading: WorldTensionReading) -> some View {
@@ -124,9 +128,7 @@ struct TensionIndexView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-                        Text("\(reading.assessment.score)").font(AppTypography.tensionReading).monospacedDigit()
-                            .contentTransition(.numericText())
-                        Text("°").font(AppTypography.headline).foregroundStyle(AppColor.secondaryText)
+                        Text("\(reading.assessment.score)°").font(AppTypography.tensionReading).monospacedDigit()
                         Label {
                             Text(reading.level.rawValue).font(AppTypography.sectionTitle)
                                 .foregroundStyle(AppColor.primaryText)
@@ -136,29 +138,40 @@ struct TensionIndexView: View {
                     }
                     if let comparison = comparison(reading) {
                         Text(comparison).font(AppTypography.callout).foregroundStyle(AppColor.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text("Updated \(reading.evaluatedAt.formatted(date: .abbreviated, time: .shortened))")
-                        .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                    Text(updated(reading)).font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
                 }
                 Spacer()
                 TensionGlyph(level: reading.level)
             }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("World tension \(reading.assessment.score) degrees, \(reading.level.rawValue)")
+            .accessibilityLabel(
+                "World tension \(reading.assessment.score) degrees, \(reading.level.rawValue)"
+                    + (reading.assessment.isEstimate == true ? ", keyword estimate" : ""))
             TensionScaleBar(score: reading.assessment.score)
         }
     }
 
-    /// Today's own assessment when the shown reading blends it with the week's history (methodology v3), then where
+    private func updated(_ reading: WorldTensionReading) -> String {
+        "Updated \(reading.evaluatedAt.formatted(date: .abbreviated, time: .shortened))"
+            + (reading.assessment.isEstimate == true ? " · Keyword estimate" : "")
+    }
+
+    /// The day's own assessment when the shown reading blends it with the week's history (methodology v3), then where
     /// the reading sits among the past month's assessments, or its change since the previous one.
     private func comparison(_ reading: WorldTensionReading) -> String? {
-        let assessed = reading.assessment.assessedScore.map { "Today's assessment \($0)°, 7-day reading shown. " }
+        let day =
+            reading.id == TensionMethodology.day(containing: state.loadedAt).start
+            ? "Today's assessment"
+            : "Assessment on \(reading.evaluatedAt.formatted(.dateTime.month(.abbreviated).day()))"
+        let assessed = reading.assessment.assessedScore.map { "\(day) \($0)°, 7-day reading shown. " }
         let text = (assessed ?? "") + (ranking(reading) ?? "")
         return text.isEmpty ? nil : text
     }
 
     private func ranking(_ reading: WorldTensionReading) -> String? {
-        let others = history.filter {
+        let others = state.history.filter {
             $0.id < reading.id && $0.id > reading.id.addingTimeInterval(-30 * 86400)
                 && $0.modelGeneration == reading.modelGeneration && $0.assessment.isEstimate != true
         }
@@ -166,6 +179,8 @@ struct TensionIndexView: View {
             let below = others.filter { $0.assessment.score < reading.assessment.score }.count
             let above = others.filter { $0.assessment.score > reading.assessment.score }.count
             let share = { (n: Int) in Int((Double(n) / Double(others.count) * 100).rounded()) }
+            if below == others.count { return "The highest reading of the past month's assessed days" }
+            if above == others.count { return "The lowest reading of the past month's assessed days" }
             return above >= below
                 ? "Lower than \(share(above))% of assessed days in the past month"
                 : "Higher than \(share(below))% of assessed days in the past month"
@@ -173,9 +188,9 @@ struct TensionIndexView: View {
         guard let previous = others.last else { return nil }
         let change = reading.assessment.score - previous.assessment.score
         let direction = change > 0 ? "Up" : "Down"
-        let movement = change == 0 ? "Unchanged" : "\(direction) \(abs(change))"
+        let movement = change == 0 ? "Unchanged" : "\(direction) \(abs(change))°"
         return
-            "\(movement) since the assessment on \(previous.evaluatedAt.formatted(date: .abbreviated, time: .omitted))"
+            "\(movement) since the reading on \(previous.evaluatedAt.formatted(date: .abbreviated, time: .omitted))"
     }
 
     /// A titled group of the sheet (DESIGN.md 8.6): `md` inside, on the story card surface.
@@ -210,22 +225,14 @@ struct TensionIndexView: View {
 
     /// The lead sentence in bold, then the synthesis; readings saved before leads existed show the synthesis alone.
     private func summary(_ reading: WorldTensionReading) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Group {
-                if let lead = reading.assessment.lead {
-                    Text(lead).bold() + Text(" ") + Text(reading.assessment.summary)
-                } else {
-                    Text(reading.assessment.summary)
-                }
-            }
-            .font(AppTypography.lede).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-            if reading.assessment.isEstimate == true {
-                Label("Keyword estimate · on-device assessment unavailable", systemImage: "exclamationmark.circle")
-                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+        Group {
+            if let lead = reading.assessment.lead {
+                Text(lead).bold() + Text(" ") + Text(reading.assessment.summary)
             } else {
-                Text("Assessed on this Mac").font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                Text(reading.assessment.summary)
             }
         }
+        .font(AppTypography.lede).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
     }
 
     @ViewBuilder
@@ -240,9 +247,7 @@ struct TensionIndexView: View {
                     ForEach(headlines, id: \.id) { headline in
                         GridRow {
                             EyebrowText(headline.publisher)
-                            if let link = headline.link.flatMap(URL.init(string:)),
-                                ["http", "https"].contains(link.scheme?.lowercased())
-                            {
+                            if let link = headline.webURL {
                                 Link(headline.title, destination: link).font(AppTypography.body)
                                     .multilineTextAlignment(.leading).help("Open the story in your browser")
                             } else {
@@ -263,7 +268,6 @@ struct TensionIndexView: View {
                         Text(factor.rawValue).font(AppTypography.headline)
                         Text(reason.explanation).font(AppTypography.body).fixedSize(horizontal: false, vertical: true)
                             .textSelection(.enabled)
-
                     }
                 }
             }
@@ -285,37 +289,6 @@ struct TensionIndexView: View {
         }
     }
 
-    private var trend: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Chart {
-                ForEach(Array(history.enumerated()), id: \.element.id) { index, reading in
-                    LineMark(
-                        x: .value("Day", reading.id), y: .value("Assessment", reading.assessment.score),
-                        series: .value("Segment", segment(index))
-                    )
-                    .interpolationMethod(.catmullRom)
-                    .foregroundStyle(AppColor.secondaryText)
-                    PointMark(x: .value("Day", reading.id), y: .value("Assessment", reading.assessment.score))
-                        .foregroundStyle(AppColor.tension(reading.level))
-                        .accessibilityLabel(reading.evaluatedAt.formatted(date: .abbreviated, time: .omitted))
-                        .accessibilityValue("\(reading.assessment.score) degrees")
-                }
-            }
-            .chartYScale(domain: 0...100).chartXSelection(value: $selectedDay)
-            .frame(height: AppLayout.tensionChartHeight)
-            Text("One assessment per UTC day; missing days remain gaps. Select a day to inspect its reasoning.")
-                .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
-        }
-    }
-
-    private func segment(_ index: Int) -> Int {
-        guard index > 0 else { return 0 }
-        return (1...index).filter { i in
-            history[i].id.timeIntervalSince(history[i - 1].id) > 86400
-                || history[i].modelGeneration != history[i - 1].modelGeneration
-        }.count
-    }
-
     private var footer: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Text(
@@ -324,54 +297,64 @@ struct TensionIndexView: View {
             .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             DisclosureGroup("How World Tension Is Assessed") {
                 Text(
-                    "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Before an assessment is saved, every place, person and figure it names is checked against the supplied headlines. Royal, celebrity, sport and lifestyle stories are left out. When no assessment exists for the day, a labelled keyword estimate of the current headlines is shown instead. It is not saved while the model is unavailable; when the model declines the headlines, it is kept as the day's reading until new headlines or Reassess bring an assessment."
+                    "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Before an assessment is saved, every place, person and figure it names is checked against the supplied headlines. Royal, celebrity, sport and lifestyle stories are left out. The reading shown is the weighted average of the past seven days' assessments, plus up to 9° when the assessment rose on consecutive days. When no assessment exists for the day, a labelled keyword estimate of the current headlines is shown as it is and never enters the average. It is not saved while the model is unavailable; when the model declines the headlines, it is kept as the day's reading until new headlines or Reassess bring an assessment."
                 )
                 .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             }
             HStack {
+                Text("Last 24 hours · \(TensionMethodology.v1.panel.count) international panel feeds")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
                 Spacer()
-                if loading { ProgressView().controlSize(.small) }
-                Button("Reassess") { reassessment += 1 }.disabled(loading)
-            }.font(AppTypography.callout)
-            Text("Last 24 hours · 12 international panel feeds")
-                .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                if state.isLoading { ProgressView().controlSize(.small).accessibilityHidden(true) }
+                Button("Reassess", action: reassess)
+                    .disabled(state.isLoading || !state.aiEnabled || !state.collectionEnabled)
+                    .help("Assess today's headlines again on this Mac")
+                    .accessibilityValue(state.isLoading ? "Assessing" : "")
+            }
+            .font(AppTypography.callout)
         }
     }
+}
 
-    private func load(force: Bool = false) async {
-        if !appSettings.aiEnabled || !appSettings.tensionCollectionOptIn {
-            history = []
-            unscoredHeadlines = []
-            onUpdate([])
-        }
-        loading = true
-        defer { loading = false }
-        do {
-            let loaded = try await service.assess(
-                database: articleStore.database, now: Date(),
-                aiEnabled: appSettings.aiEnabled, collectionEnabled: appSettings.tensionCollectionOptIn, force: force)
-            try Task.checkCancellation()
-            history = loaded
-            unscoredHeadlines = []
-            errorMessage = nil
-            onUpdate(loaded)
-        } catch is CancellationError { return } catch {
-            guard !Task.isCancelled else { return }
-            if appSettings.aiEnabled, appSettings.tensionCollectionOptIn {
-                let accepted = try? await articleStore.database.worldTensionHistory()
-                guard !Task.isCancelled, appSettings.aiEnabled, appSettings.tensionCollectionOptIn else { return }
-                if let accepted { history = WorldTensionSmoothing.displayed(accepted) }
-                let now = Date()
-                if let rows = try? await articleStore.database.tensionCorpus(
-                    day: DateInterval(start: now.addingTimeInterval(-86400), end: now),
-                    feedURLs: TensionMethodology.v1.panel.map(\.url))
-                {
-                    guard !Task.isCancelled else { return }
-                    unscoredHeadlines = WorldTensionService.headlines(rows, prefix: "C", limit: 12)
+/// The sheet's trend: one point per UTC day in its band colour, a line that breaks at missing days and model changes,
+/// and the axis labelled in UTC days, the days the readings belong to. Selecting a day selects its reading.
+struct TensionTrendChart: View {
+    let readings: [WorldTensionReading]
+    @Binding var selection: Date?
+
+    private static let utcCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .gmt
+        return calendar
+    }()
+
+    var body: some View {
+        let segments = WorldTensionState.segments(readings)
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Chart {
+                ForEach(Array(readings.enumerated()), id: \.element.id) { index, reading in
+                    LineMark(
+                        x: .value("Day", reading.id), y: .value("Reading", reading.assessment.score),
+                        series: .value("Segment", segments[index])
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(AppColor.secondaryText)
+                    PointMark(x: .value("Day", reading.id), y: .value("Reading", reading.assessment.score))
+                        .foregroundStyle(AppColor.tension(reading.level))
+                        .accessibilityLabel(reading.evaluatedAt.formatted(date: .abbreviated, time: .omitted))
+                        .accessibilityValue(
+                            "\(reading.assessment.score) degrees"
+                                + (reading.assessment.isEstimate == true ? ", keyword estimate" : ""))
                 }
             }
-            // The cause is for the log; the sheet says what to do.
-            errorMessage = "The assessment could not be completed. Try again."
+            .chartYScale(domain: 0...100).chartXSelection(value: $selection)
+            // West of UTC a local axis labelled each reading with the day before.
+            .environment(\.timeZone, .gmt)
+            .environment(\.calendar, Self.utcCalendar)
+            .frame(height: AppLayout.tensionChartHeight)
+            Text("One reading per UTC day; missing days remain gaps. Select a day to inspect its reasoning.")
+                .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
         }
     }
 }
@@ -423,11 +406,13 @@ struct TensionGlyph: View {
     let level: TensionLevel
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.appearsActive) private var appearsActive
     /// Motion time starts at the resting pose and freezes while paused, so it resumes where it stopped.
     @State private var origin = Date()
     @State private var frozen: TimeInterval = 0
 
-    private var paused: Bool { reduceMotion || scenePhase != .active }
+    /// Paused with Reduce Motion and whenever its window is not the active one (DESIGN.md 6).
+    private var paused: Bool { reduceMotion || scenePhase != .active || !appearsActive }
 
     private func animationTime(for date: Date) -> TimeInterval {
         if reduceMotion {
@@ -658,10 +643,12 @@ struct TensionGlyph: View {
 
 /// The sidebar is intentionally static: no symbol effects or perpetual redraws in navigation chrome.
 struct TensionSidebarButton: View {
-    let reading: WorldTensionReading?
+    /// The state the sheet and the Briefing strip show too (#781).
+    let state: WorldTensionState
     let open: () -> Void
-    var status = "Not assessed"
     @Environment(\.effectiveContrast) private var contrast
+
+    private var reading: WorldTensionReading? { state.reading }
 
     private var readingHeadline: String {
         if let reading {
@@ -670,8 +657,9 @@ struct TensionSidebarButton: View {
         return TensionIndexView.navigationTitleText
     }
 
+    /// The state's note in the words the other surfaces use; today's assessment names the indicator instead.
     private var readingSubheadline: String {
-        reading == nil ? status : TensionIndexView.navigationTitleText
+        state.note ?? TensionIndexView.navigationTitleText
     }
 
     private var statusDot: some View {
@@ -726,8 +714,8 @@ struct TensionSidebarButton: View {
         .buttonStyle(.accessoryBar)
         .help("Show the World Tension assessment")
         .accessibilityLabel(
-            reading.map { "World tension, \($0.assessment.score) degrees, \($0.level.rawValue)" }
-                ?? "World tension, \(status)"
+            (reading.map { "World tension, \($0.assessment.score) degrees, \($0.level.rawValue)" } ?? "World tension")
+                + (state.note.map { ", \($0)" } ?? "")
         )
         .accessibilityHint("Opens the World Tension details")
         .transaction { $0.animation = nil }

@@ -786,6 +786,7 @@ struct NewsTests {
         try await testTensionMethodology()
         try await testWorldTension()
         testWorldTensionSmoothing()
+        try await testWorldTensionState()
         try await testUndatedArticleOrdering()
         try await testReaderFigures(fixtureRoot: fixtureRoot)
         testReaderExtractionFidelity(fixtureRoot: fixtureRoot)
@@ -4642,6 +4643,109 @@ struct NewsTests {
         assertEqual(
             WorldTensionSmoothing.displayed(withEstimate)[1].assessment.assessedScore, nil,
             "An estimate keeps no assessed score")
+    }
+
+    /// #781: the sidebar, the Briefing strip and the sheet read one state. Its status, note and explanation follow the
+    /// reading (today's assessment, estimate, stale, off, failed), and a failed assessment keeps the history as shown.
+    static func testWorldTensionState() async throws {
+        print("  - Testing the shared World Tension state: statuses, copy, stale readings and failure paths (#781)...")
+        let now = Date(timeIntervalSince1970: 1_780_000_000)
+        let today = TensionMethodology.day(containing: now).start
+        let reasons = WorldTensionFactor.allCases.map {
+            WorldTensionAssessment.Reason(factor: $0, explanation: "The supplied headline reports continued talks.")
+        }
+        func reading(
+            _ offset: Int, _ score: Int, estimate: Bool = false, hash: String? = nil, generation: String = "generation"
+        ) -> WorldTensionReading {
+            WorldTensionReading(
+                evaluatedAt: today.addingTimeInterval(Double(offset) * 86400 + 3600),
+                inputHash: hash ?? "hash-\(offset)", modelGeneration: generation,
+                headlines: [WorldTensionHeadline(id: "C1", title: "Peace talks resume", publisher: "Panel")],
+                assessment: WorldTensionAssessment(
+                    score: score, summary: "Ceasefire talks continue between the parties.", reasons: reasons,
+                    isEstimate: estimate ? true : nil))
+        }
+        assertEqual(WorldTensionState(aiEnabled: false).status, .aiOff, "AI off wins over everything")
+        assertEqual(
+            WorldTensionState(aiEnabled: false, history: [reading(0, 30)], loadedAt: now).reading, nil,
+            "Nothing is shown while AI story analysis is off")
+        assertEqual(WorldTensionState(collectionEnabled: false).note, "Panel collection is off", "Collection off")
+        assertEqual(WorldTensionState(loadedAt: now).status, .assessing, "Before the first load nothing has failed")
+        assertEqual(
+            WorldTensionState(loadedAt: now, problem: "Failed", isLoading: true).status, .assessing,
+            "A failed state that is loading again says so")
+        let failed = WorldTensionState(loadedAt: now, problem: "The model failed.")
+        assertEqual(failed.status, .unavailable, "No reading and a failure is unavailable")
+        assertEqual(failed.note, "Assessment unavailable", "… in those words")
+        assertEqual(failed.explanation, "The model failed.", "… with the reason")
+        let assessed = WorldTensionState(history: [reading(-1, 20), reading(0, 30)], loadedAt: now)
+        assertEqual(assessed.status, .assessed, "Today's assessment")
+        assertEqual(assessed.note, nil, "Today's assessment needs no qualifier")
+        assertEqual(assessed.explanation, nil, "… and no explanation")
+        var declinedLater = assessed
+        declinedLater.problem = WorldTensionError.rejected.errorDescription
+        assertEqual(declinedLater.status, .assessed, "Declined new headlines leave today's assessment standing")
+        assertTrue(
+            declinedLater.explanation?.contains("earlier assessment stands") == true,
+            "… and say the earlier assessment stands instead of claiming an estimate")
+        let provisional = WorldTensionState(
+            history: [reading(-1, 20), reading(0, 48, estimate: true, hash: "today:estimate")], loadedAt: now)
+        assertEqual(provisional.status, .estimate, "Today's keyword estimate")
+        assertEqual(provisional.note, "Keyword estimate", "… is named the same on every surface")
+        assertTrue(
+            provisional.explanation?.contains("asked again") == true, "An unsaved estimate waits for the model")
+        let saved = WorldTensionState(history: [reading(0, 48, estimate: true)], loadedAt: now)
+        assertTrue(saved.explanation?.contains("declined") == true, "A saved estimate stands for declined headlines")
+        let stale = WorldTensionState(history: [reading(-3, 20), reading(-2, 30)], loadedAt: now)
+        assertEqual(stale.status, .stale, "A reading of an earlier UTC day is stale")
+        assertTrue(stale.note?.hasPrefix("Reading from ") == true, "A stale reading says how old it is")
+        assertEqual(stale.reading?.assessment.score, 30, "… and is still shown")
+        let gapped = [
+            reading(-9, 10), reading(-6, 20), reading(-5, 30), reading(-3, 40), reading(-2, 50, generation: "next"),
+            reading(-1, 60, generation: "next"), reading(0, 70, generation: "next"),
+        ]
+        let week = WorldTensionState(history: gapped, loadedAt: now)
+        assertEqual(week.trend(days: 7).map(\.assessment.score), [20, 30, 40, 50, 60, 70], "Seven UTC days")
+        assertEqual(
+            WorldTensionState.segments(week.trend(days: 7)), [0, 0, 1, 2, 2, 2],
+            "A missing day or a model change starts a new line")
+
+        let database = DatabaseEngine(path: ":memory:")
+        try await database.open()
+        let silent = WorldTensionService(
+            model: NewsTextModel { _, _ in
+                assertTrue(false, "A disabled state never asks the model")
+                return ""
+            }, allowsEnergy: { true })
+        let off = try await WorldTensionState.load(
+            service: silent, database: database, now: now, aiEnabled: false, collectionEnabled: true)
+        assertEqual(off.status, .aiOff, "Loading with AI off assesses nothing")
+        let history = [reading(-3, 10), reading(-2, 20), reading(-1, 30)]
+        for item in history { try await database.saveWorldTensionReading(item) }
+        let evidence = FeedArticle(
+            title: "Missile strike hits border town", link: "https://example.com/panel/1", guid: "panel-1",
+            description: "", pubDate: now.addingTimeInterval(-3600), source: "Panel")
+        try await database.upsertArticles([evidence], feedUrl: TensionMethodology.v1.panel[0].url)
+        // One reporting panel feed is not enough coverage, so the assessment fails before the model is asked.
+        let failedLoad = try await WorldTensionState.load(
+            service: WorldTensionService(model: .unavailable, allowsEnergy: { true }), database: database, now: now,
+            aiEnabled: true, collectionEnabled: true)
+        assertEqual(failedLoad.status, .stale, "A failed assessment keeps yesterday's reading, marked stale")
+        assertEqual(
+            failedLoad.explanation, WorldTensionError.insufficientCoverage.errorDescription,
+            "… and says why today has none")
+        assertEqual(
+            failedLoad.reading?.assessment.score, WorldTensionSmoothing.displayed(history).last?.assessment.score,
+            "The failure path shows the methodology v3 reading, as the sheet always did, not the raw assessment")
+        assertTrue(failedLoad.reading?.assessment.score != 30, "The raw assessment of 30 is not shown")
+        assertEqual(
+            failedLoad.panelHeadlines.map(\.title), [evidence.title], "Today's waiting panel headlines are kept")
+        let deferred = try await WorldTensionState.load(
+            service: WorldTensionService(model: .unavailable, allowsEnergy: { false }), database: database, now: now,
+            aiEnabled: true, collectionEnabled: true)
+        assertEqual(
+            deferred.explanation, WorldTensionError.deferred.errorDescription, "Low Power Mode says it is paused")
+        await database.close()
     }
 
     static func testWorldTension() async throws {

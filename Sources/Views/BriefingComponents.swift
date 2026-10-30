@@ -116,35 +116,25 @@ enum BriefingFactExtractor {
 
 // MARK: - World Tension Strip Component
 
-/// Compact horizontal dashboard strip displaying the World Tension score, 7-day sparkline, and driving headlines.
+/// The Briefing's World Tension strip (DESIGN.md 8.4): the reading, its state in the words the sidebar and the sheet
+/// use (#781), the 7-day trend and up to three driving headlines. Without a reading it says why, in the same words.
 struct BriefingTensionStripView: View {
-    let reading: WorldTensionReading?
-    let history: [WorldTensionReading]
-    var onOpenHeadline: ((WorldTensionHeadline) -> Void)? = nil
+    let state: WorldTensionState
 
     @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.openURL) private var openURL
 
     private static let driverMinWidthWide: CGFloat = 280
     private static let driverMinWidthCompact: CGFloat = 260
 
-    init(
-        reading: WorldTensionReading?,
-        history: [WorldTensionReading],
-        onOpenHeadline: ((WorldTensionHeadline) -> Void)? = nil
-    ) {
-        self.reading = reading
-        self.history = history
-        self.onOpenHeadline = onOpenHeadline
-    }
-
     var body: some View {
-        if let reading {
+        if let reading = state.reading {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 // Top Row: Score + Level + 7-Day Sparkline
                 HStack(alignment: .center) {
                     scoreHeader(reading)
                     Spacer(minLength: AppSpacing.md)
-                    trendSparkline(reading)
+                    trendSparkline
                 }
 
                 Divider()
@@ -169,26 +159,27 @@ struct BriefingTensionStripView: View {
             )
         } else {
             NoticeView {
-                Label(
-                    "World Tension assessment unavailable. Enable on-device AI and panel collection in Settings.",
-                    systemImage: "globe"
-                )
+                Label {
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        Text("World Tension: \(state.note ?? "")").foregroundStyle(AppColor.primaryText)
+                        if let explanation = state.explanation { Text(explanation) }
+                    }
+                } icon: {
+                    Image(systemName: "globe")
+                }
                 .font(AppTypography.caption)
                 .foregroundStyle(AppColor.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
 
     private func scoreHeader(_ reading: WorldTensionReading) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-            Text("\(reading.assessment.score)")
+            Text("\(reading.assessment.score)°")
                 .font(AppTypography.tensionReading)
                 .monospacedDigit()
                 .foregroundStyle(AppColor.primaryText)
-
-            Text("°")
-                .font(AppTypography.headline)
-                .foregroundStyle(AppColor.secondaryText)
 
             Label {
                 Text(reading.level.rawValue)
@@ -200,29 +191,27 @@ struct BriefingTensionStripView: View {
                     .foregroundStyle(AppColor.tension(reading.level))
             }
 
-            if reading.assessment.isEstimate == true {
-                TagView(title: "Keyword estimate", tint: AppColor.secondaryText)
+            if let note = state.note {
+                TagView(title: note, tint: AppColor.secondaryText)
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("World tension \(reading.assessment.score) degrees, \(reading.level.rawValue)")
+        .accessibilityLabel(
+            "World tension \(reading.assessment.score) degrees, \(reading.level.rawValue)"
+                + (state.note.map { ", \($0)" } ?? ""))
     }
 
-    private func trendSparkline(_ reading: WorldTensionReading) -> some View {
+    private var trendSparkline: some View {
         HStack(alignment: .center, spacing: AppSpacing.xs) {
-            EyebrowText("7-DAY TREND")
-
-            BriefingTensionSparklineView(
-                history: history,
-                currentReading: reading
-            )
+            EyebrowText("7-day trend")
+            BriefingTensionSparklineView(readings: state.trend(days: 7))
         }
     }
 
     private func driversSection(_ reading: WorldTensionReading) -> some View {
         let drivers = Array(reading.drivingHeadlines.prefix(3))
         return VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            EyebrowText("KEY DRIVERS")
+            EyebrowText("Key drivers")
 
             ViewThatFits(in: .horizontal) {
                 // Wide (>= 1100 pt): 3 columns
@@ -256,96 +245,77 @@ struct BriefingTensionStripView: View {
         }
     }
 
+    /// A driving headline opens its story in the browser, as in the sheet; panel stories need not be in the library.
+    @ViewBuilder
     private func driverCard(_ driver: WorldTensionHeadline) -> some View {
-        Button {
-            onOpenHeadline?(driver)
-        } label: {
-            VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-                EyebrowText(driver.publisher)
-                Text(driver.title)
-                    .font(AppTypography.callout)
-                    .foregroundStyle(AppColor.primaryText)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(AppSpacing.xs)
-            .background(
-                AppColor.elevatedSurface,
-                in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
-            )
+        let cell = VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+            EyebrowText(driver.publisher)
+            Text(driver.title)
+                .font(AppTypography.callout)
+                .foregroundStyle(AppColor.primaryText)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
         }
-        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppSpacing.xs)
+        .background(
+            AppColor.elevatedSurface,
+            in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
+        )
+        if let url = driver.webURL {
+            Button {
+                openURL(url)
+            } label: {
+                cell
+            }
+            .buttonStyle(.plain)
+            .help("Open the story in your browser")
+        } else {
+            cell
+        }
     }
 }
 
+/// The last seven UTC days of readings as a small line; a missing day breaks the line. One reading or none shows a
+/// flat baseline.
 struct BriefingTensionSparklineView: View {
-    let history: [WorldTensionReading]
-    let currentReading: WorldTensionReading?
+    let readings: [WorldTensionReading]
 
     private static let chartWidth: CGFloat = 140
     private static let chartHeight: CGFloat = 36
 
-    init(history: [WorldTensionReading], currentReading: WorldTensionReading?) {
-        self.history = history
-        self.currentReading = currentReading
-    }
-
-    private var recentHistory: [WorldTensionReading] {
-        Array(history.suffix(7))
-    }
-
     var body: some View {
-        Group {
-            if recentHistory.count >= 2 {
-                Chart {
-                    ForEach(recentHistory) { item in
-                        LineMark(
-                            x: .value("Day", item.evaluatedAt),
-                            y: .value("Score", item.assessment.score)
-                        )
-                        .interpolationMethod(.catmullRom)
-                        .foregroundStyle(AppColor.secondaryText)
-
-                        PointMark(
-                            x: .value("Day", item.evaluatedAt),
-                            y: .value("Score", item.assessment.score)
-                        )
-                        .foregroundStyle(AppColor.tension(item.level))
-                    }
-                }
-                .chartYScale(domain: 0...100)
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
-            } else if let reading = currentReading {
-                Chart {
-                    RuleMark(y: .value("Baseline", reading.assessment.score))
-                        .foregroundStyle(AppColor.borderSubtle)
-                        .lineStyle(StrokeStyle(lineWidth: AppLayout.hairline, dash: [4, 4]))
+        let segments = WorldTensionState.segments(readings)
+        Chart {
+            if readings.count >= 2 {
+                ForEach(Array(readings.enumerated()), id: \.element.id) { index, item in
+                    LineMark(
+                        x: .value("Day", item.id),
+                        y: .value("Reading", item.assessment.score),
+                        series: .value("Segment", segments[index])
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(AppColor.secondaryText)
 
                     PointMark(
-                        x: .value("Day", reading.evaluatedAt),
-                        y: .value("Score", reading.assessment.score)
+                        x: .value("Day", item.id),
+                        y: .value("Reading", item.assessment.score)
                     )
-                    .foregroundStyle(AppColor.tension(reading.level))
+                    .foregroundStyle(AppColor.tension(item.level))
                 }
-                .chartYScale(domain: 0...100)
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
             } else {
-                Chart {
-                    RuleMark(y: .value("Baseline", 50))
-                        .foregroundStyle(AppColor.borderSubtle)
-                        .lineStyle(StrokeStyle(lineWidth: AppLayout.hairline, dash: [4, 4]))
-                }
-                .chartYScale(domain: 0...100)
-                .chartXAxis(.hidden)
-                .chartYAxis(.hidden)
+                RuleMark(y: .value("Baseline", readings.last?.assessment.score ?? 50))
+                    .foregroundStyle(AppColor.borderSubtle)
+                    .lineStyle(StrokeStyle(lineWidth: AppLayout.hairline, dash: [4, 4]))
             }
         }
+        .chartYScale(domain: 0...100)
+        .chartXAxis(.hidden)
+        .chartYAxis(.hidden)
         .frame(width: Self.chartWidth, height: Self.chartHeight)
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("World tension seven-day trend")
+        .accessibilityValue(readings.map { "\($0.assessment.score) degrees" }.joined(separator: ", "))
     }
 }
 

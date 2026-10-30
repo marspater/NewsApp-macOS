@@ -223,10 +223,17 @@ struct NativeUIQAChecks {
             await db.close()
             return
         }
-        let host = NSHostingView(
-            rootView:
-                TensionIndexView(history: [old], service: WorldTensionService(model: .unavailable))
-                .environmentObject(settings).environmentObject(store))
+        // The sheet shows the state MainView loads (#781); one reporting panel feed is not enough coverage to assess.
+        guard
+            let state = try? await WorldTensionState.load(
+                service: WorldTensionService(model: .unavailable), database: db, now: Date(), aiEnabled: true,
+                collectionEnabled: true)
+        else {
+            assertTrue(false, "Load the tension state")
+            await db.close()
+            return
+        }
+        let host = NSHostingView(rootView: TensionIndexView(state: state))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 800),
             styleMask: [.titled], backing: .buffered, defer: false)
@@ -270,8 +277,8 @@ struct NativeUIQAChecks {
             text.contains("Current Panel Headlines"), "Failed reassessments expose current evidence alongside history")
         assertTrue(text.contains("Current unscored panel evidence"), "The current publisher headline is inspectable")
         for disableAI in [true, false] {
-            settings.aiEnabled = !disableAI
-            settings.tensionCollectionOptIn = disableAI
+            host.rootView = TensionIndexView(
+                state: WorldTensionState(aiEnabled: !disableAI, collectionEnabled: disableAI, history: state.history))
             let hiddenDeadline = ContinuousClock.now + .seconds(2)
             while renderedText().contains("Current Panel Headlines"), ContinuousClock.now < hiddenDeadline {
                 host.layoutSubtreeIfNeeded()
