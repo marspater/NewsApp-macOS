@@ -12099,6 +12099,9 @@ struct NewsTests {
             report.changedEvents.contains(vote) && report.changedEvents.contains(protest), "Story changes are reported")
         assertEqual(try await db.storyEventIDs(storyID ?? "").sorted(), [vote, protest].sorted(), "Both events belong")
         assertEqual(try await db.storyEventIDs(protest).sorted(), [vote, protest].sorted(), "… from either event")
+        assertEqual(
+            try await db.storyIDs(forEvents: [vote, protest]), [protest: vote],
+            "Notifications map a later event to its story; the story's own event is absent (#740)")
         var summaries = try await db.eventFeedSummaries(forArticles: [ids[0]])
         assertEqual(summaries.count, 1, "One card for the story")
         assertEqual(summaries.first?.eventID, protest, "The card opens the story's newest event")
@@ -18377,6 +18380,33 @@ struct NewsTests {
         assertEqual(
             together.banners.map(\.lane), [.priority, .starred, .normal, .normal, .normal],
             "Simultaneous arrivals post priority, then the starred group, then normal stories")
+
+        // Two events of one story (#740): one banner per pass, threaded by the story; a later event of an announced
+        // story adds to it without notifying again, unless it reaches a higher lane.
+        var storyDelivery = NotificationDelivery(mode: .full)
+        let stormFirst = report(800, "Storm reaches the coast")
+        let stormSecond = report(801, "Storm leaves thousands without power")
+        let stormMajor = report(802, "Explosion at a storm shelter")
+        storyDelivery.events = [stormFirst.id: "storm-a", stormSecond.id: "storm-b", stormMajor.id: "storm-c"]
+        storyDelivery.stories = ["storm-b": "storm-a", "storm-c": "storm-a"]
+        storyDelivery.publishers = ["storm-c": 5]
+        let storyPass = NotificationService.plan(
+            new: [(stormFirst, 0.7), (stormSecond, 0.75)], pending: [:], delivery: storyDelivery
+        ).banners
+        assertEqual(
+            storyPass.map { $0.article?.title ?? "" }, ["Storm leaves thousands without power"],
+            "Two events of one story post one banner, by the stronger report")
+        assertEqual(storyPass.first?.thread, "storm-a", "A story's banners share the story's thread")
+        storyDelivery.ledger.announced["storm-a"] = .init(
+            leadKey: EventFeedSummary.titleKey(stormFirst.title), lane: .normal)
+        assertTrue(
+            NotificationService.plan(new: [(stormSecond, 0.75)], pending: [:], delivery: storyDelivery).banners
+                .isEmpty,
+            "A new event of an announced story does not notify again")
+        assertEqual(
+            NotificationService.plan(new: [(stormMajor, 0.9)], pending: [:], delivery: storyDelivery).banners.map(
+                \.lane), [.priority],
+            "A new event of an announced story notifies when it reaches a higher lane")
 
         // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
         let rising = report(800, "Explosion levels block")

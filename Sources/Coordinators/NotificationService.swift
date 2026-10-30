@@ -14,6 +14,9 @@ struct NotificationDelivery: Sendable {
     var mode: AppSettings.NotificationMode
     /// Story id → event id, for stories clustering has grouped; a story outside any event is absent.
     var events: [String: String] = [:]
+    /// Event id → the story it belongs to (#581), for this pass's events and the ledger's announced events; an event
+    /// that is its own story is absent. Banners count once per story (#740).
+    var stories: [String: String] = [:]
     /// Event id → number of distinct publishers among its members.
     var publishers: [String: Int] = [:]
     /// The reader's top interest categories, lowercased `NewsCategory` raw values.
@@ -267,7 +270,8 @@ final class NotificationService: Sendable {
         switch delivery.mode {
         case .minimal:
             // ALWAYS exactly one coalesced notification with singular/plural grammar
-            let ranked = await Self.representatives(of: newArticles, events: delivery.events)
+            let ranked = await Self.representatives(
+                of: newArticles, events: delivery.events.mapValues { delivery.stories[$0] ?? $0 })
             await triggerMinimalNotification(for: ranked.map(\.article))
 
         case .privacy:
@@ -480,12 +484,28 @@ typealias ScoredStory = (article: FeedArticle, score: Double)
 private struct LanePlanner {
     let delivery: NotificationDelivery
     var banners: [PlannedBanner] = []
-    /// Keys a banner of this pass already covers.
+    /// Stories a banner of this pass already covers.
     var taken = Set<String>()
+    /// Story → the highest lane any of its events was announced in during the last 24 h.
+    let storyLanes: [String: NotificationLane]
 
-    init(delivery: NotificationDelivery) { self.delivery = delivery }
+    init(delivery: NotificationDelivery) {
+        self.delivery = delivery
+        storyLanes = delivery.ledger.announced.reduce(into: [:]) { lanes, entry in
+            let story = delivery.stories[entry.key] ?? entry.key
+            lanes[story] = max(lanes[story] ?? entry.value.lane, entry.value.lane)
+        }
+    }
 
+    /// The event a story is announced and queued under; the story itself outside any event.
     func key(_ article: FeedArticle) -> String { delivery.events[article.id] ?? article.id }
+
+    /// The story the event belongs to (#740): banners group, dedupe and thread by it, so two events of one story
+    /// notify once.
+    func story(_ article: FeedArticle) -> String {
+        let event = key(article)
+        return delivery.stories[event] ?? event
+    }
 
     func lead(_ article: FeedArticle) -> String {
         NotificationService.leadKey(of: article, event: key(article), delivery: delivery)
@@ -499,10 +519,12 @@ private struct LanePlanner {
         delivery.events[article.id].flatMap { delivery.publishers[$0] } ?? 1
     }
 
-    /// Whether the story's key may post in `lane`: not announced, a new lead headline, or a higher lane.
+    /// Whether the story's key may post in `lane`: not announced, a new lead headline, or a higher lane. A new event of
+    /// a story another of whose events was announced adds to that story and posts only in a higher lane (#740).
     func fresh(_ article: FeedArticle, in lane: NotificationLane) -> Bool {
-        guard let event = delivery.events[article.id], let seen = delivery.ledger.announced[event] else { return true }
-        return seen.leadKey != lead(article) || lane > seen.lane
+        guard let event = delivery.events[article.id] else { return true }
+        if let seen = delivery.ledger.announced[event] { return seen.leadKey != lead(article) || lane > seen.lane }
+        return storyLanes[story(article)].map { lane > $0 } ?? true
     }
 
     func isPriority(_ item: ScoredStory) -> Bool {
@@ -529,8 +551,8 @@ private struct LanePlanner {
         var order: [String] = []
         var members: [String: [ScoredStory]] = [:]
         for item in new {
-            if members[key(item.article)] == nil { order.append(key(item.article)) }
-            members[key(item.article), default: []].append(item)
+            if members[story(item.article)] == nil { order.append(story(item.article)) }
+            members[story(item.article), default: []].append(item)
         }
         var priority: [ScoredStory] = []
         var normal: [ScoredStory] = []
@@ -555,9 +577,9 @@ private struct LanePlanner {
         for item in individual {
             banners.append(
                 PlannedBanner(
-                    lane: .priority, grouped: false, article: item.article, thread: key(item.article), sound: true,
+                    lane: .priority, grouped: false, article: item.article, thread: story(item.article), sound: true,
                     announces: announces(item.article)))
-            taken.insert(key(item.article))
+            taken.insert(story(item.article))
         }
         let newOverflow = keys.dropFirst(individual.count).map {
             QueuedPriority(
@@ -576,7 +598,7 @@ private struct LanePlanner {
                 count: overflow.count, thread: "priority", sound: true,
                 announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first },
                 members: overflow.map(\.story).filter { !$0.isEmpty }))
-        taken.formUnion(overflow.map(\.event))
+        taken.formUnion(overflow.map { delivery.stories[$0.event] ?? $0.event })
         return []
     }
 
@@ -595,14 +617,15 @@ private struct LanePlanner {
     private mutating func planStarredFeed(_ feed: String, items: [ScoredStory]) {
         var seen = Set<String>()
         let freshItems = items.filter {
-            !taken.contains(key($0.article)) && fresh($0.article, in: .starred) && seen.insert(key($0.article)).inserted
+            !taken.contains(story($0.article)) && fresh($0.article, in: .starred)
+                && seen.insert(story($0.article)).inserted
         }
         guard let top = freshItems.first else { return }
         let covered = freshItems.reduce(into: [String: String]()) { $0.merge(announces($1.article)) { a, _ in a } }
         if items.count == 1 {
             banners.append(
                 PlannedBanner(
-                    lane: .starred, grouped: false, article: top.article, feedURL: feed, thread: key(top.article),
+                    lane: .starred, grouped: false, article: top.article, feedURL: feed, thread: story(top.article),
                     sound: top.score >= NotificationService.breakingScore, announces: covered))
         } else {
             let rest = items.filter { item in !freshItems.contains { $0.article.id == item.article.id } }
@@ -612,18 +635,18 @@ private struct LanePlanner {
                     headlines: (freshItems + rest).prefix(2).map(\.article.title), count: items.count, feedURL: feed,
                     thread: "starred-\(feed)", sound: false, announces: covered, members: items.map(\.article.id)))
         }
-        taken.formUnion(freshItems.map { key($0.article) })
+        taken.formUnion(freshItems.map { story($0.article) })
     }
 
     /// Today's qualification, up to the rolling hour's remaining allowance.
     mutating func planNormal(_ keys: [ScoredStory]) {
         let allowance = max(0, NotificationService.normalLimit - delivery.ledger.normalLastHour)
-        for item in keys.filter({ !taken.contains(key($0.article)) }).sorted(by: { $0.score > $1.score })
+        for item in keys.filter({ !taken.contains(story($0.article)) }).sorted(by: { $0.score > $1.score })
             .prefix(allowance)
         {
             banners.append(
                 PlannedBanner(
-                    lane: .normal, grouped: false, article: item.article, thread: key(item.article),
+                    lane: .normal, grouped: false, article: item.article, thread: story(item.article),
                     sound: item.score >= NotificationService.breakingScore, announces: announces(item.article)))
         }
     }

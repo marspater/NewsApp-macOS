@@ -22,8 +22,9 @@ a second pass waits until the first has finished posting.
 ## Scores and the dedupe key
 
 - **Score**: `NotificationService.computeImportance`, computed once per story (#545).
-- **Dedupe key**: the story's event id when it is in an event, otherwise the story id. One key yields at most one
-  banner per pass, in exactly one lane.
+- **Dedupe key**: the story (#581, #740) the report's event belongs to, otherwise the report's own id. Two events of
+  one story share a key, so a story yields at most one banner per pass, in exactly one lane, threaded under the story.
+  Announcements and waiting priority keys stay recorded per event.
 - **Full-weight signal word**: a word of weight 1 in `breakingSignals` ("breaking", "killed", "earthquake", …), not
   the half-weight announcement words.
 
@@ -118,6 +119,10 @@ An event is **announced** when any banner (individual or grouped, any lane) has 
 - its lead headline changed (#545): the event notifies again, in the lane it now qualifies for;
 - it now qualifies for a **higher lane** than the highest lane it was announced in (normal → starred or priority,
   starred → priority): one banner in the new lane.
+
+**Stories (#740).** A new event of a story another of whose events is announced adds to that story and posts no
+banner, unless it qualifies for a higher lane than the highest lane any event of the story was announced in. The story
+then appears in the app, not as a second alert.
 
 **Merged events.** When clustering merges an event into another (fragment merge #541, "Same Event as…" #524), the
 absorbed event's announcement of the last 24 hours moves to the event it joined, keeping its time and highest lane.

@@ -527,6 +527,23 @@ extension DatabaseEngine {
         return try eventRows("SELECT coalesce(story_id, id) FROM events WHERE id = ?;", [.text(live)]).first?[0]
     }
 
+    /// Event → its story, for the events that belong to another event's story; an event that is its own story is absent.
+    func storyIDs(forEvents eventIDs: Set<String>) throws -> [String: String] {
+        var result: [String: String] = [:]
+        let ids = eventIDs.sorted()
+        for start in stride(from: 0, to: ids.count, by: 400) {
+            let slice = Array(ids[start..<min(start + 400, ids.count)])
+            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ",")
+            for row in try eventRows(
+                "SELECT id, story_id FROM events WHERE story_id IS NOT NULL AND story_id != id AND id IN (\(placeholders));",
+                slice.map { .text($0) })
+            {
+                if let event = row[0], let story = row[1] { result[event] = story }
+            }
+        }
+        return result
+    }
+
     /// Live events of the story that `eventID` (any of its events, or the story id) belongs to, the story's own id first.
     func storyEventIDs(_ eventID: String) throws -> [String] {
         let storyID = try storyID(forEvent: eventID) ?? eventID
