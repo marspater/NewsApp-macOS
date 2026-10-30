@@ -1476,11 +1476,16 @@ struct NewsTests {
         assertEqual(
             sqlite3_exec(locker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK, "A second connection takes the lock")
         nonisolated(unsafe) let held = locker
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) {
+        // The lock stays held for a second, far longer than the write takes to reach SQLite; without the busy
+        // timeout the write fails at once instead of waiting.
+        let lockedAt = Date()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
             sqlite3_exec(held, "COMMIT;", nil, nil, nil)
             sqlite3_close(held)
         }
         try await db.markRead(articleId: "backup-a", isRead: true)
+        let waited = Date().timeIntervalSince(lockedAt)
+        assertTrue(waited >= 0.9, "A write waits for another connection's lock (waited \(waited) s)")
         assertTrue(try await db.isRead(articleId: "backup-a"), "A write waits out another connection's lock")
         await db.close()
         let backups = try files("news-before-")
@@ -1507,6 +1512,8 @@ struct NewsTests {
             SQLITE_OK, "Reconstruct a library from a newer build")
         sqlite3_close(handle)
         let futureBytes = try Data(contentsOf: future)
+        let sideFile = URL(fileURLWithPath: future.path + ".world-tension-v2.json")
+        try Data("[]".utf8).write(to: sideFile)
         let newer = DatabaseEngine(path: future.path)
         try await newer.open()
         let futureNotice = await newer.databaseHealthNotice()
@@ -1516,6 +1523,21 @@ struct NewsTests {
             try await newer.markRead(articleId: "backup-a", isRead: true)
             assertTrue(false, "A newer library refuses writes")
         } catch {}
+        let reading = WorldTensionReading(
+            evaluatedAt: Date(), inputHash: "", modelGeneration: "", headlines: [],
+            assessment: WorldTensionAssessment(score: 1, summary: "", reasons: []))
+        for (name, write) in [
+            ("saving a World Tension reading", { _ = try await newer.saveWorldTensionReading(reading) }),
+            ("clearing enrichment", { try await newer.clearArticleEnrichment() }),
+        ] as [(String, () async throws -> Void)] {
+            do {
+                try await write()
+                assertTrue(false, "A newer library refuses \(name)")
+            } catch let error as CocoaError {
+                assertEqual(error.code, .fileWriteVolumeReadOnly, "A newer library refuses \(name) as read-only")
+            }
+        }
+        assertEqual(try Data(contentsOf: sideFile), Data("[]".utf8), "A newer library's side files stay untouched")
         await newer.close()
         assertEqual(try Data(contentsOf: future), futureBytes, "A newer library is never migrated or written")
         assertEqual(try files("future-before-"), [], "A newer library is never backed up")

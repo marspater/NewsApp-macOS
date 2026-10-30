@@ -32,6 +32,9 @@ actor DatabaseEngine {
         storyPassPending = false
     }
     private(set) var healthNotice: String?
+    /// True while the library is open read-only (integrity issue, newer schema, failed backup); its side files are
+    /// then left alone too, so nothing beside the database changes either.
+    private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
     static let schemaVersion = 27
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
@@ -139,6 +142,7 @@ actor DatabaseEngine {
     func open() throws {
         guard db == nil else { return }
         healthNotice = nil
+        isReadOnly = false
 
         let parentDir = URL(fileURLWithPath: dbPath).deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: parentDir.path) {
@@ -270,6 +274,7 @@ actor DatabaseEngine {
 
     /// Closes the writable handle and reopens the library read-only, keeping the health notice already set.
     private func reopenReadOnly(closing openDb: OpaquePointer) {
+        isReadOnly = true
         sqlite3_close_v2(openDb)
         self.db = nil
         var roHandle: OpaquePointer?
@@ -3987,7 +3992,12 @@ actor DatabaseEngine {
         URL(fileURLWithPath: dbPath + ".world-tension-v2.json")
     }
 
+    private func requireWritable() throws {
+        if isReadOnly { throw CocoaError(.fileWriteVolumeReadOnly) }
+    }
+
     private func clearWorldTensionHistory() throws {
+        try requireWritable()
         if dbPath == ":memory:" {
             inMemoryWorldTension = []
             return
@@ -4019,6 +4029,7 @@ actor DatabaseEngine {
     @discardableResult
     func saveWorldTensionReading(_ reading: WorldTensionReading, keepingAssessment: Bool = false) throws -> Bool {
         try Task.checkCancellation()
+        try requireWritable()
         guard reading.assessment.isValid(headlines: reading.headlines),
             reading.evaluatedAt.timeIntervalSince1970.isFinite
         else { throw CocoaError(.fileWriteInvalidFileName) }
