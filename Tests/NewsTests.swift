@@ -18041,6 +18041,12 @@ struct NewsTests {
             AppSettings.normalizeFeedURL("user:pass@example.com/rss"), "https://user:pass@example.com/rss",
             "Credentials without a scheme are not mistaken for a scheme")
         assertTrue(AppSettings.normalizeFeedURL("[2001:db8::1]/feed") != nil, "A bracketed IPv6 host is accepted")
+        assertTrue(
+            AppSettings.normalizeFeedURL("ftp:user:pass@example.com/rss") == nil,
+            "An explicit unsupported scheme is refused before credentials are read")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed:8443/rss"), "https://feed:8443/rss",
+            "feed: followed by a port is a host named feed, not a wrapper")
         let invalidURL = AppSettings.normalizeFeedURL("")
         assertEqual(invalidURL, nil, "Empty string should return nil")
 
