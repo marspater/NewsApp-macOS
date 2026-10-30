@@ -3738,6 +3738,12 @@ struct NewsTests {
         assertEqual(
             FeedFetcher.webArticles(linkless ?? []).map(\.guid), ["123"],
             "A JSON Feed item without a URL is kept by its ID")
+        let emptyURL = JSONFeedParser.parse(
+            data: Data(
+                #"{"version":"https://jsonfeed.org/version/1.1","title":"T","items":[{"id":"https://example.com/a","url":"","content_text":"Story"}]}"#
+                    .utf8),
+            feedURL: "https://example.com/feed.json")
+        assertEqual(emptyURL?.first?.link, "https://example.com/a", "An empty url falls back to a web ID")
         let fetcher = FeedFetcher(client: client)
         var notified = 0
         // No image lookup: it outlives fetchFeedsAsync and its write transaction would hold the lock the trigger edits need.
@@ -16659,7 +16665,7 @@ struct NewsTests {
             assertEqual(markStore.unreadCount, 0, "Unread count is 0 after MarkAllAsReadIntent")
             let dialogMark = extractDialogText(from: resMark)
             assertTrue(
-                dialogMark != nil && dialogMark!.contains("All stories marked as read"),
+                dialogMark != nil && dialogMark!.contains("All visible stories marked as read"),
                 "MarkAllAsReadIntent returns confirmation dialog")
         } catch {
             assertTrue(false, "MarkAllAsReadIntent perform threw: \(error)")
@@ -16671,7 +16677,7 @@ struct NewsTests {
             assertEqual(markStore.unreadCount, 0, "Unread count remains 0 on repeat MarkAllAsReadIntent")
             let dialogMark2 = extractDialogText(from: resMark2)
             assertTrue(
-                dialogMark2 != nil && dialogMark2!.contains("All stories marked as read"),
+                dialogMark2 != nil && dialogMark2!.contains("All visible stories marked as read"),
                 "Confirmation dialog returned on idempotent run")
         } catch {
             assertTrue(false, "MarkAllAsReadIntent repeat threw: \(error)")
@@ -16685,7 +16691,7 @@ struct NewsTests {
             let resAmbientMark = try await ambientMarkIntent.perform()
             let dialogAmbient = extractDialogText(from: resAmbientMark)
             assertTrue(
-                dialogAmbient != nil && dialogAmbient!.contains("All stories marked as read"),
+                dialogAmbient != nil && dialogAmbient!.contains("All visible stories marked as read"),
                 "Ambient MarkAllAsReadIntent succeeds via resolver")
         } catch {
             assertTrue(false, "Ambient MarkAllAsReadIntent threw: \(error)")
@@ -18116,6 +18122,20 @@ struct NewsTests {
             AppSettings.normalizeFeedURL("user:pass@example.com/rss"), "https://user:pass@example.com/rss",
             "Credentials without a scheme are not mistaken for a scheme")
         assertTrue(AppSettings.normalizeFeedURL("[2001:db8::1]/feed") != nil, "A bracketed IPv6 host is accepted")
+        assertTrue(
+            AppSettings.normalizeFeedURL("ftp:user:pass@example.com/rss") == nil,
+            "An explicit unsupported scheme is refused before credentials are read")
+        assertEqual(
+            AppSettings.addFeedFailureMessage(for: "ftp://example.com/rss"),
+            "Feed not added. ftp: addresses are not supported. Use an http or https feed address.",
+            "Add Feed names a refused scheme")
+        assertEqual(
+            AppSettings.addFeedFailureMessage(for: "https://example.com/rss"),
+            "Feed not added. Check the URL or whether you already subscribe.",
+            "A web address keeps the generic failure text")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed:8443/rss"), "https://feed:8443/rss",
+            "feed: followed by a port is a host named feed, not a wrapper")
         let invalidURL = AppSettings.normalizeFeedURL("")
         assertEqual(invalidURL, nil, "Empty string should return nil")
 
