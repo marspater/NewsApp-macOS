@@ -7907,6 +7907,37 @@ struct NewsTests {
             description: "Thousands marched in Paris on Saturday.", date: now)
         assertFalse(plainStart.names.contains("thousands"), "An ordinary sentence-initial word is still no name")
 
+        // Admission and rescue knobs measured in #582, all off in the standard policy.
+        var sweep = EventMatchPolicy.standard
+        let storm = features(
+            ["austen", "storm austen"], ["wind", "power", "cut"], places: [EventPlaces.canonical("UK")])
+        let stormLater = features(
+            ["austen", "storm austen"], ["wind", "batter", "rain"], hours: 2, places: [EventPlaces.canonical("UK")])
+        assertFalse(
+            EventMatcher.assess(storm, stormLater, embeddingSimilarity: 0.66).isMatch,
+            "Two shared names and a cosine under 0.70 are no match by default")
+        sweep.twoAnchorRescueThreshold = 0.65
+        assertTrue(
+            EventMatcher.assess(storm, stormLater, policy: sweep, embeddingSimilarity: 0.66).isMatch,
+            "The two-anchor rescue links them when switched on")
+        let bare = features([], ["central", "bank", "rate", "hold"])
+        let bareLater = features([], ["central", "bank", "rate", "unchanged"], hours: 1)
+        assertFalse(
+            EventMatcher.needsPairModel(EventMatcher.assess(bare, bareLater, embeddingSimilarity: 0.9)),
+            "Without any shared anchor the pair model is not asked by default")
+        sweep = EventMatchPolicy.standard
+        sweep.anchorlessModelCosine = 0.85
+        assertTrue(
+            EventMatcher.needsPairModel(EventMatcher.assess(bare, bareLater, policy: sweep, embeddingSimilarity: 0.9)),
+            "An anchorless pair at a high cosine goes to the model when switched on")
+        sweep = EventMatchPolicy.standard
+        sweep.compatibleRequiresMatch = true
+        let open = EventMatcher.assess(englishStrike, englishStrikeLater)
+        assertTrue(open.isCompatible && !open.isMatch, "A borderline pair with a shared name is compatible by default")
+        assertFalse(
+            EventMatcher.assess(englishStrike, englishStrikeLater, policy: sweep).isCompatible,
+            "… and not when compatibility requires a match")
+
         let french = DatabaseEngine(path: ":memory:")
         try await french.open()
         try await french.upsertArticles([
@@ -12376,7 +12407,8 @@ struct NewsTests {
                         if let va = vectorCache[items[i].id], let vb = vectorCache[items[j].id] {
                             similarity = SentenceEmbedder.cosineSimilarity(va, vb)
                         }
-                        let pair = EventMatcher.assess(a, b, embeddingSimilarity: similarity)
+                        let pair = EventMatcher.assess(
+                            a, b, policy: StoryCorpus.policyFromEnvironment(), embeddingSimilarity: similarity)
                         let pairModel =
                             EventMatcher.needsPairModel(pair)
                             ? await PairScorer.shared.probability(
@@ -12664,10 +12696,7 @@ struct NewsTests {
             try await db.eventRows("DELETE FROM \(table);")
         }
         let newest = try await recentLibraryRows(db).newest
-        var policy = EventMatchPolicy.standard
-        if let value = ProcessInfo.processInfo.environment["NEWS_PAIR_THRESHOLD"].flatMap({ Double($0) }) {
-            policy.pairModelThreshold = value
-        }
+        let policy = StoryCorpus.policyFromEnvironment()
         let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
         let started = Date()
         var passes = 0

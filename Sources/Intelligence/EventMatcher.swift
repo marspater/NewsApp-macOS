@@ -518,6 +518,19 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// specific anchor. The highest cutoff that keeps the best tune recall without a false pair (24 October 2026:
     /// 0.5–0.9 link 44 tune pairs and no false one, 0.95–0.98 link 43).
     var pairModelThreshold: Double = 0.9
+    /// Semantic rescue for a pair sharing two or more specific anchors (#582): a named storm or a named match reported
+    /// in different words. Infinity turns it off (1 would still fire on identical texts).
+    var twoAnchorRescueThreshold: Double = .infinity
+    /// A pair sharing no anchor may still go to the pair model when its cosine reaches this and the reports are at most
+    /// `anchorlessModelGap` apart (#582). Infinity turns it off.
+    var anchorlessModelCosine: Double = .infinity
+    var anchorlessModelGap: TimeInterval = 24 * 3600
+    /// When true, a pair counts as compatible for admission only when it is a match (#582): a borderline pair with a
+    /// shared name cannot carry an unrelated report into an event through the two-thirds rule.
+    var compatibleRequiresMatch = false
+    /// Two reports from one publisher are compatible for admission only when they match each other (#582). Measured on
+    /// the library holdout: one wrong link fewer, one true link (a live blog beside its report) fewer; off by default.
+    var samePublisherRequiresMatch = false
     static let standard = EventMatchPolicy()
 }
 
@@ -543,6 +556,8 @@ struct EventPairAssessment: Sendable, Equatable {
     var modelConfirmed = false
     /// Both reports are English or of unknown language, so the embedding and the pair model may be consulted (#553).
     var neuralEligible = true
+    /// No shared anchor, but a cosine high enough for the pair model to be asked (#582).
+    var anchorlessModelCandidate = false
 }
 
 enum EventMatcher {
@@ -626,22 +641,31 @@ enum EventMatcher {
         let semanticRescue =
             conflict == nil && !primaryDisjoint && sharedSpecific >= 1
             && (embeddingSimilarity ?? 0) >= policy.semanticMatchThreshold && gap <= policy.maximumTimeGap
+        let twoAnchorRescue =
+            conflict == nil && !primaryDisjoint && sharedSpecific >= 2
+            && (embeddingSimilarity ?? 0) >= policy.twoAnchorRescueThreshold && gap <= policy.maximumTimeGap
 
-        let isMatch = ruleMatch || semanticRescue
+        let isMatch = ruleMatch || semanticRescue || twoAnchorRescue
         let isCompatible =
             conflict == nil && !primaryDisjoint && sharedSpecific >= 1
             && (score >= policy.compatibilityScore || (embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold)
+            && (!policy.compatibleRequiresMatch || isMatch)
+        let anchorlessCandidate =
+            sharedAnchors == 0 && embeddingSimilarity != nil
+            && (embeddingSimilarity ?? 0) >= policy.anchorlessModelCosine
+            && gap <= policy.anchorlessModelGap
         let isBorderline =
             !isMatch && conflict == nil && !primaryDisjoint
             && ((sharedAnchors >= 1 && sharedEvidence >= 1 && score >= policy.borderlineScore)
                 || (sharedEvidence >= 3 && what >= policy.minimumWhat)
-                || ((embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold && sharedSpecific >= 1))
+                || ((embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold && sharedSpecific >= 1)
+                || anchorlessCandidate)
         return EventPairAssessment(
             conflict: conflict, isBorderline: isBorderline,
             score: max(score, embeddingSimilarity ?? 0.0), what: what, entity: entity, sharedAnchors: sharedAnchors,
             sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
             isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity,
-            neuralEligible: neuralEligible)
+            neuralEligible: neuralEligible, anchorlessModelCandidate: anchorlessCandidate)
     }
 
     /// Both models are English-only (MiniLM vocabulary, pair model trained on English pairs), so the semantic veto,
@@ -655,7 +679,8 @@ enum EventMatcher {
     /// name, place or country. Without any anchor two generic reports ("Central bank holds interest rates") can be
     /// about different places, so the model never stands in for all of them.
     static func needsPairModel(_ pair: EventPairAssessment) -> Bool {
-        pair.neuralEligible && pair.conflict == nil && !pair.isMatch && pair.isBorderline && pair.sharedAnchors >= 1
+        pair.neuralEligible && pair.conflict == nil && !pair.isMatch && pair.isBorderline
+            && (pair.sharedAnchors >= 1 || pair.anchorlessModelCandidate)
     }
 
     /// The pair model judged a borderline pair one event; it stands in for the shared specific anchor (#525).

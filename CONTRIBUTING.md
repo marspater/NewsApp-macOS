@@ -57,6 +57,7 @@ NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --review-pairs --h
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json ./test.sh --library-holdout # Local: re-clusters a temporary copy from scratch and scores the labelled pairs; the gate for matcher changes (#579). NEWS_PAIR_THRESHOLD and NEWS_PAIR_MODEL=0 apply
 NEWS_SNAPSHOT_DB=copy.sqlite3 ./test.sh --duplicate-replay # Local: re-ingests each same-publisher, same-headline pair of a library copy and reports how many become one story (#583)
 NEWS_SNAPSHOT_DB=copy.sqlite3 ./test.sh --fragment-merge-timing # Local: one fragment-merge pass over a temporary copy of a library, timed, with the merge count (#541, #582)
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json NEWS_PAIR_THRESHOLD=0.8 ./test.sh --library-holdout # Sweep override (#582): one knob per run, measured against the holdout; the knobs are NEWS_PAIR_THRESHOLD=0.8, NEWS_RESCUE_TWO_ANCHORS=0.65, NEWS_MODEL_ANCHORLESS=0.85, NEWS_COMPATIBLE_REQUIRES_MATCH=1, NEWS_COMPATIBLE_SHARE=1 (a finite share in 0...1) and NEWS_SAME_PUBLISHER=1, each also read by --event-corpus and --matcher-regressions
 NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power Mode (#534): no embedding, no pair model; deferred rows counted, not re-read
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)
 ./test.sh --corpus-review DIR     # Fingerprint match review sheet and precision against private labels (#102)

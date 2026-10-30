@@ -189,7 +189,9 @@ enum EventClusterer {
                 // model may have confirmed a borderline pair: such pairs stay open and are decided again later.
                 let unvetted =
                     pair.embeddingCosine == nil && pair.neuralEligible && pair.conflict == nil
-                    && pair.sharedSpecificAnchors >= 1
+                    && (pair.sharedSpecificAnchors >= 1
+                        || (matchPolicy.anchorlessModelCosine.isFinite && pair.sharedAnchors == 0
+                            && abs(a.date.timeIntervalSince(b.date)) <= matchPolicy.anchorlessModelGap))
                 if unvetted || EventMatcher.needsPairModel(pair) {
                     deferredCurrentRow = true
                     if pair.isMatch { pair = EventMatcher.unvetted(pair) }
@@ -204,6 +206,9 @@ enum EventClusterer {
                 if let probability = modelScores[key] ?? nil, probability >= matchPolicy.pairModelThreshold {
                     pair = EventMatcher.modelConfirmed(pair, policy: matchPolicy)
                 }
+            }
+            if matchPolicy.samePublisherRequiresMatch, !pair.isMatch, !a.source.isEmpty, a.source == b.source {
+                pair.isCompatible = false
             }
             // The matcher's own verdict is recorded; a reader's inclusion only overrides it here.
             let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
