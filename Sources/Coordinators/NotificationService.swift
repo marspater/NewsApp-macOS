@@ -561,13 +561,14 @@ private struct LanePlanner {
         var normal: [ScoredStory] = []
         for id in order {
             // The representative is the strongest story of the key's lane that may still post: in a story of two
-            // events, an unchanged announced event must not hide the other event's new lead headline (#740).
+            // events, an unchanged announced event must not hide the other event's new lead headline (#740). A starred
+            // story leaves the key to the starred lane only while it may still post there.
             let items = members[id, default: []].sorted { $0.score > $1.score }
             if items.contains(where: isPriority) {
                 if let best = items.first(where: { isPriority($0) && fresh($0.article, in: .priority) }) {
                     priority.append(best)
                 }
-            } else if !items.contains(where: { isStarred($0.article) }),
+            } else if !items.contains(where: { isStarred($0.article) && fresh($0.article, in: .starred) }),
                 let best = items.first(where: { isNormal($0) && fresh($0.article, in: .normal) })
             {
                 normal.append(best)
