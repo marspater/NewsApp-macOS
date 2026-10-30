@@ -15224,8 +15224,18 @@ struct NewsTests {
                 var pairs: [(String, Color, Color)] = [
                     ("current accent", TagView.textColor(tint: AppColor.accent, contrast: contrast), AppColor.accent)
                 ]
+                // readableAccent reads the system colors under the current AppKit appearance, so it matches the pass.
+                let appearance = NSAppearance(
+                    named: scheme == .dark
+                        ? (contrast == .increased ? .accessibilityHighContrastDarkAqua : .darkAqua)
+                        : (contrast == .increased ? .accessibilityHighContrastAqua : .aqua))
+                assertTrue(appearance != nil, "Appearance for \(scheme), \(contrast) exists")
                 for accent in accents {
-                    let base = Color(nsColor: AppColor.readableAccent(accent, dark: scheme == .dark, on: reference))
+                    var readable = accent
+                    appearance?.performAsCurrentDrawingAppearance {
+                        readable = AppColor.readableAccent(accent, dark: scheme == .dark, on: reference)
+                    }
+                    let base = Color(nsColor: readable)
                     pairs.append(
                         ("\(accent)", TagView.textColor(tint: base, contrast: contrast), Color(nsColor: accent)))
                 }
