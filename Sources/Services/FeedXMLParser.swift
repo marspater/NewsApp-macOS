@@ -331,7 +331,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
         if insideItem {
             appendItemXML("</\(elementName)>")
-            if ["category", "dc:subject"].contains(elementName), !isCollectingContentEncoded {
+            // A category inside an Atom <source> is the origin feed's; it must not block the entry's own term.
+            if ["category", "dc:subject"].contains(elementName), !isCollectingContentEncoded,
+                !(isAtom && elementStack.contains("source"))
+            {
                 itemCategory += "\n"
             }
             if elementName == "link", !isCollectingContentEncoded { itemLink = resolvedURL(itemLink) }

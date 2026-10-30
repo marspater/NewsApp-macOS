@@ -264,6 +264,14 @@ enum FeedKitSwiftSoupTests {
             FeedXMLParser(data: Data(sourcedLink.utf8), feedURL: base).parse().first?.link
                 == "https://example.com/linked",
             "A link inside an Atom entry's source does not become the entry's link")
+        let sourcedCategory = """
+            <feed xmlns="http://www.w3.org/2005/Atom"><title>Planet</title><entry><title>Tagged</title>
+            <id>urn:tagged</id><source><category term="Origin"/><title>Origin</title></source>
+            <category term="News"/><link href="https://example.com/tagged"/></entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(sourcedCategory.utf8), feedURL: base).parse().first?.category == "News",
+            "A category inside an Atom entry's source does not block the entry's own category")
 
         let malicious =
             "<!DOCTYPE rss [<!ENTITY payload 'expanded'>]><rss><channel><item><title>&payload;</title></item></channel></rss>"
