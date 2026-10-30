@@ -9311,6 +9311,9 @@ struct NewsTests {
                     await fetches.add(Task.isCancelled ? "cutAtDeadline" : outcome.kindName)
                     return outcome
                 }) : nil
+        // Industry Impact (#670) on every covered event: the share that shows the section, and each entry with the full
+        // text of the passages it cites, for the 30-event support review. Private, like the other outputs.
+        var industryEntries: [[String: Any]] = []
         for event in events {
             var members = try await db.fetchArticles(limit: nil, eventID: event.eventID)
             guard let first = members.first else { continue }
@@ -9351,12 +9354,30 @@ struct NewsTests {
                 }, uniquingKeysWith: { kept, _ in kept })
             let diagnosis = OverviewPerspectivesExtractor.diagnosePerspectives(
                 passages: passages, articles: members, existingCitations: citations)
-            let shown = OverviewComposer.composeOverview(
+            let composed = OverviewComposer.composeOverview(
                 eventID: event.eventID, eventTitle: first.title,
                 verifiedFacts: PassageFactExtractor.deterministicExtract(passages: passages), passages: passages,
                 articles: members,
                 membershipVersion: event.membershipVersion
-            ).perspectives.count
+            )
+            let shown = composed.perspectives.count
+            let impact = composed.evidenceSections?.industryImpact ?? []
+            if !impact.isEmpty {
+                coverage["industryImpactEvents", default: 0] += 1
+                coverage["industryImpactEntries", default: 0] += impact.count
+                let passageText = Dictionary(passages.map { ($0.id, $0.text) }, uniquingKeysWith: { kept, _ in kept })
+                industryEntries.append([
+                    "eventID": event.eventID, "eventTitle": first.title, "sources": event.sources.count,
+                    "entries": impact.map { item in
+                        [
+                            "industry": item.industry, "implication": item.implication,
+                            "citedPassages": item.citationIDs.compactMap { id in
+                                composed.citations[id].map { passageText[$0.passageID] ?? $0.quote }
+                            },
+                        ] as [String: Any]
+                    },
+                ])
+            }
             coverage["events", default: 0] += 1
             coverage[shown >= 2 ? "twoOrMore" : shown == 1 ? "one" : "none", default: 0] += 1
             if let gap = perspectiveGap(shown: shown, diagnosis: diagnosis) { coverage["gap_\(gap)", default: 0] += 1 }
@@ -9384,6 +9405,8 @@ struct NewsTests {
         }
         try encoder.encode(report).write(to: directory.appendingPathComponent("overviews.json"))
         try encoder.encode(coverage).write(to: directory.appendingPathComponent("perspectives.json"))
+        try JSONSerialization.data(withJSONObject: industryEntries, options: [.prettyPrinted, .sortedKeys]).write(
+            to: directory.appendingPathComponent("industry-impact-private.json"), options: .withoutOverwriting)
         print("OVERVIEW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         print("PERSPECTIVE_COVERAGE \(String(decoding: try encoder.encode(coverage), as: UTF8.self))")
 
