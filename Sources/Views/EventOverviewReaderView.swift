@@ -286,6 +286,14 @@ struct EventOverviewReaderView: View {
         return parts.joined(separator: ". ")
     }
 
+    /// A citation pill's label: the cited publisher, the matched report's publisher, else "Source"; never blank, so a
+    /// report from an unknown publisher shows a named pill rather than an empty one (#672).
+    nonisolated static func citationLabel(sourceName: String?, match: FeedArticle?) -> String {
+        [sourceName, match?.publisherName, match?.source]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "Source"
+    }
+
     /// Combines the source name and quoted passage into one VoiceOver label.
     nonisolated static func citationAccessibilityLabel(sourceName: String, quote: String) -> String {
         "Citation from \(sourceName): \(quote)"
@@ -811,7 +819,7 @@ struct EventOverviewReaderView: View {
     @ViewBuilder
     private func citationPill(_ citation: OverviewCitation) -> some View {
         let match = matchingArticle(for: citation)
-        let label = citation.sourceName ?? match?.source ?? "Source"
+        let label = Self.citationLabel(sourceName: citation.sourceName, match: match)
 
         Button {
             onSelectCitation(citation, match)

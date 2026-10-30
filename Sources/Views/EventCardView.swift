@@ -184,6 +184,9 @@ private struct EventSourceRow: View {
     let article: FeedArticle
     let canSeparate: Bool
     let relatedEvents: [RelatedStoryEvent]
+
+    /// "Same Event as…" offers the first few earlier events only; a long story would make the menu unwieldy.
+    private var mergeTargets: ArraySlice<RelatedStoryEvent> { relatedEvents.prefix(EventStoryRelation.linkLimit) }
     let open: () -> Void
     let separate: () -> Void
     let combine: (RelatedStoryEvent) -> Void
@@ -242,7 +245,7 @@ private struct EventSourceRow: View {
                 }
                 if !relatedEvents.isEmpty {
                     Menu {
-                        ForEach(relatedEvents, id: \.eventID) { event in
+                        ForEach(mergeTargets, id: \.eventID) { event in
                             Button(event.title) { combine(event) }
                         }
                     } label: {
@@ -270,7 +273,7 @@ private struct EventSourceRow: View {
             if canSeparate {
                 Button("Not the Same Event") { separate() }
             }
-            ForEach(relatedEvents, id: \.eventID) { event in
+            ForEach(mergeTargets, id: \.eventID) { event in
                 Button("Same Event as \(event.title)") { combine(event) }
             }
         }
