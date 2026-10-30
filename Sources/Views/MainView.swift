@@ -354,6 +354,8 @@ struct MainView: View {
                 service: .shared, database: articleStore.database, now: Date(), aiEnabled: aiEnabled,
                 collectionEnabled: collectionEnabled, force: requested > handledTensionReassessments)
         else { return }
+        // A reload cancelled while resuming on the main actor must not overwrite the newer one.
+        guard !Task.isCancelled else { return }
         handledTensionReassessments = requested
         tension.state = loaded
     }
