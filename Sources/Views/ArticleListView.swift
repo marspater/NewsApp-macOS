@@ -106,6 +106,8 @@ struct ArticleListView: View {
     @State private var isReaderRefreshing = false
     /// Stories the reader's muting removes from this list, across every page.
     @State private var mutedCount = 0
+    /// Stories of this list across all its pages and the events grouping them; nil until a new list has loaded.
+    @State private var listTotals: (stories: Int, events: Int)?
     @State private var searchSuggestion: String?
     @State private var showsMuted = false
     @State private var confirmsUnmuteAll = false
@@ -288,6 +290,11 @@ struct ArticleListView: View {
                 briefing = nil
                 if isBriefing { pageRequest += 1 }
             }
+            // Subscribing asks for those stories, as Refresh does: the refresh the subscription starts shows them
+            // instead of parking them behind the updates button, where the list looked unchanged (#782).
+            .onChange(of: appSettings.feedURLs) { previous, current in
+                if !Set(current).isSubset(of: Set(previous)) { refreshFeeds() }
+            }
             .focusable()
             .focused($listHasFocus)
             .defaultFocus($listHasFocus, true)
@@ -466,6 +473,7 @@ struct ArticleListView: View {
             cursor = nil
             hasMoreResults = false
             expandedEvents = []
+            listTotals = nil
             loadedQuery = identity
         }
         queryError = nil
@@ -479,6 +487,7 @@ struct ArticleListView: View {
             if !isPaging {
                 var hidden = 0
                 if !muting.isEmpty { hidden = try await countMuted(muting) }
+                let totals = try await countListed(showsMuted ? MuteRules() : muting)
                 // A search that finds nothing offers the closest spelling that does; a failure means no suggestion.
                 var suggestion: String?
                 if isSearching && fetched.isEmpty {
@@ -487,6 +496,7 @@ struct ArticleListView: View {
                 }
                 try Task.checkCancellation()
                 mutedCount = hidden
+                listTotals = totals
                 searchSuggestion = suggestion
             }
             let page = Array(fetched.prefix(200))
@@ -554,6 +564,16 @@ struct ArticleListView: View {
         }
         let filters = listFilters
         return try await articleStore.database.mutedArticleCount(
+            section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
+    }
+
+    /// The masthead's totals: every story of the list, across all its pages, and the events grouping them (#782).
+    private func countListed(_ muting: MuteRules) async throws -> (stories: Int, events: Int) {
+        if isSearching {
+            return try await articleStore.database.listTotals(search: searchText, muting: muting)
+        }
+        let filters = listFilters
+        return try await articleStore.database.listTotals(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
     }
 
@@ -765,18 +785,26 @@ struct ArticleListView: View {
         }
     }
 
-    /// Story count, how many cards group an event's coverage, and when feeds last refreshed.
+    /// The list's story count and how many events group them, across every page rather than the loaded one (#782);
+    /// "unread" when the list shows unread stories only. Then when feeds last refreshed.
     private var listSubtitle: String {
         if isBriefing {
             let edition = (briefing?.startedAt ?? Date()).formatted(.dateTime.weekday(.wide).month(.wide).day())
             return "\(edition) briefing · Selected by coverage and your interests"
         }
-        var parts = ["\(entries.count) \(entries.count == 1 ? "story" : "stories")"]
+        var parts: [String] = []
         if !isSearching && (selectedTopic ?? "Today") == "Today" {
-            parts.insert(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()), at: 0)
+            parts.append(Date().formatted(.dateTime.weekday(.wide).month(.wide).day()))
         }
-        let events = entries.filter { if case .event = $0 { return true } else { return false } }.count
-        if events > 0 { parts.append("\(events) grouped \(events == 1 ? "event" : "events")") }
+        if let listTotals {
+            let unread = !isSearching && listFilters.read == false ? "unread " : ""
+            parts.append(
+                "\(listTotals.stories.formatted()) \(unread)\(listTotals.stories == 1 ? "story" : "stories")")
+            if groupingMode == .events && listTotals.events > 0 {
+                parts.append(
+                    "\(listTotals.events.formatted()) grouped \(listTotals.events == 1 ? "event" : "events")")
+            }
+        }
         if !isSearching, let refreshed = feedManager.lastRefreshCompletedAt {
             parts.append("Updated \(refreshed.formatted(date: .omitted, time: .shortened))")
         }

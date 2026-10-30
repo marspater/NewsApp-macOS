@@ -3752,13 +3752,49 @@ actor DatabaseEngine {
         search: String? = nil,
         muting: MuteRules
     ) throws -> Int {
+        guard !muting.isEmpty else { return 0 }
+        return try listAggregates(
+            "count(*)", section: section, isRead: isRead, isSaved: isSaved, search: search,
+            filter: " AND " + Self.mutedArticle, filterParameters: Self.mutingParameters(muting))[0]
+    }
+
+    /// What a list or search holds across all its pages (#782): its stories, and the events of two or more visible
+    /// reports that group any of them, as `EventFeedGrouping` groups a page. Reports hidden from lists count toward an
+    /// event's size, as they do on its card; muted stories are left out, as they are from the list.
+    func listTotals(
+        section: String? = nil,
+        isRead: Bool? = nil,
+        isSaved: Bool? = nil,
+        search: String? = nil,
+        muting: MuteRules = MuteRules()
+    ) throws -> (stories: Int, events: Int) {
+        let totals = try listAggregates(
+            "count(*), count(DISTINCT CASE WHEN g.reports >= 2 THEN g.story END)",
+            joins: """
+                 LEFT JOIN event_members m ON m.article_id = a.id LEFT JOIN events e ON e.id = m.event_id
+                 LEFT JOIN (SELECT coalesce(ge.story_id, ge.id) AS story, count(*) AS reports FROM event_members gm
+                     JOIN events ge ON ge.id = gm.event_id JOIN articles a ON a.id = gm.article_id
+                     WHERE \(Self.visibleArticle) GROUP BY 1) g ON g.story = coalesce(e.story_id, e.id)
+                """,
+            section: section, isRead: isRead, isSaved: isSaved, search: search,
+            filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
+            filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))
+        return (totals[0], totals[1])
+    }
+
+    /// One row of integer aggregates over the stories of a list or search, under the list's own filters plus
+    /// `filter`.
+    private func listAggregates(
+        _ columns: String, joins: String = "", section: String?, isRead: Bool?, isSaved: Bool?, search: String?,
+        filter: String, filterParameters: [QueryParameter]
+    ) throws -> [Int] {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
-        guard !muting.isEmpty else { return 0 }
         var sql =
-            "SELECT count(*) FROM articles a JOIN article_state s ON s.article_id = a.id LEFT JOIN article_enrichment ae ON ae.article_id = a.id"
+            "SELECT \(columns) FROM articles a JOIN article_state s ON s.article_id = a.id LEFT JOIN article_enrichment ae ON ae.article_id = a.id"
+            + joins
         var params: [QueryParameter]
         let searchText = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if searchText.isEmpty {
@@ -3770,15 +3806,15 @@ actor DatabaseEngine {
             sql += conditions.join + " AND " + Self.visibleArticle + conditions.sql
             params = conditions.params
         }
-        sql += " AND " + Self.mutedArticle
-        params += Self.mutingParameters(muting)
+        sql += filter
+        params += filterParameters
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1,
                 userInfo: [
-                    NSLocalizedDescriptionKey: "Failed to prepare muted count: \(String(cString: sqlite3_errmsg(db)))"
+                    NSLocalizedDescriptionKey: "Failed to prepare list count: \(String(cString: sqlite3_errmsg(db)))"
                 ])
         }
         defer { sqlite3_finalize(stmt) }
@@ -3788,7 +3824,7 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
-        return Int(sqlite3_column_int64(stmt, 0))
+        return (0..<sqlite3_column_count(stmt)).map { Int(sqlite3_column_int64(stmt, $0)) }
     }
 
     // MARK: - Story Visibility
