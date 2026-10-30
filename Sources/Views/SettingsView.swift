@@ -192,7 +192,7 @@ struct SettingsView: View {
             // Add feed row
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "plus.circle.fill")
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .imageScale(.large)
                 TextField("Feed URL", text: $newFeedURL)
                     .textFieldStyle(.roundedBorder)
@@ -339,7 +339,7 @@ struct SettingsView: View {
                         } label: {
                             Image(systemName: starred ? "star.fill" : "star")
                                 .font(AppTypography.label)
-                                .foregroundStyle(starred ? AppColor.accent : AppColor.secondaryText)
+                                .foregroundStyle(starred ? AppColor.accentText : AppColor.secondaryText)
                         }
                         .buttonStyle(.plain)
                         .disabled(!starred && starLimitReached)
@@ -672,7 +672,7 @@ struct SettingsView: View {
                     HStack(spacing: AppSpacing.xs) {
                         Image(systemName: appSettings.notificationMode == .privacy ? "lock.fill" : "info.circle")
                             .foregroundStyle(
-                                appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accent)
+                                appSettings.notificationMode == .privacy ? AppColor.success : AppColor.accentText)
                         Text(appSettings.notificationMode.detail)
                             .font(AppTypography.caption)
                             .foregroundStyle(AppColor.secondaryText)
@@ -743,7 +743,7 @@ struct SettingsView: View {
 
                     HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "bolt.shield")
-                            .foregroundStyle(AppColor.accent)
+                            .foregroundStyle(AppColor.accentText)
                             .padding(.top, AppSpacing.textStack)
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("When it runs")
@@ -831,7 +831,7 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
                     HStack(alignment: .top, spacing: AppSpacing.xs) {
                         Image(systemName: "shield.lefthalf.filled")
-                            .foregroundStyle(AppColor.accent)
+                            .foregroundStyle(AppColor.accentText)
                             .padding(.top, AppSpacing.textStack)
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             Text("Hardened Runtime & App Sandbox")
@@ -977,6 +977,22 @@ struct SettingsView: View {
                 }
             }
 
+            Section(header: sectionHeader("Backup")) {
+                storageRow(
+                    "Back Up Library", detail: nil,
+                    description: "Saves stories, read history, saved stories and settings to one file you choose."
+                ) {
+                    Button("Back Up Library…") { NewsApp.backUpLibrary() }
+                }
+                storageRow(
+                    "Restore Library", detail: nil,
+                    description:
+                        "Replaces the library with a backup, and settings if the backup includes them, then relaunches. The current library is kept beside it."
+                ) {
+                    Button("Restore Library…") { NewsApp.restoreLibrary() }
+                }
+            }
+
             Section(header: sectionHeader("Retention")) {
                 retentionRow
             }
@@ -1086,7 +1102,7 @@ struct SettingsView: View {
         NoticeView(tint: AppColor.accent) {
             HStack(spacing: AppSpacing.sm) {
                 Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .imageScale(.large)
                     .accessibilityHidden(true)
 

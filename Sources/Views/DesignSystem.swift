@@ -25,6 +25,47 @@ enum AppColor {
 
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
     static var accent: Color { Color.accentColor }
+    /// The accent for text: the system accent is one color in every appearance, which gave 4.2:1 on the dark page
+    /// background. This keeps the person's accent choice, a little darker in light and lighter in dark, so text in it
+    /// stays above 4.5:1 (#754). Fills, strokes and symbols keep `accent`.
+    static let accentText = Color(
+        NSColor(name: "accentText") { appearance in
+            var color = NSColor.controlAccentColor
+            appearance.performAsCurrentDrawingAppearance {
+                let dark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+                // Light measures against white, the brightest page or card; dark against the window background.
+                color = readableAccent(
+                    NSColor.controlAccentColor, dark: dark, on: dark ? NSColor.windowBackgroundColor : .white)
+            }
+            return color
+        })
+
+    /// The accent blended 15 % toward black in light (30 % toward white in dark), then further in 5 % steps until it
+    /// reaches 4.5:1 on `background`: bright accents such as yellow, orange and green gave about 2–3:1 at 15 %.
+    static func readableAccent(_ accent: NSColor, dark: Bool, on background: NSColor) -> NSColor {
+        let target: NSColor = dark ? .white : .black
+        var fraction: CGFloat = dark ? 0.3 : 0.15
+        while fraction < 1, let blend = accent.blended(withFraction: fraction, of: target),
+            contrastRatio(blend, background) < 4.5
+        {
+            fraction += 0.05
+        }
+        return accent.blended(withFraction: min(fraction, 1), of: target) ?? target
+    }
+
+    /// WCAG 2 contrast ratio of two colors.
+    static func contrastRatio(_ first: NSColor, _ second: NSColor) -> CGFloat {
+        func luminance(_ color: NSColor) -> CGFloat {
+            guard let rgb = color.usingColorSpace(.sRGB) else { return 0 }
+            func linear(_ value: CGFloat) -> CGFloat {
+                value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent)
+                + 0.0722 * linear(rgb.blueComponent)
+        }
+        let (a, b) = (luminance(first), luminance(second))
+        return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    }
     /// Subtle warm gold for generated-content marks: darker on light, brighter on dark, saturated with Increase Contrast.
     static let intelligence = Color(
         nsColor: NSColor(name: "intelligence") { appearance in
@@ -428,12 +469,14 @@ struct UnreadDot: View {
 }
 
 /// A small capsule for a state or label ("Updated", the intelligence tag). The fill is the tint at 12 %,
-/// 22 % with Increase Contrast (DESIGN.md 11).
+/// 22 % with Increase Contrast (DESIGN.md 11); the text is the tint mixed toward the primary text color.
 struct TagView: View {
     let title: String
     var systemImage: String?
     var tint: Color = AppColor.secondaryText
     var font: Font = AppTypography.eyebrow
+    /// Replaces the mixed text color where the tag sits on a fixed surface, such as the lead caption's dark scrim.
+    var foreground: Color?
     @Environment(\.effectiveContrast) private var contrast
 
     var body: some View {
@@ -445,10 +488,18 @@ struct TagView: View {
             Text(title)
         }
         .font(font)
-        .foregroundStyle(tint)
+        .foregroundStyle(foreground ?? textColor)
         .padding(.horizontal, AppSpacing.eyebrowGap)
         .padding(.vertical, AppSpacing.textStack)
         .background(fill, in: Capsule())
+    }
+
+    /// Tinted text is mixed toward the primary text color (darker in light, lighter in dark, more with Increase
+    /// Contrast), so it keeps at least 4.5:1 on its own wash; the bare tint fell to 2.9:1 in dark Increase Contrast
+    /// (#754).
+    private var textColor: Color {
+        if tint == AppColor.secondaryText { return tint }
+        return tint.mix(with: AppColor.primaryText, by: contrast == .increased ? 0.5 : 0.35)
     }
 
     /// Neutral tags share the badge background; tinted tags take a wash of their tint.
@@ -460,8 +511,8 @@ struct TagView: View {
 
 extension TagView {
     /// Marks generated content; the only use of the intelligence color besides its glyphs.
-    static func intelligence(_ title: String = "AI") -> TagView {
-        TagView(title: title, systemImage: "sparkles", tint: AppColor.intelligence)
+    static func intelligence(_ title: String = "AI", foreground: Color? = nil) -> TagView {
+        TagView(title: title, systemImage: "sparkles", tint: AppColor.intelligence, foreground: foreground)
     }
 }
 

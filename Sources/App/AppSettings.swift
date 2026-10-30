@@ -28,6 +28,28 @@ final class AppSettings: ObservableObject {
     static let retiredFeedsVersionKey = "retired_feeds_version"
     static let dismissedAdvisoriesKey = "dismissed_advisories"
 
+    /// Everything this class persists; a library backup carries these values (#563).
+    static let backedUpKeys = [
+        feedURLsKey, userSectionsKey, fetchIntervalKey, articleRetentionDaysKey, notificationsEnabledKey,
+        showsDockBadgeKey, showsMenuBarExtraKey, aiEnabledKey, privateNotificationsEnabledKey, notificationModeKey,
+        allowInsecureHTTPKey, mutedSourcesKey, mutedTopicsKey, mutedTopicSetsKey, starredFeedURLsKey,
+        starredFeedTimesKey, tensionCollectionOptInKey, retiredFeedsVersionKey, dismissedAdvisoriesKey,
+    ]
+
+    /// The backed-up keys' stored values as a binary property list.
+    static func backupSettings(from defaults: UserDefaults) throws -> Data {
+        let values = backedUpKeys.reduce(into: [String: Any]()) { $0[$1] = defaults.object(forKey: $1) }
+        return try PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0)
+    }
+
+    /// Writes a backup's values back; a key the backup didn't have returns to its default. Takes effect on relaunch.
+    static func restoreSettings(_ data: Data, to defaults: UserDefaults) throws {
+        guard let values = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            throw CocoaError(.propertyListReadCorrupt)
+        }
+        for key in backedUpKeys { defaults.set(values[key], forKey: key) }
+    }
+
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"  // Headlines + snippets + images
         case privacy = "private"  // Generic non-identifying updates

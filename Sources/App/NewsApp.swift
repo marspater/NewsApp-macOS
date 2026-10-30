@@ -1,6 +1,7 @@
 import AppIntents
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 import UserNotifications
 
 /// Notification posted when the user clicks a notification banner or uses keyboard navigation.
@@ -38,6 +39,17 @@ struct NewsApp: App {
         alert.runModal()
     }
 
+    @MainActor private func exportStories(saved: Bool, markdown: Bool) {
+        Task { @MainActor in
+            do {
+                let entries = try await articleStore.database.exportedStories(saved: saved)
+                OPMLDialogs.exportStories(entries, title: saved ? "Saved Stories" : "History", markdown: markdown)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
     var body: some Scene {
         Window("News", id: "main") {
             MainView()
@@ -72,6 +84,11 @@ struct NewsApp: App {
                     }
                 }
             }
+            CommandGroup(after: .importExport) {
+                Divider()
+                Button("Back Up Library…") { Self.backUpLibrary() }
+                Button("Restore Library…") { Self.restoreLibrary() }
+            }
             CommandGroup(replacing: .importExport) {
                 Button("Add Feed…") { addFeedSubscription?() }
                     .disabled(addFeedSubscription == nil)
@@ -93,6 +110,15 @@ struct NewsApp: App {
                     OPMLDialogs.exportOPML(xmlString: opml)
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+                Divider()
+                Menu("Export Saved Stories") {
+                    Button("JSON…") { exportStories(saved: true, markdown: false) }
+                    Button("Markdown…") { exportStories(saved: true, markdown: true) }
+                }
+                Menu("Export History") {
+                    Button("JSON…") { exportStories(saved: false, markdown: false) }
+                    Button("Markdown…") { exportStories(saved: false, markdown: true) }
+                }
             }
             ListViewCommands(themeManager: themeManager)
             CommandGroup(after: .sidebar) {
@@ -418,5 +444,71 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             )
         }
         completionHandler()
+    }
+}
+
+// MARK: - Library backup (#563)
+
+extension NewsApp {
+    private static var backupType: UTType { UTType(filenameExtension: "sqlite3") ?? .data }
+
+    @MainActor static func backUpLibrary() {
+        let panel = NSSavePanel()
+        panel.title = "Back Up Library"
+        panel.prompt = "Back Up"
+        panel.nameFieldStringValue = "News Backup \(Date().formatted(.iso8601.year().month().day())).sqlite3"
+        panel.allowedContentTypes = [backupType]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { @MainActor in
+            do {
+                let settings = try AppSettings.backupSettings(from: .standard)
+                try await DatabaseEngine.shared.writeBackup(to: url, settings: settings)
+                showAlert("Library backed up")
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+        }
+    }
+
+    @MainActor static func restoreLibrary() {
+        let panel = NSOpenPanel()
+        panel.title = "Restore Library"
+        panel.prompt = "Restore"
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [backupType]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let confirm = NSAlert()
+        confirm.messageText = "Replace your library with this backup?"
+        confirm.informativeText =
+            "Your current stories, read history and saved stories are replaced by the backup's, and your settings too if the backup includes them. The current library is kept beside it, then News relaunches."
+        confirm.addButton(withTitle: "Restore")
+        confirm.addButton(withTitle: "Cancel")
+        guard confirm.runModal() == .alertFirstButtonReturn else { return }
+        Task { @MainActor in
+            let settings: Data?
+            do {
+                settings = try await DatabaseEngine.shared.restoreBackup(from: url)
+            } catch {
+                // A refused or failed restore leaves the library open and unchanged.
+                NSAlert(error: error).runModal()
+                return
+            }
+            if let settings, (try? AppSettings.restoreSettings(settings, to: .standard)) == nil {
+                showAlert("The library was restored, but the backup's settings couldn't be read.")
+            }
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.createsNewApplicationInstance = true
+            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
+                let launched = app != nil && error == nil
+                Task { @MainActor in
+                    // This instance quits only once the new one is running, so News never just disappears.
+                    guard launched else {
+                        return showAlert("The library was restored. Quit and reopen News to use it.")
+                    }
+                    NSApp.terminate(nil)
+                }
+            }
+        }
     }
 }

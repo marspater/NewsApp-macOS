@@ -15,6 +15,7 @@ python3 script/evaluation/importance_review.py
 python3 script/evaluation/relation_review.py
 python3 script/evaluation/catalog_review.py
 python3 script/evaluation/fit_pair_head.py
+python3 script/evaluation/calibrate_tension.py
 python3 script/training/pretrain_pairs.py --self-check
 
 # Content key of everything the Swift runner compiles or reads: the working tree (tracked and new files) without
@@ -54,6 +55,14 @@ echo "Running unit tests..."
 
 # Clean up
 rm -f test_runner
+
+# The standalone headless runners (no window, no Screen Recording): Story Overview sections including Industry
+# Impact (Epic T), reader accessibility and tension calibration. A run with arguments is a single targeted mode.
+if [[ $# -eq 0 ]]; then
+    script/test_event_overview_accessibility.sh
+    script/test_reader_accessibility.sh
+    script/test_tension_calibration.sh
+fi
 
 if [ -n "$PASS_STAMP" ]; then
     mkdir -p "$(dirname "$PASS_STAMP")"
