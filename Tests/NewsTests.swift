@@ -896,6 +896,7 @@ struct NewsTests {
         try await testActiveWorkCancellation()
         await testSignpostHelperExecution()
         await testAppSettingsIsolationAndURLNormalization()
+        await testOnboardingAndPermissionTiming()
         await testFixedTaxonomyAndCaseInsensitivity()
         await testClassificationMultiStageAndConfidenceTiers()
         await testClassificationBenchmarkDataset()
@@ -17672,6 +17673,113 @@ struct NewsTests {
             assertTrue(false, "async measure must preserve the original error type")
         }
         assertTrue(caughtAsyncError, "async measure should propagate thrown error")
+    }
+
+    @MainActor
+    static func testOnboardingAndPermissionTiming() async {
+        print("  - Testing the first-launch setting and the deferred notification request (#562)...")
+        // The flow walks forward and back one step at a time, from Welcome to Done.
+        var walked = [OnboardingStep.welcome]
+        while let next = walked.last?.next { walked.append(next) }
+        assertEqual(walked, OnboardingStep.allCases, "Continue visits every step once, in order")
+        assertEqual(
+            walked.map(\.title),
+            [
+                "Welcome to News", "Choose Your Feeds", "Pick Your Sections", "On-Device Intelligence",
+                "Notifications", "You're All Set",
+            ], "Each step has its own screen")
+        var back = [OnboardingStep.done]
+        while let previous = back.last?.previous { back.append(previous) }
+        assertEqual(back, walked.reversed(), "Back retraces the same steps")
+        assertTrue(OnboardingStep.welcome.previous == nil, "Welcome has no Back")
+        assertTrue(OnboardingStep.done.isLast && !OnboardingStep.notifications.isLast, "Only Done is last")
+        assertEqual(OnboardingStep.done.continueTitle, "Start Reading", "The last step starts reading")
+        assertEqual(OnboardingStep.feeds.continueTitle, "Continue", "Other steps continue")
+        assertEqual(OnboardingStep.feeds.position, "Step 2 of 6", "The indicator names the step and the count")
+        assertTrue(walked.allSatisfy { !$0.tip.isEmpty && $0.companions.count <= 3 }, "Every step has a tip and art")
+        func suite(_ name: String, seed: [String: Any] = [:]) -> (String, UserDefaults) {
+            let name = testDefaultsSuite(name)
+            let defaults = UserDefaults(suiteName: name)!
+            for (key, value) in seed { defaults.set(value, forKey: key) }
+            return (name, defaults)
+        }
+        let (freshName, fresh) = suite("onboarding-fresh")
+        let (feedsName, feeds) = suite(
+            "onboarding-feeds", seed: [AppSettings.feedURLsKey: ["https://example.com/feed"]])
+        let (modeName, mode) = suite("onboarding-mode", seed: [AppSettings.notificationModeKey: "full"])
+        defer { for name in [freshName, feedsName, modeName] { removeTestDefaults(name) } }
+        assertFalse(AppSettings(defaults: fresh).firstLaunchCompleted, "A fresh install shows the first-launch sheet")
+        assertFalse(AppSettings(defaults: fresh).firstLaunchCompleted, "A sheet closed by quitting shows again")
+        AppSettings(defaults: fresh).completeFirstLaunch()
+        assertTrue(AppSettings(defaults: fresh).firstLaunchCompleted, "Completing the sheet persists")
+        assertTrue(AppSettings(defaults: feeds).firstLaunchCompleted, "Existing subscriptions skip the sheet")
+        assertTrue(AppSettings(defaults: mode).firstLaunchCompleted, "Settings from an earlier version skip the sheet")
+
+        // The permission request waits for a refresh that leaves stories, the closed sheet and the setting.
+        // Refreshes deliver nothing until `delivering` is incremented; then each feed brings one story.
+        func manager(_ settings: AppSettings, delivering: TestCounter) async -> FeedManager {
+            settings.aiEnabled = false
+            let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+            await store.initialize()
+            return FeedManager(
+                settings: settings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, _ in
+                    guard await delivering.value > 0 else { return [] }
+                    return urls.map { url in
+                        let story = FeedArticle(
+                            title: "First story", link: "https://example.com/onboarding/story", guid: "first",
+                            description: "", pubDate: Date(), source: "Publisher")
+                        return (url, [story], nil, nil)
+                    }
+                },
+                notifyBatch: { _, _ in }, imageFinder: .unavailable)
+        }
+        let (newName, newDefaults) = suite("onboarding-permission")
+        let (offName, offDefaults) = suite("onboarding-permission-off")
+        defer { for name in [newName, offName] { removeTestDefaults(name) } }
+        let settings = AppSettings(defaults: newDefaults)
+        let delivering = TestCounter()
+        let feedManager = await manager(settings, delivering: delivering)
+        var requests = 0
+        var requestedMidRefresh = false
+        let request = NotificationPermissionRequest(feedManager: feedManager, settings: settings) {
+            requests += 1
+            requestedMidRefresh = requestedMidRefresh || feedManager.isAnyFeedLoading
+        }
+        assertEqual(requests, 0, "Nothing is asked at launch")
+        settings.completeFirstLaunch()
+        await feedManager.fetchFeedsAsync()
+        assertEqual(requests, 0, "A refresh that brings no stories does not ask")
+        await delivering.increment()
+        await feedManager.fetchFeedsAsync()
+        assertTrue(!feedManager.articles.isEmpty, "The second refresh brings a story")
+        assertEqual(requests, 1, "The first refresh with stories asks once")
+        assertFalse(requestedMidRefresh, "After an empty refresh, the next one asks only once it has completed")
+        await feedManager.fetchFeedsAsync()
+        settings.setNotificationsEnabled(false)
+        settings.setNotificationsEnabled(true)
+        assertEqual(requests, 1, "Later refreshes and toggles in the same launch do not ask again")
+        assertTrue(request.hasRequested, "The request records that it asked")
+        feedManager.stopBackgroundWork()
+
+        // Stories and a refresh first: the sheet's closing, then turning notifications on, decide.
+        let quiet = AppSettings(defaults: offDefaults)
+        quiet.setNotificationsEnabled(false)
+        let quietDelivering = TestCounter()
+        await quietDelivering.increment()
+        let quietManager = await manager(quiet, delivering: quietDelivering)
+        var quietRequests = 0
+        let quietRequest = NotificationPermissionRequest(feedManager: quietManager, settings: quiet) {
+            quietRequests += 1
+        }
+        await quietManager.fetchFeedsAsync()
+        assertEqual(quietRequests, 0, "Nothing is asked while the first-launch sheet is open")
+        quiet.completeFirstLaunch()
+        assertEqual(quietRequests, 0, "With notifications off, closing the sheet does not ask")
+        quiet.setNotificationsEnabled(true)
+        assertEqual(quietRequests, 1, "Turning notifications on after a refresh with stories asks")
+        assertTrue(quietRequest.hasRequested, "The request records that it asked")
+        quietManager.stopBackgroundWork()
     }
 
     @MainActor

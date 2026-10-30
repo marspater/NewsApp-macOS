@@ -50,6 +50,7 @@ SWIFT_SOURCES=(
     Sources/Models/ArticleIdentity.swift \
     Sources/Models/EventOverview.swift \
     Sources/Models/EventFeed.swift \
+    Sources/Models/OnboardingStep.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
     Sources/Storage/MigrationCoordinator.swift \
@@ -111,6 +112,7 @@ SWIFT_SOURCES=(
     Sources/Views/MainView.swift \
     Sources/Views/SettingsView.swift \
     Sources/Views/FeedCatalogView.swift \
+    Sources/Views/OnboardingView.swift \
     Sources/Views/FeedHealthLine.swift \
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \

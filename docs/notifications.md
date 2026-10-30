@@ -228,6 +228,14 @@ delivered in the last hour.
   - 48 min: banner (8).
   - That is at most 3 banners an hour for the feed, and 9 for three starred feeds, with no story missing from a count.
 
+## Permission
+
+News does not ask for notification permission at launch (#562). `NotificationPermissionRequest` asks once per launch,
+when a refresh has completed and the library holds stories, the first-launch sheet has closed and notifications are
+on. Whichever comes last triggers it: a later refresh that brings the first stories, the sheet closing, or turning
+notifications on. Notification categories and the delegate are still set up at launch, so
+banner actions keep working. macOS shows the prompt only once; later requests return the saved answer.
+
 ## Relaunch
 
 All limits, windows and announced events are read from the two tables, so a relaunch changes nothing. A refresh
