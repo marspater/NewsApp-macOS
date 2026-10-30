@@ -18032,6 +18032,13 @@ struct NewsTests {
         assertEqual(
             AppSettings.normalizeFeedURL("example.com:8443/feed"), "https://example.com:8443/feed",
             "A host with a port still gets https")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed: https://example.com/rss"), "https://example.com/rss",
+            "A space after feed: is ignored")
+        assertEqual(
+            AppSettings.normalizeFeedURL("user:pass@example.com/rss"), "https://user:pass@example.com/rss",
+            "Credentials without a scheme are not mistaken for a scheme")
+        assertTrue(AppSettings.normalizeFeedURL("[2001:db8::1]/feed") != nil, "A bracketed IPv6 host is accepted")
         let invalidURL = AppSettings.normalizeFeedURL("")
         assertEqual(invalidURL, nil, "Empty string should return nil")
 

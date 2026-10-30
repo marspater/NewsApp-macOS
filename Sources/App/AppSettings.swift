@@ -262,6 +262,7 @@ final class AppSettings: ObservableObject {
         if trimmed.lowercased().hasPrefix("feed:") {
             trimmed = String(trimmed.dropFirst(5))
             if trimmed.hasPrefix("//") { trimmed = String(trimmed.dropFirst(2)) }
+            trimmed = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         guard !trimmed.isEmpty else { return nil }
 
@@ -270,8 +271,13 @@ final class AppSettings: ObservableObject {
         if !hasScheme {
             // Any other scheme (ftp://, webcal://, file:, javascript:) is not a feed address; host:port still is.
             let head = lower.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
-            if let colon = head.firstIndex(of: ":") {
-                let port = head[head.index(after: colon)...]
+            // The port follows any user:password@ and a bracketed IPv6 literal.
+            var hostPort = head.split(separator: "@", omittingEmptySubsequences: false).last ?? head
+            if hostPort.hasPrefix("["), let close = hostPort.firstIndex(of: "]") {
+                hostPort = hostPort[hostPort.index(after: close)...]
+            }
+            if let colon = hostPort.firstIndex(of: ":") {
+                let port = hostPort[hostPort.index(after: colon)...]
                 if port.isEmpty || !port.allSatisfy(\.isNumber) { return nil }
             }
         }
