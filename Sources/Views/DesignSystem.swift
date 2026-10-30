@@ -494,16 +494,20 @@ struct TagView: View {
         .background(fill, in: Capsule())
     }
 
+    private var textColor: Color { Self.textColor(tint: tint, contrast: contrast) }
+    private var fill: Color { Self.fill(tint: tint, contrast: contrast) }
+
     /// Tinted text is mixed toward the primary text color (darker in light, lighter in dark, more with Increase
     /// Contrast), so it keeps at least 4.5:1 on its own wash; the bare tint fell to 2.9:1 in dark Increase Contrast
-    /// (#754).
-    private var textColor: Color {
+    /// (#754). The accent starts from the accent-text token: a yellow accent mixed from the bare tint gave 3.8:1.
+    nonisolated static func textColor(tint: Color, contrast: ColorSchemeContrast) -> Color {
         if tint == AppColor.secondaryText { return tint }
-        return tint.mix(with: AppColor.primaryText, by: contrast == .increased ? 0.5 : 0.35)
+        let base = tint == AppColor.accent ? AppColor.accentText : tint
+        return base.mix(with: AppColor.primaryText, by: contrast == .increased ? 0.5 : 0.35)
     }
 
     /// Neutral tags share the badge background; tinted tags take a wash of their tint.
-    private var fill: Color {
+    nonisolated static func fill(tint: Color, contrast: ColorSchemeContrast) -> Color {
         if tint == AppColor.secondaryText { return AppColor.badgeBackground }
         return tint.opacity(contrast == .increased ? 0.22 : 0.12)
     }
