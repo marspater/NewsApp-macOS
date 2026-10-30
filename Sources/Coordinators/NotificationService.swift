@@ -523,7 +523,10 @@ private struct LanePlanner {
     /// a story another of whose events was announced adds to that story and posts only in a higher lane (#740).
     func fresh(_ article: FeedArticle, in lane: NotificationLane) -> Bool {
         guard let event = delivery.events[article.id] else { return true }
-        if let seen = delivery.ledger.announced[event] { return seen.leadKey != lead(article) || lane > seen.lane }
+        if let seen = delivery.ledger.announced[event] {
+            // A new lead notifies again; a higher lane only above the story's highest announced lane.
+            return seen.leadKey != lead(article) || lane > max(seen.lane, storyLanes[story(article)] ?? seen.lane)
+        }
         return storyLanes[story(article)].map { lane > $0 } ?? true
     }
 

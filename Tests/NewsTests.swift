@@ -18451,6 +18451,24 @@ struct NewsTests {
         assertEqual(
             NotificationService.plan(new: [], pending: [:], delivery: twoQueued).banners.map(\.count), [1],
             "A waiting key with a changed lead survives the story's priority announcement")
+        // An event announced in the normal lane whose story another event announced in priority does not post again
+        // in the starred lane without a new lead.
+        var laneDelivery = NotificationDelivery(mode: .full)
+        var starredStorm = stormFirst
+        starredStorm.identityFeedURL = "https://starred.invalid/feed"
+        laneDelivery.starredFeedURLs = ["https://starred.invalid/feed"]
+        laneDelivery.events = [starredStorm.id: "storm-a"]
+        laneDelivery.stories = ["storm-c": "storm-a"]
+        laneDelivery.ledger.announced = [
+            "storm-a": .init(leadKey: EventFeedSummary.titleKey(stormFirst.title), lane: .normal),
+            "storm-c": .init(leadKey: "c", lane: .priority),
+        ]
+        assertTrue(
+            NotificationService.plan(
+                new: [(starredStorm, 0.5)], pending: ["https://starred.invalid/feed": [(starredStorm, 0.5)]],
+                delivery: laneDelivery
+            ).banners.isEmpty,
+            "A story announced in priority does not post again in the starred lane")
 
         // Three publishers on arrival give a normal banner; a fourth makes it priority once, and never a third time.
         let rising = report(800, "Explosion levels block")
