@@ -51,7 +51,7 @@ flowchart LR
         GW["<b>NetworkBoundaryProxy</b><br/>IPAddressValidator"]
     end
 
-    subgraph Store["Storage · SQLite v27"]
+    subgraph Store["Storage · SQLite v28"]
         AS["<b>ArticleStore</b>"]
         DB[("<b>DatabaseEngine</b><br/>+Events<br/>WAL · FTS5")]
     end
@@ -171,6 +171,7 @@ timeline
         v25 : event_inclusions
         v26 : incremental auto-vacuum (#536)
         v27 : events.story_id (story layer)
+        v28 : publisher categories repaired (#817)
 ```
 
 ## Invariants

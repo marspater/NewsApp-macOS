@@ -40,7 +40,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 27
+    static let schemaVersion = 28
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
     static let busyTimeoutMilliseconds: Int32 = 5_000
 
@@ -1531,6 +1531,26 @@ actor DatabaseEngine {
                 try executeSimple("CREATE INDEX IF NOT EXISTS idx_events_story ON events(story_id);")
                 try Task.checkCancellation()
                 try setUserVersion(27)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 28 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Classifier categories were also written into the publisher-hint column (#817). Where it holds the
+                // classifier's value, clear it: a feed that sends a category restores it on its next fetch, and lists
+                // read the classifier's value from article_enrichment as before.
+                try executeSimple(
+                    """
+                    UPDATE articles SET category = NULL WHERE category IS NOT NULL AND category = (
+                        SELECT ae.category FROM article_enrichment ae WHERE ae.article_id = articles.id);
+                    """)
+                try Task.checkCancellation()
+                try setUserVersion(28)
                 try commitTransaction()
             } catch {
                 try? rollbackTransaction()
@@ -3277,14 +3297,11 @@ actor DatabaseEngine {
             if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
 
-        // 1. Update article table content, category & image if provided
-        if content != nil || image != nil || category != nil {
+        // 1. Update publisher content and image if provided. A category is classifier output and goes only to
+        // article_enrichment: `articles.category` keeps the publisher's hint (#817).
+        if content != nil || image != nil || readerDocument != nil {
             var updates: [String] = []
             var params: [(type: String, val: Any)] = []
-            if let cat = category {
-                updates.append("category = ?")
-                params.append(("text", cat))
-            }
             if let c = content {
                 updates.append("content = ?")
                 params.append(("text", c))
