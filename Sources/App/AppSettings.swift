@@ -29,6 +29,28 @@ final class AppSettings: ObservableObject {
     static let dismissedAdvisoriesKey = "dismissed_advisories"
     static let firstLaunchCompletedKey = "first_launch_completed"
 
+    /// Everything this class persists; a library backup carries these values (#563).
+    static let backedUpKeys = [
+        feedURLsKey, userSectionsKey, fetchIntervalKey, articleRetentionDaysKey, notificationsEnabledKey,
+        showsDockBadgeKey, showsMenuBarExtraKey, aiEnabledKey, privateNotificationsEnabledKey, notificationModeKey,
+        allowInsecureHTTPKey, mutedSourcesKey, mutedTopicsKey, mutedTopicSetsKey, starredFeedURLsKey,
+        starredFeedTimesKey, tensionCollectionOptInKey, retiredFeedsVersionKey, dismissedAdvisoriesKey,
+    ]
+
+    /// The backed-up keys' stored values as a binary property list.
+    static func backupSettings(from defaults: UserDefaults) throws -> Data {
+        let values = backedUpKeys.reduce(into: [String: Any]()) { $0[$1] = defaults.object(forKey: $1) }
+        return try PropertyListSerialization.data(fromPropertyList: values, format: .binary, options: 0)
+    }
+
+    /// Writes a backup's values back; a key the backup didn't have returns to its default. Takes effect on relaunch.
+    static func restoreSettings(_ data: Data, to defaults: UserDefaults) throws {
+        guard let values = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+            throw CocoaError(.propertyListReadCorrupt)
+        }
+        for key in backedUpKeys { defaults.set(values[key], forKey: key) }
+    }
+
     enum NotificationMode: String, CaseIterable, Identifiable, Sendable {
         case full = "full"  // Headlines + snippets + images
         case privacy = "private"  // Generic non-identifying updates
@@ -90,7 +112,7 @@ final class AppSettings: ObservableObject {
     /// Days a read, unsaved story stays before retention deletes it; 0 keeps every story.
     @Published private(set) var articleRetentionDays: Int
     @Published var notificationsEnabled: Bool
-    /// The Dock icon shows the unread count.
+    /// The Dock icon shows the unread stories of today's Briefing and of notifications since launch (#584).
     @Published private(set) var showsDockBadge: Bool
     /// The macOS menu bar shows an optional unread item (off by default).
     @Published private(set) var showsMenuBarExtra: Bool

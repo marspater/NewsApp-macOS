@@ -286,6 +286,14 @@ struct EventOverviewReaderView: View {
         return parts.joined(separator: ". ")
     }
 
+    /// A citation pill's label: the cited publisher, the matched report's publisher, else "Source"; never blank, so a
+    /// report from an unknown publisher shows a named pill rather than an empty one (#672).
+    nonisolated static func citationLabel(sourceName: String?, match: FeedArticle?) -> String {
+        [sourceName, match?.publisherName, match?.source]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty } ?? "Source"
+    }
+
     /// Combines the source name and quoted passage into one VoiceOver label.
     nonisolated static func citationAccessibilityLabel(sourceName: String, quote: String) -> String {
         "Citation from \(sourceName): \(quote)"
@@ -732,7 +740,7 @@ struct EventOverviewReaderView: View {
         HStack(alignment: .top, spacing: AppSpacing.sm) {
             Circle()
                 .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
-                .foregroundStyle(AppColor.accent)
+                .foregroundStyle(AppColor.accentText)
                 .padding(.top, AppLayout.bulletTopInset * textScale)
                 .accessibilityHidden(true)
 
@@ -801,7 +809,7 @@ struct EventOverviewReaderView: View {
             mark.link = URL(string: "\(citationScheme)://\(index)")
             mark.font = AppTypography.overviewFont(.micro, scale: scale).bold()
             mark.baselineOffset = AppTypography.superscriptOffset
-            mark.foregroundColor = AppColor.accent
+            mark.foregroundColor = AppColor.accentText
             result.append(AttributedString(" "))
             result.append(mark)
         }
@@ -811,7 +819,7 @@ struct EventOverviewReaderView: View {
     @ViewBuilder
     private func citationPill(_ citation: OverviewCitation) -> some View {
         let match = matchingArticle(for: citation)
-        let label = citation.sourceName ?? match?.source ?? "Source"
+        let label = Self.citationLabel(sourceName: citation.sourceName, match: match)
 
         Button {
             onSelectCitation(citation, match)
@@ -853,7 +861,7 @@ struct EventOverviewReaderView: View {
                     HStack(alignment: .center, spacing: AppSpacing.sm) {
                         Text("[\(index + 1)]")
                             .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                            .foregroundStyle(AppColor.accent)
+                            .foregroundStyle(AppColor.accentText)
                             .bold()
                             .monospacedDigit()
                             .frame(
@@ -863,7 +871,7 @@ struct EventOverviewReaderView: View {
                         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                             EyebrowText(
                                 article.publisherName,
-                                color: AppColor.accent,
+                                color: AppColor.accentText,
                                 font: AppTypography.overviewFont(.eyebrow, scale: textScale)
                             )
 
@@ -920,7 +928,7 @@ struct EventOverviewReaderView: View {
             HStack(spacing: AppSpacing.xs) {
                 Image(systemName: "newspaper")
                     .imageScale(.small)
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .accessibilityHidden(true)
 
                 Text("Sources (\(memberArticles.count))")
@@ -1128,7 +1136,7 @@ struct EventOverviewReaderView: View {
                 if hasEventDate && hasDateText {
                     Text(item.dateText)
                         .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                        .foregroundStyle(AppColor.accent)
+                        .foregroundStyle(AppColor.accentText)
                         .bold()
                 } else if !hasEventDate && (hasDateText || hasPubDate) {
                     let displayDate =
@@ -1139,7 +1147,7 @@ struct EventOverviewReaderView: View {
                         let text = displayDate.hasPrefix("Reported ") ? displayDate : "Reported \(displayDate)"
                         Text(text)
                             .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                            .foregroundStyle(AppColor.accent)
+                            .foregroundStyle(AppColor.accentText)
                             .bold()
                     }
                 }
@@ -1231,7 +1239,7 @@ struct EventOverviewReaderView: View {
             HStack(alignment: .top, spacing: AppSpacing.sm) {
                 Image(systemName: "person.crop.circle")
                     .font(AppTypography.overviewFont(.emphasis, scale: textScale))
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .accessibilityHidden(true)
 
                 perspectiveContent(perspective, source: source, citations: citations)
@@ -1357,7 +1365,7 @@ struct EventOverviewReaderView: View {
                 HStack(alignment: .top, spacing: AppSpacing.xs) {
                     Circle()
                         .frame(width: AppSpacing.xxs, height: AppSpacing.xxs)
-                        .foregroundStyle(AppColor.accent)
+                        .foregroundStyle(AppColor.accentText)
                         .padding(.top, AppLayout.bulletTopInset * textScale)
                         .accessibilityHidden(true)
 

@@ -121,10 +121,12 @@ SWIFT_SOURCES=(
 echo "⚙️ Compiling arm64 slice..."
 NEWS_DEPENDENCY_ARCH=arm64
 source script/swiftpm_dependencies.sh
-swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -whole-module-optimization -parse-as-library \
-    -target "arm64-apple-macos${TARGET_MACOS}" \
+source script/app_intents_metadata.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${NEWS_APP_INTENTS_FLAGS[@]}" -swift-version 6 -O -whole-module-optimization \
+    -parse-as-library -target "arm64-apple-macos${TARGET_MACOS}" \
     "${SWIFT_SOURCES[@]}" \
     -o "${BUILD_TMP}/News_arm64"
+news_app_intents_metadata "${RESOURCES_DIR}" "${TARGET_MACOS}"
 
 echo "📋 Verifying arm64 binary..."
 cp "${BUILD_TMP}/News_arm64" "${MACOS_DIR}/${APP_NAME}"
