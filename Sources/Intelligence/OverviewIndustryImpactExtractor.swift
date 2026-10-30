@@ -30,13 +30,15 @@ struct OverviewIndustryImpactExtractor: Sendable {
             switch self {
             case .energy:
                 return [
-                    "energy", "utilities", "oil", "gas", "petroleum", "refinery", "refineries", "crude", "drilling",
+                    "energy", "utilities", "oil", "natural gas", "gas prices", "gas supplies", "petroleum", "refinery",
+                    "refineries", "crude", "drilling",
                     "pipeline", "pipelines", "power grid", "electricity", "renewable energy", "solar", "wind farm",
                     "wind farms", "nuclear power", "utility company", "utility companies",
                 ]
             case .financialServices:
                 return [
-                    "banking", "bank", "banks", "lender", "lenders", "financial services", "credit", "mortgage",
+                    "banking", "bank", "banks", "lender", "lenders", "financial services", "credit markets",
+                    "consumer credit", "mortgage",
                     "mortgages",
                     "wall street", "investment bank", "investment banks", "hedge fund", "hedge funds", "fintech",
                     "liquidity",
@@ -45,7 +47,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
             case .healthcare:
                 return [
                     "healthcare", "pharmaceutical", "pharmaceuticals", "pharma", "drugmaker", "drugmakers",
-                    "drug", "drugs", "medical device", "medical devices", "biotech", "hospital", "hospitals",
+                    "drug prices", "drug supplies", "drug shortages", "medical device", "medical devices", "biotech",
+                    "hospital", "hospitals",
                     "clinical",
                     "fda approval", "prescription drug", "prescription drugs", "vaccine", "vaccines",
                 ]
@@ -58,9 +61,10 @@ struct OverviewIndustryImpactExtractor: Sendable {
             case .transportation:
                 return [
                     "transportation", "airline", "airlines", "aircraft", "aviation", "flight", "flights", "airport",
-                    "airports", "carrier", "carriers", "automaker", "automakers", "carmaker", "carmakers",
-                    "auto industry", "automotive", "vehicle", "vehicles", "electric vehicles", "shipping", "freight",
-                    "railroad", "railroads", "railway", "railways", "transit",
+                    "airports", "air carrier", "air carriers", "automaker", "automakers", "carmaker", "carmakers",
+                    "auto industry", "automotive", "vehicle sales", "vehicle production", "electric vehicles",
+                    "shipping", "freight",
+                    "railroad", "railroads", "railway", "railways", "public transit",
                 ]
             case .agriculture:
                 return [
@@ -71,14 +75,16 @@ struct OverviewIndustryImpactExtractor: Sendable {
             case .manufacturing:
                 return [
                     "manufacturing", "manufacturer", "manufacturers", "factory", "factories", "industrial", "steel",
-                    "aluminum", "heavy industry", "machinery", "chemical", "chemicals", "foundry", "smelter",
+                    "aluminum", "heavy industry", "machinery", "chemical plant", "chemical plants", "chemical makers",
+                    "foundry", "smelter",
                     "production line", "raw materials",
                 ]
             case .retailAndEcommerce:
                 return [
                     "retail", "retailer", "retailers", "supermarket", "supermarkets", "e-commerce", "department stores",
-                    "apparel", "consumer goods", "grocery", "merchandise", "shopping malls", "foot traffic", "store",
-                    "stores",
+                    "apparel", "consumer goods", "grocery", "merchandise", "shopping malls", "foot traffic",
+                    "store closures",
+                    "store sales",
                 ]
             case .mediaAndEntertainment:
                 return [
@@ -100,7 +106,8 @@ struct OverviewIndustryImpactExtractor: Sendable {
             case .defenseAndAerospace:
                 return [
                     "defense", "aerospace", "defense contractor", "defense contractors", "military spending",
-                    "weapon", "weapons", "missile", "missiles", "fighter jet", "fighter jets", "defense budget",
+                    "weapons maker", "weapons makers", "missile maker", "missile makers", "fighter jet", "fighter jets",
+                    "defense budget",
                     "lockheed", "raytheon", "northrop", "general dynamics", "boeing defense", "pentagon contract",
                     "airbus defense",
                 ]
