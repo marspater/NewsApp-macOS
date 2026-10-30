@@ -51,6 +51,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Models/ArticleIdentity.swift \
     Sources/Models/EventOverview.swift \
     Sources/Models/EventFeed.swift \
+    Sources/Models/OnboardingStep.swift \
     Sources/Models/ArchiveSearchToken.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
@@ -106,6 +107,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Views/ReaderSupportViews.swift \
     Sources/Views/EventOverviewReaderView.swift \
     Sources/App/NewsSignposts.swift \
+    Sources/App/DiagnosticsExport.swift \
     Sources/App/UpdateChecker.swift \
     Sources/App/NewsURLParser.swift \
     Sources/App/Intents.swift \

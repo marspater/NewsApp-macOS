@@ -320,6 +320,17 @@ struct FiniteBriefing: Equatable, Sendable {
         selectedAt >= editionStart(now: now, hour: hour, calendar: calendar) && selectedAt <= now
     }
 
+    /// The Dock badge (#584): unread stories of the current stored edition plus unread stories a notification
+    /// covered since launch, each counted once. An edition from before the current edition hour counts nothing.
+    static func dockBadgeCount(
+        editionIDs: String, selectedAt: Date, hour: Int, notified: Set<String>, read: Set<String>, now: Date = Date()
+    ) -> Int {
+        let edition =
+            isCurrent(selectedAt: selectedAt, now: now, hour: hour)
+            ? editionIDs.split(separator: "\n").map { String($0) } : []
+        return notified.union(edition).filter { !read.contains($0) }.count
+    }
+
     init(
         candidates: [FeedArticle], readIDs: Set<String>, now: Date = Date(),
         priorities: [String: BriefingPriority] = [:], interests: [String: Int] = [:]

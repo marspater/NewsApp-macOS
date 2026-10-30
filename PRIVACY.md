@@ -14,6 +14,7 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
 * **Separation of Concerns**: Ephemeral HTTP response caches (`URLCache`) are strictly segregated from durable user data. Clearing the HTTP cache does not alter bookmarks, read markers, or custom feed hierarchies.
 * **Spotlight Indexing**: Only stories you explicitly save are indexed in macOS Spotlight (`CoreSpotlight`) on your Mac, with their title, publisher, summary, and publication date (`com.marspater.news.saved-stories`). Unread and read feed items are never indexed. Removing a story from Saved Stories removes its Spotlight entry immediately, clearing caches leaves saved-story entries intact, and resetting or deleting the library removes all Spotlight entries.
 * **Muting**: Muted publisher hosts and topic words are stored in the app's local preferences and applied on your Mac; they are never sent anywhere.
+* **Backups**: Back Up Library… writes a backup only where you save it; it contains your library, settings and World Tension history and is readable by your user account only. NewsApp never uploads it; a synced folder you save it to, such as iCloud Drive, may. Restoring keeps the replaced library beside it on your Mac (newest two copies).
 * **No Account Required**: The application does not require user registration, account creation, or cloud authentication.
 
 ---
@@ -76,4 +77,11 @@ No access is requested or granted for:
 
 * **Retention Policies**: Read stories that are not saved are deleted after 30 days by default (Settings › Storage: Never, 30 or 90 days). Saved stories, unread stories and stories cited by an event overview are kept.
 * **Exportability**: You can export your entire feed library at any time via the standard OPML 2.0 format (`File > Export OPML...`).
+* **Diagnostics Export**: Help › Export Diagnostics… writes a zip file to a place you choose. Nothing is sent anywhere; you decide whether to share the file. It contains:
+  * The app's own log entries (subsystem `com.marspater.news`) from **this launch only**. macOS lets a sandboxed app read only its own process's log, so entries from earlier launches are not included. If the app has run for more than a day, only the last 24 hours are included. Values the app logs as private appear as `<private>`.
+  * The app version and build, the macOS version and the library's schema version.
+  * A settings summary: counts of feeds, starred feeds, sections and mute rules; the refresh interval and retention period; and which notification, Dock badge, menu bar, on-device intelligence, insecure HTTP and World Tension options are on.
+  * Feed health per subscription (responding or failing, newest item, text depth), named by host only.
+
+  The export does not add story text. Before the zip is written, every URL is cut down to its host (no path, query or credentials), home folder paths are shortened to `~`, and the titles of stories the app has loaded are replaced with `<story>` when they are 12 or more characters long. Shorter titles are left as written, because they match ordinary words in log text. The app does not log titles as public values, so they normally appear only as `<private>`.
 * **Complete Erasure**: Current application data is stored under `~/Library/Containers/com.marspater.news/`. Quit the app before manually removing its sandbox container. Removing that container does not erase exported OPML files or historical backups stored elsewhere.

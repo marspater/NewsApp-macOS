@@ -8,11 +8,16 @@ import os
 enum NewsSignposts {
     static let subsystem = "com.marspater.news"
 
-    static let feeds = OSSignposter(subsystem: subsystem, category: "Feeds")
-    static let database = OSSignposter(subsystem: subsystem, category: "Database")
+    /// One category per area (#564): the area's log lines and its signposts share it.
+    static let feedsLog = Logger(subsystem: subsystem, category: "Feeds")
+    static let databaseLog = Logger(subsystem: subsystem, category: "Database")
+    static let launchLog = Logger(subsystem: subsystem, category: "Launch")
+
+    static let feeds = OSSignposter(logger: feedsLog)
+    static let database = OSSignposter(logger: databaseLog)
     static let enrichment = OSSignposter(subsystem: subsystem, category: "Enrichment")
     static let intelligence = OSSignposter(subsystem: subsystem, category: "Intelligence")
-    static let launch = OSSignposter(subsystem: subsystem, category: "Launch")
+    static let launch = OSSignposter(logger: launchLog)
 
     @MainActor private static var firstCardReported = false
 
@@ -29,7 +34,7 @@ enum NewsSignposts {
         guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return }
         let start = info.kp_proc.p_un.__p_starttime
         let elapsed = Date().timeIntervalSince1970 - (Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
-        Logger(subsystem: subsystem, category: "Launch").notice(
+        launchLog.notice(
             "First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public)"
         )
     }
