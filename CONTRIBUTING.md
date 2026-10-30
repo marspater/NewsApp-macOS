@@ -45,6 +45,8 @@ NEWS_READING_FULL_APP=1 ./script/native_performance_baseline.sh # Live: sandboxe
 ./script/test_notification_live.sh DIR # Opt-in real OS notifications with synthetic reports, temporary settings and in-memory SQLite; existing News authorization required
 ./script/test_native_ui_qa.sh        # Automated Native UI QA checks with system settings overrides (#155, #123)
 ./script/appearance_matrix.sh [DIR]  # Window captures of list, grid, reader and overview in light, dark and Increase Contrast; needs Screen Recording
+make run                             # Build and launch News.app as com.marspater.news.dev: its own container, library and settings; the real library is never opened (#749)
+./script/build_and_run.sh --real-library # Build and launch with the installed app's id: opens and migrates the real library, closing any running News first
 ./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver
 ./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
@@ -97,7 +99,7 @@ SwiftSoup and FeedKit are resolved by `Package.swift` and the committed `Package
 
 Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which builds with `build_release.sh`, checks the bundle version equals the tag and publishes the arm64 zip with its sha256 as a GitHub release (ad-hoc signed, no notarization). Tag only after the version stamping (#566) is on `main`.
 
-`make build` and `make release` compile SwiftPM executables; `make app` and `make run` use the app-bundle workflow. Packaging helpers live under `script/distribution/` and are inactive in development CI. Do not run notarization or build Intel slices in the current scope.
+`make build` and `make release` compile SwiftPM executables; `make app` and `make run` use the app-bundle workflow; `make run` launches the development bundle id `com.marspater.news.dev` unless `script/build_and_run.sh --real-library` is used, with `--verify`, `--debug` or `--logs` after it as needed. Packaging helpers live under `script/distribution/` and are inactive in development CI. Do not run notarization or build Intel slices in the current scope.
 
 Add deterministic regressions for changed parsing, classification, persistence, migrations, security boundaries and state transitions. Synchronize async tests on observable state rather than short sleeps; model-dependent tests must use deterministic fallbacks. Preserve tests rather than removing failing coverage. Keep tests isolated from real user settings, databases and logs. Create temporary defaults with `testDefaultsSuite` and remove them with `removeTestDefaults` from `Tests/TestDefaults.swift`: a plain suite name leaves a plist in `~/Library/Preferences` that cfprefsd rewrites after deletion.
 
