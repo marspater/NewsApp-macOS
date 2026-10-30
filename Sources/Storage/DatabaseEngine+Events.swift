@@ -37,16 +37,17 @@ extension DatabaseEngine {
         defer { sqlite3_finalize(checkStmt) }
 
         sqlite3_bind_text(checkStmt, 1, overview.eventID, -1, Self.sqliteTransient)
+        // A result for an older version of the event is stale, stored overview or not (#789). The event's own version
+        // decides, so a row stored under a story's summed version is replaced rather than kept.
+        let currentVersion = try eventRows(
+            "SELECT membership_version FROM events WHERE id = ?;", [.text(overview.eventID)]
+        ).first?[0].flatMap { Int($0) }
+        if let currentVersion, overview.membershipVersion < currentVersion { return false }
         var existingOverviewID: String?
         if sqlite3_step(checkStmt) == SQLITE_ROW {
             let existingVersion = Int(sqlite3_column_int(checkStmt, 1))
-            // An older result never overwrites a newer version. The event's own version decides when the event
-            // exists, so a row stored under a story's summed version before #789 is replaced, not kept forever.
-            if let current = try eventRows(
-                "SELECT membership_version FROM events WHERE id = ?;", [.text(overview.eventID)]
-            ).first?[0].flatMap({ Int($0) }) {
-                if overview.membershipVersion < current { return false }
-            } else if existingVersion > overview.membershipVersion {
+            // Without an event row, an older result never overwrites a newer version.
+            if currentVersion == nil, existingVersion > overview.membershipVersion {
                 return false
             }
             if let idText = sqlite3_column_text(checkStmt, 0) {
