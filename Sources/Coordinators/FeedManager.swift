@@ -591,10 +591,12 @@ class FeedManager: NSObject, ObservableObject {
                 }
             }
         }
-        // A feed removed while this run ingested keeps no status.
-        var updatedStatuses = feedStatuses
-        for (url, status) in statuses where updatedStatuses[url] != nil { updatedStatuses[url] = status }
-        feedStatuses = updatedStatuses
+        // A cancelled run leaves the statuses to the run that replaced it; a feed removed meanwhile keeps no status.
+        if !Task.isCancelled {
+            var updatedStatuses = feedStatuses
+            for (url, status) in statuses where updatedStatuses[url] != nil { updatedStatuses[url] = status }
+            feedStatuses = updatedStatuses
+        }
 
         // Publish one coherent snapshot per collection, including any committed prefix if it was cancelled.
         await articleStore.refreshState()

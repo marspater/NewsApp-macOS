@@ -284,9 +284,12 @@ final class ArticleStore: ObservableObject {
     /// Background classification results not yet published; they go out together (#778).
     private var pendingPublicationIDs: Set<String> = []
     private var publicationTask: Task<Void, Never>?
+    /// The latest publication; the next one waits for it, so a batch read before a newer write never lands after it.
+    private var lastPublication: Task<Void, Never>?
     /// How long background classification results wait to be published together. An enrichment burst after a
     /// refresh writes hundreds of stories; publishing each one re-rendered every list, card and the open reader.
-    static let coalescedPublicationDelay: Duration = .seconds(1)
+    /// Tests lengthen it and publish with `flushPendingPublications()`.
+    var coalescedPublicationDelay: Duration = .seconds(1)
 
     /// `coalescesPublication`: background classification, published with the other results of the next second
     /// instead of at once. Writes the reader waits for publish at once.
@@ -322,7 +325,7 @@ final class ArticleStore: ObservableObject {
                 }
             }
             if coalescesPublication {
-                schedulePublication(id)
+                schedulePublication([id])
             } else {
                 try await publishStoredArticles([id])
             }
@@ -333,28 +336,64 @@ final class ArticleStore: ObservableObject {
         }
     }
 
-    /// Publishes `id` with every other background result of the next `coalescedPublicationDelay`. The stored rows are
+    /// Publishes `ids` with every other background result of the next `coalescedPublicationDelay`. The stored rows are
     /// read when the batch goes out, so the published state is the latest one.
-    private func schedulePublication(_ id: String) {
-        pendingPublicationIDs.insert(id)
-        guard publicationTask == nil else { return }
+    private func schedulePublication(_ ids: some Sequence<String>) {
+        pendingPublicationIDs.formUnion(ids)
+        guard publicationTask == nil, !pendingPublicationIDs.isEmpty else { return }
         publicationTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.coalescedPublicationDelay)
-            guard let self else { return }
-            let ids = pendingPublicationIDs
-            pendingPublicationIDs = []
-            publicationTask = nil
-            do { try await publishStoredArticles(ids) } catch {
-                logger.error("Failed to publish enrichment: \(error.localizedDescription)")
-            }
+            guard let delay = self?.coalescedPublicationDelay else { return }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await self?.flushPendingPublications()
+        }
+    }
+
+    /// Publishes the waiting background results now. Stories whose rows could not be read wait for the next batch.
+    func flushPendingPublications() async {
+        publicationTask?.cancel()
+        publicationTask = nil
+        let ids = pendingPublicationIDs
+        pendingPublicationIDs = []
+        guard !ids.isEmpty else { return }
+        let failed = await publishInOrder(ids)
+        if !failed.isEmpty {
+            logger.error("Failed to publish enrichment of \(failed.count) stories; retrying with the next batch")
+            schedulePublication(failed)
         }
     }
 
     /// Hydrate the persisted results, including fields invalidated by publisher-input changes, in one publication.
     private func publishStoredArticles(_ ids: Set<String>) async throws {
+        let failed = await publishInOrder(ids)
+        if !failed.isEmpty {
+            throw NSError(
+                domain: "ArticleStore", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Stored story could not be read"])
+        }
+    }
+
+    /// Runs one publication after the previous one has applied (#778): rows are read inside the queue, so a later
+    /// publication always reads at least as new a state. Returns the IDs whose rows could not be read.
+    private func publishInOrder(_ ids: Set<String>) async -> Set<String> {
+        let previous = lastPublication
+        let current = Task { [weak self] () -> Set<String> in
+            await previous?.value
+            return await self?.applyStoredArticles(ids) ?? []
+        }
+        lastPublication = Task { _ = await current.value }
+        return await current.value
+    }
+
+    private func applyStoredArticles(_ ids: Set<String>) async -> Set<String> {
         var stored: [FeedArticle] = []
+        var failed = Set<String>()
         for id in ids {
-            if let updated = try await database.fetchArticles(limit: 1, id: id).first { stored.append(updated) }
+            do {
+                if let updated = try await database.fetchArticles(limit: 1, id: id).first { stored.append(updated) }
+            } catch {
+                failed.insert(id)
+            }
         }
         var listed = articles
         var saved = savedArticles
@@ -377,10 +416,11 @@ final class ArticleStore: ObservableObject {
                 savedArticleIDs.insert(updated.id)
             }
         }
-        guard revised else { return }
+        guard revised else { return failed }
         if listChanged { articles = listed }
         if savedChanged { savedArticles = saved }
         revision &+= 1
+        return failed
     }
 
     // MARK: - Structured Article Analysis
