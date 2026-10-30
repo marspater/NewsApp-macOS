@@ -296,6 +296,12 @@ struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
     let headlines: [WorldTensionHeadline]
     var assessment: WorldTensionAssessment
     var id: Date { TensionMethodology.day(containing: evaluatedAt).start }
+
+    /// The reading of the UTC day containing `day`, never a neighbouring day's.
+    static func reading(on day: Date, in readings: [WorldTensionReading]) -> WorldTensionReading? {
+        let start = TensionMethodology.day(containing: day).start
+        return readings.first { $0.id == start }
+    }
     var level: TensionLevel { TensionLevel(index: Double(assessment.score)) }
 
     /// The current headlines behind the score. Model-named drivers count only when the explanation shares a word with

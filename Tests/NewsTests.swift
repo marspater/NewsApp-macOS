@@ -4665,6 +4665,13 @@ struct NewsTests {
                     score: score, summary: "Ceasefire talks continue between the parties.", reasons: reasons,
                     isEstimate: estimate ? true : nil))
         }
+        assertEqual(
+            WorldTensionReading.reading(
+                on: today.addingTimeInterval(86400 + 7200), in: [reading(0, 30), reading(2, 50)]),
+            nil, "A selected day without a reading shows no neighbouring day's reading")
+        assertEqual(
+            WorldTensionReading.reading(on: today.addingTimeInterval(2 * 86400), in: [reading(0, 30), reading(2, 50)])?
+                .assessment.score, 50, "A selected day shows its own reading")
         assertEqual(WorldTensionState(aiEnabled: false).status, .aiOff, "AI off wins over everything")
         assertEqual(
             WorldTensionState(aiEnabled: false, history: [reading(0, 30)], loadedAt: now).reading, nil,
