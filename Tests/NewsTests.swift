@@ -603,6 +603,8 @@ struct NewsTests {
             try await testFTSRowIDMigration()
             try await testDatabaseHealthAndDerivedRetention()
             try await testRealLibraryMigrationFixture()
+            try await testLibraryBackupAndFutureSchemaGuard()
+            try await testLibraryBackupRestore()
             return
         }
         if CommandLine.arguments.contains("--export-pairs") {
@@ -861,6 +863,8 @@ struct NewsTests {
         try await testFTSRowIDMigration()
         try await testDatabaseHealthAndDerivedRetention()
         try await testRealLibraryMigrationFixture()
+        try await testLibraryBackupAndFutureSchemaGuard()
+        try await testLibraryBackupRestore()
         try await testMigrationCoordinatorAtomicity()
         await testArticleRetentionPolicy()
         await testContentExtractionPipelineDeep()
@@ -1394,6 +1398,404 @@ struct NewsTests {
             "Corrupted database surfaces a user-visible health notice on ArticleStore (#536)"
         )
         await corruptDB.close()
+    }
+
+    static func testLibraryBackupAndFutureSchemaGuard() async throws {
+        print("  - Testing the pre-migration backup and the newer-library guard (#746, #747)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-backup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        func value(_ file: URL, _ sql: String) -> String? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            assertEqual(
+                sqlite3_open_v2(file.path, &handle, SQLITE_OPEN_READONLY, nil), SQLITE_OK, "Inspect backup fixture")
+            defer { sqlite3_close(handle) }
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+        func files(_ prefix: String) throws -> [String] {
+            try FileManager.default.contentsOfDirectory(atPath: directory.path).filter { $0.hasPrefix(prefix) }.sorted()
+        }
+        let current = String(DatabaseEngine.schemaVersion)
+        let library = directory.appendingPathComponent("news.sqlite3")
+        let creator = DatabaseEngine(path: library.path)
+        try await creator.open()
+        try await creator.upsertArticles(
+            ["a", "b", "c"].map { name in
+                FeedArticle(
+                    storedID: "backup-\(name)", title: "Backup report \(name)",
+                    link: "https://backup.test/\(name)", guid: "backup-guid-\(name)",
+                    description: "Backup body \(name)", pubDate: Date(), source: "Backup Publisher")
+            })
+        await creator.close()
+        assertEqual(value(library, "PRAGMA user_version;"), current, "A fresh library is written at schemaVersion")
+        assertEqual(try files("news-before-"), [], "A fresh library is never backed up")
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &handle), SQLITE_OK, "Open v25 backup fixture")
+        assertEqual(
+            sqlite3_exec(
+                handle,
+                "DROP INDEX idx_events_story; ALTER TABLE events DROP COLUMN story_id; PRAGMA user_version = 25;",
+                nil, nil, nil), SQLITE_OK, "Reconstruct a v25 library")
+        sqlite3_close(handle)
+
+        // A backup that cannot be written leaves the library unmigrated and read-only.
+        var holder: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &holder), SQLITE_OK, "Hold the v25 fixture's WAL files open")
+        assertEqual(
+            sqlite3_exec(holder, "SELECT count(*) FROM articles;", nil, nil, nil), SQLITE_OK, "Read v25 fixture")
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: directory.path)
+        let blocked = DatabaseEngine(path: library.path)
+        try await blocked.open()
+        let blockedNotice = await blocked.databaseHealthNotice()
+        await blocked.close()
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: directory.path)
+        sqlite3_close(holder)
+        assertTrue(blockedNotice?.contains("couldn't back up") == true, "A failed backup surfaces the health notice")
+        assertEqual(value(library, "PRAGMA user_version;"), "25", "A failed backup stops the migration")
+
+        // Two engines opening one v25 library together: one backup, one migration, no error.
+        let race = directory.appendingPathComponent("race", isDirectory: true)
+        try FileManager.default.createDirectory(at: race, withIntermediateDirectories: true)
+        let raceLibrary = race.appendingPathComponent("news.sqlite3")
+        try FileManager.default.copyItem(at: library, to: raceLibrary)
+        let racers = [DatabaseEngine(path: raceLibrary.path), DatabaseEngine(path: raceLibrary.path)]
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for racer in racers { group.addTask { try await racer.open() } }
+            try await group.waitForAll()
+        }
+        for racer in racers {
+            let raceNotice = await racer.databaseHealthNotice()
+            assertEqual(raceNotice, nil, "Both concurrent opens end writable")
+            await racer.close()
+        }
+        assertEqual(value(raceLibrary, "PRAGMA user_version;"), current, "Concurrent opens migrate the library once")
+        assertEqual(
+            try FileManager.default.contentsOfDirectory(atPath: race.path).filter { $0.hasPrefix("news-before-") }
+                .count,
+            1, "Concurrent opens back the library up once")
+
+        // Two older copies exist; the migration keeps the newer one and its own.
+        for (name, age) in [
+            ("news-before-v20-2026-01-01.sqlite3", 200.0), ("news-before-v21-2026-02-01.sqlite3", 100.0),
+        ] {
+            let url = directory.appendingPathComponent(name)
+            try Data("old copy".utf8).write(to: url)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-age * 86400)], ofItemAtPath: url.path)
+        }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: library.path)
+        let db = DatabaseEngine(path: library.path)
+        try await db.open()
+        let notice = await db.databaseHealthNotice()
+        assertEqual(notice, nil, "A backed-up migration opens writable without a notice")
+        assertEqual(value(library, "PRAGMA user_version;"), current, "The v25 library migrates to schemaVersion")
+        assertEqual(try await db.fetchArticles(limit: nil).count, 3, "The migration keeps every article")
+        // A write waits for another connection's lock instead of failing busy.
+        var locker: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &locker), SQLITE_OK, "Open a second connection")
+        assertEqual(
+            sqlite3_exec(locker, "BEGIN IMMEDIATE;", nil, nil, nil), SQLITE_OK, "A second connection takes the lock")
+        nonisolated(unsafe) let held = locker
+        // The lock stays held for a second, far longer than the write takes to reach SQLite; without the busy
+        // timeout the write fails at once instead of waiting.
+        let lockedAt = Date()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 1) {
+            sqlite3_exec(held, "COMMIT;", nil, nil, nil)
+            sqlite3_close(held)
+        }
+        try await db.markRead(articleId: "backup-a", isRead: true)
+        let waited = Date().timeIntervalSince(lockedAt)
+        assertTrue(waited >= 0.9, "A write waits for another connection's lock (waited \(waited) s)")
+        assertTrue(try await db.isRead(articleId: "backup-a"), "A write waits out another connection's lock")
+        await db.close()
+        let backups = try files("news-before-")
+        let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+        let backup = "news-before-v25-\(day).sqlite3"
+        assertEqual(backups, ["news-before-v21-2026-02-01.sqlite3", backup], "Only the newest two backups are kept")
+        let backupURL = directory.appendingPathComponent(backup)
+        let backupMode = try FileManager.default.attributesOfItem(atPath: backupURL.path)[.posixPermissions] as? Int
+        assertEqual(backupMode, 0o600, "The backup keeps the library's file permissions")
+        assertEqual(value(backupURL, "PRAGMA user_version;"), "25", "The backup keeps the old schema version")
+        assertEqual(value(backupURL, "SELECT count(*) FROM articles;"), "3", "The backup keeps every article")
+        assertEqual(value(backupURL, "PRAGMA quick_check;"), "ok", "The backup is a sound database")
+        assertEqual(try files(".news-before-"), [], "No partial backup is left behind")
+
+        let reopened = DatabaseEngine(path: library.path)
+        try await reopened.open()
+        await reopened.close()
+        assertEqual(try files("news-before-"), backups, "A current library opens without a new backup")
+
+        // A library from a newer build opens read-only and stays byte-identical.
+        let future = directory.appendingPathComponent("future.sqlite3")
+        try FileManager.default.copyItem(at: library, to: future)
+        assertEqual(sqlite3_open(future.path, &handle), SQLITE_OK, "Open future fixture")
+        assertEqual(
+            sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil),
+            SQLITE_OK, "Reconstruct a library from a newer build")
+        sqlite3_close(handle)
+        let futureBytes = try Data(contentsOf: future)
+        let sideFile = URL(fileURLWithPath: future.path + ".world-tension-v2.json")
+        try Data("[]".utf8).write(to: sideFile)
+        let newer = DatabaseEngine(path: future.path)
+        try await newer.open()
+        let futureNotice = await newer.databaseHealthNotice()
+        assertTrue(futureNotice?.contains("newer version") == true, "A newer library surfaces the health notice")
+        assertEqual(try await newer.fetchArticles(limit: nil).count, 3, "A newer library stays readable")
+        do {
+            try await newer.markRead(articleId: "backup-a", isRead: true)
+            assertTrue(false, "A newer library refuses writes")
+        } catch {}
+        let reading = WorldTensionReading(
+            evaluatedAt: Date(), inputHash: "", modelGeneration: "", headlines: [],
+            assessment: WorldTensionAssessment(score: 1, summary: "", reasons: []))
+        for (name, write) in [
+            ("saving a World Tension reading", { _ = try await newer.saveWorldTensionReading(reading) }),
+            ("clearing enrichment", { try await newer.clearArticleEnrichment() }),
+            ("clearing the database cache", { try await newer.clearAllDatabaseCache() }),
+        ] as [(String, () async throws -> Void)] {
+            do {
+                try await write()
+                assertTrue(false, "A newer library refuses \(name)")
+            } catch let error as CocoaError {
+                assertEqual(error.code, .fileWriteVolumeReadOnly, "A newer library refuses \(name) as read-only")
+            } catch {
+                assertTrue(false, "A newer library refuses \(name) as read-only, not with \(error)")
+            }
+        }
+        assertEqual(try Data(contentsOf: sideFile), Data("[]".utf8), "A newer library's side files stay untouched")
+        await newer.close()
+        assertEqual(try Data(contentsOf: future), futureBytes, "A newer library is never migrated or written")
+        assertEqual(try files("future-before-"), [], "A newer library is never backed up")
+    }
+
+    @MainActor
+    static func testLibraryBackupRestore() async throws {
+        print("  - Testing library backup and restore (#563)...")
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-restore-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = testDefaultsSuite("test.backup")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer {
+            removeTestDefaults(suite)
+            try? fileManager.removeItem(at: directory)
+        }
+        func article(_ name: String) -> FeedArticle {
+            FeedArticle(
+                storedID: "restore-\(name)", title: "Restore report \(name)", link: "https://restore.test/\(name)",
+                guid: "restore-guid-\(name)", description: "Restore body \(name)", pubDate: Date(),
+                source: "Restore Publisher")
+        }
+        let library = directory.appendingPathComponent("news.sqlite3")
+        let sideFile = URL(fileURLWithPath: library.path + ".world-tension-v2.json")
+        let db = DatabaseEngine(path: library.path)
+        try await db.open()
+        try await db.upsertArticles([article("a"), article("b")])
+        try await db.markRead(articleId: "restore-a", isRead: true)
+        try await db.setSaved(articleId: "restore-b", isSaved: true)
+        try Data("[\"before\"]".utf8).write(to: sideFile)
+        defaults.set(["https://restore.test/feed"], forKey: AppSettings.feedURLsKey)
+        defaults.set(["Tech"], forKey: AppSettings.userSectionsKey)
+        defaults.set(["muted.test"], forKey: AppSettings.mutedSourcesKey)
+        defaults.set(["https://restore.test/feed"], forKey: AppSettings.starredFeedURLsKey)
+        defaults.set(["https://restore.test/feed": 1_700_000_000.0], forKey: AppSettings.starredFeedTimesKey)
+        defaults.set(AppSettings.NotificationMode.minimal.rawValue, forKey: AppSettings.notificationModeKey)
+
+        let archive = directory.appendingPathComponent("News Backup.sqlite3")
+        try Data("an older file the reader chose to replace".utf8).write(to: archive)
+        try await db.writeBackup(to: archive, settings: AppSettings.backupSettings(from: defaults))
+        func permissions(_ file: URL) throws -> Int? {
+            try fileManager.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
+        }
+        assertEqual(try permissions(archive), 0o600, "A backup is readable by its owner only")
+        func value(_ file: URL, _ sql: String) -> String? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            defer { sqlite3_close(handle) }
+            guard sqlite3_open_v2(file.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+                sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK
+            else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+
+        // A backup is never written over the live library, its WAL files, or a link to the library.
+        let link = directory.appendingPathComponent("link.sqlite3")
+        try fileManager.createSymbolicLink(at: link, withDestinationURL: library)
+        for destination in [library, URL(fileURLWithPath: library.path + "-wal"), link] {
+            do {
+                try await db.writeBackup(to: destination, settings: Data())
+                assertTrue(false, "A backup over the library itself is refused (\(destination.lastPathComponent))")
+            } catch {
+                assertTrue(
+                    error.localizedDescription.contains("library itself"),
+                    "A backup over the library is refused with a plain message (\(destination.lastPathComponent))")
+            }
+        }
+        try fileManager.removeItem(at: link)
+        assertEqual(try await db.fetchArticles(limit: nil).count, 2, "A refused destination leaves the library intact")
+        // A hard link is checked on a closed library: SQLite fails writes on an open file that gains a second link.
+        let closedLibrary = directory.appendingPathComponent("closed.sqlite3")
+        try fileManager.copyItem(at: archive, to: closedLibrary)
+        let hardLink = directory.appendingPathComponent("hard-link.sqlite3")
+        try fileManager.linkItem(at: closedLibrary, to: hardLink)
+        do {
+            try await DatabaseEngine(path: closedLibrary.path).writeBackup(to: hardLink, settings: Data())
+            assertTrue(false, "A backup over a hard link to the library is refused")
+        } catch {
+            assertTrue(error.localizedDescription.contains("library itself"), "A hard link to the library is refused")
+        }
+        for file in [hardLink, closedLibrary] { try fileManager.removeItem(at: file) }
+
+        // Everything changes after the backup.
+        try await db.upsertArticles([article("c")])
+        try await db.markRead(articleId: "restore-a", isRead: false)
+        try await db.markRead(articleId: "restore-b", isRead: true)
+        try await db.setSaved(articleId: "restore-b", isSaved: false)
+        try Data("[\"after\"]".utf8).write(to: sideFile)
+        defaults.set(["https://other.test/feed"], forKey: AppSettings.feedURLsKey)
+        defaults.removeObject(forKey: AppSettings.userSectionsKey)
+        defaults.set(true, forKey: AppSettings.allowInsecureHTTPKey)
+        defaults.set(AppSettings.NotificationMode.full.rawValue, forKey: AppSettings.notificationModeKey)
+
+        // A damaged file, a foreign file with an articles table this build can't migrate, and a backup from a newer build
+        // are refused; the live library stays open and unchanged.
+        let foreign = directory.appendingPathComponent("foreign.sqlite3")
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(foreign.path, &handle), SQLITE_OK, "Create the foreign fixture")
+        assertEqual(
+            sqlite3_exec(handle, "CREATE TABLE articles (headline TEXT);", nil, nil, nil), SQLITE_OK,
+            "Give the foreign fixture an articles table with other columns")
+        sqlite3_close(handle)
+        let corrupt = directory.appendingPathComponent("corrupt.sqlite3")
+        try Data(repeating: 0x5A, count: 8192).write(to: corrupt)
+        // A real SQLite file with a valid header and a damaged b-tree: the articles table's root page header is
+        // overwritten, so the file opens but fails integrity_check.
+        let damagedPages = directory.appendingPathComponent("damaged-pages.sqlite3")
+        var pages = try Data(contentsOf: archive)
+        let rawPageSize = Int(pages[16]) << 8 | Int(pages[17])
+        let pageSize = rawPageSize == 1 ? 65_536 : rawPageSize
+        let root = Int(value(archive, "SELECT rootpage FROM sqlite_master WHERE name = 'articles';") ?? "") ?? 0
+        assertTrue(root > 1, "The archive's articles table has a root page past the header")
+        let offset = (root - 1) * pageSize
+        pages.replaceSubrange(offset..<(offset + 12), with: Data(repeating: 0xFF, count: 12))
+        try pages.write(to: damagedPages)
+        assertTrue(
+            value(damagedPages, "SELECT count(*) FROM sqlite_master;") != nil,
+            "The damaged-page fixture still opens as SQLite")
+        assertTrue(
+            value(damagedPages, "PRAGMA integrity_check(1);") != "ok", "The damaged-page fixture fails integrity_check")
+        let newer = directory.appendingPathComponent("newer.sqlite3")
+        try fileManager.copyItem(at: archive, to: newer)
+        assertEqual(sqlite3_open(newer.path, &handle), SQLITE_OK, "Open the newer-backup fixture")
+        assertEqual(
+            sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil),
+            SQLITE_OK, "Mark the fixture as saved by a newer build")
+        sqlite3_close(handle)
+        for (name, file, message) in [
+            ("damaged", corrupt, "damaged"), ("damaged-page", damagedPages, "damaged"), ("foreign", foreign, "damaged"),
+            ("newer", newer, "newer version"),
+        ] {
+            do {
+                _ = try await db.restoreBackup(from: file)
+                assertTrue(false, "A \(name) backup is refused")
+            } catch {
+                assertTrue(
+                    error.localizedDescription.contains(message), "A \(name) backup is refused with a plain message")
+            }
+            assertEqual(
+                try await db.fetchArticles(limit: nil).count, 3, "A refused \(name) backup leaves the library open")
+        }
+        assertTrue(try await db.isRead(articleId: "restore-b"), "A refused backup leaves read state alone")
+        assertEqual(
+            try Data(contentsOf: sideFile), Data("[\"after\"]".utf8), "A refused backup leaves side files alone")
+        assertEqual(defaults.stringArray(forKey: AppSettings.feedURLsKey), ["https://other.test/feed"], "Settings kept")
+
+        // A side file that can't be written stops the restore before the swap: the library stays open and unchanged.
+        try fileManager.removeItem(at: sideFile)
+        try fileManager.createDirectory(at: sideFile, withIntermediateDirectories: false)
+        do {
+            _ = try await db.restoreBackup(from: archive)
+            assertTrue(false, "A restore whose side file can't be written fails")
+        } catch {}
+        assertEqual(try await db.fetchArticles(limit: nil).count, 3, "A failed side file leaves the library in place")
+        try fileManager.removeItem(at: sideFile)
+        try Data("[\"after\"]".utf8).write(to: sideFile)
+        func keptCopies() throws -> [String] {
+            try fileManager.contentsOfDirectory(atPath: directory.path).filter {
+                $0.contains(".restoring") || ($0.hasPrefix("news-before-restore-") && $0.hasSuffix(".sqlite3"))
+            }.sorted()
+        }
+        // The failed attempt's own kept copy is set aside so the pruning below starts from known copies.
+        for name in try keptCopies() { try fileManager.removeItem(at: directory.appendingPathComponent(name)) }
+
+        // The restore swaps the backup in, closes the library and hands back the settings. Two older copies of replaced libraries exist; the restore keeps the newer one and its own.
+        for (name, age) in [
+            ("news-before-restore-2026-01-01.sqlite3", 200.0), ("news-before-restore-2026-02-01.sqlite3", 100.0),
+        ] {
+            let url = directory.appendingPathComponent(name)
+            try Data("old copy".utf8).write(to: url)
+            try fileManager.setAttributes(
+                [.modificationDate: Date().addingTimeInterval(-age * 86400)], ofItemAtPath: url.path)
+        }
+        let settings = try await db.restoreBackup(from: archive)
+        try AppSettings.restoreSettings(settings ?? Data(), to: defaults)
+        let afterFirst = try keptCopies()
+        assertEqual(afterFirst.count, 2, "A restore keeps the replaced library and prunes to the newest two copies")
+        assertEqual(afterFirst.first, "news-before-restore-2026-02-01.sqlite3", "Pruning keeps the newer old copy")
+        let kept = directory.appendingPathComponent(afterFirst.last ?? "")
+        let day = Date().formatted(Date.ISO8601FormatStyle(timeZone: .current).year().month().day())
+        assertTrue(kept.lastPathComponent.hasPrefix("news-before-restore-\(day)-"), "The kept copy is time-stamped")
+        assertEqual(try permissions(kept), 0o600, "The kept library is readable by its owner only")
+        let undo = DatabaseEngine(path: kept.path)
+        try await undo.open()
+        assertEqual(
+            try await undo.fetchArticles(limit: nil).count, 3, "The kept copy holds the replaced library, for undo")
+        assertTrue(try await undo.isRead(articleId: "restore-b"), "The kept copy holds the replaced read state")
+        await undo.close()
+        let restored = DatabaseEngine(path: library.path)
+        try await restored.open()
+        let notice = await restored.databaseHealthNotice()
+        assertEqual(notice, nil, "A restored library opens writable")
+        assertEqual(
+            Set(try await restored.fetchArticles(limit: nil).map(\.id)), ["restore-a", "restore-b"],
+            "The restore brings back the backed-up stories")
+        assertTrue(try await restored.isRead(articleId: "restore-a"), "The restore brings back read state")
+        assertTrue(!(try await restored.isRead(articleId: "restore-b")), "The restore brings back unread state")
+        assertTrue(try await restored.isSaved(articleId: "restore-b"), "The restore brings back saved state")
+        await restored.close()
+        assertEqual(try Data(contentsOf: sideFile), Data("[\"before\"]".utf8), "The restore brings back World Tension")
+        assertEqual(sqlite3_open_v2(library.path, &handle, SQLITE_OPEN_READONLY, nil), SQLITE_OK, "Inspect restore")
+        assertEqual(
+            sqlite3_exec(handle, "SELECT * FROM \(DatabaseEngine.backupExtrasTable);", nil, nil, nil) == SQLITE_OK,
+            false, "The restored library doesn't keep the backup's extras table")
+        sqlite3_close(handle)
+        let reloaded = AppSettings(defaults: defaults)
+        assertEqual(reloaded.feedURLs, ["https://restore.test/feed"], "The restore brings back subscriptions")
+        assertEqual(reloaded.userSections, ["Tech"], "The restore brings back sections")
+        assertEqual(reloaded.muteRules.sources, ["muted.test"], "The restore brings back mute rules")
+        assertEqual(reloaded.starredFeedURLs, ["https://restore.test/feed"], "The restore brings back starred feeds")
+        assertEqual(reloaded.notificationMode, .minimal, "The restore brings back the notification mode")
+        assertEqual(reloaded.allowInsecureHTTP, false, "A setting the backup lacked returns to its default")
+
+        // A second restore the same day keeps its own copy beside the first one instead of replacing it.
+        try await Task.sleep(nanoseconds: 1_100_000_000)
+        let again = DatabaseEngine(path: library.path)
+        try await again.open()
+        _ = try await again.restoreBackup(from: archive)
+        let afterSecond = try keptCopies()
+        assertEqual(afterSecond.count, 2, "Two restores in one day keep two copies")
+        assertTrue(afterSecond.contains(kept.lastPathComponent), "The second restore keeps the first restore's copy")
+        assertEqual(
+            value(kept, "SELECT count(*) FROM articles;"), "3", "The first copy still holds the original library")
+        let second = directory.appendingPathComponent(afterSecond.first { $0 != kept.lastPathComponent } ?? "")
+        assertEqual(value(second, "SELECT count(*) FROM articles;"), "2", "The second copy holds the restored library")
     }
 
     static func testRealLibraryMigrationFixture() async throws {
@@ -8114,6 +8516,69 @@ struct NewsTests {
         assertFalse(
             EventMatcher.assess(seriesFirst, seriesSecond, samePublisher: true).isMatch,
             "Inside one publisher's series its name is no shared evidence")
+        // #741: storm names, and Title Case verbs that are not names.
+        assertEqual(
+            EventFeatures.stormNames(in: "Storm Darragh leaves 2,000 homes without power"), ["darragh"],
+            "A named storm is read from the headline")
+        assertEqual(
+            EventFeatures.stormNames(in: "Storm Ellen Leaves Thousands Without Power"), ["ellen"],
+            "A storm name in a Title Case headline is read too")
+        assertEqual(
+            EventFeatures.stormNames(in: "Storm Éowyn brings record winds to Ireland"), ["eowyn"],
+            "An accented storm name is read and folded")
+        assertTrue(
+            EventFeatures.stormNames(in: "Storm Ciarán nears the coast")
+                != EventFeatures.stormNames(in: "Storm Éowyn nears the coast"),
+            "Two accented storms differ")
+        assertTrue(
+            EventFeatures.stormNames(in: "Winter Storm Brings Snow to Chicago").isEmpty
+                && EventFeatures.stormNames(in: "Winter Storm Dumps Snow on Chicago").isEmpty
+                && EventFeatures.stormNames(in: "Storm Will Hit the Coast Tonight").isEmpty,
+            "A Title Case verb after Storm is no storm name")
+        // #737: different places in the headlines separate reports whose descriptions mention both places.
+        let kyivFire = EventFeatures(
+            title: "Ukraine: firefighters battle flames and rescue dog from Kyiv ruins",
+            description: "Russian strikes hit Kyiv overnight; in Kramatorsk crews also fought fires.", date: now)
+        let kramatorskFire = EventFeatures(
+            title: "Russians attack firefighters while they tackle blaze in Kramatorsk",
+            description: "The attack came hours after Kyiv was hit and firefighters rescued a dog.",
+            date: now.addingTimeInterval(3600))
+        assertEqual(
+            EventMatcher.assess(kyivFire, kramatorskFire).conflict, .headlinePlaces,
+            "Fires in Kyiv and in Kramatorsk are two events though each description names the other city")
+        let ceutaA = EventFeatures(
+            title: "Moroccan police intercept migrant swimming back towards Ceuta",
+            description: "Spain has deported migrants from Ceuta this week.", date: now)
+        let ceutaB = EventFeatures(
+            title: "Spain deports migrants from Ceuta in move criticised by rights group",
+            description: "Moroccan police intercepted a migrant swimming back.", date: now.addingTimeInterval(3600))
+        assertTrue(
+            EventMatcher.assess(ceutaA, ceutaB).conflict != .headlinePlaces,
+            "Headlines that share a place (Ceuta) are not split by their countries")
+        let dieselA = EventFeatures(
+            title: "Trump administration may let more Russian diesel onto market", description: "", date: now)
+        let dieselB = EventFeatures(
+            title: "Trump-Putin diesel deal has not lowered US fuel prices", description: "",
+            date: now.addingTimeInterval(3600))
+        assertTrue(
+            EventMatcher.assess(dieselA, dieselB).conflict != .headlinePlaces,
+            "Headlines that share a person (Trump) are not split by their countries")
+        // #739: the different-day veto covers only series items with no headline date or edition word.
+        var roundUpOne = quake
+        roundUpOne.series = "deals"
+        roundUpOne.titleSpecificAnchors = []
+        var roundUpTwo = quakeLater
+        roundUpTwo.series = "deals"
+        roundUpTwo.titleSpecificAnchors = []
+        roundUpTwo.date = roundUpOne.date.addingTimeInterval(30 * 3600)
+        assertEqual(
+            EventMatcher.assess(roundUpOne, roundUpTwo, samePublisher: true).conflict, .calendarDay,
+            "Dateless round-ups of one series on different days are two items")
+        roundUpOne.editions = ["evening"]
+        roundUpTwo.editions = ["evening"]
+        assertTrue(
+            EventMatcher.assess(roundUpOne, roundUpTwo, samePublisher: true).conflict != .calendarDay,
+            "Items with an edition word are left to the edition check")
 
         let followUpTerms: Set<String> = ["earthquake", "damage", "rescue", "tent", "camp", "aid", "shelter", "winter"]
         assertTrue(
@@ -9255,7 +9720,12 @@ struct NewsTests {
         isoFormatter.timeZone = TimeZone(secondsFromGMT: 0)
         let captureTimeUTC = isoFormatter.string(from: captureDate)
 
-        let selectionAnchor = captureDate
+        // NEWS_OVERVIEWS_NOW=<epoch> pins the 72 h window, so a rerun on the same copy measures the same events (#670).
+        let selectionAnchor =
+            environment["NEWS_OVERVIEWS_NOW"].flatMap { raw -> Date? in
+                guard let seconds = TimeInterval(raw), seconds.isFinite else { return nil }
+                return Date(timeIntervalSince1970: seconds)
+            } ?? captureDate
         let selectionWindowStart = selectionAnchor.addingTimeInterval(-72 * 3600)
         let selectionWindowEnd = selectionAnchor
         let selectionAnchorUTC = isoFormatter.string(from: selectionAnchor)
@@ -12189,6 +12659,20 @@ struct NewsTests {
         assertEqual(
             try await db.relatedActEvents(eventID: protest, limit: .max).map(\.eventID), [vote],
             "The newest event's overview reaches the story's earlier event")
+        // "Earlier in This Story" (#671): the story's own earlier events come first and are never capped away by other
+        // links; other links fill up to the cap.
+        let store = await ArticleStore(database: db)
+        assertEqual(
+            try await store.relatedStoryEvents(eventID: protest).map(\.eventID), [vote],
+            "The overview lists the story's earlier event")
+        func link(_ id: String) -> RelatedStoryEvent {
+            RelatedStoryEvent(eventID: id, articleID: "a-\(id)", title: id, firstPublishedAt: now)
+        }
+        assertEqual(
+            ArticleStore.earlierLinks(
+                story: ["s1", "s2"].map { link($0) }, others: ["l1", "l2", "l3", "s1", "l4"].map { link($0) }
+            ).map(\.eventID), ["s1", "s2", "l1", "l2", "l3"],
+            "Every story event first, then at most three other links, no duplicates")
         assertEqual(summaries.first?.members.count, 4, "All four reports are on the card")
         assertEqual(summaries.first?.membershipVersion, 2, "The story version is the sum of its events' versions")
         assertEqual(summaries.first?.seenVersion, nil, "Never opened")
@@ -13637,20 +14121,62 @@ struct NewsTests {
                 replacing: false)
             // One line per story that joins two or more events: each event's earliest headline within the window,
             // for the group review.
-            var lines = ["story_id,events,recent_members,recent_acts"]
+            // Countries named in headlines (#737): a story whose events name disjoint countries ("Jordan" beside "US")
+            // is flagged cross_country for the review; so is an event whose reports do.
+            func headlineCountries(_ rows: [LibraryRow]) -> Set<String> {
+                rows.reduce(into: Set<String>()) {
+                    $0.formUnion(EventFeatures(title: $1.title, description: "", date: $1.date).countries)
+                }
+            }
+            func disjointCountries(_ sets: [Set<String>]) -> Bool {
+                let named = sets.filter { !$0.isEmpty }
+                return named.indices.contains { i in named.indices.contains { j in named[i].isDisjoint(with: named[j]) }
+                }
+            }
+            var crossCountryStories = 0
+            var lines = ["story_id,events,recent_members,cross_country,countries,recent_acts"]
             for (story, rows) in joinedStories.sorted(by: { $0.key < $1.key }) {
-                let acts = Dictionary(grouping: rows) { $0.event ?? "" }.values
+                let groups = Dictionary(grouping: rows) { $0.event ?? "" }.values
+                let acts =
+                    groups
                     .compactMap { group in
                         group.min(by: { $0.date < $1.date }).map { "\(group.count)× \($0.source): \($0.title)" }
                     }
                     .sorted()
+                let countrySets = groups.map { headlineCountries($0) }
+                let cross = disjointCountries(countrySets)
+                if cross { crossCountryStories += 1 }
                 lines.append(
                     [
-                        story, String(eventsOf[story] ?? acts.count), String(rows.count),
+                        story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
+                        "\"" + countrySets.map { $0.sorted().joined(separator: " ") }.sorted().joined(separator: " | ")
+                            + "\"",
                         "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
                     ]
                     .joined(separator: ","))
             }
+            let crossCountryEvents = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }.values
+                .filter { group in disjointCountries(group.map { headlineCountries([$0]) }) }
+            print(
+                "    cross-country (headline countries disjoint): \(crossCountryStories) of \(joinedStories.count) story groups, "
+                    + "\(crossCountryEvents.count) events")
+            var eventLines = ["event,reports,countries,headlines"]
+            for group in crossCountryEvents {
+                eventLines.append(
+                    [
+                        group.first?.event ?? "", String(group.count),
+                        "\""
+                            + group.map { headlineCountries([$0]).sorted().joined(separator: " ") }.joined(
+                                separator: " | ") + "\"",
+                        "\""
+                            + group.map { "\($0.source): \($0.title)" }.joined(separator: " || ")
+                            .replacingOccurrences(of: "\"", with: "\"\"") + "\"",
+                    ].joined(separator: ","))
+            }
+            try StoryCorpus.writePrivate(
+                Data(eventLines.joined(separator: "\n").utf8),
+                to: try StoryCorpus.privateDirectory(output).appendingPathComponent("cross-country-events.csv"),
+                replacing: false)
             try StoryCorpus.writePrivate(
                 Data(lines.joined(separator: "\n").utf8),
                 to: try StoryCorpus.privateDirectory(output).appendingPathComponent("story-groups.csv"),

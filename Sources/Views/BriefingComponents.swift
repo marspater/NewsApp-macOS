@@ -503,7 +503,7 @@ struct BriefingTileView: View {
             if isSaved {
                 Image(systemName: "bookmark.fill")
                     .font(AppTypography.eyebrow)
-                    .foregroundStyle(AppColor.accent)
+                    .foregroundStyle(AppColor.accentText)
                     .accessibilityLabel("Saved")
             }
         }

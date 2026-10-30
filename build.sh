@@ -38,7 +38,8 @@ xcrun actool "$(pwd)/Assets/AppIcon.icon" --compile "$(pwd)/${RESOURCES_DIR}" \
 # Compile Swift files (exclude any standalone scripts)
 NEWS_DEPENDENCY_ARCH=arm64
 source script/swiftpm_dependencies.sh
-swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -target "arm64-apple-macos${TARGET_MACOS}" \
+# The trailing backslashes stay: harness scripts add their entry points after the `NewsApp.swift \` line.
+SWIFT_SOURCES=(
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
@@ -120,7 +121,11 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/App/Intents.swift \
     Sources/App/NotificationActionRouter.swift \
     Sources/App/NewsApp.swift \
-    -o "${MACOS_DIR}/${APP_NAME}"
+)
+source script/app_intents_metadata.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${NEWS_APP_INTENTS_FLAGS[@]}" -swift-version 6 -O -parse-as-library \
+    -target "arm64-apple-macos${TARGET_MACOS}" "${SWIFT_SOURCES[@]}" -o "${MACOS_DIR}/${APP_NAME}"
+news_app_intents_metadata "${RESOURCES_DIR}" "${TARGET_MACOS}"
 
 # Create Info.plist
 cat > "${CONTENTS_DIR}/Info.plist" <<EOF

@@ -14,7 +14,8 @@ The current release simplification uses existing #102 labeled tune/English holdo
 
 ```sh
 ./test.sh                         # Full regressions, including parser-to-embedding/clustering integration; also run by the commit hook
-NEWS_TEST_FORCE=1 ./test.sh       # A plain ./test.sh skips the Swift runner when the same inputs already passed on this machine; this reruns it
+script/test_event_overview_accessibility.sh # Story Overview sections, Industry Impact included (Epic T); headless, and run by a plain ./test.sh after the main runner, together with script/test_reader_accessibility.sh and script/test_tension_calibration.sh
+NEWS_TEST_FORCE=1 ./test.sh       # A plain ./test.sh skips the Swift runner and the three headless runners when the same inputs already passed all of them on this machine (the stamp is written after the last one); this reruns them
 ./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
 script/format.sh --check          # Strict repository-wide Swift formatting lint
@@ -45,6 +46,9 @@ NEWS_READING_FULL_APP=1 ./script/native_performance_baseline.sh # Live: sandboxe
 ./script/test_notification_live.sh DIR # Opt-in real OS notifications with synthetic reports, temporary settings and in-memory SQLite; existing News authorization required
 ./script/test_native_ui_qa.sh        # Automated Native UI QA checks with system settings overrides (#155, #123)
 ./script/appearance_matrix.sh [DIR]  # Window captures of list, grid, reader and overview in light, dark and Increase Contrast; needs Screen Recording
+NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift script/native_performance_baseline.sh DIR # Story Overview with every Epic T section rendered offscreen (no window, no Screen Recording) at 900 and 1,400 pt, text size 1.0 and 1.3, light, dark and Increase Contrast, each also in gray
+make run                             # Build and launch "News Dev.app" as com.marspater.news.dev: its own container, library and settings; the real library is never opened (#749)
+./script/build_and_run.sh --real-library # Build and launch with the installed app's id: opens and migrates the real library, closing any running News first
 ./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver
 ./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
@@ -62,7 +66,7 @@ NEWS_SNAPSHOT_DB=copy.sqlite3 ./test.sh --fragment-merge-timing # Local: one fra
 NEWS_PAIR_PREFIX=1 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json NEWS_PAIR_MODEL_PATH=OUT/pairscorer.mlmodelc ./test.sh --library-holdout # Evaluate a pair model trained with the gap-and-publisher prefix (#626); off by default, and the exporters follow it (set it on each command, as here)
 NEWS_PAIR_MODEL_PATH=OUT/pairscorer.mlmodelc ./test.sh --matcher-regressions # A candidate pair model instead of the shipped one (#624); use the same per-command assignment for --library-holdout and --event-corpus with their inputs; compile the .mlpackage first with `xcrun coremlcompiler compile OUT/pairscorer.mlpackage OUT`
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json NEWS_PAIR_MODEL_PATH=OUT/pairscorer.mlmodelc NEWS_PAIR_RULE=story NEWS_STORY_MODEL=0.9 NEWS_STORY_MODEL_PATH=OUT/pairscorer.mlmodelc ./test.sh --library-holdout # Evaluation of a three-way pair model (#627): NEWS_PAIR_MODEL_PATH names the admission candidate, which NEWS_PAIR_RULE=story admits on p_same + p_related; NEWS_STORY_MODEL sets the story pass's model signal at s (off by default), read from NEWS_STORY_MODEL_PATH; the holdout's story level and the story regressions measure stories, while --event-corpus and --matcher-regressions stay scored by event (their labels are events)
-NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json NEWS_PAIR_THRESHOLD=0.8 ./test.sh --library-holdout # Sweep override (#582): one knob per run, measured against the holdout; the knobs are NEWS_PAIR_THRESHOLD=0.8, NEWS_RESCUE_TWO_ANCHORS=0.65, NEWS_MODEL_ANCHORLESS=0.85, NEWS_COMPATIBLE_REQUIRES_MATCH=1, NEWS_COMPATIBLE_SHARE=1 (a finite share in 0...1) and NEWS_SAME_PUBLISHER=1, each also read by --event-corpus and --matcher-regressions
+NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_LIBRARY_HOLDOUT=holdout.json NEWS_PAIR_THRESHOLD=0.8 ./test.sh --library-holdout # Sweep override (#582): one knob per run, measured against the holdout; the knobs are NEWS_PAIR_THRESHOLD=0.8, NEWS_RESCUE_TWO_ANCHORS=0.65, NEWS_MODEL_ANCHORLESS=0.85, NEWS_COMPATIBLE_REQUIRES_MATCH=1, NEWS_COMPATIBLE_SHARE=1 (a finite share in 0...1), NEWS_SAME_PUBLISHER=1 and NEWS_STORY_COUNTRY=2 (the story pass's country signal, #737: K shared keywords, countries outside the common-actor share), each also read by --event-corpus, --matcher-regressions and --story-regressions
 NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power Mode (#534): no embedding, no pair model; deferred rows counted, not re-read. A fresh replay has no stored vectors, so every rule match waits for a pass with energy: the true-positive floor and the story links are not checked in this mode, only that nothing is linked wrongly
 ./test.sh --corpus-capture DIR    # Opt-in, live: capture catalog feed items into a private directory (#102)
 ./test.sh --corpus-review DIR     # Fingerprint match review sheet and precision against private labels (#102)
@@ -91,13 +95,13 @@ NEWS_LIVE_CATALOG_CHECK=1 ./test.sh # Optional: fetch every catalog feed through
 ./build_release.sh                # Optimized arm64 verification bundle
 ```
 
-Further opt-in variables: `NEWS_SNAPSHOT_DB=path` makes the default run open a copied library after the suite and check that it lists stories; `NEWS_OVERVIEWS_MAX_EVENTS=N` (default 120) and `NEWS_OVERVIEWS_RUN_NAME=name` bound and label an `--overviews-live` run; `NEWS_WORLD_TENSION_INTERACTIVE=1` keeps the World Tension harness window open for ten minutes; `NEWS_SETTLE_SECONDS=N` (default 5) is the wait before `launch_baseline.sh` samples settled memory.
+Further opt-in variables: `NEWS_SNAPSHOT_DB=path` makes the default run open a copied library after the suite and check that it lists stories; `NEWS_OVERVIEWS_MAX_EVENTS=N` (default 120) and `NEWS_OVERVIEWS_RUN_NAME=name` bound and label an `--overviews-live` run, and `NEWS_OVERVIEWS_NOW=<epoch>` pins its 72 h window so a rerun on the same copy measures the same events; `NEWS_WORLD_TENSION_INTERACTIVE=1` keeps the World Tension harness window open for ten minutes; `NEWS_SETTLE_SECONDS=N` (default 5) is the wait before `launch_baseline.sh` samples settled memory.
 
 SwiftSoup and FeedKit are resolved by `Package.swift` and the committed `Package.resolved`. Native app and QA scripts source `script/swiftpm_dependencies.sh`, which builds one static dependency archive with SwiftPM and supplies its module and link paths to the existing compiler commands. No separate dependency installation or system library search path is needed. Bundles include `Sources/ThirdPartyNotices.txt`.
 
 Releases: pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which builds with `build_release.sh`, checks the bundle version equals the tag and publishes the arm64 zip with its sha256 as a GitHub release (ad-hoc signed, no notarization). Tag only after the version stamping (#566) is on `main`.
 
-`make build` and `make release` compile SwiftPM executables; `make app` and `make run` use the app-bundle workflow. Packaging helpers live under `script/distribution/` and are inactive in development CI. Do not run notarization or build Intel slices in the current scope.
+`make build` and `make release` compile SwiftPM executables; `make app` and `make run` use the app-bundle workflow; `make run` launches the development bundle id `com.marspater.news.dev` unless `script/build_and_run.sh --real-library` is used, with `--verify`, `--debug` or `--logs` after it as needed. Packaging helpers live under `script/distribution/` and are inactive in development CI. Do not run notarization or build Intel slices in the current scope.
 
 Add deterministic regressions for changed parsing, classification, persistence, migrations, security boundaries and state transitions. Synchronize async tests on observable state rather than short sleeps; model-dependent tests must use deterministic fallbacks. Preserve tests rather than removing failing coverage. Keep tests isolated from real user settings, databases and logs. Create temporary defaults with `testDefaultsSuite` and remove them with `removeTestDefaults` from `Tests/TestDefaults.swift`: a plain suite name leaves a plist in `~/Library/Preferences` that cfprefsd rewrites after deletion.
 
