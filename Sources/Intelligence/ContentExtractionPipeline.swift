@@ -1900,7 +1900,12 @@ final class ContentExtractionPipeline: Sendable {
         var end = data.endIndex
         for index in data.indices.reversed().prefix(4) where data[index] & 0xC0 != 0x80 {
             let lead = data[index]
-            let length = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2
+            let length: Int
+            switch lead {
+            case 0xF0...: length = 4
+            case 0xE0...: length = 3
+            default: length = 2
+            }
             if (0xC2...0xF4).contains(lead), data.distance(from: index, to: data.endIndex) < length { end = index }
             break
         }

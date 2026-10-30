@@ -259,10 +259,15 @@ final class AppSettings: ObservableObject {
     nonisolated static func normalizeFeedURL(_ raw: String, allowInsecureHTTP: Bool = false) -> String? {
         var trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         // A pasted `feed:` address wraps the real one: feed://host/path or feed:https://host/path (#797).
+        // `feed:8443/rss` stays a host named feed with a port.
         if trimmed.lowercased().hasPrefix("feed:") {
-            trimmed = String(trimmed.dropFirst(5))
-            if trimmed.hasPrefix("//") { trimmed = String(trimmed.dropFirst(2)) }
-            trimmed = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rest = String(trimmed.dropFirst(5))
+            let unwrapped = rest.hasPrefix("//") ? String(rest.dropFirst(2)) : rest
+            let target = unwrapped.trimmingCharacters(in: .whitespacesAndNewlines)
+            let lowerTarget = target.lowercased()
+            if rest.hasPrefix("//") || lowerTarget.hasPrefix("http://") || lowerTarget.hasPrefix("https://") {
+                trimmed = target
+            }
         }
         guard !trimmed.isEmpty else { return nil }
 
@@ -271,6 +276,9 @@ final class AppSettings: ObservableObject {
         if !hasScheme {
             // Any other scheme (ftp://, webcal://, file:, javascript:) is not a feed address; host:port still is.
             let head = lower.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+            // Known non-web schemes are refused before the user:password@ reading below, which would accept
+            // `ftp:user:pass@host`. ponytail: a fixed list; a bare `scheme:user@host` outside it reads as credentials.
+            if refusedFeedScheme(trimmed) != nil { return nil }
             // The port follows any user:password@ and a bracketed IPv6 literal.
             var hostPort = head.split(separator: "@", omittingEmptySubsequences: false).last ?? head
             if hostPort.hasPrefix("["), let close = hostPort.firstIndex(of: "]") {
@@ -299,6 +307,26 @@ final class AppSettings: ObservableObject {
         if components.path == "/" { components.path = "" }
 
         return components.url?.absoluteString
+    }
+
+    private nonisolated static let nonWebSchemes: Set<Substring> = [
+        "ftp", "ftps", "sftp", "file", "webcal", "mailto", "javascript", "data", "smb", "afp", "ssh", "news",
+    ]
+
+    /// The known non-web scheme an address names, such as `ftp`, or nil.
+    nonisolated static func refusedFeedScheme(_ raw: String) -> String? {
+        let lower = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let head = lower.prefix { $0 != "/" && $0 != "?" && $0 != "#" }
+        guard let colon = head.firstIndex(of: ":"), nonWebSchemes.contains(head[..<colon]) else { return nil }
+        return String(head[..<colon])
+    }
+
+    /// The Add Feed failure text: names a refused scheme, otherwise the generic URL-or-duplicate message.
+    nonisolated static func addFeedFailureMessage(for raw: String) -> String {
+        if let scheme = refusedFeedScheme(raw) {
+            return "Feed not added. \(scheme): addresses are not supported. Use an http or https feed address."
+        }
+        return "Feed not added. Check the URL or whether you already subscribe."
     }
 
     /// Slash-insensitive subscription key: `/feed` and `/feed/` are one subscription even though only one form may work.
