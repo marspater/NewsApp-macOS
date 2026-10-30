@@ -37,6 +37,11 @@ enum StoryCurator {
             where lookedUp.count < imageBudget {
                 try Task.checkCancellation()
                 if let event = row.eventID, lookedUp.contains(event) { continue }
+                // A link that can never be requested is recorded without spending the budget on it (#818).
+                guard StoryImageFinder.pageURL(row.link) != nil else {
+                    try await database.recordStoryImage(row.id, imageURL: nil, at: now, expectedLink: row.link)
+                    continue
+                }
                 lookedUp.insert(row.eventID ?? row.id)
                 switch await imageFinder.find(row.link) {
                 case .found(let url):
@@ -76,11 +81,18 @@ struct StoryImageFinder: Sendable {
     /// The article page through the protected client; http links are requested over https.
     static let publisherPages = publisherPages(using: .shared)
 
+    /// The page address a lookup requests: an absolute http(s) link with a host, http upgraded to https.
+    static func pageURL(_ link: String) -> URL? {
+        guard var components = URLComponents(string: link),
+            ["http", "https"].contains(components.scheme?.lowercased() ?? ""), !(components.host ?? "").isEmpty
+        else { return nil }
+        components.scheme = "https"
+        return components.url
+    }
+
     static func publisherPages(using client: SecureHTTPClient) -> StoryImageFinder {
         StoryImageFinder { link in
-            guard var components = URLComponents(string: link) else { return .none }
-            if components.scheme?.lowercased() == "http" { components.scheme = "https" }
-            guard let url = components.url else { return .none }
+            guard let url = pageURL(link) else { return .none }
             let data: Data
             let response: HTTPURLResponse
             do {
