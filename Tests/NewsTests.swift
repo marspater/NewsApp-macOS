@@ -14178,14 +14178,14 @@ struct NewsTests {
                 let countrySets = groups.map { headlineCountries($0) }
                 let cross = disjointCountries(countrySets)
                 if cross { crossCountryStories += 1 }
-                lines.append(
-                    [
-                        story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
-                        "\"" + countrySets.map { $0.sorted().joined(separator: " ") }.sorted().joined(separator: " | ")
-                            + "\"",
-                        "\"" + acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"") + "\"",
-                    ]
-                    .joined(separator: ","))
+                let countries: String = countrySets.map { $0.sorted().joined(separator: " ") }.sorted()
+                    .joined(separator: " | ")
+                let headlines: String = acts.joined(separator: " || ").replacingOccurrences(of: "\"", with: "\"\"")
+                let fields: [String] = [
+                    story, String(eventsOf[story] ?? acts.count), String(rows.count), cross ? "yes" : "no",
+                    "\"\(countries)\"", "\"\(headlines)\"",
+                ]
+                lines.append(fields.joined(separator: ","))
             }
             let crossCountryEvents = Dictionary(grouping: recent.filter { $0.event != nil }) { $0.event ?? "" }.values
                 .filter { group in disjointCountries(group.map { headlineCountries([$0]) }) }
@@ -15209,11 +15209,18 @@ struct NewsTests {
             .systemGray,
         ]
         for scheme in [ColorScheme.light, .dark] {
-            var environment = EnvironmentValues()
-            environment.colorScheme = scheme
-            let page = AppColor.background.resolve(in: environment)
-            let reference = scheme == .dark ? srgb(AppColor.background, environment) : .white
             for contrast in [ColorSchemeContrast.standard, .increased] {
+                // System colors resolve differently with Increase Contrast, so each pass resolves under its own setting.
+                var environment = EnvironmentValues()
+                environment.colorScheme = scheme
+                environment._colorSchemeContrast = contrast
+                let page = AppColor.background.resolve(in: environment)
+                let reference = scheme == .dark ? srgb(AppColor.background, environment) : .white
+                // The accent branch mixes from accent text, whatever accent the runner has.
+                assertEqual(
+                    TagView.textColor(tint: AppColor.accent, contrast: contrast).resolve(in: environment),
+                    TagView.textColor(tint: AppColor.accentText, contrast: contrast).resolve(in: environment),
+                    "Accent tag text mixes from accent text (\(scheme), \(contrast))")
                 var pairs: [(String, Color, Color)] = [
                     ("current accent", TagView.textColor(tint: AppColor.accent, contrast: contrast), AppColor.accent)
                 ]
