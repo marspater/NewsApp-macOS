@@ -144,12 +144,11 @@ enum StoryCorpus {
                     try await db.upsertArticles(batch)
                     // Keep production's per-pass article limit in evaluation too.
                     let policy = policyFromEnvironment()
-                    let modelOff = ProcessInfo.processInfo.environment["NEWS_PAIR_MODEL"] == "0"
                     // NEWS_ENERGY=0 replays the rules-only pass of Low Power Mode (#534).
                     let energy = ProcessInfo.processInfo.environment["NEWS_ENERGY"] != "0"
                     let report = try await EventClusterer.run(
                         in: db, matchPolicy: policy, now: clock,
-                        allowsEnergy: energy, pairProbability: modelOff ? { @Sendable _, _ in nil } : nil)
+                        allowsEnergy: energy, pairProbability: pairProbabilityFromEnvironment())
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)
@@ -172,6 +171,16 @@ enum StoryCorpus {
     /// The matcher policy with the sweep overrides of the evaluation flags (#525, #582): NEWS_PAIR_THRESHOLD,
     /// NEWS_RESCUE_TWO_ANCHORS (cosine), NEWS_MODEL_ANCHORLESS (cosine), NEWS_COMPATIBLE_REQUIRES_MATCH=1,
     /// NEWS_COMPATIBLE_SHARE, NEWS_SAME_PUBLISHER=1. NEWS_PAIR_MODEL=0 turns the model off at the call site.
+    /// The pair model the evaluation flags use (#624): `NEWS_PAIR_MODEL=0` none, `NEWS_PAIR_MODEL_PATH` a candidate
+    /// `pairscorer.mlmodelc` (compile a `.mlpackage` with `xcrun coremlcompiler compile`), otherwise the shipped one.
+    static func pairProbabilityFromEnvironment() -> (@Sendable (String, String) async -> Double?)? {
+        let environment = ProcessInfo.processInfo.environment
+        if environment["NEWS_PAIR_MODEL"] == "0" { return { @Sendable _, _ in nil } }
+        guard let path = environment["NEWS_PAIR_MODEL_PATH"] else { return nil }
+        let candidate = PairScorer(modelURL: URL(fileURLWithPath: path))
+        return { @Sendable a, b in await candidate.probability(a, b) }
+    }
+
     static func policyFromEnvironment() -> EventMatchPolicy {
         let environment = ProcessInfo.processInfo.environment
         var policy = EventMatchPolicy.standard
