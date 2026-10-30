@@ -65,6 +65,8 @@ The owner's library was first copied with SQLite's online backup API, which incl
 **Rollback:** quit News and do not open it until these steps are done. Then run the script below with the install backup set. To roll back to the 30 October set instead, replace all three source names together: `library-pre-v2-2026-10-30.sqlite3`, `library-pre-v2-2026-10-30.world-tension-v2.json` and `com.marspater.news-pre-v2-2026-10-30.plist`.
 
 ```bash
+(
+set -euo pipefail
 L="$HOME/Library/Containers/com.marspater.news/Data/Library"
 DB="$L/Application Support/com.marspater.news/news.sqlite3"
 B="$HOME/news-eval"
@@ -74,7 +76,10 @@ install -m 600 "$B/library-pre-v2-install.world-tension-v2.json" "$DB.world-tens
 install -m 600 "$B/com.marspater.news-pre-v2-install.plist" "$L/Preferences/com.marspater.news.plist"
 killall cfprefsd
 sqlite3 "file:$DB?mode=ro" "PRAGMA user_version;"
+)
 ```
+
+The parentheses run it in a subshell: it stops at the first failed step without closing your terminal.
 
 Reinstall the previous app only if the last line prints `25`. Builds before #751 have no newer-schema guard, so the previous app must never open the v27 library.
 
