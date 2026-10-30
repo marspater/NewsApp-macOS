@@ -1555,12 +1555,15 @@ struct NewsTests {
         for (name, write) in [
             ("saving a World Tension reading", { _ = try await newer.saveWorldTensionReading(reading) }),
             ("clearing enrichment", { try await newer.clearArticleEnrichment() }),
+            ("clearing the database cache", { try await newer.clearAllDatabaseCache() }),
         ] as [(String, () async throws -> Void)] {
             do {
                 try await write()
                 assertTrue(false, "A newer library refuses \(name)")
             } catch let error as CocoaError {
                 assertEqual(error.code, .fileWriteVolumeReadOnly, "A newer library refuses \(name) as read-only")
+            } catch {
+                assertTrue(false, "A newer library refuses \(name) as read-only, not with \(error)")
             }
         }
         assertEqual(try Data(contentsOf: sideFile), Data("[]".utf8), "A newer library's side files stay untouched")
