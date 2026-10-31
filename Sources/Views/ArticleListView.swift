@@ -1246,7 +1246,7 @@ struct ArticleListView: View {
     ) {
         let context = context ?? filteredArticles
         focusedArticleID = article.id
-        readManager.markAsRead(article.id)
+        if initialExperienceMode?.marksOpenedStoryRead ?? true { readManager.markAsRead(article.id) }
         articlePath.append(
             FeedArticleWrap(
                 article: article,
@@ -1257,7 +1257,7 @@ struct ArticleListView: View {
     }
 
     /// Opening a publication from an event records the event version as seen; it marks only the
-    /// opened article read.
+    /// opened article read, and opening the event overview marks nothing read.
     private func openEvent(
         _ eventID: String,
         article: FeedArticle,
