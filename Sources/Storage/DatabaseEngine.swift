@@ -3705,6 +3705,8 @@ actor DatabaseEngine {
             try clearWorldTensionHistory()
             try executeSimple("DELETE FROM article_enrichment;")
             try clearEventOverviews()
+            // Sitrep lines restate overview highlights, so they go with the overviews.
+            try executeSimple("DELETE FROM briefing_sitrep;")
             try executeSimple("DELETE FROM article_embeddings;")
             try executeSimple("DELETE FROM article_features;")
             try executeSimple("UPDATE pair_assessments SET features = NULL;")

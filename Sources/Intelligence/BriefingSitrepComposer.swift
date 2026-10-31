@@ -30,8 +30,18 @@ enum BriefingSitrepComposer {
     struct Line: Equatable, Sendable {
         let text: String
         let isGenerated: Bool
-        /// False when the model could not run right now; such a line is not cached, so a later load can try again.
+        /// True only when the model ran: its sentence was kept, or it answered and the answer was rejected. A line made
+        /// while the model was off or unavailable is not cached, so a later load can generate.
         let isFinal: Bool
+    }
+
+    /// The overview's top highlights with the publisher of each one's first named citation.
+    static func highlights(of overview: EventOverviewDocument) -> [Highlight] {
+        overview.facts.prefix(factLimit).map { fact in
+            Highlight(
+                text: fact.text,
+                publisher: fact.citationIDs.lazy.compactMap { overview.citations[$0]?.sourceName }.first)
+        }
     }
 
     static func compose(title: String, highlights: [Highlight], model: NewsTextModel) async -> Line? {
@@ -45,21 +55,22 @@ enum BriefingSitrepComposer {
                 isValid(sentence, inputs: [title] + highlights.map(\.text) + highlights.compactMap(\.publisher))
             else { return fallback }
             return Line(text: sentence, isGenerated: true, isFinal: true)
-        } catch is NewsTextModel.TemporarilyUnavailable {
-            return Line(text: first.text, isGenerated: false, isFinal: false)
-        } catch {
+        } catch is NewsTextModel.Rejected {
             return fallback
+        } catch {
+            return Line(text: first.text, isGenerated: false, isFinal: false)
         }
     }
 
-    /// At most `maximumLength` characters, no link, and every capitalized word after the first appears in the inputs.
+    /// At most `maximumLength` characters, no link, every capitalized word after the first and every number appear in
+    /// the inputs, so an invented name or figure fails.
     static func isValid(_ sentence: String, inputs: [String]) -> Bool {
         let lower = sentence.lowercased()
         guard !sentence.isEmpty, sentence.count <= maximumLength, !lower.contains("http"), !lower.contains("www.")
         else { return false }
         let known = Set(inputs.flatMap(words).map { $0.lowercased() })
-        return words(sentence).dropFirst().allSatisfy { word in
-            guard let initial = word.first, initial.isUppercase else { return true }
+        return words(sentence).enumerated().allSatisfy { index, word in
+            guard let initial = word.first, initial.isNumber || (index > 0 && initial.isUppercase) else { return true }
             return known.contains(word.lowercased())
         }
     }

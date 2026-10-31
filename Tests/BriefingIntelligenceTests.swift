@@ -108,6 +108,15 @@ enum BriefingIntelligenceTests {
             }
             check(previous.startedAt == monday, "The previous edition is Monday's")
             check(previous.rows.count == 2, "Saving an edition twice keeps one row per event")
+            let empty = tuesday.addingTimeInterval(-3600)
+            try await db.saveBriefingSnapshot(startedAt: empty, rows: [])
+            let emptyPrevious = try await db.latestBriefingSnapshot(before: tuesday)
+            check(
+                emptyPrevious?.startedAt == empty && emptyPrevious?.rows.isEmpty == true,
+                "An edition without events is still the previous edition")
+            try await db.eventRows(
+                "DELETE FROM briefing_edition_snapshots WHERE edition_started_at = ?;",
+                [.real(empty.timeIntervalSince1970)])
             let rows = BriefingSinceLastData.changes(
                 previous: previous.rows, previousAt: previous.startedAt, current: current)
             check(
@@ -185,6 +194,12 @@ enum BriefingIntelligenceTests {
         let invent = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: invented)
         check(invent?.isGenerated == false, "A sentence naming something the inputs lack falls back")
         check(invent?.text == highlights[0].text, "The fallback is the first highlight")
+        let figure = NewsTextModel { _, _ in "Port authorities raised the security level to 3, Reuters reports." }
+        let numbered = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: figure)
+        check(numbered?.isGenerated == false, "A sentence with an invented figure falls back")
+        check(numbered?.isFinal == true, "A rejected model answer is cached as the highlight")
+        let off = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: .unavailable)
+        check(off?.isFinal == false, "A line made with the model off is not cached")
         let faithful = NewsTextModel { _, _ in "Port authorities raised the security level, Reuters reports." }
         let kept = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: faithful)
         check(kept?.isGenerated == true, "A sentence restating the inputs is kept")

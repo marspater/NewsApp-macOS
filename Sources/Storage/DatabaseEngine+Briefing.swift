@@ -26,9 +26,10 @@ struct BriefingEditionSnapshotRow: Equatable, Sendable {
 
 /// Briefing storage: edition snapshots and the sitrep cache (#849).
 extension DatabaseEngine {
-    /// The stamp of a sitrep line's inputs: the event, its overview version and the highlights the line restates.
+    /// The stamp of a sitrep line's inputs: the event, its overview version and the highlights the line restates, each
+    /// with the publisher the prompt names.
     static func briefingSitrepInputHash(eventID: String, overview: EventOverviewDocument) -> String {
-        let facts = overview.facts.prefix(BriefingSitrepComposer.factLimit).map(\.text)
+        let facts = BriefingSitrepComposer.highlights(of: overview).map { "\($0.text)\t\($0.publisher ?? "")" }
         return ArticleIdentity.sha256Hex(
             ([eventID, String(overview.membershipVersion)] + facts).joined(separator: "\n"))
     }
@@ -70,7 +71,10 @@ extension DatabaseEngine {
         }
     }
 
-    /// The newest edition saved before `date`, with its events.
+    /// Every saved edition has this row, so an edition without events still counts as the previous one.
+    private static let editionMarker = ""
+
+    /// The newest edition saved before `date`, with its events (possibly none).
     func latestBriefingSnapshot(before date: Date) throws -> (startedAt: Date, rows: [BriefingEditionSnapshotRow])? {
         guard
             let started = try eventRows(
@@ -84,7 +88,7 @@ extension DatabaseEngine {
             WHERE edition_started_at = ?;
             """, [.real(started)]
         ).compactMap { row -> BriefingEditionSnapshotRow? in
-            guard let id = row[0] else { return nil }
+            guard let id = row[0], id != Self.editionMarker else { return nil }
             return BriefingEditionSnapshotRow(
                 eventID: id, membershipVersion: row[1].flatMap { Int($0) } ?? 0,
                 publisherCount: row[2].flatMap { Int($0) } ?? 0, escalation: row[3])
@@ -97,7 +101,13 @@ extension DatabaseEngine {
         try inEventTransaction {
             let started = EventValue.real(startedAt.timeIntervalSince1970)
             try eventRows("DELETE FROM briefing_edition_snapshots WHERE edition_started_at = ?;", [started])
-            for row in rows {
+            try eventRows(
+                """
+                INSERT INTO briefing_edition_snapshots
+                    (edition_started_at, event_id, membership_version, publisher_count, escalation)
+                VALUES (?, ?, 0, 0, NULL);
+                """, [started, .text(Self.editionMarker)])
+            for row in rows where row.eventID != Self.editionMarker {
                 try eventRows(
                     """
                     INSERT OR REPLACE INTO briefing_edition_snapshots

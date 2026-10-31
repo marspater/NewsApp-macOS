@@ -59,6 +59,8 @@ struct BriefingSitrepData: Equatable, Sendable {
         let title: String
         let body: String
         let publisherCount: Int
+        /// Written by the on-device model rather than taken from a highlight.
+        let isGenerated: Bool
         /// Opens the thread; nil in captures.
         let summary: EventFeedSummary?
     }
@@ -75,19 +77,18 @@ struct BriefingSitrepData: Equatable, Sendable {
             else { continue }
             let hash = DatabaseEngine.briefingSitrepInputHash(eventID: eventID, overview: overview)
             let body: String
+            let isGenerated: Bool
             if let cached = try? await store.database.fetchBriefingSitrep(eventID: eventID), cached.inputHash == hash {
                 body = cached.text
+                isGenerated = cached.isGenerated
             } else {
-                let highlights = overview.facts.prefix(BriefingSitrepComposer.factLimit).map { fact in
-                    BriefingSitrepComposer.Highlight(
-                        text: fact.text,
-                        publisher: fact.citationIDs.lazy.compactMap { overview.citations[$0]?.sourceName }.first)
-                }
                 guard
                     let line = await BriefingSitrepComposer.compose(
-                        title: thread.representative.title, highlights: highlights, model: model)
+                        title: thread.representative.title, highlights: BriefingSitrepComposer.highlights(of: overview),
+                        model: model)
                 else { continue }
                 body = line.text
+                isGenerated = line.isGenerated
                 if line.isFinal {
                     _ = try? await store.database.saveBriefingSitrep(
                         eventID: eventID, inputHash: hash, text: line.text, isGenerated: line.isGenerated)
@@ -96,7 +97,7 @@ struct BriefingSitrepData: Equatable, Sendable {
             lines.append(
                 Line(
                     id: eventID, title: BriefingThread.shortTitle(thread.representative.title, limit: 48), body: body,
-                    publisherCount: thread.publisherCount, summary: thread.summary))
+                    publisherCount: thread.publisherCount, isGenerated: isGenerated, summary: thread.summary))
         }
         return lines.count >= 2 ? Self(lines: lines) : nil
     }
@@ -107,15 +108,15 @@ struct BriefingSitrepData: Equatable, Sendable {
             Line(
                 id: "s1", title: "Corridor security tightens",
                 body: "Three more publishers report incidents near a major shipping lane; insurers and ports respond.",
-                publisherCount: 11, summary: nil),
+                publisherCount: 11, isGenerated: true, summary: nil),
             Line(
                 id: "s2", title: "Protest bans face weekend tests",
                 body: "Authorities in two capitals extend restrictions ahead of planned marches.", publisherCount: 8,
-                summary: nil),
+                isGenerated: true, summary: nil),
             Line(
                 id: "s3", title: "Health emergency perimeter widens",
                 body: "Officials report new cases outside the first containment zone.", publisherCount: 6,
-                summary: nil),
+                isGenerated: false, summary: nil),
         ])
     }
 }
@@ -136,8 +137,10 @@ struct BriefingSitrepModuleView: View {
                 HStack(alignment: .top, spacing: AppSpacing.md) { lineViews(minWidth: Metrics.lineMinimum) }
                 VStack(alignment: .leading, spacing: AppSpacing.md) { lineViews(minWidth: nil) }
             }
-            IntelligenceLabel("Assembled on this Mac from the cited passages")
-                .font(AppTypography.caption)
+            if data.lines.contains(where: \.isGenerated) {
+                IntelligenceLabel("Assembled on this Mac from the cited passages")
+                    .font(AppTypography.caption)
+            }
         }
     }
 
