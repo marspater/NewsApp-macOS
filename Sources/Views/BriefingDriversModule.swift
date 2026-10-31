@@ -66,6 +66,8 @@ struct BriefingDriversData: Equatable, Sendable {
         }
     }
 
+    func hasRows(under filter: BriefingBoardFilter) -> Bool { !rows(for: filter).isEmpty }
+
     /// Types with a story inside the filter, most severe first.
     func rows(for filter: BriefingBoardFilter) -> [Row] {
         let weights = TensionWeights.calibratedV1.typeWeights
@@ -168,14 +170,13 @@ struct BriefingDriversModuleView: View {
 
     var body: some View {
         let rows = data.rows(for: filter)
+        if !rows.isEmpty { card(rows) }
+    }
+
+    private func card(_ rows: [BriefingDriversData.Row]) -> some View {
         BriefingModuleCard(title: "What drives World Tension", caption: "severity and coverage shown apart") {
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 IntelligenceLabel("Assessed on this Mac").font(AppTypography.caption)
-                if rows.isEmpty {
-                    Text("No classified event in this region.")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                }
                 ForEach(rows) { row in
                     VStack(alignment: .leading, spacing: AppSpacing.textStack) {
                         bar(row)

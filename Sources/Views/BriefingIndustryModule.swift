@@ -52,7 +52,9 @@ struct BriefingIndustryData: Equatable, Sendable {
         var order: [String] = []
         var grouped: [String: [Mention]] = [:]
         for (entry, overview) in overviews {
-            for item in overview.industryImpact where !item.citationIDs.isEmpty {
+            // Only items whose every citation resolves in this overview are named by a cited passage.
+            for item in overview.industryImpact
+            where !item.citationIDs.isEmpty && item.citationIDs.allSatisfy({ overview.citations[$0] != nil }) {
                 if grouped[item.industry] == nil { order.append(item.industry) }
                 grouped[item.industry, default: []].append(
                     Mention(entry: entry, implication: item.implication, citationIDs: item.citationIDs))
@@ -61,6 +63,8 @@ struct BriefingIndustryData: Equatable, Sendable {
         guard !order.isEmpty else { return nil }
         return Self(sectors: order.map { Sector(industry: $0, mentions: grouped[$0] ?? []) })
     }
+
+    func hasRows(under filter: BriefingBoardFilter) -> Bool { !cards(for: filter).isEmpty }
 
     /// The cards for the filter: sectors with a story inside it, most stories first.
     func cards(for filter: BriefingBoardFilter) -> [Card] {
@@ -72,7 +76,11 @@ struct BriefingIndustryData: Equatable, Sendable {
                 Card(
                     industry: sector.industry, implication: first.implication,
                     storyCount: Set(mentions.map(\.entry.id)).count,
-                    passageCount: Set(mentions.flatMap(\.citationIDs)).count)
+                    // Citation IDs are local to each overview, so a passage is its story plus its ID.
+                    passageCount: Set(
+                        mentions.flatMap { mention in mention.citationIDs.map { "\(mention.entry.id):\($0)" } }
+                    )
+                    .count)
             )
         }
         .sorted { $0.1.storyCount != $1.1.storyCount ? $0.1.storyCount > $1.1.storyCount : $0.0 < $1.0 }
@@ -157,14 +165,13 @@ struct BriefingIndustryModuleView: View {
 
     var body: some View {
         let cards = data.cards(for: filter)
+        if !cards.isEmpty { card(cards) }
+    }
+
+    private func card(_ cards: [BriefingIndustryData.Card]) -> some View {
         BriefingModuleCard(title: "Industry impact", caption: "only sectors a cited passage names") {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 IntelligenceLabel("Assessed on this Mac").font(AppTypography.caption)
-                if cards.isEmpty {
-                    Text("No cited sector in this region.")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                }
                 LazyVGrid(
                     columns: Array(
                         repeating: GridItem(.flexible(), spacing: AppSpacing.sm, alignment: .topLeading),
