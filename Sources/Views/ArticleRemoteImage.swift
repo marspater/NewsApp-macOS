@@ -32,11 +32,29 @@ extension EnvironmentValues {
         cache.countLimit = 500
         return cache
     }()
-    private static var pending: [URL: Task<CGImage, Error>] = [:]
+    /// One download shared by every waiter on a URL. It is cancelled once all waiters that joined have cancelled.
+    @MainActor final class SharedLoad {
+        let task: Task<CGImage, Error>
+        private(set) var waiters = 0
+        private(set) var cancelledWaiters = 0
+        init(task: Task<CGImage, Error>) { self.task = task }
+
+        func join() { waiters += 1 }
+
+        /// Records one waiter cancelling; true when no waiter is left and the download should stop.
+        func leave() -> Bool {
+            cancelledWaiters += 1
+            return cancelledWaiters >= waiters
+        }
+    }
+    private static var pending: [URL: SharedLoad] = [:]
+
+    /// The download currently shared for a URL, so tests can observe who has joined it.
+    static func sharedLoad(for url: URL) -> SharedLoad? { pending[url] }
 
     static func clear() {
-        for (_, task) in pending {
-            task.cancel()
+        for (_, load) in pending {
+            load.task.cancel()
         }
         pending.removeAll()
         images.removeAllObjects()
@@ -52,12 +70,25 @@ extension EnvironmentValues {
         -> CGImage
     {
         if let image = images.object(forKey: url as NSURL) { return image }
-        if let task = pending[url] { return try await task.value }
-        // Shared loads survive one card disappearing; NSCache bounds retained decoded images.
-        let task = Task { try await loader(ReaderImageCandidate.preferredRendition(of: url)) }
-        pending[url] = task
-        defer { pending[url] = nil }
-        let image = try await task.value
+        // Shared loads survive one card disappearing; the last waiter to cancel stops the download.
+        let shared =
+            pending[url]
+            ?? SharedLoad(task: Task { try await loader(ReaderImageCandidate.preferredRendition(of: url)) })
+        let task = shared.task
+        pending[url] = shared
+        shared.join()
+        // After clear() a newer load may own the key; only remove this load's own entry.
+        defer { if pending[url] === shared { pending[url] = nil } }
+        let image = try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            Task { @MainActor in
+                if shared.leave() {
+                    task.cancel()
+                    if pending[url] === shared { pending[url] = nil }
+                }
+            }
+        }
         if !task.isCancelled && !Task.isCancelled {
             images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
         }
