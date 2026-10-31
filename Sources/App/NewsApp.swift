@@ -139,8 +139,10 @@ struct NewsApp: App {
                 .keyboardShortcut("r", modifiers: .command)
             }
             CommandMenu("Navigate") {
-                Button("Back to Stories") { readerActions?.back() }
-                    .disabled(readerActions == nil)
+                Button(readerActions == nil && listActions?.back != nil ? "Back" : "Back to Stories") {
+                    if let readerActions { readerActions.back() } else { listActions?.back?() }
+                }
+                .disabled(readerActions == nil && listActions?.back == nil)
                 Divider()
                 Button("Today") {
                     NotificationCenter.default.post(name: .jumpToTodayCommand, object: nil)
@@ -326,6 +328,9 @@ struct ListViewCommands: Commands {
 
             Button("New Briefing") { listActions?.newBriefing?() }
                 .disabled(listActions?.newBriefing == nil)
+
+            Button("Customize Briefing…") { listActions?.customizeBriefing?() }
+                .disabled(listActions?.customizeBriefing == nil)
 
             Button("World Tension…") {
                 NotificationCenter.default.post(name: .showNewsTensionCommand, object: nil)

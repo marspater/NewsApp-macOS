@@ -24,6 +24,8 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var revision: UInt64 = 0
     /// Bumped when clustering or the reader changes events; the feed regroups on it.
     @Published private(set) var eventRevision: UInt64 = 0
+    /// Bumped when an event overview is stored; the Briefing reloads its cited facts on it.
+    @Published private(set) var overviewRevision: UInt64 = 0
     @Published var operationError: String?
     @Published private(set) var databaseHealthNotice: String?
 
@@ -584,7 +586,9 @@ final class ArticleStore: ObservableObject {
     func recordEventOverview(_ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil)
         async throws -> Bool
     {
-        try await database.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
+        let stored = try await database.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
+        if stored { overviewRevision &+= 1 }
+        return stored
     }
 
     func fetchEventOverview(eventID: String) async throws -> EventOverviewDocument? {

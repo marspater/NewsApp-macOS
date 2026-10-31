@@ -51,7 +51,7 @@ flowchart LR
         GW["<b>NetworkBoundaryProxy</b><br/>IPAddressValidator"]
     end
 
-    subgraph Store["Storage · SQLite v28"]
+    subgraph Store["Storage · SQLite v29"]
         AS["<b>ArticleStore</b>"]
         DB[("<b>DatabaseEngine</b><br/>+Events<br/>WAL · FTS5")]
     end
@@ -172,6 +172,7 @@ timeline
         v26 : incremental auto-vacuum (#536)
         v27 : events.story_id (story layer)
         v28 : publisher categories repaired (#817)
+        v29 : Briefing edition snapshots and sitrep cache (#849)
 ```
 
 ## Invariants
@@ -324,7 +325,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 <details>
 <summary><b>Briefing, feed list, muting, images</b></summary>
 
-- Briefing is a daily edition: ≤10 unread, unmuted reports from a 24 h window, ≤500 candidates, ≤2 per publisher, 1 per event. Frozen in preferences across windows until the edition hour (default 7:00) or New Edition. Order: stored importance, publisher coverage, interests from ≤200 recent read/saved stories, then diversity, recency, stable ID. Selection never calls a model.
+- Briefing is a daily edition: ≤10 unread, unmuted reports from a 24 h window, ≤500 candidates, ≤2 per publisher, 1 per event. Frozen in preferences across windows until the edition hour (default 7:00) or New Edition. Order: stored importance, publisher coverage, interests from ≤200 recent read/saved stories, then diversity, recency, stable ID. Selection never calls a model. The board's executive sitrep restates each top thread's cited highlights in one on-device sentence (names and numbers must appear in the inputs, else the first highlight stands); lines are cached in `briefing_sitrep` under a stamp of the overview version and highlights, a save whose stamp no longer matches the stored overview is refused inside the transaction (#844), only lines made while the model ran are cached, and Clear AI Analysis clears it. Each opened edition saves its events to `briefing_edition_snapshots` (with an edition marker row, so an edition without events still counts) for "Since your last briefing" (#849).
 
 - Importance never hides or expires stories; refresh never rates it.
 
@@ -344,7 +345,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 <summary><b>Intelligence, catalog, World Tension</b></summary>
 
 - `NaturalLanguage` + conditional `FoundationModels`, fixed 12-category taxonomy, plain-text model contracts with strict parsing and extractive fallbacks. v20 stamps the macOS build; a model change invalidates generated summaries, not publisher excerpts.
-- Two prose surfaces call Foundation Models, the reader summary and World Tension; ingestion, classification, search and clustering never do (clustering uses the bundled MiniLM CoreML model and the project's own pair model, never a language model). `NewsTextModel.onDevice` maps every `LanguageModelSession.GenerationError`, and on macOS 27 every `LanguageModelError` and `SystemLanguageModel.Error` (the types that SDK actually throws; built only with it), to one outcome: `Rejected` (guardrails, refusal, context window, unsupported language, undecodable output) is final, so the extractive summary stands and a refused World Tension input keeps its keyword estimate as the day's saved reading until the headlines change; `TemporarilyUnavailable` (model off, downloading, busy, rate limited) keeps a provisional result (an unsaved estimate for World Tension) that is redone when next requested. Only the outcome label is logged, never text. Story text the language recognizer reads as non-English gets the final extractive summary without a model call (#550). Publisher category hints match whole words only.
+- Three prose surfaces call Foundation Models, the reader summary, World Tension and the Briefing sitrep; ingestion, classification, search and clustering never do (clustering uses the bundled MiniLM CoreML model and the project's own pair model, never a language model). `NewsTextModel.onDevice` maps every `LanguageModelSession.GenerationError`, and on macOS 27 every `LanguageModelError` and `SystemLanguageModel.Error` (the types that SDK actually throws; built only with it), to one outcome: `Rejected` (guardrails, refusal, context window, unsupported language, undecodable output) is final, so the extractive summary stands and a refused World Tension input keeps its keyword estimate as the day's saved reading until the headlines change; `TemporarilyUnavailable` (model off, downloading, busy, rate limited) keeps a provisional result (an unsaved estimate for World Tension) that is redone when next requested. Only the outcome label is logged, never text. Story text the language recognizer reads as non-English gets the final extractive summary without a model call (#550). Publisher category hints match whole words only.
 - One energy rule (`IntelligencePolicy.allowsEnergy`): background classification, overview warm-up, story images and World Tension pause in Low Power Mode and from the serious thermal state on. Clustering keeps running with the rules alone (#534): no embedding is computed and the pair model is not asked. A pair without a stored vector is not merged (the semantic veto has not cleared it) and a borderline pair is not confirmed; the rows involved are marked one matcher version behind, members already matched are not revalidated, and the next pass with energy reads them again. Hard conflicts, exclusions and pairs with stored vectors decide as usual.
 - World Tension: the reading shown is methodology v3, the 7-day exponentially weighted average of accepted assessments (α = 0.25) plus up to 9 points of momentum for consecutive rises; estimates are shown as they are, stored readings keep the assessed scores, and 90 days are kept (`WorldTensionSmoothing`, `docs/methodology/world-tension-v3.md`). `MainView` alone assesses, after each refresh, at each UTC day and on Reassess, into one `WorldTensionState` value that the sidebar foot, the Briefing strip and the sheet take as input (#781); its status (assessed, estimate, stale, assessing, unavailable, AI or collection off) carries the one wording every surface shows.
 

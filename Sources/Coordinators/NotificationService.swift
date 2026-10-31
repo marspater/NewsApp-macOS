@@ -119,6 +119,8 @@ final class NotificationService: Sendable {
     static let breakingScore = 0.6
     /// An interest story needs this many publishers on its event before it notifies.
     static let interestPublishers = 3
+    /// Largest encoded notification image attachment in bytes; the same ceiling as the image fetch, so the two agree.
+    static let attachmentLimit = Int(SecureHTTPClient.defaultImageLimit)
     /// Normal banners in any rolling 60 minutes (#665).
     static let normalLimit = 5
     /// Individual priority banners in any rolling 30 minutes, plus one grouped banner.
@@ -417,7 +419,7 @@ final class NotificationService: Sendable {
         guard let destination = CGImageDestinationCreateWithData(encoded, UTType.png.identifier as CFString, 1, nil)
         else { throw URLError(.cannotDecodeContentData) }
         CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination), encoded.length <= 10_000_000 else {
+        guard CGImageDestinationFinalize(destination), encoded.length <= Self.attachmentLimit else {
             throw URLError(.cannotDecodeContentData)
         }
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
