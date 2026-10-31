@@ -1180,7 +1180,15 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "27", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "28", "Copied v14 library upgrades through v15 to the current schema")
+        assertEqual(
+            value(copy, "SELECT count(*) FROM articles WHERE category IS NOT NULL;"), "0",
+            "A library from before v22 keeps none of the classifier labels v22 wrote into the publisher column (#817)")
+        assertEqual(
+            value(
+                copy,
+                "SELECT count(*) FROM articles a WHERE NOT EXISTS (SELECT 1 FROM article_enrichment ae WHERE ae.article_id = a.id AND ae.category IS NOT NULL);"
+            ), "0", "Every article from before v22 keeps a classifier category in article_enrichment (#817)")
         assertEqual(value(path, "PRAGMA user_version;"), "14", "Original library stays untouched")
         assertEqual(
             try await db.searchArticles(query: "Research").map(\.id), originalOrder,
@@ -1250,7 +1258,7 @@ struct NewsTests {
         let shrinkPath = directory.appendingPathComponent("shrink.sqlite3").path
         let shrinkDB = DatabaseEngine(path: shrinkPath)
         try await shrinkDB.open()
-        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "27", "New database opens at schema v27")
+        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "28", "New database opens at schema v28")
         assertEqual(value(shrinkPath, "PRAGMA auto_vacuum;"), "2", "New database uses incremental auto_vacuum (2)")
 
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -1862,7 +1870,7 @@ struct NewsTests {
         let db = DatabaseEngine(path: workingCopy.path)
         try await db.open()
         assertEqual(
-            value(workingCopy.path, "PRAGMA user_version;"), "27",
+            value(workingCopy.path, "PRAGMA user_version;"), "28",
             "Fixture migrates cleanly to current schema v26 (#539)"
         )
         assertEqual(
@@ -6561,7 +6569,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "27", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "28", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -6814,7 +6822,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "28", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -8159,7 +8167,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "28", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -10824,7 +10832,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "27", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "28", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -10851,6 +10859,43 @@ struct NewsTests {
         assertEqual(
             value("SELECT count(*) FROM sqlite_master WHERE name='story_image_defaults';"), "1",
             "Upgraded libraries remember site defaults")
+
+        // #817: classifier output stays out of the publisher-hint column, and v28 clears the rows it reached.
+        let hints = ["hint-classified", "hint-publisher", "hint-unclassified", "hint-unrated"].map { id in
+            FeedArticle(
+                storedID: id, title: "Hint report \(id)", link: fixtureRoot.appendingPathComponent(id).absoluteString,
+                guid: id, description: "Report.", pubDate: Date(), source: "Publisher")
+        }
+        try await db.upsertArticles(hints)
+        for hint in hints.prefix(2) {
+            try await db.updateEnrichment(articleId: hint.id, update: .init(category: "World"))
+        }
+        assertEqual(
+            value("SELECT category FROM articles WHERE id = 'hint-classified';"), nil,
+            "A classification is stored in article_enrichment only (#817)")
+        assertEqual(
+            try await db.fetchArticles(limit: 1, id: "hint-classified").first?.category, "World",
+            "Lists still show the classifier's category")
+        await db.close()
+        assertEqual(
+            sqlite3_exec(
+                handle,
+                "UPDATE articles SET category = 'World' WHERE id = 'hint-classified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-publisher'; UPDATE articles SET category = 'World' WHERE id = 'hint-unclassified'; UPDATE articles SET category = 'Politics' WHERE id = 'hint-unrated'; PRAGMA user_version = 27;",
+                nil, nil, nil), SQLITE_OK, "Reconstruct a v27 library with a classifier category in the hint column")
+        try await db.open()
+        assertEqual(value("PRAGMA user_version;"), "28", "The v27 library migrates to v28")
+        assertEqual(
+            value("SELECT category FROM articles WHERE id = 'hint-classified';"), nil,
+            "v28 clears a hint that holds the classifier's category")
+        assertEqual(
+            value("SELECT category FROM articles WHERE id = 'hint-publisher';"), "Sport",
+            "v28 keeps a publisher category that differs from the classifier's")
+        assertEqual(
+            value("SELECT category FROM articles WHERE id = 'hint-unclassified';"), nil,
+            "v28 clears a classifier label left in the hint after its enrichment category was cleared")
+        assertEqual(
+            value("SELECT category FROM articles WHERE id = 'hint-unrated';"), "Politics",
+            "v28 keeps a publisher label that differs from the label the classifier gives the article")
         await db.close()
     }
 
@@ -11573,7 +11618,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "28", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -12591,7 +12636,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "27", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "28", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
