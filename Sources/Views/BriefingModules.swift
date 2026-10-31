@@ -258,14 +258,18 @@ struct BriefingBoardData: Equatable, Sendable {
 
     /// Whether the module has anything true to show. The carousel needs stories; World Tension always shows its
     /// reading or says why there is none.
-    func hasData(for kind: BriefingModuleKind, hasStories: Bool) -> Bool {
+    func hasData(
+        for kind: BriefingModuleKind, hasStories: Bool, filter: BriefingBoardFilter = BriefingBoardFilter()
+    ) -> Bool {
         let present: [BriefingModuleKind: Bool] = [
             .heroCarousel: hasStories, .worldTension: true,
             .sinceLastBriefing: sinceLast != nil, .executiveSitrep: sitrep != nil,
             .priorityDevelopments: priority != nil, .sourceFootprint: footprint != nil,
             .tensionDrivers: drivers != nil, .industryImpact: industry != nil,
             .regions: regions != nil, .regionTiles: regions != nil,
-            .weakSignals: weakSignals != nil, .forwardWatch: forwardWatch != nil,
+            // The signal modules hide with the region filter, so their pillars can leave the board with them.
+            .weakSignals: weakSignals?.hasRows(under: filter) ?? false,
+            .forwardWatch: forwardWatch?.hasRows(under: filter) ?? false,
             .escalationTimeline: timeline != nil,
         ]
         return present[kind] ?? false
