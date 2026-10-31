@@ -6,6 +6,16 @@ import WebKit
 enum WebPreviewPolicy {
     private static var compiled: Task<WKContentRuleList, Error>?
 
+    /// Whether the WebKit proxy configurations need to be refreshed for a changed gateway port.
+    nonisolated static func needsProxyRefresh(configuredPort: Int?, currentPort: Int) -> Bool {
+        configuredPort != currentPort
+    }
+
+    /// Whether the WebKit proxy configurations need to be refreshed for a changed gateway port.
+    nonisolated static func needsProxyRefresh(configuredPort: UInt16?, currentPort: UInt16) -> Bool {
+        configuredPort != currentPort
+    }
+
     static func contentRules() async throws -> WKContentRuleList {
         if let compiled { return try await compiled.value }
         let task = Task { @MainActor in
