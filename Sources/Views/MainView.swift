@@ -47,6 +47,8 @@ struct MainView: View {
     /// Why the library did not open, kept after its alert is dismissed, so World Tension says why it has nothing.
     @State private var libraryFailure: String?
     @State private var isWindowDropTargeted = false
+    /// The section shown before the current one, where the Briefing's Back returns (#780).
+    @State private var previousTopic = "Today"
 
     @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
     @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
@@ -128,8 +130,9 @@ struct MainView: View {
             .task(id: mastheadNotice) {
                 await handleMastheadNoticeTimeout()
             }
-            .onChange(of: selectedTopic) { _, _ in
+            .onChange(of: selectedTopic) { old, new in
                 articlePath = NavigationPath()
+                if let old, old != new { previousTopic = old }
             }
             .onChange(of: searchText, handleSearchTextChange)
             .onChange(of: searchTokens, handleSearchTokensChange)
@@ -222,7 +225,9 @@ struct MainView: View {
                     selectedTopic: $selectedTopic,
                     searchText: searchBinding,
                     mastheadNotice: $mastheadNotice,
-                    articlePath: $articlePath
+                    articlePath: $articlePath,
+                    previousTopic: previousTopic,
+                    isSheetPresented: showsTension
                 )
                 .environmentObject(appSettings)
                 .environmentObject(articleStore)

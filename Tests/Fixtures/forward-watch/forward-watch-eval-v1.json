@@ -1,0 +1,256 @@
+{
+  "published_at": "2026-10-28T12:00:00Z",
+  "note": "Hand-written sentences for the forward watch extractor (#851). published_at is a Wednesday.",
+  "items": [
+    {
+      "sentence": "The Security Council will meet on Tuesday to discuss the shipping corridor.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "Tuesday"
+    },
+    {
+      "sentence": "Parliament is scheduled to vote on the budget on 4 November.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "on 4 November"
+    },
+    {
+      "sentence": "The hearing is due to resume on November 3, a court spokesperson said.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "on November 3"
+    },
+    {
+      "sentence": "Leaders will gather for a two-day summit in Nairobi next week.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "next week"
+    },
+    {
+      "sentence": "The ceasefire deadline expires on Friday at midnight local time.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "Friday"
+    },
+    {
+      "sentence": "Talks between the two delegations are set to restart on Monday in Geneva.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "Monday"
+    },
+    {
+      "sentence": "The central bank's rate-setting committee will hold its next session on 2026-11-05.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "on 2026-11-05"
+    },
+    {
+      "sentence": "A runoff election is scheduled for 15 November, the electoral commission confirmed.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "15 November"
+    },
+    {
+      "sentence": "The new export rules take effect on 1 December, the ministry said.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "on 1 December"
+    },
+    {
+      "sentence": "Union leaders will meet employers on Thursday for a final round of talks.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "Thursday"
+    },
+    {
+      "sentence": "Sentencing is set for December 12 after the jury returned its verdict.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "December 12"
+    },
+    {
+      "sentence": "The board will vote next Tuesday on the proposed merger.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "next Tuesday"
+    },
+    {
+      "sentence": "The senate committee is due to hold a hearing on the bill on Friday.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "Friday"
+    },
+    {
+      "sentence": "Foreign ministers will meet in Brussels on 9 November to review sanctions.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "on 9 November"
+    },
+    {
+      "sentence": "The regional trade summit is scheduled to take place in November 2026, organisers said.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "in November 2026"
+    },
+    {
+      "sentence": "Shipping insurers are expected to review war-risk rates later this week.",
+      "expected_kind": "expected",
+      "expected_date_text": "later this week"
+    },
+    {
+      "sentence": "The government plans to publish its revised energy strategy in the coming weeks.",
+      "expected_kind": "expected",
+      "expected_date_text": "in the coming weeks"
+    },
+    {
+      "sentence": "The regulator will review the airline's safety record, officials said.",
+      "expected_kind": "expected",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The company is expected to announce further job cuts in the coming days.",
+      "expected_kind": "expected",
+      "expected_date_text": "in the coming days"
+    },
+    {
+      "sentence": "Investigators plan to release a preliminary report on the crash.",
+      "expected_kind": "expected",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The ministry intends to extend the price cap to diesel and heating oil.",
+      "expected_kind": "expected",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Aid agencies are expected to resume deliveries once the road reopens.",
+      "expected_kind": "expected",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The prime minister will announce a cabinet reshuffle later this month, aides said.",
+      "expected_kind": "expected",
+      "expected_date_text": "later this month"
+    },
+    {
+      "sentence": "The court will decide on the appeal within weeks, lawyers said.",
+      "expected_kind": "expected",
+      "expected_date_text": "within weeks"
+    },
+    {
+      "sentence": "Port operators will close the terminal if attacks on vessels continue.",
+      "expected_kind": "conditional",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "If talks fail, the union will begin an indefinite strike.",
+      "expected_kind": "conditional",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Unless a deal is reached, tariffs could rise to 25 percent.",
+      "expected_kind": "conditional",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "In the event of a breach, the dam operator would evacuate nearby villages.",
+      "expected_kind": "conditional",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Should the ceasefire collapse, then aid convoys would be suspended, the agency warned.",
+      "expected_kind": "conditional",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The airline said flights may be cancelled if the strike goes ahead on Friday.",
+      "expected_kind": "conditional",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Officials warned that power cuts could spread if temperatures keep rising.",
+      "expected_kind": "conditional",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Shares could fall sharply if the central bank raises rates again.",
+      "expected_kind": "conditional",
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The summit was held on 12 October in Lisbon.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The council met on Tuesday and condemned the attacks.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Ministers voted on Monday to approve the emergency budget.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The deal expired last week without an extension.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "On 3 September, protesters marched through the capital.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The vote took place on 20 October after a heated debate.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The future of the region remains deeply uncertain, analysts say.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Many residents hope that peace will one day return to the valley.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Analysts said the crisis could last for years.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "\"We never expected the water to rise so quickly,\" one farmer said.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "\"It was the worst night of my life,\" a survivor told reporters on Friday.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Reporters asked if the minister would resign over the scandal.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "He said he would have left earlier if he had known about the danger.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The company reported a 12 percent rise in quarterly profit on Thursday.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Rescue teams worked through the night to free trapped residents.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "The talks ended on Sunday without an agreement.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Officials said the situation was under control.",
+      "expected_kind": null,
+      "expected_date_text": null
+    },
+    {
+      "sentence": "Prices rose sharply in September, official figures showed.",
+      "expected_kind": null,
+      "expected_date_text": null
+    }
+  ]
+}
