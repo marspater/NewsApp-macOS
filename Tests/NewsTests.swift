@@ -342,6 +342,40 @@ struct NewsTests {
         }
     }
 
+    /// Tests that take longer than a whole shard; NEWS_TEST_SHARD=slow runs only these, in their own process.
+    static let slowTests: Set<String> = ["testActiveWorkCancellation"]
+
+    /// NEWS_TEST_SHARD="i/n" runs every n-th test from the i-th (0-based) that is not slow, "slow" the slow ones;
+    /// test.sh runs the shards as separate processes, so each test keeps the process-wide state it expects.
+    /// NEWS_TEST_TIMING=1 prints each duration.
+    static func shardIncludes(_ index: Int, name: String) -> Bool {
+        guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"] else { return true }
+        if spec == "slow" { return slowTests.contains(name) }
+        let parts = spec.split(separator: "/").compactMap { Int($0) }
+        return !slowTests.contains(name) && index % parts[1] == parts[0]
+    }
+
+    /// A malformed or out-of-range shard would run nothing and pass; it stops the process instead.
+    static func validateShard() {
+        guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"], spec != "slow" else { return }
+        let parts = spec.split(separator: "/", omittingEmptySubsequences: false).map { Int($0) }
+        guard parts.count == 2, let shard = parts[0], let count = parts[1], count > 0, (0..<count).contains(shard)
+        else {
+            print("❌ NEWS_TEST_SHARD must be \"slow\" or i/n with 0 <= i < n, not \"\(spec)\"")
+            exit(2)
+        }
+    }
+
+    static func runSharded(_ tests: [(name: String, run: () async throws -> Void)]) async throws {
+        validateShard()
+        let timing = ProcessInfo.processInfo.environment["NEWS_TEST_TIMING"] == "1"
+        for (index, test) in tests.enumerated() where shardIncludes(index, name: test.name) {
+            let start = ContinuousClock.now
+            try await test.run()
+            if timing { print("    ⏱ \(test.name) \(ContinuousClock.now - start)") }
+        }
+    }
+
     static func runTests(fixtureHost: String = "example.com") async throws {
         if let index = CommandLine.arguments.firstIndex(of: "--curation-live"), CommandLine.arguments.count > index + 2
         {
@@ -765,173 +799,232 @@ struct NewsTests {
             return
         }
         print("🏃 Running NewsApp Unit Tests...")
-
-        await testURLNormalization()
-        await testSSRFValidation()
-        await testIsBlockedIPv4()
-        await testIPAddressValidatorDeep()
-        await testSecureHTTPClientFetchImage()
-        await testSecureHTTPClientPolicies()
-        await testFeedErrorHierarchy()
-        await testAppSettingsDecoupling()
-        await testDateParsing()
-        try await testAuditParsingAndSettingsRegressions(fixtureRoot: fixtureRoot)
-        try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
-        try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot)
-        try await testConditionalFeedRequests(fixtureRoot: fixtureRoot)
-        try await testFeedBackoffAndHostLimits()
-        try await testRefreshEndsAtCollection()
-        try await testFeedCatalog()
-        try await testCatalogReviewAndAlternatives()
-        try await testFeedHealth()
-        try await testUserMuting()
-        try await testTensionMethodology()
-        try await testWorldTension()
-        testWorldTensionSmoothing()
-        try await testWorldTensionState()
-        try await testUndatedArticleOrdering()
-        try await testReaderFigures(fixtureRoot: fixtureRoot)
-        testReaderExtractionFidelity(fixtureRoot: fixtureRoot)
-        await testReaderParsingRegressions()
-        await testStructuredReaderAndTags()
-        await testReaderStoreUpdates()
-        try await testProductionFollowupRegressions()
-        await testXMLParsing()
-        await testJSONParsing()
-        await testNavigationCommands()
-        await testEscapeXML()
-        await testOPMLParsingAndExporting()
-        try await testStoryExport()
-        await testOfflineCacheAndResilience()
-        await testArticleIdentityDeep()
-        try await testPublisherTitleAliases()
-        await testDatabaseEnginePersistence()
-        try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot)
-        try await testPersistentArticleAliases(fixtureRoot: fixtureRoot)
-        try await testBatchStateAliasResolution()
-        try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot)
-        try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot)
-        try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot)
-        try await testPublisherTextFingerprints()
-        try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
-        try await testOverviewVersionFollowsEventNotStorySum()
-        try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
-        try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
-        try await testPassageAnchoredFactExtraction()
-        try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
-        try await testPlainTextGeneration(fixtureHost: fixtureHost)
-        try await testOverviewPublisherEvidence(fixtureHost: fixtureHost)
-        try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)
-        try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost)
-        try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost)
-        try await testDeterministicClaimVerification(fixtureHost: fixtureHost)
-        testOverviewVerifierControls()
-        try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
-        try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
-        try await testOverviewTimeline(fixtureHost: fixtureHost)
-        try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
-        try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
-        try await testThematicAngleFromExistingFacts(fixtureHost: fixtureHost)
-        try await testCoverageSentimentEvaluation(fixtureHost: fixtureHost)
-        try await testHistoricalReconciliation(fixtureRoot: fixtureRoot)
-        try await testEventDataModel(fixtureRoot: fixtureRoot)
-        try await testEventCandidateGeneration(fixtureRoot: fixtureRoot)
-        try await testRelatedStoryEvents(fixtureRoot: fixtureRoot)
-        try await testEventMatcherRules()
-        testActClassTable()
-        try await testEventClustering(fixtureRoot: fixtureRoot)
-        try await testArticleSignalsRoundTrip()
-        try await testPairAssessmentsRecorded()
-        try await testReaderVerdictsExportAndGate()
-        try await testStoryLayer()
-        try await testStoryPassOrderIndependent()
-        try await testEventInclusions()
-        try await testPairModelGreyZone()
-        try await testEventEmbeddingIntegration()
-        try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot)
-        try await testStoryVisibility(fixtureRoot: fixtureRoot)
-        try await testStoryImages(fixtureRoot: fixtureRoot)
-        try await testOrphanStateGuards()
-        try await testEventReadingState(fixtureRoot: fixtureRoot)
-        testEventFeedSummaryUnit()
-        await testEventFeedGroupingAndStability()
-        testEventFeedGroupingOptimization()
-        try await testFiniteBriefing()
-        testDockBadgeCount()
-        testBriefingBoardLayout()
-        try await testPublisherContentProvenance()
-        try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
-        try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
-        try await testMatcherRegressionCorpus()
-        try await testStoryRegressionCorpus()
-        try await testPairCalibration()
-        try testCapturedFingerprintReview()
-        await testFTS5SearchAndOperators()
-        try await testUnchangedFTSRefresh()
-        try await testSearchSpellingSuggestion()
-        try await testFTSRowIDMigration()
-        try await testDatabaseHealthAndDerivedRetention()
-        try await testRealLibraryMigrationFixture()
-        try await testLibraryBackupAndFutureSchemaGuard()
-        try await testLibraryBackupRestore()
-        try await testMigrationCoordinatorAtomicity()
-        await testArticleRetentionPolicy()
-        await testContentExtractionPipelineDeep()
-        await testExtractionURLRejection()
-        await testEnrichmentQueueSchedulingAndPromotion()
-        await testDesignSystemAndArticleFilter()
-        await testDistributionAndEntitlementsIntegrity()
-        await testStrictSemVerAndReleaseSecurity()
-        await testUpdateCheckerThrottleWithClock()
-        await testUpdateCheckerVersionComparisonAndErrors()
-        await testUpdateCheckerAdversarialEdgeCases()
-        await testNewsURLParserAndSchemeRouting()
-        await testAppIntentsExecutionAndValidation()
-        await testAppShortcutsProviderDeclarations()
-        try await testSpotlightSavedStoriesIndexing()
-        await testNotificationActionsAndRouting()
-        await testMenuBarExtraSettingsAndUnreadCount()
-        await EpicNE2ETests.run()
-        await testNotificationModeTriageAndGrammar()
-        await testCompletionOnce()
-        try await testSocketNetworkBoundary()
-        try await testTransportCancellation()
-        try await testFeedRemovalAndShutdown()
-        try await testSleepAndWakeRefresh()
-        try await testRetentionPruneAfterRefresh()
-        try await testCancelledRefreshCarriesNotifications()
-        try await testUndatedStoriesInPublicationWindow()
-        try await testActiveWorkCancellation()
-        await testSignpostHelperExecution()
-        await testAppSettingsIsolationAndURLNormalization()
-        await testOnboardingAndPermissionTiming()
-        await testFixedTaxonomyAndCaseInsensitivity()
-        await testClassificationMultiStageAndConfidenceTiers()
-        await testClassificationBenchmarkDataset()
-        try await testArticleAnalyzerStructuredOutputAndFallbacks()
-        await testInteractiveAnalysisCancellation()
-        try await testGranularCacheClearingAndRetention()
-        await testNotificationServiceErrorLogging()
-        try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot)
-        try await testNotificationLanesAcrossRefreshes(fixtureRoot: fixtureRoot)
-        try await testNotifyBeforeClustering()
-        await testArticleStoreErrorResilience()
-        await testSystemErrorHardeningAndResilience()
-        await testFeedArticleWrapContextNavigation()
-        await testArticleContentRedactionAndTypography()
-        await testArticleDetailReadingExperienceOverhaul()
-        try await testReaderPhaseC(fixtureRoot: fixtureRoot)
-        testReaderPassageMatcher()
-        await testBBCExtractionFixture()
-        await testMultiPublisherExtractionFixtures()
-        await testReaderFurnitureRemoval()
-        await testContentQualityValidation()
-        await testExtractionOutcomeDiagnostics()
-        await testCanonicalClassificationDisambiguation()
-        try await testDiagnosticsExport()
-        await testAppContainerWiring()
-        try await testReadManagerReconciliationCache()
-        try await testMemoryLeakMitigationsAndErrorHandling()
+        let tests: [(name: String, run: () async throws -> Void)] = [
+            ("testURLNormalization", { await testURLNormalization() }),
+            ("testSSRFValidation", { await testSSRFValidation() }),
+            ("testIsBlockedIPv4", { await testIsBlockedIPv4() }),
+            ("testIPAddressValidatorDeep", { await testIPAddressValidatorDeep() }),
+            ("testSecureHTTPClientFetchImage", { await testSecureHTTPClientFetchImage() }),
+            ("testSecureHTTPClientPolicies", { await testSecureHTTPClientPolicies() }),
+            ("testFeedErrorHierarchy", { await testFeedErrorHierarchy() }),
+            ("testAppSettingsDecoupling", { await testAppSettingsDecoupling() }),
+            ("testDateParsing", { await testDateParsing() }),
+            (
+                "testAuditParsingAndSettingsRegressions",
+                { try await testAuditParsingAndSettingsRegressions(fixtureRoot: fixtureRoot) }
+            ),
+            (
+                "testAuditPersistenceAndRoutingRegressions",
+                { try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot) }
+            ),
+            ("testAuditRefreshRegressions", { try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot) }),
+            ("testConditionalFeedRequests", { try await testConditionalFeedRequests(fixtureRoot: fixtureRoot) }),
+            ("testFeedBackoffAndHostLimits", { try await testFeedBackoffAndHostLimits() }),
+            ("testRefreshEndsAtCollection", { try await testRefreshEndsAtCollection() }),
+            ("testFeedCatalog", { try await testFeedCatalog() }),
+            ("testCatalogReviewAndAlternatives", { try await testCatalogReviewAndAlternatives() }),
+            ("testFeedHealth", { try await testFeedHealth() }),
+            ("testUserMuting", { try await testUserMuting() }),
+            ("testTensionMethodology", { try await testTensionMethodology() }),
+            ("testWorldTension", { try await testWorldTension() }),
+            ("testWorldTensionSmoothing", { testWorldTensionSmoothing() }),
+            ("testWorldTensionState", { try await testWorldTensionState() }),
+            ("testUndatedArticleOrdering", { try await testUndatedArticleOrdering() }),
+            ("testReaderFigures", { try await testReaderFigures(fixtureRoot: fixtureRoot) }),
+            ("testReaderExtractionFidelity", { testReaderExtractionFidelity(fixtureRoot: fixtureRoot) }),
+            ("testReaderParsingRegressions", { await testReaderParsingRegressions() }),
+            ("testStructuredReaderAndTags", { await testStructuredReaderAndTags() }),
+            ("testReaderStoreUpdates", { await testReaderStoreUpdates() }),
+            ("testProductionFollowupRegressions", { try await testProductionFollowupRegressions() }),
+            ("testXMLParsing", { await testXMLParsing() }),
+            ("testJSONParsing", { await testJSONParsing() }),
+            ("testNavigationCommands", { await testNavigationCommands() }),
+            ("testEscapeXML", { await testEscapeXML() }),
+            ("testOPMLParsingAndExporting", { await testOPMLParsingAndExporting() }),
+            ("testStoryExport", { try await testStoryExport() }),
+            ("testOfflineCacheAndResilience", { await testOfflineCacheAndResilience() }),
+            ("testArticleIdentityDeep", { await testArticleIdentityDeep() }),
+            ("testPublisherTitleAliases", { try await testPublisherTitleAliases() }),
+            ("testDatabaseEnginePersistence", { await testDatabaseEnginePersistence() }),
+            ("testCanonicalArticleIngestion", { try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot) }),
+            ("testPersistentArticleAliases", { try await testPersistentArticleAliases(fixtureRoot: fixtureRoot) }),
+            ("testBatchStateAliasResolution", { try await testBatchStateAliasResolution() }),
+            ("testFeedScopedGUIDs", { try await testFeedScopedGUIDs(fixtureRoot: fixtureRoot) }),
+            ("testValidatedDocumentIdentity", { try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot) }),
+            ("testIdentityBaselineScenarios", { try await testIdentityBaselineScenarios(fixtureRoot: fixtureRoot) }),
+            ("testPublisherTextFingerprints", { try await testPublisherTextFingerprints() }),
+            (
+                "testOverviewDocumentModelBoundToInputsAndVersions",
+                { try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost) }
+            ),
+            ("testOverviewVersionFollowsEventNotStorySum", { try await testOverviewVersionFollowsEventNotStorySum() }),
+            (
+                "testOverviewPassageSelectionAndTokenBudget",
+                { try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost) }
+            ),
+            ("testPromptInjectionDefenses", { try await testPromptInjectionDefenses(fixtureHost: fixtureHost) }),
+            ("testPassageAnchoredFactExtraction", { try await testPassageAnchoredFactExtraction() }),
+            (
+                "testOverviewCompositionFromVerifiedFacts",
+                { try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost) }
+            ),
+            ("testPlainTextGeneration", { try await testPlainTextGeneration(fixtureHost: fixtureHost) }),
+            ("testOverviewPublisherEvidence", { try await testOverviewPublisherEvidence(fixtureHost: fixtureHost) }),
+            (
+                "testOverviewQualityAuditAndReleaseGate",
+                { try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost) }
+            ),
+            (
+                "testOnDemandOverviewGenerationAndCaching",
+                { try await testOnDemandOverviewGenerationAndCaching(fixtureHost: fixtureHost) }
+            ),
+            (
+                "testOverviewGenerationCancellationAndSupersession",
+                { try await testOverviewGenerationCancellationAndSupersession(fixtureHost: fixtureHost) }
+            ),
+            (
+                "testDeterministicClaimVerification",
+                { try await testDeterministicClaimVerification(fixtureHost: fixtureHost) }
+            ),
+            ("testOverviewVerifierControls", { testOverviewVerifierControls() }),
+            ("testEventOverviewReaderMode", { try await testEventOverviewReaderMode(fixtureHost: fixtureHost) }),
+            (
+                "testOverviewResolutionWhenOpeningMemberArticle",
+                { try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost) }
+            ),
+            ("testOverviewTimeline", { try await testOverviewTimeline(fixtureHost: fixtureHost) }),
+            (
+                "testEventTimelineWithSourcedItems",
+                { try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost) }
+            ),
+            (
+                "testAttributedPerspectivesOfParticipantsAndPublishers",
+                { try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost) }
+            ),
+            (
+                "testThematicAngleFromExistingFacts",
+                { try await testThematicAngleFromExistingFacts(fixtureHost: fixtureHost) }
+            ),
+            (
+                "testCoverageSentimentEvaluation",
+                { try await testCoverageSentimentEvaluation(fixtureHost: fixtureHost) }
+            ),
+            ("testHistoricalReconciliation", { try await testHistoricalReconciliation(fixtureRoot: fixtureRoot) }),
+            ("testEventDataModel", { try await testEventDataModel(fixtureRoot: fixtureRoot) }),
+            ("testEventCandidateGeneration", { try await testEventCandidateGeneration(fixtureRoot: fixtureRoot) }),
+            ("testRelatedStoryEvents", { try await testRelatedStoryEvents(fixtureRoot: fixtureRoot) }),
+            ("testEventMatcherRules", { try await testEventMatcherRules() }),
+            ("testActClassTable", { testActClassTable() }),
+            ("testEventClustering", { try await testEventClustering(fixtureRoot: fixtureRoot) }),
+            ("testArticleSignalsRoundTrip", { try await testArticleSignalsRoundTrip() }),
+            ("testPairAssessmentsRecorded", { try await testPairAssessmentsRecorded() }),
+            ("testReaderVerdictsExportAndGate", { try await testReaderVerdictsExportAndGate() }),
+            ("testStoryLayer", { try await testStoryLayer() }),
+            ("testStoryPassOrderIndependent", { try await testStoryPassOrderIndependent() }),
+            ("testEventInclusions", { try await testEventInclusions() }),
+            ("testPairModelGreyZone", { try await testPairModelGreyZone() }),
+            ("testEventEmbeddingIntegration", { try await testEventEmbeddingIntegration() }),
+            (
+                "testEventFragmentMergingAndJudge",
+                { try await testEventFragmentMergingAndJudge(fixtureRoot: fixtureRoot) }
+            ),
+            ("testStoryVisibility", { try await testStoryVisibility(fixtureRoot: fixtureRoot) }),
+            ("testStoryImages", { try await testStoryImages(fixtureRoot: fixtureRoot) }),
+            ("testOrphanStateGuards", { try await testOrphanStateGuards() }),
+            ("testEventReadingState", { try await testEventReadingState(fixtureRoot: fixtureRoot) }),
+            ("testEventFeedSummaryUnit", { testEventFeedSummaryUnit() }),
+            ("testEventFeedGroupingAndStability", { await testEventFeedGroupingAndStability() }),
+            ("testEventFeedGroupingOptimization", { testEventFeedGroupingOptimization() }),
+            ("testFiniteBriefing", { try await testFiniteBriefing() }),
+            ("testDockBadgeCount", { testDockBadgeCount() }),
+            ("testBriefingBoardLayout", { testBriefingBoardLayout() }),
+            ("testPublisherContentProvenance", { try await testPublisherContentProvenance() }),
+            ("testRefreshClustersEvents", { try await testRefreshClustersEvents(fixtureRoot: fixtureRoot) }),
+            ("testEventCorpusHarness", { try await testEventCorpusHarness(fixtureRoot: fixtureRoot) }),
+            ("testMatcherRegressionCorpus", { try await testMatcherRegressionCorpus() }),
+            ("testStoryRegressionCorpus", { try await testStoryRegressionCorpus() }),
+            ("testPairCalibration", { try await testPairCalibration() }),
+            ("testCapturedFingerprintReview", { try testCapturedFingerprintReview() }),
+            ("testFTS5SearchAndOperators", { await testFTS5SearchAndOperators() }),
+            ("testUnchangedFTSRefresh", { try await testUnchangedFTSRefresh() }),
+            ("testSearchSpellingSuggestion", { try await testSearchSpellingSuggestion() }),
+            ("testFTSRowIDMigration", { try await testFTSRowIDMigration() }),
+            ("testDatabaseHealthAndDerivedRetention", { try await testDatabaseHealthAndDerivedRetention() }),
+            ("testRealLibraryMigrationFixture", { try await testRealLibraryMigrationFixture() }),
+            ("testLibraryBackupAndFutureSchemaGuard", { try await testLibraryBackupAndFutureSchemaGuard() }),
+            ("testLibraryBackupRestore", { try await testLibraryBackupRestore() }),
+            ("testMigrationCoordinatorAtomicity", { try await testMigrationCoordinatorAtomicity() }),
+            ("testArticleRetentionPolicy", { await testArticleRetentionPolicy() }),
+            ("testContentExtractionPipelineDeep", { await testContentExtractionPipelineDeep() }),
+            ("testExtractionURLRejection", { await testExtractionURLRejection() }),
+            ("testEnrichmentQueueSchedulingAndPromotion", { await testEnrichmentQueueSchedulingAndPromotion() }),
+            ("testDesignSystemAndArticleFilter", { await testDesignSystemAndArticleFilter() }),
+            ("testDistributionAndEntitlementsIntegrity", { await testDistributionAndEntitlementsIntegrity() }),
+            ("testStrictSemVerAndReleaseSecurity", { await testStrictSemVerAndReleaseSecurity() }),
+            ("testUpdateCheckerThrottleWithClock", { await testUpdateCheckerThrottleWithClock() }),
+            ("testUpdateCheckerVersionComparisonAndErrors", { await testUpdateCheckerVersionComparisonAndErrors() }),
+            ("testUpdateCheckerAdversarialEdgeCases", { await testUpdateCheckerAdversarialEdgeCases() }),
+            ("testNewsURLParserAndSchemeRouting", { await testNewsURLParserAndSchemeRouting() }),
+            ("testAppIntentsExecutionAndValidation", { await testAppIntentsExecutionAndValidation() }),
+            ("testAppShortcutsProviderDeclarations", { await testAppShortcutsProviderDeclarations() }),
+            ("testSpotlightSavedStoriesIndexing", { try await testSpotlightSavedStoriesIndexing() }),
+            ("testNotificationActionsAndRouting", { await testNotificationActionsAndRouting() }),
+            ("testMenuBarExtraSettingsAndUnreadCount", { await testMenuBarExtraSettingsAndUnreadCount() }),
+            ("EpicNE2ETests", { await EpicNE2ETests.run() }),
+            ("testNotificationModeTriageAndGrammar", { await testNotificationModeTriageAndGrammar() }),
+            ("testCompletionOnce", { await testCompletionOnce() }),
+            ("testSocketNetworkBoundary", { try await testSocketNetworkBoundary() }),
+            ("testTransportCancellation", { try await testTransportCancellation() }),
+            ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
+            ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
+            ("testRetentionPruneAfterRefresh", { try await testRetentionPruneAfterRefresh() }),
+            ("testCancelledRefreshCarriesNotifications", { try await testCancelledRefreshCarriesNotifications() }),
+            ("testUndatedStoriesInPublicationWindow", { try await testUndatedStoriesInPublicationWindow() }),
+            ("testActiveWorkCancellation", { try await testActiveWorkCancellation() }),
+            ("testSignpostHelperExecution", { await testSignpostHelperExecution() }),
+            ("testAppSettingsIsolationAndURLNormalization", { await testAppSettingsIsolationAndURLNormalization() }),
+            ("testOnboardingAndPermissionTiming", { await testOnboardingAndPermissionTiming() }),
+            ("testFixedTaxonomyAndCaseInsensitivity", { await testFixedTaxonomyAndCaseInsensitivity() }),
+            (
+                "testClassificationMultiStageAndConfidenceTiers",
+                { await testClassificationMultiStageAndConfidenceTiers() }
+            ),
+            ("testClassificationBenchmarkDataset", { await testClassificationBenchmarkDataset() }),
+            (
+                "testArticleAnalyzerStructuredOutputAndFallbacks",
+                { try await testArticleAnalyzerStructuredOutputAndFallbacks() }
+            ),
+            ("testInteractiveAnalysisCancellation", { await testInteractiveAnalysisCancellation() }),
+            ("testGranularCacheClearingAndRetention", { try await testGranularCacheClearingAndRetention() }),
+            ("testNotificationServiceErrorLogging", { await testNotificationServiceErrorLogging() }),
+            (
+                "testNotificationDedupeAcrossRefreshes",
+                { try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot) }
+            ),
+            (
+                "testNotificationLanesAcrossRefreshes",
+                { try await testNotificationLanesAcrossRefreshes(fixtureRoot: fixtureRoot) }
+            ),
+            ("testNotifyBeforeClustering", { try await testNotifyBeforeClustering() }),
+            ("testArticleStoreErrorResilience", { await testArticleStoreErrorResilience() }),
+            ("testSystemErrorHardeningAndResilience", { await testSystemErrorHardeningAndResilience() }),
+            ("testFeedArticleWrapContextNavigation", { await testFeedArticleWrapContextNavigation() }),
+            ("testArticleContentRedactionAndTypography", { await testArticleContentRedactionAndTypography() }),
+            ("testArticleDetailReadingExperienceOverhaul", { await testArticleDetailReadingExperienceOverhaul() }),
+            ("testReaderPhaseC", { try await testReaderPhaseC(fixtureRoot: fixtureRoot) }),
+            ("testReaderPassageMatcher", { testReaderPassageMatcher() }),
+            ("testBBCExtractionFixture", { await testBBCExtractionFixture() }),
+            ("testMultiPublisherExtractionFixtures", { await testMultiPublisherExtractionFixtures() }),
+            ("testReaderFurnitureRemoval", { await testReaderFurnitureRemoval() }),
+            ("testContentQualityValidation", { await testContentQualityValidation() }),
+            ("testExtractionOutcomeDiagnostics", { await testExtractionOutcomeDiagnostics() }),
+            ("testCanonicalClassificationDisambiguation", { await testCanonicalClassificationDisambiguation() }),
+            ("testDiagnosticsExport", { try await testDiagnosticsExport() }),
+            ("testAppContainerWiring", { await testAppContainerWiring() }),
+            ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
+            ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
+        ]
+        try await runSharded(tests)
 
         if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
             await testLiveReader()

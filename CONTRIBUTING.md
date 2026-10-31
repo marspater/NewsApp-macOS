@@ -14,8 +14,9 @@ The current release simplification uses existing #102 labeled tune/English holdo
 
 ```sh
 ./test.sh                         # Full regressions, including parser-to-embedding/clustering integration; also run by the commit hook
-script/test_event_overview_accessibility.sh # Story Overview sections, Industry Impact included (Epic T); headless, and run by a plain ./test.sh after the main runner, together with script/test_reader_accessibility.sh and script/test_tension_calibration.sh
+script/test_event_overview_accessibility.sh # Story Overview sections, Industry Impact included (Epic T); headless; a plain ./test.sh runs the same suite inside the main runner (NEWS_TEST_ATOM=Tests/EventOverviewAccessibilityTests.swift), as it does script/test_reader_accessibility.sh and script/test_tension_calibration.sh
 NEWS_TEST_FORCE=1 ./test.sh       # A plain ./test.sh skips the Swift runner and the three headless runners when the same inputs already passed all of them on this machine (the stamp is written after the last one); this reruns them
+NEWS_TEST_SHARDS=2 NEWS_TEST_JOBS=3 ./test.sh # A plain run is a job pool: each Tests/*.swift file is its own process, Tests/NewsTests.swift is split into NEWS_TEST_SHARDS processes (default 4) and NEWS_TEST_JOBS bounds how many jobs run at once (default shards + 2); NEWS_TEST_TIMING=1 prints each NewsTests duration
 ./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
 script/format.sh --check          # Strict repository-wide Swift formatting lint
