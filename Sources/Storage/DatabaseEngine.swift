@@ -19,6 +19,13 @@ actor DatabaseEngine {
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
+    /// The last library counts, valid while no write has happened since: `sqlite3_total_changes` moves on every write,
+    /// triggers included, so no write path can leave a stale count behind (#839).
+    private var countsCache: (changes: Int, scope: [String], value: (unread: Int, saved: Int, total: Int))?
+    private var mutedCountCache: (changes: Int, counts: [MutedCountKey: Int]) = (-1, [:])
+    private struct MutedCountKey: Hashable {
+        let section: String?, isRead: Bool?, isSaved: Bool?, search: String?, muting: MuteRules, scope: [String]
+    }
     private var spellingCache: (key: String, words: [String: Int])?
     /// `repeatedImageURLs` by publisher. Every curated fetch asks for it, single-story fetches included, and the query
     /// reads every reader document of the publisher (10–40 ms on a real library), so classification writes and list
@@ -2974,6 +2981,14 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: "Failed to prepare markRead statement"])
         }
         defer { sqlite3_finalize(stmt) }
+        // A read toggle moves the unread count by at most one: adjust the cached counts instead of scanning (#839).
+        let before = Int(sqlite3_total_changes(db))
+        var adjusted = countsCache.flatMap { $0.changes == before ? $0 : nil }
+        if adjusted != nil, let wasRead = countedReadState(of: articleId) {
+            if wasRead != isRead { adjusted?.value.unread += isRead ? -1 : 1 }
+        } else {
+            adjusted = nil
+        }
 
         let now = Date().timeIntervalSince1970
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
@@ -2987,6 +3002,10 @@ actor DatabaseEngine {
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markRead"])
+        }
+        if var adjusted {
+            adjusted.changes = Int(sqlite3_total_changes(db))
+            countsCache = adjusted
         }
     }
 
@@ -3878,6 +3897,10 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
 
+        let changes = Int(sqlite3_total_changes(db))
+        if let cache = countsCache, cache.changes == changes, cache.scope == collectionOnlyFeedURLs {
+            return cache.value
+        }
         var total = 0
         var unread = 0
         var saved = 0
@@ -3900,9 +3923,25 @@ actor DatabaseEngine {
                 total = Int(sqlite3_column_int(stmt, 0))
                 unread = Int(sqlite3_column_int(stmt, 1))
                 saved = Int(sqlite3_column_int(stmt, 2))
+                countsCache = (changes, collectionOnlyFeedURLs, (unread: unread, saved: saved, total: total))
             }
         }
         return (unread: unread, saved: saved, total: total)
+    }
+
+    /// Whether a story the counts include is read, or nil when it is not among them.
+    private func countedReadState(of articleId: String) -> Bool? {
+        guard let db = db else { return nil }
+        let scope = collectionScope()
+        let sql = """
+            SELECT s.is_read FROM articles a JOIN article_state s ON s.article_id = a.id
+            WHERE a.id = ? AND \(Self.visibleArticle) \(scope.sql);
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bind([("text", articleId)] + scope.params, to: stmt)
+        return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int(stmt, 0) != 0 : nil
     }
 
     /// How many stories muting removes from a list or search, across every page, under the list's own filters.
@@ -3913,10 +3952,20 @@ actor DatabaseEngine {
         search: String? = nil,
         muting: MuteRules
     ) throws -> Int {
-        guard !muting.isEmpty else { return 0 }
-        return try listAggregates(
+        guard !muting.isEmpty, let db = db else { return 0 }
+        // The count scans the library through two SQL functions per row; it only changes when a write does (#839).
+        let changes = Int(sqlite3_total_changes(db))
+        if mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
+        let key = MutedCountKey(
+            section: section, isRead: isRead, isSaved: isSaved, search: search, muting: muting,
+            scope: collectionOnlyFeedURLs)
+        if let known = mutedCountCache.counts[key] { return known }
+        let count = try listAggregates(
             "count(*)", section: section, isRead: isRead, isSaved: isSaved, search: search,
             filter: " AND " + Self.mutedArticle, filterParameters: Self.mutingParameters(muting))[0]
+        if mutedCountCache.counts.count >= 32 { mutedCountCache.counts = [:] }
+        mutedCountCache.counts[key] = count
+        return count
     }
 
     /// What a list or search holds across all its pages (#782): its stories, and the events of two or more visible

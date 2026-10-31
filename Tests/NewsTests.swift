@@ -785,6 +785,7 @@ struct NewsTests {
             await testFTS5SearchAndOperators()
             try await testUnchangedFTSRefresh()
             try await testSearchSpellingSuggestion()
+            try await testCountsStayExactAcrossToggleAndBulkChanges()
             try await testFTSRowIDMigration()
             try await testDatabaseHealthAndDerivedRetention()
             try await testRealLibraryMigrationFixture()
@@ -948,6 +949,10 @@ struct NewsTests {
             ("testFTS5SearchAndOperators", { await testFTS5SearchAndOperators() }),
             ("testUnchangedFTSRefresh", { try await testUnchangedFTSRefresh() }),
             ("testSearchSpellingSuggestion", { try await testSearchSpellingSuggestion() }),
+            (
+                "testCountsStayExactAcrossToggleAndBulkChanges",
+                { try await testCountsStayExactAcrossToggleAndBulkChanges() }
+            ),
             ("testFTSRowIDMigration", { try await testFTSRowIDMigration() }),
             ("testDatabaseHealthAndDerivedRetention", { try await testDatabaseHealthAndDerivedRetention() }),
             ("testRealLibraryMigrationFixture", { try await testRealLibraryMigrationFixture() }),
@@ -1129,6 +1134,44 @@ struct NewsTests {
         assertEqual(rowID(), migratedID, "Existing v11 database receives a durable FTS key")
         assertEqual(indexData(), migratedIndex, "Existing v11 database receives the guarded trigger")
         assertEqual(try await db.searchArticles(query: "Updated").count, 1, "Migration preserves searchable rows")
+        await db.close()
+    }
+
+    /// #839: counts are cached and adjusted per read toggle, and every other write refreshes them.
+    static func testCountsStayExactAcrossToggleAndBulkChanges() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        func story(_ index: Int, _ host: String = "other.org") -> FeedArticle {
+            FeedArticle(
+                title: "Counted story \(index)", link: "https://\(host)/\(index)", guid: "count-\(index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000 - Double(index) * 60),
+                source: "Publisher")
+        }
+        let stories = (0..<5).map { story($0) }
+        try await db.upsertArticles(stories)
+        let muting = MuteRules(sources: ["muted.example"])
+        assertEqual(try await db.counts().unread, 5, "Every story starts unread")
+        assertEqual(try await db.mutedArticleCount(muting: muting), 0, "Nothing is muted yet")
+
+        try await db.markRead(articleId: stories[0].id, isRead: true)
+        assertEqual(try await db.counts().unread, 4, "A read toggle lowers the unread count")
+        try await db.markRead(articleId: stories[0].id, isRead: true)
+        assertEqual(try await db.counts().unread, 4, "Marking a read story read again changes nothing")
+        try await db.markRead(articleId: stories[0].id, isRead: false)
+        assertEqual(try await db.counts().unread, 5, "Marking it unread raises the count back")
+        try await db.setSaved(articleId: stories[1].id, isSaved: true)
+        assertEqual(try await db.counts().saved, 1, "A save is counted after cached counts")
+
+        try await db.markReadBatch(articleIds: stories.prefix(3).map(\.id), isRead: true)
+        assertEqual(try await db.counts().unread, 2, "A bulk change refreshes the counts")
+        try await db.markRead(articleId: stories[4].id, isRead: true)
+        assertEqual(try await db.counts().unread, 1, "A toggle after a bulk change adjusts the fresh counts")
+
+        try await db.upsertArticles([story(9, "muted.example")])
+        assertEqual(try await db.counts().total, 6, "New stories refresh the total")
+        assertEqual(try await db.counts().unread, 2, "New stories refresh the unread count")
+        assertEqual(try await db.mutedArticleCount(muting: muting), 1, "A new muted story refreshes the muted count")
+        assertEqual(try await db.mutedArticleCount(muting: muting), 1, "The cached muted count repeats")
         await db.close()
     }
 
