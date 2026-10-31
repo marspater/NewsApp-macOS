@@ -786,6 +786,7 @@ struct NewsTests {
             try await testUnchangedFTSRefresh()
             try await testSearchSpellingSuggestion()
             try await testRefreshStateKeepsChangesMadeWhileLoading()
+            try await testUnreadCountAndSavedStateCoverTheLibrary()
             try await testFTSRowIDMigration()
             try await testDatabaseHealthAndDerivedRetention()
             try await testRealLibraryMigrationFixture()
@@ -952,6 +953,10 @@ struct NewsTests {
             (
                 "testRefreshStateKeepsChangesMadeWhileLoading",
                 { try await testRefreshStateKeepsChangesMadeWhileLoading() }
+            ),
+            (
+                "testUnreadCountAndSavedStateCoverTheLibrary",
+                { try await testUnreadCountAndSavedStateCoverTheLibrary() }
             ),
             ("testFTSRowIDMigration", { try await testFTSRowIDMigration() }),
             ("testDatabaseHealthAndDerivedRetention", { try await testDatabaseHealthAndDerivedRetention() }),
@@ -1178,6 +1183,52 @@ struct NewsTests {
         store.refreshLoadedHook = nil
         assertTrue(refreshed, "The refresh publishes after reloading")
         assertTrue(store.readArticleIDs.contains(stories[2].id), "A bulk read change made while loading survives")
+        await db.close()
+    }
+
+    /// #785: the unread count is one SQL count over the whole library with muting applied, and saved state has no
+    /// 500-story cap.
+    @MainActor static func testUnreadCountAndSavedStateCoverTheLibrary() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        var stories = (0..<600).map { index in
+            FeedArticle(
+                title: "Library story \(index)", link: "https://other.org/\(index)", guid: "lib-\(index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000 - Double(index) * 60),
+                source: "Publisher")
+        }
+        stories.append(
+            FeedArticle(
+                title: "Muted story", link: "https://muted.example/1", guid: "lib-muted", description: "",
+                pubDate: Date(timeIntervalSince1970: 1_600_000_000), source: "Publisher"))
+        try await db.upsertArticles(stories)
+        let muting = MuteRules(sources: ["muted.example"])
+
+        assertEqual(try await db.counts().unread, 601, "Without rules every unread story counts")
+        assertEqual(
+            try await db.counts(muting: muting).unread, 600,
+            "The unread count spans the whole library, beyond the 500-story window, and leaves muted stories out")
+        let unreadList = try await db.fetchArticles(isRead: false, limit: nil, muting: muting)
+        assertEqual(unreadList.count, 600, "The Unread list agrees with the count")
+
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        // The store's own launch task also refreshes; the latest refresh publishes, so wait for it to settle.
+        for _ in 0..<100 where store.unreadCount != 601 { try await Task.sleep(for: .milliseconds(50)) }
+        assertEqual(store.unreadCount, 601, "The store counts everything while nothing is muted")
+        await store.setMuting(muting)
+        assertEqual(store.unreadCount, 600, "The menu bar and sidebar count follows the mute rules")
+        await store.markAsRead(id: stories[0].id)
+        assertEqual(store.unreadCount, 599, "A read toggle keeps muting applied")
+
+        for story in stories.prefix(501) { try await db.setSaved(articleId: story.id, isSaved: true) }
+        await store.refreshState()
+        assertEqual(store.savedArticles.count, 501, "Saved stories are not capped at 500")
+        assertEqual(store.savedArticleIDs.count, 501, "Every saved story reads as saved")
+        assertEqual(store.savedCount, 501, "The saved count agrees")
+        await store.removeAllSavedStories()
+        assertEqual(try await db.counts().saved, 0, "Remove All unsaves every saved story")
+        assertTrue(store.savedArticles.isEmpty, "Nothing stays saved in memory")
         await db.close()
     }
 
@@ -15949,6 +16000,19 @@ struct NewsTests {
             source: "Physics Journal"
         )
 
+        // Fill the bounded queue first, so A and B stay queued and the cancellations below cannot race a job that
+        // already finished (a refused write leaves no job behind, #820).
+        let hold = OpenGate()
+        for index in 0..<3 {
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "hold-\(index)") {
+                    await hold.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("Held generations fill the queue") { await queue.activeJobCount() == 3 }
+
         // 1. Enqueue background
         await queue.enqueue(article: articleA, priority: .background)
 
@@ -15975,6 +16039,8 @@ struct NewsTests {
             let active = await queue.activeJobCount()
             assertTrue(active <= 3, "Rapid replacement cannot exceed the concurrency bound")
         }
+
+        await hold.open()
 
         // Finished work is not superseded or repeated by the next refresh, and its full FeedArticle job is released (#535).
         let articleC = FeedArticle(

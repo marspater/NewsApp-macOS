@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 import os
@@ -7,7 +8,7 @@ import os
 @MainActor
 final class ArticleStore: ObservableObject {
     static let shared = ArticleStore()
-    private let logger = Logger(subsystem: "com.marspater.news", category: "ArticleStore")
+    let logger = Logger(subsystem: "com.marspater.news", category: "ArticleStore")
 
     let database: DatabaseEngine
     let migrationCoordinator: MigrationCoordinator?
@@ -23,12 +24,22 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var unreadCount: Int = 0
     @Published private(set) var savedCount: Int = 0
     @Published private(set) var isReady: Bool = false
+    /// The reader's mute rules; `unreadCount` leaves out the stories they hide, as the Unread list does (#785).
+    private(set) var muting = MuteRules()
+    private var muteObservation: AnyCancellable?
+    /// Numbers every count request, mute-rule changes included; only the latest request's result is published, so
+    /// neither older rules nor an older count that finishes last can overwrite a newer one.
+    private var countSequence = 0
+    private func newCountRequest() -> Int {
+        countSequence &+= 1
+        return countSequence
+    }
 
     @Published private(set) var revision: UInt64 = 0
     /// Bumped when clustering or the reader changes events; the feed regroups on it.
-    @Published private(set) var eventRevision: UInt64 = 0
+    @Published var eventRevision: UInt64 = 0
     /// Bumped when an event overview is stored; the Briefing reloads its cited facts on it.
-    @Published private(set) var overviewRevision: UInt64 = 0
+    @Published var overviewRevision: UInt64 = 0
     @Published var operationError: String?
     @Published private(set) var databaseHealthNotice: String?
 
@@ -41,6 +52,17 @@ final class ArticleStore: ObservableObject {
         self.database = db
         self.migrationCoordinator = migrationCoordinator ?? (database == nil ? MigrationCoordinator(database: db) : nil)
         self.spotlightIndexer = spotlightIndexer
+        if database == nil {
+            muting = AppSettings.shared.muteRules
+            // Applied synchronously, in the order the rules change; only the recount is a task.
+            muteObservation = AppSettings.shared.$muteRules.dropFirst().sink { [weak self] rules in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.applyMuting(rules)
+                    Task { await self.recountUnread() }
+                }
+            }
+        }
 
         Task {
             await initialize()
@@ -85,6 +107,26 @@ final class ArticleStore: ObservableObject {
     /// Runs after `refreshState` has loaded and before it assigns; lets a test land a change in between.
     var refreshLoadedHook: (@MainActor () async -> Void)?
 
+    /// Recounts unread stories under new mute rules.
+    func setMuting(_ rules: MuteRules) async {
+        applyMuting(rules)
+        await recountUnread()
+    }
+
+    private func applyMuting(_ rules: MuteRules) {
+        muting = rules
+        countSequence &+= 1
+    }
+
+    /// Counts under the current rules and publishes only if they did not change meanwhile.
+    private func recountUnread() async {
+        let generation = newCountRequest()
+        guard let counts = try? await database.counts(muting: muting), generation == countSequence else { return }
+        unreadCount = counts.unread
+        savedCount = counts.saved
+        revision &+= 1
+    }
+
     @discardableResult
     func refreshState() async -> Bool {
         do {
@@ -94,18 +136,21 @@ final class ArticleStore: ObservableObject {
             var published = false
             for _ in 1...3 {
                 let changesAtStart = stateChanges
+                let generation = newCountRequest()
                 let fetched = try await database.fetchArticles(limit: 500)
                 let readIDs = try await database.getReadArticleIDs()
                 let saved = try await database.getSavedArticles()
-                let counts = try await database.counts()
+                let counts = try await database.counts(muting: muting)
                 await refreshLoadedHook?()
                 self.articles = fetched
                 guard changesAtStart == stateChanges else { continue }
                 self.readArticleIDs = readIDs
                 self.savedArticles = saved
                 self.savedArticleIDs = Set(saved.map { $0.id })
-                self.unreadCount = counts.unread
-                self.savedCount = counts.saved
+                if generation == countSequence {
+                    self.unreadCount = counts.unread
+                    self.savedCount = counts.saved
+                }
                 published = true
                 break
             }
@@ -211,8 +256,12 @@ final class ArticleStore: ObservableObject {
                 readArticleIDs.remove(id)
             }
             stateChanges &+= 1
-            let counts = try await database.counts()
-            self.unreadCount = counts.unread
+            let generation = newCountRequest()
+            let counts = try await database.counts(muting: muting)
+            if generation == countSequence {
+                self.unreadCount = counts.unread
+                self.savedCount = counts.saved
+            }
             revision &+= 1
         } catch {
             operationError = "Could not save reading status. Please try again."
@@ -296,8 +345,13 @@ final class ArticleStore: ObservableObject {
                 savedArticleIDs.remove(storedArticle.id)
                 await serialSpotlight { await $0.removeSavedArticle(id: storedArticle.id) }
             }
-            let counts = try await database.counts()
-            self.savedCount = counts.saved
+            // Unsaving a panel-only story also hides it from the unread count.
+            let generation = newCountRequest()
+            let counts = try await database.counts(muting: muting)
+            if generation == countSequence {
+                self.unreadCount = counts.unread
+                self.savedCount = counts.saved
+            }
             revision &+= 1
             return nextState
         } catch {
@@ -319,37 +373,7 @@ final class ArticleStore: ObservableObject {
         await refreshState()
     }
 
-    /// Replaces the saved-stories Spotlight domain with exactly the stories the open library holds (#812).
-    /// Run at launch, which is also where a restored library first opens, so entries of the previous library go.
-    func rebuildSpotlightIndex() async {
-        await serialSpotlight { indexer in
-            // Read when it runs, so a story unsaved while this waited is not re-added; the whole list, not the 500-story
-            // UI snapshot. If the read fails the old index stays, rather than a partial one.
-            let saved: [FeedArticle]
-            do {
-                saved = try await self.database.fetchArticles(isSaved: true, limit: nil)
-            } catch {
-                self.logger.error("Spotlight rebuild skipped: \(error.localizedDescription)")
-                return
-            }
-            await indexer.removeAllSavedArticles()
-            for article in saved { await indexer.indexSavedArticle(article) }
-        }
-    }
-
-    private var spotlightTail: Task<Void, Never>?
-
-    /// Runs Spotlight updates one at a time in call order, so a rebuild and a save or unsave cannot interleave (#812).
-    private func serialSpotlight(_ operation: @escaping @MainActor (any SpotlightIndexing) async -> Void) async {
-        let previous = spotlightTail
-        let indexer = spotlightIndexer
-        let task = Task { @MainActor in
-            await previous?.value
-            await operation(indexer)
-        }
-        spotlightTail = task
-        await task.value
-    }
+    var spotlightTail: Task<Void, Never>?
 
     // MARK: - Enrichment
 
@@ -563,112 +587,5 @@ final class ArticleStore: ObservableObject {
             logger.error("Failed to prune old articles: \(error.localizedDescription)")
             return 0
         }
-    }
-
-    // MARK: - Events
-
-    func noteEventsChanged() {
-        eventRevision &+= 1
-    }
-
-    func eventFeedSummaries(for articleIDs: [String]) async throws -> [EventFeedSummary] {
-        try await database.eventFeedSummaries(forArticles: articleIDs)
-    }
-
-    func eventMemberArticles(eventID: String) async throws -> [FeedArticle] {
-        try await database.fetchArticles(limit: nil, eventID: eventID)
-    }
-
-    /// Every visible report of the story the event leads (#581), for the expanded story card, whose coverage counts
-    /// the whole story.
-    func storyMemberArticles(eventID: String) async throws -> [FeedArticle] {
-        try await database.fetchArticles(limit: nil, eventID: eventID, wholeStory: true)
-    }
-
-    /// Earlier events of the same developing story, shown under "Earlier in This Story": every earlier event of the
-    /// story itself (#581), then up to `EventStoryRelation.linkLimit` other links, the lexical relation's (#314) before
-    /// related acts the matcher kept apart (#522).
-    func relatedStoryEvents(eventID: String) async throws -> [RelatedStoryEvent] {
-        let lexical = try await EventStoryRelation.find(eventID: eventID, in: database)
-        let members = try await database.fetchArticles(limit: nil, eventID: eventID)
-        guard let start = members.map(\.pubDate).min() else { return lexical }
-        // Every related act and story event, earlier and later: the earlier-only filter comes first.
-        let earlier = try await database.relatedActEvents(eventID: eventID, limit: .max)
-            .filter { $0.firstPublishedAt < start }
-        let story = Set(try await database.storyEventIDs(eventID))
-        return Self.earlierLinks(
-            story: earlier.filter { story.contains($0.eventID) },
-            others: lexical + earlier.filter { !story.contains($0.eventID) })
-    }
-
-    /// The story's own events, all of them and in the given order, then other links up to the cap. Three lexical
-    /// links used to fill the list before the story's own earlier events were reached (#671).
-    nonisolated static func earlierLinks(
-        story: [RelatedStoryEvent], others: [RelatedStoryEvent], cap: Int = EventStoryRelation.linkLimit
-    ) -> [RelatedStoryEvent] {
-        var seen = Set(story.map(\.eventID))
-        let extra = others.filter { seen.insert($0.eventID).inserted }.prefix(cap)
-        return story + extra
-    }
-
-    /// Records the event version the reader has seen. Article read and saved state stay as they are.
-    func markEventSeen(_ eventID: String) async {
-        do {
-            let before = try await database.eventSeenVersion(eventID)
-            if try await database.markEventSeen(eventID) != before { eventRevision &+= 1 }
-        } catch {
-            logger.error("Failed to record event reading state: \(error.localizedDescription)")
-        }
-    }
-
-    /// "These are different events": a local exclusion that later refreshes and passes respect.
-    @discardableResult
-    func separateArticle(_ articleID: String, fromEvent eventID: String) async -> Bool {
-        do {
-            try await database.separateArticle(articleID, fromEvent: eventID)
-            eventRevision &+= 1
-            return true
-        } catch {
-            operationError = "This article could not be separated from the event. Please try again."
-            logger.error("Failed to separate article from event: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    /// "Same event": the related event joins this one, and later passes keep them together (#524).
-    @discardableResult
-    func includeEvent(_ relatedEventID: String, inEvent eventID: String) async -> Bool {
-        do {
-            let combined = try await database.includeEvent(relatedEventID, inEvent: eventID)
-            // The reader made this change: it is no new reporting to flag as "Updated".
-            _ = try? await database.markEventSeen(combined.id)
-            eventRevision &+= 1
-            return true
-        } catch {
-            operationError = "These events could not be combined. Please try again."
-            logger.error("Failed to combine events: \(error.localizedDescription)")
-            return false
-        }
-    }
-
-    // MARK: - Event Overviews
-
-    @discardableResult
-    func recordEventOverview(
-        _ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil,
-        expectedGeneration: Int? = nil
-    ) async throws -> Bool {
-        let stored = try await database.recordEventOverview(
-            document, expectedArticleInputs: expectedArticleInputs, expectedGeneration: expectedGeneration)
-        if stored { overviewRevision &+= 1 }
-        return stored
-    }
-
-    func fetchEventOverview(eventID: String) async throws -> EventOverviewDocument? {
-        try await database.fetchEventOverview(eventID: eventID)
-    }
-
-    func fetchEventOverview(forArticleID articleID: String) async throws -> EventOverviewDocument? {
-        try await database.fetchEventOverview(forArticleID: articleID)
     }
 }

@@ -23,10 +23,9 @@ struct SidebarView: View {
         // Default no-op action
     }
 
-    @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
-    @EnvironmentObject private var readManager: ReadManager
+    @EnvironmentObject private var articleStore: ArticleStore
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     @State private var isSubscribePopoverPresented = false
@@ -126,11 +125,8 @@ struct SidebarView: View {
         }
     }
 
-    /// Unread stories the Unread list can show: muted stories are left out, as they are from the list.
-    private var unreadBadge: Int {
-        let muting = appSettings.muteRules
-        return feedManager.articles.filter { !readManager.isRead($0.id) && (muting.isEmpty || !muting.mutes($0)) }.count
-    }
+    /// Unread stories the Unread list can show, counted across the whole library with muting applied (#785).
+    private var unreadBadge: Int { articleStore.unreadCount }
 
     private var librarySection: some View {
         Section("Library") {
