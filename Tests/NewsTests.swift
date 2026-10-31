@@ -975,6 +975,7 @@ struct NewsTests {
             ("testCompletionOnce", { await testCompletionOnce() }),
             ("testSocketNetworkBoundary", { try await testSocketNetworkBoundary() }),
             ("testTransportCancellation", { try await testTransportCancellation() }),
+            ("testProxyWaitingClassification", { await testProxyWaitingClassification() }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
             ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
             ("testRetentionPruneAfterRefresh", { try await testRetentionPruneAfterRefresh() }),
@@ -17948,6 +17949,22 @@ struct NewsTests {
                 waitForClose()
             }
         }
+    }
+
+    static func testProxyWaitingClassification() async {
+        print("  - Testing which waiting connect errors the proxy waits out and which it refuses at once (#769)...")
+        for code in [POSIXErrorCode.ECONNREFUSED, .ENETUNREACH, .EHOSTUNREACH, .ENETDOWN] {
+            assertTrue(
+                NetworkBoundaryProxy.waitingFailsAtOnce(.posix(code)), "\(code) is refused at once, fail-closed")
+        }
+        for code in [POSIXErrorCode.ETIMEDOUT, .ENOBUFS, .EADDRNOTAVAIL, .EMFILE] {
+            assertFalse(
+                NetworkBoundaryProxy.waitingFailsAtOnce(.posix(code)),
+                "\(code) may clear under load, so the handshake timeout bounds the wait")
+        }
+        assertFalse(
+            NetworkBoundaryProxy.waitingFailsAtOnce(.dns(DNSServiceErrorType(kDNSServiceErr_Timeout))),
+            "A non-POSIX waiting error is waited out")
     }
 
     @MainActor
