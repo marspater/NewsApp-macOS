@@ -19646,6 +19646,26 @@ struct NewsTests {
             "Saved body survives cache cleanup")
         assertTrue(try await db.getReadArticleIDs().contains(article2.id), "Read history survives cache cleanup")
 
+        // Clear All Caches removes everything Clear Analysis removes (#811)
+        try await db.upsertArticleEmbeddings([article2.id: [0.5, 0.25]], modelVersion: 1)
+        _ = try await db.recordEventOverview(
+            EventOverviewDocument(
+                eventID: event.id,
+                version: OverviewVersionContext(membershipVersion: event.membershipVersion, inputTextHash: "hash"),
+                content: OverviewContent(
+                    title: "Event", summary: "Summary",
+                    citations: [
+                        OverviewCitation(
+                            id: "citation", articleID: article2.id, passageID: "p", passageFingerprint: "f",
+                            quote: "Quote")
+                    ])))
+        try await db.clearAllDatabaseCache()
+        assertTrue(
+            try await db.fetchArticleEmbeddings(articleIDs: [article2.id], modelVersion: 1).isEmpty,
+            "Clear All Caches removes story embeddings (#811)")
+        assertTrue(
+            try await db.fetchEventOverview(eventID: event.id) == nil, "Clear All Caches removes overviews (#811)")
+
         // 5. Test CacheManager methods
         // Do not clear the user's WebKit cache from a unit test.
     }

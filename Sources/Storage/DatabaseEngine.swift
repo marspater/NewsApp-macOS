@@ -3741,10 +3741,10 @@ actor DatabaseEngine {
     func clearAllDatabaseCache() throws {
         try requireWritable()
         repeatedImageCache = [:]
-        try clearWorldTensionHistory()
+        // Everything Clear Analysis removes (enrichment, embeddings, features, overviews, tension history) goes too (#811).
+        try clearArticleEnrichment()
         try beginTransaction()
         do {
-            try executeSimple("DELETE FROM article_enrichment;")
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
             )
