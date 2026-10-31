@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 import os
@@ -23,6 +24,9 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var unreadCount: Int = 0
     @Published private(set) var savedCount: Int = 0
     @Published private(set) var isReady: Bool = false
+    /// The reader's mute rules; `unreadCount` leaves out the stories they hide, as the Unread list does (#785).
+    private(set) var muting = MuteRules()
+    private var muteObservation: AnyCancellable?
 
     @Published private(set) var revision: UInt64 = 0
     /// Bumped when clustering or the reader changes events; the feed regroups on it.
@@ -41,6 +45,12 @@ final class ArticleStore: ObservableObject {
         self.database = db
         self.migrationCoordinator = migrationCoordinator ?? (database == nil ? MigrationCoordinator(database: db) : nil)
         self.spotlightIndexer = spotlightIndexer
+        if database == nil {
+            muting = AppSettings.shared.muteRules
+            muteObservation = AppSettings.shared.$muteRules.dropFirst().sink { [weak self] rules in
+                Task { @MainActor in await self?.setMuting(rules) }
+            }
+        }
 
         Task {
             await initialize()
@@ -80,13 +90,21 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    /// Recounts unread stories under new mute rules.
+    func setMuting(_ rules: MuteRules) async {
+        muting = rules
+        guard let counts = try? await database.counts(muting: rules), muting == rules else { return }
+        unreadCount = counts.unread
+        revision &+= 1
+    }
+
     @discardableResult
     func refreshState() async -> Bool {
         do {
             let fetched = try await database.fetchArticles(limit: 500)
             let readIDs = try await database.getReadArticleIDs()
             let saved = try await database.getSavedArticles()
-            let counts = try await database.counts()
+            let counts = try await database.counts(muting: muting)
 
             self.articles = fetched
             self.readArticleIDs = readIDs
@@ -194,7 +212,7 @@ final class ArticleStore: ObservableObject {
             } else {
                 readArticleIDs.remove(id)
             }
-            let counts = try await database.counts()
+            let counts = try await database.counts(muting: muting)
             self.unreadCount = counts.unread
             revision &+= 1
         } catch {
@@ -276,7 +294,7 @@ final class ArticleStore: ObservableObject {
                 savedArticleIDs.remove(storedArticle.id)
                 await serialSpotlight { await $0.removeSavedArticle(id: storedArticle.id) }
             }
-            let counts = try await database.counts()
+            let counts = try await database.counts(muting: muting)
             self.savedCount = counts.saved
             revision &+= 1
             return nextState
