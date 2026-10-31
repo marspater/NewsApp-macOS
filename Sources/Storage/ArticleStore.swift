@@ -300,8 +300,9 @@ final class ArticleStore: ObservableObject {
     func rebuildSpotlightIndex() async {
         await serialSpotlight { indexer in
             await indexer.removeAllSavedArticles()
-            // Read when it runs, so a story unsaved while this waited is not re-added.
-            for article in self.savedArticles { await indexer.indexSavedArticle(article) }
+            // Read when it runs, so a story unsaved while this waited is not re-added; the whole list, not the 500-story UI snapshot.
+            let saved = (try? await self.database.fetchArticles(isSaved: true, limit: nil)) ?? self.savedArticles
+            for article in saved { await indexer.indexSavedArticle(article) }
         }
     }
 
