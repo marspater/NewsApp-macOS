@@ -299,9 +299,16 @@ final class ArticleStore: ObservableObject {
     /// Run at launch, which is also where a restored library first opens, so entries of the previous library go.
     func rebuildSpotlightIndex() async {
         await serialSpotlight { indexer in
+            // Read when it runs, so a story unsaved while this waited is not re-added; the whole list, not the 500-story
+            // UI snapshot. If the read fails the old index stays, rather than a partial one.
+            let saved: [FeedArticle]
+            do {
+                saved = try await self.database.fetchArticles(isSaved: true, limit: nil)
+            } catch {
+                self.logger.error("Spotlight rebuild skipped: \(error.localizedDescription)")
+                return
+            }
             await indexer.removeAllSavedArticles()
-            // Read when it runs, so a story unsaved while this waited is not re-added; the whole list, not the 500-story UI snapshot.
-            let saved = (try? await self.database.fetchArticles(isSaved: true, limit: nil)) ?? self.savedArticles
             for article in saved { await indexer.indexSavedArticle(article) }
         }
     }
