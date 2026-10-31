@@ -10,7 +10,8 @@ with SQLite's online backup API, which includes pages still in the write-ahead l
 [the v2 completion plan](plans/2026-10-30-v2-completion.md), step 0):
 
 ```sh
-sqlite3 "file:$HOME/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-copy.sqlite3"
+(umask 077 && sqlite3 "file:$HOME/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-copy.sqlite3")
+stat -f %Lp "$HOME/news-eval/library-copy.sqlite3"   # must print 600: the copy holds private reading history
 ```
 
 ## 0. Everything, once
@@ -26,14 +27,20 @@ plus the extra commands that are not in the plain run.
 
 ## 1. Database migration and restore on a library copy
 
-- Automated: `./test.sh --fts-refresh-regression` runs the real-library migration fixture, the pre-migration backup
-  and newer-schema guard, and backup restore (`testRealLibraryMigrationFixture`, `testLibraryBackupAndFutureSchemaGuard`,
-  `testLibraryBackupRestore` in `Tests/NewsTests.swift`).
-- On the copy: `NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=<copy> ./test.sh` (item 0). Manual: compare the copy's schema
-  version and story, read and saved counts before and after, as the v2 completion plan does.
-- Manual: with News quit, confirm the first launch of the built app on a library copy leaves a `news-before-v<N>-…`
-  backup beside the library. Never point the build at the live library for this check; `make run` uses its own
-  container.
+- Automated, on synthetic libraries (it does not read `NEWS_SNAPSHOT_DB`): `./test.sh --fts-refresh-regression` runs
+  the migration fixture, the pre-migration backup and newer-schema guard, and backup restore
+  (`testRealLibraryMigrationFixture`, `testLibraryBackupAndFutureSchemaGuard`, `testLibraryBackupRestore` in
+  `Tests/NewsTests.swift`).
+- On the real-library copy: `NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=<copy> ./test.sh` (item 0). Manual: compare the copy's
+  schema version and story, read and saved counts before and after, as the v2 completion plan does:
+  `sqlite3 <file> "PRAGMA user_version; SELECT count(*) FROM articles;"`.
+- Manual, migration and restore on the copy (the live library is never touched): copy the library copy to
+  `$TMPDIR/migrate/news.sqlite3` and launch the built app on it only through an isolated container (`make run` uses
+  its own); confirm a `news-before-v<N>-…sqlite3` backup appears beside it. Then restore: copy that backup to a second
+  file, `$TMPDIR/restore/news.sqlite3`, and run `sqlite3 <second> "PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM articles;"`
+  (expect `ok`, the pre-migration schema version and the original story count). Open the second file once more in the
+  built app (or run `NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=<second> ./test.sh`) and confirm it migrates again to the same
+  counts as the first run.
 
 ## 2. Feed parser and networking security tests
 
@@ -87,7 +94,9 @@ fresh holdout, as the audits describe.
 ## 7. Performance budgets
 
 There is no automatic pass or fail budget yet: #543 re-baselines the numbers and #839 covers the list refresh. Until
-they land, run the commands, compare with the newest file in `docs/benchmarks/`, and record any regression:
+they land, every command below must succeed and its numbers must be recorded in the release record next to the
+newest file in `docs/benchmarks/`. Any regression against that file has to be acknowledged in the release record by
+the release owner; an unacknowledged regression blocks the release.
 
 ```sh
 ./test.sh --performance-baseline
@@ -102,7 +111,8 @@ NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/ListInvalidationBaseline.swi
   entitlements, the container migration plist and that `PRIVACY.md` exists.
 - Manual (#815, #569): read `PRIVACY.md`, `README.md`, `docs/ARCHITECTURE.md` and `CONTRIBUTING.md` against the
   code for anything this release changed (network access, stored data, notification limits, supported macOS).
-  Run `python3 script/changelog_fold.py` only when cutting the tag, then check `CHANGELOG.md`.
+  Run `python3 script/changelog_fold.py` when cutting the tag: it rewrites `CHANGELOG.md` and deletes the
+  `CHANGELOG.d/` fragments. Check the result and commit it before tagging, so the tag contains the folded changelog.
 
 ## Cutting the tag
 
