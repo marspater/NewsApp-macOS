@@ -102,10 +102,10 @@ struct BriefingPriorityData: Equatable, Sendable {
         for (index, thread) in threads.enumerated() {
             let summary = thread.summary
             let overview = try? await store.fetchEventOverview(eventID: summary.eventID)
-            let members = (try? await store.eventMemberArticles(eventID: summary.eventID)) ?? []
+            let members = (try? await store.storyMemberArticles(eventID: summary.eventID)) ?? []
             let original = members.isEmpty ? nil : originalReports(members.map { ($0.publisherName, reportText($0)) })
             let links = Dictionary(members.map { ($0.id, $0.link) }, uniquingKeysWith: { first, _ in first })
-            let firstReport = (try? await store.storyMemberArticles(eventID: summary.eventID))?.map(\.pubDate).min()
+            let firstReport = members.map(\.pubDate).min()
             let latest = summary.latestDate ?? thread.representative.pubDate
             cards.append(
                 Card(
@@ -322,7 +322,7 @@ struct BriefingPriorityModuleView: View {
 
     private func quoteView(_ quote: BriefingPriorityData.Quote) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.textStack) {
-            Text("“\(quote.text)”")
+            Text(quote.text)
                 .font(AppTypography.quote)
                 .foregroundStyle(AppColor.primaryText)
                 .fixedSize(horizontal: false, vertical: true)

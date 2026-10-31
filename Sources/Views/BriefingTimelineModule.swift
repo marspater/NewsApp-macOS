@@ -83,7 +83,7 @@ struct BriefingTimelineData: Equatable, Sendable {
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
         let overviews = await BriefingOverviews.load(context.entries, store: store)
         var threads: [(Int, Thread)] = []
-        for (index, pair) in overviews.enumerated() {
+        for (index, pair) in overviews.enumerated() where !Task.isCancelled {
             var timelines = [pair.1.timeline]
             if case .event(let summary, _, _) = pair.0,
                 let storyEvents = try? await store.database.storyEventIDs(summary.eventID)

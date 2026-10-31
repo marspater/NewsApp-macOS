@@ -79,16 +79,18 @@ enum BriefingSitrepComposer {
     /// Negation and uncertainty cues; a sentence restating qualified facts must keep at least one of them.
     private static let qualifiers: Set<String> = [
         "not", "no", "never", "denied", "denies", "unconfirmed", "alleged", "reportedly", "could not", "may", "might",
-        "could", "expected", "possible", "likely",
+        "could", "expected", "possible", "likely", "cannot", "n't",
     ]
 
     /// False when a fact is negated or uncertain and the sentence drops every such cue. Publisher names are not
     /// required: the module's label and the thread link carry attribution, and quotes stay on their own lines.
     static func keepsQualifiers(_ sentence: String, facts: [String]) -> Bool {
         func hasQualifier(_ text: String) -> Bool {
-            let lower = text.lowercased()
+            let lower = text.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
             let tokens = Set(words(lower))
-            return qualifiers.contains { $0.contains(" ") ? lower.contains($0) : tokens.contains($0) }
+            return qualifiers.contains {
+                $0.contains(" ") || $0.contains("'") ? lower.contains($0) : tokens.contains($0)
+            }
         }
         return !facts.contains(where: hasQualifier) || hasQualifier(sentence)
     }
