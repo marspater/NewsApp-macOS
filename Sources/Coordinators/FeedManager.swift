@@ -454,20 +454,22 @@ class FeedManager: NSObject, ObservableObject {
         await OverviewGenerationCoordinator.shared.analysisCleared()
     }
 
-    /// The library's read-only reason, or nil while it is writable. The store opens asynchronously at launch, so
-    /// this waits for the store's startup open rather than trusting a notice that may not be set yet.
-    func readOnlyNotice() async -> String? {
+    /// Why nothing can be stored, or nil while the library is writable: its read-only reason, or that it never opened.
+    /// The store opens asynchronously at launch, so this waits for the startup open instead of trusting a notice that
+    /// may not be set yet.
+    func refreshBlockedReason() async -> String? {
         await articleStore.waitForStartup()
-        return articleStore.databaseHealthNotice
+        if let notice = articleStore.databaseHealthNotice { return "The library is read-only. \(notice)" }
+        return articleStore.isReady ? nil : "The library could not be opened."
     }
 
-    /// True while the library is read-only; a manual refresh then says why, once (#787).
+    /// True while nothing can be stored; a manual refresh then says why, once (#787).
     private func refusesCollectionWhileReadOnly(manual: Bool) async -> Bool {
-        let notice = await readOnlyNotice()
+        let reason = await refreshBlockedReason()
         // Stopped or cancelled while waiting for startup: do not report or start anything.
         guard !isStopped, !Task.isCancelled else { return true }
-        guard let notice else { return false }
-        if manual { articleStore.operationError = "Refresh is off while the library is read-only. \(notice)" }
+        guard let reason else { return false }
+        if manual { articleStore.operationError = "Refresh is off. \(reason)" }
         return true
     }
 

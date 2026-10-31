@@ -1579,8 +1579,9 @@ struct NewsTests {
 
         let refreshDialog = try await RefreshFeedsIntent(feedManager: manager).perform()
         assertTrue(
-            extractDialogText(from: refreshDialog)?.contains("read-only") == true,
-            "The Refresh Feeds shortcut reports the read-only library instead of success")
+            extractDialogText(from: refreshDialog)?.contains("read-only") == true
+                && extractDialogText(from: refreshDialog)?.contains(store.databaseHealthNotice ?? "?") == true,
+            "The Refresh Feeds shortcut reports the read-only library and its notice instead of success")
         await manager.fetchFeedsAsync()
         assertEqual(await fetches.batches.count, 0, "A manual refresh downloads nothing while read-only")
         assertTrue(
