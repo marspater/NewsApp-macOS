@@ -12399,6 +12399,12 @@ struct NewsTests {
         let clearedInterests = try await interestsDb.briefingInterests(now: testNow, resetAt: testNow)
         assertTrue(clearedInterests.isEmpty, "Resetting to now produces zero inferred interests")
 
+        // 3b. Notification triage honors the reset like the Briefing does (#806)
+        let triageUnreset = await FeedManager.triageInterests(database: interestsDb, now: testNow, resetAt: nil)
+        assertFalse(triageUnreset.isEmpty, "Triage without a reset still ranks the read history")
+        let triageReset = await FeedManager.triageInterests(database: interestsDb, now: testNow, resetAt: testNow)
+        assertTrue(triageReset.isEmpty, "Triage after a reset has no interests from earlier history")
+
         // 4. Non-destructive assertion: read markers and bookmarks remain intact
         assertTrue(
             try await interestsDb.isRead(articleId: "int-tech"),
