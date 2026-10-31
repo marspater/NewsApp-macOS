@@ -60,7 +60,8 @@ enum ForwardWatchExtractor {
                     guard sentence.count >= 20,
                         let (kind, dateText) = classify(sentence, publishedAt: citation.publishedAt ?? publishedAt)
                     else { continue }
-                    guard seen.insert(key(sentence)).inserted else { continue }
+                    // One item per sentence and publisher, so the module can count every publisher that stated it.
+                    guard seen.insert(key(sentence) + "\u{0}" + (citation.sourceName ?? "")).inserted else { continue }
                     items.append(
                         ForwardWatchItem(
                             kind: kind, text: sentence, dateText: dateText, publisher: citation.sourceName,
@@ -68,11 +69,22 @@ enum ForwardWatchExtractor {
                 }
             }
         }
-        return Array(sorted(items).prefix(maximumItems))
+        // The cap counts distinct sentences; further publishers of a kept sentence stay in.
+        var kept = Set<String>()
+        return sorted(items).filter { item in
+            let sentence = key(item.text)
+            if kept.contains(sentence) { return true }
+            guard kept.count < maximumItems else { return false }
+            kept.insert(sentence)
+            return true
+        }
     }
 
-    /// Dedupe key: the first 40 characters, case folded.
-    static func key(_ text: String) -> String { String(text.prefix(40)).lowercased() }
+    /// Dedupe key: the whole sentence, whitespace collapsed and case folded, so identical wire copy merges but two
+    /// claims that only share an opening stay apart.
+    static func key(_ text: String) -> String {
+        text.lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
 
     /// Scheduled first, then expected, then conditional; stable within a kind.
     static func sorted(_ items: [ForwardWatchItem]) -> [ForwardWatchItem] {

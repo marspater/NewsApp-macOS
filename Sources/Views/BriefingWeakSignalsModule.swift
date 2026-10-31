@@ -42,7 +42,7 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
     static let bigThreadPublishers = 5
     static let maximumRows = 5
     static let footer =
-        "Low coverage alone never qualifies: a story needs a major rating, a link to a big thread, or rising momentum."
+        "Low coverage alone never qualifies: a story needs a major rating, a link to a big thread, rising momentum, or a cited industry impact."
 
     /// The reason pills; empty means the story does not qualify.
     static func reasons(_ evidence: Evidence) -> [String] {
@@ -67,6 +67,14 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
         let words = headline.split(whereSeparator: \.isWhitespace)
         return words.prefix(4).joined(separator: " ").lowercased()
     }
+
+    /// The sector of the first industry-impact item that carries a citation; uncited items never qualify a story.
+    static func citedSector(_ impacts: [OverviewIndustryImpact]) -> String? {
+        impacts.first { !$0.citationIDs.isEmpty }?.industry
+    }
+
+    /// Whether any row survives the board's region filter.
+    func hasRows(under filter: BriefingBoardFilter) -> Bool { rows.contains { filter.includes($0.entry) } }
 
     static func isCandidate(_ entry: FeedEntry) -> Bool { entry.publisherCount <= lowCoverageLimit }
 
@@ -108,7 +116,7 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
             } else {
                 overview = try? await store.fetchEventOverview(forArticleID: entry.id)
             }
-            found.sector = overview?.industryImpact.first?.industry
+            found.sector = citedSector(overview?.industryImpact ?? [])
             evidence[entry.id] = found
             let count = entry.publisherCount
             captions[entry.id] =
@@ -150,6 +158,12 @@ struct BriefingWeakSignalsModuleView: View {
 
     var body: some View {
         let rows = data.rows.filter { filter.includes($0.entry) }
+        if !rows.isEmpty {
+            card(rows)
+        }
+    }
+
+    private func card(_ rows: [BriefingWeakSignalsData.Row]) -> some View {
         BriefingModuleCard(title: "Weak signals") {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in

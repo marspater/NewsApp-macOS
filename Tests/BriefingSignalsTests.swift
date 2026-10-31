@@ -57,6 +57,10 @@ enum BriefingSignalsTests {
     }
 
     static func weakSignalGate() {
+        let uncited = OverviewIndustryImpact(industry: "Energy", implication: "Fuel prices may rise.")
+        let cited = OverviewIndustryImpact(industry: "Shipping", implication: "Routes change.", citationIDs: ["c1"])
+        check(BriefingWeakSignalsData.citedSector([uncited]) == nil, "an uncited industry impact never qualifies")
+        check(BriefingWeakSignalsData.citedSector([uncited, cited]) == "Shipping", "the first cited sector qualifies")
         typealias Data = BriefingWeakSignalsData
         let low = entry("low", publishers: 2)
         check(
@@ -153,7 +157,13 @@ enum BriefingSignalsTests {
             } else {
                 print("   wrong kind \(found.kind): \(item.sentence)")
             }
-            if found.dateText == item.expected_date_text { dateRight += 1 }
+            if found.dateText == item.expected_date_text {
+                dateRight += 1
+            } else {
+                print(
+                    "   date text \(found.dateText ?? "nil"), expected \(item.expected_date_text ?? "nil"): \(item.sentence)"
+                )
+            }
         }
         let recall = Double(recalled) / Double(max(positives, 1))
         let accuracy = Double(kindRight) / Double(max(recalled, 1))
@@ -163,6 +173,7 @@ enum BriefingSignalsTests {
         )
         for (cell, count) in confusion.sorted(by: { $0.key < $1.key }) { print("   \(cell): \(count)") }
         check(falsePositives == 0, "no item for a sentence that states nothing ahead")
+        check(dateRight == recalled, "date text exact \(dateRight)/\(recalled)")
         check(badDates == 0, "every date text is a substring of its sentence")
         check(recall >= 0.8, "recall \(recall) ≥ 0.8")
         check(accuracy >= 0.9, "kind accuracy \(accuracy) ≥ 0.9")
@@ -194,6 +205,30 @@ enum BriefingSignalsTests {
     }
 
     static func forwardWatchMerge() {
+        let wire = "The Security Council will meet on Tuesday to discuss the shipping corridor."
+        let twoCitations = ["c1": "Harbor Times", "c2": "Wire Service"].mapValues { _ in wire }
+        let cited = Dictionary(
+            uniqueKeysWithValues: [("c1", "Harbor Times"), ("c2", "Wire Service")].map { id, name in
+                (
+                    id,
+                    OverviewCitation(
+                        id: id, articleID: id, passageID: id, passageFingerprint: id, quote: twoCitations[id] ?? "",
+                        source: OverviewSourceMetadata(name: name, publishedAt: now))
+                )
+            })
+        let both = ForwardWatchExtractor.extract(
+            facts: [OverviewFact(id: "f", text: wire, citationIDs: ["c1", "c2"])], citations: cited, publishedAt: now)
+        let counted = BriefingForwardWatchData.make(both.map { BriefingForwardWatchData.Candidate(item: $0) })
+        check(
+            counted?.rows.count == 1 && counted?.rows.first?.publishers.count == 2,
+            "one sentence from two citations counts both publishers")
+        let opening = "The Federal Reserve's rate-setting committee will meet on "
+        let split = BriefingForwardWatchData.make(
+            (extract(opening + "5 November.") + extract(opening + "12 December.", publisher: "Wire Service"))
+                .map { BriefingForwardWatchData.Candidate(item: $0, url: nil, entry: nil) })
+        check(split?.rows.map(\.item.dateText) == ["on 5 November", "on 12 December"], "a shared opening never merges")
+        check(ForwardWatchExtractor.key("A  b\nC") == ForwardWatchExtractor.key("a b c"), "whitespace and case fold")
+        check(split?.hasRows(under: BriefingBoardFilter()) == true, "rows without a story pass the filter")
         let text = "The Security Council will meet on Tuesday to discuss the shipping corridor."
         let a = extract(text, publisher: "Harbor Times")
         let b = extract(text, publisher: "Wire Service")

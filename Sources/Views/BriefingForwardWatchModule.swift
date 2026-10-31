@@ -41,6 +41,9 @@ struct BriefingForwardWatchData: Equatable, Sendable {
 
     let rows: [Row]
 
+    /// Whether any row survives the board's region filter; a row without a story always does.
+    func hasRows(under filter: BriefingBoardFilter) -> Bool { rows.contains { $0.entry.map(filter.includes) ?? true } }
+
     /// One extracted line with where it came from: the citation's link and the story it was found in.
     struct Candidate: Sendable {
         let item: ForwardWatchItem
@@ -132,6 +135,12 @@ struct BriefingForwardWatchModuleView: View {
 
     var body: some View {
         let rows = data.rows.filter { $0.entry.map(filter.includes) ?? true }
+        if !rows.isEmpty {
+            card(rows)
+        }
+    }
+
+    private func card(_ rows: [BriefingForwardWatchData.Row]) -> some View {
         BriefingModuleCard(title: "Forward watch", caption: "Stated in reporting") {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
