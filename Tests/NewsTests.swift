@@ -1164,6 +1164,8 @@ struct NewsTests {
 
         let store = ArticleStore(database: db)
         await store.initialize()
+        // The store's own launch task also refreshes; the latest refresh publishes, so wait for it to settle.
+        for _ in 0..<100 where store.unreadCount != 601 { try await Task.sleep(for: .milliseconds(50)) }
         assertEqual(store.unreadCount, 601, "The store counts everything while nothing is muted")
         await store.setMuting(muting)
         assertEqual(store.unreadCount, 600, "The menu bar and sidebar count follows the mute rules")
