@@ -785,6 +785,7 @@ struct NewsTests {
             await testFTS5SearchAndOperators()
             try await testUnchangedFTSRefresh()
             try await testSearchSpellingSuggestion()
+            try await testUnreadCountAndSavedStateCoverTheLibrary()
             try await testFTSRowIDMigration()
             try await testDatabaseHealthAndDerivedRetention()
             try await testRealLibraryMigrationFixture()
@@ -948,10 +949,15 @@ struct NewsTests {
             ("testFTS5SearchAndOperators", { await testFTS5SearchAndOperators() }),
             ("testUnchangedFTSRefresh", { try await testUnchangedFTSRefresh() }),
             ("testSearchSpellingSuggestion", { try await testSearchSpellingSuggestion() }),
+            (
+                "testUnreadCountAndSavedStateCoverTheLibrary",
+                { try await testUnreadCountAndSavedStateCoverTheLibrary() }
+            ),
             ("testFTSRowIDMigration", { try await testFTSRowIDMigration() }),
             ("testDatabaseHealthAndDerivedRetention", { try await testDatabaseHealthAndDerivedRetention() }),
             ("testRealLibraryMigrationFixture", { try await testRealLibraryMigrationFixture() }),
             ("testLibraryBackupAndFutureSchemaGuard", { try await testLibraryBackupAndFutureSchemaGuard() }),
+            ("testReadOnlyLibraryRefresh", { try await testReadOnlyLibraryRefresh() }),
             ("testLibraryBackupRestore", { try await testLibraryBackupRestore() }),
             ("testMigrationCoordinatorAtomicity", { try await testMigrationCoordinatorAtomicity() }),
             ("testArticleRetentionPolicy", { await testArticleRetentionPolicy() }),
@@ -1130,6 +1136,52 @@ struct NewsTests {
         assertEqual(rowID(), migratedID, "Existing v11 database receives a durable FTS key")
         assertEqual(indexData(), migratedIndex, "Existing v11 database receives the guarded trigger")
         assertEqual(try await db.searchArticles(query: "Updated").count, 1, "Migration preserves searchable rows")
+        await db.close()
+    }
+
+    /// #785: the unread count is one SQL count over the whole library with muting applied, and saved state has no
+    /// 500-story cap.
+    @MainActor static func testUnreadCountAndSavedStateCoverTheLibrary() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        var stories = (0..<600).map { index in
+            FeedArticle(
+                title: "Library story \(index)", link: "https://other.org/\(index)", guid: "lib-\(index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000 - Double(index) * 60),
+                source: "Publisher")
+        }
+        stories.append(
+            FeedArticle(
+                title: "Muted story", link: "https://muted.example/1", guid: "lib-muted", description: "",
+                pubDate: Date(timeIntervalSince1970: 1_600_000_000), source: "Publisher"))
+        try await db.upsertArticles(stories)
+        let muting = MuteRules(sources: ["muted.example"])
+
+        assertEqual(try await db.counts().unread, 601, "Without rules every unread story counts")
+        assertEqual(
+            try await db.counts(muting: muting).unread, 600,
+            "The unread count spans the whole library, beyond the 500-story window, and leaves muted stories out")
+        let unreadList = try await db.fetchArticles(isRead: false, limit: nil, muting: muting)
+        assertEqual(unreadList.count, 600, "The Unread list agrees with the count")
+
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        // The store's own launch task also refreshes; the latest refresh publishes, so wait for it to settle.
+        for _ in 0..<100 where store.unreadCount != 601 { try await Task.sleep(for: .milliseconds(50)) }
+        assertEqual(store.unreadCount, 601, "The store counts everything while nothing is muted")
+        await store.setMuting(muting)
+        assertEqual(store.unreadCount, 600, "The menu bar and sidebar count follows the mute rules")
+        await store.markAsRead(id: stories[0].id)
+        assertEqual(store.unreadCount, 599, "A read toggle keeps muting applied")
+
+        for story in stories.prefix(501) { try await db.setSaved(articleId: story.id, isSaved: true) }
+        await store.refreshState()
+        assertEqual(store.savedArticles.count, 501, "Saved stories are not capped at 500")
+        assertEqual(store.savedArticleIDs.count, 501, "Every saved story reads as saved")
+        assertEqual(store.savedCount, 501, "The saved count agrees")
+        await store.removeAllSavedStories()
+        assertEqual(try await db.counts().saved, 0, "Remove All unsaves every saved story")
+        assertTrue(store.savedArticles.isEmpty, "Nothing stays saved in memory")
         await db.close()
     }
 
@@ -1535,6 +1587,60 @@ struct NewsTests {
             "Corrupted database surfaces a user-visible health notice on ArticleStore (#536)"
         )
         await corruptDB.close()
+    }
+
+    @MainActor
+    static func testReadOnlyLibraryRefresh() async throws {
+        print("  - Testing a read-only library skips scheduled refreshes and explains a manual one (#787)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-readonly-refresh-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        // A readable library saved by a newer build opens read-only, and loads without any startup error.
+        let seed = DatabaseEngine(path: path)
+        try await seed.open()
+        await seed.close()
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the seeded library")
+        sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil)
+        sqlite3_close(handle)
+        let engine = DatabaseEngine(path: path)
+        let store = ArticleStore(database: engine)
+        await store.waitForStartup()
+        assertTrue(store.databaseHealthNotice != nil, "The newer library opens read-only with a notice")
+
+        let suite = testDefaultsSuite("test.readonly.refresh")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        _ = settings.addFeed(url: "https://example.com/readonly.xml")
+        let fetches = TestRecorder()
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                await fetches.record(urls)
+                return urls.map { ($0, [], nil, nil) }
+            })
+        defer { manager.stopBackgroundWork() }
+
+        assertTrue(store.operationError == nil, "A readable read-only library starts without an alert")
+        await manager.fetchFeedsAsync(scheduled: true)
+        assertEqual(await fetches.batches.count, 0, "A scheduled refresh downloads nothing while read-only")
+        assertTrue(store.operationError == nil, "A scheduled refresh raises no alert while read-only")
+
+        let refreshDialog = try await RefreshFeedsIntent(feedManager: manager).perform()
+        assertTrue(
+            extractDialogText(from: refreshDialog)?.contains("read-only") == true
+                && extractDialogText(from: refreshDialog)?.contains(store.databaseHealthNotice ?? "?") == true,
+            "The Refresh Feeds shortcut reports the read-only library and its notice instead of success")
+        await manager.fetchFeedsAsync()
+        assertEqual(await fetches.batches.count, 0, "A manual refresh downloads nothing while read-only")
+        assertTrue(
+            store.operationError?.contains("read-only") == true
+                && store.operationError?.contains(store.databaseHealthNotice ?? "?") == true,
+            "A manual refresh says why, with the library's own notice")
+        await engine.close()
     }
 
     static func testLibraryBackupAndFutureSchemaGuard() async throws {
@@ -15901,6 +16007,19 @@ struct NewsTests {
             source: "Physics Journal"
         )
 
+        // Fill the bounded queue first, so A and B stay queued and the cancellations below cannot race a job that
+        // already finished (a refused write leaves no job behind, #820).
+        let hold = OpenGate()
+        for index in 0..<3 {
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "hold-\(index)") {
+                    await hold.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("Held generations fill the queue") { await queue.activeJobCount() == 3 }
+
         // 1. Enqueue background
         await queue.enqueue(article: articleA, priority: .background)
 
@@ -15927,6 +16046,8 @@ struct NewsTests {
             let active = await queue.activeJobCount()
             assertTrue(active <= 3, "Rapid replacement cannot exceed the concurrency bound")
         }
+
+        await hold.open()
 
         // Finished work is not superseded or repeated by the next refresh, and its full FeedArticle job is released (#535).
         let articleC = FeedArticle(
