@@ -442,7 +442,16 @@ class FeedManager: NSObject, ObservableObject {
         Task { await queue.cancelAll(reason: .user) }
     }
 
+    /// Clear AI Analysis: the runs that would enqueue or warm from pre-clear inputs stop here, the queue and the
+    /// coordinator drop their session state, and the store already refuses any write still in flight.
     private func analysisCleared() {
+        enrichmentTask?.cancel()
+        enrichmentTask = nil
+        overviewWarmupTask?.cancel()
+        overviewWarmupTask = nil
+        clusteringTask?.cancel()
+        clusteringTask = nil
+        clusteringRunID = nil
         let queue = enrichmentQueue
         Task {
             await queue.analysisCleared()
