@@ -174,6 +174,12 @@ class FeedManager: NSObject, ObservableObject {
     func addFeedAndCollect(url: String) async -> String? {
         guard let added = subscribe(url: url) else { return nil }
         await fetchFeedsAsync()
+        // Another subscription change may have cancelled that run and started a replacement; wait for it too.
+        for _ in 0..<5 {
+            await Task.yield()
+            guard let replacement = refreshTask else { break }
+            _ = await replacement.value
+        }
         return added
     }
 

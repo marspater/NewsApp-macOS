@@ -17223,6 +17223,25 @@ struct NewsTests {
             assertTrue(false, "AddFeedIntent 1 threw: \(error)")
         }
 
+        // A later subscription change cancels the run the Shortcut awaits; the action still returns only once the
+        // replacement run has collected the new feed.
+        let slowSuite = testDefaultsSuite("test.intent.addfeed.slow")
+        let slowDefaults = UserDefaults(suiteName: slowSuite)!
+        defer { removeTestDefaults(slowSuite) }
+        let slowSettings = AppSettings(defaults: slowDefaults)
+        let slowManager = FeedManager(
+            settings: slowSettings, store: addStore, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                try? await Task.sleep(for: .milliseconds(250))
+                return urls.map { ($0, [], nil, nil) }
+            })
+        defer { slowManager.stopBackgroundWork() }
+        let slowAdd = Task { @MainActor in await slowManager.addFeedAndCollect(url: "https://slow.example.com/a.xml") }
+        try? await Task.sleep(for: .milliseconds(60))
+        slowManager.addFeed(url: "https://slow.example.com/b.xml")
+        _ = await slowAdd.value
+        assertFalse(slowManager.isAnyFeedLoading, "Add Feed returns only after the replacement run has finished")
+
         // Duplicate subscription rejection
         let addIntentDup = AddFeedIntent(url: validURL, feedManager: addManager)
         do {
