@@ -118,6 +118,17 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// Feed and page links are untrusted: only an http(s) address with a host is stored or opened, so a link such as
+/// `smb://` or another app's URL scheme never reaches Launch Services (#799). Every open site goes through `url`.
+enum WebLink {
+    static func url(_ link: String) -> URL? {
+        guard let url = URL(string: link.trimmingCharacters(in: .whitespacesAndNewlines)),
+            ["http", "https"].contains(url.scheme?.lowercased() ?? ""), !(url.host ?? "").isEmpty
+        else { return nil }
+        return url
+    }
+}
+
 /// Navigation wrapper that pairs an active article with its contextual collection
 /// (e.g. active filtered search, category, or unread stories).
 struct FeedArticleWrap: Identifiable, Hashable, Sendable {

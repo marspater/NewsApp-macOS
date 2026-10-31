@@ -3799,6 +3799,15 @@ struct NewsTests {
         assertEqual(
             FeedFetcher.webArticles(linked).map(\.link), ["https://example.com/story", "http://example.com/older", ""],
             "Feed items whose links are not web addresses are dropped")
+        for link in [
+            "smb://evil.example/share", "x-apple.systempreferences:com.apple.preference.security",
+            "file:///etc/passwd", "javascript:alert(1)", "https:///no-host", "",
+        ] {
+            assertTrue(WebLink.url(link) == nil, "Every open site refuses \(link.isEmpty ? "an empty link" : link)")
+        }
+        assertEqual(
+            WebLink.url(" https://example.com/story ")?.absoluteString, "https://example.com/story",
+            "A web link opens, trimmed")
         let linkless = JSONFeedParser.parse(
             data: Data(
                 #"{"version":"https://jsonfeed.org/version/1.1","title":"T","items":[{"id":"123","content_text":"Story"}]}"#
