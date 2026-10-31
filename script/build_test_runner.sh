@@ -32,6 +32,10 @@ struct NewsRegressionRunner {
             }
             if selected("Tests/NotificationAttachmentTests.swift") { NotificationAttachmentTests.run() }
             if selected("Tests/BriefingE2ETests.swift") { await BriefingE2ETests.run() }
+            if selected("Tests/BriefingWarRoomTests.swift") { await BriefingWarRoomTests.run() }
+            if selected("Tests/BriefingIntelligenceTests.swift") { await BriefingIntelligenceTests.run() }
+            if selected("Tests/BriefingImpactTests.swift") { await BriefingImpactTests.run() }
+            if selected("Tests/BriefingSignalsTests.swift") { await BriefingSignalsTests.run() }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
         }
     }
@@ -104,6 +108,20 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Views/ArticleCardView.swift \
     Sources/Views/BriefingComponents.swift \
     Sources/Views/BriefingView.swift \
+    Sources/Views/BriefingModules.swift \
+    Sources/Views/BriefingSitrepModule.swift \
+    Sources/Views/BriefingSinceLastModule.swift \
+    Sources/Views/BriefingPriorityModule.swift \
+    Sources/Views/BriefingFootprintModule.swift \
+    Sources/Views/BriefingRegionsModule.swift \
+    Sources/Views/BriefingIndustryModule.swift \
+    Sources/Views/BriefingDriversModule.swift \
+    Sources/Views/BriefingTimelineModule.swift \
+    Sources/Views/BriefingWeakSignalsModule.swift \
+    Sources/Views/BriefingForwardWatchModule.swift \
+    Sources/Intelligence/ForwardWatchExtractor.swift \
+    Sources/Intelligence/BriefingSitrepComposer.swift \
+    Sources/Storage/DatabaseEngine+Briefing.swift \
     Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/ReaderSupportViews.swift \
     Sources/Views/EventOverviewReaderView.swift \
@@ -119,6 +137,10 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Tests/EventEmbeddingTests.swift \
     Tests/EpicNE2ETests.swift \
     Tests/BriefingE2ETests.swift \
+    Tests/BriefingWarRoomTests.swift \
+    Tests/BriefingIntelligenceTests.swift \
+    Tests/BriefingImpactTests.swift \
+    Tests/BriefingSignalsTests.swift \
     "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
     -o "$OUTPUT"

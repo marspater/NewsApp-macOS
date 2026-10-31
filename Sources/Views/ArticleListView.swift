@@ -9,6 +9,8 @@ struct ListCommandActions {
     let newBriefing: (() -> Void)?
     /// Leaves the Briefing for the destination shown before it (Navigate › Back).
     var back: (() -> Void)? = nil
+    /// Presents the Customize Briefing sheet (View › Customize Briefing…).
+    var customizeBriefing: (() -> Void)? = nil
 }
 
 private struct ListCommandActionsKey: FocusedValueKey { typealias Value = ListCommandActions }
@@ -66,8 +68,11 @@ struct ArticleListView: View {
     @State private var focusedArticleID: String? = nil
 
     @State private var briefing: FiniteBriefing?
-    /// The Briefing's cited facts and hero images, read from the library once per edition.
-    @State private var briefingDetails = BriefingStoryDetails()
+    /// Every Briefing module's data, read from the library once per edition.
+    @State private var briefingData = BriefingBoardData()
+    @State private var showsCustomizeBriefing = false
+    /// The window's World Tension model, snapshotted into the Briefing modules' load context.
+    @Environment(WorldTensionModel.self) private var tensionModel: WorldTensionModel?
     @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
     /// The stored edition, shared by every window: when it was selected and its story IDs in order.
     @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
@@ -237,7 +242,8 @@ struct ArticleListView: View {
         guard articlePath.isEmpty else { return nil }
         return ListCommandActions(
             canGroupStories: true, newBriefing: isBriefing ? { startNewBriefing() } : nil,
-            back: isBriefing ? { leaveBriefing() } : nil)
+            back: isBriefing ? { leaveBriefing() } : nil,
+            customizeBriefing: isBriefing ? { showsCustomizeBriefing = true } : nil)
     }
 
     var body: some View {
@@ -249,6 +255,9 @@ struct ArticleListView: View {
         }
         .focusedSceneValue(\.selectedStory, selectedStory)
         .focusedSceneValue(\.listActions, listCommandActions)
+        .sheet(isPresented: $showsCustomizeBriefing) {
+            BriefingCustomizeSheet().environmentObject(appSettings)
+        }
         .navigationTitle(locationTitle)
         // The masthead shows the location, so the toolbar does not repeat it (DESIGN.md 5).
         .toolbar(removing: .title)
@@ -690,7 +699,10 @@ struct ArticleListView: View {
             }
         }
         // Aligned with the content column: the centred list and Briefing measure, or the full-width grid.
-        .frame(maxWidth: gridLayout && !isBriefing ? .infinity : AppLayout.listMaxWidth, alignment: .leading)
+        .frame(
+            maxWidth: isBriefing ? AppLayout.briefingMaxWidth : gridLayout ? .infinity : AppLayout.listMaxWidth,
+            alignment: .leading
+        )
         .frame(maxWidth: .infinity)
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.top, AppSpacing.md)
@@ -792,6 +804,14 @@ struct ArticleListView: View {
         #endif
         if isBriefing {
             ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showsCustomizeBriefing = true
+                } label: {
+                    Label("Customize Briefing", systemImage: "slider.horizontal.3")
+                }
+                .help("Choose and order the Briefing's modules")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button(action: startNewBriefing) {
                     Label("New Briefing", systemImage: "text.book.closed")
                 }
@@ -890,11 +910,12 @@ struct ArticleListView: View {
             BriefingView(
                 entries: listed,
                 briefing: briefing,
-                details: briefingDetails,
+                data: briefingData,
+                layout: appSettings.briefingLayout,
                 readIDs: readManager.readArticles,
                 savedIDs: briefingSavedIDs(listed),
                 focusedID: listHasFocus ? focusedArticleID : nil,
-                isMotionPaused: !articlePath.isEmpty || isSheetPresented,
+                isMotionPaused: !articlePath.isEmpty || isSheetPresented || showsCustomizeBriefing,
                 nextEdition: FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour),
                 actions: BriefingActions(
                     onOpenArticle: { article in openArticle(article) },
@@ -913,15 +934,21 @@ struct ArticleListView: View {
                     onStartNewBriefing: { startNewBriefing() },
                     onBackToToday: { selectedTopic = "Today" },
                     onToggleRead: { readManager.toggleRead($0.id) },
-                    onToggleSave: { toggleSaved($0) }
+                    onToggleSave: { toggleSaved($0) },
+                    onCustomize: { showsCustomizeBriefing = true }
                 )
             )
-            // Stored overview highlights and each hero event's best image; nothing is generated here. Reloads when
-            // the stories, their event membership or a stored overview change.
-            .task(id: "\(listed.map(\.id)):\(articleStore.eventRevision):\(articleStore.overviewRevision)") {
-                let loaded = await BriefingStoryDetails.load(
-                    for: listed, heroIDs: Set(BriefingView.heroEntries(listed).map(\.id)), store: articleStore)
-                if !Task.isCancelled { briefingDetails = loaded }
+            // Every module's data from the library; nothing is generated at render time. Reloads when the stories,
+            // their event membership or a stored overview change.
+            .task(
+                id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision)"
+            ) {
+                let context = BriefingLoadContext(
+                    entries: listed, heroIDs: Set(BriefingView.heroEntries(listed).map(\.id)), briefing: briefing,
+                    now: Date(), tension: tensionModel?.state ?? WorldTensionState(),
+                    readIDs: readManager.readArticles, previousEditionStartedAt: nil)
+                let loaded = await BriefingBoardData.load(context, store: articleStore)
+                if !Task.isCancelled { briefingData = loaded }
             }
             .allowsWindowActivationEvents(true)
         } else {
