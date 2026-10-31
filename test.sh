@@ -66,19 +66,20 @@ else
     CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
     JOBS="${NEWS_TEST_JOBS:-$(( SHARDS + 2 < CORES ? SHARDS + 2 : CORES ))}"
     for setting in "NEWS_TEST_SHARDS=$SHARDS" "NEWS_TEST_JOBS=$JOBS"; do
-        if ! [[ "${setting#*=}" =~ ^[1-9][0-9]*$ ]]; then
-            echo "❌ $setting must be a positive integer." >&2
+        if ! [[ "${setting#*=}" =~ ^[1-9][0-9]?$ ]]; then
+            echo "❌ $setting must be a whole number from 1 to 99." >&2
             exit 2
         fi
     done
     LOGS=$(mktemp -d "${TMPDIR:-/tmp}/news-test-jobs.XXXXXX")
     JOB_LIST="$LOGS/jobs"
     : > "$JOB_LIST"
+    # A job is a name and the environment its copy of the runner gets.
     job() { printf '%s\t%s\n' "$1" "$2" >> "$JOB_LIST"; }
     # Longest first, so the pool ends evenly.
-    job "NewsTests-slow" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=slow ./test_runner"
+    job "NewsTests-slow" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=slow"
     for ((i = 0; i < SHARDS; i++)); do
-        job "NewsTests-$i-of-$SHARDS" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=$i/$SHARDS ./test_runner"
+        job "NewsTests-$i-of-$SHARDS" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=$i/$SHARDS"
     done
     {
         printf '%s\n' Tests/EventOverviewAccessibilityTests.swift Tests/ReaderAccessibilityTests.swift \
@@ -86,7 +87,7 @@ else
         grep -oE 'selected\("Tests/[A-Za-z0-9]+\.swift"\)' script/build_test_runner.sh \
             | grep -oE 'Tests/[A-Za-z0-9]+\.swift' | sort -u | grep -v '^Tests/NewsTests\.swift$'
     } | while read -r atom; do
-        job "$(basename "$atom" .swift)" "NEWS_TEST_ATOM=$atom ./test_runner"
+        job "$(basename "$atom" .swift)" "NEWS_TEST_ATOM=$atom"
     done
     JOB_COUNT=$(wc -l < "$JOB_LIST" | tr -d ' ')
     echo "Running $JOB_COUNT test jobs, $JOBS at a time..."
@@ -99,14 +100,16 @@ else
         name="$0"
         start=$(date +%s)
         cp test_runner "$LOGS/$name.runner"
-        command="${*//.\/test_runner/$LOGS/$name.runner}"
-        ( eval "$command" ) > "$LOGS/$name.log" 2>&1
+        env "$@" "$LOGS/$name.runner" > "$LOGS/$name.log" 2>&1
         status=$?
         echo "$status" > "$LOGS/$name.status"
         rm -f "$LOGS/$name.runner"
         if [[ "$status" -eq 0 ]]; then mark="✅"; else mark="❌"; fi
+        # One finished job prints at a time (mkdir is the portable lock), so log blocks never interleave.
+        until mkdir "$LOGS/print.lock" 2>/dev/null; do sleep 0.05; done
         printf "%s %s (%ss)\n" "$mark" "$name" "$(( $(date +%s) - start ))"
         cat "$LOGS/$name.log"
+        rmdir "$LOGS/print.lock"
         exit "$status"
     ' < "$JOB_LIST"
     POOL_STATUS=$?
