@@ -37,6 +37,7 @@ final class AppSettings: ObservableObject {
         showsDockBadgeKey, showsMenuBarExtraKey, aiEnabledKey, privateNotificationsEnabledKey, notificationModeKey,
         allowInsecureHTTPKey, mutedSourcesKey, mutedTopicsKey, mutedTopicSetsKey, starredFeedURLsKey,
         starredFeedTimesKey, tensionCollectionOptInKey, retiredFeedsVersionKey, dismissedAdvisoriesKey,
+        readingInterestsResetAtKey,
     ]
 
     /// The backed-up keys' stored values as a binary property list.
