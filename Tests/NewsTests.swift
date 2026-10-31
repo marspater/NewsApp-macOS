@@ -1172,6 +1172,18 @@ struct NewsTests {
         assertEqual(try await db.counts().unread, 2, "New stories refresh the unread count")
         assertEqual(try await db.mutedArticleCount(muting: muting), 1, "A new muted story refreshes the muted count")
         assertEqual(try await db.mutedArticleCount(muting: muting), 1, "The cached muted count repeats")
+
+        // A collection-only story is counted only while read: marking it unread leaves the counts.
+        let panelURL = "https://example.com/panel-counts.xml"
+        let panelStory = story(20)
+        try await db.upsertArticles([panelStory], feedUrl: panelURL)
+        await db.setCollectionOnlyFeedURLs([panelURL])
+        try await db.markRead(articleId: panelStory.id, isRead: true)
+        let withPanelRead = try await db.counts()
+        try await db.markRead(articleId: panelStory.id, isRead: false)
+        let withPanelUnread = try await db.counts()
+        assertEqual(withPanelRead.total, withPanelUnread.total + 1, "An unread collection-only story leaves the total")
+        assertEqual(withPanelRead.unread, withPanelUnread.unread, "It never joins the unread count")
         await db.close()
     }
 

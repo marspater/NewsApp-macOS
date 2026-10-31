@@ -21,8 +21,24 @@ actor DatabaseEngine {
     private var collectionOnlyFeedURLs: [String] = []
     /// The last library counts, valid while no write has happened since: `sqlite3_total_changes` moves on every write,
     /// triggers included, so no write path can leave a stale count behind (#839).
-    private var countsCache: (changes: Int, scope: [String], value: (unread: Int, saved: Int, total: Int))?
-    private var mutedCountCache: (changes: Int, counts: [MutedCountKey: Int]) = (-1, [:])
+    private var countsCache: (changes: ChangeToken, scope: [String], value: (unread: Int, saved: Int, total: Int))?
+    private var mutedCountCache: (changes: ChangeToken?, counts: [MutedCountKey: Int]) = (nil, [:])
+    /// This connection's writes (`sqlite3_total_changes`) and other connections' commits (`PRAGMA data_version`).
+    private struct ChangeToken: Equatable {
+        let own: Int
+        let external: Int
+    }
+    private func changeToken() -> ChangeToken? {
+        guard let db = db else { return nil }
+        var external = 0
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "PRAGMA data_version;", -1, &stmt, nil) == SQLITE_OK, sqlite3_step(stmt) == SQLITE_ROW
+        {
+            external = Int(sqlite3_column_int64(stmt, 0))
+        }
+        sqlite3_finalize(stmt)
+        return ChangeToken(own: Int(sqlite3_total_changes(db)), external: external)
+    }
     private struct MutedCountKey: Hashable {
         let section: String?, isRead: Bool?, isSaved: Bool?, search: String?, muting: MuteRules, scope: [String]
     }
@@ -2982,13 +2998,10 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
         // A read toggle moves the unread count by at most one: adjust the cached counts instead of scanning (#839).
-        let before = Int(sqlite3_total_changes(db))
+        let before = changeToken()
         var adjusted = countsCache.flatMap { $0.changes == before ? $0 : nil }
-        if adjusted != nil, let wasRead = countedReadState(of: articleId) {
-            if wasRead != isRead { adjusted?.value.unread += isRead ? -1 : 1 }
-        } else {
-            adjusted = nil
-        }
+        let wasRead = adjusted == nil ? nil : countedReadState(of: articleId)
+        if wasRead == nil { adjusted = nil }
 
         let now = Date().timeIntervalSince1970
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
@@ -3003,8 +3016,11 @@ actor DatabaseEngine {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markRead"])
         }
-        if var adjusted {
-            adjusted.changes = Int(sqlite3_total_changes(db))
+        // Only when the story is counted both before and after: a read story kept only by being read leaves the counts
+        // when it turns unread, which this single adjustment does not model.
+        if var adjusted, let wasRead, let nowRead = countedReadState(of: articleId), let token = changeToken() {
+            if wasRead != nowRead { adjusted.value.unread += nowRead ? -1 : 1 }
+            adjusted.changes = token
             countsCache = adjusted
         }
     }
@@ -3897,7 +3913,7 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
 
-        let changes = Int(sqlite3_total_changes(db))
+        guard let changes = changeToken() else { return (unread: 0, saved: 0, total: 0) }
         if let cache = countsCache, cache.changes == changes, cache.scope == collectionOnlyFeedURLs {
             return cache.value
         }
@@ -3954,7 +3970,7 @@ actor DatabaseEngine {
     ) throws -> Int {
         guard !muting.isEmpty, let db = db else { return 0 }
         // The count scans the library through two SQL functions per row; it only changes when a write does (#839).
-        let changes = Int(sqlite3_total_changes(db))
+        let changes = changeToken()
         if mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
         let key = MutedCountKey(
             section: section, isRead: isRead, isSaved: isSaved, search: search, muting: muting,
