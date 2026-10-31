@@ -370,9 +370,11 @@ final class AppSettings: ObservableObject {
     }
 
     func removeFeed(url: String) {
-        feedURLs.removeAll { $0 == url }
+        let key = Self.feedKey(url)
+        let removed = feedURLs.filter { Self.feedKey($0) == key }
+        feedURLs.removeAll { Self.feedKey($0) == key }
         saveFeeds()
-        if starredFeedURLs.contains(url) { setFeedStarred(url, false) }
+        for stored in Set(removed + [url]) where starredFeedURLs.contains(stored) { setFeedStarred(stored, false) }
     }
 
     /// Feeds that can be starred at once (#588).
