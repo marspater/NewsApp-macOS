@@ -63,7 +63,7 @@ struct SettingsView: View {
 
     @AppStorage(SettingsView.lastPaneStorageKey) private var selectedPane: SettingsPane = .general
     @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
-    @AppStorage("readingInterestsResetAt") private var readingInterestsResetAt = 0.0
+    @AppStorage(AppSettings.readingInterestsResetAtKey) private var readingInterestsResetAt = 0.0
     @State private var newFeedURL: String = ""
     @State private var webCacheSize: String = "Calculating…"
     @State private var databaseSize: String = "Calculating…"
@@ -693,7 +693,9 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: Self.paneWidth)
         .task {
-            let weights = (try? await articleStore.database.briefingInterests()) ?? [:]
+            // The same interests notification triage ranks by, so a reset shows here at once (#806).
+            let cutoff = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
+            let weights = (try? await articleStore.database.briefingInterests(now: Date(), resetAt: cutoff)) ?? [:]
             notificationInterests = NotificationService.rankedInterests(weights).compactMap { key in
                 NewsCategory.allCases.first { $0.rawValue.lowercased() == key }?.rawValue
             }

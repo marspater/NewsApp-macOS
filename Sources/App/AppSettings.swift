@@ -28,6 +28,8 @@ final class AppSettings: ObservableObject {
     static let retiredFeedsVersionKey = "retired_feeds_version"
     static let dismissedAdvisoriesKey = "dismissed_advisories"
     static let firstLaunchCompletedKey = "first_launch_completed"
+    /// Epoch seconds of the last Reset Reading Interests; 0 means never reset.
+    static let readingInterestsResetAtKey = "readingInterestsResetAt"
     static let briefingModuleOrderKey = "briefing_module_order"
 
     /// Everything this class persists; a library backup carries these values (#563).
@@ -36,7 +38,7 @@ final class AppSettings: ObservableObject {
         showsDockBadgeKey, showsMenuBarExtraKey, aiEnabledKey, privateNotificationsEnabledKey, notificationModeKey,
         allowInsecureHTTPKey, mutedSourcesKey, mutedTopicsKey, mutedTopicSetsKey, starredFeedURLsKey,
         starredFeedTimesKey, tensionCollectionOptInKey, retiredFeedsVersionKey, dismissedAdvisoriesKey,
-        briefingModuleOrderKey,
+        readingInterestsResetAtKey, briefingModuleOrderKey,
     ]
 
     /// The backed-up keys' stored values as a binary property list.
@@ -349,6 +351,12 @@ final class AppSettings: ObservableObject {
         guard var components = URLComponents(string: url) else { return url }
         if components.percentEncodedPath.hasSuffix("/") { components.percentEncodedPath.removeLast() }
         return components.url?.absoluteString ?? url
+    }
+
+    /// When the reader last reset their reading interests, or nil if they never did.
+    var readingInterestsResetDate: Date? {
+        let epoch = defaults.double(forKey: Self.readingInterestsResetAtKey)
+        return epoch > 0 ? Date(timeIntervalSince1970: epoch) : nil
     }
 
     func hasFeed(_ normalizedURL: String) -> Bool {

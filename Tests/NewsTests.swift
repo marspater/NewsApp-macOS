@@ -2345,6 +2345,22 @@ struct NewsTests {
         taskA.cancel()
         taskB.cancel()
 
+        // Proxy refresh is required whenever the gateway listener port changes (#807).
+        assertTrue(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: nil, currentPort: 8080),
+            "Unconfigured port needs refresh")
+        assertTrue(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: 8080, currentPort: 8081), "Changed port needs refresh")
+        assertFalse(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: 8080, currentPort: 8080),
+            "Unchanged port does not refresh")
+        assertTrue(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: UInt16(8080), currentPort: UInt16(8081)),
+            "UInt16 changed port needs refresh")
+        assertFalse(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: UInt16(8080), currentPort: UInt16(8080)),
+            "UInt16 unchanged port does not refresh")
+
         // A refused subframe is dropped quietly; only a refused main frame reports an error (#802).
         var insecureRefused = false
         do { try await SecureHTTPClient.shared.validateDestination(URL(string: "http://example.com/frame")!) } catch {
@@ -12436,6 +12452,12 @@ struct NewsTests {
         // 3. With resetAt = testNow: interests are completely cleared
         let clearedInterests = try await interestsDb.briefingInterests(now: testNow, resetAt: testNow)
         assertTrue(clearedInterests.isEmpty, "Resetting to now produces zero inferred interests")
+
+        // 3b. Notification triage honors the reset like the Briefing does (#806)
+        let triageUnreset = await FeedManager.triageInterests(database: interestsDb, now: testNow, resetAt: nil)
+        assertFalse(triageUnreset.isEmpty, "Triage without a reset still ranks the read history")
+        let triageReset = await FeedManager.triageInterests(database: interestsDb, now: testNow, resetAt: testNow)
+        assertTrue(triageReset.isEmpty, "Triage after a reset has no interests from earlier history")
 
         // 4. Non-destructive assertion: read markers and bookmarks remain intact
         assertTrue(
