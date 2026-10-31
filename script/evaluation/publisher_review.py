@@ -154,7 +154,8 @@ def self_check(manifest):
             raise AssertionError('Existing reviewer data overwritten')
         assert file.read_text() == 'original' and file.stat().st_mode & 0o077 == 0
         public = directory / 'public'
-        public.mkdir(mode=0o755)
+        public.mkdir()
+        public.chmod(0o755)  # mkdir's mode is masked by the umask; the check needs a readable directory
         checkout = directory / 'checkout'
         checkout.mkdir(mode=0o700)
         (checkout / '.git').mkdir()
