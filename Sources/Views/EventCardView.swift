@@ -14,7 +14,9 @@ struct EventCardView: View {
     var isSelected = false
     var compact = false
     var isLead = false
-    @Binding var isExpanded: Bool
+    var isExpanded = false
+    /// Expands or collapses the coverage; the list keeps which events are open.
+    let setExpanded: (Bool) -> Void
     let openRepresentative: () -> Void
     let openMember: (FeedArticle, [FeedArticle]) -> Void
     let separate: (FeedArticle) -> Void
@@ -67,7 +69,9 @@ struct EventCardView: View {
     @ViewBuilder
     private var coverage: some View {
         Divider()
-        coverageToggle
+        // The row's "updated 5 minutes ago" and its spoken label age by the minute; the equatable card is not
+        // redrawn by a refresh (#839).
+        TimelineView(.everyMinute) { _ in coverageToggle }
         if isExpanded {
             Divider()
             sourceList
@@ -77,8 +81,8 @@ struct EventCardView: View {
 
     private var coverageToggle: some View {
         Button {
-            withAnimation(reduceMotion ? nil : AppMotion.state) { isExpanded.toggle() }
-            if isExpanded {
+            withAnimation(reduceMotion ? nil : AppMotion.state) { setExpanded(!isExpanded) }
+            if !isExpanded {
                 let eventID = summary.eventID
                 Task { await articleStore.markEventSeen(eventID) }
             }
@@ -198,7 +202,7 @@ private struct EventSourceRow: View {
                         .font(AppTypography.eyebrow)
                         .foregroundStyle(AppColor.accentText)
                 }
-                Text(article.cardDateText())
+                CardDateText(article: article)
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.tertiaryText(for: contrast))
                     .monospacedDigit()
@@ -262,5 +266,15 @@ private struct EventSourceRow: View {
 
     private func toggleSaved() {
         if isSaved { savedStories.remove(article) } else { savedStories.save(article) }
+    }
+}
+
+/// An event card redraws only when its story, members, selection or expansion changed (#839). The closures are
+/// left out of the comparison: they capture the same event and representative the card shows.
+extension EventCardView: @MainActor Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.representative == rhs.representative && lhs.summary == rhs.summary
+            && lhs.visibleMembers == rhs.visibleMembers && lhs.isSelected == rhs.isSelected
+            && lhs.compact == rhs.compact && lhs.isLead == rhs.isLead && lhs.isExpanded == rhs.isExpanded
     }
 }

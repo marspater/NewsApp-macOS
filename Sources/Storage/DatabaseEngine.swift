@@ -3007,7 +3007,7 @@ actor DatabaseEngine {
         let before = changeToken()
         // Only a cache for the current scope: a scope change moves no SQLite token.
         var adjusted = countsCache.flatMap { $0.changes == before && $0.scope == collectionOnlyFeedURLs ? $0 : nil }
-        let wasRead = adjusted == nil ? nil : countedReadState(of: articleId)
+        let wasRead = adjusted.flatMap { countedReadState(of: articleId, muting: $0.muting) }
         if wasRead == nil { adjusted = nil }
 
         let now = Date().timeIntervalSince1970
@@ -3023,10 +3023,15 @@ actor DatabaseEngine {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markRead"])
         }
-        // Only when the story is counted both before and after: a read story kept only by being read leaves the counts
-        // when it turns unread, which this single adjustment does not model.
-        if var adjusted, let wasRead, let nowRead = countedReadState(of: articleId), let token = changeToken() {
-            if wasRead != nowRead { adjusted.value.unread += nowRead ? -1 : 1 }
+        // Only when the story is in scope both before and after: a read story kept only by being read leaves the counts
+        // when it turns unread, which this single adjustment does not model. A muted story stays outside the unread
+        // count, so its toggle only carries the cache forward.
+        if var adjusted, let wasRead, let nowRead = countedReadState(of: articleId, muting: adjusted.muting),
+            let token = changeToken()
+        {
+            if wasRead.counted, nowRead.counted, wasRead.isRead != nowRead.isRead {
+                adjusted.value.unread += nowRead.isRead ? -1 : 1
+            }
             adjusted.changes = token
             countsCache = adjusted
         }
@@ -3957,19 +3962,22 @@ actor DatabaseEngine {
         return (unread: unread, saved: saved, total: total)
     }
 
-    /// Whether a story the counts include is read, or nil when it is not among them.
-    private func countedReadState(of articleId: String) -> Bool? {
+    /// A story's read state and whether the counts under `muting` include it, or nil when it is outside the visible
+    /// library or the collection scope.
+    private func countedReadState(of articleId: String, muting: MuteRules) -> (isRead: Bool, counted: Bool)? {
         guard let db = db else { return nil }
         let scope = collectionScope()
+        let muted = muting.isEmpty ? "0" : Self.mutedArticle
         let sql = """
-            SELECT s.is_read FROM articles a JOIN article_state s ON s.article_id = a.id
+            SELECT s.is_read, \(muted) FROM articles a JOIN article_state s ON s.article_id = a.id
             WHERE a.id = ? AND \(Self.visibleArticle) \(scope.sql);
             """
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
-        bind([("text", articleId)] + scope.params, to: stmt)
-        return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int(stmt, 0) != 0 : nil
+        bind((muting.isEmpty ? [] : Self.mutingParameters(muting)) + [("text", articleId)] + scope.params, to: stmt)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return (isRead: sqlite3_column_int(stmt, 0) != 0, counted: sqlite3_column_int(stmt, 1) == 0)
     }
 
     /// How many stories muting removes from a list or search, across every page, under the list's own filters.
@@ -3980,7 +3988,7 @@ actor DatabaseEngine {
         search: String? = nil,
         muting: MuteRules
     ) throws -> Int {
-        guard !muting.isEmpty, let db = db else { return 0 }
+        guard !muting.isEmpty, db != nil else { return 0 }
         // The count scans the library through two SQL functions per row; it only changes when a write does (#839).
         let changes = changeToken()
         if mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
