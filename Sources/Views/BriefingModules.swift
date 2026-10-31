@@ -276,11 +276,10 @@ struct BriefingBoardData: Equatable, Sendable {
 struct BriefingBoardFilter: Equatable, Sendable {
     var region: TensionMacroRegion? = nil
 
-    /// Whether the entry belongs on the filtered board. Phase C (#850) implements the region match; until then every
-    /// entry is included.
+    /// Whether the entry belongs on the filtered board: always without a region, else when the entry's story touches it.
     func includes(_ entry: FeedEntry) -> Bool {
-        guard region != nil else { return true }
-        return true
+        guard let region else { return true }
+        return BriefingRegion.regions(of: entry).contains(region)
     }
 }
 
@@ -455,5 +454,66 @@ struct BriefingCustomizeSheet: View {
         var layout = settings.briefingLayout
         change(&layout)
         settings.setBriefingLayout(layout)
+    }
+}
+
+// MARK: - Region mapping (#850)
+
+/// Maps stories to the World Tension macro regions for the board's region filter.
+enum BriefingRegion {
+    private static let lock = NSLock()
+    /// The regions the Regions loader resolved from each entry's reports, by entry ID.
+    nonisolated(unsafe) private static var resolved: [String: Set<TensionMacroRegion>] = [:]
+
+    /// Keeps the Regions loader's map for `BriefingBoardFilter.includes`, replacing the previous edition's.
+    static func remember(_ regions: [String: Set<TensionMacroRegion>]) {
+        lock.withLock { resolved = regions }
+    }
+
+    /// The loader's regions for the entry when it resolved them, else the countries its headline names.
+    static func regions(of entry: FeedEntry) -> Set<TensionMacroRegion> {
+        if let known = lock.withLock({ resolved[entry.id] }) { return known }
+        return regions(of: entry.representative)
+    }
+
+    /// The regions of every country the headline names (the matcher's place names, aliases and demonyms included),
+    /// else of those in the description's opening.
+    static func regions(of story: FeedArticle) -> Set<TensionMacroRegion> {
+        for text in [story.title, String(ArticleContentRedactor.cleanText(story.description).prefix(240))] {
+            let words = text.split { !$0.isLetter && $0 != "'" && $0 != "\u{2019}" && $0 != "." }.map(String.init)
+            var found = Set<TensionMacroRegion>()
+            for index in words.indices {
+                // Three, two and one-word names: "Saudi Arabia", "South Korea", "Jordan".
+                for length in [3, 2, 1] where index + length <= words.count {
+                    let place = EventPlaces.canonical(words[index..<(index + length)].joined(separator: " "))
+                    if place.hasPrefix("@"), let region = region(code: String(place.dropFirst())) {
+                        found.insert(region)
+                    }
+                }
+            }
+            if !found.isEmpty { return found }
+        }
+        return []
+    }
+
+    /// Western Asia, Iran and North Africa are the Middle East & North Africa; the rest follows the UN regions, with
+    /// Central Asia in South Asia.
+    static func region(code: String) -> TensionMacroRegion? {
+        if ["IR", "EG", "DZ", "LY", "MA", "TN", "SD", "EH"].contains(code) { return .middleEastNorthAfrica }
+        let subregion = Locale.Region(code).containingRegion
+        switch subregion?.identifier {
+        case "145": return .middleEastNorthAfrica
+        case "021": return .northAmerica
+        case "034", "143": return .southAsia
+        case "030", "035": return .eastSoutheastAsia
+        default: break
+        }
+        switch subregion?.containingRegion?.identifier {
+        case "002": return .subSaharanAfrica
+        case "150": return .europe
+        case "019", "419": return .latinAmerica
+        case "009": return .oceania
+        default: return nil
+        }
     }
 }

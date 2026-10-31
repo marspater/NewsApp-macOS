@@ -15,13 +15,111 @@
 import Foundation
 import SwiftUI
 
-/// What drives World Tension: event types and regions, severity beside coverage (#850).
-/// Phase C fills the data and the view; until then the module is hidden.
+/// What drives World Tension: the event types today's stories report, severity beside coverage (#850).
 struct BriefingDriversData: Equatable, Sendable {
+    /// One story whose cited highlights the World Tension classifier gave a type.
+    struct Event: Equatable, Sendable {
+        let entry: FeedEntry
+        let type: TensionEventType
+    }
+
+    /// One type under the current filter. Severity and coverage stay separate values (DESIGN.md 8.4).
+    struct Row: Equatable, Sendable, Identifiable {
+        let type: TensionEventType
+        /// The type's calibrated weight relative to the heaviest type, 0...1.
+        let severity: Double
+        /// Distinct publishers across the type's stories.
+        let publishers: Int
+        var id: TensionEventType { type }
+        var coverageText: String { BriefingDriversData.coverageText(publishers: publishers) }
+    }
+
+    let events: [Event]
+
+    static func coverageText(publishers: Int) -> String {
+        switch publishers {
+        case 5...: return "well covered"
+        case 2...: return "thin coverage"
+        default: return "one report"
+        }
+    }
+
+    static func title(_ type: TensionEventType) -> String {
+        switch type {
+        case .armedConflict: return "Armed conflict"
+        case .terrorism: return "Terrorism"
+        case .civilUnrest: return "Civil unrest"
+        case .coercion: return "Military or economic pressure"
+        case .disaster: return "Disaster"
+        case .healthEmergency: return "Health emergency"
+        case .cyberAttack: return "Cyberattack"
+        }
+    }
+
+    /// Types with a story inside the filter, most severe first.
+    func rows(for filter: BriefingBoardFilter) -> [Row] {
+        let weights = TensionWeights.calibratedV1.typeWeights
+        let heaviest = weights.values.max() ?? 1
+        let visible = events.filter { filter.includes($0.entry) }
+        return TensionEventType.allCases.compactMap { type -> Row? in
+            let stories = visible.filter { $0.type == type }
+            guard !stories.isEmpty else { return nil }
+            let publishers = Set(stories.flatMap { Self.publishers(of: $0.entry) }).count
+            return Row(type: type, severity: (weights[type] ?? 0) / heaviest, publishers: publishers)
+        }
+        .sorted { $0.severity > $1.severity }
+    }
+
+    static func publishers(of entry: FeedEntry) -> [String] {
+        if case .event(let summary, _, _) = entry { return summary.sources }
+        return [entry.representative.source]
+    }
+
+    /// Classifies each overview's highlights by the publisher quotes they cite; nil when nothing has a type.
+    static func make(_ overviews: [(FeedEntry, EventOverviewDocument)]) -> Self? {
+        let events = overviews.compactMap { entry, overview -> Event? in
+            let facts = overview.facts.flatMap { fact in
+                fact.citationIDs.compactMap { id -> PassageAnchoredFact? in
+                    guard let citation = overview.citations[id] else { return nil }
+                    return PassageAnchoredFact(
+                        id: "\(fact.id):\(id)", statement: fact.text, passageID: citation.passageID,
+                        quote: citation.quote, articleID: citation.articleID)
+                }
+            }
+            guard let type = TensionEventClassifier.classify(facts, methodology: .v1).type else { return nil }
+            return Event(entry: entry, type: type)
+        }
+        return events.isEmpty ? nil : Self(events: events)
+    }
+
     /// nil hides the module.
-    @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? { nil }
+    @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
+        make(await BriefingOverviews.load(context.entries, store: store))
+    }
+
     /// Sample data for `Tests/OverviewCaptures.swift`.
-    static var captureFixture: Self? { nil }
+    static var captureFixture: Self? {
+        let now = Date(timeIntervalSince1970: 1_793_372_400)
+        let samples: [(String, Int, TensionEventType)] = [
+            ("Drones intercepted near an oil terminal in Saudi Arabia", 6, .armedConflict),
+            ("Protest bans extended in two capitals", 5, .civilUnrest),
+            ("Containment perimeter widens in Uganda", 3, .healthEmergency),
+            ("Cyber incident at a regional utility in Canada", 1, .cyberAttack),
+        ]
+        return Self(
+            events: samples.enumerated().map { index, sample in
+                Event(
+                    entry: BriefingRegionsData.sampleEntry(
+                        id: "driver-\(index)", title: sample.0, publishers: sample.1, date: now),
+                    type: sample.2)
+            })
+    }
+}
+
+private enum Metrics {
+    static let barHeight: CGFloat = 6
+    static let labelWidth: CGFloat = 200
+    static let coverageWidth: CGFloat = 96
 }
 
 struct BriefingDriversModuleView: View {
@@ -29,5 +127,41 @@ struct BriefingDriversModuleView: View {
     let filter: BriefingBoardFilter
     let actions: BriefingActions
 
-    var body: some View { EmptyView() }
+    var body: some View {
+        let rows = data.rows(for: filter)
+        BriefingModuleCard(title: "What drives World Tension", caption: "severity and coverage shown apart") {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                IntelligenceLabel("Assessed on this Mac").font(AppTypography.caption)
+                if rows.isEmpty {
+                    Text("No classified event in this region.")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+                ForEach(rows) { row in
+                    HStack(spacing: AppSpacing.sm) {
+                        Text(BriefingDriversData.title(row.type))
+                            .font(AppTypography.callout)
+                            .foregroundStyle(AppColor.primaryText)
+                            .frame(width: Metrics.labelWidth, alignment: .leading)
+                        GeometryReader { proxy in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(AppColor.badgeBackground)
+                                Capsule().fill(AppColor.secondaryText)
+                                    .frame(width: proxy.size.width * row.severity)
+                            }
+                        }
+                        .frame(height: Metrics.barHeight)
+                        Text(row.coverageText)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .frame(width: Metrics.coverageWidth, alignment: .trailing)
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(
+                        "\(BriefingDriversData.title(row.type)), severity \(Int((row.severity * 10).rounded())) of 10, "
+                            + row.coverageText)
+                }
+            }
+        }
+    }
 }

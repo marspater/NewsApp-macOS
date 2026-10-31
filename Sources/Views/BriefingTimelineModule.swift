@@ -15,13 +15,93 @@
 import Foundation
 import SwiftUI
 
-/// Escalation timeline: turning points across one story thread (#850).
-/// Phase C fills the data and the view; until then the module is hidden.
+/// Escalation timeline: turning points across the lead story's thread (#850).
 struct BriefingTimelineData: Equatable, Sendable {
+    struct Item: Equatable, Sendable, Identifiable {
+        let id: String
+        let dayText: String
+        let summary: String
+        let date: Date
+        /// The summary reports escalation explicitly (World Tension classifier cues).
+        let isEscalating: Bool
+    }
+
+    /// One story with at least two dated past turning points.
+    struct Thread: Equatable, Sendable {
+        let entry: FeedEntry
+        let items: [Item]
+        /// Whole days from the first item to the edition.
+        let day: Int
+
+        var caption: String { "\(entry.representative.title) · day \(day)" }
+    }
+
+    /// Most publishers first.
+    let threads: [Thread]
+
+    /// The lead thread inside the filter.
+    func thread(for filter: BriefingBoardFilter) -> Thread? { threads.first { filter.includes($0.entry) } }
+
+    /// Past, dated items in date order, the latest five; nil with fewer than two.
+    static func items(_ timeline: [OverviewTimelineItem], now: Date) -> [Item]? {
+        let dated = timeline.compactMap { item -> Item? in
+            guard !item.isFuturePlan, let date = item.eventDate ?? item.publicationDate, date <= now else { return nil }
+            let fact = PassageAnchoredFact(
+                id: item.id, statement: item.summary, passageID: item.id, quote: item.summary, articleID: "")
+            return Item(
+                id: item.id, dayText: item.dateText, summary: item.summary, date: date,
+                isEscalating: TensionEventClassifier.classify([fact], methodology: .v1).escalation == .escalating)
+        }
+        let latest = Array(dated.sorted { $0.date < $1.date }.suffix(Metrics.maximumItems))
+        return latest.count >= 2 ? latest : nil
+    }
+
+    static func thread(entry: FeedEntry, timeline: [OverviewTimelineItem], now: Date) -> Thread? {
+        guard let items = items(timeline, now: now), let first = items.first else { return nil }
+        let calendar = Calendar.current
+        let day = calendar.dateComponents(
+            [.day], from: calendar.startOfDay(for: first.date), to: calendar.startOfDay(for: now)
+        ).day
+        return Thread(entry: entry, items: items, day: max(0, day ?? 0))
+    }
+
     /// nil hides the module.
-    @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? { nil }
+    @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
+        let overviews = await BriefingOverviews.load(context.entries, store: store)
+        let threads = overviews.enumerated().compactMap { index, pair -> (Int, Thread)? in
+            thread(entry: pair.0, timeline: pair.1.timeline, now: context.now).map { (index, $0) }
+        }
+        .sorted {
+            $0.1.entry.publisherCount != $1.1.entry.publisherCount
+                ? $0.1.entry.publisherCount > $1.1.entry.publisherCount : $0.0 < $1.0
+        }
+        .map(\.1)
+        return threads.isEmpty ? nil : Self(threads: threads)
+    }
+
     /// Sample data for `Tests/OverviewCaptures.swift`.
-    static var captureFixture: Self? { nil }
+    static var captureFixture: Self? {
+        let now = Date(timeIntervalSince1970: 1_793_372_400)
+        let entry = BriefingRegionsData.sampleEntry(
+            id: "timeline-0", title: "Shipping corridor security tightens off Yemen", publishers: 11, date: now)
+        let steps: [(String, String, Double)] = [
+            ("Mon", "First incident reported in the corridor", 4),
+            ("Tue", "Two more vessels named by the coast guard", 3),
+            ("Wed", "Insurers suspend new war-risk cover", 2),
+            ("Thu", "Attacks escalated as the security level is raised", 1),
+            ("Today", "Naval escorts begin for inbound vessels", 0.1),
+        ]
+        let timeline = steps.map {
+            OverviewTimelineItem(dateText: $0.0, summary: $0.1, eventDate: now.addingTimeInterval(-$0.2 * 86_400))
+        }
+        return thread(entry: entry, timeline: timeline, now: now).map { Self(threads: [$0]) }
+    }
+}
+
+private enum Metrics {
+    static let maximumItems = 5
+    static let dot: CGFloat = 8
+    static let escalatingDot: CGFloat = 12
 }
 
 struct BriefingTimelineModuleView: View {
@@ -29,5 +109,47 @@ struct BriefingTimelineModuleView: View {
     let filter: BriefingBoardFilter
     let actions: BriefingActions
 
-    var body: some View { EmptyView() }
+    var body: some View {
+        let thread = data.thread(for: filter)
+        BriefingModuleCard(title: "Escalation timeline", caption: thread?.caption) {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                IntelligenceLabel("Assessed on this Mac").font(AppTypography.caption)
+                if let thread {
+                    HStack(alignment: .top, spacing: AppSpacing.sm) {
+                        ForEach(thread.items) { item in
+                            column(item)
+                        }
+                    }
+                } else {
+                    Text("No escalation thread in this region.")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+            }
+        }
+    }
+
+    private func column(_ item: BriefingTimelineData.Item) -> some View {
+        let size = item.isEscalating ? Metrics.escalatingDot : Metrics.dot
+        return VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+            HStack(spacing: AppSpacing.xxs) {
+                Circle()
+                    .fill(item.isEscalating ? AppColor.warning : AppColor.secondaryText)
+                    .frame(width: size, height: size)
+                    .frame(width: Metrics.escalatingDot, height: Metrics.escalatingDot)
+                Rectangle().fill(AppColor.borderSubtle).frame(height: AppLayout.hairline)
+            }
+            .accessibilityHidden(true)
+            Text(item.dayText)
+                .font(AppTypography.caption.weight(.semibold))
+                .foregroundStyle(AppColor.secondaryText)
+            Text(item.summary)
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.primaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(item.isEscalating ? "Reports escalation" : "")
+    }
 }
