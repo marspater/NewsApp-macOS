@@ -176,7 +176,7 @@ This section maps News directly against Apple's **App Store Review Guidelines**.
     - `NSPrivacyCollectedDataTypes`: `<array/>` (Empty)
     - `NSPrivacyAccessedAPITypes`:
       - `NSPrivacyAccessedAPICategoryUserDefaults` (Reason: `CA92.1` — app settings storage).
-      - `NSPrivacyAccessedAPICategoryFileTimestamp` (Reason: `C617.1` — cache invalidation and database timestamps).
+      - `NSPrivacyAccessedAPICategoryFileTimestamp` (Reasons: `C617.1` — cache invalidation and database timestamps; `3B52.1` — files the user chose, such as the library backup destination).
 * **Export Compliance (Encryption)**:
   - Uses standard HTTPS / TLS communication provided by Apple's `URLSession` and `Network.framework`.
   - Exempt from US Export Administration Regulations (EAR) under Category 5, Part 2 (mass market encryption for general consumer software). Set `ITSAppUsesNonExemptEncryption` to `<false/>` in `Info.plist`.
