@@ -1,2 +1,0 @@
-- Event Overview: reject legal-order phrases as industry implications while preserving customer-order demand cues.
-- Event Overview: prefer a matching article's publisher name for highlight attribution, with the citation source name as a fallback.

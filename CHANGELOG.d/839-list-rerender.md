@@ -1,1 +1,0 @@
-- A feed refresh redraws only the cards whose story, coverage or selection changed; every visible card used to redraw each time the list updated.
