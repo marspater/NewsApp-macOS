@@ -2236,6 +2236,35 @@ struct NewsTests {
         assertEqual(publications, 1, "A changed classification publishes once")
         observation.cancel()
 
+        // Background classification publishes a burst together, with the latest state of every story (#778).
+        let burst = (0..<5).map { index in
+            FeedArticle(
+                title: "Burst \(index)", link: "https://example.com/burst-\(index)", guid: "burst-\(index)",
+                description: "Preview", pubDate: Date(), source: "Publisher")
+        }
+        await store.batchUpsert(articles: burst)
+        let burstRevision = store.revision
+        var burstPublications = 0
+        let burstObservation = store.$articles.dropFirst().sink { _ in burstPublications += 1 }
+        // The batch waits longer than the writes take on a loaded machine; the test publishes it explicitly.
+        store.coalescedPublicationDelay = .seconds(600)
+        for article in burst {
+            await store.updateEnrichment(id: article.id, category: "Science", coalescesPublication: true)
+        }
+        await store.updateEnrichment(id: burst[0].id, category: "World", coalescesPublication: true)
+        assertEqual(burstPublications, 0, "Background classification waits to be published together")
+        assertEqual(store.revision, burstRevision, "Waiting classification does not reload queries yet")
+        await store.flushPendingPublications()
+        assertEqual(burstPublications, 1, "A classification burst publishes the article collection once")
+        assertEqual(store.revision, burstRevision + 1, "A classification burst reloads queries once")
+        assertEqual(
+            store.articles.first { $0.title == "Burst 0" }?.category, "World",
+            "The latest classification of a story is the one published")
+        assertEqual(
+            store.articles.filter { $0.title.hasPrefix("Burst ") && $0.title != "Burst 0" }.compactMap(\.category),
+            Array(repeating: "Science", count: 4), "Every story of the burst is published")
+        burstObservation.cancel()
+
         let delegate = SecureSessionDelegateCoordinator()
         let request = URLRequest(url: URL(string: "https://example.com")!)
         let task = URLSession.shared.dataTask(with: request)
@@ -10772,6 +10801,11 @@ struct NewsTests {
         assertEqual(
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "1",
             "Reopening preserves one index")
+        assertTrue(
+            value(
+                "EXPLAIN QUERY PLAN SELECT a.id FROM articles a ORDER BY \(DatabaseEngine.articleDateOrder) DESC, a.id LIMIT 201;",
+                column: 3)?.contains("idx_articles_order") == true,
+            "List pages walk the date-order index instead of sorting every story (#778)")
         assertEqual(
             value("SELECT count(*) FROM sqlite_master WHERE name='story_image_defaults';"), "1",
             "Upgraded libraries remember site defaults")
@@ -20491,9 +20525,15 @@ struct NewsTests {
                     title: "Document \(index)", link: base + "/\(index)", guid: "repeat-\(index)", description: first,
                     pubDate: Date(), source: "Recurring publisher", imageUrl: base + "/shared.jpg"))
         }
-        try await db.upsertArticles(repeats)
+        try await db.upsertArticles(Array(repeats.prefix(2)))
+        assertTrue(
+            try await db.repeatedImageURLs(source: "Recurring publisher").isEmpty,
+            "Two documents do not make an image recurring")
+        try await db.upsertArticles([repeats[2]])
         let repeated = try await db.repeatedImageURLs(source: "Recurring publisher")
-        assertEqual(repeated, Set([base + "/shared.jpg"]), "Recurrence counts distinct publisher documents")
+        assertEqual(
+            repeated, Set([base + "/shared.jpg"]),
+            "Recurrence counts distinct publisher documents, also after an earlier lookup was cached (#778)")
         assertTrue(
             try await db.fetchArticles().filter { $0.source == "Recurring publisher" }.allSatisfy {
                 $0.imageUrl == nil
