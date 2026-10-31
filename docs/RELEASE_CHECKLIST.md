@@ -34,7 +34,7 @@ plus the extra commands that are not in the plain run.
   `Tests/NewsTests.swift`).
 - On the real-library copy: `NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=<copy> ./test.sh` (item 0). Manual: compare the copy's
   schema version and story, read and saved counts before and after, as the v2 completion plan does:
-  `sqlite3 <file> "PRAGMA user_version; SELECT count(*) FROM articles;"`.
+  `sqlite3 <file> "PRAGMA user_version; SELECT count(*) FROM articles; SELECT count(*) FROM article_state WHERE is_read = 1; SELECT count(*) FROM article_state WHERE is_saved = 1;"`.
 - Manual, migration and restore on the copy. `script/run_isolated.sh` builds the app under the bundle id
   `com.marspater.news.isolatedqa`, so it only ever opens the library in that container. Quit any running isolated
   News, then stage the copy there (never use `--real-library` or any other flag that opens the live library):
@@ -48,11 +48,12 @@ plus the extra commands that are not in the plain run.
 
   Without `--seed` the script leaves the staged file alone. After the app has opened it, quit it and check
   `ls "$D"`: a `news-before-v<N>-…sqlite3` backup must sit beside `news.sqlite3`, and
-  `sqlite3 "$D/news.sqlite3" "PRAGMA user_version; SELECT count(*) FROM articles;"` must show the new schema and
-  the original story count. Then restore: copy the backup to `$TMPDIR/restore/news.sqlite3` and run
-  `sqlite3 <restored> "PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM articles;"` (expect `ok`,
-  the pre-migration schema version and the original count). Put that file back at `$D/news.sqlite3` (after removing
-  any `-wal` and `-shm` beside it), run `./script/run_isolated.sh` again and confirm it migrates to the same counts.
+  `sqlite3 "$D/news.sqlite3" "PRAGMA user_version; SELECT count(*) FROM articles; SELECT count(*) FROM article_state WHERE is_read = 1; SELECT count(*) FROM article_state WHERE is_saved = 1;"` must show the new schema and
+  the original story, read and saved counts. Then restore: copy the backup to `$TMPDIR/restore/news.sqlite3` and run
+  `sqlite3 <restored> "PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM articles; SELECT count(*) FROM article_state WHERE is_read = 1; SELECT count(*) FROM article_state WHERE is_saved = 1;"` (expect `ok`,
+  the pre-migration schema version and the original story, read and saved counts). Put that file back at `$D/news.sqlite3` (after removing
+  any `-wal` and `-shm` beside it), run `./script/run_isolated.sh` again and confirm it migrates to the same three counts. Story, read and saved counts must all match the
+  original copy for the migrated, the restored and the second migrated database; a restore that loses history fails.
 
 ## 2. Feed parser and networking security tests
 
