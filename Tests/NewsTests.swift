@@ -15900,6 +15900,19 @@ struct NewsTests {
             source: "Physics Journal"
         )
 
+        // Fill the bounded queue first, so A and B stay queued and the cancellations below cannot race a job that
+        // already finished (a refused write leaves no job behind, #820).
+        let hold = OpenGate()
+        for index in 0..<3 {
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "hold-\(index)") {
+                    await hold.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("Held generations fill the queue") { await queue.activeJobCount() == 3 }
+
         // 1. Enqueue background
         await queue.enqueue(article: articleA, priority: .background)
 
@@ -15926,6 +15939,8 @@ struct NewsTests {
             let active = await queue.activeJobCount()
             assertTrue(active <= 3, "Rapid replacement cannot exceed the concurrency bound")
         }
+
+        await hold.open()
 
         // Finished work is not superseded or repeated by the next refresh, and its full FeedArticle job is released (#535).
         let articleC = FeedArticle(
