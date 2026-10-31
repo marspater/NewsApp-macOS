@@ -144,15 +144,7 @@ class FeedManager: NSObject, ObservableObject {
             }
         // Clear AI Analysis (#805): the store refuses the in-flight writes; the session state goes here.
         analysisClearedObserver = NotificationCenter.default.publisher(for: .aiAnalysisCleared)
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let queue = self?.enrichmentQueue else { return }
-                    Task {
-                        await queue.analysisCleared()
-                        await OverviewGenerationCoordinator.shared.analysisCleared()
-                    }
-                }
-            }
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.analysisCleared() } }
         // NSWorkspace posts sleep and wake on the main thread.
         if let center = powerEvents ?? (schedulesRefresh ? NSWorkspace.shared.notificationCenter : nil) {
             powerObservers = [
@@ -448,6 +440,14 @@ class FeedManager: NSObject, ObservableObject {
         isAnyFeedLoading = false
         let queue = enrichmentQueue
         Task { await queue.cancelAll(reason: .user) }
+    }
+
+    private func analysisCleared() {
+        let queue = enrichmentQueue
+        Task {
+            await queue.analysisCleared()
+            await OverviewGenerationCoordinator.shared.analysisCleared()
+        }
     }
 
     /// Returns once new articles are collected and published. Notification triage and background classification
