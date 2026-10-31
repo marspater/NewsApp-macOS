@@ -4,7 +4,11 @@ The release checklist (`docs/RELEASE_CHECKLIST.md`) run on `main` `442ccec` plus
 finish Epic Y: #884 (list redraw, counts cache, card dates) and #892 (publisher-review self-check under a restrictive
 umask). The tree checked is the tip of `fix/839-card-rerender` (`ca26b80`), which is `main` with #884; #892 touches
 only the Python self-check and was verified on its own branch. The tag is cut on `main` after both merge and this
-record merges with the folded changelog.
+record merges with the folded changelog. The difference between the checked tree and that final `main` is #892 (a
+Python self-check in `script/evaluation/`), #891 (an agent definition under `.claude/`) and this record with the
+folded changelog: no app code. Before tagging, the release owner reruns `NEWS_TEST_FORCE=1 ./test.sh` and `./build.sh`
+on the merged commit and appends its SHA and result under "Final confirmation" below; the checks that take a library
+copy or a harness were run on `ca26b80` and are not repeated unless app code changes before the tag.
 
 Machine: Apple silicon, macOS 27.2 (26B123), 10 cores, 24 GiB. Library copy: online backup of the owner's library
 taken 31 October (schema 27, 7,442 stories, 99 read, 0 saved; the read count fell from 115 on 30 October because
@@ -112,6 +116,13 @@ v2 regression; #885 is the one the release owner may want to pull forward.
 
 ## Cutting the tag
 
-After #884, #892 and this record merge: `git tag v2.0.0` on `main` (the existing local tag from 30 October points at
-`8d94d38` and is moved), `./build_release.sh`, check `News.app/Contents/Info.plist` says 2.0.0. Pushing the tag runs
-`release.yml` and publishes the GitHub release (#567); that push is the owner's decision.
+After #884, #892, #891 and this record merge, on a clean checkout of `main` at the confirmed commit: `git tag -f v2.0.0
+HEAD` (the local tag from 30 October points at `8d94d38`; `-f` moves it, since a plain `git tag` fails when the tag
+exists), `./build_release.sh`, check `News.app/Contents/Info.plist` says 2.0.0 and `lipo -archs` says arm64. The dry run
+of `./build_release.sh` on `release/2.0.0` produced 2.0.0 (984), arm64, `codesign --verify --deep --strict` clean.
+Pushing the tag runs `release.yml` and publishes the GitHub release (#567); that push is the owner's decision.
+
+## Final confirmation
+
+_To be appended by the release owner after the merges: merged `main` SHA, `NEWS_TEST_FORCE=1 ./test.sh` result,
+`./build.sh` result._
