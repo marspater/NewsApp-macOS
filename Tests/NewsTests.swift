@@ -15877,7 +15877,10 @@ struct NewsTests {
     static func testEnrichmentQueueSchedulingAndPromotion() async {
         print("  - Testing EnrichmentQueue Scheduling, Promotion & Cancellation...")
 
-        let store = await ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        // Opened here, so the setup write below cannot race the store's own initialisation.
+        let database = DatabaseEngine(path: ":memory:")
+        do { try await database.open() } catch { return assertTrue(false, "The queue test database opens") }
+        let store = await ArticleStore(database: database)
         let queue = EnrichmentQueue(store: store)
 
         let articleA = FeedArticle(
@@ -15928,6 +15931,10 @@ struct NewsTests {
         let articleC = FeedArticle(
             title: "Quarterly Earnings Beat Expectations", link: "https://example.com/earnings", guid: "eq-3",
             description: "Revenue and profit exceed analyst forecasts", pubDate: Date(), source: "Markets")
+        // Only a stored classification counts as finished (#820).
+        do { _ = try await database.upsertArticles([articleC]) } catch {
+            assertTrue(false, "Article C is stored before it is classified: \(error)")
+        }
         await queue.enqueue(article: articleC, priority: .interactive)
         await eventually("Article C finishes classification") { await queue.state(for: articleC.id) == .completed }
         assertFalse(

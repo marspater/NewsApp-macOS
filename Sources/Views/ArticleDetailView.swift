@@ -1520,6 +1520,8 @@ struct ArticleDetailView: View {
         guard !Task.isCancelled, activeArticle.id == targetID, appSettings.aiEnabled else { return }
 
         isAnalyzing = true
+        // The analysis is saved only if nothing cleared derived data in the meantime (#844).
+        let analysisGeneration = await articleStore.database.analysisGeneration
 
         do {
             try Task.checkCancellation()
@@ -1540,7 +1542,8 @@ struct ArticleDetailView: View {
             try Task.checkCancellation()
 
             let saved = await articleStore.saveArticleAnalysis(
-                result, for: targetArticle.id, expectedInputHash: targetArticle.publisherInputHash)
+                result, for: targetArticle.id, expectedInputHash: targetArticle.publisherInputHash,
+                expectedGeneration: analysisGeneration)
             guard !Task.isCancelled, activeArticle.id == targetArticle.id else { return }
             guard saved, currentArticle.publisherInputHash == targetArticle.publisherInputHash else {
                 isAnalyzing = false

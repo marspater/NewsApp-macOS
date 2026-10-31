@@ -81,7 +81,9 @@ actor EnrichmentQueue {
     private let maxConcurrency: Int = 3
     private var activeCount: Int = 0
     private var jobs: [String: Job] = [:]  // Indexed by articleId (active/queued/cancelled/failed; completed removed)
-    private var completedArticleIDs: Set<String> = []
+    /// Publisher input hash each article was classified from this session (#820): a changed input, or a clear of
+    /// derived data, makes the article eligible again.
+    private var completedInputs: [String: String] = [:]
     private var queuedHeap: [QueuedEntry] = []
 
     private let store: ArticleStore?
@@ -114,7 +116,7 @@ actor EnrichmentQueue {
             let articleId = article.id
 
             // 1. Check for existing or completed job (Duplicate-Job Prevention)
-            if completedArticleIDs.contains(articleId) {
+            if completedInputs[articleId] == article.publisherInputHash {
                 continue
             }
             if var existing = jobs[articleId] {
@@ -246,10 +248,15 @@ actor EnrichmentQueue {
     // MARK: - Queue State Queries
 
     func state(for articleId: String) -> EnrichmentJobState? {
-        if completedArticleIDs.contains(articleId) {
-            return .completed
-        }
-        return jobs[articleId]?.state
+        if let state = jobs[articleId]?.state { return state }
+        return completedInputs[articleId] == nil ? nil : .completed
+    }
+
+    /// Clear AI Analysis ran (#805): queued and running work is cancelled (its writes are refused anyway) and every
+    /// story is eligible for classification again.
+    func analysisCleared() {
+        completedInputs.removeAll()
+        cancelAll(reason: .superseded)
     }
 
     func activeJobCount() -> Int {
@@ -359,6 +366,11 @@ actor EnrichmentQueue {
             NewsSignposts.enrichment, name: "EnrichmentJob", metadata: "source=\(article.source)")
         defer { NewsSignposts.end(NewsSignposts.enrichment, name: "EnrichmentJob", state: signpostState) }
 
+        // Queue computes. Store persists. The write carries the generation the work started under (#844).
+        let destination: ArticleStore
+        if let store { destination = store } else { destination = await ArticleStore.shared }
+        let analysisGeneration = await destination.database.analysisGeneration
+
         // Background feed ingestion: strictly lightweight topic classification.
         // Deep semantic analysis (summary, key points, entities) is performed lazily when the user opens an article.
         let topicResult = await ArticleClassifier.shared.classify(
@@ -386,10 +398,7 @@ actor EnrichmentQueue {
             image: nil
         )
 
-        // Queue computes. Store persists.
-        let destination: ArticleStore
-        if let store { destination = store } else { destination = await ArticleStore.shared }
-        await destination.updateEnrichment(
+        let stored = await destination.updateEnrichment(
             id: result.articleId,
             summary: nil,
             category: result.category,
@@ -399,11 +408,19 @@ actor EnrichmentQueue {
             content: nil,
             image: nil,
             expectedInputHash: article.publisherInputHash,
+            expectedGeneration: analysisGeneration,
             coalescesPublication: true
         )
 
         guard jobs[articleId]?.generation == generation, !Task.isCancelled else { return }
-        markJobState(articleId: articleId, state: .completed)
+        // A refused write (the publisher changed the story, or the analysis was cleared) leaves the story eligible
+        // for the next enqueue instead of counting as classified (#820).
+        if stored {
+            jobs.removeValue(forKey: articleId)
+            completedInputs[articleId] = article.publisherInputHash
+        } else {
+            jobs.removeValue(forKey: articleId)
+        }
     }
 
     private func isJobCancelled(_ articleId: String) -> Bool {
@@ -414,11 +431,6 @@ actor EnrichmentQueue {
     }
 
     private func markJobState(articleId: String, state: EnrichmentJobState) {
-        if case .completed = state {
-            jobs.removeValue(forKey: articleId)
-            completedArticleIDs.insert(articleId)
-            return
-        }
         if var job = jobs[articleId] {
             job.state = state
             jobs[articleId] = job

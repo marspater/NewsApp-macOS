@@ -121,6 +121,8 @@ actor OverviewGenerationCoordinator {
         let sortedFingerprints = selection.passages.map { $0.fingerprint }.sorted().joined(separator: ":")
         let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
         recordRequestedInputs(eventID: eventID, membershipVersion: membershipVersion, inputTextHash: inputTextHash)
+        // The generation this request starts under; a clear of derived data before the commit refuses it (#844).
+        let analysisGeneration = await targetStore.database.analysisGeneration
 
         // Persistent storage is authoritative: publisher-input changes atomically remove old overviews.
         do {
@@ -153,6 +155,9 @@ actor OverviewGenerationCoordinator {
                 let result = await running.task.value
                 return Task.isCancelled ? nil : result
             }
+            // A background warm-up never supersedes the generation the reader is waiting for (#792).
+            guard Self.maySupersede(priority: priority, eventID: eventID, visibleEventID: currentVisibleEventID)
+            else { return nil }
             running.task.cancel()
             inFlightTasks.removeValue(forKey: eventID)
         }
@@ -197,7 +202,8 @@ actor OverviewGenerationCoordinator {
                 membershipVersion: membershipVersion,
                 inputTextHash: inputTextHash,
                 targetStore: targetStore,
-                expectedArticleInputs: expectedArticleInputs
+                expectedArticleInputs: expectedArticleInputs,
+                analysisGeneration: analysisGeneration
             )
             return isCurrent ? generated : nil
         }
@@ -339,7 +345,8 @@ actor OverviewGenerationCoordinator {
         membershipVersion: Int,
         inputTextHash: String,
         targetStore: ArticleStore,
-        expectedArticleInputs: [String: String]
+        expectedArticleInputs: [String: String],
+        analysisGeneration: Int
     ) async -> Bool {
         // A result from inputs that are no longer the latest requested is stale, even at the same membership version
         if let latest = latestRequestedInputs[eventID],
@@ -360,7 +367,8 @@ actor OverviewGenerationCoordinator {
         // DatabaseEngine also atomically prevents an older result from overwriting newer
         let saved: Bool
         do {
-            saved = try await targetStore.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
+            saved = try await targetStore.recordEventOverview(
+                document, expectedArticleInputs: expectedArticleInputs, expectedGeneration: analysisGeneration)
         } catch {
             if !(error is CancellationError) {
                 logger.error("Failed to commit overview for event \(eventID): \(error.localizedDescription)")
@@ -400,10 +408,10 @@ actor OverviewGenerationCoordinator {
         }.prefix(3)
         for event in top {
             guard !Task.isCancelled, await allowsEnergy() else { return }
+            // The same reports the reader builds from, so the two never overwrite each other's overview (#792).
             let members: [FeedArticle]
             do {
-                members = try await store.database.fetchArticles(
-                    limit: nil, eventID: event.eventID, muting: muting)
+                members = try await store.eventMemberArticles(eventID: event.eventID)
             } catch {
                 if !(error is CancellationError) {
                     logger.error("Failed to fetch event members for \(event.eventID): \(error.localizedDescription)")
@@ -480,6 +488,21 @@ actor OverviewGenerationCoordinator {
         }
         await queue.cancelOverview(eventID: eventID, reason: reason)
         logger.debug("Cancelled overview generation for \(eventID): \(reason.rawValue)")
+    }
+
+    /// Only a request for the visible event itself, or a request for another event, may cancel a running generation
+    /// with different inputs; a background warm-up of the visible event waits its turn (#792).
+    nonisolated static func maySupersede(
+        priority: OverviewRequestPriority, eventID: String, visibleEventID: String?
+    ) -> Bool {
+        priority != .background || eventID != visibleEventID
+    }
+
+    /// Clear AI Analysis ran (#805): in-flight results are refused by the store, and the memory cache would
+    /// otherwise serve cleared overviews.
+    func analysisCleared() {
+        cancelAll()
+        clearCache()
     }
 
     /// Cancels all in-flight overview generations.

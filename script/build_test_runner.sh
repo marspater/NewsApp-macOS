@@ -49,6 +49,7 @@ struct NewsRegressionRunner {
             if selected("Tests/BriefingIntelligenceTests.swift") { await BriefingIntelligenceTests.run() }
             if selected("Tests/BriefingImpactTests.swift") { await BriefingImpactTests.run() }
             if selected("Tests/BriefingSignalsTests.swift") { await BriefingSignalsTests.run() }
+            if selected("Tests/AnalysisGenerationTests.swift") { await AnalysisGenerationTests.run() }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
             // The harness suites run only when named: a targeted runner mode must not pick them up.
             if atom == "Tests/EventOverviewAccessibilityTests.swift" { await EventOverviewAccessibilityTests.main() }
@@ -166,6 +167,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Tests/BriefingIntelligenceTests.swift \
     Tests/BriefingImpactTests.swift \
     Tests/BriefingSignalsTests.swift \
+    Tests/AnalysisGenerationTests.swift \
     Sources/Views/ArticleDetailView.swift \
     Sources/Views/ArticleWebView.swift \
     Tests/TensionCalibrationTests.swift \

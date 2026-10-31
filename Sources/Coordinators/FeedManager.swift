@@ -108,6 +108,9 @@ class FeedManager: NSObject, ObservableObject {
         self.wakeRefreshDelay = wakeRefreshDelay
         self.now = now
         super.init()
+        // Clear AI Analysis (#805): the store refuses the in-flight writes; the session state resets here, before
+        // the clear returns.
+        store.analysisClearedHandler = { [weak self] in await self?.analysisCleared() }
         observeArticles()
         observeSubscriptions()
         observeLifecycle(powerEvents: powerEvents, schedulesRefresh: schedulesRefresh)
@@ -435,6 +438,20 @@ class FeedManager: NSObject, ObservableObject {
         isAnyFeedLoading = false
         let queue = enrichmentQueue
         Task { await queue.cancelAll(reason: .user) }
+    }
+
+    /// Clear AI Analysis: the runs that would enqueue or warm from pre-clear inputs stop here, the queue and the
+    /// coordinator drop their session state, and the store already refuses any write still in flight.
+    private func analysisCleared() async {
+        enrichmentTask?.cancel()
+        enrichmentTask = nil
+        overviewWarmupTask?.cancel()
+        overviewWarmupTask = nil
+        clusteringTask?.cancel()
+        clusteringTask = nil
+        clusteringRunID = nil
+        await enrichmentQueue.analysisCleared()
+        await OverviewGenerationCoordinator.shared.analysisCleared()
     }
 
     /// Returns once new articles are collected and published. Notification triage and background classification

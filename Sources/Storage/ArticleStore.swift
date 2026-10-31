@@ -11,6 +11,9 @@ final class ArticleStore: ObservableObject {
 
     let database: DatabaseEngine
     let migrationCoordinator: MigrationCoordinator?
+    /// Runs after a clear of derived data and before the clear returns, so the queues and caches that hold session
+    /// state about that data (the enrichment queue, the overview coordinator) have reset by then (#805).
+    var analysisClearedHandler: (@MainActor () async -> Void)?
     let spotlightIndexer: any SpotlightIndexing
 
     @Published private(set) var articles: [FeedArticle] = []
@@ -354,6 +357,7 @@ final class ArticleStore: ObservableObject {
         readerDocument: ReaderDocument? = nil,
         identityEvidence: DocumentIdentityEvidence? = nil,
         expectedInputHash: String? = nil,
+        expectedGeneration: Int? = nil,
         coalescesPublication: Bool = false
     ) async -> Bool {
         do {
@@ -364,7 +368,8 @@ final class ArticleStore: ObservableObject {
                     update: .init(
                         summary: summary, category: category, sentiment: sentiment,
                         entities: entities, topics: topics, content: content,
-                        image: image, readerDocument: readerDocument, expectedInputHash: expectedInputHash)
+                        image: image, readerDocument: readerDocument, expectedInputHash: expectedInputHash,
+                        expectedGeneration: expectedGeneration)
                 )
             else { return false }
             if let identityEvidence {
@@ -474,12 +479,18 @@ final class ArticleStore: ObservableObject {
     // MARK: - Structured Article Analysis
 
     @discardableResult
-    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil) async
+    func saveArticleAnalysis(
+        _ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil,
+        expectedGeneration: Int? = nil
+    ) async
         -> Bool
     {
         do {
             let articleId = try await database.resolvedArticleID(articleId)
-            guard try await database.saveArticleAnalysis(analysis, for: articleId, expectedInputHash: expectedInputHash)
+            guard
+                try await database.saveArticleAnalysis(
+                    analysis, for: articleId, expectedInputHash: expectedInputHash,
+                    expectedGeneration: expectedGeneration)
             else { return false }
             try await publishStoredArticles([articleId])
             return true
@@ -498,6 +509,8 @@ final class ArticleStore: ObservableObject {
     /// Purges all generated AI analysis data while preserving articles and subscriptions.
     func clearAIAnalysis() async throws {
         try await database.clearArticleEnrichment()
+        // Running work is refused at commit by the generation bump; its session state is reset here (#805).
+        await analysisClearedHandler?()
         await refreshState()
     }
 
@@ -510,6 +523,8 @@ final class ArticleStore: ObservableObject {
     /// Clears replaceable caches while preserving subscriptions, history and saved bodies.
     func clearAllDatabaseCache() async throws {
         try await database.clearAllDatabaseCache()
+        // This clear removes enrichment too, so running work and its session state are reset the same way (#805).
+        await analysisClearedHandler?()
         await refreshState()
     }
 
@@ -618,10 +633,12 @@ final class ArticleStore: ObservableObject {
     // MARK: - Event Overviews
 
     @discardableResult
-    func recordEventOverview(_ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil)
-        async throws -> Bool
-    {
-        let stored = try await database.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
+    func recordEventOverview(
+        _ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil,
+        expectedGeneration: Int? = nil
+    ) async throws -> Bool {
+        let stored = try await database.recordEventOverview(
+            document, expectedArticleInputs: expectedArticleInputs, expectedGeneration: expectedGeneration)
         if stored { overviewRevision &+= 1 }
         return stored
     }
