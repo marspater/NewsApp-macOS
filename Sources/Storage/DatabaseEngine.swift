@@ -21,7 +21,8 @@ actor DatabaseEngine {
     private var collectionOnlyFeedURLs: [String] = []
     /// The last library counts, valid while no write has happened since: `sqlite3_total_changes` moves on every write,
     /// triggers included, so no write path can leave a stale count behind (#839).
-    private var countsCache: (changes: ChangeToken, scope: [String], value: (unread: Int, saved: Int, total: Int))?
+    private var countsCache:
+        (changes: ChangeToken, scope: [String], muting: MuteRules, value: (unread: Int, saved: Int, total: Int))?
     private var mutedCountCache: (changes: ChangeToken?, counts: [MutedCountKey: Int]) = (nil, [:])
     /// This connection's writes (`sqlite3_total_changes`) and other connections' commits (`PRAGMA data_version`).
     private struct ChangeToken: Equatable {
@@ -40,7 +41,12 @@ actor DatabaseEngine {
         return ChangeToken(own: Int(sqlite3_total_changes(db)), external: external)
     }
     private struct MutedCountKey: Hashable {
-        let section: String?, isRead: Bool?, isSaved: Bool?, search: String?, muting: MuteRules, scope: [String]
+        let section: String?
+        let isRead: Bool?
+        let isSaved: Bool?
+        let search: String?
+        let muting: MuteRules
+        let scope: [String]
     }
     private var spellingCache: (key: String, words: [String: Int])?
     /// `repeatedImageURLs` by publisher. Every curated fetch asks for it, single-story fetches included, and the query
@@ -2999,7 +3005,8 @@ actor DatabaseEngine {
         defer { sqlite3_finalize(stmt) }
         // A read toggle moves the unread count by at most one: adjust the cached counts instead of scanning (#839).
         let before = changeToken()
-        var adjusted = countsCache.flatMap { $0.changes == before ? $0 : nil }
+        // Only a cache for the current scope: a scope change moves no SQLite token.
+        var adjusted = countsCache.flatMap { $0.changes == before && $0.scope == collectionOnlyFeedURLs ? $0 : nil }
         let wasRead = adjusted == nil ? nil : countedReadState(of: articleId)
         if wasRead == nil { adjusted = nil }
 
@@ -3266,7 +3273,7 @@ actor DatabaseEngine {
     }
 
     func getSavedArticles() throws -> [FeedArticle] {
-        return try fetchArticles(isSaved: true)
+        return try fetchArticles(isSaved: true, limit: nil)
     }
 
     /// Saved stories, newest save first, or the read history, newest read first, for File › Export (#565).
@@ -3907,14 +3914,18 @@ actor DatabaseEngine {
 
     // MARK: - Counts & Diagnostics
 
-    func counts() throws -> (unread: Int, saved: Int, total: Int) {
+    /// Totals over the visible library. `unread` leaves out stories `muting` hides, as the Unread list does, so the
+    /// sidebar, the menu bar and the list agree (#785).
+    func counts(muting: MuteRules = MuteRules()) throws -> (unread: Int, saved: Int, total: Int) {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
 
         guard let changes = changeToken() else { return (unread: 0, saved: 0, total: 0) }
-        if let cache = countsCache, cache.changes == changes, cache.scope == collectionOnlyFeedURLs {
+        if let cache = countsCache, cache.changes == changes, cache.scope == collectionOnlyFeedURLs,
+            cache.muting == muting
+        {
             return cache.value
         }
         var total = 0
@@ -3923,10 +3934,11 @@ actor DatabaseEngine {
 
         var stmt: OpaquePointer?
         let scope = collectionScope()
+        let muted = muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle
         let sql = """
             SELECT
                 count(a.id) as total_count,
-                coalesce(sum(case when s.is_read = 0 then 1 else 0 end), 0) as unread_count,
+                coalesce(sum(case when s.is_read = 0\(muted) then 1 else 0 end), 0) as unread_count,
                 coalesce(sum(case when s.is_saved = 1 then 1 else 0 end), 0) as saved_count
             FROM articles a
             JOIN article_state s ON s.article_id = a.id
@@ -3934,12 +3946,12 @@ actor DatabaseEngine {
             """
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(stmt) }
-            bind(scope.params, to: stmt)
+            bind((muting.isEmpty ? [] : Self.mutingParameters(muting)) + scope.params, to: stmt)
             if sqlite3_step(stmt) == SQLITE_ROW {
                 total = Int(sqlite3_column_int(stmt, 0))
                 unread = Int(sqlite3_column_int(stmt, 1))
                 saved = Int(sqlite3_column_int(stmt, 2))
-                countsCache = (changes, collectionOnlyFeedURLs, (unread: unread, saved: saved, total: total))
+                countsCache = (changes, collectionOnlyFeedURLs, muting, (unread: unread, saved: saved, total: total))
             }
         }
         return (unread: unread, saved: saved, total: total)
