@@ -157,7 +157,7 @@ struct BriefingLayout: Equatable, Codable, Sendable {
         } else if !isVisible {
             kinds.removeAll { $0 == kind }
         }
-        visible[kind.pillar] = kinds
+        visible[kind.pillar] = Self.pinned(kinds)
     }
 
     /// Moves a visible module to `index` among its pillar's movable modules; pinned modules keep their ends and
@@ -169,9 +169,14 @@ struct BriefingLayout: Equatable, Codable, Sendable {
         guard let from = kinds.firstIndex(of: kind) else { return }
         kinds.remove(at: from)
         kinds.insert(kind, at: max(0, min(index, kinds.count)))
-        let leading = shown.contains(.heroCarousel) ? [BriefingModuleKind.heroCarousel] : []
-        let trailing = shown.contains(.executiveSitrep) ? [BriefingModuleKind.executiveSitrep] : []
-        visible[kind.pillar] = leading + kinds + trailing
+        visible[kind.pillar] = Self.pinned(kinds + shown.filter(\.isPinned))
+    }
+
+    /// The pinned modules at their ends, the carousel first and the sitrep last, the rest in the given order.
+    private static func pinned(_ kinds: [BriefingModuleKind]) -> [BriefingModuleKind] {
+        let leading = kinds.contains(.heroCarousel) ? [BriefingModuleKind.heroCarousel] : []
+        let trailing = kinds.contains(.executiveSitrep) ? [BriefingModuleKind.executiveSitrep] : []
+        return leading + kinds.filter { !$0.isPinned } + trailing
     }
 
     /// Just after the nearest module that precedes `kind` in canvas order, else first.
