@@ -33,13 +33,20 @@ extension DatabaseEngine {
             ([eventID, String(overview.membershipVersion)] + facts).joined(separator: "\n"))
     }
 
-    func fetchBriefingSitrep(eventID: String) throws -> (inputHash: String, text: String, isGenerated: Bool)? {
+    /// A cached sitrep line with the stamp of the inputs it restates.
+    struct BriefingSitrepRow: Equatable, Sendable {
+        let inputHash: String
+        let text: String
+        let isGenerated: Bool
+    }
+
+    func fetchBriefingSitrep(eventID: String) throws -> BriefingSitrepRow? {
         guard
             let row = try eventRows(
                 "SELECT input_hash, text, is_generated FROM briefing_sitrep WHERE event_id = ?;", [.text(eventID)]
             ).first, let hash = row[0], let text = row[1]
         else { return nil }
-        return (hash, text, row[2] == "1")
+        return BriefingSitrepRow(inputHash: hash, text: text, isGenerated: row[2] == "1")
     }
 
     /// Saves a sitrep line only while its inputs are current: inside the transaction the stamp is recomputed from the

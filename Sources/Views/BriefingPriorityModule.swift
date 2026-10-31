@@ -241,11 +241,7 @@ struct BriefingPriorityModuleView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Divider()
-            HStack(alignment: .top, spacing: AppSpacing.xs) {
-                stat("Impact", card.impact)
-                stat("Momentum", card.momentum.label)
-                stat("Original reports", card.original)
-            }
+            stats(card)
             Divider()
             if let reported = card.reported {
                 layer("Reported") { quoteView(reported) }
@@ -261,18 +257,7 @@ struct BriefingPriorityModuleView: View {
                 layer("Not yet reported") { quoteView(unknown) }
             }
             Spacer(minLength: 0)
-            HStack(spacing: AppSpacing.xs) {
-                if let day = card.threadDay {
-                    Text("Story thread · day \(day)").font(AppTypography.caption).foregroundStyle(
-                        AppColor.secondaryText)
-                }
-                Spacer(minLength: AppSpacing.xs)
-                Button("Open event overview") {
-                    if let summary = card.summary { actions.onOpenEvent(summary) }
-                }
-                .buttonStyle(.link)
-                .font(AppTypography.caption)
-            }
+            footer(card)
         }
         .padding(AppSpacing.sm)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -285,6 +270,29 @@ struct BriefingPriorityModuleView: View {
                         : contrast == .increased ? AppLayout.hoverStroke : AppLayout.hairline)
         )
         .accessibilityElement(children: .contain)
+    }
+
+    private func stats(_ card: BriefingPriorityData.Card) -> some View {
+        HStack(alignment: .top, spacing: AppSpacing.xs) {
+            stat("Impact", card.impact)
+            stat("Momentum", card.momentum.label)
+            stat("Original reports", card.original)
+        }
+    }
+
+    /// The thread's day and the way to its overview.
+    private func footer(_ card: BriefingPriorityData.Card) -> some View {
+        HStack(spacing: AppSpacing.xs) {
+            if let day = card.threadDay {
+                Text("Story thread · day \(day)").font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+            }
+            Spacer(minLength: AppSpacing.xs)
+            Button("Open event overview") {
+                if let summary = card.summary { actions.onOpenEvent(summary) }
+            }
+            .buttonStyle(.link)
+            .font(AppTypography.caption)
+        }
     }
 
     private func stat(_ label: String, _ value: String) -> some View {
