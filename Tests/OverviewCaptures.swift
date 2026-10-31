@@ -451,7 +451,7 @@ extension OverviewCaptures {
                 .environment(tension)
                 failures += render(
                     board, name: "briefing-\(window)pt-\(appearance)",
-                    size: NSSize(width: width, height: 2600), dark: dark, contrast: contrast, trim: true,
+                    size: NSSize(width: width, height: 6000), dark: dark, contrast: contrast, trim: true,
                     into: output)
             }
         }
