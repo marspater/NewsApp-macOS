@@ -1230,6 +1230,15 @@ struct NewsTests {
         assertEqual(try await db.mutedArticleCount(muting: muting), 1, "A new muted story refreshes the muted count")
         assertEqual(try await db.mutedArticleCount(muting: muting), 1, "The cached muted count repeats")
 
+        // A muted story is outside the unread count under rules, so toggling it leaves the cached count alone.
+        let mutedID = story(9, "muted.example").id
+        assertEqual(try await db.counts(muting: muting).unread, 1, "The muted story is outside the unread count")
+        try await db.markRead(articleId: mutedID, isRead: true)
+        assertEqual(try await db.counts(muting: muting).unread, 1, "Reading a muted story leaves the cached count")
+        try await db.markRead(articleId: mutedID, isRead: false)
+        assertEqual(try await db.counts(muting: muting).unread, 1, "Unreading it leaves the cached count too")
+        assertEqual(try await db.counts().unread, 2, "Without rules the muted story counts again")
+
         // A collection-only story is counted only while read: marking it unread leaves the counts.
         let panelURL = "https://example.com/panel-counts.xml"
         let panelStory = story(20)
