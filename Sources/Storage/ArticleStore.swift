@@ -114,6 +114,11 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    /// Bumped whenever a read or save change lands in memory, so a refresh that loaded around it can tell (#786).
+    private var stateChanges: UInt = 0
+    /// Runs after `refreshState` has loaded and before it assigns; lets a test land a change in between.
+    var refreshLoadedHook: (@MainActor () async -> Void)?
+
     /// Recounts unread stories under new mute rules.
     func setMuting(_ rules: MuteRules) async {
         applyMuting(rules)
@@ -137,22 +142,33 @@ final class ArticleStore: ObservableObject {
     @discardableResult
     func refreshState() async -> Bool {
         do {
-            let generation = newCountRequest()
-            let fetched = try await database.fetchArticles(limit: 500)
-            let readIDs = try await database.getReadArticleIDs()
-            let saved = try await database.getSavedArticles()
-            let counts = try await database.counts(muting: muting)
-
-            self.articles = fetched
-            self.readArticleIDs = readIDs
-            self.savedArticles = saved
-            self.savedArticleIDs = Set(saved.map { $0.id })
-            if generation == countSequence {
-                self.unreadCount = counts.unread
-                self.savedCount = counts.saved
+            // A read or save change that lands while this loads makes the loaded read and saved state stale: load again
+            // instead of overwriting it. ponytail: three tries, then it reports failure; a retry loop with backoff if
+            // changes ever arrive faster than a load.
+            var published = false
+            for _ in 1...3 {
+                let changesAtStart = stateChanges
+                let generation = newCountRequest()
+                let fetched = try await database.fetchArticles(limit: 500)
+                let readIDs = try await database.getReadArticleIDs()
+                let saved = try await database.getSavedArticles()
+                let counts = try await database.counts(muting: muting)
+                await refreshLoadedHook?()
+                self.articles = fetched
+                guard changesAtStart == stateChanges else { continue }
+                self.readArticleIDs = readIDs
+                self.savedArticles = saved
+                self.savedArticleIDs = Set(saved.map { $0.id })
+                if generation == countSequence {
+                    self.unreadCount = counts.unread
+                    self.savedCount = counts.saved
+                }
+                published = true
+                break
             }
             revision &+= 1
-            return true
+            if !published { logger.error("Refresh kept being overtaken by read or save changes") }
+            return published
         } catch {
             logger.error("Failed to refresh ArticleStore state: \(error.localizedDescription)")
             return false
@@ -251,6 +267,7 @@ final class ArticleStore: ObservableObject {
             } else {
                 readArticleIDs.remove(id)
             }
+            stateChanges &+= 1
             let generation = newCountRequest()
             let counts = try await database.counts(muting: muting)
             if generation == countSequence {
@@ -278,6 +295,7 @@ final class ArticleStore: ObservableObject {
     func markAsRead(ids: [String]) async {
         do {
             try await database.markReadBatch(articleIds: ids, isRead: true)
+            stateChanges &+= 1
             await refreshState()
         } catch {
             operationError = "Could not mark stories as read. Please try again."
@@ -297,6 +315,7 @@ final class ArticleStore: ObservableObject {
         }
         do {
             try await database.markAllRead(feedUrl: feedUrl, muting: muting)
+            stateChanges &+= 1
             await refreshState()
             return true
         } catch {
@@ -326,6 +345,7 @@ final class ArticleStore: ObservableObject {
             let id = try await database.resolvedArticleID(for: article)
             guard let storedArticle = try await database.fetchArticles(limit: 1, id: id).first else { return false }
             try await database.setSaved(articleId: storedArticle.id, isSaved: nextState)
+            stateChanges &+= 1
             if nextState {
                 if !savedArticleIDs.contains(storedArticle.id) {
                     savedArticles.insert(storedArticle, at: 0)
@@ -360,6 +380,7 @@ final class ArticleStore: ObservableObject {
         for article in currentSaved {
             _ = try? await database.setSaved(articleId: article.id, isSaved: false)
         }
+        stateChanges &+= 1
         await serialSpotlight { await $0.removeAllSavedArticles() }
         await refreshState()
     }
