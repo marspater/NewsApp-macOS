@@ -746,7 +746,8 @@ private struct GridRowFixture: View {
         case .event(let summary, let representative, let members):
             EventCardView(
                 representative: representative, summary: summary, visibleMembers: members, compact: false,
-                isExpanded: .constant(expanded), openRepresentative: {}, openMember: { _, _ in }, separate: { _ in },
+                isExpanded: expanded, setExpanded: { _ in }, openRepresentative: {}, openMember: { _, _ in },
+                separate: { _ in },
                 combine: { _ in })
         }
     }
