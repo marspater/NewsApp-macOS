@@ -166,6 +166,14 @@ enum BriefingIntelligenceTests {
             BriefingPriorityData.originalReports(reports) == 3,
             "A wire agency's own report counts; a paper running only wire copy does not")
         check(BriefingPriorityData.isWireCopy(text: "(AP) - Text", publisher: "Daily Example"), "AP copy is wire")
+        let body = String(repeating: "Our correspondent reports from the port. ", count: 8)
+        check(
+            !BriefingPriorityData.isWireCopy(
+                text: body + "Reuters reported a similar figure.", publisher: "Daily Example"),
+            "A body mention of Reuters stays original")
+        check(
+            BriefingPriorityData.isWireCopy(text: "LONDON (Reuters) – " + body, publisher: "Daily Example"),
+            "A leading Reuters credit is wire copy")
         check(!BriefingPriorityData.isWireCopy(text: "(Reuters) - Text", publisher: "Reuters"), "Reuters is original")
     }
 
@@ -218,6 +226,11 @@ enum BriefingIntelligenceTests {
         check(
             BriefingSitrepComposer.keepsQualifiers("Officials denied damage.", facts: [negated[0].text]),
             "A sentence keeping the negation passes")
+        let hedged = [BriefingSitrepComposer.Highlight(text: "Residents may evacuate the coast.", publisher: nil)]
+        let certain = await BriefingSitrepComposer.compose(
+            title: "Corridor", highlights: hedged,
+            model: NewsTextModel { _, _ in "Residents evacuated the coast after the warning was issued." })
+        check(certain?.isGenerated == false, "A sentence that drops the facts' uncertainty falls back")
         let faithful = NewsTextModel { _, _ in "Port authorities raised the security level, Reuters reports." }
         let kept = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: faithful)
         check(kept?.isGenerated == true, "A sentence restating the inputs is kept")

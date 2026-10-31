@@ -940,7 +940,9 @@ struct ArticleListView: View {
             )
             // Every module's data from the library; nothing is generated at render time. Reloads when the stories,
             // their event membership or a stored overview change.
-            .task(id: "\(listed.map(\.id)):\(articleStore.eventRevision):\(articleStore.overviewRevision)") {
+            .task(
+                id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision)"
+            ) {
                 let context = BriefingLoadContext(
                     entries: listed, heroIDs: Set(BriefingView.heroEntries(listed).map(\.id)), briefing: briefing,
                     now: Date(), tension: tensionModel?.state ?? WorldTensionState(),

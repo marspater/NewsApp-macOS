@@ -78,7 +78,8 @@ enum BriefingSitrepComposer {
 
     /// Negation and uncertainty cues; a sentence restating qualified facts must keep at least one of them.
     private static let qualifiers: Set<String> = [
-        "not", "no", "never", "denied", "denies", "unconfirmed", "alleged", "reportedly", "could not",
+        "not", "no", "never", "denied", "denies", "unconfirmed", "alleged", "reportedly", "could not", "may", "might",
+        "could", "expected", "possible", "likely",
     ]
 
     /// False when a fact is negated or uncertain and the sentence drops every such cue. Publisher names are not

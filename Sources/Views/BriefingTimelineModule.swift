@@ -39,13 +39,21 @@ struct BriefingTimelineData: Equatable, Sendable {
     /// Most publishers first.
     let threads: [Thread]
 
+    func hasRows(under filter: BriefingBoardFilter) -> Bool { thread(for: filter) != nil }
+
     /// The lead thread inside the filter.
     func thread(for filter: BriefingBoardFilter) -> Thread? { threads.first { filter.includes($0.entry) } }
 
     /// Every timeline of the story's live events as one, keeping the first item of each identical summary.
-    static func merged(_ timelines: [[OverviewTimelineItem]]) -> [OverviewTimelineItem] {
+    /// Plans, undated and future items are dropped first, so they never hide a dated past copy of the same summary.
+    static func merged(_ timelines: [[OverviewTimelineItem]], now: Date) -> [OverviewTimelineItem] {
         var seen = Set<String>()
-        return timelines.joined().filter { seen.insert($0.summary).inserted }
+        return timelines.joined().filter { item in
+            guard !item.isFuturePlan, let date = item.eventDate ?? item.publicationDate, date <= now else {
+                return false
+            }
+            return seen.insert(item.summary).inserted
+        }
     }
 
     /// Past, dated items in date order, the latest five; nil with fewer than two.
@@ -86,7 +94,7 @@ struct BriefingTimelineData: Equatable, Sendable {
                     }
                 }
             }
-            if let thread = thread(entry: pair.0, timeline: merged(timelines), now: context.now) {
+            if let thread = thread(entry: pair.0, timeline: merged(timelines, now: context.now), now: context.now) {
                 threads.append((index, thread))
             }
         }
@@ -137,20 +145,17 @@ struct BriefingTimelineModuleView: View {
     let actions: BriefingActions
 
     var body: some View {
-        let thread = data.thread(for: filter)
-        BriefingModuleCard(title: "Escalation timeline", caption: thread?.caption) {
+        if let thread = data.thread(for: filter) { card(thread) }
+    }
+
+    private func card(_ thread: BriefingTimelineData.Thread) -> some View {
+        BriefingModuleCard(title: "Escalation timeline", caption: thread.caption) {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
                 IntelligenceLabel("Assessed on this Mac").font(AppTypography.caption)
-                if let thread {
-                    HStack(alignment: .top, spacing: AppSpacing.sm) {
-                        ForEach(thread.items) { item in
-                            column(item)
-                        }
+                HStack(alignment: .top, spacing: AppSpacing.sm) {
+                    ForEach(thread.items) { item in
+                        column(item)
                     }
-                } else {
-                    Text("No escalation thread in this region.")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
                 }
             }
         }

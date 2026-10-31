@@ -108,13 +108,40 @@ enum BriefingImpactTests {
         ])
         let cards = data.cards(for: BriefingBoardFilter())
         check(cards.map(\.industry) == ["Transportation", "Energy"], "most stories first")
-        check(cards.first?.sourceText == "From 2 stories · 3 cited passages", "distinct stories and citations")
+        check(cards.first?.sourceText == "From 2 stories · 4 cited passages", "citation IDs count per story")
         check(cards.first?.implication == "Ships rerouted.", "first implication")
         check(cards.last?.sourceText == "From 1 story · 1 cited passage", "singular wording")
         let europe = data.cards(for: BriefingBoardFilter(region: .europe))
         check(europe.map(\.industry) == ["Transportation"], "sectors outside the region hide")
         check(europe.first?.sourceText == "From 1 story · 2 cited passages", "filtered counts")
         check(BriefingIndustryData.make([]) == nil, "no overviews is nil")
+        check(data.hasRows(under: BriefingBoardFilter()), "rows without a filter")
+        check(!data.hasRows(under: BriefingBoardFilter(region: .oceania)), "no rows outside every story's region")
+        let made = BriefingIndustryData.make([
+            (cairo, overview(items: [("Energy", ["c1"]), ("Retail & E-commerce", ["missing"])])),
+            (paris, overview(items: [("Energy", ["c1"])])),
+        ])
+        check(made?.sectors.map(\.industry) == ["Energy"], "an item citing no stored passage is dropped")
+        check(
+            made?.cards(for: BriefingBoardFilter()).first?.sourceText == "From 2 stories · 2 cited passages",
+            "the same citation ID in two stories is two passages")
+    }
+
+    static func overview(items: [(String, [String])]) -> EventOverviewDocument {
+        EventOverviewDocument(
+            eventID: "event-\(UUID().uuidString)",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "input"),
+            content: OverviewContent(
+                title: "Story", summary: "",
+                citations: [
+                    OverviewCitation(
+                        id: "c1", articleID: "a1", passageID: "p1", passageFingerprint: "f1", quote: "Quote.")
+                ],
+                evidenceSections: OverviewEvidenceSections(
+                    industryImpact: items.map {
+                        OverviewIndustryImpact(industry: $0.0, implication: "Costs rose.", citationIDs: $0.1)
+                    })),
+            provenance: OverviewProvenance(memberArticleIDs: ["a1"], kind: .synthesized))
     }
 
     static func driversCoverage() {
@@ -154,11 +181,22 @@ enum BriefingImpactTests {
             OverviewTimelineItem(id: "x", dateText: "Mon", summary: "First report", eventDate: now - 3 * day),
             OverviewTimelineItem(id: "4", dateText: "Thu", summary: "Talks begin", eventDate: now - day / 2),
         ]
-        let merged = BriefingTimelineData.merged([timeline, other])
+        let merged = BriefingTimelineData.merged([timeline, other], now: now)
         check(merged.filter { $0.summary == "First report" }.map(\.id) == ["1"], "identical summaries merge once")
         check(
             BriefingTimelineData.items(merged, now: now)?.map(\.id) == ["1", "2", "3", "4"],
             "both events' timelines in date order")
+        let shadowed = BriefingTimelineData.merged(
+            [
+                [OverviewTimelineItem(id: "plan", dateText: "Soon", summary: "Escorts begin", isFuturePlan: true)],
+                [OverviewTimelineItem(id: "undated", dateText: "", summary: "Escorts begin")],
+                [OverviewTimelineItem(id: "real", dateText: "Thu", summary: "Escorts begin", eventDate: now - day)],
+            ], now: now)
+        check(shadowed.map(\.id) == ["real"], "a plan or undated copy never hides the dated past one")
+        check(BriefingDriversData.captureFixture?.hasRows(under: BriefingBoardFilter()) == true, "drivers have rows")
+        check(
+            BriefingTimelineData.captureFixture?.hasRows(under: BriefingBoardFilter(region: .oceania)) == false,
+            "no thread outside the filter")
         check(BriefingTimelineData.items(many, now: now)?.map(\.id) == ["3", "4", "5", "6", "7"], "latest five")
     }
 }
