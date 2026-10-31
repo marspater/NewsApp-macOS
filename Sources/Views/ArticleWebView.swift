@@ -176,14 +176,13 @@ struct ArticleWebView: NSViewRepresentable {
                     }
                     decisionHandler(.allow)
                 } catch {
-                    let refusal = WebPreviewPolicy.refusalPolicy(isMainFrame: isMainFrame)
-                    if let message = refusal.error, let self, let webView, self.webView === webView,
-                        self.requestGeneration == generation
+                    if let message = WebPreviewPolicy.refusalMessage(isMainFrame: isMainFrame), let self, let webView,
+                        self.webView === webView, self.requestGeneration == generation
                     {
                         self.parent.loadError = message
                         self.parent.isLoading = false
                     }
-                    decisionHandler(refusal.decision)
+                    decisionHandler(.cancel)
                 }
             }
         }

@@ -11,15 +11,12 @@ enum WebPreviewPolicy {
         targetFrameIsMain ?? true
     }
 
-    /// What a navigation the network policy refused does: it is always cancelled, but only a refused main-frame
-    /// navigation reports an error; a blocked iframe is dropped quietly and leaves the page and its progress alone.
-    nonisolated static func refusalPolicy(isMainFrame: Bool) -> (decision: WKNavigationActionPolicy, error: String?) {
-        (
-            .cancel,
-            isMainFrame
-                ? "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
-                : nil
-        )
+    /// The error a navigation the network policy refused shows: only a refused main-frame navigation reports one; a
+    /// blocked iframe is dropped quietly and leaves the page and its progress alone. The navigation is always cancelled.
+    nonisolated static func refusalMessage(isMainFrame: Bool) -> String? {
+        isMainFrame
+            ? "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
+            : nil
     }
 
     static func contentRules() async throws -> WKContentRuleList {

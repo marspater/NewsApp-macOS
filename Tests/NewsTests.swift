@@ -2296,12 +2296,9 @@ struct NewsTests {
             insecureRefused = true
         }
         assertTrue(insecureRefused, "An http address is refused while insecure HTTP is off")
-        let mainRefusal = WebPreviewPolicy.refusalPolicy(isMainFrame: true)
         assertTrue(
-            mainRefusal.decision == .cancel && mainRefusal.error != nil, "Main frame refusal cancels with an error")
-        let subframeRefusal = WebPreviewPolicy.refusalPolicy(isMainFrame: false)
-        assertTrue(
-            subframeRefusal.decision == .cancel && subframeRefusal.error == nil, "Subframe refusal cancels quietly")
+            WebPreviewPolicy.refusalMessage(isMainFrame: true) != nil, "A main-frame refusal reports an error")
+        assertTrue(WebPreviewPolicy.refusalMessage(isMainFrame: false) == nil, "A subframe refusal is quiet")
         assertTrue(WebPreviewPolicy.isMainFrame(targetFrameIsMain: nil), "A new-window navigation counts as main frame")
     }
 
