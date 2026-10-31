@@ -1,6 +1,6 @@
 # Contributing to NewsApp
 
-Start with [README.md](README.md), [architecture and technology constraints](docs/ARCHITECTURE.md), [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md); for UI work, also the [design language](docs/DESIGN.md). These documents apply to every contributor. `AGENTS.md` and `JULES.md` contain instructions for coding agents only.
+Start with [README.md](README.md), [architecture and technology constraints](docs/ARCHITECTURE.md), [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md); for UI work, also the [design language](docs/DESIGN.md). These documents apply to every contributor. `AGENTS.md` contains instructions for coding agents only.
 
 ## Development
 
