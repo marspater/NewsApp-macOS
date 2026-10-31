@@ -3699,14 +3699,14 @@ actor DatabaseEngine {
 
     // MARK: - Granular Cache Purging
 
-    /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings, stored matcher
-    /// signals, the pair decisions' stored signals (which resets the verdict calibration, #629) and the World Tension
-    /// history. Articles, events, pair decisions and subscriptions remain intact.
     /// Bumped by every clear of derived data (#844). Background work captures it when it starts and hands it back
     /// as `expectedGeneration` on its write; a write from an earlier generation is refused inside the transaction,
     /// so nothing computed before a clear comes back. In memory only: in-flight work does not outlive the process.
     private(set) var analysisGeneration = 0
 
+    /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings, stored matcher
+    /// signals, the pair decisions' stored signals (which resets the verdict calibration, #629) and the World Tension
+    /// history. Articles, events, pair decisions and subscriptions remain intact.
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
         try requireWritable()

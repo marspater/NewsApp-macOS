@@ -490,6 +490,8 @@ final class ArticleStore: ObservableObject {
     /// Clears replaceable caches while preserving subscriptions, history and saved bodies.
     func clearAllDatabaseCache() async throws {
         try await database.clearAllDatabaseCache()
+        // This clear removes enrichment too, so running work and its session state are reset the same way (#805).
+        NotificationCenter.default.post(name: .aiAnalysisCleared, object: nil)
         await refreshState()
     }
 
