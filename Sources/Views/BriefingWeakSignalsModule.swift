@@ -40,6 +40,7 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
 
     static let lowCoverageLimit = 2
     static let bigThreadPublishers = 5
+    /// The view shows at most this many rows that pass the region filter; the data keeps every qualifying row.
     static let maximumRows = 5
     static let footer =
         "Low coverage alone never qualifies: a story needs a major rating, a link to a big thread, rising momentum, or a cited industry impact."
@@ -87,7 +88,7 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
                 entry: entry, headline: entry.representative.title, caption: captions[entry.id] ?? "",
                 reasons: reasons)
         }
-        return rows.isEmpty ? nil : Self(rows: Array(rows.prefix(maximumRows)))
+        return rows.isEmpty ? nil : Self(rows: rows)
     }
 
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
@@ -157,7 +158,7 @@ struct BriefingWeakSignalsModuleView: View {
     let actions: BriefingActions
 
     var body: some View {
-        let rows = data.rows.filter { filter.includes($0.entry) }
+        let rows = Array(data.rows.filter { filter.includes($0.entry) }.prefix(BriefingWeakSignalsData.maximumRows))
         if !rows.isEmpty {
             card(rows)
         }

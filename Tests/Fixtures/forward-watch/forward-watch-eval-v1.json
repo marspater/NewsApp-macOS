@@ -73,6 +73,11 @@
       "expected_date_text": "on 9 November"
     },
     {
+      "sentence": "The regional trade summit is scheduled to take place in November 2026, organisers said.",
+      "expected_kind": "scheduled",
+      "expected_date_text": "in November 2026"
+    },
+    {
       "sentence": "Shipping insurers are expected to review war-risk rates later this week.",
       "expected_kind": "expected",
       "expected_date_text": "later this week"

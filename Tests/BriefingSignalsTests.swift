@@ -87,7 +87,8 @@ enum BriefingSignalsTests {
         let many = (0..<7).map { entry("m\($0)", publishers: 1) }
         let all = Dictionary(uniqueKeysWithValues: many.map { ($0.id, Data.Evidence(isMajor: true)) })
         check(
-            Data.make(entries: many, evidence: all, captions: [:])?.rows.count == Data.maximumRows, "at most five rows")
+            Data.make(entries: many, evidence: all, captions: [:])?.rows.count == many.count,
+            "the data keeps every qualifying row")
     }
 
     static func momentum() {

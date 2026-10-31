@@ -149,7 +149,7 @@ enum ForwardWatchExtractor {
 
         /// Matched case-sensitively so "may" as a verb is never a month.
         static let calendarDate = make(
-            #"(?:on\s+)?(?:(?:19|20)\d{2}-\d{2}-\d{2}|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:\#(months))\b(?:,?\s+(?:19|20)\d{2})?|(?:\#(months))\.?\s+\d{1,2}(?:st|nd|rd|th)?\b(?:,?\s+(?:19|20)\d{2})?)"#,
+            #"(?:(?:on|in)\s+)?(?:(?:19|20)\d{2}-\d{2}-\d{2}|\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:\#(months))\b(?:,?\s+(?:19|20)\d{2})?|(?:\#(months))\.?\s+\d{1,2}(?:st|nd|rd|th)?\b(?:,?\s+(?:19|20)\d{2})?|(?:\#(months))\s+(?:19|20)\d{2}\b)"#,
             caseless: false)
         static let relativeDay = make(
             #"\b(?:next\s+(?:week|month)|(?:next\s+|this\s+)?(?:\#(weekdays)))\b"#, caseless: false)
