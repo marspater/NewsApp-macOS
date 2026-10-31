@@ -75,7 +75,7 @@ The single design language for News on macOS. It applies to every change that ad
 
 | Area | List | Reader |
 | --- | --- | --- |
-| Leading (`.navigation`) | System sidebar toggle, queued-stories button | Back, Previous Story, Next Story |
+| Leading (`.navigation`) | System sidebar toggle, queued-stories button; in Briefing, Back first | Back, Previous Story, Next Story |
 | Center (`.principal`) | Nothing | Mode picker (Overview, Story, Web) |
 | Trailing (`.primaryAction`) | View options group (group by event, list or grid), Refresh, New Briefing when in Briefing | Save and Share group, Reading options, Web back and forward while in Web mode |
 
@@ -141,14 +141,50 @@ A single click on the card opens the event overview, with the lead report one mo
 
 ### 8.4 Briefing
 
-Briefing is a situation board presenting the day's essential intelligence, selected once daily at the configured edition hour (default 7:00 AM) and frozen across all windows until the next edition or explicit New Briefing. It is composed of three primary zones: a top hero carousel, a World Tension executive strip, and categorized dense story tiles.
+Briefing is a war room presenting the day's essential intelligence, selected once daily at the configured edition hour (default 7:00 AM) and frozen across all windows until the next edition or explicit New Briefing. The approved layout lives in the "Briefing War Room" canvas (https://claude.ai/artifact/7hHJUQX1q2evEYjh2EtfQ8); `docs/mocks/briefing_situation_board.md` summarizes it. When this section and the canvas disagree, the canvas wins.
+
+The toolbar holds Back, the title "Briefing" with its edition line (date, edition selection time, last update), Customize Briefing and New Briefing. Below it, Briefing is an ordered list of modules grouped under five pillars, in this order:
+
+| Pillar | Question |
+| --- | --- |
+| Situational awareness | What is happening right now? |
+| Intelligence assessment | What does the reporting show? |
+| Strategic impact | What could this affect? |
+| Weak signals | What might we be missing? |
+| Forward watch | What should we monitor next? |
+
+**Module shell**:
+- A pillar header shows the pillar's icon, its name in `AppTypography.eyebrow` (uppercase by `.textCase(.uppercase)`) and its question in `AppTypography.callout`, secondary color, with the header trait.
+- Every module uses one module card style: `AppColor.surface`, `AppRadius.card`, `AppSpacing.md` inner padding, a separator-color hairline and the resting shadow token. The shared header carries the module title in `AppTypography.sectionTitle` and an options menu (`⋯`). No module draws its own frame.
+- A module with no data is hidden, never shown empty. Hiding a module never reflows another pillar.
+
+**Customize Briefing sheet**: lists the modules grouped by pillar, each with a visibility toggle. Dragging reorders modules within their pillar only; hidden modules keep their place. Order and visibility are saved per Mac and survive relaunch. Reset to Default restores the original order with every module shown; Done closes the sheet.
 
 | Component | Hierarchy & Tokens | Anatomy & Invariants |
 | --- | --- | --- |
-| Hero carousel | `AppLayout.leadStoryHeight` (360 pt), `AppRadius.card` (12 pt), `AppColor.leadScrim` | Top 3–5 stories ranked by publisher coverage count (`sourceCount` descending). Displays lead image via `bestCardImage` across all member reports. Overlay contains publisher `EyebrowText`, headline in `AppTypography.leadStoryHeadline` (28 pt serif), publisher count `TagView`, timestamp in `caption`, and `UnreadDot`. Left/Right arrow controls and bottom dot indicators. |
-| World Tension strip | `AppColor.surface`, `AppRadius.card`, `AppSpacing.md` (16 pt) inner padding | Top row: current reading in `AppTypography.tensionReading` (44 pt bold rounded), degree symbol, level name with colored dot (`AppColor.tension(level)`), and a 7-day sparkline trend chart (`LineMark`, Catmull-Rom interpolation). Bottom row: three driving headlines (`reading.drivingHeadlines.prefix(3)`) in a 3-column grid with publisher eyebrow and headline. |
-| Dense story tiles | `AppColor.surface`, `AppRadius.card`, hairline border, resting shadow | Up to 10 stories grouped by region or topic with `AppTypography.sectionTitle` headers. Tile anatomy: publisher eyebrow, timestamp, unread dot; headline in `AppTypography.headline` (unread in `primaryText`, read in `secondaryText`); one deterministic key fact cited from event overview highlights with publisher badge; footer coverage count tag and bookmark glyph. Single click opens the story. |
-| Completion banner | `AppSpacing.lg` padding, centered | Title in `AppTypography.sectionTitle` ("Briefing complete" or "N of 10 stories read"), subtitle in `caption` with edition selection time and next edition arrival time, and "Back to Today" button. |
+| Hero carousel | `AppLayout.leadStoryHeight` (360 pt), `AppRadius.card` (12 pt), `AppColor.leadScrim` | Situational awareness. Top 3–5 stories ranked by publisher coverage count (`sourceCount` descending). Displays lead image via `bestCardImage` across all member reports. Overlay contains publisher `EyebrowText` with position ("1 of 5"), headline in `AppTypography.leadStoryHeadline` (28 pt serif), publisher count `TagView`, timestamp in `caption`, Developing pill and `UnreadDot`. Left/Right arrow controls and bottom dot indicators. |
+| World Tension | `AppColor.surface`, `AppRadius.card`, `AppSpacing.md` (16 pt) inner padding | Situational awareness. Score in `AppTypography.tensionReading` (44 pt bold rounded) followed by "of 100", and the level name with its colored dot (`AppColor.tension(level)`). Below: the 7-day change ("▲ 4 in 7 days") and coverage sufficiency ("coverage sufficient"), then rising risk types as pills (`TagView`) with their trend. Ends with the gold "Assessed on this Mac" label. Data from `WorldTensionModel`, the one model shared with the sidebar and the sheet. |
+| Since your last briefing | Module card, rows in `AppTypography.callout` | Situational awareness. New events, more publishers, easing or escalation since the last opened edition; each row a kind pill, the event and a `caption` meta line. Data from an edition snapshot (event id, membership version, publisher count, escalation signal). |
+| Executive sitrep | Module card, numbered rows, titles in `AppTypography.headline` | Situational awareness. A 60-second read: three lines from the three most-covered threads, each with its publisher count and a link to the thread. Built from overview highlights by the on-device model (plain text output) with an extractive fallback; carries the gold label. |
+| Priority developments | Module card per story; accent border on the lead | Intelligence assessment. Publishers · time, Developing or Updated state, headline in `AppTypography.headline`; Impact, Momentum and Original reports ("5 of 11"); a reported fact quoted with its publisher; "Accounts differ" with each side attributed; "Not yet reported"; the story thread with Open event overview. Data from story importance, report rate, overview perspectives and cited highlights. |
+| Source footprint | Module card, bar rows in `AppTypography.callout` | Intelligence assessment. Publisher regions (international, regional, wire agencies, official sources) for the lead story, and a line stating how many reports are original and how many carry wire text that counts once. Data from catalog feed regions and wire reconciliation. |
+| What drives World Tension | Module card, rows in `AppTypography.callout` | Intelligence assessment. Event types and regions with severity and coverage shown as two separate values ("well covered", "thin coverage", "one report"). Data from the tension methodology. |
+| Industry impact | Module card, sector in `AppTypography.headline` | Strategic impact. Only sectors a cited passage names across today's stories, each with one line and its source count in `caption` ("From 2 stories · 4 cited passages"). Data from overview industry impact. |
+| Regions | Module card, rows with level dot | Strategic impact. Region name, top story, level and story count; selecting a region filters every module on the board. Data from tension macro regions and event places. |
+| Region tiles | `AppColor.surface`, `AppRadius.card`, hairline border, resting shadow | Strategic impact. Dense tiles under a region header in `AppTypography.sectionTitle`: publishers · time in `caption`, Developing pill, headline in `AppTypography.headline`, one serif quoted fact with its publisher. The lead tile carries an accent border. Single click opens the story. |
+| Weak signals | Module card, rows with reason pills | Weak signals. Low-coverage stories that also have a major rating, a link to a big thread or rising momentum; the reasons show as pills. Low coverage alone never qualifies. |
+| Forward watch | Module card, rows with kind pill | Forward watch. Scheduled, expected and conditional items, each with the source of the date or condition in `caption` ("Tuesday, as reported by 3 publishers"). |
+| Escalation timeline | Module card, horizontal day track | Forward watch. Turning points across one story thread, one dot per day, the largest dot for the sharpest escalation. Data from overview timeline items. |
+| Completion banner | `AppSpacing.lg` padding, centered | Title in `AppTypography.sectionTitle` ("Briefing complete" or "N of M stories read"), subtitle in `caption` with edition selection time and next edition arrival time, and "Back to Today" button. |
+
+**Honesty rules** (every module):
+- Reported text and generated text never share a line. Reported passages are quoted with their publisher; generated lines carry the gold "Assessed on this Mac" label once per module.
+- Copied wire text counts once: "original reports" replaces any claim of independent confirmation.
+- Severity and coverage are separate values; no number combines them.
+- Forward watch only lists dates and conditions a cited passage states, in the publisher's words; nothing is scheduled by the app.
+- A module with no data is hidden, never shown empty.
+
+**Back**: in Briefing the list toolbar carries the reader's Back control (`.navigation`, `chevron.left`, "Back to [section]"), returning to the section shown before the Briefing, Today if none; Navigate › Back does the same.
 
 **Carousel Motion Rules**:
 - The hero carousel is the **only auto-advancing motion permitted in the app**.

@@ -82,6 +82,41 @@ extension EnvironmentValues {
     }
 }
 
+/// A lead photo filling its frame as the lead story card and the Briefing hero show it: wide photos fill, anchored to
+/// the top where subjects usually sit above the caption; square and portrait photos are shown whole over a blurred copy
+/// of themselves, so faces are never cropped. Clipped, and it takes no clicks outside its frame.
+struct LeadImageFill: View {
+    let image: Image
+    let aspectRatio: CGFloat?
+
+    /// Below this width-to-height ratio a lead image is framed whole rather than cropped to fill.
+    static let wideRatio: CGFloat = 1.25
+
+    /// Square and portrait lead images (and wide ones only once their size is known) are framed whole.
+    static func framesWhole(aspectRatio: CGFloat?) -> Bool {
+        aspectRatio.map { $0 < wideRatio } ?? false
+    }
+
+    var body: some View {
+        Color.clear
+            .overlay(alignment: .top) {
+                if Self.framesWhole(aspectRatio: aspectRatio) {
+                    ZStack(alignment: .top) {
+                        image.resizable().aspectRatio(contentMode: .fill)
+                            .blur(radius: AppLayout.leadBackdropBlur)
+                            .overlay(AppColor.leadBackdropDim)
+                        image.resizable().aspectRatio(contentMode: .fit)
+                    }
+                } else {
+                    image.resizable().aspectRatio(contentMode: .fill)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+            }
+            .clipped()
+            .contentShape(Rectangle())
+    }
+}
+
 // Feed image URLs use the same bounded, validated network path as article content.
 struct ArticleRemoteImage<Content: View>: View {
     let url: URL

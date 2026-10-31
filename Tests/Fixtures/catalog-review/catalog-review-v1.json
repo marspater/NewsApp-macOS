@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "reviewedOn": "2026-10-10",
+  "reviewedOn": "2026-10-31",
   "reviewer": "maintainer",
   "feeds": [
     {
@@ -37,6 +37,80 @@
         "suggestedAlternativeFeedIDs": [
           "guardian-world",
           "bbc-world"
+        ]
+      }
+    },
+    {
+      "id": "semafor-world",
+      "url": "https://www.semafor.com/feed.xml",
+      "status": "retired",
+      "advisory": {
+        "date": "2026-10-31",
+        "reason": "technical_deterioration",
+        "summary": "HTTP 404 from the feed URL.",
+        "evidenceLinks": [
+          "https://www.semafor.com/feed.xml"
+        ],
+        "uncertainty": "known",
+        "suggestedAlternativeFeedIDs": [
+          "bbc-world",
+          "guardian-world"
+        ]
+      }
+    },
+    {
+      "id": "roll-call",
+      "url": "https://rollcall.com/feed",
+      "status": "retired",
+      "advisory": {
+        "date": "2026-10-31",
+        "reason": "technical_deterioration",
+        "summary": "Feed fails to parse as Malformed XML feed because it redefines xmlns:media.",
+        "evidenceLinks": [
+          "https://rollcall.com/feed"
+        ],
+        "uncertainty": "known",
+        "suggestedAlternativeFeedIDs": [
+          "bbc-politics",
+          "guardian-politics",
+          "pbs-politics"
+        ]
+      }
+    },
+    {
+      "id": "smithsonian",
+      "url": "https://www.smithsonianmag.com/rss/smart-news",
+      "status": "retired",
+      "advisory": {
+        "date": "2026-10-31",
+        "reason": "technical_deterioration",
+        "summary": "HTTP 403 Cloudflare challenge for automated readers.",
+        "evidenceLinks": [
+          "https://www.smithsonianmag.com/rss/smart-news"
+        ],
+        "uncertainty": "known",
+        "suggestedAlternativeFeedIDs": [
+          "science-news",
+          "bbc-science",
+          "quanta"
+        ]
+      }
+    },
+    {
+      "id": "abc-australia",
+      "url": "https://www.abc.net.au/news/feed/52278/rss.xml",
+      "status": "retired",
+      "advisory": {
+        "date": "2026-10-31",
+        "reason": "technical_deterioration",
+        "summary": "HTTP 404 gone from the feed URL.",
+        "evidenceLinks": [
+          "https://www.abc.net.au/news/feed/52278/rss.xml"
+        ],
+        "uncertainty": "known",
+        "suggestedAlternativeFeedIDs": [
+          "bbc-world",
+          "dw-english"
         ]
       }
     }

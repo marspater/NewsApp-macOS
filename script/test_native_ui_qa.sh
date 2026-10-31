@@ -71,6 +71,20 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/ArticleListView.swift \
     Sources/Views/BriefingComponents.swift \
     Sources/Views/BriefingView.swift \
+    Sources/Views/BriefingModules.swift \
+    Sources/Views/BriefingSitrepModule.swift \
+    Sources/Views/BriefingSinceLastModule.swift \
+    Sources/Views/BriefingPriorityModule.swift \
+    Sources/Views/BriefingFootprintModule.swift \
+    Sources/Views/BriefingRegionsModule.swift \
+    Sources/Views/BriefingIndustryModule.swift \
+    Sources/Views/BriefingDriversModule.swift \
+    Sources/Views/BriefingTimelineModule.swift \
+    Sources/Views/BriefingWeakSignalsModule.swift \
+    Sources/Views/BriefingForwardWatchModule.swift \
+    Sources/Intelligence/ForwardWatchExtractor.swift \
+    Sources/Intelligence/BriefingSitrepComposer.swift \
+    Sources/Storage/DatabaseEngine+Briefing.swift \
     Sources/Views/ArticleWebView.swift \
     Sources/Views/ArticleRemoteImage.swift \
     Sources/Views/EventOverviewReaderView.swift \
