@@ -36,7 +36,7 @@ extension EnvironmentValues {
     @MainActor final class SharedLoad {
         let task: Task<CGImage, Error>
         private(set) var waiters = 0
-        private var cancelledWaiters = 0
+        private(set) var cancelledWaiters = 0
         init(task: Task<CGImage, Error>) { self.task = task }
 
         func join() { waiters += 1 }
@@ -48,6 +48,9 @@ extension EnvironmentValues {
         }
     }
     private static var pending: [URL: SharedLoad] = [:]
+
+    /// The download currently shared for a URL, so tests can observe who has joined it.
+    static func sharedLoad(for url: URL) -> SharedLoad? { pending[url] }
 
     static func clear() {
         for (_, load) in pending {

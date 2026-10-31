@@ -25310,37 +25310,80 @@ struct NewsTests {
         // Cancelling the only waiter stops the shared download; a clear() does not let a finished old load
         // remove a newer load's entry.
         final class LoaderProbe: @unchecked Sendable {
-            let lock = NSLock()
-            var started = 0
-            var cancelled = 0
-            func record(started s: Int = 0, cancelled c: Int = 0) {
-                lock.lock()
-                started += s
-                cancelled += c
-                lock.unlock()
+            private let lock = NSLock()
+            private var startedCount = 0
+            private var cancelledCount = 0
+            var started: Int { lock.withLock { startedCount } }
+            var cancelled: Int { lock.withLock { cancelledCount } }
+            func recordStart() { lock.withLock { startedCount += 1 } }
+            func recordCancel() { lock.withLock { cancelledCount += 1 } }
+            var loader: @Sendable (URL) async throws -> CGImage {
+                { [self] _ in
+                    recordStart()
+                    do { try await Task.sleep(for: .seconds(30)) } catch {
+                        recordCancel()
+                        throw error
+                    }
+                    throw CancellationError()
+                }
             }
         }
         let probe = LoaderProbe()
-        let hangingLoader: @Sendable (URL) async throws -> CGImage = { _ in
-            probe.record(started: 1)
-            do { try await Task.sleep(for: .seconds(30)) } catch {
-                probe.record(cancelled: 1)
-                throw error
-            }
-            throw CancellationError()
-        }
         let cancelURL = URL(string: "https://example.com/cancel_\(UUID().uuidString).jpg")!
-        let first = Task { @MainActor in _ = try? await DecodedImageCache.load(cancelURL, using: hangingLoader) }
-        let second = Task { @MainActor in _ = try? await DecodedImageCache.load(cancelURL, using: hangingLoader) }
-        try await Task.sleep(for: .milliseconds(100))
+        let first = Task { @MainActor in _ = try? await DecodedImageCache.load(cancelURL, using: probe.loader) }
+        let second = Task { @MainActor in _ = try? await DecodedImageCache.load(cancelURL, using: probe.loader) }
+        await eventually("Both waiters join the shared download") {
+            await MainActor.run { DecodedImageCache.sharedLoad(for: cancelURL)?.waiters == 2 }
+        }
         first.cancel()
-        try await Task.sleep(for: .milliseconds(100))
+        await eventually("The first cancellation is recorded") {
+            await MainActor.run { DecodedImageCache.sharedLoad(for: cancelURL)?.cancelledWaiters == 1 }
+        }
         assertEqual(probe.cancelled, 0, "A shared download keeps running while a waiter is left")
         second.cancel()
         _ = await first.value
         _ = await second.value
         assertEqual(probe.started, 1, "Two waiters on one URL share one download")
         assertEqual(probe.cancelled, 1, "The shared download stops once its last waiter cancels")
+        await MainActor.run {
+            assertTrue(
+                DecodedImageCache.sharedLoad(for: cancelURL) == nil, "A cancelled shared download leaves the table")
+        }
+
+        // A finished old load must not delete the entry of the load that replaced it after a clear().
+        let oldProbe = LoaderProbe()
+        let newProbe = LoaderProbe()
+        let thirdProbe = LoaderProbe()
+        let replaceURL = URL(string: "https://example.com/replace_\(UUID().uuidString).jpg")!
+        let oldCaller = Task { @MainActor in _ = try? await DecodedImageCache.load(replaceURL, using: oldProbe.loader) }
+        await eventually("The old load registers") {
+            await MainActor.run { DecodedImageCache.sharedLoad(for: replaceURL)?.waiters == 1 }
+        }
+        await MainActor.run { DecodedImageCache.clear() }
+        let newCaller = Task { @MainActor in _ = try? await DecodedImageCache.load(replaceURL, using: newProbe.loader) }
+        await eventually("The replacement registers") {
+            await MainActor.run { DecodedImageCache.sharedLoad(for: replaceURL)?.waiters == 1 }
+        }
+        _ = await oldCaller.value  // the old load finishes, cancelled by clear()
+        let replacement = await MainActor.run { DecodedImageCache.sharedLoad(for: replaceURL) }
+        assertTrue(replacement != nil, "A finished old load leaves the replacement registered")
+        let thirdCaller = Task { @MainActor in
+            _ = try? await DecodedImageCache.load(replaceURL, using: thirdProbe.loader)
+        }
+        await eventually("A third caller joins the replacement") {
+            await MainActor.run { DecodedImageCache.sharedLoad(for: replaceURL)?.waiters == 2 }
+        }
+        await MainActor.run {
+            assertTrue(
+                DecodedImageCache.sharedLoad(for: replaceURL) === replacement, "The third caller shares the replacement"
+            )
+        }
+        assertEqual(thirdProbe.started, 0, "The third caller starts no download of its own")
+        newCaller.cancel()
+        thirdCaller.cancel()
+        _ = await newCaller.value
+        _ = await thirdCaller.value
+        assertEqual(newProbe.started, 1, "The replacement downloads once")
 
         await MainActor.run {
             let oldLoad = DecodedImageCache.SharedLoad(task: Task { throw CancellationError() })
