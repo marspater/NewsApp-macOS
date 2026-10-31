@@ -198,7 +198,8 @@ enum BriefingSignalsTests {
         let a = extract(text, publisher: "Harbor Times")
         let b = extract(text, publisher: "Wire Service")
         let conditional = extract("Port operators will close the terminal if attacks on vessels continue.")
-        let data = BriefingForwardWatchData.make((conditional + a + b).map { ($0, nil, nil) })
+        let data = BriefingForwardWatchData.make(
+            (conditional + a + b).map { BriefingForwardWatchData.Candidate(item: $0) })
         check(data?.rows.count == 2, "same line from two publishers merges")
         check(data?.rows.first?.item.kind == .scheduled, "scheduled first")
         check(data?.rows.first?.caption == "Tuesday, as reported by 2 publishers", "merged caption")

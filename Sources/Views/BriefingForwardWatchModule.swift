@@ -41,10 +41,17 @@ struct BriefingForwardWatchData: Equatable, Sendable {
 
     let rows: [Row]
 
+    /// One extracted line with where it came from: the citation's link and the story it was found in.
+    struct Candidate: Sendable {
+        let item: ForwardWatchItem
+        var url: URL? = nil
+        var entry: FeedEntry? = nil
+    }
+
     /// Merges per-story items: one row per line prefix, publishers collected across stories, scheduled first.
-    static func make(_ found: [(item: ForwardWatchItem, url: URL?, entry: FeedEntry?)]) -> Self? {
+    static func make(_ found: [Candidate]) -> Self? {
         var order: [String] = []
-        var first: [String: (item: ForwardWatchItem, url: URL?, entry: FeedEntry?)] = [:]
+        var first: [String: Candidate] = [:]
         var publishers: [String: [String]] = [:]
         for candidate in found {
             let key = ForwardWatchExtractor.key(candidate.item.text)
@@ -66,7 +73,7 @@ struct BriefingForwardWatchData: Equatable, Sendable {
     }
 
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
-        var found: [(item: ForwardWatchItem, url: URL?, entry: FeedEntry?)] = []
+        var found: [Candidate] = []
         for entry in context.entries {
             let overview: EventOverviewDocument?
             if case .event(let summary, _, _) = entry {
@@ -79,7 +86,7 @@ struct BriefingForwardWatchData: Equatable, Sendable {
                 facts: overview.facts, citations: overview.citations, publishedAt: entry.representative.pubDate)
             for item in items {
                 let url = item.citationID.flatMap { overview.citations[$0]?.sourceURL }.flatMap(WebLink.url)
-                found.append((item, url, entry))
+                found.append(Candidate(item: item, url: url, entry: entry))
             }
         }
         return make(found)
@@ -88,27 +95,27 @@ struct BriefingForwardWatchData: Equatable, Sendable {
     /// Sample data for `Tests/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         make([
-            (
-                ForwardWatchItem(
+            Candidate(
+                item: ForwardWatchItem(
                     kind: .scheduled,
                     text: "The Security Council will meet on Tuesday to discuss the shipping corridor.",
-                    dateText: "Tuesday", publisher: "Harbor Times", citationID: "c1"), nil, nil
+                    dateText: "Tuesday", publisher: "Harbor Times", citationID: "c1")
             ),
-            (
-                ForwardWatchItem(
+            Candidate(
+                item: ForwardWatchItem(
                     kind: .scheduled,
                     text: "The Security Council will meet on Tuesday to discuss the shipping corridor.",
-                    dateText: "Tuesday", publisher: "Wire Service", citationID: "c2"), nil, nil
+                    dateText: "Tuesday", publisher: "Wire Service", citationID: "c2")
             ),
-            (
-                ForwardWatchItem(
+            Candidate(
+                item: ForwardWatchItem(
                     kind: .expected, text: "Shipping insurers are expected to review war-risk rates later this week.",
-                    dateText: "later this week", publisher: "Market Wire", citationID: "c3"), nil, nil
+                    dateText: "later this week", publisher: "Market Wire", citationID: "c3")
             ),
-            (
-                ForwardWatchItem(
+            Candidate(
+                item: ForwardWatchItem(
                     kind: .conditional, text: "Port operators will close the terminal if attacks on vessels continue.",
-                    dateText: nil, publisher: "Port Authority Bulletin", citationID: "c4"), nil, nil
+                    dateText: nil, publisher: "Port Authority Bulletin", citationID: "c4")
             ),
         ])
     }

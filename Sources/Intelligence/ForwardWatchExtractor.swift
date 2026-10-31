@@ -126,7 +126,9 @@ enum ForwardWatchExtractor {
     private enum Pattern {
         static func make(_ pattern: String, caseless: Bool = true) -> NSRegularExpression {
             // The patterns are literals; a typo is a programming error caught by the evaluation test.
-            try! NSRegularExpression(pattern: pattern, options: caseless ? [.caseInsensitive] : [])
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: caseless ? [.caseInsensitive] : [])
+            else { preconditionFailure("Forward watch pattern does not compile: \(pattern)") }
+            return regex
         }
 
         static let months =
