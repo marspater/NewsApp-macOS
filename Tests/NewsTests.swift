@@ -18544,6 +18544,16 @@ struct NewsTests {
         assertEqual(
             slashSettings.addFeed(url: "https://legacy.example.com/feed/"), "https://legacy.example.com/feed/",
             "Removing the stored form frees the slash variant")
+        _ = slashSettings.addFeed(url: "https://removal.example.com/feed/")
+        slashSettings.removeFeed(url: "https://removal.example.com/feed")
+        assertFalse(
+            slashSettings.feedURLs.contains { AppSettings.feedKey($0) == "https://removal.example.com/feed" },
+            "Removing the slashless form removes a slash-stored subscription")
+        _ = slashSettings.addFeed(url: "https://removal.example.com/plain")
+        slashSettings.removeFeed(url: "https://removal.example.com/plain/")
+        assertFalse(
+            slashSettings.feedURLs.contains { AppSettings.feedKey($0) == "https://removal.example.com/plain" },
+            "Removing the slash form removes a slashless subscription")
         assertEqual(
             slashDefaults.stringArray(forKey: AppSettings.feedURLsKey), slashSettings.feedURLs,
             "Slash-preserving subscriptions persist as given")
