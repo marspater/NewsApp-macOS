@@ -24156,6 +24156,8 @@ struct NewsTests {
         let publicationMode = ReaderExperienceMode.sourcePublication
         assertEqual(overviewMode.rawValue, "Event overview", "Overview mode label is 'Event overview'")
         assertEqual(publicationMode.rawValue, "Source publication", "Publication mode label is 'Source publication'")
+        assertFalse(overviewMode.marksOpenedStoryRead, "Opening an event overview marks no story read (#813)")
+        assertTrue(publicationMode.marksOpenedStoryRead, "Opening a single publication marks it read")
     }
 
     /// #218: Verifies that opening an article belonging to a multi-source event
