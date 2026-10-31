@@ -66,6 +66,9 @@ enum BriefingWarRoomTests {
             "move reorders between the pinned carousel and sitrep")
         layout.move(.executiveSitrep, to: 0)
         check(layout.modules(in: .situationalAwareness).last == .executiveSitrep, "a pinned module does not move")
+        layout.setVisible(.executiveSitrep, false)
+        layout.setVisible(.executiveSitrep, true)
+        check(layout.modules(in: .situationalAwareness).last == .executiveSitrep, "the sitrep returns last")
         check(
             layout.modules(in: .strategicImpact) == BriefingLayout.default.modules(in: .strategicImpact),
             "move leaves other pillars")
