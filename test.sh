@@ -73,10 +73,12 @@ else
     for ((i = 0; i < SHARDS; i++)); do
         job "NewsTests-$i-of-$SHARDS" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=$i/$SHARDS ./test_runner"
     done
-    for atom in Tests/EventOverviewAccessibilityTests.swift Tests/ReaderAccessibilityTests.swift \
-        Tests/TensionCalibrationTests.swift \
-        $(grep -oE 'selected\("Tests/[A-Za-z0-9]+\.swift"\)' script/build_test_runner.sh \
-        | grep -oE 'Tests/[A-Za-z0-9]+\.swift' | sort -u | grep -v '^Tests/NewsTests\.swift$'); do
+    {
+        printf '%s\n' Tests/EventOverviewAccessibilityTests.swift Tests/ReaderAccessibilityTests.swift \
+            Tests/TensionCalibrationTests.swift
+        grep -oE 'selected\("Tests/[A-Za-z0-9]+\.swift"\)' script/build_test_runner.sh \
+            | grep -oE 'Tests/[A-Za-z0-9]+\.swift' | sort -u | grep -v '^Tests/NewsTests\.swift$'
+    } | while read -r atom; do
         job "$(basename "$atom" .swift)" "NEWS_TEST_ATOM=$atom ./test_runner"
     done
     echo "Running $(wc -l < "$JOB_LIST" | tr -d ' ') test jobs, $JOBS at a time..."
@@ -96,12 +98,12 @@ else
     set -e
     rm -f test_runner
     FAILED=$(grep -L '^0$' "$LOGS"/*.status 2>/dev/null || true)
-    if [ -n "$FAILED" ]; then
-        for status in $FAILED; do
+    if [[ -n "$FAILED" ]]; then
+        while read -r status; do
             name=$(basename "$status" .status)
             echo "❌ $name failed; its log again:"
             tail -n 40 "$LOGS/$name.log"
-        done
+        done <<< "$FAILED"
         rm -rf "$LOGS"
         exit 1
     fi
