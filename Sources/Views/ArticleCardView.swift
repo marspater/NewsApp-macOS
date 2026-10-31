@@ -280,7 +280,7 @@ struct ArticleCardView<Footer: View>: View {
 
     private var regularFooter: some View {
         HStack(spacing: AppSpacing.xs) {
-            Text(article.cardDateText())
+            CardDateText(article: article)
                 .font(AppTypography.caption)
                 .foregroundStyle(AppColor.tertiaryText(for: contrast))
                 .monospacedDigit()
@@ -369,7 +369,7 @@ struct ArticleCardView<Footer: View>: View {
             }
 
             HStack(spacing: AppSpacing.sm) {
-                Text(article.cardDateText())
+                CardDateText(article: article)
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.leadSecondaryText)
                     .monospacedDigit()
@@ -409,6 +409,18 @@ struct ArticleCardView<Footer: View>: View {
 /// The coverage row: symbol, coverage, last update, "Updated" tag and chevron. In a grid it keeps one line, an
 /// abbreviated update and the tag's height with or without the tag, so every collapsed event card of a grid row is as
 /// tall as the others (#779); list and lead cards keep the full text.
+/// A card's relative date, re-evaluated each minute: an equatable card is not redrawn by a refresh, so "Just now"
+/// has to age on its own (#839).
+struct CardDateText: View {
+    let article: FeedArticle
+
+    var body: some View {
+        TimelineView(.everyMinute) { context in
+            Text(article.cardDateText(now: context.date))
+        }
+    }
+}
+
 struct CoverageRowLabel: View {
     let coverageText: String
     let latestDate: Date?
