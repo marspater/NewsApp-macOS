@@ -42,6 +42,12 @@ struct BriefingTimelineData: Equatable, Sendable {
     /// The lead thread inside the filter.
     func thread(for filter: BriefingBoardFilter) -> Thread? { threads.first { filter.includes($0.entry) } }
 
+    /// Every timeline of the story's live events as one, keeping the first item of each identical summary.
+    static func merged(_ timelines: [[OverviewTimelineItem]]) -> [OverviewTimelineItem] {
+        var seen = Set<String>()
+        return timelines.joined().filter { seen.insert($0.summary).inserted }
+    }
+
     /// Past, dated items in date order, the latest five; nil with fewer than two.
     static func items(_ timeline: [OverviewTimelineItem], now: Date) -> [Item]? {
         let dated = timeline.compactMap { item -> Item? in
@@ -68,15 +74,28 @@ struct BriefingTimelineData: Equatable, Sendable {
     /// nil hides the module.
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
         let overviews = await BriefingOverviews.load(context.entries, store: store)
-        let threads = overviews.enumerated().compactMap { index, pair -> (Int, Thread)? in
-            thread(entry: pair.0, timeline: pair.1.timeline, now: context.now).map { (index, $0) }
+        var threads: [(Int, Thread)] = []
+        for (index, pair) in overviews.enumerated() {
+            var timelines = [pair.1.timeline]
+            if case .event(let summary, _, _) = pair.0,
+                let storyEvents = try? await store.database.storyEventIDs(summary.eventID)
+            {
+                for eventID in storyEvents where eventID != summary.eventID {
+                    if let overview = try? await store.fetchEventOverview(eventID: eventID) {
+                        timelines.append(overview.timeline)
+                    }
+                }
+            }
+            if let thread = thread(entry: pair.0, timeline: merged(timelines), now: context.now) {
+                threads.append((index, thread))
+            }
         }
-        .sorted {
+        let ordered = threads.sorted {
             $0.1.entry.publisherCount != $1.1.entry.publisherCount
                 ? $0.1.entry.publisherCount > $1.1.entry.publisherCount : $0.0 < $1.0
         }
         .map(\.1)
-        return threads.isEmpty ? nil : Self(threads: threads)
+        return ordered.isEmpty ? nil : Self(threads: ordered)
     }
 
     /// Sample data for `Tests/OverviewCaptures.swift`.

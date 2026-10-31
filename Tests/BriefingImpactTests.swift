@@ -58,6 +58,10 @@ enum BriefingImpactTests {
         check(
             BriefingRegion.regions(of: story.representative) == [.middleEastNorthAfrica, .europe],
             "headline countries map to their regions")
+        let nested = BriefingRegionsData.sampleEntry(
+            id: "impact-nested", title: "Aid reaches South Sudan", publishers: 1, date: now)
+        check(
+            BriefingRegion.regions(of: nested.representative) == [.subSaharanAfrica], "South Sudan never counts Sudan")
     }
 
     static func regionFilter() {
@@ -146,6 +150,15 @@ enum BriefingImpactTests {
             OverviewTimelineItem(
                 id: "\($0)", dateText: "D\($0)", summary: "Step", eventDate: now - Double(8 - $0) * day)
         }
+        let other = [
+            OverviewTimelineItem(id: "x", dateText: "Mon", summary: "First report", eventDate: now - 3 * day),
+            OverviewTimelineItem(id: "4", dateText: "Thu", summary: "Talks begin", eventDate: now - day / 2),
+        ]
+        let merged = BriefingTimelineData.merged([timeline, other])
+        check(merged.filter { $0.summary == "First report" }.map(\.id) == ["1"], "identical summaries merge once")
+        check(
+            BriefingTimelineData.items(merged, now: now)?.map(\.id) == ["1", "2", "3", "4"],
+            "both events' timelines in date order")
         check(BriefingTimelineData.items(many, now: now)?.map(\.id) == ["3", "4", "5", "6", "7"], "latest five")
     }
 }

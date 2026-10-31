@@ -471,14 +471,18 @@ enum BriefingRegion {
         for text in [story.title, String(ArticleContentRedactor.cleanText(story.description).prefix(240))] {
             let words = text.split { !$0.isLetter && $0 != "'" && $0 != "\u{2019}" && $0 != "." }.map(String.init)
             var found = Set<TensionMacroRegion>()
-            for index in words.indices {
-                // Three, two and one-word names: "Saudi Arabia", "South Korea", "Jordan".
+            var index = 0
+            while index < words.count {
+                // Longest name first, and its words are consumed: "South Sudan" never also counts "Sudan".
+                var consumed = 1
                 for length in [3, 2, 1] where index + length <= words.count {
                     let place = EventPlaces.canonical(words[index..<(index + length)].joined(separator: " "))
-                    if place.hasPrefix("@"), let region = region(code: String(place.dropFirst())) {
-                        found.insert(region)
-                    }
+                    guard place.hasPrefix("@") else { continue }
+                    if let region = region(code: String(place.dropFirst())) { found.insert(region) }
+                    consumed = length
+                    break
                 }
+                index += consumed
             }
             if !found.isEmpty { return found }
         }
