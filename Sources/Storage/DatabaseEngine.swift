@@ -24,6 +24,8 @@ actor DatabaseEngine {
     /// reads every reader document of the publisher (10–40 ms on a real library), so classification writes and list
     /// reloads queued behind it (#778). Dropped when stories are stored, deleted, or their images or documents change.
     private var repeatedImageCache: [String: Set<String>] = [:]
+    /// `PRAGMA data_version` when the cache was last valid: a commit by another connection to the library changes it.
+    private var repeatedImageDataVersion: String?
     /// The clock of the last story pass over this library (#581); process-local, nil until the first pass.
     private(set) var lastStoryPass: Date?
     /// Story work skipped or interrupted since the last completed pass; retried when energy permits.
@@ -3285,6 +3287,11 @@ actor DatabaseEngine {
     // This rejects repeated furniture heuristically; a publisher-specific allowlist needs corpus evidence.
     /// Recurrence is publisher-local and counts distinct documents, not GUID copies.
     func repeatedImageURLs(source: String) throws -> Set<String> {
+        let dataVersion = try eventRows("PRAGMA data_version;").first?.first ?? nil
+        if dataVersion != repeatedImageDataVersion {
+            repeatedImageCache = [:]
+            repeatedImageDataVersion = dataVersion
+        }
         if let cached = repeatedImageCache[source] { return cached }
         let sql = """
             SELECT url FROM (
@@ -3373,7 +3380,11 @@ actor DatabaseEngine {
 
         try beginTransaction()
         defer {
-            if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
+            if sqlite3_get_autocommit(db) == 0 {
+                // Curation inside the transaction may have cached recurrences from rows that are being rolled back.
+                repeatedImageCache = [:]
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+            }
         }
 
         // 1. Update publisher content and image if provided. A category is classifier output and goes only to
