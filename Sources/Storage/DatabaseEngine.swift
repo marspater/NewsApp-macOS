@@ -87,6 +87,8 @@ actor DatabaseEngine {
             sqlite3_close_v2(handle)
             connection.handle = nil
         }
+        // A reopened library may hold other rows (a restore, or sources normalized on open).
+        repeatedImageCache = [:]
     }
 
     /// Runs `PRAGMA optimize;` and `PRAGMA wal_checkpoint(TRUNCATE);` before app termination (#536).
