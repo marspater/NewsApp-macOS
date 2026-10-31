@@ -81,6 +81,9 @@ public struct RefreshFeedsIntent: AppIntent {
     @MainActor
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         let manager = feedManager ?? IntentDependencyResolver.resolveFeedManager()
+        if let reason = await manager.refreshBlockedReason() {
+            return .result(dialog: "Feeds were not refreshed. \(reason)")
+        }
         await manager.fetchFeedsAsync()
         return .result(dialog: "Feeds refreshed successfully.")
     }
