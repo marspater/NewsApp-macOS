@@ -34,7 +34,7 @@ enum AnalysisGenerationTests {
         do {
             try await staleWritesAreRefused()
             try await queueForgetsRefusedAndClearedWork()
-            backgroundNeverSupersedesTheVisibleEvent()
+            try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
         } catch {
             check(false, "Unexpected error: \(error)")
@@ -140,6 +140,7 @@ enum AnalysisGenerationTests {
         try await db.open()
         let store = ArticleStore(database: db)
         let queue = EnrichmentQueue(store: store)
+        store.analysisClearedHandler = { await queue.analysisCleared() }
 
         // A story the store does not hold: its write fails, so it never counts as classified.
         let missing = article("missing")
@@ -167,7 +168,8 @@ enum AnalysisGenerationTests {
         check(await queue.state(for: stored.id) != .completed, "A changed input queues the story again")
 
         await eventually("The changed input settles") { await queue.retainsJob(for: stored.id) == false }
-        await queue.analysisCleared()
+        // The clear returns only once the queue has reset, so an enqueue right after it is not skipped.
+        try await store.clearAIAnalysis()
         check(await queue.state(for: stored.id) == nil, "Clear AI Analysis forgets what was classified")
         await queue.enqueue(article: stored, priority: .interactive)
         await eventually("The story is classified again after the clear") {
@@ -175,8 +177,10 @@ enum AnalysisGenerationTests {
         }
     }
 
-    /// A background warm-up never cancels the generation running for the visible event (#792).
-    static func backgroundNeverSupersedesTheVisibleEvent() {
+    /// A background warm-up never cancels the generation running for the visible event (#792): the rule, then the
+    /// coordinator with a visible request held in flight.
+    @MainActor
+    static func backgroundNeverSupersedesTheVisibleEvent() async throws {
         check(
             !OverviewGenerationCoordinator.maySupersede(priority: .background, eventID: "e1", visibleEventID: "e1"),
             "A warm-up of the visible event waits")
@@ -186,6 +190,48 @@ enum AnalysisGenerationTests {
         check(
             OverviewGenerationCoordinator.maySupersede(priority: .visibleEvent, eventID: "e1", visibleEventID: "e1"),
             "The reader's own request may replace a stale generation")
+
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let reports = (1...3).map { index in
+            FeedArticle(
+                storedID: "visible-\(index)", title: "Port authority raises alert level \(index)",
+                link: "https://example.com/visible/\(index)", guid: "visible-\(index)",
+                description: "Vessels are rerouted around the port \(index).",
+                pubDate: Date(timeIntervalSince1970: 1_793_188_800 + Double(index)), source: "Outlet \(index)")
+        }
+        try await db.upsertArticles(reports)
+        let store = ArticleStore(database: db)
+        let queue = EnrichmentQueue(store: store)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
+        // Fill the bounded queue so the visible request stays in flight until the gate opens.
+        let hold = OpenGate()
+        for index in 0..<3 {
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "hold-\(index)") {
+                    await hold.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("Held generations fill the overview queue") { await queue.activeJobCount() == 3 }
+        let visible = Task {
+            await coordinator.setVisibleEvent(
+                eventID: "e1", eventTitle: reports[0].title, membershipVersion: 1, articles: reports, store: store,
+                owner: UUID())
+        }
+        await eventually("The visible request is in flight") { await coordinator.inFlightInputHash(for: "e1") != nil }
+        let visibleHash = await coordinator.inFlightInputHash(for: "e1")
+        let warmed = await coordinator.requestOverview(
+            eventID: "e1", eventTitle: reports[0].title, membershipVersion: 1, articles: Array(reports.prefix(2)),
+            priority: .background, store: store)
+        check(warmed == nil, "A warm-up with other inputs yields to the visible generation")
+        check(
+            await coordinator.inFlightInputHash(for: "e1") == visibleHash,
+            "and the visible generation is still the one in flight")
+        await coordinator.cancel(eventID: "e1")
+        await hold.open()
+        _ = await visible.value
     }
 
     /// A banner is recorded in one transaction: a failed step leaves no delivery row behind (#814).

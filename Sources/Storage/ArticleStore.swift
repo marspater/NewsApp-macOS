@@ -2,11 +2,6 @@ import Foundation
 import SwiftUI
 import os
 
-extension Notification.Name {
-    /// Clear AI Analysis ran: queues and caches of derived data drop their session state (#805).
-    static let aiAnalysisCleared = Notification.Name("aiAnalysisCleared")
-}
-
 /// High-level, observable application store managing article persistence,
 /// reactive UI state, full-text search, and legacy migration.
 @MainActor
@@ -16,6 +11,9 @@ final class ArticleStore: ObservableObject {
 
     let database: DatabaseEngine
     let migrationCoordinator: MigrationCoordinator?
+    /// Runs after a clear of derived data and before the clear returns, so the queues and caches that hold session
+    /// state about that data (the enrichment queue, the overview coordinator) have reset by then (#805).
+    var analysisClearedHandler: (@MainActor () async -> Void)?
     let spotlightIndexer: any SpotlightIndexing
 
     @Published private(set) var articles: [FeedArticle] = []
@@ -477,7 +475,7 @@ final class ArticleStore: ObservableObject {
     func clearAIAnalysis() async throws {
         try await database.clearArticleEnrichment()
         // Running work is refused at commit by the generation bump; its session state is reset here (#805).
-        NotificationCenter.default.post(name: .aiAnalysisCleared, object: nil)
+        await analysisClearedHandler?()
         await refreshState()
     }
 
@@ -491,7 +489,7 @@ final class ArticleStore: ObservableObject {
     func clearAllDatabaseCache() async throws {
         try await database.clearAllDatabaseCache()
         // This clear removes enrichment too, so running work and its session state are reset the same way (#805).
-        NotificationCenter.default.post(name: .aiAnalysisCleared, object: nil)
+        await analysisClearedHandler?()
         await refreshState()
     }
 

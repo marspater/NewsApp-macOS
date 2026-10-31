@@ -43,7 +43,6 @@ class FeedManager: NSObject, ObservableObject {
     private var subscriptionUpdates: AnyCancellable?
     private var subscriptionTask: Task<Void, Never>?
     private var terminationObserver: AnyCancellable?
-    private var analysisClearedObserver: AnyCancellable?
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
@@ -109,6 +108,9 @@ class FeedManager: NSObject, ObservableObject {
         self.wakeRefreshDelay = wakeRefreshDelay
         self.now = now
         super.init()
+        // Clear AI Analysis (#805): the store refuses the in-flight writes; the session state resets here, before
+        // the clear returns.
+        store.analysisClearedHandler = { [weak self] in await self?.analysisCleared() }
         observeArticles()
         observeSubscriptions()
         observeLifecycle(powerEvents: powerEvents, schedulesRefresh: schedulesRefresh)
@@ -142,9 +144,6 @@ class FeedManager: NSObject, ObservableObject {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.stopBackgroundWork() }
             }
-        // Clear AI Analysis (#805): the store refuses the in-flight writes; the session state goes here.
-        analysisClearedObserver = NotificationCenter.default.publisher(for: .aiAnalysisCleared)
-            .sink { [weak self] _ in MainActor.assumeIsolated { self?.analysisCleared() } }
         // NSWorkspace posts sleep and wake on the main thread.
         if let center = powerEvents ?? (schedulesRefresh ? NSWorkspace.shared.notificationCenter : nil) {
             powerObservers = [
@@ -415,7 +414,6 @@ class FeedManager: NSObject, ObservableObject {
         storeUpdates?.cancel()
         storeUpdates = nil
         terminationObserver?.cancel()
-        analysisClearedObserver?.cancel()
         terminationObserver = nil
         for observer in powerObservers {
             observer.cancel()
@@ -444,7 +442,7 @@ class FeedManager: NSObject, ObservableObject {
 
     /// Clear AI Analysis: the runs that would enqueue or warm from pre-clear inputs stop here, the queue and the
     /// coordinator drop their session state, and the store already refuses any write still in flight.
-    private func analysisCleared() {
+    private func analysisCleared() async {
         enrichmentTask?.cancel()
         enrichmentTask = nil
         overviewWarmupTask?.cancel()
@@ -452,11 +450,8 @@ class FeedManager: NSObject, ObservableObject {
         clusteringTask?.cancel()
         clusteringTask = nil
         clusteringRunID = nil
-        let queue = enrichmentQueue
-        Task {
-            await queue.analysisCleared()
-            await OverviewGenerationCoordinator.shared.analysisCleared()
-        }
+        await enrichmentQueue.analysisCleared()
+        await OverviewGenerationCoordinator.shared.analysisCleared()
     }
 
     /// Returns once new articles are collected and published. Notification triage and background classification
