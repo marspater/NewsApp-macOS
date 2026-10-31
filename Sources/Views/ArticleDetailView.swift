@@ -235,7 +235,6 @@ struct ArticleDetailView: View {
                                 eventMemberArticles = []
                                 overviewRequestedArticleID = article.id
                                 activeArticle = article
-                                readManager.markAsRead(article.id)
                                 // Opening an event from here counts as seeing it, as it does from the feed.
                                 await articleStore.markEventSeen(related.eventID)
                             } catch {

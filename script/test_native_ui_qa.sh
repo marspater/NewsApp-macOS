@@ -95,6 +95,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \
     Sources/App/NotificationActionRouter.swift \
+    Sources/App/LibraryBackup.swift \
     Sources/Views/FeedHealthLine.swift \
     Sources/Views/FeedCatalogView.swift \
     Sources/Views/TensionIndexView.swift \

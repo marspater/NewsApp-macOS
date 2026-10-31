@@ -987,14 +987,14 @@ struct SettingsView: View {
                     "Back Up Library", detail: nil,
                     description: "Saves stories, read history, saved stories and settings to one file you choose."
                 ) {
-                    Button("Back Up Library…") { NewsApp.backUpLibrary() }
+                    Button("Back Up Library…") { LibraryBackup.backUpLibrary() }
                 }
                 storageRow(
                     "Restore Library", detail: nil,
                     description:
                         "Replaces the library with a backup, and settings if the backup includes them, then relaunches. The current library is kept beside it."
                 ) {
-                    Button("Restore Library…") { NewsApp.restoreLibrary() }
+                    Button("Restore Library…") { LibraryBackup.restoreLibrary() }
                 }
             }
 
@@ -1174,7 +1174,7 @@ struct SettingsView: View {
                 Text("Software Updates")
             } footer: {
                 Text(
-                    "Checks published releases. Opening a release shows its download page; News never replaces itself automatically."
+                    "News checks GitHub Releases at launch and at most every 6 hours while it runs, sending its version in the User-Agent and standard request headers, nothing that identifies you or your Mac. Opening a release shows its download page; News never replaces itself automatically."
                 )
             }
         }

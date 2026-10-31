@@ -67,8 +67,11 @@ final class ArticleStore: ObservableObject {
                     await database.setCollectionOnlyFeedURLs(Array(hidden))
                 }
             }
-            self.isReady = await refreshState()
-            if !isReady { operationError = "Stored articles could not be loaded. Please try again." }
+            let loaded = await refreshState()
+            self.isReady = loaded
+            if !loaded { operationError = "Stored articles could not be loaded. Please try again." }
+            // Only the app's own library owns the Spotlight domain; a restore relaunches into this path (#812).
+            if loaded, database === DatabaseEngine.shared { await rebuildSpotlightIndex() }
         } catch {
             self.databaseHealthNotice = await database.databaseHealthNotice()
             isReady = false
@@ -267,11 +270,11 @@ final class ArticleStore: ObservableObject {
                     savedArticles.insert(storedArticle, at: 0)
                     savedArticleIDs.insert(storedArticle.id)
                 }
-                await spotlightIndexer.indexSavedArticle(storedArticle)
+                await serialSpotlight { await $0.indexSavedArticle(storedArticle) }
             } else {
                 savedArticles.removeAll { $0.id == storedArticle.id }
                 savedArticleIDs.remove(storedArticle.id)
-                await spotlightIndexer.removeSavedArticle(id: storedArticle.id)
+                await serialSpotlight { await $0.removeSavedArticle(id: storedArticle.id) }
             }
             let counts = try await database.counts()
             self.savedCount = counts.saved
@@ -291,8 +294,40 @@ final class ArticleStore: ObservableObject {
         for article in currentSaved {
             _ = try? await database.setSaved(articleId: article.id, isSaved: false)
         }
-        await spotlightIndexer.removeAllSavedArticles()
+        await serialSpotlight { await $0.removeAllSavedArticles() }
         await refreshState()
+    }
+
+    /// Replaces the saved-stories Spotlight domain with exactly the stories the open library holds (#812).
+    /// Run at launch, which is also where a restored library first opens, so entries of the previous library go.
+    func rebuildSpotlightIndex() async {
+        await serialSpotlight { indexer in
+            // Read when it runs, so a story unsaved while this waited is not re-added; the whole list, not the 500-story
+            // UI snapshot. If the read fails the old index stays, rather than a partial one.
+            let saved: [FeedArticle]
+            do {
+                saved = try await self.database.fetchArticles(isSaved: true, limit: nil)
+            } catch {
+                self.logger.error("Spotlight rebuild skipped: \(error.localizedDescription)")
+                return
+            }
+            await indexer.removeAllSavedArticles()
+            for article in saved { await indexer.indexSavedArticle(article) }
+        }
+    }
+
+    private var spotlightTail: Task<Void, Never>?
+
+    /// Runs Spotlight updates one at a time in call order, so a rebuild and a save or unsave cannot interleave (#812).
+    private func serialSpotlight(_ operation: @escaping @MainActor (any SpotlightIndexing) async -> Void) async {
+        let previous = spotlightTail
+        let indexer = spotlightIndexer
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation(indexer)
+        }
+        spotlightTail = task
+        await task.value
     }
 
     // MARK: - Enrichment

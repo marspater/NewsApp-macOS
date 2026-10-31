@@ -140,6 +140,10 @@ public enum ReaderExperienceMode: String, CaseIterable, Sendable, Identifiable {
     case sourcePublication = "Source publication"
 
     public var id: String { rawValue }
+
+    /// Opening a story in this mode counts as reading it. An event overview does not: opening an event
+    /// marks nothing read, so the unread count only drops for stories the reader actually opens.
+    public var marksOpenedStoryRead: Bool { self != .eventOverview }
 }
 
 /// An entry in an event overview's chronological timeline.

@@ -3712,21 +3712,27 @@ actor DatabaseEngine {
         try requireWritable()
         try beginTransaction()
         do {
-            analysisGeneration &+= 1
-            try clearWorldTensionHistory()
-            try executeSimple("DELETE FROM article_enrichment;")
-            try clearEventOverviews()
-            // Sitrep lines restate overview highlights, so they go with the overviews.
-            try executeSimple("DELETE FROM briefing_sitrep;")
-            try executeSimple("DELETE FROM article_embeddings;")
-            try executeSimple("DELETE FROM article_features;")
-            try executeSimple("UPDATE pair_assessments SET features = NULL;")
+            try deleteAnalysisRows()
             try commitTransaction()
         } catch {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
         logger.info("Cleared all article enrichment data.")
+    }
+
+    /// Everything Clear Analysis removes, for the caller's open transaction (#811). The generation bump goes with
+    /// it, so every clear of derived data refuses the writes still in flight (#844).
+    private func deleteAnalysisRows() throws {
+        analysisGeneration &+= 1
+        try clearWorldTensionHistory()
+        try executeSimple("DELETE FROM article_enrichment;")
+        try clearEventOverviews()
+        // Sitrep lines restate overview highlights, so they go with the overviews.
+        try executeSimple("DELETE FROM briefing_sitrep;")
+        try executeSimple("DELETE FROM article_embeddings;")
+        try executeSimple("DELETE FROM article_features;")
+        try executeSimple("UPDATE pair_assessments SET features = NULL;")
     }
 
     /// Clears persisted article body text from local storage.
@@ -3752,11 +3758,10 @@ actor DatabaseEngine {
     func clearAllDatabaseCache() throws {
         try requireWritable()
         repeatedImageCache = [:]
-        try clearWorldTensionHistory()
         try beginTransaction()
         do {
-            analysisGeneration &+= 1
-            try executeSimple("DELETE FROM article_enrichment;")
+            // Everything Clear Analysis removes goes too, in the same transaction (#811).
+            try deleteAnalysisRows()
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
             )
