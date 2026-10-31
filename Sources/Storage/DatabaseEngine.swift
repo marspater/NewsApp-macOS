@@ -19,6 +19,35 @@ actor DatabaseEngine {
     private let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
+    /// The last library counts, valid while no write has happened since: `sqlite3_total_changes` moves on every write,
+    /// triggers included, so no write path can leave a stale count behind (#839).
+    private var countsCache:
+        (changes: ChangeToken, scope: [String], muting: MuteRules, value: (unread: Int, saved: Int, total: Int))?
+    private var mutedCountCache: (changes: ChangeToken?, counts: [MutedCountKey: Int]) = (nil, [:])
+    /// This connection's writes (`sqlite3_total_changes`) and other connections' commits (`PRAGMA data_version`).
+    private struct ChangeToken: Equatable {
+        let own: Int
+        let external: Int
+    }
+    private func changeToken() -> ChangeToken? {
+        guard let db = db else { return nil }
+        var external = 0
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "PRAGMA data_version;", -1, &stmt, nil) == SQLITE_OK, sqlite3_step(stmt) == SQLITE_ROW
+        {
+            external = Int(sqlite3_column_int64(stmt, 0))
+        }
+        sqlite3_finalize(stmt)
+        return ChangeToken(own: Int(sqlite3_total_changes(db)), external: external)
+    }
+    private struct MutedCountKey: Hashable {
+        let section: String?
+        let isRead: Bool?
+        let isSaved: Bool?
+        let search: String?
+        let muting: MuteRules
+        let scope: [String]
+    }
     private var spellingCache: (key: String, words: [String: Int])?
     /// `repeatedImageURLs` by publisher. Every curated fetch asks for it, single-story fetches included, and the query
     /// reads every reader document of the publisher (10–40 ms on a real library), so classification writes and list
@@ -2974,6 +3003,12 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: "Failed to prepare markRead statement"])
         }
         defer { sqlite3_finalize(stmt) }
+        // A read toggle moves the unread count by at most one: adjust the cached counts instead of scanning (#839).
+        let before = changeToken()
+        // Only a cache for the current scope: a scope change moves no SQLite token.
+        var adjusted = countsCache.flatMap { $0.changes == before && $0.scope == collectionOnlyFeedURLs ? $0 : nil }
+        let wasRead = adjusted == nil ? nil : countedReadState(of: articleId)
+        if wasRead == nil { adjusted = nil }
 
         let now = Date().timeIntervalSince1970
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
@@ -2987,6 +3022,13 @@ actor DatabaseEngine {
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Failed to execute markRead"])
+        }
+        // Only when the story is counted both before and after: a read story kept only by being read leaves the counts
+        // when it turns unread, which this single adjustment does not model.
+        if var adjusted, let wasRead, let nowRead = countedReadState(of: articleId), let token = changeToken() {
+            if wasRead != nowRead { adjusted.value.unread += nowRead ? -1 : 1 }
+            adjusted.changes = token
+            countsCache = adjusted
         }
     }
 
@@ -3231,7 +3273,7 @@ actor DatabaseEngine {
     }
 
     func getSavedArticles() throws -> [FeedArticle] {
-        return try fetchArticles(isSaved: true)
+        return try fetchArticles(isSaved: true, limit: nil)
     }
 
     /// Saved stories, newest save first, or the read history, newest read first, for File › Export (#565).
@@ -3872,22 +3914,31 @@ actor DatabaseEngine {
 
     // MARK: - Counts & Diagnostics
 
-    func counts() throws -> (unread: Int, saved: Int, total: Int) {
+    /// Totals over the visible library. `unread` leaves out stories `muting` hides, as the Unread list does, so the
+    /// sidebar, the menu bar and the list agree (#785).
+    func counts(muting: MuteRules = MuteRules()) throws -> (unread: Int, saved: Int, total: Int) {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
 
+        guard let changes = changeToken() else { return (unread: 0, saved: 0, total: 0) }
+        if let cache = countsCache, cache.changes == changes, cache.scope == collectionOnlyFeedURLs,
+            cache.muting == muting
+        {
+            return cache.value
+        }
         var total = 0
         var unread = 0
         var saved = 0
 
         var stmt: OpaquePointer?
         let scope = collectionScope()
+        let muted = muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle
         let sql = """
             SELECT
                 count(a.id) as total_count,
-                coalesce(sum(case when s.is_read = 0 then 1 else 0 end), 0) as unread_count,
+                coalesce(sum(case when s.is_read = 0\(muted) then 1 else 0 end), 0) as unread_count,
                 coalesce(sum(case when s.is_saved = 1 then 1 else 0 end), 0) as saved_count
             FROM articles a
             JOIN article_state s ON s.article_id = a.id
@@ -3895,14 +3946,30 @@ actor DatabaseEngine {
             """
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(stmt) }
-            bind(scope.params, to: stmt)
+            bind((muting.isEmpty ? [] : Self.mutingParameters(muting)) + scope.params, to: stmt)
             if sqlite3_step(stmt) == SQLITE_ROW {
                 total = Int(sqlite3_column_int(stmt, 0))
                 unread = Int(sqlite3_column_int(stmt, 1))
                 saved = Int(sqlite3_column_int(stmt, 2))
+                countsCache = (changes, collectionOnlyFeedURLs, muting, (unread: unread, saved: saved, total: total))
             }
         }
         return (unread: unread, saved: saved, total: total)
+    }
+
+    /// Whether a story the counts include is read, or nil when it is not among them.
+    private func countedReadState(of articleId: String) -> Bool? {
+        guard let db = db else { return nil }
+        let scope = collectionScope()
+        let sql = """
+            SELECT s.is_read FROM articles a JOIN article_state s ON s.article_id = a.id
+            WHERE a.id = ? AND \(Self.visibleArticle) \(scope.sql);
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        bind([("text", articleId)] + scope.params, to: stmt)
+        return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int(stmt, 0) != 0 : nil
     }
 
     /// How many stories muting removes from a list or search, across every page, under the list's own filters.
@@ -3913,10 +3980,20 @@ actor DatabaseEngine {
         search: String? = nil,
         muting: MuteRules
     ) throws -> Int {
-        guard !muting.isEmpty else { return 0 }
-        return try listAggregates(
+        guard !muting.isEmpty, let db = db else { return 0 }
+        // The count scans the library through two SQL functions per row; it only changes when a write does (#839).
+        let changes = changeToken()
+        if mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
+        let key = MutedCountKey(
+            section: section, isRead: isRead, isSaved: isSaved, search: search, muting: muting,
+            scope: collectionOnlyFeedURLs)
+        if let known = mutedCountCache.counts[key] { return known }
+        let count = try listAggregates(
             "count(*)", section: section, isRead: isRead, isSaved: isSaved, search: search,
             filter: " AND " + Self.mutedArticle, filterParameters: Self.mutingParameters(muting))[0]
+        if mutedCountCache.counts.count >= 32 { mutedCountCache.counts = [:] }
+        mutedCountCache.counts[key] = count
+        return count
     }
 
     /// What a list or search holds across all its pages (#782): its stories, and the events of two or more visible

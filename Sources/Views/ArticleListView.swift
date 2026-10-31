@@ -288,7 +288,8 @@ struct ArticleListView: View {
         guard !Task.isCancelled, !Self.hasSettledLaunch else { return }
         Self.hasSettledLaunch = true
         withAnimation(reduceMotion ? nil : AppMotion.navigation) { isSettled = true }
-        feedManager.fetchFeeds()
+        // The launch refresh is automatic: a read-only library skips it rather than alerting on every launch.
+        feedManager.fetchFeeds(scheduled: true)
         feedManager.clusterEventsInBackground()
     }
 

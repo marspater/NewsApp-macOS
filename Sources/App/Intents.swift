@@ -81,6 +81,9 @@ public struct RefreshFeedsIntent: AppIntent {
     @MainActor
     public func perform() async throws -> some IntentResult & ProvidesDialog {
         let manager = feedManager ?? IntentDependencyResolver.resolveFeedManager()
+        if let reason = await manager.refreshBlockedReason() {
+            return .result(dialog: "Feeds were not refreshed. \(reason)")
+        }
         await manager.fetchFeedsAsync()
         return .result(dialog: "Feeds refreshed successfully.")
     }
@@ -115,7 +118,7 @@ public struct AddFeedIntent: AppIntent {
         }
         // Through the manager, like the app's own Add Feed, so the feed is fetched at once and gets a status entry.
         let manager = feedManager ?? IntentDependencyResolver.resolveFeedManager()
-        if let added = manager.addFeedNormalized(url: url.absoluteString) {
+        if let added = await manager.addFeedAndCollect(url: url.absoluteString) {
             return .result(value: true, dialog: "Subscribed to feed: \(added)")
         } else {
             return .result(

@@ -1423,9 +1423,10 @@ extension DatabaseEngine {
                 JOIN articles a ON a.id = m.article_id
                 JOIN article_state s ON s.article_id = a.id
                 LEFT JOIN event_state st ON st.event_id = m.event_id
-                WHERE coalesce(e.story_id, e.id) IN (\(placeholders)) AND \(Self.visibleArticle)
+                WHERE (e.story_id IN (\(placeholders)) OR (e.story_id IS NULL AND e.id IN (\(placeholders))))
+                    AND \(Self.visibleArticle)
                 ORDER BY coalesce(e.story_id, e.id), \(Self.articleDateOrder) DESC, a.id;
-                """, slice.map { .text($0) })
+                """, (slice + slice).map { .text($0) })
             var current: (id: String, rows: [Row])?
             func flush() throws {
                 guard let story = current, !story.rows.isEmpty else { return }
