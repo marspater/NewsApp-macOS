@@ -36,7 +36,7 @@ Every module is optional, ordered by the reader, and hidden when it has nothing 
 
 - **Industry impact**: sectors named by cited passages across today's stories. Source: overview industry impact (standard sector names).
 - **Regions**: level and story count per region; selecting one filters the board. Source: tension macro regions, event places.
-- **Region tiles**: dense tiles per region with publishers · time, a quoted fact, Developing pill, accent border on the lead tile. Source: partly built in the #835 draft and the sketch A rework.
+- **Region tiles**: dense tiles per region with publishers · time, a quoted fact, Developing pill, accent border on the lead tile. Source: tile code may be reused from #835; the layout follows the Briefing War Room canvas and DESIGN.md §8.4.
 
 ### 4. Weak signals: What might we be missing?
 
