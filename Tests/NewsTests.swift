@@ -957,6 +957,7 @@ struct NewsTests {
             ("testDatabaseHealthAndDerivedRetention", { try await testDatabaseHealthAndDerivedRetention() }),
             ("testRealLibraryMigrationFixture", { try await testRealLibraryMigrationFixture() }),
             ("testLibraryBackupAndFutureSchemaGuard", { try await testLibraryBackupAndFutureSchemaGuard() }),
+            ("testReadOnlyLibraryRefresh", { try await testReadOnlyLibraryRefresh() }),
             ("testLibraryBackupRestore", { try await testLibraryBackupRestore() }),
             ("testMigrationCoordinatorAtomicity", { try await testMigrationCoordinatorAtomicity() }),
             ("testArticleRetentionPolicy", { await testArticleRetentionPolicy() }),
@@ -1585,6 +1586,60 @@ struct NewsTests {
             "Corrupted database surfaces a user-visible health notice on ArticleStore (#536)"
         )
         await corruptDB.close()
+    }
+
+    @MainActor
+    static func testReadOnlyLibraryRefresh() async throws {
+        print("  - Testing a read-only library skips scheduled refreshes and explains a manual one (#787)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-readonly-refresh-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        // A readable library saved by a newer build opens read-only, and loads without any startup error.
+        let seed = DatabaseEngine(path: path)
+        try await seed.open()
+        await seed.close()
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the seeded library")
+        sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil)
+        sqlite3_close(handle)
+        let engine = DatabaseEngine(path: path)
+        let store = ArticleStore(database: engine)
+        await store.waitForStartup()
+        assertTrue(store.databaseHealthNotice != nil, "The newer library opens read-only with a notice")
+
+        let suite = testDefaultsSuite("test.readonly.refresh")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        _ = settings.addFeed(url: "https://example.com/readonly.xml")
+        let fetches = TestRecorder()
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                await fetches.record(urls)
+                return urls.map { ($0, [], nil, nil) }
+            })
+        defer { manager.stopBackgroundWork() }
+
+        assertTrue(store.operationError == nil, "A readable read-only library starts without an alert")
+        await manager.fetchFeedsAsync(scheduled: true)
+        assertEqual(await fetches.batches.count, 0, "A scheduled refresh downloads nothing while read-only")
+        assertTrue(store.operationError == nil, "A scheduled refresh raises no alert while read-only")
+
+        let refreshDialog = try await RefreshFeedsIntent(feedManager: manager).perform()
+        assertTrue(
+            extractDialogText(from: refreshDialog)?.contains("read-only") == true
+                && extractDialogText(from: refreshDialog)?.contains(store.databaseHealthNotice ?? "?") == true,
+            "The Refresh Feeds shortcut reports the read-only library and its notice instead of success")
+        await manager.fetchFeedsAsync()
+        assertEqual(await fetches.batches.count, 0, "A manual refresh downloads nothing while read-only")
+        assertTrue(
+            store.operationError?.contains("read-only") == true
+                && store.operationError?.contains(store.databaseHealthNotice ?? "?") == true,
+            "A manual refresh says why, with the library's own notice")
+        await engine.close()
     }
 
     static func testLibraryBackupAndFutureSchemaGuard() async throws {

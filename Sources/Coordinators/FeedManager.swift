@@ -336,7 +336,7 @@ class FeedManager: NSObject, ObservableObject {
                     return
                 }
 
-                await self.fetchFeedsAsync()
+                await self.fetchFeedsAsync(scheduled: true)
                 completion(.finished)
             }
         }
@@ -348,7 +348,7 @@ class FeedManager: NSObject, ObservableObject {
         backgroundTimer = Timer.scheduledTimer(withTimeInterval: appSettings.fetchIntervalMinutes * 60, repeats: true) {
             [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.fetchFeedsAsync()
+                await self?.fetchFeedsAsync(scheduled: true)
             }
         }
     }
@@ -374,7 +374,7 @@ class FeedManager: NSObject, ObservableObject {
             try? await Task.sleep(for: wakeRefreshDelay)
             guard let self, !Task.isCancelled, !self.isStopped, self.needsRefreshAfterWake else { return }
             if self.backgroundTimer != nil { self.scheduleForegroundTimer() }
-            await self.fetchFeedsAsync()
+            await self.fetchFeedsAsync(scheduled: true)
         }
     }
 
@@ -390,9 +390,9 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Ingestion Pipeline
 
-    func fetchFeeds() {
+    func fetchFeeds(scheduled: Bool = false) {
         Task {
-            await fetchFeedsAsync()
+            await fetchFeedsAsync(scheduled: scheduled)
         }
     }
 
@@ -454,10 +454,33 @@ class FeedManager: NSObject, ObservableObject {
         await OverviewGenerationCoordinator.shared.analysisCleared()
     }
 
+    /// Why nothing can be stored, or nil while the library is writable: its read-only reason, or that it never opened.
+    /// The store opens asynchronously at launch, so this waits for the startup open instead of trusting a notice that
+    /// may not be set yet.
+    func refreshBlockedReason() async -> String? {
+        await articleStore.waitForStartup()
+        if let notice = articleStore.databaseHealthNotice { return "The library is read-only. \(notice)" }
+        return articleStore.isReady ? nil : "The library could not be opened."
+    }
+
+    /// True while nothing can be stored; a manual refresh then says why, once (#787).
+    private func refusesCollectionWhileReadOnly(manual: Bool) async -> Bool {
+        let reason = await refreshBlockedReason()
+        // Stopped or cancelled while waiting for startup: do not report or start anything.
+        guard !isStopped, !Task.isCancelled else { return true }
+        guard let reason else { return false }
+        if manual { articleStore.operationError = "Refresh is off. \(reason)" }
+        return true
+    }
+
     /// Returns once new articles are collected and published. Notification triage and background classification
     /// follow for the caller that started the run, but never hold the refresh, its spinner or the next Cmd-R.
-    func fetchFeedsAsync() async {
+    ///
+    /// A read-only library (a notice is set) cannot store anything, so nothing is downloaded. A scheduled refresh
+    /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
+    func fetchFeedsAsync(scheduled: Bool = false) async {
         guard !isStopped else { return }
+        if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
         if let refreshTask {
             _ = await refreshTask.value
             return
@@ -487,6 +510,11 @@ class FeedManager: NSObject, ObservableObject {
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
         guard !Task.isCancelled, !isStopped else { return }
+        await notifyAndEnrich(newArticles)
+    }
+
+    /// Triage and notify the new stories of a finished refresh, then enrich in the background.
+    private func notifyAndEnrich(_ newArticles: [FeedArticle]) async {
         let eligible: Set<String>
         do {
             eligible = try await articleStore.database.notificationStoryIDs(newArticles.map(\.id))
