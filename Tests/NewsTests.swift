@@ -3840,6 +3840,12 @@ struct NewsTests {
         assertEqual(
             stateAfterReopen?.validators, FeedValidators(etag: "\"keep\"", lastModified: nil),
             "Success does not touch validators")
+        // #788: a fresh 200 that carries no items still replaces the validators and the content stats.
+        await store.batchUpsert(articles: [], feedUrl: feed, validators: FeedValidators(etag: nil, lastModified: nil))
+        stateAfterReopen = try await db.feedFetchStates()[feed]
+        assertTrue(stateAfterReopen?.validators == nil, "An empty 200 clears validators the feed no longer sends")
+        assertEqual(stateAfterReopen?.itemCount, 0, "An empty 200 records that the feed carries no items")
+        assertEqual(stateAfterReopen?.latestItemAt, nil, "An emptied feed has no newest item")
         try await db.recordFeedFailure(feed, retryAfter: nil, at: t0)
         try await db.recordFeedFailure(feed, retryAfter: nil, at: t0.addingTimeInterval(700))
         let forgiven = t0.addingTimeInterval(700 + 1200 + FeedRetryPolicy.maximumDelay + 1)

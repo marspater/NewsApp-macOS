@@ -2088,7 +2088,24 @@ actor DatabaseEngine {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
-        guard !articles.isEmpty else { return [] }
+        guard !articles.isEmpty else {
+            // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
+            // must be stored, or the old ETag keeps being sent and health keeps the old item counts.
+            if let feedUrl, let validators {
+                // Same rule as the articles path: a refresh cancelled while waiting writes nothing.
+                try beginTransaction()
+                defer {
+                    if sqlite3_get_autocommit(db) == 0 {
+                        loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                    }
+                }
+                try recordFeedFetch(
+                    validators, stats: FeedContentStats(articles: []), for: feedUrl, at: Date().timeIntervalSince1970)
+                try Task.checkCancellation()
+                try commitTransaction()
+            }
+            return []
+        }
 
         let signpostState = NewsSignposts.begin(
             NewsSignposts.database, name: "DatabaseBatchUpsert", metadata: "count=\(articles.count)")
