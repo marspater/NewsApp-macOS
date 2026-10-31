@@ -2290,6 +2290,17 @@ struct NewsTests {
             assertTrue(rejected, "Unsafe redirect must be rejected before connection")
         }
         task.cancel()
+
+        // A refused subframe is dropped quietly; only a refused main frame reports an error (#802).
+        var insecureRefused = false
+        do { try await SecureHTTPClient.shared.validateDestination(URL(string: "http://example.com/frame")!) } catch {
+            insecureRefused = true
+        }
+        assertTrue(insecureRefused, "An http address is refused while insecure HTTP is off")
+        assertTrue(
+            WebPreviewPolicy.refusalMessage(isMainFrame: true) != nil, "A main-frame refusal reports an error")
+        assertTrue(WebPreviewPolicy.refusalMessage(isMainFrame: false) == nil, "A subframe refusal is quiet")
+        assertTrue(WebPreviewPolicy.isMainFrame(targetFrameIsMain: nil), "A new-window navigation counts as main frame")
     }
 
     @MainActor
