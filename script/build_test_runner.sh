@@ -18,7 +18,10 @@ trap 'rm -rf "$TEST_STAGE"' EXIT
 # The staged copies blank the lines they drop and name their source file, so an assertion still reports the real
 # file and line.
 stage() {
-    { echo "#sourceLocation(file: \"$1\", line: 1)"; sed -e 's/^@main$//' "${@:2}" "$1"; } > "$TEST_STAGE/$(basename "$1")"
+    local source="$1"
+    shift
+    { echo "#sourceLocation(file: \"$source\", line: 1)"; sed -e 's/^@main$//' "$@" "$source"; } \
+        > "$TEST_STAGE/$(basename "$source")"
 }
 stage Tests/NewsTests.swift
 # The headless harnesses (Story Overview sections, reader accessibility, tension calibration) compile into the same
