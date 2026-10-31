@@ -68,7 +68,7 @@ actor FeedFetcher {
     /// their GUID identity.
     static func webArticles(_ articles: [FeedArticle]) -> [FeedArticle] {
         articles.filter { article in
-            article.link.isEmpty || ["http", "https"].contains(URL(string: article.link)?.scheme?.lowercased() ?? "")
+            article.link.isEmpty || WebLink.url(article.link) != nil
         }
     }
 
