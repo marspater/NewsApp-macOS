@@ -4,3 +4,9 @@ reviews:
     # Stacked PRs target feature branches (e.g. mars/m-581-*), not only main.
     base_branches:
       - ".*"
+  # The repository carries no bot-authored commits: no generated docstrings or unit tests pushed to branches.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
