@@ -86,6 +86,8 @@ struct ArticleWebView: NSViewRepresentable {
             case .goForward:
                 if nsView.canGoForward { nsView.goForward() }
             case .reload:
+                // A reload the reader asked for may retry a failure once more.
+                context.coordinator.hasRetriedProvisionalFailure = false
                 context.coordinator.prepareGateway(nsView) { [weak nsView] in
                     guard let nsView else { return }
                     // After a blocked or failed first load there is no page to reload; request the story again.
@@ -122,7 +124,9 @@ struct ArticleWebView: NSViewRepresentable {
         var gatewayTask: Task<Void, Never>?
         private var configuredPort: UInt16?
         private var contentRulesConfigured = false
-        private var hasRetriedProvisionalFailure = false
+        /// A failed provisional load retries once after re-checking the gateway; the flag clears on a finished
+        /// page or a reload the reader asks for, never on the retry itself, so a persistent failure cannot loop.
+        var hasRetriedProvisionalFailure = false
 
         func prepareGateway(_ view: WKWebView, then onReady: (@MainActor () -> Void)? = nil) {
             gatewayTask?.cancel()
@@ -202,7 +206,6 @@ struct ArticleWebView: NSViewRepresentable {
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             guard self.webView === webView else { return }
             activeNavigation = navigation
-            hasRetriedProvisionalFailure = false
             parent.loadError = nil
             parent.isLoading = true
             updateHistory(webView)
@@ -210,6 +213,7 @@ struct ArticleWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard self.webView === webView, navigation === activeNavigation else { return }
+            hasRetriedProvisionalFailure = false
             parent.isLoading = false
             updateHistory(webView)
         }
