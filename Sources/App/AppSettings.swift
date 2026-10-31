@@ -156,11 +156,12 @@ final class AppSettings: ObservableObject {
         let applied =
             defaults.object(forKey: Self.retiredFeedsVersionKey) as? Int
             ?? (defaults.bool(forKey: "retired_default_feeds_v1") ? 1 : 0)
-        let retired = Set(Self.retiredFeeds.filter { $0.version > applied }.map(\.url))
+        // Matched by feed key, so a subscription or star stored with a trailing slash is retired too.
+        let retired = Set(Self.retiredFeeds.filter { $0.version > applied }.map { Self.feedKey($0.url) })
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
             // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
             let parked = Set(FeedCatalog.parkedFeeds.map(\.url))
-            let kept = savedUrls.filter { !parked.contains($0) && !retired.contains($0) }
+            let kept = savedUrls.filter { !parked.contains($0) && !retired.contains(Self.feedKey($0)) }
             if kept.count != savedUrls.count { defaults.set(kept, forKey: Self.feedURLsKey) }
             self.feedURLs = kept
         } else {
@@ -228,7 +229,7 @@ final class AppSettings: ObservableObject {
             topicSets: defaults.stringArray(forKey: Self.mutedTopicSetsKey) ?? [])
         // A retired feed gives its star slot back with its subscription (#800).
         let storedStars = defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? []
-        let starred = Set(storedStars.filter { !retired.contains($0) })
+        let starred = Set(storedStars.filter { !retired.contains(Self.feedKey($0)) })
         if starred.count != storedStars.count { defaults.set(starred.sorted(), forKey: Self.starredFeedURLsKey) }
         self.starredFeedURLs = starred
         // A star from before star times were kept counts from now.
