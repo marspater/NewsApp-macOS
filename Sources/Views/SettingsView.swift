@@ -1174,7 +1174,7 @@ struct SettingsView: View {
                 Text("Software Updates")
             } footer: {
                 Text(
-                    "Checks published releases. Opening a release shows its download page; News never replaces itself automatically."
+                    "News checks GitHub Releases at launch and at most every 6 hours while it runs, sending its version in the User-Agent and standard request headers, nothing that identifies you or your Mac. Opening a release shows its download page; News never replaces itself automatically."
                 )
             }
         }
