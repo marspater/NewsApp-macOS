@@ -19739,6 +19739,42 @@ struct NewsTests {
             "Saved body survives cache cleanup")
         assertTrue(try await db.getReadArticleIDs().contains(article2.id), "Read history survives cache cleanup")
 
+        // Clear All Caches removes everything Clear Analysis removes (#811)
+        try await db.upsertArticleEmbeddings([article2.id: [0.5, 0.25]], modelVersion: 1)
+        try await db.upsertArticleFeatures(
+            [article2.id: EventFeatures(title: article2.title, description: "", date: Date(timeIntervalSince1970: 0))],
+            version: EventFeatures.storageVersion)
+        try await db.upsertPairDecisions(
+            [
+                DatabaseEngine.PairDecision(
+                    articleID: article1.id, otherArticleID: article2.id, decision: "related-act",
+                    reason: "differentAct", score: 0.4, features: #"{"cosine":0.7}"#)
+            ], matcherVersion: EventMatcher.version)
+        _ = try await db.recordEventOverview(
+            EventOverviewDocument(
+                eventID: event.id,
+                version: OverviewVersionContext(membershipVersion: event.membershipVersion, inputTextHash: "hash"),
+                content: OverviewContent(
+                    title: "Event", summary: "Summary",
+                    citations: [
+                        OverviewCitation(
+                            id: "citation", articleID: article2.id, passageID: "p", passageFingerprint: "f",
+                            quote: "Quote")
+                    ])))
+        try await db.clearAllDatabaseCache()
+        assertTrue(
+            try await db.fetchArticleEmbeddings(articleIDs: [article2.id], modelVersion: 1).isEmpty,
+            "Clear All Caches removes story embeddings (#811)")
+        assertTrue(
+            try await db.fetchArticleFeatures(articleIDs: [article2.id], version: EventFeatures.storageVersion).isEmpty,
+            "Clear All Caches removes matcher features (#811)")
+        let pairRows = try await db.eventRows("SELECT features FROM pair_assessments;")
+        assertEqual(pairRows.count, 1, "Clear All Caches keeps the pair decision (#811)")
+        assertTrue(
+            (pairRows.first?.first ?? nil) == nil, "Clear All Caches clears the pair decision's features (#811)")
+        assertTrue(
+            try await db.fetchEventOverview(eventID: event.id) == nil, "Clear All Caches removes overviews (#811)")
+
         // 5. Test CacheManager methods
         // Do not clear the user's WebKit cache from a unit test.
     }
