@@ -25587,6 +25587,20 @@ struct NewsTests {
         savedManager.removeAll()
         await savedManager.waitForPendingChanges()
         assertEqual(await mockIndexer.getIndexedCount(), 0, "Removing all saved stories purges Spotlight domain (#559)")
+
+        // 5. A rebuild keeps exactly the open library's saved stories, dropping a previous library's entries (#812)
+        savedManager.save(article)
+        await savedManager.waitForPendingChanges()
+        let previous = FeedArticle(
+            storedID: "spotlight-previous-library", title: "Previous library", link: "https://example.com/previous",
+            guid: "spotlight-previous-library", description: "", pubDate: pubDate, source: "Old")
+        await mockIndexer.indexSavedArticle(previous)
+        await store.rebuildSpotlightIndex()
+        assertFalse(
+            await mockIndexer.contains(id: "spotlight-previous-library"),
+            "Rebuild drops entries the open library does not hold (#812)")
+        assertTrue(
+            await mockIndexer.contains(id: "spotlight-unit-1"), "Rebuild indexes the library's saved stories (#812)")
         await db.close()
     }
 
