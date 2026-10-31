@@ -675,8 +675,20 @@ struct BriefingView: View {
         }
     }
 
+    /// One module by its pillar, each pillar's views in their own builder.
     @ViewBuilder
     private func module(_ kind: BriefingModuleKind) -> some View {
+        switch kind.pillar {
+        case .situationalAwareness: situationalModule(kind)
+        case .intelligenceAssessment: intelligenceModule(kind)
+        case .strategicImpact: strategicModule(kind)
+        case .weakSignals: weakSignalsModule(kind)
+        case .forwardWatch: forwardWatchModule(kind)
+        }
+    }
+
+    @ViewBuilder
+    private func situationalModule(_ kind: BriefingModuleKind) -> some View {
         let actions = boardActions
         switch kind {
         case .heroCarousel:
@@ -690,32 +702,60 @@ struct BriefingView: View {
             if let value = data.sinceLast { BriefingSinceLastModuleView(data: value, filter: filter, actions: actions) }
         case .executiveSitrep:
             if let value = data.sitrep { BriefingSitrepModuleView(data: value, filter: filter, actions: actions) }
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func intelligenceModule(_ kind: BriefingModuleKind) -> some View {
+        let actions = boardActions
+        switch kind {
         case .priorityDevelopments:
             if let value = data.priority { BriefingPriorityModuleView(data: value, filter: filter, actions: actions) }
         case .sourceFootprint:
-            if let value = data.footprint {
-                BriefingFootprintModuleView(data: value, filter: filter, actions: actions)
-            }
+            if let value = data.footprint { BriefingFootprintModuleView(data: value, filter: filter, actions: actions) }
         case .tensionDrivers:
             if let value = data.drivers { BriefingDriversModuleView(data: value, filter: filter, actions: actions) }
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func strategicModule(_ kind: BriefingModuleKind) -> some View {
+        let actions = boardActions
+        switch kind {
         case .industryImpact:
             if let value = data.industry { BriefingIndustryModuleView(data: value, filter: filter, actions: actions) }
         case .regions:
             if let value = data.regions { BriefingRegionsModuleView(data: value, filter: filter, actions: actions) }
         case .regionTiles:
-            if let value = data.regions {
-                BriefingRegionTilesModuleView(data: value, filter: filter, actions: actions)
-            }
-        case .weakSignals:
-            if let value = data.weakSignals {
-                BriefingWeakSignalsModuleView(data: value, filter: filter, actions: actions)
-            }
+            if let value = data.regions { BriefingRegionTilesModuleView(data: value, filter: filter, actions: actions) }
+        default:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func weakSignalsModule(_ kind: BriefingModuleKind) -> some View {
+        if kind == .weakSignals, let value = data.weakSignals {
+            BriefingWeakSignalsModuleView(data: value, filter: filter, actions: boardActions)
+        }
+    }
+
+    @ViewBuilder
+    private func forwardWatchModule(_ kind: BriefingModuleKind) -> some View {
+        let actions = boardActions
+        switch kind {
         case .forwardWatch:
             if let value = data.forwardWatch {
                 BriefingForwardWatchModuleView(data: value, filter: filter, actions: actions)
             }
         case .escalationTimeline:
             if let value = data.timeline { BriefingTimelineModuleView(data: value, filter: filter, actions: actions) }
+        default:
+            EmptyView()
         }
     }
 }
