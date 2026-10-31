@@ -336,7 +336,7 @@ class FeedManager: NSObject, ObservableObject {
                     return
                 }
 
-                await self.fetchFeedsAsync()
+                await self.fetchFeedsAsync(scheduled: true)
                 completion(.finished)
             }
         }
@@ -348,7 +348,7 @@ class FeedManager: NSObject, ObservableObject {
         backgroundTimer = Timer.scheduledTimer(withTimeInterval: appSettings.fetchIntervalMinutes * 60, repeats: true) {
             [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.fetchFeedsAsync()
+                await self?.fetchFeedsAsync(scheduled: true)
             }
         }
     }
@@ -374,7 +374,7 @@ class FeedManager: NSObject, ObservableObject {
             try? await Task.sleep(for: wakeRefreshDelay)
             guard let self, !Task.isCancelled, !self.isStopped, self.needsRefreshAfterWake else { return }
             if self.backgroundTimer != nil { self.scheduleForegroundTimer() }
-            await self.fetchFeedsAsync()
+            await self.fetchFeedsAsync(scheduled: true)
         }
     }
 
@@ -456,8 +456,15 @@ class FeedManager: NSObject, ObservableObject {
 
     /// Returns once new articles are collected and published. Notification triage and background classification
     /// follow for the caller that started the run, but never hold the refresh, its spinner or the next Cmd-R.
-    func fetchFeedsAsync() async {
+    ///
+    /// A read-only library (a notice is set) cannot store anything, so nothing is downloaded. A scheduled refresh
+    /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
+    func fetchFeedsAsync(scheduled: Bool = false) async {
         guard !isStopped else { return }
+        if let notice = articleStore.databaseHealthNotice {
+            if !scheduled { articleStore.operationError = "Refresh is off while the library is read-only. \(notice)" }
+            return
+        }
         if let refreshTask {
             _ = await refreshTask.value
             return
