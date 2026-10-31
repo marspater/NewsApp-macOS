@@ -58,8 +58,14 @@ enum BriefingWarRoomTests {
         check(layout.allModules(in: .situationalAwareness)[1] == .worldTension, "hidden module keeps its place")
         layout.setVisible(.worldTension, true)
         check(layout == .default, "showing again restores the canvas place")
+        layout.move(.sinceLastBriefing, to: 0)
+        check(
+            layout.modules(in: .situationalAwareness) == [
+                .heroCarousel, .sinceLastBriefing, .worldTension, .executiveSitrep,
+            ],
+            "move reorders between the pinned carousel and sitrep")
         layout.move(.executiveSitrep, to: 0)
-        check(layout.modules(in: .situationalAwareness).first == .executiveSitrep, "move reorders")
+        check(layout.modules(in: .situationalAwareness).last == .executiveSitrep, "a pinned module does not move")
         check(
             layout.modules(in: .strategicImpact) == BriefingLayout.default.modules(in: .strategicImpact),
             "move leaves other pillars")

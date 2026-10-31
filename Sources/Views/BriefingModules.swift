@@ -97,6 +97,9 @@ enum BriefingModuleKind: String, CaseIterable, Codable, Sendable {
 
     /// Modules that take a whole row of their pillar; the others share rows in a grid.
     var spansFullWidth: Bool { self == .priorityDevelopments || self == .regionTiles }
+
+    /// The carousel leads the board and the Executive sitrep closes its pillar, as on the canvas; neither moves.
+    var isPinned: Bool { self == .heroCarousel || self == .executiveSitrep }
 }
 
 // MARK: - Layout
@@ -157,13 +160,18 @@ struct BriefingLayout: Equatable, Codable, Sendable {
         visible[kind.pillar] = kinds
     }
 
-    /// Moves a visible module to `index` among its pillar's visible modules; other pillars never change.
+    /// Moves a visible module to `index` among its pillar's movable modules; pinned modules keep their ends and
+    /// other pillars never change.
     mutating func move(_ kind: BriefingModuleKind, to index: Int) {
-        var kinds = modules(in: kind.pillar)
+        guard !kind.isPinned else { return }
+        let shown = modules(in: kind.pillar)
+        var kinds = shown.filter { !$0.isPinned }
         guard let from = kinds.firstIndex(of: kind) else { return }
         kinds.remove(at: from)
         kinds.insert(kind, at: max(0, min(index, kinds.count)))
-        visible[kind.pillar] = kinds
+        let leading = shown.contains(.heroCarousel) ? [BriefingModuleKind.heroCarousel] : []
+        let trailing = shown.contains(.executiveSitrep) ? [BriefingModuleKind.executiveSitrep] : []
+        visible[kind.pillar] = leading + kinds + trailing
     }
 
     /// Just after the nearest module that precedes `kind` in canvas order, else first.
@@ -409,8 +417,9 @@ struct BriefingCustomizeSheet: View {
     }
 
     private func row(_ kind: BriefingModuleKind, layout: BriefingLayout) -> some View {
-        let visible = layout.modules(in: kind.pillar)
-        let index = visible.firstIndex(of: kind)
+        // Pinned modules show no live move target: the carousel leads and the sitrep closes its pillar.
+        let visible = layout.modules(in: kind.pillar).filter { !$0.isPinned }
+        let index = kind.isPinned ? nil : visible.firstIndex(of: kind)
         return HStack(spacing: AppSpacing.xs) {
             Toggle(
                 kind.title,
@@ -418,7 +427,7 @@ struct BriefingCustomizeSheet: View {
                     get: { layout.isVisible(kind) },
                     set: { isOn in update { $0.setVisible(kind, isOn) } }))
             Spacer()
-            moveButton("chevron.up", label: "Move \(kind.title) Up", enabled: (index ?? 0) > 0) {
+            moveButton("chevron.up", label: "Move \(kind.title) Up", enabled: index.map { $0 > 0 } ?? false) {
                 update { $0.move(kind, to: (index ?? 0) - 1) }
             }
             moveButton(
