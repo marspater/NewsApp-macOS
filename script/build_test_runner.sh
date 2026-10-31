@@ -16,6 +16,12 @@ TEST_STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-tests.XXXXXX")
 trap 'rm -rf "$TEST_STAGE"' EXIT
 # Keep the existing runner unchanged while including the dedicated parsing checks in every full regression run.
 sed '/^@main$/d' Tests/NewsTests.swift > "$TEST_STAGE/NewsTests.swift"
+# The headless harnesses (Story Overview sections, reader accessibility, tension calibration) compile into the same
+# runner, so a plain ./test.sh builds once; their scripts still build standalone binaries for CI jobs. Both harness
+# files declare the reader's command notification names that NewsApp.swift provides in the app; one copy is kept.
+sed '/^@main$/d' Tests/EventOverviewAccessibilityTests.swift > "$TEST_STAGE/EventOverviewAccessibilityTests.swift"
+sed -e '/^@main$/d' -e '/^extension Notification.Name {$/,/^}$/d' Tests/ReaderAccessibilityTests.swift \
+    > "$TEST_STAGE/ReaderAccessibilityTests.swift"
 cat > "$TEST_STAGE/Runner.swift" <<'SWIFT'
 import Foundation
 
@@ -37,6 +43,18 @@ struct NewsRegressionRunner {
             if selected("Tests/BriefingImpactTests.swift") { await BriefingImpactTests.run() }
             if selected("Tests/BriefingSignalsTests.swift") { await BriefingSignalsTests.run() }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
+            // The harness suites run only when named: a targeted runner mode must not pick them up.
+            if atom == "Tests/EventOverviewAccessibilityTests.swift" { await EventOverviewAccessibilityTests.main() }
+            if atom == "Tests/ReaderAccessibilityTests.swift" { await ReaderAccessibilityTests.main() }
+            if atom == "Tests/TensionCalibrationTests.swift" {
+                do {
+                    try await TensionCalibrationTests.runAllTests()
+                    print("✅ All tension calibration tests passed successfully!")
+                } catch {
+                    print("❌ Tension calibration tests failed: \(error)")
+                    exit(1)
+                }
+            }
         }
     }
 }
@@ -141,6 +159,10 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Tests/BriefingIntelligenceTests.swift \
     Tests/BriefingImpactTests.swift \
     Tests/BriefingSignalsTests.swift \
+    Sources/Views/ArticleDetailView.swift \
+    Sources/Views/ArticleWebView.swift \
+    Tests/TensionCalibrationTests.swift \
+    "$TEST_STAGE/EventOverviewAccessibilityTests.swift" "$TEST_STAGE/ReaderAccessibilityTests.swift" \
     "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
     -o "$OUTPUT"
