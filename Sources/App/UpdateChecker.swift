@@ -74,11 +74,11 @@ struct GitHubReleasePayload: Codable, Sendable {
 /// Security & Architecture Constraints:
 /// - Informational only: NEVER downloads, executes, replaces, or installs application binaries.
 /// - Validates remote release URLs strictly against `https://github.com/marspater/NewsApp-macOS/releases/*`.
-/// - Enforces 6-hour automatic throttling cache while allowing manual bypass.
+/// - Enforces 6-hour automatic throttling after every attempt, failed or not, while allowing manual bypass.
 /// - Validates strict SemVer before flagging updates.
 @MainActor
 final class UpdateChecker: ObservableObject {
-    static let shared = UpdateChecker()
+    static let shared = UpdateChecker(defaults: .standard)
 
     @Published var isChecking: Bool = false
     @Published var updateAvailable: Bool = false
@@ -91,15 +91,42 @@ final class UpdateChecker: ObservableObject {
     private let httpClient: SecureHTTPClient
     private let now: @Sendable () -> Date
     private let customAppVersion: String?
+    /// Where the last attempt is kept so a relaunch does not reset the throttle; nil keeps it in memory only.
+    private let defaults: UserDefaults?
+    private static let lastAttemptKey = "updateCheckLastAttempt"
+    /// The last automatic or manual attempt, successful or not. Failures throttle too (#798).
+    /// A date more than the window ahead of the clock (a backward correction) counts as expired.
+    private var lastAttemptDate: Date?
 
     init(
         httpClient: SecureHTTPClient = .shared,
         now: @escaping @Sendable () -> Date = { Date() },
-        currentAppVersion: String? = nil
+        currentAppVersion: String? = nil,
+        defaults: UserDefaults? = nil
     ) {
         self.httpClient = httpClient
         self.now = now
         self.customAppVersion = currentAppVersion
+        self.defaults = defaults
+        self.lastAttemptDate = defaults?.object(forKey: Self.lastAttemptKey) as? Date
+        restoreFoundRelease()
+    }
+
+    private static let foundReleaseKey = "updateCheckFoundRelease"
+
+    /// A relaunch inside the throttle window skips the launch check, so the update it found stays available.
+    /// The release is compared with the running version again, so an app updated since then shows nothing.
+    private func restoreFoundRelease() {
+        guard let saved = defaults?.dictionary(forKey: Self.foundReleaseKey) as? [String: String],
+            let tag = saved["tag"], let remote = SemanticVersion.parse(tag),
+            let local = SemanticVersion.parse(currentAppVersion), remote > local,
+            let link = saved["url"], let url = URL(string: link), Self.isValidReleaseURL(url)
+        else { return }
+        updateAvailable = true
+        latestVersionString = tag
+        releaseNotes = saved["body"]
+        verifiedReleaseURL = url
+        statusMessage = "Version \(tag) available"
     }
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "UpdateChecker")
@@ -112,14 +139,20 @@ final class UpdateChecker: ObservableObject {
     /// Checks for newer releases on GitHub.
     /// - Parameter userInitiated: If true, bypasses the 6-hour cache.
     func checkForUpdates(userInitiated: Bool = false) async {
-        if !userInitiated, let last = lastCheckDate, now().timeIntervalSince(last) < minimumCheckInterval {
+        if !userInitiated, let last = lastAttemptDate,
+            case let elapsed = now().timeIntervalSince(last), abs(elapsed) < minimumCheckInterval
+        {
             logger.debug("Skipping automatic update check; cached within 6-hour window.")
             return
         }
 
         guard !isChecking else { return }
+        lastAttemptDate = now()
+        defaults?.set(lastAttemptDate, forKey: Self.lastAttemptKey)
         isChecking = true
         updateAvailable = false
+        // Whatever this check finds replaces the saved release; a 404 or a failure must not bring it back on relaunch.
+        defaults?.removeObject(forKey: Self.foundReleaseKey)
         latestVersionString = nil
         releaseNotes = nil
         verifiedReleaseURL = nil
@@ -186,9 +219,13 @@ final class UpdateChecker: ObservableObject {
                 self.releaseNotes = payload.body
                 self.verifiedReleaseURL = targetURL
                 self.statusMessage = "Version \(payload.tagName) available"
+                defaults?.set(
+                    ["tag": payload.tagName, "url": payload.htmlUrl, "body": payload.body ?? ""],
+                    forKey: Self.foundReleaseKey)
                 logger.info("Newer release found: \(payload.tagName)")
             } else {
                 self.updateAvailable = false
+                defaults?.removeObject(forKey: Self.foundReleaseKey)
                 self.statusMessage = "NewsApp is up to date (v\(self.currentAppVersion))"
                 logger.info("NewsApp is up to date.")
             }

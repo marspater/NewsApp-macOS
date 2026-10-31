@@ -160,14 +160,34 @@ class FeedManager: NSObject, ObservableObject {
     // MARK: - Feed URL Management (delegates to AppSettings)
 
     @discardableResult
-    func addFeed(url: String) -> Bool {
-        if let added = appSettings.addFeed(url: url) {
-            cancelRefresh()
-            feedStatuses[added] = .idle
-            fetchFeeds()
-            return true
+    func addFeed(url: String) -> Bool { addFeedNormalized(url: url) != nil }
+
+    /// Adds the feed and returns the address actually subscribed (insecure HTTP may have been upgraded).
+    func addFeedNormalized(url: String) -> String? {
+        guard let added = subscribe(url: url) else { return nil }
+        fetchFeeds()
+        return added
+    }
+
+    /// Like `addFeedNormalized`, but returns once the new feed has been collected, so a Shortcuts action that
+    /// follows (Mark All as Read) sees its stories.
+    func addFeedAndCollect(url: String) async -> String? {
+        guard let added = subscribe(url: url) else { return nil }
+        await fetchFeedsAsync()
+        // Another subscription change may have cancelled that run and started a replacement; wait for it too.
+        for _ in 0..<5 {
+            await Task.yield()
+            guard let replacement = refreshTask else { break }
+            _ = await replacement.value
         }
-        return false
+        return added
+    }
+
+    private func subscribe(url: String) -> String? {
+        guard let added = appSettings.addFeed(url: url) else { return nil }
+        cancelRefresh()
+        feedStatuses[added] = .idle
+        return added
     }
 
     /// Subscribes to catalog feeds the user chose; one refresh covers the whole batch.
