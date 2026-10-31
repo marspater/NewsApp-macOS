@@ -15904,6 +15904,10 @@ struct NewsTests {
             assertTrue(plist is [String: Any], "Distribution manifest must be a valid property list: \(file)")
         }
 
+        assertEqual(
+            Int64(NotificationService.attachmentLimit), SecureHTTPClient.defaultImageLimit,
+            "The notification attachment ceiling equals the image fetch limit")
+
         guard let data = fileManager.contents(atPath: entitlementsPath) else {
             assertEqual(true, false, "Failed to read News.entitlements data")
             return
