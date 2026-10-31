@@ -11013,7 +11013,7 @@ struct NewsTests {
         assertEqual(
             sqlite3_exec(
                 handle,
-                "UPDATE articles SET category = 'World' WHERE id = 'hint-classified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-publisher'; UPDATE articles SET category = 'Politics' WHERE id = 'hint-unclassified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-unrated'; PRAGMA user_version = 27;",
+                "UPDATE articles SET category = 'World' WHERE id = 'hint-classified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-publisher'; UPDATE articles SET category = 'World' WHERE id = 'hint-unclassified'; UPDATE articles SET category = 'Politics' WHERE id = 'hint-unrated'; PRAGMA user_version = 27;",
                 nil, nil, nil), SQLITE_OK, "Reconstruct a v27 library with a classifier category in the hint column")
         try await db.open()
         assertEqual(value("PRAGMA user_version;"), "28", "The v27 library migrates to v28")
@@ -11027,8 +11027,8 @@ struct NewsTests {
             value("SELECT category FROM articles WHERE id = 'hint-unclassified';"), nil,
             "v28 clears a classifier label left in the hint after its enrichment category was cleared")
         assertEqual(
-            value("SELECT category FROM articles WHERE id = 'hint-unrated';"), "Sport",
-            "v28 keeps an unclassified article's publisher category")
+            value("SELECT category FROM articles WHERE id = 'hint-unrated';"), "Politics",
+            "v28 keeps a publisher label that differs from the label the classifier gives the article")
         await db.close()
     }
 
