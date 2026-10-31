@@ -164,10 +164,23 @@ class FeedManager: NSObject, ObservableObject {
 
     /// Adds the feed and returns the address actually subscribed (insecure HTTP may have been upgraded).
     func addFeedNormalized(url: String) -> String? {
+        guard let added = subscribe(url: url) else { return nil }
+        fetchFeeds()
+        return added
+    }
+
+    /// Like `addFeedNormalized`, but returns once the new feed has been collected, so a Shortcuts action that
+    /// follows (Mark All as Read) sees its stories.
+    func addFeedAndCollect(url: String) async -> String? {
+        guard let added = subscribe(url: url) else { return nil }
+        await fetchFeedsAsync()
+        return added
+    }
+
+    private func subscribe(url: String) -> String? {
         guard let added = appSettings.addFeed(url: url) else { return nil }
         cancelRefresh()
         feedStatuses[added] = .idle
-        fetchFeeds()
         return added
     }
 

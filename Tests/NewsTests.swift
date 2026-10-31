@@ -16469,6 +16469,16 @@ struct NewsTests {
         let upgraded = UpdateChecker(
             httpClient: client, now: { clock.now }, currentAppVersion: "2.1.0", defaults: foundDefaults)
         assertFalse(upgraded.updateAvailable, "Once the app has that version, nothing is offered")
+
+        // A later check that finds nothing (here a 404) removes the saved release.
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        clock.advance(by: 7 * 3600)
+        await finder.checkForUpdates(userInitiated: false)
+        let withdrawn = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: foundDefaults)
+        assertFalse(withdrawn.updateAvailable, "A withdrawn release is not restored on relaunch")
     }
 
     @MainActor

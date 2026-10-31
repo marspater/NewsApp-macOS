@@ -151,6 +151,8 @@ final class UpdateChecker: ObservableObject {
         defaults?.set(lastAttemptDate, forKey: Self.lastAttemptKey)
         isChecking = true
         updateAvailable = false
+        // Whatever this check finds replaces the saved release; a 404 or a failure must not bring it back on relaunch.
+        defaults?.removeObject(forKey: Self.foundReleaseKey)
         latestVersionString = nil
         releaseNotes = nil
         verifiedReleaseURL = nil
