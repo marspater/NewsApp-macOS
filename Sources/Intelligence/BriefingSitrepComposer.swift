@@ -52,7 +52,8 @@ enum BriefingSitrepComposer {
             let answer = try await model.respond(prompt(title: title, highlights: highlights), 120)
             let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let sentence = OverviewComposer.firstCompleteSentence(trimmed),
-                isValid(sentence, inputs: [title] + highlights.map(\.text) + highlights.compactMap(\.publisher))
+                isValid(sentence, inputs: [title] + highlights.map(\.text) + highlights.compactMap(\.publisher)),
+                keepsQualifiers(sentence, facts: highlights.map(\.text))
             else { return fallback }
             return Line(text: sentence, isGenerated: true, isFinal: true)
         } catch is NewsTextModel.Rejected {
@@ -73,6 +74,22 @@ enum BriefingSitrepComposer {
             guard let initial = word.first, initial.isNumber || (index > 0 && initial.isUppercase) else { return true }
             return known.contains(word.lowercased())
         }
+    }
+
+    /// Negation and uncertainty cues; a sentence restating qualified facts must keep at least one of them.
+    private static let qualifiers: Set<String> = [
+        "not", "no", "never", "denied", "denies", "unconfirmed", "alleged", "reportedly", "could not",
+    ]
+
+    /// False when a fact is negated or uncertain and the sentence drops every such cue. Publisher names are not
+    /// required: the module's label and the thread link carry attribution, and quotes stay on their own lines.
+    static func keepsQualifiers(_ sentence: String, facts: [String]) -> Bool {
+        func hasQualifier(_ text: String) -> Bool {
+            let lower = text.lowercased()
+            let tokens = Set(words(lower))
+            return qualifiers.contains { $0.contains(" ") ? lower.contains($0) : tokens.contains($0) }
+        }
+        return !facts.contains(where: hasQualifier) || hasQualifier(sentence)
     }
 
     private static func words(_ text: String) -> [String] {

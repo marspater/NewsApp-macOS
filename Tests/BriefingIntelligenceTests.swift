@@ -57,15 +57,23 @@ enum BriefingIntelligenceTests {
             try await db.open()
             let first = overview(version: 1, facts: ["Port authorities raised the security level."])
             check(try await db.recordEventOverview(first), "Stores the first overview")
-            let hash = DatabaseEngine.briefingSitrepInputHash(eventID: "event-1", overview: first)
+            _ = try await db.upsertArticles([BriefingTestFactory.makeArticle(id: "a1", title: "Corridor")])
+            let hash = DatabaseEngine.briefingSitrepInputHash(eventID: "event-1", title: "Corridor", overview: first)
+            let renamed = DatabaseEngine.briefingSitrepInputHash(eventID: "event-1", title: "Renamed", overview: first)
             check(
-                try await db.saveBriefingSitrep(eventID: "event-1", inputHash: hash, text: "Line", isGenerated: true),
+                try await !db.saveBriefingSitrep(
+                    eventID: "event-1", articleID: "a1", inputHash: renamed, text: "Line", isGenerated: true),
+                "A line made under a headline the stored article no longer has is refused")
+            check(
+                try await db.saveBriefingSitrep(
+                    eventID: "event-1", articleID: "a1", inputHash: hash, text: "Line", isGenerated: true),
                 "A sitrep line made from the current overview is saved")
             check(try await db.fetchBriefingSitrep(eventID: "event-1")?.text == "Line", "The saved line reads back")
             let second = overview(version: 2, facts: ["Port authorities raised the security level."])
             check(try await db.recordEventOverview(second), "Stores the newer overview")
             check(
-                try await !db.saveBriefingSitrep(eventID: "event-1", inputHash: hash, text: "Stale", isGenerated: true),
+                try await !db.saveBriefingSitrep(
+                    eventID: "event-1", articleID: "a1", inputHash: hash, text: "Stale", isGenerated: true),
                 "A line made from an older overview version is refused")
             check(
                 try await db.fetchBriefingSitrep(eventID: "event-1")?.text == "Line",
@@ -200,6 +208,16 @@ enum BriefingIntelligenceTests {
         check(numbered?.isFinal == true, "A rejected model answer is cached as the highlight")
         let off = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: .unavailable)
         check(off?.isFinal == false, "A line made with the model off is not cached")
+        let negated = [
+            BriefingSitrepComposer.Highlight(text: "Officials denied that ships were damaged.", publisher: nil)
+        ]
+        let dropped = await BriefingSitrepComposer.compose(
+            title: "Corridor", highlights: negated,
+            model: NewsTextModel { _, _ in "Officials said that ships were damaged in the corridor." })
+        check(dropped?.isGenerated == false, "A sentence that drops the facts' negation falls back")
+        check(
+            BriefingSitrepComposer.keepsQualifiers("Officials denied damage.", facts: [negated[0].text]),
+            "A sentence keeping the negation passes")
         let faithful = NewsTextModel { _, _ in "Port authorities raised the security level, Reuters reports." }
         let kept = await BriefingSitrepComposer.compose(title: "Corridor", highlights: highlights, model: faithful)
         check(kept?.isGenerated == true, "A sentence restating the inputs is kept")

@@ -75,7 +75,8 @@ struct BriefingSitrepData: Equatable, Sendable {
             let eventID = thread.summary.eventID
             guard let overview = try? await store.fetchEventOverview(eventID: eventID), !overview.facts.isEmpty
             else { continue }
-            let hash = DatabaseEngine.briefingSitrepInputHash(eventID: eventID, overview: overview)
+            let hash = DatabaseEngine.briefingSitrepInputHash(
+                eventID: eventID, title: thread.representative.title, overview: overview)
             let body: String
             let isGenerated: Bool
             if let cached = try? await store.database.fetchBriefingSitrep(eventID: eventID), cached.inputHash == hash {
@@ -91,7 +92,8 @@ struct BriefingSitrepData: Equatable, Sendable {
                 isGenerated = line.isGenerated
                 if line.isFinal {
                     _ = try? await store.database.saveBriefingSitrep(
-                        eventID: eventID, inputHash: hash, text: line.text, isGenerated: line.isGenerated)
+                        eventID: eventID, articleID: thread.representative.id, inputHash: hash, text: line.text,
+                        isGenerated: line.isGenerated)
                 }
             }
             lines.append(

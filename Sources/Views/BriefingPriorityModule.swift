@@ -44,7 +44,8 @@ struct BriefingPriorityData: Equatable, Sendable {
         let headline: String
         let impact: String
         let momentum: Momentum
-        let original: String
+        /// "5 of 11", or nil when the member reports were not available to check for wire copy.
+        let original: String?
         let reported: Quote?
         /// Two differing accounts, "[participant]: position", or empty.
         let accounts: [String]
@@ -96,11 +97,8 @@ struct BriefingPriorityData: Equatable, Sendable {
             let summary = thread.summary
             let overview = try? await store.fetchEventOverview(eventID: summary.eventID)
             let members = (try? await store.eventMemberArticles(eventID: summary.eventID)) ?? []
-            let original =
-                members.isEmpty
-                ? (overview.map { thread.publisherCount - Set($0.perspectives.compactMap(\.originalWireSource)).count }
-                    ?? thread.publisherCount)
-                : originalReports(members.map { ($0.publisherName, reportText($0)) })
+            let original = members.isEmpty ? nil : originalReports(members.map { ($0.publisherName, reportText($0)) })
+            let links = Dictionary(members.map { ($0.id, $0.link) }, uniquingKeysWith: { first, _ in first })
             let firstReport = (try? await store.storyMemberArticles(eventID: summary.eventID))?.map(\.pubDate).min()
             let latest = summary.latestDate ?? thread.representative.pubDate
             cards.append(
@@ -115,9 +113,9 @@ struct BriefingPriorityData: Equatable, Sendable {
                     headline: thread.representative.title,
                     impact: impactText(priorities[thread.representative.id]?.importance),
                     momentum: momentum(dates: summary.members.map(\.date), now: context.now),
-                    original: "\(max(0, original)) of \(thread.publisherCount)",
-                    reported: overview.flatMap(reported), accounts: overview.map(accounts) ?? [],
-                    notYetReported: overview.flatMap(notYetReported),
+                    original: original.map { "\($0) of \(thread.publisherCount)" },
+                    reported: overview.flatMap { reported($0, links: links) }, accounts: overview.map(accounts) ?? [],
+                    notYetReported: overview.flatMap { notYetReported($0, links: links) },
                     threadDay: firstReport.map {
                         (Calendar.current.dateComponents([.day], from: $0, to: context.now).day ?? 0) + 1
                     },
@@ -135,15 +133,20 @@ struct BriefingPriorityData: Equatable, Sendable {
         }
     }
 
-    private static func quote(_ text: String, citationIDs: [String], in overview: EventOverviewDocument) -> Quote? {
+    /// The quote keeps its publisher as plain text when neither the citation nor the cited member report has an http(s)
+    /// link.
+    private static func quote(
+        _ text: String, citationIDs: [String], in overview: EventOverviewDocument, links: [String: String]
+    ) -> Quote? {
         guard let citation = citationIDs.lazy.compactMap({ overview.citations[$0] }).first,
             let publisher = citation.sourceName
         else { return nil }
-        return Quote(text: text, publisher: publisher, url: citation.sourceURL.flatMap(URL.init(string:)))
+        let url = citation.sourceURL.flatMap(WebLink.url) ?? links[citation.articleID].flatMap(WebLink.url)
+        return Quote(text: text, publisher: publisher, url: url)
     }
 
-    private static func reported(_ overview: EventOverviewDocument) -> Quote? {
-        overview.facts.lazy.compactMap { quote($0.text, citationIDs: $0.citationIDs, in: overview) }.first
+    private static func reported(_ overview: EventOverviewDocument, links: [String: String]) -> Quote? {
+        overview.facts.lazy.compactMap { quote($0.text, citationIDs: $0.citationIDs, in: overview, links: links) }.first
     }
 
     /// Two perspectives from different participants with different positions.
@@ -158,12 +161,12 @@ struct BriefingPriorityData: Equatable, Sendable {
     }
 
     /// Only a cited line that itself says something is unconfirmed; never written by the app.
-    private static func notYetReported(_ overview: EventOverviewDocument) -> Quote? {
+    private static func notYetReported(_ overview: EventOverviewDocument, links: [String: String]) -> Quote? {
         let lines =
             overview.facts.map { ($0.text, $0.citationIDs) }
             + overview.perspectives.map { ($0.position, $0.citationIDs) }
         return lines.lazy.filter { text, _ in unconfirmedCues.contains { text.lowercased().contains($0) } }
-            .compactMap { quote($0.0, citationIDs: $0.1, in: overview) }.first
+            .compactMap { quote($0.0, citationIDs: $0.1, in: overview, links: links) }.first
     }
 
     /// Sample data for `Tests/OverviewCaptures.swift`.
@@ -276,7 +279,7 @@ struct BriefingPriorityModuleView: View {
         HStack(alignment: .top, spacing: AppSpacing.xs) {
             stat("Impact", card.impact)
             stat("Momentum", card.momentum.label)
-            stat("Original reports", card.original)
+            if let original = card.original { stat("Original reports", original) }
         }
     }
 

@@ -27,11 +27,11 @@ struct BriefingEditionSnapshotRow: Equatable, Sendable {
 /// Briefing storage: edition snapshots and the sitrep cache (#849).
 extension DatabaseEngine {
     /// The stamp of a sitrep line's inputs: the event, its overview version and the highlights the line restates, each
-    /// with the publisher the prompt names.
-    static func briefingSitrepInputHash(eventID: String, overview: EventOverviewDocument) -> String {
+    /// with the publisher the prompt names, and the representative headline the prompt is titled with.
+    static func briefingSitrepInputHash(eventID: String, title: String, overview: EventOverviewDocument) -> String {
         let facts = BriefingSitrepComposer.highlights(of: overview).map { "\($0.text)\t\($0.publisher ?? "")" }
         return ArticleIdentity.sha256Hex(
-            ([eventID, String(overview.membershipVersion)] + facts).joined(separator: "\n"))
+            ([eventID, title, String(overview.membershipVersion)] + facts).joined(separator: "\n"))
     }
 
     /// A cached sitrep line with the stamp of the inputs it restates.
@@ -51,12 +51,15 @@ extension DatabaseEngine {
     }
 
     /// Saves a sitrep line only while its inputs are current: inside the transaction the stamp is recomputed from the
-    /// stored overview, and a line made from older inputs is refused (#844).
+    /// stored overview and the representative article's stored title, and a line made from older inputs is refused (#844).
     @discardableResult
-    func saveBriefingSitrep(eventID: String, inputHash: String, text: String, isGenerated: Bool) throws -> Bool {
+    func saveBriefingSitrep(eventID: String, articleID: String, inputHash: String, text: String, isGenerated: Bool)
+        throws -> Bool
+    {
         try inEventTransaction {
             guard let overview = try fetchEventOverview(eventID: eventID),
-                Self.briefingSitrepInputHash(eventID: eventID, overview: overview) == inputHash
+                let title = try fetchArticles(limit: 1, id: articleID).first?.title,
+                Self.briefingSitrepInputHash(eventID: eventID, title: title, overview: overview) == inputHash
             else { return false }
             try eventRows(
                 """
