@@ -34,9 +34,41 @@ enum BriefingWarRoomTests {
         layoutEditing()
         await layoutPersistence()
         hiddenModules()
+        regionFilter()
         tensionCaptions()
         print("Finished \(checks) Briefing war room checks with \(failures) failures.")
         if failures > 0 { exit(1) }
+    }
+
+    /// The region filter hides the signal modules it empties, and clears itself when its control is gone (#850, #851).
+    static func regionFilter() {
+        guard let weak = BriefingWeakSignalsData.captureFixture, let watch = BriefingForwardWatchData.captureFixture
+        else {
+            check(false, "signal fixtures exist")
+            return
+        }
+        var data = BriefingBoardData()
+        data.weakSignals = weak
+        data.forwardWatch = watch
+        var filter = BriefingBoardFilter()
+        filter.region = .oceania
+        filter.regionsByEntry = Dictionary(
+            uniqueKeysWithValues: weak.rows.map { ($0.entry.id, Set([TensionMacroRegion.europe])) })
+        let shown = BriefingView.visibleModules(layout: .default, data: data, filter: filter)
+        check(!shown.contains(.weakSignals), "weak signals hide when the region filter empties them")
+        check(shown.contains(.forwardWatch), "forward watch rows without a story stay")
+        check(
+            BriefingView.visibleModules(layout: .default, data: data).contains(.weakSignals),
+            "weak signals show without a filter")
+        // No Regions control on the board: the selection cannot be cleared there, so the board clears it.
+        check(
+            BriefingView.effectiveFilter(filter, layout: .default, data: data).region == nil,
+            "a region without the Regions module is dropped")
+        var layout = BriefingLayout.default
+        layout.setVisible(.regions, false)
+        check(
+            BriefingView.effectiveFilter(filter, layout: layout, data: data).region == nil,
+            "a region with the Regions module hidden is dropped")
     }
 
     static func layoutDefaults() {

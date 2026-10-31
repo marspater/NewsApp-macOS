@@ -489,10 +489,21 @@ struct BriefingView: View {
     @State private var filter = BriefingBoardFilter()
 
     /// The region filter with the Regions loader's map, so modules filter by resolved regions, not headlines alone.
-    private var boardFilter: BriefingBoardFilter {
-        var filter = filter
-        filter.regionsByEntry = data.regions?.regionsByEntry ?? [:]
-        return filter
+    private var boardFilter: BriefingBoardFilter { Self.effectiveFilter(filter, layout: layout, data: data) }
+
+    /// The filter the board applies: a region stays selected only while the Regions control that can clear it is
+    /// shown and still lists that region; otherwise the board shows everything again.
+    static func effectiveFilter(
+        _ filter: BriefingBoardFilter, layout: BriefingLayout, data: BriefingBoardData
+    ) -> BriefingBoardFilter {
+        var effective = filter
+        effective.regionsByEntry = data.regions?.regionsByEntry ?? [:]
+        if let region = filter.region,
+            !layout.isVisible(.regions) || !(data.regions?.rows.contains { $0.region == region } ?? false)
+        {
+            effective.region = nil
+        }
+        return effective
     }
 
     init(
@@ -552,10 +563,11 @@ struct BriefingView: View {
 
     /// The modules the board shows, in pillar and layout order: visible in the layout and with data.
     static func visibleModules(
-        layout: BriefingLayout, data: BriefingBoardData, hasStories: Bool = true
+        layout: BriefingLayout, data: BriefingBoardData, hasStories: Bool = true,
+        filter: BriefingBoardFilter = BriefingBoardFilter()
     ) -> [BriefingModuleKind] {
         BriefingPillar.allCases.flatMap { pillar in
-            layout.modules(in: pillar).filter { data.hasData(for: $0, hasStories: hasStories) }
+            layout.modules(in: pillar).filter { data.hasData(for: $0, hasStories: hasStories, filter: filter) }
         }
     }
 
@@ -578,7 +590,8 @@ struct BriefingView: View {
     }
 
     var body: some View {
-        let modules = Self.visibleModules(layout: layout, data: data, hasStories: !entries.isEmpty)
+        let modules = Self.visibleModules(
+            layout: layout, data: data, hasStories: entries.contains(where: boardFilter.includes), filter: boardFilter)
         let pillars = BriefingPillar.allCases.filter { pillar in modules.contains { $0.pillar == pillar } }
         VStack(alignment: .leading, spacing: AppSpacing.xl) {
             ForEach(pillars.filter { $0 != .weakSignals && $0 != .forwardWatch }, id: \.self) { pillar in
@@ -598,6 +611,12 @@ struct BriefingView: View {
         .padding(.bottom, AppSpacing.xl)
         .frame(maxWidth: AppLayout.briefingMaxWidth + 2 * AppLayout.pageInset)
         .frame(maxWidth: .infinity, alignment: .center)
+        // A selection the board can no longer honour is forgotten, so it does not return with the Regions module.
+        .onChange(of: boardFilter.region == nil && filter.region != nil) { _, stale in
+            guard stale else { return }
+            filter.region = nil
+            actions.onSelectRegion(nil)
+        }
     }
 
     /// Weak signals and Forward watch sit side by side on a wide board, as on the canvas.
