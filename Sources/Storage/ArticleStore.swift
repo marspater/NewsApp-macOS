@@ -27,6 +27,8 @@ final class ArticleStore: ObservableObject {
     /// The reader's mute rules; `unreadCount` leaves out the stories they hide, as the Unread list does (#785).
     private(set) var muting = MuteRules()
     private var muteObservation: AnyCancellable?
+    /// Bumped on every mute-rule change, so a count taken under older rules is not published.
+    private var muteGeneration = 0
 
     @Published private(set) var revision: UInt64 = 0
     /// Bumped when clustering or the reader changes events; the feed regroups on it.
@@ -47,8 +49,13 @@ final class ArticleStore: ObservableObject {
         self.spotlightIndexer = spotlightIndexer
         if database == nil {
             muting = AppSettings.shared.muteRules
+            // Applied synchronously, in the order the rules change; only the recount is a task.
             muteObservation = AppSettings.shared.$muteRules.dropFirst().sink { [weak self] rules in
-                Task { @MainActor in await self?.setMuting(rules) }
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.applyMuting(rules)
+                    Task { await self.recountUnread() }
+                }
             }
         }
 
@@ -92,8 +99,19 @@ final class ArticleStore: ObservableObject {
 
     /// Recounts unread stories under new mute rules.
     func setMuting(_ rules: MuteRules) async {
+        applyMuting(rules)
+        await recountUnread()
+    }
+
+    private func applyMuting(_ rules: MuteRules) {
         muting = rules
-        guard let counts = try? await database.counts(muting: rules), muting == rules else { return }
+        muteGeneration &+= 1
+    }
+
+    /// Counts under the current rules and publishes only if they did not change meanwhile.
+    private func recountUnread() async {
+        let generation = muteGeneration
+        guard let counts = try? await database.counts(muting: muting), generation == muteGeneration else { return }
         unreadCount = counts.unread
         revision &+= 1
     }
@@ -101,6 +119,7 @@ final class ArticleStore: ObservableObject {
     @discardableResult
     func refreshState() async -> Bool {
         do {
+            let generation = muteGeneration
             let fetched = try await database.fetchArticles(limit: 500)
             let readIDs = try await database.getReadArticleIDs()
             let saved = try await database.getSavedArticles()
@@ -110,7 +129,7 @@ final class ArticleStore: ObservableObject {
             self.readArticleIDs = readIDs
             self.savedArticles = saved
             self.savedArticleIDs = Set(saved.map { $0.id })
-            self.unreadCount = counts.unread
+            if generation == muteGeneration { self.unreadCount = counts.unread }
             self.savedCount = counts.saved
             revision &+= 1
             return true
@@ -212,8 +231,9 @@ final class ArticleStore: ObservableObject {
             } else {
                 readArticleIDs.remove(id)
             }
+            let generation = muteGeneration
             let counts = try await database.counts(muting: muting)
-            self.unreadCount = counts.unread
+            if generation == muteGeneration { self.unreadCount = counts.unread }
             revision &+= 1
         } catch {
             operationError = "Could not save reading status. Please try again."
@@ -294,7 +314,10 @@ final class ArticleStore: ObservableObject {
                 savedArticleIDs.remove(storedArticle.id)
                 await serialSpotlight { await $0.removeSavedArticle(id: storedArticle.id) }
             }
+            // Unsaving a panel-only story also hides it from the unread count.
+            let generation = muteGeneration
             let counts = try await database.counts(muting: muting)
+            if generation == muteGeneration { self.unreadCount = counts.unread }
             self.savedCount = counts.saved
             revision &+= 1
             return nextState
