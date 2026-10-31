@@ -22,7 +22,8 @@ NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=$HOME/news-eval/library-copy.sqlite3 ./test.s
 
 `./test.sh` runs the design lint, the Python evaluation self-checks, the whole Swift suite as parallel jobs and the
 three headless runners. `NEWS_TEST_FORCE=1` reruns it even if the same inputs passed on this machine. Also check that
-`script/format.sh --check` and `./build.sh` succeed. The items below name the part of this run that proves each gate,
+`CI=1 script/format.sh --check` and `./build.sh` succeed. Without `CI` set, the format script passes with only a warning
+when no swift-format is installed, so also confirm `xcrun --find swift-format` prints a path, or the check proved nothing. The items below name the part of this run that proves each gate,
 plus the extra commands that are not in the plain run.
 
 ## 1. Database migration and restore on a library copy
