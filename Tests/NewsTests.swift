@@ -17229,15 +17229,19 @@ struct NewsTests {
         let slowDefaults = UserDefaults(suiteName: slowSuite)!
         defer { removeTestDefaults(slowSuite) }
         let slowSettings = AppSettings(defaults: slowDefaults)
+        let slowFetches = TestRecorder()
         let slowManager = FeedManager(
             settings: slowSettings, store: addStore, schedulesRefresh: false,
             fetchBatch: { urls, _ in
+                await slowFetches.record(urls)
                 try? await Task.sleep(for: .milliseconds(250))
                 return urls.map { ($0, [], nil, nil) }
             })
         defer { slowManager.stopBackgroundWork() }
         let slowAdd = Task { @MainActor in await slowManager.addFeedAndCollect(url: "https://slow.example.com/a.xml") }
-        try? await Task.sleep(for: .milliseconds(60))
+        await eventually("Feed A's refresh has started") {
+            await slowFetches.batches.contains { $0.contains("https://slow.example.com/a.xml") }
+        }
         slowManager.addFeed(url: "https://slow.example.com/b.xml")
         _ = await slowAdd.value
         assertFalse(slowManager.isAnyFeedLoading, "Add Feed returns only after the replacement run has finished")
