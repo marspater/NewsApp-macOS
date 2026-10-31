@@ -786,6 +786,7 @@ struct NewsTests {
             try await testUnchangedFTSRefresh()
             try await testSearchSpellingSuggestion()
             try await testRefreshStateKeepsChangesMadeWhileLoading()
+            try await testCountsStayExactAcrossToggleAndBulkChanges()
             try await testUnreadCountAndSavedStateCoverTheLibrary()
             try await testFTSRowIDMigration()
             try await testDatabaseHealthAndDerivedRetention()
@@ -955,6 +956,10 @@ struct NewsTests {
                 { try await testRefreshStateKeepsChangesMadeWhileLoading() }
             ),
             (
+                "testCountsStayExactAcrossToggleAndBulkChanges",
+                { try await testCountsStayExactAcrossToggleAndBulkChanges() }
+            ),
+            (
                 "testUnreadCountAndSavedStateCoverTheLibrary",
                 { try await testUnreadCountAndSavedStateCoverTheLibrary() }
             ),
@@ -973,6 +978,7 @@ struct NewsTests {
             ("testDistributionAndEntitlementsIntegrity", { await testDistributionAndEntitlementsIntegrity() }),
             ("testStrictSemVerAndReleaseSecurity", { await testStrictSemVerAndReleaseSecurity() }),
             ("testUpdateCheckerThrottleWithClock", { await testUpdateCheckerThrottleWithClock() }),
+            ("testUpdateCheckerFailureBackoff", { await testUpdateCheckerFailureBackoff() }),
             ("testUpdateCheckerVersionComparisonAndErrors", { await testUpdateCheckerVersionComparisonAndErrors() }),
             ("testUpdateCheckerAdversarialEdgeCases", { await testUpdateCheckerAdversarialEdgeCases() }),
             ("testNewsURLParserAndSchemeRouting", { await testNewsURLParserAndSchemeRouting() }),
@@ -1185,6 +1191,56 @@ struct NewsTests {
         store.refreshLoadedHook = nil
         assertTrue(refreshed, "The refresh publishes after reloading")
         assertTrue(store.readArticleIDs.contains(stories[2].id), "A bulk read change made while loading survives")
+        await db.close()
+    }
+
+    /// #839: counts are cached and adjusted per read toggle, and every other write refreshes them.
+    static func testCountsStayExactAcrossToggleAndBulkChanges() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        func story(_ index: Int, _ host: String = "other.org") -> FeedArticle {
+            FeedArticle(
+                title: "Counted story \(index)", link: "https://\(host)/\(index)", guid: "count-\(index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000 - Double(index) * 60),
+                source: "Publisher")
+        }
+        let stories = (0..<5).map { story($0) }
+        try await db.upsertArticles(stories)
+        let muting = MuteRules(sources: ["muted.example"])
+        assertEqual(try await db.counts().unread, 5, "Every story starts unread")
+        assertEqual(try await db.mutedArticleCount(muting: muting), 0, "Nothing is muted yet")
+
+        try await db.markRead(articleId: stories[0].id, isRead: true)
+        assertEqual(try await db.counts().unread, 4, "A read toggle lowers the unread count")
+        try await db.markRead(articleId: stories[0].id, isRead: true)
+        assertEqual(try await db.counts().unread, 4, "Marking a read story read again changes nothing")
+        try await db.markRead(articleId: stories[0].id, isRead: false)
+        assertEqual(try await db.counts().unread, 5, "Marking it unread raises the count back")
+        try await db.setSaved(articleId: stories[1].id, isSaved: true)
+        assertEqual(try await db.counts().saved, 1, "A save is counted after cached counts")
+
+        try await db.markReadBatch(articleIds: stories.prefix(3).map(\.id), isRead: true)
+        assertEqual(try await db.counts().unread, 2, "A bulk change refreshes the counts")
+        try await db.markRead(articleId: stories[4].id, isRead: true)
+        assertEqual(try await db.counts().unread, 1, "A toggle after a bulk change adjusts the fresh counts")
+
+        try await db.upsertArticles([story(9, "muted.example")])
+        assertEqual(try await db.counts().total, 6, "New stories refresh the total")
+        assertEqual(try await db.counts().unread, 2, "New stories refresh the unread count")
+        assertEqual(try await db.mutedArticleCount(muting: muting), 1, "A new muted story refreshes the muted count")
+        assertEqual(try await db.mutedArticleCount(muting: muting), 1, "The cached muted count repeats")
+
+        // A collection-only story is counted only while read: marking it unread leaves the counts.
+        let panelURL = "https://example.com/panel-counts.xml"
+        let panelStory = story(20)
+        try await db.upsertArticles([panelStory], feedUrl: panelURL)
+        await db.setCollectionOnlyFeedURLs([panelURL])
+        try await db.markRead(articleId: panelStory.id, isRead: true)
+        let withPanelRead = try await db.counts()
+        try await db.markRead(articleId: panelStory.id, isRead: false)
+        let withPanelUnread = try await db.counts()
+        assertEqual(withPanelRead.total, withPanelUnread.total + 1, "An unread collection-only story leaves the total")
+        assertEqual(withPanelRead.unread, withPanelUnread.unread, "It never joins the unread count")
         await db.close()
     }
 
@@ -16570,6 +16626,88 @@ struct NewsTests {
     }
 
     @MainActor
+    static func testUpdateCheckerFailureBackoff() async {
+        print("  - Testing UpdateChecker throttles after a failed attempt and across relaunch (#798)...")
+        let clock = TestClock(Date(timeIntervalSince1970: 1_700_000_000))
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = mockHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+        let suite = testDefaultsSuite("test.updatechecker.backoff")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+
+        var requests = 0
+        MockURLProtocol.requestHandler = { request in
+            requests += 1
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!, Data()
+            )
+        }
+        let checker = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: defaults)
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 1, "First automatic check sends one request")
+        assertTrue(checker.lastCheckDate == nil, "A failed check is not a successful check")
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 1, "A rate-limited check does not retry on the next activation")
+
+        let relaunched = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: defaults)
+        await relaunched.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 1, "A relaunch keeps the failed attempt throttled")
+
+        await relaunched.checkForUpdates(userInitiated: true)
+        assertEqual(requests, 2, "A manual check still bypasses the throttle after a failure")
+
+        clock.advance(by: 6 * 3600 + 1)
+        await relaunched.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 3, "The next automatic check runs once the window has passed")
+
+        // A backward clock correction leaves the saved attempt in the future; it counts as expired.
+        clock.advance(by: -3 * 86400)
+        await relaunched.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 4, "A saved attempt in the future does not suppress checks")
+
+        // An update found before a relaunch stays available while the throttle skips the launch check.
+        let foundSuite = testDefaultsSuite("test.updatechecker.found")
+        let foundDefaults = UserDefaults(suiteName: foundSuite)!
+        defer { removeTestDefaults(foundSuite) }
+        MockURLProtocol.requestHandler = { request in
+            let payload = GitHubReleasePayload(
+                tagName: "v2.1.0", name: nil,
+                htmlUrl: "https://github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0", body: "notes",
+                publishedAt: nil)
+            return (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"])!, try! JSONEncoder().encode(payload)
+            )
+        }
+        let finder = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: foundDefaults)
+        await finder.checkForUpdates(userInitiated: false)
+        assertTrue(finder.updateAvailable, "The check finds the newer release")
+        let restored = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: foundDefaults)
+        assertTrue(restored.updateAvailable, "A relaunch inside the window still offers the found update")
+        assertEqual(restored.latestVersionString, "v2.1.0", "The restored update names its version")
+        let upgraded = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.1.0", defaults: foundDefaults)
+        assertFalse(upgraded.updateAvailable, "Once the app has that version, nothing is offered")
+
+        // A later check that finds nothing (here a 404) removes the saved release.
+        MockURLProtocol.requestHandler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        clock.advance(by: 7 * 3600)
+        await finder.checkForUpdates(userInitiated: false)
+        let withdrawn = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: foundDefaults)
+        assertFalse(withdrawn.updateAvailable, "A withdrawn release is not restored on relaunch")
+    }
+
+    @MainActor
     static func testUpdateCheckerVersionComparisonAndErrors() async {
         print("  - Testing UpdateChecker Version Comparison Against Release 2.0.0 & Error States...")
 
@@ -16958,14 +17096,10 @@ struct NewsTests {
 
         // 1b. Severe backward leap (30 days in the past)
         testClock.advance(by: -(30 * 86400))
-        await checker.checkForUpdates(userInitiated: false)
-        assertEqual(networkRequestCount, 2, "Automatic check is throttled during large backward leap")
-
-        // User manual check bypasses throttle and resynchronizes lastCheckDate to rolled-back clock
         let rolledBackTime = testClock.now
-        await checker.checkForUpdates(userInitiated: true)
-        assertEqual(networkRequestCount, 3, "User-initiated check executes and resets lastCheckDate")
-        assertEqual(checker.lastCheckDate, rolledBackTime, "lastCheckDate matches current rolled-back clock")
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 3, "A saved attempt far in the future counts as expired")
+        assertEqual(checker.lastCheckDate, rolledBackTime, "lastCheckDate resynchronizes to the rolled-back clock")
 
         // Check within 6 hours of new rolled-back time is throttled
         testClock.advance(by: 3600)
@@ -17282,14 +17416,31 @@ struct NewsTests {
         let addDefaults = UserDefaults(suiteName: addSuite)!
         defer { removeTestDefaults(addSuite) }
         let addSettings = AppSettings(defaults: addDefaults)
+        // Adding goes through FeedManager (#798), so the feed is fetched at once; the stub records the fetch.
+        let addFetches = TestRecorder()
+        let addStore = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await addStore.initialize()
+        let addManager = FeedManager(
+            settings: addSettings, store: addStore, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                await addFetches.record(urls)
+                return urls.map { ($0, [], nil, nil) }
+            })
+        defer { addManager.stopBackgroundWork() }
 
         // Valid feed URL with default settings (allowInsecureHTTP = false)
         let validURL = URL(string: "https://example.com/rss.xml")!
-        let addIntent1 = AddFeedIntent(url: validURL, appSettings: addSettings)
+        let addIntent1 = AddFeedIntent(url: validURL, feedManager: addManager)
         do {
             let res1 = try await addIntent1.perform()
             assertEqual(res1.value, true, "AddFeedIntent with valid URL returns true")
             assertTrue(addSettings.hasFeed("https://example.com/rss.xml"), "Feed is registered in AppSettings")
+            var fetched = false
+            for _ in 0..<100 where !fetched {
+                fetched = await addFetches.batches.contains { $0.contains("https://example.com/rss.xml") }
+                if !fetched { try? await Task.sleep(for: .milliseconds(20)) }
+            }
+            assertTrue(fetched, "AddFeedIntent fetches the new feed at once through FeedManager")
             let dialog1 = extractDialogText(from: res1)
             assertTrue(
                 dialog1 != nil && dialog1!.contains("Subscribed to feed"),
@@ -17298,8 +17449,31 @@ struct NewsTests {
             assertTrue(false, "AddFeedIntent 1 threw: \(error)")
         }
 
+        // A later subscription change cancels the run the Shortcut awaits; the action still returns only once the
+        // replacement run has collected the new feed.
+        let slowSuite = testDefaultsSuite("test.intent.addfeed.slow")
+        let slowDefaults = UserDefaults(suiteName: slowSuite)!
+        defer { removeTestDefaults(slowSuite) }
+        let slowSettings = AppSettings(defaults: slowDefaults)
+        let slowFetches = TestRecorder()
+        let slowManager = FeedManager(
+            settings: slowSettings, store: addStore, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                await slowFetches.record(urls)
+                try? await Task.sleep(for: .milliseconds(250))
+                return urls.map { ($0, [], nil, nil) }
+            })
+        defer { slowManager.stopBackgroundWork() }
+        let slowAdd = Task { @MainActor in await slowManager.addFeedAndCollect(url: "https://slow.example.com/a.xml") }
+        await eventually("Feed A's refresh has started") {
+            await slowFetches.batches.contains { $0.contains("https://slow.example.com/a.xml") }
+        }
+        slowManager.addFeed(url: "https://slow.example.com/b.xml")
+        _ = await slowAdd.value
+        assertFalse(slowManager.isAnyFeedLoading, "Add Feed returns only after the replacement run has finished")
+
         // Duplicate subscription rejection
-        let addIntentDup = AddFeedIntent(url: validURL, appSettings: addSettings)
+        let addIntentDup = AddFeedIntent(url: validURL, feedManager: addManager)
         do {
             let resDup = try await addIntentDup.perform()
             assertEqual(resDup.value, false, "Duplicate subscription returns false")
@@ -17313,7 +17487,7 @@ struct NewsTests {
 
         // Trailing slash variant is recognized as duplicate
         let slashURL = URL(string: "https://example.com/rss.xml/")!
-        let addIntentSlash = AddFeedIntent(url: slashURL, appSettings: addSettings)
+        let addIntentSlash = AddFeedIntent(url: slashURL, feedManager: addManager)
         do {
             let resSlash = try await addIntentSlash.perform()
             assertEqual(resSlash.value, false, "Trailing slash duplicate returns false")
@@ -17323,11 +17497,14 @@ struct NewsTests {
 
         // Insecure HTTP URL upgraded when allowInsecureHTTP is false
         let httpURL = URL(string: "http://insecure-feed.org/feed.xml")!
-        let addIntentHTTP = AddFeedIntent(url: httpURL, appSettings: addSettings)
+        let addIntentHTTP = AddFeedIntent(url: httpURL, feedManager: addManager)
         do {
             let resHTTP = try await addIntentHTTP.perform()
             assertEqual(resHTTP.value, true, "HTTP feed subscription succeeds via HTTPS upgrade")
             assertTrue(addSettings.hasFeed("https://insecure-feed.org/feed.xml"), "Feed was upgraded to HTTPS")
+            assertTrue(
+                extractDialogText(from: resHTTP)?.contains("https://insecure-feed.org/feed.xml") == true,
+                "The dialog names the upgraded address that was subscribed")
             assertFalse(addSettings.hasFeed("http://insecure-feed.org/feed.xml"), "HTTP URL was not preserved")
         } catch {
             assertTrue(false, "AddFeedIntent HTTP upgrade threw: \(error)")
@@ -17339,9 +17516,13 @@ struct NewsTests {
         defer { removeTestDefaults(insecureSuite) }
         let insecureSettings = AppSettings(defaults: insecureDefaults)
         insecureSettings.setAllowInsecureHTTP(true)
+        let insecureManager = FeedManager(
+            settings: insecureSettings, store: addStore, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [], nil, nil) } })
+        defer { insecureManager.stopBackgroundWork() }
 
         let plainHTTPURL = URL(string: "http://plain-http.org/feed.xml")!
-        let addIntentPlain = AddFeedIntent(url: plainHTTPURL, appSettings: insecureSettings)
+        let addIntentPlain = AddFeedIntent(url: plainHTTPURL, feedManager: insecureManager)
         do {
             let resPlain = try await addIntentPlain.perform()
             assertEqual(resPlain.value, true, "Plain HTTP feed subscription succeeds when allowed")
@@ -17352,7 +17533,7 @@ struct NewsTests {
 
         // Invalid scheme / unparseable URL returns false
         let invalidURL = URL(string: "file:///etc/passwd")!
-        let addIntentInvalid = AddFeedIntent(url: invalidURL, appSettings: addSettings)
+        let addIntentInvalid = AddFeedIntent(url: invalidURL, feedManager: addManager)
         do {
             let resInvalid = try await addIntentInvalid.perform()
             assertEqual(resInvalid.value, false, "file:// URL scheme rejected")
@@ -17361,13 +17542,13 @@ struct NewsTests {
         }
 
         // AddFeedIntent via IntentDependencyResolver
-        IntentDependencyResolver.appSettingsOverride = addSettings
-        defer { IntentDependencyResolver.appSettingsOverride = nil }
+        IntentDependencyResolver.feedManagerOverride = addManager
+        defer { IntentDependencyResolver.feedManagerOverride = nil }
         let resolverFeedURL = URL(string: "https://resolver-test.com/feed.xml")!
         let resolverAddIntent = AddFeedIntent(url: resolverFeedURL)
         do {
             let resResolver = try await resolverAddIntent.perform()
-            assertEqual(resResolver.value, true, "AddFeedIntent uses IntentDependencyResolver appSettingsOverride")
+            assertEqual(resResolver.value, true, "AddFeedIntent uses IntentDependencyResolver feedManagerOverride")
             assertTrue(addSettings.hasFeed("https://resolver-test.com/feed.xml"), "Feed registered via resolver")
         } catch {
             assertTrue(false, "AddFeedIntent resolver threw: \(error)")
