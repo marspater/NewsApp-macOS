@@ -114,14 +114,15 @@ v2 regression; #885 is the one the release owner may want to pull forward.
 
 ## Cutting the tag
 
-After #884, #892, #891 and this record merge, on a clean checkout of `main` at the confirmed commit: `git tag -f v2.0.0
-HEAD` (the local tag from 30 October points at `8d94d38`; `-f` moves it, since a plain `git tag` fails when the tag
-exists), `./build_release.sh`, check `News.app/Contents/Info.plist` says 2.0.0 and `lipo -archs` says arm64. Pushing the
-tag runs `release.yml` and publishes the GitHub release (#567); that push is the owner's decision.
+On a clean checkout of the confirmed app commit `10cf74f`: `git tag -f v2.0.0 10cf74f` (the local tag from 30 October
+points at `8d94d38`; `-f` moves it, since a plain `git tag` fails when the tag exists; the explicit commit keeps the
+build number at 982, because `build_release.sh` derives it from `git rev-list --count`, and this record lands after
+that commit), `./build_release.sh`, check `News.app/Contents/Info.plist` says 2.0.0 and `lipo -archs` says arm64.
+Pushing the tag runs `release.yml` and publishes the GitHub release (#567); that push is the owner's decision.
 
 ## Final confirmation
 
 Merged `main` `10cf74f` (#884, #892, #891, #894 squash-merged on 31 October): `NEWS_TEST_FORCE=1 ./test.sh` all tests
 passed, `./build.sh` passed. `git tag -f v2.0.0 HEAD` moved the local tag to `10cf74f`; `./build_release.sh` there
-produced News.app 2.0.0 (982), arm64, `codesign --verify --deep --strict` clean. The tag is not pushed: that publishes
-the release and is the owner's step, followed by the install steps of the 30 October plan.
+produced News.app 2.0.0 (982), arm64, `codesign --verify --deep --strict` clean. The owner authorized the push on 31 October;
+`v2.0.0` at `10cf74f` is on origin and `release.yml` built the release. The install steps of the 30 October plan follow.
