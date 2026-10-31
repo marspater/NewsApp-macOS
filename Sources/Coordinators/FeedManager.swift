@@ -454,17 +454,20 @@ class FeedManager: NSObject, ObservableObject {
         await OverviewGenerationCoordinator.shared.analysisCleared()
     }
 
+    /// True while the library is read-only; a manual refresh then says why, once (#787).
+    private func refusesCollectionWhileReadOnly(manual: Bool) -> Bool {
+        guard let notice = articleStore.databaseHealthNotice else { return false }
+        if manual { articleStore.operationError = "Refresh is off while the library is read-only. \(notice)" }
+        return true
+    }
+
     /// Returns once new articles are collected and published. Notification triage and background classification
     /// follow for the caller that started the run, but never hold the refresh, its spinner or the next Cmd-R.
     ///
     /// A read-only library (a notice is set) cannot store anything, so nothing is downloaded. A scheduled refresh
     /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
     func fetchFeedsAsync(scheduled: Bool = false) async {
-        guard !isStopped else { return }
-        if let notice = articleStore.databaseHealthNotice {
-            if !scheduled { articleStore.operationError = "Refresh is off while the library is read-only. \(notice)" }
-            return
-        }
+        guard !isStopped, !refusesCollectionWhileReadOnly(manual: !scheduled) else { return }
         if let refreshTask {
             _ = await refreshTask.value
             return
