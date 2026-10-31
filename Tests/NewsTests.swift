@@ -18019,6 +18019,42 @@ struct NewsTests {
         assertEqual(
             normalizedBare, "https://example.com", "Bare domain should gain https scheme and drop the root slash")
 
+        // #797: a pasted feed: address is unwrapped; any other explicit scheme is refused, not prefixed.
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed://example.com/rss"), "https://example.com/rss",
+            "feed:// addresses are unwrapped")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed:https://example.com/rss"), "https://example.com/rss",
+            "feed:https:// addresses are unwrapped")
+        for refused in [
+            "ftp://example.com/rss", "webcal://example.com/cal", "file:///etc/passwd", "javascript:alert(1)",
+        ] {
+            assertTrue(AppSettings.normalizeFeedURL(refused) == nil, "\(refused) is not a feed address")
+        }
+        assertEqual(
+            AppSettings.normalizeFeedURL("example.com:8443/feed"), "https://example.com:8443/feed",
+            "A host with a port still gets https")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed: https://example.com/rss"), "https://example.com/rss",
+            "A space after feed: is ignored")
+        assertEqual(
+            AppSettings.normalizeFeedURL("user:pass@example.com/rss"), "https://user:pass@example.com/rss",
+            "Credentials without a scheme are not mistaken for a scheme")
+        assertTrue(AppSettings.normalizeFeedURL("[2001:db8::1]/feed") != nil, "A bracketed IPv6 host is accepted")
+        assertTrue(
+            AppSettings.normalizeFeedURL("ftp:user:pass@example.com/rss") == nil,
+            "An explicit unsupported scheme is refused before credentials are read")
+        assertEqual(
+            AppSettings.addFeedFailureMessage(for: "ftp://example.com/rss"),
+            "Feed not added. ftp: addresses are not supported. Use an http or https feed address.",
+            "Add Feed names a refused scheme")
+        assertEqual(
+            AppSettings.addFeedFailureMessage(for: "https://example.com/rss"),
+            "Feed not added. Check the URL or whether you already subscribe.",
+            "A web address keeps the generic failure text")
+        assertEqual(
+            AppSettings.normalizeFeedURL("feed:8443/rss"), "https://feed:8443/rss",
+            "feed: followed by a port is a host named feed, not a wrapper")
         let invalidURL = AppSettings.normalizeFeedURL("")
         assertEqual(invalidURL, nil, "Empty string should return nil")
 
