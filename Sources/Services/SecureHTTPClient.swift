@@ -89,8 +89,18 @@ actor SecureHTTPClient {
 
     func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
         try await fetchData(
-            from: url, maxBytes: Self.defaultImageLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP,
-            cachePolicy: .useProtocolCachePolicy)
+            from: allowHTTP ? url : Self.upgradedToHTTPS(url), maxBytes: Self.defaultImageLimit,
+            timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy)
+    }
+
+    /// Feeds still publish `http://` image addresses that their hosts also serve over HTTPS (#794). Card, reader and
+    /// notification images ask for HTTPS instead of being refused; a host without HTTPS fails as it did before.
+    static func upgradedToHTTPS(_ url: URL) -> URL {
+        guard url.scheme?.lowercased() == "http", var parts = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return url }
+        parts.scheme = "https"
+        if parts.port == 80 { parts.port = nil }
+        return parts.url ?? url
     }
 
     /// Decodes bounded thumbnails concurrently, away from SwiftUI's main actor and from this actor, so one large image

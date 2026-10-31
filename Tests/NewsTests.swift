@@ -3197,6 +3197,27 @@ struct NewsTests {
             exit(1)
         }
 
+        // #794: an http image address is requested over HTTPS instead of being refused.
+        let requestedScheme = SocketObservation()
+        MockURLProtocol.requestHandler = { request in
+            requestedScheme.recordText(request.url?.scheme ?? "")
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (response, mockData)
+        }
+        do {
+            let (data, _) = try await client.fetchImage(from: URL(string: "http://reader.invalid/test-image.jpg")!)
+            assertEqual(data.count, 1024, "An http image address still loads")
+            assertEqual(requestedScheme.hosts, ["https"], "An http image address is requested over HTTPS")
+        } catch {
+            assertTrue(false, "An http image address is upgraded, not refused: \(error)")
+        }
+        assertEqual(
+            SecureHTTPClient.upgradedToHTTPS(URL(string: "http://img.example:80/a.jpg?v=1")!).absoluteString,
+            "https://img.example/a.jpg?v=1", "The upgrade drops the default http port and keeps the query")
+        assertEqual(
+            SecureHTTPClient.upgradedToHTTPS(URL(string: "https://img.example/a.jpg")!).absoluteString,
+            "https://img.example/a.jpg", "An https image address is unchanged")
+
         // Test 2: Image too large
         let maxAllowed = Int(SecureHTTPClient.defaultImageLimit)
         let tooLargeDataSize = maxAllowed + 1024
@@ -17725,8 +17746,9 @@ struct NewsTests {
         do {
             _ = try await imageClient.fetchImage(from: imageURL)
             assertTrue(false, "Cached HTTP images cannot bypass disabled HTTP policy")
-        } catch let error as FeedError {
-            guard case .insecureScheme = error else { throw error }
+        } catch is URLError {
+            // With HTTP off the address is requested over HTTPS instead (#794), which this plain-HTTP fixture cannot
+            // answer: the cached http bytes are never returned.
         }
         _ = try await imageClient.fetchArticleHTML(from: imageURL, allowHTTP: true)
         assertEqual(receivedRequests.count, initialRequests + 2, "Article fetching still reloads cached URLs")
