@@ -591,7 +591,7 @@ struct BriefingView: View {
 
     var body: some View {
         let modules = Self.visibleModules(
-            layout: layout, data: data, hasStories: !entries.isEmpty, filter: boardFilter)
+            layout: layout, data: data, hasStories: entries.contains(where: boardFilter.includes), filter: boardFilter)
         let pillars = BriefingPillar.allCases.filter { pillar in modules.contains { $0.pillar == pillar } }
         VStack(alignment: .leading, spacing: AppSpacing.xl) {
             ForEach(pillars.filter { $0 != .weakSignals && $0 != .forwardWatch }, id: \.self) { pillar in
@@ -611,6 +611,12 @@ struct BriefingView: View {
         .padding(.bottom, AppSpacing.xl)
         .frame(maxWidth: AppLayout.briefingMaxWidth + 2 * AppLayout.pageInset)
         .frame(maxWidth: .infinity, alignment: .center)
+        // A selection the board can no longer honour is forgotten, so it does not return with the Regions module.
+        .onChange(of: boardFilter.region == nil && filter.region != nil) { _, stale in
+            guard stale else { return }
+            filter.region = nil
+            actions.onSelectRegion(nil)
+        }
     }
 
     /// Weak signals and Forward watch sit side by side on a wide board, as on the canvas.

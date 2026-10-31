@@ -270,12 +270,13 @@ struct BriefingBoardData: Equatable, Sendable {
             .heroCarousel: hasStories, .worldTension: true,
             .sinceLastBriefing: sinceLast != nil, .executiveSitrep: sitrep != nil,
             .priorityDevelopments: priority != nil, .sourceFootprint: footprint != nil,
-            .tensionDrivers: drivers != nil, .industryImpact: industry != nil,
+            // Filtered modules hide with the region filter, so their pillars can leave the board with them.
+            .tensionDrivers: drivers?.hasRows(under: filter) ?? false,
+            .industryImpact: industry?.hasRows(under: filter) ?? false,
             .regions: regions != nil, .regionTiles: regions != nil,
-            // The signal modules hide with the region filter, so their pillars can leave the board with them.
             .weakSignals: weakSignals?.hasRows(under: filter) ?? false,
             .forwardWatch: forwardWatch?.hasRows(under: filter) ?? false,
-            .escalationTimeline: timeline != nil,
+            .escalationTimeline: timeline?.hasRows(under: filter) ?? false,
         ]
         return present[kind] ?? false
     }
