@@ -247,7 +247,6 @@ struct ArticleWebView: NSViewRepresentable {
                 prepareGateway(webView) { [weak self, weak webView] in
                     guard let self, let webView, self.webView === webView else { return }
                     self.parent.loadError = nil
-                    self.currentRequestedURL = failed
                     webView.load(URLRequest(url: failed))
                 }
                 return
