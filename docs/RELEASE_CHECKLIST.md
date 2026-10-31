@@ -1,0 +1,111 @@
+# Release checklist
+
+Run this before every tag, on the merged `main` (a clean checkout, or a worktree at the commit to be tagged), and
+record the result of each item in the release PR or the release plan under `docs/plans/`. Stacked PRs only get light
+CI, so this list is the gate: a release is not cut until every item below passed or has a written reason it does not
+apply. Never report an item as passed unless the command finished successfully.
+
+Commands run from the repository root. "Library copy" means a copy of a real library, never the live file; take it
+with SQLite's online backup API, which includes pages still in the write-ahead log (the exact commands are in
+[the v2 completion plan](plans/2026-10-30-v2-completion.md), step 0):
+
+```sh
+sqlite3 "file:$HOME/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-copy.sqlite3"
+```
+
+## 0. Everything, once
+
+```sh
+NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=$HOME/news-eval/library-copy.sqlite3 ./test.sh
+```
+
+`./test.sh` runs the design lint, the Python evaluation self-checks, the whole Swift suite as parallel jobs and the
+three headless runners. `NEWS_TEST_FORCE=1` reruns it even if the same inputs passed on this machine. Also check that
+`script/format.sh --check` and `./build.sh` succeed. The items below name the part of this run that proves each gate,
+plus the extra commands that are not in the plain run.
+
+## 1. Database migration and restore on a library copy
+
+- Automated: `./test.sh --fts-refresh-regression` runs the real-library migration fixture, the pre-migration backup
+  and newer-schema guard, and backup restore (`testRealLibraryMigrationFixture`, `testLibraryBackupAndFutureSchemaGuard`,
+  `testLibraryBackupRestore` in `Tests/NewsTests.swift`).
+- On the copy: `NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=<copy> ./test.sh` (item 0). Manual: compare the copy's schema
+  version and story, read and saved counts before and after, as the v2 completion plan does.
+- Manual: with News quit, confirm the first launch of the built app on a library copy leaves a `news-before-v<N>-…`
+  backup beside the library. Never point the build at the live library for this check; `make run` uses its own
+  container.
+
+## 2. Feed parser and networking security tests
+
+- Automated, part of `./test.sh`: the secure HTTP client, SOCKS boundary proxy, redirect and private-address tests
+  in `Tests/NewsTests.swift`, and `Tests/FeedKitSwiftSoupTests.swift`.
+- `./test.sh --parsing-regressions` for the offline HTML and feed compatibility and safety checks.
+- `./test.sh --transport-cancellation` for refresh shutdown over controlled HTTP and SOCKS sockets (optimized build).
+- `NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh` (run by CI too).
+- CI additionally runs `.github/workflows/security.yml` (CodeQL, dependency review, secret scan).
+
+## 3. Matcher holdout
+
+No precision regression against the last recorded run, and wrong story groups within 2 % (#737).
+
+```sh
+./test.sh --matcher-regressions
+NEWS_HOLDOUT_NOW=<epoch of the holdout> NEWS_SNAPSHOT_DB=<library copy> NEWS_LIBRARY_HOLDOUT=<holdout.json> ./test.sh --library-holdout
+```
+
+The current holdout is `~/news-eval/holdout-2026-10-29/library-holdout-2026-10-29.json` (SHA-256 and clock pin
+`NEWS_HOLDOUT_NOW=1793300435` in `docs/audits/2026-10-30-epic-m-verification.md`, which also holds the baseline). Manual: compare the printed event and story precision, recall and wrong-group
+rate with that baseline and write the numbers in the release record. A matcher change that touches the holdout needs a
+fresh holdout, as the audits describe.
+
+## 4. Notification deduplication
+
+- Automated, part of `./test.sh`: `testNotificationDedupeAcrossRefreshes` and the "notification deduplication beyond the
+  snapshot" test in `Tests/NewsTests.swift`, plus `Tests/NotificationAttachmentTests.swift`.
+- Optional, needs a user-authorized News: `./script/test_notification_live.sh DIR` for real OS notifications with
+  synthetic reports. Manual: after a refresh on the installed build, no story banner repeats.
+
+## 5. Reader and Briefing E2E
+
+- Automated: `Tests/BriefingE2ETests.swift` and the other Briefing suites (`BriefingWarRoomTests`,
+  `BriefingIntelligenceTests`, `BriefingImpactTests`, `BriefingSignalsTests`) are atoms of `./test.sh`. To run one:
+  `script/build_test_runner.sh /tmp/runner && NEWS_TEST_ATOM=Tests/BriefingE2ETests.swift /tmp/runner`.
+- Reader: `script/test_reader_accessibility.sh` (headless).
+- Manual: open the installed build, read one story in the reader, open the Briefing and check that both load.
+
+## 6. Accessibility and visual captures, offscreen
+
+- `script/test_event_overview_accessibility.sh` (Story Overview sections), `script/test_reader_accessibility.sh`,
+  `script/test_tension_calibration.sh`: headless, no window.
+- Captures without a window or Screen Recording:
+  `NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift script/native_performance_baseline.sh DIR` (every Story Overview
+  section at 900 and 1,400 pt, text size 1.0 and 1.3, light, dark and Increase Contrast). Review the images in `DIR`.
+- `script/design_lint.sh` (first step of `./test.sh`).
+- Not part of the gate: `script/appearance_matrix.sh` opens windows and needs Screen Recording, and the VoiceOver
+  harness `script/test_voiceover_live_qa.sh` is parked (#268). Manual: a spoken VoiceOver pass is not required for v2.
+
+## 7. Performance budgets
+
+There is no automatic pass or fail budget yet: #543 re-baselines the numbers and #839 covers the list refresh. Until
+they land, run the commands, compare with the newest file in `docs/benchmarks/`, and record any regression:
+
+```sh
+./test.sh --performance-baseline
+./script/native_performance_baseline.sh
+NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/ListInvalidationBaseline.swift script/native_performance_baseline.sh DIR
+./script/launch_baseline.sh
+```
+
+## 8. Privacy manifest and documentation consistency
+
+- Automated: `testDistributionAndEntitlementsIntegrity` (part of `./test.sh`) checks `PrivacyInfo.xcprivacy`, the
+  entitlements, the container migration plist and that `PRIVACY.md` exists.
+- Manual (#815, #569): read `PRIVACY.md`, `README.md`, `docs/ARCHITECTURE.md` and `CONTRIBUTING.md` against the
+  code for anything this release changed (network access, stored data, notification limits, supported macOS).
+  Run `python3 script/changelog_fold.py` only when cutting the tag, then check `CHANGELOG.md`.
+
+## Cutting the tag
+
+Only after every item passed: `git tag vX.Y.Z` on the checked commit and `./build_release.sh`, then check
+`News.app/Contents/Info.plist`. Pushing a tag runs `.github/workflows/release.yml`; do not push one until the release
+is meant to be published.
