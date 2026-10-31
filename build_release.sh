@@ -130,6 +130,7 @@ SWIFT_SOURCES=(
     Sources/App/NewsURLParser.swift
     Sources/App/Intents.swift
     Sources/App/NotificationActionRouter.swift
+    Sources/App/LibraryBackup.swift
     Sources/App/NewsApp.swift
 )
 
