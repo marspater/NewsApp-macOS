@@ -178,10 +178,12 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     /// The health entry for a feed, found by its slash-insensitive key so a stored trailing slash still matches.
-    func feedHealth(for url: String) -> FeedHealth? {
-        if let exact = feedHealth[url] { return exact }
+    func feedHealth(for url: String) -> FeedHealth? { Self.health(for: url, in: feedHealth) }
+
+    static func health(for url: String, in entries: [String: FeedHealth]) -> FeedHealth? {
+        if let exact = entries[url] { return exact }
         let key = AppSettings.feedKey(url)
-        return feedHealth.first { AppSettings.feedKey($0.key) == key }?.value
+        return entries.first { AppSettings.feedKey($0.key) == key }?.value
     }
 
     func removeFeed(url: String) {

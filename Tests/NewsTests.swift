@@ -5650,6 +5650,18 @@ struct NewsTests {
         assertEqual(
             [unknown.availability, health { $0.lastFetchedAt = nil }.availability], [.unknown, .unknown],
             "A feed never fetched is not rated")
+        // The catalog finds a subscription's health by feed key, so a stored trailing slash still shows (#803).
+        let slashHealth = health { $0.lastFetchedAt = now }
+        let entries = ["https://slash.example.com/feed/": slashHealth]
+        assertEqual(
+            FeedManager.health(for: "https://slash.example.com/feed", in: entries), slashHealth,
+            "Health stored with a trailing slash is found without it")
+        assertEqual(
+            FeedManager.health(for: "https://slash.example.com/feed/", in: entries), slashHealth,
+            "Health is found by the exact URL")
+        assertEqual(
+            FeedManager.health(for: "https://other.example.com/feed", in: entries), nil,
+            "Another feed has no health")
         assertEqual(unknown.freshness, .unknown, "No items, no freshness")
         assertEqual(unknown.textQuality, .unknown, "No items, no text quality")
         assertEqual(health { _ in }.availability, .responding, "A fetched feed responds")
