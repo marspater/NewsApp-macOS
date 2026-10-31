@@ -17,33 +17,49 @@ public struct GenerationPromptDefense: Sendable {
         Extract and synthesize the factual content strictly according to the requested schema.
         """
 
+    /// Delimiter tag names the prompts use to contain untrusted data.
+    private static let delimiterTagNames = [
+        "source_data", "evidence_passage", "passage", "article_content", "article_title",
+        "article_description", "data",
+    ]
+
+    /// Matches an opening or closing delimiter tag in any case, allowing whitespace after `<`, after `/`
+    /// and before the closing `>`. The tag name must end at a non-word character, so `<database>` is untouched.
+    private static let delimiterTagRegex: NSRegularExpression? = {
+        let names = delimiterTagNames.joined(separator: "|")
+        return try? NSRegularExpression(
+            pattern: "<\\s*/?\\s*(?:\(names))(?![A-Za-z0-9_])\\s*>?", options: [.caseInsensitive])
+    }()
+
+    /// Replaces every delimiter tag match with its escaped form (`&lt;` + the tag text without whitespace
+    /// + `&gt;` when the tag was closed), so spacing and case variants cannot close or reopen a data block.
+    private static func escapeDelimiterTags(in text: String) -> String {
+        guard let regex = delimiterTagRegex else { return text }
+        let source = text as NSString
+        var result = text
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: source.length))
+        for match in matches.reversed() {
+            let tag = source.substring(with: match.range)
+            let compact = String(tag.filter { !$0.isWhitespace })
+            let hasClose = compact.hasSuffix(">")
+            let inner = String(compact.dropFirst().dropLast(hasClose ? 1 : 0))
+            let escaped = "&lt;" + inner + (hasClose ? "&gt;" : "")
+            guard let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: escaped)
+        }
+        return result
+    }
+
     /// Sanitizes untrusted text to prevent prompt injection and tag breakout.
-    /// Neutralizes delimiter escape sequences, role-override patterns, and fake system headers.
+    /// Escapes every delimiter tag (`source_data`, evidence, article tags and so on) in any case and with
+    /// any whitespace inside the tag, neutralizes role-override patterns, and defuses fake system headers.
     public static func sanitizeSourceText(_ text: String) -> String {
         guard !text.isEmpty else { return "" }
 
         var sanitized = text
 
-        // 1. Neutralize XML delimiter breakout attempts
-        let tagReplacements: [(String, String)] = [
-            ("</source_data>", "&lt;/source_data&gt;"),
-            ("<source_data>", "&lt;source_data&gt;"),
-            ("</evidence_passage>", "&lt;/evidence_passage&gt;"),
-            ("<evidence_passage", "&lt;evidence_passage"),
-            ("</passage>", "&lt;/passage&gt;"),
-            ("<passage", "&lt;passage"),
-            ("</article_content>", "&lt;/article_content&gt;"),
-            ("<article_content>", "&lt;article_content&gt;"),
-            ("</article_title>", "&lt;/article_title&gt;"),
-            ("<article_title>", "&lt;article_title&gt;"),
-            ("</article_description>", "&lt;/article_description&gt;"),
-            ("<article_description>", "&lt;article_description&gt;"),
-            ("</data>", "&lt;/data&gt;"),
-            ("<data>", "&lt;data&gt;"),
-        ]
-        for (pattern, replacement) in tagReplacements {
-            sanitized = sanitized.replacingOccurrences(of: pattern, with: replacement, options: .caseInsensitive)
-        }
+        // 1. Neutralize XML delimiter breakout attempts, tolerating spacing and letter case
+        sanitized = escapeDelimiterTags(in: sanitized)
 
         // 2. Neutralize role-spoofing and conversational injection headers
         let headerReplacements: [(String, String)] = [
