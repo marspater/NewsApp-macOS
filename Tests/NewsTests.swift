@@ -2289,6 +2289,54 @@ struct NewsTests {
             assertTrue(rejected, "Unsafe redirect must be rejected before connection")
         }
         task.cancel()
+
+        // Redirect safety state is keyed per task object, not by task identifier across sessions (#808).
+        let sessionConfig = URLSessionConfiguration.ephemeral
+        let sessionA = URLSession(configuration: sessionConfig)
+        let sessionB = URLSession(configuration: sessionConfig)
+        defer {
+            sessionA.invalidateAndCancel()
+            sessionB.invalidateAndCancel()
+        }
+        let taskA = sessionA.dataTask(with: URL(string: "http://example.com/start")!)
+        let taskB = sessionB.dataTask(with: URL(string: "https://example.com/start")!)
+        assertEqual(
+            taskA.taskIdentifier, taskB.taskIdentifier,
+            "Two distinct sessions issue overlapping task identifiers starting at 1")
+
+        let responseA = HTTPURLResponse(
+            url: taskA.originalRequest!.url!, statusCode: 302, httpVersion: nil, headerFields: nil)!
+        var redirectedA: URLRequest? = nil
+        delegate.urlSession(
+            sessionA, task: taskA, willPerformHTTPRedirection: responseA,
+            newRequest: URLRequest(url: URL(string: "http://example.com/next")!)
+        ) { redirectedA = $0 }
+        assertTrue(redirectedA != nil, "Task A with HTTP scheme permits HTTP redirect")
+
+        let responseB = HTTPURLResponse(
+            url: taskB.originalRequest!.url!, statusCode: 302, httpVersion: nil, headerFields: nil)!
+        var redirectedB: URLRequest? = nil
+        delegate.urlSession(
+            sessionB, task: taskB, willPerformHTTPRedirection: responseB,
+            newRequest: URLRequest(url: URL(string: "http://example.com/downgrade")!)
+        ) { redirectedB = $0 }
+        assertTrue(
+            redirectedB == nil,
+            "Task B with HTTPS scheme refuses downgrade to HTTP despite matching task identifier")
+
+        delegate.urlSession(sessionA, task: taskA, didCompleteWithError: nil)
+
+        var redirectedB2: URLRequest? = nil
+        delegate.urlSession(
+            sessionB, task: taskB, willPerformHTTPRedirection: responseB,
+            newRequest: URLRequest(url: URL(string: "https://example.com/safe")!)
+        ) { redirectedB2 = $0 }
+        assertTrue(
+            redirectedB2 != nil,
+            "Task B retains its state and allows safe HTTPS redirect after task A completes")
+
+        taskA.cancel()
+        taskB.cancel()
     }
 
     @MainActor

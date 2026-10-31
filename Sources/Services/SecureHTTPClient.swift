@@ -265,7 +265,7 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
     }
 
     private let lock = NSLock()
-    private var states = [Int: TaskSecurityState]()
+    private var states = [ObjectIdentifier: TaskSecurityState]()
 
     func urlSession(
         _ _: URLSession,
@@ -274,16 +274,17 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
+        let taskKey = ObjectIdentifier(task)
         lock.lock()
         var state =
-            states[task.taskIdentifier]
+            states[taskKey]
             ?? TaskSecurityState(
                 redirectCount: 0,
                 initialScheme: task.originalRequest?.url?.scheme?.lowercased() ?? "https",
                 allowHTTP: false
             )
         state.redirectCount += 1
-        states[task.taskIdentifier] = state
+        states[taskKey] = state
         lock.unlock()
 
         // 1. Bound redirect depth
@@ -320,13 +321,13 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
 
     func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError _: Error?) {
         lock.lock()
-        states.removeValue(forKey: task.taskIdentifier)
+        states.removeValue(forKey: ObjectIdentifier(task))
         lock.unlock()
     }
 
     func urlSession(_ _: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
         lock.lock()
-        states.removeValue(forKey: task.taskIdentifier)
+        states.removeValue(forKey: ObjectIdentifier(task))
         lock.unlock()
 
         // Diagnostic only: metrics arrive after the request; this cannot prevent rebinding.
