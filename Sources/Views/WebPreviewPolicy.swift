@@ -16,6 +16,19 @@ enum WebPreviewPolicy {
         configuredPort != currentPort
     }
 
+    /// A navigation without a target frame opens a new window and counts as a main-frame navigation.
+    nonisolated static func isMainFrame(targetFrameIsMain: Bool?) -> Bool {
+        targetFrameIsMain ?? true
+    }
+
+    /// The error a navigation the network policy refused shows: only a refused main-frame navigation reports one; a
+    /// blocked iframe is dropped quietly and leaves the page and its progress alone. The navigation is always cancelled.
+    nonisolated static func refusalMessage(isMainFrame: Bool) -> String? {
+        isMainFrame
+            ? "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
+            : nil
+    }
+
     static func contentRules() async throws -> WKContentRuleList {
         if let compiled { return try await compiled.value }
         let task = Task { @MainActor in
