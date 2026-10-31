@@ -8,7 +8,7 @@ import os
 @MainActor
 final class ArticleStore: ObservableObject {
     static let shared = ArticleStore()
-    private let logger = Logger(subsystem: "com.marspater.news", category: "ArticleStore")
+    let logger = Logger(subsystem: "com.marspater.news", category: "ArticleStore")
 
     let database: DatabaseEngine
     let migrationCoordinator: MigrationCoordinator?
@@ -316,37 +316,7 @@ final class ArticleStore: ObservableObject {
         await refreshState()
     }
 
-    /// Replaces the saved-stories Spotlight domain with exactly the stories the open library holds (#812).
-    /// Run at launch, which is also where a restored library first opens, so entries of the previous library go.
-    func rebuildSpotlightIndex() async {
-        await serialSpotlight { indexer in
-            // Read when it runs, so a story unsaved while this waited is not re-added; the whole list, not the 500-story
-            // UI snapshot. If the read fails the old index stays, rather than a partial one.
-            let saved: [FeedArticle]
-            do {
-                saved = try await self.database.fetchArticles(isSaved: true, limit: nil)
-            } catch {
-                self.logger.error("Spotlight rebuild skipped: \(error.localizedDescription)")
-                return
-            }
-            await indexer.removeAllSavedArticles()
-            for article in saved { await indexer.indexSavedArticle(article) }
-        }
-    }
-
-    private var spotlightTail: Task<Void, Never>?
-
-    /// Runs Spotlight updates one at a time in call order, so a rebuild and a save or unsave cannot interleave (#812).
-    private func serialSpotlight(_ operation: @escaping @MainActor (any SpotlightIndexing) async -> Void) async {
-        let previous = spotlightTail
-        let indexer = spotlightIndexer
-        let task = Task { @MainActor in
-            await previous?.value
-            await operation(indexer)
-        }
-        spotlightTail = task
-        await task.value
-    }
+    var spotlightTail: Task<Void, Never>?
 
     // MARK: - Enrichment
 
