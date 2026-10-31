@@ -4383,7 +4383,12 @@ struct NewsTests {
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in
                 await requested.record(urls)
-                return urls.map { ($0, [], nil, nil) }
+                return urls.map { url in
+                    let story = FeedArticle(
+                        title: "Catalog story from \(url)", link: url + "/catalog-story", guid: "catalog-\(url)",
+                        description: "", pubDate: Date(), source: "Catalog publisher")
+                    return (url, [story], nil, nil)
+                }
             },
             notifyBatch: { _, _ in })
         let ukraine = FeedCatalog.feeds(in: .ukraine)
@@ -4393,6 +4398,24 @@ struct NewsTests {
         }
         // A refresh still in flight would absorb the next one; count only after it has finished.
         await eventually("The catalog refresh finishes") { await MainActor.run { !manager.isAnyFeedLoading } }
+        assertEqual(
+            store.articles.filter { $0.title.hasPrefix("Catalog story from") }.count, ukraine.count,
+            "A newly subscribed catalog feed's stories reach the library with that refresh (#782)")
+        assertTrue(
+            FeedUpdateBuffer.subscriptionAdded(from: [], to: ukraine.map(\.url)),
+            "Subscribing makes the list take the refresh as the reader's, not park it behind Show N New Stories")
+        assertFalse(
+            FeedUpdateBuffer.subscriptionAdded(from: ukraine.map(\.url), to: Array(ukraine.map(\.url).dropFirst())),
+            "Unsubscribing starts no reader refresh in the list")
+        var held = FeedUpdateBuffer()
+        held.holdsSubscription = true
+        held.replace(with: FeedSnapshot(articles: store.articles))
+        assertFalse(held.holdsSubscription, "Showing the list's stories ends a subscription's hold")
+        var holding = FeedUpdateBuffer()
+        holding.replace(with: FeedSnapshot(articles: [store.articles.last!]))
+        assertEqual(
+            holding.receive(FeedSnapshot(articles: store.articles), holding: false, mode: .events), .replaced,
+            "A reader refresh shows the new stories instead of waiting behind the updates button")
         let batches = await requested.batches.count
         manager.addCatalogFeeds(ukraine)
         await manager.fetchFeedsAsync()
@@ -4695,6 +4718,25 @@ struct NewsTests {
             try await db.fetchArticles(limit: nil, muting: aiMuting).count, stories.count + 1,
             "The SQLite and Swift paths agree on what a set hides")
         assertEqual(try await db.mutedRuleCounts(aiMuting).topicSets, [aiSet: 1], "Settings count a set's stories")
+
+        // The masthead counts the whole list, not its loaded page (#782): an event counts once it groups a listed
+        // story, and its read or muted reports still count toward its size, as on its card.
+        _ = try await db.applyEventMatch(
+            stories[3].id, .create(with: [stories[6].id]), matcherVersion: EventMatcher.version)
+        _ = try await db.applyEventMatch(
+            stories[4].id, .create(with: [stories[0].id]), matcherVersion: EventMatcher.version)
+        let totals = try await db.listTotals(section: "Today", isRead: false, muting: muting)
+        assertEqual(totals.stories, 5, "Totals count unread, unmuted stories across every page")
+        assertEqual(totals.events, 2, "Totals count the events grouping listed stories")
+        let whole = try await db.fetchArticles(section: "Today", isRead: false, limit: nil, muting: muting)
+        let grouped = EventFeedGrouping.entries(
+            for: whole, events: try await db.eventFeedSummaries(forArticles: whole.map(\.id)), mode: .events)
+        assertEqual(
+            grouped.filter { if case .event = $0 { return true } else { return false } }.count, totals.events,
+            "Totals group events exactly as the list does")
+        assertEqual(whole.count, totals.stories, "Totals match the list's stories")
+        assertEqual(
+            try await db.listTotals(search: "example").stories, 2, "Search totals use the search's own filters")
         await db.close()
 
         // Rules persist with the reader's settings; Unmute All clears them.
