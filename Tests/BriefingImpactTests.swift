@@ -71,9 +71,9 @@ enum BriefingImpactTests {
         check(filter.includes(cairo), "Egypt is in Middle East & North Africa")
         check(!filter.includes(tokyo), "Japan is outside Middle East & North Africa")
         // The loader's resolved regions win over the headline.
-        BriefingRegion.remember([tokyo.id: [.middleEastNorthAfrica]])
+        filter.regionsByEntry = [tokyo.id: [.middleEastNorthAfrica]]
         check(filter.includes(tokyo), "resolved regions are used when known")
-        BriefingRegion.remember([:])
+        filter.regionsByEntry = [:]
         let data = BriefingRegionsData.make(
             entries: [tokyo, cairo],
             regionsByEntry: [cairo.id: [.middleEastNorthAfrica], tokyo.id: [.eastSoutheastAsia]],

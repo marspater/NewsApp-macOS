@@ -488,6 +488,13 @@ struct BriefingView: View {
 
     @State private var filter = BriefingBoardFilter()
 
+    /// The region filter with the Regions loader's map, so modules filter by resolved regions, not headlines alone.
+    private var boardFilter: BriefingBoardFilter {
+        var filter = filter
+        filter.regionsByEntry = data.regions?.regionsByEntry ?? [:]
+        return filter
+    }
+
     init(
         entries: [FeedEntry],
         briefing: FiniteBriefing?,
@@ -693,15 +700,17 @@ struct BriefingView: View {
         switch kind {
         case .heroCarousel:
             BriefingHeroCarouselView(
-                entries: Self.heroEntries(entries.filter(filter.includes)), images: data.details.images,
+                entries: Self.heroEntries(entries.filter(boardFilter.includes)), images: data.details.images,
                 readIDs: readIDs, clock: clock, isReaderOpen: isMotionPaused, onOpen: actions.open)
         case .worldTension:
             // Reads the window's World Tension model, as the sidebar does (#781).
             BriefingTensionStripView(onOpenURL: actions.onOpenURL, onCustomize: actions.onCustomize)
         case .sinceLastBriefing:
-            if let value = data.sinceLast { BriefingSinceLastModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.sinceLast {
+                BriefingSinceLastModuleView(data: value, filter: boardFilter, actions: actions)
+            }
         case .executiveSitrep:
-            if let value = data.sitrep { BriefingSitrepModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.sitrep { BriefingSitrepModuleView(data: value, filter: boardFilter, actions: actions) }
         default:
             EmptyView()
         }
@@ -712,11 +721,17 @@ struct BriefingView: View {
         let actions = boardActions
         switch kind {
         case .priorityDevelopments:
-            if let value = data.priority { BriefingPriorityModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.priority {
+                BriefingPriorityModuleView(data: value, filter: boardFilter, actions: actions)
+            }
         case .sourceFootprint:
-            if let value = data.footprint { BriefingFootprintModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.footprint {
+                BriefingFootprintModuleView(data: value, filter: boardFilter, actions: actions)
+            }
         case .tensionDrivers:
-            if let value = data.drivers { BriefingDriversModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.drivers {
+                BriefingDriversModuleView(data: value, filter: boardFilter, actions: actions)
+            }
         default:
             EmptyView()
         }
@@ -727,11 +742,17 @@ struct BriefingView: View {
         let actions = boardActions
         switch kind {
         case .industryImpact:
-            if let value = data.industry { BriefingIndustryModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.industry {
+                BriefingIndustryModuleView(data: value, filter: boardFilter, actions: actions)
+            }
         case .regions:
-            if let value = data.regions { BriefingRegionsModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.regions {
+                BriefingRegionsModuleView(data: value, filter: boardFilter, actions: actions)
+            }
         case .regionTiles:
-            if let value = data.regions { BriefingRegionTilesModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.regions {
+                BriefingRegionTilesModuleView(data: value, filter: boardFilter, actions: actions)
+            }
         default:
             EmptyView()
         }
@@ -740,7 +761,7 @@ struct BriefingView: View {
     @ViewBuilder
     private func weakSignalsModule(_ kind: BriefingModuleKind) -> some View {
         if kind == .weakSignals, let value = data.weakSignals {
-            BriefingWeakSignalsModuleView(data: value, filter: filter, actions: boardActions)
+            BriefingWeakSignalsModuleView(data: value, filter: boardFilter, actions: boardActions)
         }
     }
 
@@ -750,10 +771,12 @@ struct BriefingView: View {
         switch kind {
         case .forwardWatch:
             if let value = data.forwardWatch {
-                BriefingForwardWatchModuleView(data: value, filter: filter, actions: actions)
+                BriefingForwardWatchModuleView(data: value, filter: boardFilter, actions: actions)
             }
         case .escalationTimeline:
-            if let value = data.timeline { BriefingTimelineModuleView(data: value, filter: filter, actions: actions) }
+            if let value = data.timeline {
+                BriefingTimelineModuleView(data: value, filter: boardFilter, actions: actions)
+            }
         default:
             EmptyView()
         }

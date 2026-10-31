@@ -80,7 +80,6 @@ struct BriefingRegionsData: Equatable, Sendable {
             let regions = Set(codes.compactMap { BriefingRegion.region(code: String($0.dropFirst())) })
             map[entry.id] = regions.isEmpty ? BriefingRegion.regions(of: entry.representative) : regions
         }
-        BriefingRegion.remember(map)
         guard let grouped = make(entries: context.entries, regionsByEntry: map, facts: [:], now: context.now) else {
             return nil
         }

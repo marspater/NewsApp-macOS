@@ -275,11 +275,15 @@ struct BriefingBoardData: Equatable, Sendable {
 /// The board's region filter. Every module view receives it.
 struct BriefingBoardFilter: Equatable, Sendable {
     var region: TensionMacroRegion? = nil
+    /// The regions the Regions loader resolved from each entry's reports, by entry ID; the board fills it from its data.
+    var regionsByEntry: [String: Set<TensionMacroRegion>] = [:]
 
-    /// Whether the entry belongs on the filtered board: always without a region, else when the entry's story touches it.
+    /// Whether the entry belongs on the filtered board: always without a region, else when the entry's story touches
+    /// it, by the loader's regions when known and the countries its headline names otherwise.
     func includes(_ entry: FeedEntry) -> Bool {
         guard let region else { return true }
-        return BriefingRegion.regions(of: entry).contains(region)
+        let regions = regionsByEntry[entry.id] ?? BriefingRegion.regions(of: entry.representative)
+        return regions.contains(region)
     }
 }
 
@@ -461,21 +465,6 @@ struct BriefingCustomizeSheet: View {
 
 /// Maps stories to the World Tension macro regions for the board's region filter.
 enum BriefingRegion {
-    private static let lock = NSLock()
-    /// The regions the Regions loader resolved from each entry's reports, by entry ID.
-    nonisolated(unsafe) private static var resolved: [String: Set<TensionMacroRegion>] = [:]
-
-    /// Keeps the Regions loader's map for `BriefingBoardFilter.includes`, replacing the previous edition's.
-    static func remember(_ regions: [String: Set<TensionMacroRegion>]) {
-        lock.withLock { resolved = regions }
-    }
-
-    /// The loader's regions for the entry when it resolved them, else the countries its headline names.
-    static func regions(of entry: FeedEntry) -> Set<TensionMacroRegion> {
-        if let known = lock.withLock({ resolved[entry.id] }) { return known }
-        return regions(of: entry.representative)
-    }
-
     /// The regions of every country the headline names (the matcher's place names, aliases and demonyms included),
     /// else of those in the description's opening.
     static func regions(of story: FeedArticle) -> Set<TensionMacroRegion> {
