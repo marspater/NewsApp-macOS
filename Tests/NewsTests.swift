@@ -1264,12 +1264,35 @@ struct NewsTests {
             )
         }
         try await shrinkDB.upsertArticles(bulkyArticles)
-        try await shrinkDB.markReadBatch(articleIds: bulkyArticles.map(\.id), isRead: true)
+        // A feed item, identified by its feed-scoped GUID, that the feed keeps serving after it is pruned (#783).
+        let servedFeed = "https://example.com/archive.xml"
+        let served = FeedArticle(
+            title: "Still served report", link: "https://example.com/served/report", guid: "served-guid",
+            description: "Served long after reading", pubDate: expiredDate, source: "Archival Press")
+        let servedID = try await shrinkDB.upsertArticles([served], feedUrl: servedFeed)
+        try await shrinkDB.markReadBatch(articleIds: bulkyArticles.map(\.id) + Array(servedID), isRead: true)
         await shrinkDB.checkpointAndOptimize()
         let sizeBeforePrune =
             (try? FileManager.default.attributesOfItem(atPath: shrinkPath)[.size] as? Int64) ?? 0
         let prunedCount = try await shrinkDB.pruneOldArticles(keepReadDays: 30, now: now)
-        assertEqual(prunedCount, 250, "Prunes all 250 expired read articles")
+        assertEqual(prunedCount, 251, "Prunes all 251 expired read articles")
+        assertTrue(
+            try await shrinkDB.upsertArticles([served], feedUrl: servedFeed).isEmpty,
+            "A pruned story its feed still serves is not stored again as new (#783)")
+        assertTrue(
+            try await shrinkDB.upsertArticles([bulkyArticles[0]]).isEmpty,
+            "A pruned story keeps its stored ID's tombstone")
+        assertTrue(try await shrinkDB.fetchArticles(limit: 10).isEmpty, "Pruned stories stay out of every list")
+        let sameAddress = FeedArticle(
+            title: "Next edition", link: served.link, guid: "served-guid-2", description: "A new edition",
+            pubDate: now, source: "Archival Press")
+        assertEqual(
+            try await shrinkDB.upsertArticles([sameAddress], feedUrl: servedFeed).count, 1,
+            "A new story at a pruned story's address still arrives")
+        try await shrinkDB.upsertArticles([bulkyArticles[1]], preservingStoredContent: true)
+        assertTrue(
+            try await shrinkDB.fetchArticles(limit: 10).contains { $0.id == bulkyArticles[1].id },
+            "Saving a pruned story explicitly stores it again")
         await shrinkDB.checkpointAndOptimize()
         await shrinkDB.close()
         let sizeAfterPrune =
