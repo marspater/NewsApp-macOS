@@ -93,40 +93,34 @@ enum EpicNContracts {
             self.settings = AppSettings(defaults: defaults)
         }
 
-        var formattedBadge: String? {
-            guard unreadCount > 0 else { return nil }
-            return "\(unreadCount)"
-        }
-
-        var statusItemTitle: String {
-            if let badge = formattedBadge {
-                return "News (\(badge))"
-            } else {
-                return "News"
-            }
-        }
+        /// The production label count and first menu line for the current unread count.
+        var formattedBadge: String? { AppSettings.menuBarBadgeCopy(unread: unreadCount) }
+        var statusItemTitle: String { AppSettings.menuBarStatusCopy(unread: unreadCount) }
     }
 
-    /// Update checker deterministic harness with injectable clock and version (#556)
+    /// Drives the production `UpdateChecker` with an injected clock and a mocked GitHub response (#556, #804).
     @MainActor
-    final class UpdateCheckerHarness: ObservableObject {
-        let minimumCheckInterval: TimeInterval = 6 * 3600
-        private let clock: () -> Date
+    final class UpdateCheckerHarness {
+        private let checker: UpdateChecker
         let currentAppVersion: String
-        private(set) var lastCheckDate: Date?
 
-        @Published var isChecking: Bool = false
-        @Published var updateAvailable: Bool = false
-        @Published var latestVersionString: String? = nil
-        @Published var statusMessage: String? = nil
-        @Published var verifiedReleaseURL: URL? = nil
+        var isChecking: Bool { checker.isChecking }
+        var updateAvailable: Bool { checker.updateAvailable }
+        var latestVersionString: String? { checker.latestVersionString }
+        var statusMessage: String? { checker.statusMessage }
+        var verifiedReleaseURL: URL? { checker.verifiedReleaseURL }
+        var lastCheckDate: Date? { checker.lastCheckDate }
 
         init(
-            clock: @escaping () -> Date = { Date() },
+            clock: @escaping @Sendable () -> Date = { Date() },
             currentAppVersion: String = "2.0.0"
         ) {
-            self.clock = clock
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [MockURLProtocol.self]
             self.currentAppVersion = currentAppVersion
+            self.checker = UpdateChecker(
+                httpClient: NewsTests.mockHTTPClient(configuration: configuration), now: clock,
+                currentAppVersion: currentAppVersion)
         }
 
         func checkForUpdates(
@@ -137,73 +131,26 @@ enum EpicNContracts {
             simulateTimeout: Bool = false,
             simulateOversized: Bool = false
         ) async {
-            let now = clock()
-            if !userInitiated, let last = lastCheckDate, now.timeIntervalSince(last) < minimumCheckInterval {
-                return
-            }
-
-            guard !isChecking else { return }
-            isChecking = true
-            defer { isChecking = false }
-
-            if simulateTimeout {
-                statusMessage = "Unable to check for updates"
-                return
-            }
-
-            if simulatedHTTPStatus == 404 {
-                statusMessage = "No published release is available to compare."
-                lastCheckDate = now
-                return
-            }
-
-            if simulatedHTTPStatus != 200 {
-                statusMessage = "Update check failed (HTTP \(simulatedHTTPStatus))"
-                return
-            }
-
-            if simulateOversized {
-                statusMessage = "Unable to check for updates"
-                return
-            }
-
-            guard let tag = mockResponseTag else {
-                statusMessage = "No valid updates found"
-                lastCheckDate = now
-                return
-            }
-
-            guard let remoteVersion = SemanticVersion.parse(tag) else {
-                statusMessage = "No valid updates found"
-                lastCheckDate = now
-                return
-            }
-
-            guard let localVersion = SemanticVersion.parse(currentAppVersion) else {
-                statusMessage = "App version configuration error"
-                return
-            }
-
-            lastCheckDate = now
-
-            if remoteVersion > localVersion {
-                if let targetURL = mockReleaseURL {
-                    guard UpdateChecker.isValidReleaseURL(targetURL) else {
-                        statusMessage = "Received untrusted release URL"
-                        return
-                    }
-                    self.verifiedReleaseURL = targetURL
+            let tag = mockResponseTag ?? ""
+            let link =
+                mockReleaseURL?.absoluteString ?? "https://github.com/marspater/NewsApp-macOS/releases/tag/\(tag)"
+            MockURLProtocol.requestHandler = { request in
+                if simulateTimeout { throw URLError(.timedOut) }
+                let body: Data
+                if simulateOversized {
+                    body = Data(repeating: 32, count: 2 * 1024 * 1024)
                 } else {
-                    self.verifiedReleaseURL = URL(
-                        string: "https://github.com/marspater/NewsApp-macOS/releases/tag/\(tag)")
+                    body = try JSONEncoder().encode(
+                        GitHubReleasePayload(tagName: tag, name: nil, htmlUrl: link, body: nil, publishedAt: nil))
                 }
-                self.updateAvailable = true
-                self.latestVersionString = tag
-                self.statusMessage = "Version \(tag) available"
-            } else {
-                self.updateAvailable = false
-                self.statusMessage = "NewsApp is up to date (v\(currentAppVersion))"
+                return (
+                    HTTPURLResponse(
+                        url: request.url!, statusCode: simulatedHTTPStatus, httpVersion: nil,
+                        headerFields: ["Content-Type": "application/json"])!, body
+                )
             }
+            defer { MockURLProtocol.requestHandler = nil }
+            await checker.checkForUpdates(userInitiated: userInitiated)
         }
     }
 }
@@ -564,13 +511,13 @@ enum EpicNE2ETests {
         let menuBar28 = EpicNContracts.MenuBarModel(defaults: UserDefaults(suiteName: testDefaultsSuite("mb28"))!)
         menuBar28.unreadCount = 5
         expectEqual(menuBar28.formattedBadge, "5", "Menu bar badge displays unread count when > 0")
-        expectEqual(menuBar28.statusItemTitle, "News (5)", "Status item title contains badge when > 0")
+        expectEqual(menuBar28.statusItemTitle, "5 Unread Stories", "Menu shows the unread count when > 0")
         passedCount += 1
 
         // 29. Menu bar displays icon without count when unread == 0
         menuBar28.unreadCount = 0
         expectNil(menuBar28.formattedBadge, "Menu bar badge is nil when unread count == 0")
-        expectEqual(menuBar28.statusItemTitle, "News", "Status item title displays icon only without count badge")
+        expectEqual(menuBar28.statusItemTitle, "No Unread Stories", "Menu says nothing is unread when 0")
         passedCount += 1
 
         // 30. Menu bar action Refresh triggers feed refresh; Open News activates app
@@ -593,27 +540,27 @@ enum EpicNE2ETests {
 
         // F1 Boundaries: Update Check (5 tests)
         // 31. Clock advanced by exactly 5h 59m: check skipped
-        var testTime = Date(timeIntervalSince1970: 1_000_000_000)
-        let h31 = EpicNContracts.UpdateCheckerHarness(clock: { testTime }, currentAppVersion: "2.0.0")
+        let testClock = TestClock(Date(timeIntervalSince1970: 1_000_000_000))
+        let h31 = EpicNContracts.UpdateCheckerHarness(clock: { testClock.now }, currentAppVersion: "2.0.0")
         await h31.checkForUpdates(userInitiated: true, mockResponseTag: "v2.0.0")
-        expectEqual(h31.lastCheckDate, testTime, "Initial check sets lastCheckDate")
+        expectEqual(h31.lastCheckDate, testClock.now, "Initial check sets lastCheckDate")
 
-        testTime = testTime.addingTimeInterval(5 * 3600 + 59 * 60)
+        testClock.advance(by: 5 * 3600 + 59 * 60)
         await h31.checkForUpdates(userInitiated: false, mockResponseTag: "v2.1.0")
         expectFalse(h31.updateAvailable, "Check at 5h 59m is skipped (throttled)")
         passedCount += 1
 
         // 32. Clock advanced by exactly 6h 00m: check executes
-        testTime = Date(timeIntervalSince1970: 1_000_000_000).addingTimeInterval(6 * 3600)
+        testClock.advance(by: 60)  // exactly 6h 00m after the first check
         await h31.checkForUpdates(userInitiated: false, mockResponseTag: "v2.1.0")
         expectTrue(h31.updateAvailable, "Check at exactly 6h 00m executes")
         expectEqual(h31.latestVersionString, "v2.1.0", "New release detected at 6h throttle expiry")
         passedCount += 1
 
         // 33. Clock advanced by 12h: check executes
-        let h33 = EpicNContracts.UpdateCheckerHarness(clock: { testTime }, currentAppVersion: "2.0.0")
+        let h33 = EpicNContracts.UpdateCheckerHarness(clock: { testClock.now }, currentAppVersion: "2.0.0")
         await h33.checkForUpdates(userInitiated: true, mockResponseTag: "v2.0.0")
-        testTime = testTime.addingTimeInterval(12 * 3600)
+        testClock.advance(by: 12 * 3600)
         await h33.checkForUpdates(userInitiated: false, mockResponseTag: "v2.2.0")
         expectTrue(h33.updateAvailable, "Check at 12h executes successfully")
         expectEqual(h33.latestVersionString, "v2.2.0", "Release detected after 12h interval")
@@ -901,7 +848,7 @@ enum EpicNE2ETests {
         let mb56 = EpicNContracts.MenuBarModel(defaults: UserDefaults(suiteName: testDefaultsSuite("mb56"))!)
         mb56.unreadCount = 1042
         expectEqual(mb56.formattedBadge, "1042", "Large unread count formats as plain digits string")
-        expectEqual(mb56.statusItemTitle, "News (1042)", "Large unread count formats cleanly in status title")
+        expectEqual(mb56.statusItemTitle, "1042 Unread Stories", "Large unread count formats cleanly in the menu line")
         passedCount += 1
 
         // 57. Unread count transition from 1 to 0: count label removed cleanly
@@ -909,7 +856,7 @@ enum EpicNE2ETests {
         expectEqual(mb56.formattedBadge, "1", "Count of 1 displays badge")
         mb56.unreadCount = 0
         expectNil(mb56.formattedBadge, "Count of 0 removes badge")
-        expectEqual(mb56.statusItemTitle, "News", "Count of 0 displays clean icon title without badge")
+        expectEqual(mb56.statusItemTitle, "No Unread Stories", "Count of 0 displays the empty menu line")
         passedCount += 1
 
         // 58. Repeatedly toggling preference on/off: state updates without resource leak
@@ -1199,7 +1146,7 @@ enum EpicNE2ETests {
         expectTrue(menuBar70.showsMenuBarExtra, "Power user enables menu bar extra")
 
         menuBar70.unreadCount = 2
-        expectEqual(menuBar70.statusItemTitle, "News (2)", "Status item displays unread count")
+        expectEqual(menuBar70.statusItemTitle, "2 Unread Stories", "Menu line displays unread count")
 
         var refreshDispatched = false
         let clickRefresh = { refreshDispatched = true }

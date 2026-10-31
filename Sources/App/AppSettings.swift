@@ -338,6 +338,17 @@ final class AppSettings: ObservableObject {
         return String(head[..<colon])
     }
 
+    /// The menu bar item's label count: the bare number, or nil when nothing is unread.
+    nonisolated static func menuBarBadgeCopy(unread: Int) -> String? {
+        unread > 0 ? "\(unread)" : nil
+    }
+
+    /// The menu bar item's first menu line.
+    nonisolated static func menuBarStatusCopy(unread: Int) -> String {
+        guard unread > 0 else { return "No Unread Stories" }
+        return "\(unread) Unread \(unread == 1 ? "Story" : "Stories")"
+    }
+
     /// The Add Feed failure text: names a refused scheme, otherwise the generic URL-or-duplicate message.
     nonisolated static func addFeedFailureMessage(for raw: String) -> String {
         if let scheme = refusedFeedScheme(raw) {

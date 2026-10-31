@@ -294,16 +294,9 @@ struct NewsApp: App {
         }
     }
 
-    private var menuBarBadgeCopy: String? {
-        let unread = articleStore.unreadCount
-        return unread > 0 ? "\(unread)" : nil
-    }
+    private var menuBarBadgeCopy: String? { AppSettings.menuBarBadgeCopy(unread: articleStore.unreadCount) }
 
-    private var menuBarStatusCopy: String {
-        let unread = articleStore.unreadCount
-        guard unread > 0 else { return "No Unread Stories" }
-        return "\(unread) Unread \(unread == 1 ? "Story" : "Stories")"
-    }
+    private var menuBarStatusCopy: String { AppSettings.menuBarStatusCopy(unread: articleStore.unreadCount) }
 }
 
 /// View → as List, as Grid and Group Stories by Event, sharing the list toolbar's stored preferences.

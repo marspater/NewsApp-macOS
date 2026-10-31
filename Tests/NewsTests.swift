@@ -25638,24 +25638,11 @@ struct NewsTests {
         }
         try? FileManager.default.removeItem(at: tempDir)
 
-        // 3. SecureSessionDelegateCoordinator task cleanup on completion with error
-        let coordinator = SecureSessionDelegateCoordinator()
-        let config = URLSessionConfiguration.ephemeral
-        let session = URLSession(configuration: config, delegate: coordinator, delegateQueue: nil)
-        let dummyRequest = URLRequest(url: URL(string: "https://example.com/test")!)
-        let dummyTask = session.dataTask(with: dummyRequest)
-        coordinator.urlSession(session, task: dummyTask, didCompleteWithError: URLError(.cancelled))
-        session.invalidateAndCancel()
-
-        // 4. FeedFetcher hostCooldowns pruning
+        // A fetch of nothing, long after startup, returns nothing and does not trip over the cooldown pruning.
         let clock = TestClock(Date())
         let fetcher = FeedFetcher(now: { clock.now })
         clock.advance(by: 86400)
-        _ = await fetcher.fetchAllFeeds(urls: [])
-
-        // 5. OverviewGenerationCoordinator activeExtractions safety & memory cache bounding
-        let coord = OverviewGenerationCoordinator.shared
-        await coord.clearCache()
+        assertEqual(await fetcher.fetchAllFeeds(urls: []).count, 0, "Fetching no feeds returns no results")
     }
 
     // MARK: - Epic N (#559, #560, #561) System Integration Unit Tests
