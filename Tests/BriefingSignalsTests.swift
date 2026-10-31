@@ -105,8 +105,13 @@ enum BriefingSignalsTests {
     struct Evaluation: Decodable {
         struct Item: Decodable {
             let sentence: String
-            let expected_kind: String?
-            let expected_date_text: String?
+            let expectedKind: String?
+            let expectedDateText: String?
+            enum CodingKeys: String, CodingKey {
+                case sentence
+                case expectedKind = "expected_kind"
+                case expectedDateText = "expected_date_text"
+            }
         }
         let items: [Item]
     }
@@ -138,9 +143,9 @@ enum BriefingSignalsTests {
         var confusion: [String: Int] = [:]
         for item in evaluation.items {
             let found = extract(item.sentence).first
-            confusion["\(item.expected_kind ?? "none") → \(found.map { "\($0.kind)" } ?? "none")", default: 0] += 1
+            confusion["\(item.expectedKind ?? "none") → \(found.map { "\($0.kind)" } ?? "none")", default: 0] += 1
             if let date = found?.dateText, !item.sentence.contains(date) { badDates += 1 }
-            guard let expected = item.expected_kind else {
+            guard let expected = item.expectedKind else {
                 if let found {
                     falsePositives += 1
                     print("   false positive: \(item.sentence) → \(found.kind)")
@@ -158,11 +163,11 @@ enum BriefingSignalsTests {
             } else {
                 print("   wrong kind \(found.kind): \(item.sentence)")
             }
-            if found.dateText == item.expected_date_text {
+            if found.dateText == item.expectedDateText {
                 dateRight += 1
             } else {
                 print(
-                    "   date text \(found.dateText ?? "nil"), expected \(item.expected_date_text ?? "nil"): \(item.sentence)"
+                    "   date text \(found.dateText ?? "nil"), expected \(item.expectedDateText ?? "nil"): \(item.sentence)"
                 )
             }
         }
