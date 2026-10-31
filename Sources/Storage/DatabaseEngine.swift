@@ -3231,7 +3231,7 @@ actor DatabaseEngine {
     }
 
     func getSavedArticles() throws -> [FeedArticle] {
-        return try fetchArticles(isSaved: true)
+        return try fetchArticles(isSaved: true, limit: nil)
     }
 
     /// Saved stories, newest save first, or the read history, newest read first, for File › Export (#565).
@@ -3872,7 +3872,9 @@ actor DatabaseEngine {
 
     // MARK: - Counts & Diagnostics
 
-    func counts() throws -> (unread: Int, saved: Int, total: Int) {
+    /// Totals over the visible library. `unread` leaves out stories `muting` hides, as the Unread list does, so the
+    /// sidebar, the menu bar and the list agree (#785).
+    func counts(muting: MuteRules = MuteRules()) throws -> (unread: Int, saved: Int, total: Int) {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
@@ -3884,10 +3886,11 @@ actor DatabaseEngine {
 
         var stmt: OpaquePointer?
         let scope = collectionScope()
+        let muted = muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle
         let sql = """
             SELECT
                 count(a.id) as total_count,
-                coalesce(sum(case when s.is_read = 0 then 1 else 0 end), 0) as unread_count,
+                coalesce(sum(case when s.is_read = 0\(muted) then 1 else 0 end), 0) as unread_count,
                 coalesce(sum(case when s.is_saved = 1 then 1 else 0 end), 0) as saved_count
             FROM articles a
             JOIN article_state s ON s.article_id = a.id
@@ -3895,7 +3898,7 @@ actor DatabaseEngine {
             """
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
             defer { sqlite3_finalize(stmt) }
-            bind(scope.params, to: stmt)
+            bind((muting.isEmpty ? [] : Self.mutingParameters(muting)) + scope.params, to: stmt)
             if sqlite3_step(stmt) == SQLITE_ROW {
                 total = Int(sqlite3_column_int(stmt, 0))
                 unread = Int(sqlite3_column_int(stmt, 1))

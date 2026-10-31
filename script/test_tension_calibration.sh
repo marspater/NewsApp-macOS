@@ -25,6 +25,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Storage/DatabaseEngine+Events.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \
+    Sources/Storage/ArticleStore+Spotlight.swift \
+    Sources/Storage/ArticleStore+Events.swift \
     Sources/Storage/SpotlightIndexer.swift \
     Sources/Intelligence/ArticleIntelligence.swift \
     Sources/Intelligence/OverviewPassageSelector.swift \
