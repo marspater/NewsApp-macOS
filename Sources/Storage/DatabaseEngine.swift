@@ -3980,7 +3980,7 @@ actor DatabaseEngine {
         search: String? = nil,
         muting: MuteRules
     ) throws -> Int {
-        guard !muting.isEmpty, let db = db else { return 0 }
+        guard !muting.isEmpty, db != nil else { return 0 }
         // The count scans the library through two SQL functions per row; it only changes when a write does (#839).
         let changes = changeToken()
         if mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }

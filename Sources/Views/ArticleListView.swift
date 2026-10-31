@@ -1016,6 +1016,7 @@ struct ArticleListView: View {
                 compact: !gridLayout, isLead: isLead, reservesCoverageRow: gridLayout && !isLead,
                 action: { openArticle(article) }, footer: EmptyView()
             )
+            .equatable()
             .id(entry.id)
             .onAppear {
                 NewsSignposts.firstCardAppeared()
@@ -1029,7 +1030,8 @@ struct ArticleListView: View {
                 isSelected: listHasFocus && representative.id == focusedArticleID,
                 compact: !gridLayout,
                 isLead: isLead,
-                isExpanded: expansionBinding(summary.eventID),
+                isExpanded: expandedEvents.contains(summary.eventID),
+                setExpanded: { expanded in setExpanded(summary.eventID, expanded) },
                 openRepresentative: {
                     openEvent(summary.eventID, article: representative, initialExperienceMode: .eventOverview)
                 },
@@ -1041,6 +1043,7 @@ struct ArticleListView: View {
                 separate: { member in separate(member, from: summary.eventID) },
                 combine: { related in combine(related, into: summary.eventID) }
             )
+            .equatable()
             .id(entry.id)
             .onAppear {
                 NewsSignposts.firstCardAppeared()
@@ -1049,13 +1052,8 @@ struct ArticleListView: View {
         }
     }
 
-    private func expansionBinding(_ eventID: String) -> Binding<Bool> {
-        Binding(
-            get: { expandedEvents.contains(eventID) },
-            set: { isExpanded in
-                if isExpanded { expandedEvents.insert(eventID) } else { expandedEvents.remove(eventID) }
-            }
-        )
+    private func setExpanded(_ eventID: String, _ isExpanded: Bool) {
+        if isExpanded { expandedEvents.insert(eventID) } else { expandedEvents.remove(eventID) }
     }
 
     // MARK: - Empty States & Diagnostics
@@ -1232,9 +1230,9 @@ struct ArticleListView: View {
         guard let entry = entries.first(where: { $0.id == focusedArticleID }),
             case .event(let summary, _, _) = entry
         else { return }
-        let binding = expansionBinding(summary.eventID)
-        withAnimation(reduceMotion ? nil : AppMotion.state) { binding.wrappedValue.toggle() }
-        if binding.wrappedValue {
+        let expanded = !expandedEvents.contains(summary.eventID)
+        withAnimation(reduceMotion ? nil : AppMotion.state) { setExpanded(summary.eventID, expanded) }
+        if expanded {
             let eventID = summary.eventID
             Task { await articleStore.markEventSeen(eventID) }
         }

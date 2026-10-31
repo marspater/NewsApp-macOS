@@ -556,3 +556,14 @@ extension StoryContextMenuItems where TrailingContent == EmptyView {
         self.init(article: article, trailingContent: { EmptyView() })
     }
 }
+
+/// A list card redraws only when what it draws changed, not every time the list's body runs (#839). The action
+/// closure is left out of the comparison: it captures the same story the card shows. Cards with a footer, such as
+/// an event's coverage, are compared by SwiftUI's default rules.
+extension ArticleCardView: @MainActor Equatable where Footer == EmptyView {
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.article == rhs.article && lhs.isSelected == rhs.isSelected && lhs.compact == rhs.compact
+            && lhs.imageFallbacks == rhs.imageFallbacks && lhs.isLead == rhs.isLead
+            && lhs.reservesCoverageRow == rhs.reservesCoverageRow
+    }
+}
