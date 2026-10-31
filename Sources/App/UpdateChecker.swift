@@ -74,11 +74,11 @@ struct GitHubReleasePayload: Codable, Sendable {
 /// Security & Architecture Constraints:
 /// - Informational only: NEVER downloads, executes, replaces, or installs application binaries.
 /// - Validates remote release URLs strictly against `https://github.com/marspater/NewsApp-macOS/releases/*`.
-/// - Enforces 6-hour automatic throttling cache while allowing manual bypass.
+/// - Enforces 6-hour automatic throttling after every attempt, failed or not, while allowing manual bypass.
 /// - Validates strict SemVer before flagging updates.
 @MainActor
 final class UpdateChecker: ObservableObject {
-    static let shared = UpdateChecker()
+    static let shared = UpdateChecker(defaults: .standard)
 
     @Published var isChecking: Bool = false
     @Published var updateAvailable: Bool = false
@@ -91,15 +91,23 @@ final class UpdateChecker: ObservableObject {
     private let httpClient: SecureHTTPClient
     private let now: @Sendable () -> Date
     private let customAppVersion: String?
+    /// Where the last attempt is kept so a relaunch does not reset the throttle; nil keeps it in memory only.
+    private let defaults: UserDefaults?
+    private static let lastAttemptKey = "updateCheckLastAttempt"
+    /// The last automatic or manual attempt, successful or not. Failures throttle too (#798).
+    private var lastAttemptDate: Date?
 
     init(
         httpClient: SecureHTTPClient = .shared,
         now: @escaping @Sendable () -> Date = { Date() },
-        currentAppVersion: String? = nil
+        currentAppVersion: String? = nil,
+        defaults: UserDefaults? = nil
     ) {
         self.httpClient = httpClient
         self.now = now
         self.customAppVersion = currentAppVersion
+        self.defaults = defaults
+        self.lastAttemptDate = defaults?.object(forKey: Self.lastAttemptKey) as? Date
     }
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "UpdateChecker")
@@ -112,12 +120,14 @@ final class UpdateChecker: ObservableObject {
     /// Checks for newer releases on GitHub.
     /// - Parameter userInitiated: If true, bypasses the 6-hour cache.
     func checkForUpdates(userInitiated: Bool = false) async {
-        if !userInitiated, let last = lastCheckDate, now().timeIntervalSince(last) < minimumCheckInterval {
+        if !userInitiated, let last = lastAttemptDate, now().timeIntervalSince(last) < minimumCheckInterval {
             logger.debug("Skipping automatic update check; cached within 6-hour window.")
             return
         }
 
         guard !isChecking else { return }
+        lastAttemptDate = now()
+        defaults?.set(lastAttemptDate, forKey: Self.lastAttemptKey)
         isChecking = true
         updateAvailable = false
         latestVersionString = nil

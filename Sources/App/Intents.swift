@@ -96,15 +96,15 @@ public struct AddFeedIntent: AppIntent {
     @Parameter(title: "Feed URL")
     public var url: URL
 
-    private let appSettings: AppSettings?
+    private let feedManager: FeedManager?
 
     public init() {
-        self.appSettings = nil
+        self.feedManager = nil
         self.url = URL(string: "https://example.com")!
     }
 
-    init(url: URL, appSettings: AppSettings? = nil) {
-        self.appSettings = appSettings
+    init(url: URL, feedManager: FeedManager? = nil) {
+        self.feedManager = feedManager
         self.url = url
     }
 
@@ -113,9 +113,10 @@ public struct AddFeedIntent: AppIntent {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             return .result(value: false, dialog: "Could not subscribe to feed. The URL scheme is invalid.")
         }
-        let settings = appSettings ?? IntentDependencyResolver.resolveAppSettings()
-        if let added = settings.addFeed(url: url.absoluteString) {
-            return .result(value: true, dialog: "Subscribed to feed: \(added)")
+        // Through the manager, like the app's own Add Feed, so the feed is fetched at once and gets a status entry.
+        let manager = feedManager ?? IntentDependencyResolver.resolveFeedManager()
+        if manager.addFeed(url: url.absoluteString) {
+            return .result(value: true, dialog: "Subscribed to feed: \(url.absoluteString)")
         } else {
             return .result(
                 value: false, dialog: "Could not subscribe to feed. The URL may be invalid or already subscribed.")

@@ -962,6 +962,7 @@ struct NewsTests {
             ("testDistributionAndEntitlementsIntegrity", { await testDistributionAndEntitlementsIntegrity() }),
             ("testStrictSemVerAndReleaseSecurity", { await testStrictSemVerAndReleaseSecurity() }),
             ("testUpdateCheckerThrottleWithClock", { await testUpdateCheckerThrottleWithClock() }),
+            ("testUpdateCheckerFailureBackoff", { await testUpdateCheckerFailureBackoff() }),
             ("testUpdateCheckerVersionComparisonAndErrors", { await testUpdateCheckerVersionComparisonAndErrors() }),
             ("testUpdateCheckerAdversarialEdgeCases", { await testUpdateCheckerAdversarialEdgeCases() }),
             ("testNewsURLParserAndSchemeRouting", { await testNewsURLParserAndSchemeRouting() }),
@@ -16399,6 +16400,46 @@ struct NewsTests {
     }
 
     @MainActor
+    static func testUpdateCheckerFailureBackoff() async {
+        print("  - Testing UpdateChecker throttles after a failed attempt and across relaunch (#798)...")
+        let clock = TestClock(Date(timeIntervalSince1970: 1_700_000_000))
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = mockHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+        let suite = testDefaultsSuite("test.updatechecker.backoff")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+
+        var requests = 0
+        MockURLProtocol.requestHandler = { request in
+            requests += 1
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)!, Data()
+            )
+        }
+        let checker = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: defaults)
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 1, "First automatic check sends one request")
+        assertTrue(checker.lastCheckDate == nil, "A failed check is not a successful check")
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 1, "A rate-limited check does not retry on the next activation")
+
+        let relaunched = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: defaults)
+        await relaunched.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 1, "A relaunch keeps the failed attempt throttled")
+
+        await relaunched.checkForUpdates(userInitiated: true)
+        assertEqual(requests, 2, "A manual check still bypasses the throttle after a failure")
+
+        clock.advance(by: 6 * 3600 + 1)
+        await relaunched.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 3, "The next automatic check runs once the window has passed")
+    }
+
+    @MainActor
     static func testUpdateCheckerVersionComparisonAndErrors() async {
         print("  - Testing UpdateChecker Version Comparison Against Release 2.0.0 & Error States...")
 
@@ -17111,14 +17152,31 @@ struct NewsTests {
         let addDefaults = UserDefaults(suiteName: addSuite)!
         defer { removeTestDefaults(addSuite) }
         let addSettings = AppSettings(defaults: addDefaults)
+        // Adding goes through FeedManager (#798), so the feed is fetched at once; the stub records the fetch.
+        let addFetches = TestRecorder()
+        let addStore = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await addStore.initialize()
+        let addManager = FeedManager(
+            settings: addSettings, store: addStore, schedulesRefresh: false,
+            fetchBatch: { urls, _ in
+                await addFetches.record(urls)
+                return urls.map { ($0, [], nil, nil) }
+            })
+        defer { addManager.stopBackgroundWork() }
 
         // Valid feed URL with default settings (allowInsecureHTTP = false)
         let validURL = URL(string: "https://example.com/rss.xml")!
-        let addIntent1 = AddFeedIntent(url: validURL, appSettings: addSettings)
+        let addIntent1 = AddFeedIntent(url: validURL, feedManager: addManager)
         do {
             let res1 = try await addIntent1.perform()
             assertEqual(res1.value, true, "AddFeedIntent with valid URL returns true")
             assertTrue(addSettings.hasFeed("https://example.com/rss.xml"), "Feed is registered in AppSettings")
+            var fetched = false
+            for _ in 0..<100 where !fetched {
+                fetched = await addFetches.batches.contains { $0.contains("https://example.com/rss.xml") }
+                if !fetched { try? await Task.sleep(for: .milliseconds(20)) }
+            }
+            assertTrue(fetched, "AddFeedIntent fetches the new feed at once through FeedManager")
             let dialog1 = extractDialogText(from: res1)
             assertTrue(
                 dialog1 != nil && dialog1!.contains("Subscribed to feed"),
@@ -17128,7 +17186,7 @@ struct NewsTests {
         }
 
         // Duplicate subscription rejection
-        let addIntentDup = AddFeedIntent(url: validURL, appSettings: addSettings)
+        let addIntentDup = AddFeedIntent(url: validURL, feedManager: addManager)
         do {
             let resDup = try await addIntentDup.perform()
             assertEqual(resDup.value, false, "Duplicate subscription returns false")
@@ -17142,7 +17200,7 @@ struct NewsTests {
 
         // Trailing slash variant is recognized as duplicate
         let slashURL = URL(string: "https://example.com/rss.xml/")!
-        let addIntentSlash = AddFeedIntent(url: slashURL, appSettings: addSettings)
+        let addIntentSlash = AddFeedIntent(url: slashURL, feedManager: addManager)
         do {
             let resSlash = try await addIntentSlash.perform()
             assertEqual(resSlash.value, false, "Trailing slash duplicate returns false")
@@ -17152,7 +17210,7 @@ struct NewsTests {
 
         // Insecure HTTP URL upgraded when allowInsecureHTTP is false
         let httpURL = URL(string: "http://insecure-feed.org/feed.xml")!
-        let addIntentHTTP = AddFeedIntent(url: httpURL, appSettings: addSettings)
+        let addIntentHTTP = AddFeedIntent(url: httpURL, feedManager: addManager)
         do {
             let resHTTP = try await addIntentHTTP.perform()
             assertEqual(resHTTP.value, true, "HTTP feed subscription succeeds via HTTPS upgrade")
@@ -17168,9 +17226,13 @@ struct NewsTests {
         defer { removeTestDefaults(insecureSuite) }
         let insecureSettings = AppSettings(defaults: insecureDefaults)
         insecureSettings.setAllowInsecureHTTP(true)
+        let insecureManager = FeedManager(
+            settings: insecureSettings, store: addStore, schedulesRefresh: false,
+            fetchBatch: { urls, _ in urls.map { ($0, [], nil, nil) } })
+        defer { insecureManager.stopBackgroundWork() }
 
         let plainHTTPURL = URL(string: "http://plain-http.org/feed.xml")!
-        let addIntentPlain = AddFeedIntent(url: plainHTTPURL, appSettings: insecureSettings)
+        let addIntentPlain = AddFeedIntent(url: plainHTTPURL, feedManager: insecureManager)
         do {
             let resPlain = try await addIntentPlain.perform()
             assertEqual(resPlain.value, true, "Plain HTTP feed subscription succeeds when allowed")
@@ -17181,7 +17243,7 @@ struct NewsTests {
 
         // Invalid scheme / unparseable URL returns false
         let invalidURL = URL(string: "file:///etc/passwd")!
-        let addIntentInvalid = AddFeedIntent(url: invalidURL, appSettings: addSettings)
+        let addIntentInvalid = AddFeedIntent(url: invalidURL, feedManager: addManager)
         do {
             let resInvalid = try await addIntentInvalid.perform()
             assertEqual(resInvalid.value, false, "file:// URL scheme rejected")
@@ -17190,13 +17252,13 @@ struct NewsTests {
         }
 
         // AddFeedIntent via IntentDependencyResolver
-        IntentDependencyResolver.appSettingsOverride = addSettings
-        defer { IntentDependencyResolver.appSettingsOverride = nil }
+        IntentDependencyResolver.feedManagerOverride = addManager
+        defer { IntentDependencyResolver.feedManagerOverride = nil }
         let resolverFeedURL = URL(string: "https://resolver-test.com/feed.xml")!
         let resolverAddIntent = AddFeedIntent(url: resolverFeedURL)
         do {
             let resResolver = try await resolverAddIntent.perform()
-            assertEqual(resResolver.value, true, "AddFeedIntent uses IntentDependencyResolver appSettingsOverride")
+            assertEqual(resResolver.value, true, "AddFeedIntent uses IntentDependencyResolver feedManagerOverride")
             assertTrue(addSettings.hasFeed("https://resolver-test.com/feed.xml"), "Feed registered via resolver")
         } catch {
             assertTrue(false, "AddFeedIntent resolver threw: \(error)")
