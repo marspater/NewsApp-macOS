@@ -492,6 +492,11 @@ class FeedManager: NSObject, ObservableObject {
     /// One notification pass. Clustering has run: reports of one event notify once, by their strongest report, in
     /// every mode (#523, #587). Full mode reads what the lanes need (#665, docs/notifications.md); delivery only reads
     /// stories, and writes nothing but its own tables.
+    /// The reading interests notification triage ranks by; a Reset Reading Interests ignores earlier history.
+    nonisolated static func triageInterests(database: DatabaseEngine, now: Date, resetAt: Date?) async -> Set<String> {
+        NotificationService.topInterests((try? await database.briefingInterests(now: now, resetAt: resetAt)) ?? [:])
+    }
+
     private func deliverNotifications(_ notifiable: [FeedArticle]) async {
         let database = articleStore.database
         var delivery = NotificationDelivery(mode: appSettings.notificationMode)
@@ -512,8 +517,8 @@ class FeedManager: NSObject, ObservableObject {
             delivery.starredPending =
                 (try? await database.feedStories(since: since, muting: appSettings.muteRules)) ?? [:]
             storyIDs += delivery.starredPending.values.flatMap { $0.map(\.id) }
-            delivery.interests = NotificationService.topInterests(
-                (try? await database.briefingInterests(now: posted)) ?? [:])
+            delivery.interests = await Self.triageInterests(
+                database: database, now: posted, resetAt: appSettings.readingInterestsResetDate)
             delivery.record = { [weak self] banner in
                 try? await database.recordNotification(banner, at: posted)
                 await self?.markNotified(banner.stories)

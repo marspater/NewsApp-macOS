@@ -63,7 +63,7 @@ struct SettingsView: View {
 
     @AppStorage(SettingsView.lastPaneStorageKey) private var selectedPane: SettingsPane = .general
     @AppStorage("briefingEditionHour") private var briefingEditionHour = FiniteBriefing.defaultEditionHour
-    @AppStorage("readingInterestsResetAt") private var readingInterestsResetAt = 0.0
+    @AppStorage(AppSettings.readingInterestsResetAtKey) private var readingInterestsResetAt = 0.0
     @State private var newFeedURL: String = ""
     @State private var webCacheSize: String = "Calculating…"
     @State private var databaseSize: String = "Calculating…"
