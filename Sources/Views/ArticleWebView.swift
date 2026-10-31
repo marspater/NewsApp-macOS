@@ -241,14 +241,14 @@ struct ArticleWebView: NSViewRepresentable {
             guard self.webView === webView, navigation === activeNavigation else { return }
             if (error as NSError).code != NSURLErrorCancelled, !hasRetriedProvisionalFailure {
                 hasRetriedProvisionalFailure = true
+                // Retry the address that failed, never the page still in history: with story A shown, a failed
+                // load of story B must not reload A under B's reader.
+                let failed = ((error as NSError).userInfo[NSURLErrorFailingURLErrorKey] as? URL) ?? parent.url
                 prepareGateway(webView) { [weak self, weak webView] in
                     guard let self, let webView, self.webView === webView else { return }
-                    if webView.backForwardList.currentItem == nil {
-                        self.parent.loadError = nil
-                        webView.load(URLRequest(url: self.parent.url))
-                    } else {
-                        webView.reload()
-                    }
+                    self.parent.loadError = nil
+                    self.currentRequestedURL = failed
+                    webView.load(URLRequest(url: failed))
                 }
                 return
             }
