@@ -19,8 +19,9 @@ import SwiftUI
 /// offscreen at 900 pt and 1,400 pt, text sizes 1.0 and 1.3, light, dark and Increase Contrast, each also redrawn in
 /// gray. Then two rows of story grid cards (#779), collapsed and with the event card's sources shown, in light and
 /// dark, with each card's height. Run with `NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift
-/// script/native_performance_baseline.sh DIR`; `NEWS_CAPTURES=overview` or `NEWS_CAPTURES=grid` runs one set, and
-/// `NEWS_CAPTURE_SET=tension` renders the World Tension sheet, sidebar foot and Briefing strip instead (#781).
+/// script/native_performance_baseline.sh DIR`; `NEWS_CAPTURES=overview` or `NEWS_CAPTURES=grid` runs one set,
+/// `NEWS_CAPTURE_SET=tension` renders the World Tension sheet, sidebar foot and Briefing strip instead (#781), and
+/// `NEWS_CAPTURE_SET=briefing` the Briefing situation board (#780).
 @main
 struct OverviewCaptures {
     static func main() async {
@@ -29,9 +30,10 @@ struct OverviewCaptures {
         let set = ProcessInfo.processInfo.environment["NEWS_CAPTURE_SET"]
         let only = ProcessInfo.processInfo.environment["NEWS_CAPTURES"]
         var failures = 0
-        if set == "tension" {
-            failures = await MainActor.run { captureTension(into: output) }
-        } else {
+        switch set {
+        case "tension": failures = await MainActor.run { captureTension(into: output) }
+        case "briefing": failures = await MainActor.run { captureBriefing(into: output) }
+        default:
             if only != "grid" { failures = await MainActor.run { capture(into: output) } }
             if only != "overview" { failures += await GridRowCaptures.capture(into: output) }
         }
@@ -358,9 +360,12 @@ extension OverviewCaptures {
         )
     }
 
-    /// Renders `view` offscreen on the window background at `size` and writes `name.png`; returns 1 on failure.
+    /// Renders `view` offscreen on the window background at `size` and writes `name.png`, with `trim` cut below the
+    /// content; returns 1 on failure.
     @MainActor
-    static func render<V: View>(_ view: V, name: String, size: NSSize, dark: Bool, into output: URL) -> Int {
+    static func render<V: View>(
+        _ view: V, name: String, size: NSSize, dark: Bool, trim: Bool = false, into output: URL
+    ) -> Int {
         let host = NSHostingView(
             rootView: view.frame(width: size.width, height: size.height).background(AppColor.background)
                 .environment(\.colorScheme, dark ? .dark : .light)
@@ -375,7 +380,7 @@ extension OverviewCaptures {
             host.cacheDisplay(in: host.bounds, to: bitmap)
             rendered = bitmap
         }
-        guard let rendered, distinctColors(rendered) > 1 else {
+        guard let full = rendered, let rendered = trim ? trimmed(full) : full, distinctColors(rendered) > 1 else {
             print("  blank: \(name)")
             return 1
         }
@@ -386,6 +391,152 @@ extension OverviewCaptures {
             print("  write failed: \(name): \(error.localizedDescription)")
             return 1
         }
+    }
+}
+
+// MARK: - Briefing situation board (#780)
+
+extension OverviewCaptures {
+    /// The board at the detail width of a 1,600 pt window and of the 900 pt minimum window, light and dark, with a
+    /// masthead stand-in in the list's tokens above it (the list draws the real one, and the toolbar is not offscreen).
+    /// Images are drawn here and put in the decoded-image cache, so nothing is fetched.
+    @MainActor
+    static func captureBriefing(into output: URL) -> Int {
+        let (entries, facts, images, readIDs) = briefingFixture()
+        let (now, history) = tensionFixture()
+        let tension = WorldTensionModel(
+            state: WorldTensionState(history: WorldTensionSmoothing.displayed(history), loadedAt: now))
+        let briefing = FiniteBriefing(
+            startedAt: now.addingTimeInterval(-8 * 3600), articles: entries.map(\.representative))
+        let readManager = ReadManager()
+        let savedStories = SavedStoriesManager()
+        let suite = testDefaultsSuite("briefing-captures")
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: UserDefaults(suiteName: suite) ?? .standard)
+        var failures = 0
+        // 1,600 pt and 900 pt windows less the sidebar's ideal and minimum widths.
+        for (window, width) in [(1600, 1360), (900, 680)] {
+            for dark in [false, true] {
+                let board = VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                        Text("Briefing").font(AppTypography.masthead).foregroundStyle(AppColor.primaryText)
+                        Text("Friday, October 30 briefing · Selected by coverage and your interests")
+                            .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, AppLayout.pageInset)
+                    .padding(.top, AppSpacing.md)
+                    .padding(.bottom, AppLayout.cardGap)
+                    BriefingView(
+                        entries: entries, briefing: briefing,
+                        details: BriefingStoryDetails(facts: facts, images: images), readIDs: readIDs,
+                        savedIDs: [entries[3].id], focusedID: nil, nextEdition: now.addingTimeInterval(16 * 3600),
+                        actions: BriefingActions(
+                            onOpenArticle: { _ in }, onOpenEvent: { _ in }, onStartNewBriefing: {}, onBackToToday: {}))
+                    Spacer(minLength: 0)
+                }
+                .environmentObject(readManager).environmentObject(savedStories).environmentObject(settings)
+                .environment(tension)
+                failures += render(
+                    board, name: "briefing-\(window)pt-\(dark ? "dark" : "light")",
+                    size: NSSize(width: width, height: 2600), dark: dark, trim: true, into: output)
+            }
+        }
+        return failures
+    }
+
+    /// Ten stories of a morning edition: five events with several publishers and five single reports, across World,
+    /// Business, Technology, Science and Health, with stored highlights for six, three of them read.
+    @MainActor
+    static func briefingFixture() -> ([FeedEntry], [String: BriefingCitedFact], [String: URL], Set<String>) {
+        let now = Date(timeIntervalSince1970: 1_793_372_400)
+        let stories: [(String, String, String, Int, String)] = [
+            (
+                "World", "Reuters", "Ceasefire talks resume in Cairo as aid convoys reach northern Gaza", 14,
+                "Mediators said both delegations had agreed to a third round of talks on Sunday."
+            ),
+            (
+                "Business", "Financial Times", "Central banks hold rates as inflation cools across Europe", 9,
+                "The European Central Bank kept its deposit rate at 2 percent for a fourth meeting."
+            ),
+            (
+                "World", "BBC News", "Typhoon closes ports across the northern Philippines", 7,
+                "More than 40,000 people were moved to evacuation centres before landfall."
+            ),
+            ("Technology", "The Verge", "Chipmakers report record demand for data-centre processors", 6, ""),
+            (
+                "Science", "Nature", "Astronomers map the largest known structure in the early universe", 5,
+                "The filament spans more than a billion light years, the team reported."
+            ),
+            ("World", "Al Jazeera", "Sudan aid convoys reach El Fasher after weeks of delays", 1, ""),
+            (
+                "Health", "STAT", "Regulators approve a once-yearly injection for HIV prevention", 1,
+                "The agency approved the injection for adults and adolescents weighing at least 35 kilograms."
+            ),
+            ("Business", "Bloomberg", "Oil prices slip as shipping routes reopen in the Red Sea", 1, ""),
+            ("Technology", "Ars Technica", "Open-source browser engine reaches its first stable release", 1, ""),
+            ("World", "DW", "NATO ministers meet in Brussels over Baltic airspace incursions", 1, ""),
+        ]
+        var entries: [FeedEntry] = []
+        var facts: [String: BriefingCitedFact] = [:]
+        var images: [String: URL] = [:]
+        for (index, story) in stories.enumerated() {
+            let (category, publisher, title, publishers, fact) = story
+            let id = "briefing-\(index)"
+            let image = "https://example.com/briefing/\(index).jpg"
+            let article = FeedArticle(
+                storedID: id, title: title, link: "https://example.com/briefing/\(index)", guid: id,
+                description: "\(title). Reporting continues as more details emerge from officials and witnesses.",
+                pubDate: now.addingTimeInterval(-Double(index + 2) * 3600), source: publisher, imageUrl: image,
+                category: category)
+            if publishers > 1 {
+                let members = (0..<publishers).map { member in
+                    EventFeedMember(
+                        articleID: member == 0 ? id : "\(id)-\(member)",
+                        source: member == 0 ? publisher : "Outlet \(member)",
+                        title: title, date: article.pubDate, joinedVersion: 1, isRead: false, isSaved: false)
+                }
+                entries.append(
+                    .event(
+                        EventFeedSummary(
+                            eventID: "event-\(index)", membershipVersion: 1, seenVersion: nil, members: members),
+                        representative: article, visibleMembers: [article]))
+            } else {
+                entries.append(.article(article))
+            }
+            if !fact.isEmpty { facts[id] = BriefingCitedFact(text: fact, isCited: true, citationPublisher: publisher) }
+            if let url = URL(string: image), index < 5 {
+                images[id] = url
+                DecodedImageCache.images.setObject(syntheticPhoto(seed: index), forKey: url as NSURL)
+            }
+        }
+        return (entries, facts, images, ["briefing-2", "briefing-6", "briefing-8"])
+    }
+
+    /// A 1600 × 900 stand-in photograph: a sky-to-ground gradient with a few shapes, different per seed.
+    static func syntheticPhoto(seed: Int) -> CGImage {
+        let width = 1600
+        let height = 900
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let hue = CGFloat(seed) * 0.17
+        let colors = [
+            NSColor(hue: hue.truncatingRemainder(dividingBy: 1), saturation: 0.45, brightness: 0.85, alpha: 1).cgColor,
+            NSColor(hue: (hue + 0.08).truncatingRemainder(dividingBy: 1), saturation: 0.6, brightness: 0.35, alpha: 1)
+                .cgColor,
+        ]
+        let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: nil)!
+        context.drawLinearGradient(
+            gradient, start: CGPoint(x: 0, y: height), end: CGPoint(x: 0, y: 0), options: [])
+        context.setFillColor(NSColor(white: 1, alpha: 0.25).cgColor)
+        for shape in 0..<6 {
+            let x = CGFloat((seed * 211 + shape * 263) % width)
+            let size = CGFloat(120 + (seed * 37 + shape * 53) % 220)
+            context.fillEllipse(in: CGRect(x: x, y: CGFloat(200 + shape * 60), width: size, height: size))
+        }
+        return context.makeImage()!
     }
 }
 

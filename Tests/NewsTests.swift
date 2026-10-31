@@ -858,6 +858,7 @@ struct NewsTests {
         testEventFeedGroupingOptimization()
         try await testFiniteBriefing()
         testDockBadgeCount()
+        testBriefingBoardLayout()
         try await testPublisherContentProvenance()
         try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
         try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
@@ -12129,6 +12130,48 @@ struct NewsTests {
         let yesterday = FiniteBriefing.editionStart(now: now, hour: 7).addingTimeInterval(-60)
         assertEqual(badge(read, selectedAt: yesterday), 2, "An edition from before the edition hour counts nothing")
         assertEqual(badge(Set(library)), 0, "Nothing unread hides the badge")
+    }
+
+    /// #780: the Briefing carousel takes the stories with the most publishers, edition order breaking ties, and the
+    /// tiles group by topic in the order the edition reaches each one, uncategorised stories last.
+    static func testBriefingBoardLayout() {
+        print("  - Testing the Briefing board: hero ranking by publishers and tiles grouped by topic (#780)...")
+        let now = Date(timeIntervalSince1970: 1_793_372_400)
+        func story(_ id: String, _ category: String?) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Story \(id)", link: "https://example.com/\(id)", guid: id, description: "",
+                pubDate: now, source: "Publisher", category: category)
+        }
+        func event(_ id: String, _ category: String?, publishers: Int, members: Int? = nil) -> FeedEntry {
+            let article = story(id, category)
+            let rows = (0..<(members ?? publishers)).map { index in
+                EventFeedMember(
+                    articleID: index == 0 ? id : "\(id)-\(index)", source: "Outlet \(index % publishers)",
+                    title: article.title, date: now, joinedVersion: 1, isRead: false, isSaved: false)
+            }
+            return .event(
+                EventFeedSummary(eventID: "event-\(id)", membershipVersion: 1, seenVersion: nil, members: rows),
+                representative: article, visibleMembers: [article])
+        }
+        let entries: [FeedEntry] = [
+            .article(story("a", "World")), event("b", "Business", publishers: 3),
+            event("c", "International", publishers: 9),
+            .article(story("d", nil)), event("e", "Technology", publishers: 3, members: 7),
+            event("f", "World", publishers: 5), .article(story("g", "Science")),
+        ]
+        assertEqual(
+            entries.map(\.publisherCount), [1, 3, 9, 1, 3, 5, 1],
+            "Coverage counts distinct publishers, not reports: seven reports from three outlets are three")
+        assertEqual(
+            BriefingView.heroEntries(entries).map(\.id), ["c", "f", "b", "e", "a"],
+            "The carousel shows five stories, most publishers first, edition order breaking ties")
+        assertEqual(BriefingView.heroEntries(Array(entries.prefix(2))).count, 2, "Fewer stories show what there is")
+        let sections = BriefingView.sections(entries)
+        assertEqual(
+            sections.map(\.title), ["World", "Business", "Technology", "Science", BriefingView.otherSection],
+            "Sections follow the edition; a feed category maps to the app's topics and no category comes last")
+        assertEqual(sections[0].entries.map(\.id), ["a", "c", "f"], "A section keeps edition order")
+        assertEqual(sections.flatMap(\.entries).count, entries.count, "Every story has one tile")
     }
 
     static func testFiniteBriefing() async throws {

@@ -152,6 +152,12 @@ enum AppColor {
     static let leadBackdropDim = leadPlaceholder.opacity(0.45)
     static let leadText = Color.white
     static let leadSecondaryText = Color.white.opacity(0.85)
+    /// The Briefing hero's scrim: the lead scrim at the foot, clear above 65 % of the height (DESIGN.md 8.4).
+    static let leadScrimFade = LinearGradient(
+        colors: [leadScrim, Color.clear], startPoint: .bottom, endPoint: UnitPoint(x: 0.5, y: 0.35))
+    /// The hero carousel's arrow backing and its inactive page dots, over the photo.
+    static let carouselControl = Color.black.opacity(0.45)
+    static let carouselInactiveDot = Color.white.opacity(0.4)
 }
 
 // MARK: - App Layout
@@ -212,6 +218,13 @@ enum AppLayout {
     static let leadBackdropBlur: CGFloat = 40
     static let gridColumnMinimum: CGFloat = 300.0
     static let gridColumnMaximum: CGFloat = 420.0
+    /// Briefing hero carousel: arrow circle, page dots and the pointer target around a small control.
+    static let carouselControlSize: CGFloat = 32
+    static let carouselDotSize: CGFloat = 8
+    static let carouselActiveDotWidth: CGFloat = 16
+    static let minimumHitTarget: CGFloat = 44
+    /// World Tension strip: driving headlines take three columns on a wide board and two at the narrowest window.
+    static let tensionDriverMinimum: CGFloat = 260
     // Control and toolbar heights belong to the system (DESIGN.md 12).
 }
 

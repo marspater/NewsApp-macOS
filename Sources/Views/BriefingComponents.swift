@@ -114,10 +114,36 @@ enum BriefingFactExtractor {
     }
 }
 
+// MARK: - Story Details
+
+/// What the board reads from the library for its stories: one cited key fact per story from stored overview highlights
+/// and, for the carousel, the best image across each event's reports. The list loads it once per edition; nothing is
+/// generated here or at render time.
+struct BriefingStoryDetails: Equatable, Sendable {
+    var facts: [String: BriefingCitedFact] = [:]
+    var images: [String: URL] = [:]
+
+    @MainActor
+    static func load(for entries: [FeedEntry], heroIDs: Set<String>, store: ArticleStore) async -> Self {
+        var details = Self()
+        for entry in entries {
+            details.facts[entry.id] = await BriefingFactExtractor.extractFact(for: entry, store: store)
+            if heroIDs.contains(entry.id), case .event(let summary, let representative, let visible) = entry {
+                // The edition lists one report per event; the image may come from any of its reports, as on cards.
+                let members = (try? await store.storyMemberArticles(eventID: summary.eventID)) ?? []
+                details.images[entry.id] = FeedArticle.bestCardImage(in: [representative] + visible + members)
+            }
+            if Task.isCancelled { break }
+        }
+        return details
+    }
+}
+
 // MARK: - World Tension Strip Component
 
-/// The Briefing's World Tension strip (DESIGN.md 8.4): the reading, its state in the words the sidebar and the sheet
-/// use (#781), the 7-day trend and up to three driving headlines. Without a reading it says why, in the same words.
+/// The Briefing's World Tension strip (DESIGN.md 8.4): the reading under the page's one intelligence label, its state
+/// in the words the sidebar and the sheet use (#781), the 7-day trend and up to three driving headlines. Without a
+/// reading it says why, in the same words.
 struct BriefingTensionStripView: View {
     /// The window's model, so the strip cannot be handed anything but what the sidebar shows (#781).
     @Environment(WorldTensionModel.self) private var model
@@ -126,28 +152,34 @@ struct BriefingTensionStripView: View {
     @Environment(\.effectiveContrast) private var contrast
     @Environment(\.openURL) private var openURL
 
-    private static let driverMinWidthWide: CGFloat = 280
-    private static let driverMinWidthCompact: CGFloat = 260
-
     var body: some View {
         if let reading = state.reading {
             VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                // Top Row: Score + Level + 7-Day Sparkline
-                HStack(alignment: .center) {
-                    scoreHeader(reading)
+                HStack(alignment: .top, spacing: AppSpacing.md) {
+                    VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                        // The generated reading carries the board's one sparkles glyph (DESIGN.md 9).
+                        IntelligenceLabel("World Tension").font(AppTypography.headline)
+                            .accessibilityAddTraits(.isHeader)
+                        Text(state.note ?? "Assessed on this Mac")
+                            .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                        scoreHeader(reading)
+                    }
                     Spacer(minLength: AppSpacing.md)
-                    trendSparkline
+                    VStack(alignment: .trailing, spacing: AppSpacing.xxs) {
+                        EyebrowText("7-day trend")
+                        BriefingTensionSparklineView(readings: state.trend(days: 7), baseline: reading.assessment.score)
+                    }
                 }
                 // Why the reading is an estimate, stale or not refreshed, in the sheet's words.
                 if let explanation = state.explanation {
                     Text(explanation).font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Divider()
-
-                // Drivers Row: Key Drivers Grid
-                driversSection(reading)
+                let drivers = Array(reading.drivingHeadlines.prefix(3))
+                if !drivers.isEmpty {
+                    Divider()
+                    driversSection(drivers)
+                }
             }
             .padding(AppSpacing.md)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
@@ -187,7 +219,6 @@ struct BriefingTensionStripView: View {
                 .font(AppTypography.tensionReading)
                 .monospacedDigit()
                 .foregroundStyle(AppColor.primaryText)
-
             Label {
                 Text(reading.level.rawValue)
                     .font(AppTypography.sectionTitle)
@@ -197,10 +228,6 @@ struct BriefingTensionStripView: View {
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.tension(reading.level))
             }
-
-            if let note = state.note {
-                TagView(title: note, tint: AppColor.secondaryText)
-            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
@@ -208,46 +235,20 @@ struct BriefingTensionStripView: View {
                 + (state.note.map { ", \($0)" } ?? ""))
     }
 
-    private var trendSparkline: some View {
-        HStack(alignment: .center, spacing: AppSpacing.xs) {
-            EyebrowText("7-day trend")
-            BriefingTensionSparklineView(
-                readings: state.trend(days: 7), baseline: state.reading?.assessment.score ?? 50)
-        }
-    }
-
-    private func driversSection(_ reading: WorldTensionReading) -> some View {
-        let drivers = Array(reading.drivingHeadlines.prefix(3))
-        return VStack(alignment: .leading, spacing: AppSpacing.xs) {
+    /// Three columns on a wide board, two at the narrowest window, one below that.
+    private func driversSection(_ drivers: [WorldTensionHeadline]) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
             EyebrowText("Key drivers")
-
-            ViewThatFits(in: .horizontal) {
-                // Wide (>= 1100 pt): 3 columns
-                HStack(alignment: .top, spacing: AppSpacing.md) {
-                    ForEach(drivers, id: \.id) { driver in
-                        driverCard(driver)
-                            .frame(minWidth: Self.driverMinWidthWide, maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                // Compact (900–1099 pt): 2 columns
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: AppSpacing.sm),
-                        GridItem(.flexible(), spacing: AppSpacing.sm),
-                    ],
-                    spacing: AppSpacing.sm
-                ) {
-                    ForEach(drivers, id: \.id) { driver in
-                        driverCard(driver)
-                            .frame(minWidth: Self.driverMinWidthCompact, maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-                // Narrow (< 900 pt): 1 column
-                VStack(spacing: AppSpacing.xs) {
-                    ForEach(drivers, id: \.id) { driver in
-                        driverCard(driver)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+            LazyVGrid(
+                columns: [
+                    GridItem(
+                        .adaptive(minimum: AppLayout.tensionDriverMinimum), spacing: AppSpacing.md, alignment: .top)
+                ],
+                alignment: .leading,
+                spacing: AppSpacing.sm
+            ) {
+                ForEach(drivers, id: \.id) { driver in
+                    driverCell(driver)
                 }
             }
         }
@@ -255,7 +256,7 @@ struct BriefingTensionStripView: View {
 
     /// A driving headline opens its story in the browser, as in the sheet; panel stories need not be in the library.
     @ViewBuilder
-    private func driverCard(_ driver: WorldTensionHeadline) -> some View {
+    private func driverCell(_ driver: WorldTensionHeadline) -> some View {
         let cell = VStack(alignment: .leading, spacing: AppSpacing.textStack) {
             EyebrowText(driver.publisher)
             Text(driver.title)
@@ -265,11 +266,7 @@ struct BriefingTensionStripView: View {
                 .multilineTextAlignment(.leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(AppSpacing.xs)
-        .background(
-            AppColor.elevatedSurface,
-            in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous)
-        )
+        .contentShape(Rectangle())
         if let url = driver.webURL {
             Button {
                 openURL(url)
@@ -386,6 +383,9 @@ struct BriefingTileView: View {
         self.onToggleSave = onToggleSave
     }
 
+    /// Distinct publishers of the story's event, as on the hero and the event card's coverage row.
+    private var publisherCount: Int { eventSummary.map { max(1, $0.sources.count) } ?? 1 }
+
     private var appearance: BriefingTileAppearance {
         if isSelected {
             return BriefingTileAppearance(
@@ -424,10 +424,14 @@ struct BriefingTileView: View {
                 footerRow
             }
             .padding(AppSpacing.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            // Tiles of a row share its height, with footers on one line, as in the board design.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .contentShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            StoryContextMenuItems(article: article)
+        }
         .background(AppColor.surface)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
         .overlay(
@@ -467,7 +471,7 @@ struct BriefingTileView: View {
         Text(article.title)
             .font(AppTypography.headline)
             .foregroundStyle(isRead ? AppColor.secondaryText : AppColor.primaryText)
-            .lineLimit(2)
+            .lineLimit(2, reservesSpace: true)
             .multilineTextAlignment(.leading)
             .layoutPriority(1)
     }
@@ -475,7 +479,6 @@ struct BriefingTileView: View {
     @ViewBuilder
     private var footerRow: some View {
         HStack(spacing: AppSpacing.xs) {
-            let publisherCount = eventSummary?.members.count ?? 1
             if publisherCount > 1 {
                 TagView(title: "\(publisherCount) publishers", systemImage: "square.stack.3d.up")
             }
@@ -493,10 +496,10 @@ struct BriefingTileView: View {
     private var factOrSummaryView: some View {
         if let fact = citedFact, fact.isCited && !fact.text.isEmpty {
             VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-                Text("\"\(fact.text)\"")
+                Text("“\(fact.text)”")
                     .font(AppTypography.callout.italic())
                     .foregroundStyle(AppColor.primaryText)
-                    .lineLimit(3)
+                    .lineLimit(3, reservesSpace: true)
                     .multilineTextAlignment(.leading)
                 if let pub = fact.citationPublisher, !pub.isEmpty {
                     TagView(title: pub, tint: AppColor.secondaryText)
@@ -509,7 +512,7 @@ struct BriefingTileView: View {
                 Text(clean)
                     .font(AppTypography.callout)
                     .foregroundStyle(AppColor.secondaryText)
-                    .lineLimit(2)
+                    .lineLimit(3, reservesSpace: true)
                     .multilineTextAlignment(.leading)
             }
         }
@@ -520,6 +523,7 @@ struct BriefingTileView: View {
         let savedState = isSaved ? ", saved in your library" : ""
         var desc =
             "\(article.title), from \(article.publisherName), \(article.cardDateText()). \(readState)\(savedState)."
+            + (publisherCount > 1 ? " \(publisherCount) publishers." : "")
         if let fact = citedFact, fact.isCited && !fact.text.isEmpty {
             desc += " Quoting: \(fact.text)."
             if let pub = fact.citationPublisher, !pub.isEmpty {
