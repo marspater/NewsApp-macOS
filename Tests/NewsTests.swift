@@ -16437,6 +16437,38 @@ struct NewsTests {
         clock.advance(by: 6 * 3600 + 1)
         await relaunched.checkForUpdates(userInitiated: false)
         assertEqual(requests, 3, "The next automatic check runs once the window has passed")
+
+        // A backward clock correction leaves the saved attempt in the future; it counts as expired.
+        clock.advance(by: -3 * 86400)
+        await relaunched.checkForUpdates(userInitiated: false)
+        assertEqual(requests, 4, "A saved attempt in the future does not suppress checks")
+
+        // An update found before a relaunch stays available while the throttle skips the launch check.
+        let foundSuite = testDefaultsSuite("test.updatechecker.found")
+        let foundDefaults = UserDefaults(suiteName: foundSuite)!
+        defer { removeTestDefaults(foundSuite) }
+        MockURLProtocol.requestHandler = { request in
+            let payload = GitHubReleasePayload(
+                tagName: "v2.1.0", name: nil,
+                htmlUrl: "https://github.com/marspater/NewsApp-macOS/releases/tag/v2.1.0", body: "notes",
+                publishedAt: nil)
+            return (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"])!, try! JSONEncoder().encode(payload)
+            )
+        }
+        let finder = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: foundDefaults)
+        await finder.checkForUpdates(userInitiated: false)
+        assertTrue(finder.updateAvailable, "The check finds the newer release")
+        let restored = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: foundDefaults)
+        assertTrue(restored.updateAvailable, "A relaunch inside the window still offers the found update")
+        assertEqual(restored.latestVersionString, "v2.1.0", "The restored update names its version")
+        let upgraded = UpdateChecker(
+            httpClient: client, now: { clock.now }, currentAppVersion: "2.1.0", defaults: foundDefaults)
+        assertFalse(upgraded.updateAvailable, "Once the app has that version, nothing is offered")
     }
 
     @MainActor
@@ -16828,14 +16860,10 @@ struct NewsTests {
 
         // 1b. Severe backward leap (30 days in the past)
         testClock.advance(by: -(30 * 86400))
-        await checker.checkForUpdates(userInitiated: false)
-        assertEqual(networkRequestCount, 2, "Automatic check is throttled during large backward leap")
-
-        // User manual check bypasses throttle and resynchronizes lastCheckDate to rolled-back clock
         let rolledBackTime = testClock.now
-        await checker.checkForUpdates(userInitiated: true)
-        assertEqual(networkRequestCount, 3, "User-initiated check executes and resets lastCheckDate")
-        assertEqual(checker.lastCheckDate, rolledBackTime, "lastCheckDate matches current rolled-back clock")
+        await checker.checkForUpdates(userInitiated: false)
+        assertEqual(networkRequestCount, 3, "A saved attempt far in the future counts as expired")
+        assertEqual(checker.lastCheckDate, rolledBackTime, "lastCheckDate resynchronizes to the rolled-back clock")
 
         // Check within 6 hours of new rolled-back time is throttled
         testClock.advance(by: 3600)
@@ -17215,6 +17243,9 @@ struct NewsTests {
             let resHTTP = try await addIntentHTTP.perform()
             assertEqual(resHTTP.value, true, "HTTP feed subscription succeeds via HTTPS upgrade")
             assertTrue(addSettings.hasFeed("https://insecure-feed.org/feed.xml"), "Feed was upgraded to HTTPS")
+            assertTrue(
+                extractDialogText(from: resHTTP)?.contains("https://insecure-feed.org/feed.xml") == true,
+                "The dialog names the upgraded address that was subscribed")
             assertFalse(addSettings.hasFeed("http://insecure-feed.org/feed.xml"), "HTTP URL was not preserved")
         } catch {
             assertTrue(false, "AddFeedIntent HTTP upgrade threw: \(error)")

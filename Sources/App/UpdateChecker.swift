@@ -95,6 +95,7 @@ final class UpdateChecker: ObservableObject {
     private let defaults: UserDefaults?
     private static let lastAttemptKey = "updateCheckLastAttempt"
     /// The last automatic or manual attempt, successful or not. Failures throttle too (#798).
+    /// A date more than the window ahead of the clock (a backward correction) counts as expired.
     private var lastAttemptDate: Date?
 
     init(
@@ -108,6 +109,24 @@ final class UpdateChecker: ObservableObject {
         self.customAppVersion = currentAppVersion
         self.defaults = defaults
         self.lastAttemptDate = defaults?.object(forKey: Self.lastAttemptKey) as? Date
+        restoreFoundRelease()
+    }
+
+    private static let foundReleaseKey = "updateCheckFoundRelease"
+
+    /// A relaunch inside the throttle window skips the launch check, so the update it found stays available.
+    /// The release is compared with the running version again, so an app updated since then shows nothing.
+    private func restoreFoundRelease() {
+        guard let saved = defaults?.dictionary(forKey: Self.foundReleaseKey) as? [String: String],
+            let tag = saved["tag"], let remote = SemanticVersion.parse(tag),
+            let local = SemanticVersion.parse(currentAppVersion), remote > local,
+            let link = saved["url"], let url = URL(string: link), Self.isValidReleaseURL(url)
+        else { return }
+        updateAvailable = true
+        latestVersionString = tag
+        releaseNotes = saved["body"]
+        verifiedReleaseURL = url
+        statusMessage = "Version \(tag) available"
     }
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "UpdateChecker")
@@ -120,7 +139,9 @@ final class UpdateChecker: ObservableObject {
     /// Checks for newer releases on GitHub.
     /// - Parameter userInitiated: If true, bypasses the 6-hour cache.
     func checkForUpdates(userInitiated: Bool = false) async {
-        if !userInitiated, let last = lastAttemptDate, now().timeIntervalSince(last) < minimumCheckInterval {
+        if !userInitiated, let last = lastAttemptDate,
+            case let elapsed = now().timeIntervalSince(last), abs(elapsed) < minimumCheckInterval
+        {
             logger.debug("Skipping automatic update check; cached within 6-hour window.")
             return
         }
@@ -196,9 +217,13 @@ final class UpdateChecker: ObservableObject {
                 self.releaseNotes = payload.body
                 self.verifiedReleaseURL = targetURL
                 self.statusMessage = "Version \(payload.tagName) available"
+                defaults?.set(
+                    ["tag": payload.tagName, "url": payload.htmlUrl, "body": payload.body ?? ""],
+                    forKey: Self.foundReleaseKey)
                 logger.info("Newer release found: \(payload.tagName)")
             } else {
                 self.updateAvailable = false
+                defaults?.removeObject(forKey: Self.foundReleaseKey)
                 self.statusMessage = "NewsApp is up to date (v\(self.currentAppVersion))"
                 logger.info("NewsApp is up to date.")
             }

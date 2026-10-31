@@ -160,14 +160,15 @@ class FeedManager: NSObject, ObservableObject {
     // MARK: - Feed URL Management (delegates to AppSettings)
 
     @discardableResult
-    func addFeed(url: String) -> Bool {
-        if let added = appSettings.addFeed(url: url) {
-            cancelRefresh()
-            feedStatuses[added] = .idle
-            fetchFeeds()
-            return true
-        }
-        return false
+    func addFeed(url: String) -> Bool { addFeedNormalized(url: url) != nil }
+
+    /// Adds the feed and returns the address actually subscribed (insecure HTTP may have been upgraded).
+    func addFeedNormalized(url: String) -> String? {
+        guard let added = appSettings.addFeed(url: url) else { return nil }
+        cancelRefresh()
+        feedStatuses[added] = .idle
+        fetchFeeds()
+        return added
     }
 
     /// Subscribes to catalog feeds the user chose; one refresh covers the whole batch.

@@ -115,8 +115,8 @@ public struct AddFeedIntent: AppIntent {
         }
         // Through the manager, like the app's own Add Feed, so the feed is fetched at once and gets a status entry.
         let manager = feedManager ?? IntentDependencyResolver.resolveFeedManager()
-        if manager.addFeed(url: url.absoluteString) {
-            return .result(value: true, dialog: "Subscribed to feed: \(url.absoluteString)")
+        if let added = manager.addFeedNormalized(url: url.absoluteString) {
+            return .result(value: true, dialog: "Subscribed to feed: \(added)")
         } else {
             return .result(
                 value: false, dialog: "Could not subscribe to feed. The URL may be invalid or already subscribed.")
