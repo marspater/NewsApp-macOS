@@ -538,7 +538,10 @@ struct ArticleListView: View {
         } catch is CancellationError {
             // A newer query owns the results.
         } catch {
-            if queryRunID == runID { queryError = "Could not load stories. Please try again." }
+            guard queryRunID == runID else { return }
+            queryError = "Could not load stories. Please try again."
+            // The masthead must not keep totals from before a reload that failed.
+            if !isPaging { listTotals = nil }
         }
     }
 
