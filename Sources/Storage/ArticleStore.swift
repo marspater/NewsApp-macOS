@@ -66,6 +66,8 @@ final class ArticleStore: ObservableObject {
             }
             self.isReady = await refreshState()
             if !isReady { operationError = "Stored articles could not be loaded. Please try again." }
+            // Only the app's own library owns the Spotlight domain; a restore relaunches into this path (#812).
+            if isReady, database === DatabaseEngine.shared { await rebuildSpotlightIndex() }
         } catch {
             self.databaseHealthNotice = await database.databaseHealthNotice()
             isReady = false
@@ -290,6 +292,13 @@ final class ArticleStore: ObservableObject {
         }
         await spotlightIndexer.removeAllSavedArticles()
         await refreshState()
+    }
+
+    /// Replaces the saved-stories Spotlight domain with exactly the stories the open library holds (#812).
+    /// Run at launch, which is also where a restored library first opens, so entries of the previous library go.
+    func rebuildSpotlightIndex() async {
+        await spotlightIndexer.removeAllSavedArticles()
+        for article in savedArticles { await spotlightIndexer.indexSavedArticle(article) }
     }
 
     // MARK: - Enrichment
