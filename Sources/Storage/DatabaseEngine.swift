@@ -2959,14 +2959,30 @@ actor DatabaseEngine {
         }
     }
 
-    func markAllRead(feedUrl: String? = nil) throws {
+    func markAllRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) throws {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
-        let sql =
-            "UPDATE article_state SET is_read = 1, read_at = ?"
-            + (feedUrl == nil ? ";" : " WHERE article_id IN (SELECT article_id FROM article_feeds WHERE feed_url = ?);")
+        // Only unread stories the reading feed shows: earlier read times stay as they were, and reconciled
+        // originals, muted stories and analysis-only panel reports stay as they are (marking a panel report read would
+        // surface it in History; a muted one would count as a reading interest).
+        let collection = collectionScope()
+        var params: [QueryParameter] = [("double", Date().timeIntervalSince1970)] + collection.params
+        var sql = """
+            UPDATE article_state SET is_read = 1, read_at = ?
+            WHERE is_read = 0 AND article_id IN (
+                SELECT a.id FROM articles a WHERE \(Self.visibleArticle)\(collection.sql)
+            """
+        if let feedUrl {
+            sql += " AND a.id IN (SELECT article_id FROM article_feeds WHERE feed_url = ?)"
+            params.append(("text", feedUrl))
+        }
+        if !muting.isEmpty {
+            sql += " AND NOT \(Self.mutedArticle)"
+            params += Self.mutingParameters(muting)
+        }
+        sql += ");"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             throw NSError(
@@ -2974,8 +2990,7 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
         defer { sqlite3_finalize(stmt) }
-        sqlite3_bind_double(stmt, 1, Date().timeIntervalSince1970)
-        if let feedUrl { sqlite3_bind_text(stmt, 2, feedUrl, -1, Self.sqliteTransient) }
+        bind(params, to: stmt)
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw NSError(
                 domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)),
