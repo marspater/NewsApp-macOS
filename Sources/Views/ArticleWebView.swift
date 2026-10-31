@@ -244,8 +244,10 @@ struct ArticleWebView: NSViewRepresentable {
                 // Retry the address that failed, never the page still in history: with story A shown, a failed
                 // load of story B must not reload A under B's reader.
                 let failed = ((error as NSError).userInfo[NSURLErrorFailingURLErrorKey] as? URL) ?? parent.url
+                let story = parent.url
                 prepareGateway(webView) { [weak self, weak webView] in
-                    guard let self, let webView, self.webView === webView else { return }
+                    // The reader may have moved to another story while the gateway was refreshed.
+                    guard let self, let webView, self.webView === webView, self.parent.url == story else { return }
                     self.parent.loadError = nil
                     webView.load(URLRequest(url: failed))
                 }
