@@ -218,7 +218,8 @@ private final class WorldTensionQADelegate: NSObject, NSApplicationDelegate {
         settings.aiEnabled = true
         settings.tensionCollectionOptIn = true
         let sheet = show(
-            TensionIndexView(history: readings).environmentObject(settings).environmentObject(store),
+            TensionIndexView().environment(
+                WorldTensionModel(state: WorldTensionState(history: readings, loadedAt: now))),
             size: NSSize(width: AppLayout.tensionSheetWidth, height: AppLayout.tensionSheetHeight),
             title: "News — World Tension QA")
         try await Task.sleep(for: .milliseconds(500))

@@ -201,23 +201,17 @@ struct BriefingTileGridView: View {
 struct BriefingView: View {
     let entries: [FeedEntry]
     let briefing: FiniteBriefing?
-    let tensionReading: WorldTensionReading?
-    let tensionHistory: [WorldTensionReading]
     let clock: any CarouselClock
     let actions: BriefingActions
 
     init(
         entries: [FeedEntry],
         briefing: FiniteBriefing?,
-        tensionReading: WorldTensionReading?,
-        tensionHistory: [WorldTensionReading],
         clock: any CarouselClock = ContinuousCarouselClock(),
         actions: BriefingActions
     ) {
         self.entries = entries
         self.briefing = briefing
-        self.tensionReading = tensionReading
-        self.tensionHistory = tensionHistory
         self.clock = clock
         self.actions = actions
     }
@@ -235,11 +229,8 @@ struct BriefingView: View {
                     )
                 }
 
-                // Tension Strip
-                BriefingTensionStripView(
-                    reading: tensionReading,
-                    history: tensionHistory
-                )
+                // Tension Strip: reads the window's World Tension model (#781)
+                BriefingTensionStripView()
 
                 // Tiles Grid
                 BriefingTileGridView(

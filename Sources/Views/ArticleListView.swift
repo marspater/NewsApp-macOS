@@ -886,8 +886,6 @@ struct ArticleListView: View {
             BriefingView(
                 entries: listed,
                 briefing: briefing,
-                tensionReading: nil,
-                tensionHistory: [],
                 actions: BriefingActions(
                     onOpenArticle: { article in openArticle(article) },
                     onOpenEvent: { event in
