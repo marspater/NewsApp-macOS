@@ -226,6 +226,13 @@ enum BriefingIntelligenceTests {
         check(
             BriefingSitrepComposer.keepsQualifiers("Officials denied damage.", facts: [negated[0].text]),
             "A sentence keeping the negation passes")
+        check(
+            !BriefingSitrepComposer.keepsQualifiers(
+                "Officials confirmed damage to the port.", facts: ["Officials didn\u{2019}t confirm any damage."]),
+            "A contraction counts as negation")
+        check(
+            !BriefingSitrepComposer.keepsQualifiers("Ships were damaged.", facts: ["Officials cannot confirm damage."]),
+            "cannot counts as negation")
         let hedged = [BriefingSitrepComposer.Highlight(text: "Residents may evacuate the coast.", publisher: nil)]
         let certain = await BriefingSitrepComposer.compose(
             title: "Corridor", highlights: hedged,
