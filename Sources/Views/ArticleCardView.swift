@@ -445,7 +445,7 @@ struct StoryContextMenuItems<TrailingContent: View>: View {
             Label("Copy Link", systemImage: "link")
         }
 
-        if let url = URL(string: article.link) {
+        if let url = WebLink.url(article.link) {
             Button {
                 NSWorkspace.shared.open(url)
             } label: {
