@@ -86,7 +86,10 @@ struct ArticleWebView: NSViewRepresentable {
             case .goForward:
                 if nsView.canGoForward { nsView.goForward() }
             case .reload:
-                if context.coordinator.gatewayReady {
+                // A reload the reader asked for may retry a failure once more.
+                context.coordinator.hasRetriedProvisionalFailure = false
+                context.coordinator.prepareGateway(nsView) { [weak nsView] in
+                    guard let nsView else { return }
                     // After a blocked or failed first load there is no page to reload; request the story again.
                     if nsView.backForwardList.currentItem == nil {
                         DispatchQueue.main.async { self.loadError = nil }
@@ -94,8 +97,6 @@ struct ArticleWebView: NSViewRepresentable {
                     } else {
                         nsView.reload()
                     }
-                } else {
-                    context.coordinator.prepareGateway(nsView)
                 }
             }
             DispatchQueue.main.async {
@@ -121,20 +122,37 @@ struct ArticleWebView: NSViewRepresentable {
         private var activeNavigation: WKNavigation?
         var gatewayReady = false
         var gatewayTask: Task<Void, Never>?
+        private var configuredPort: UInt16?
+        private var contentRulesConfigured = false
+        /// A failed provisional load retries once after re-checking the gateway; the flag clears on a finished
+        /// page or a reload the reader asks for, never on the retry itself, so a persistent failure cannot loop.
+        var hasRetriedProvisionalFailure = false
 
-        func prepareGateway(_ view: WKWebView) {
+        func prepareGateway(_ view: WKWebView, then onReady: (@MainActor () -> Void)? = nil) {
             gatewayTask?.cancel()
             parent.isLoading = true
             gatewayTask = Task { [weak self, weak view] in
                 do {
-                    let proxy = try await NetworkBoundaryProxy.shared.configuration()
-                    let rules = try await WebPreviewPolicy.contentRules()
+                    let port = try await NetworkBoundaryProxy.shared.port()
+                    let needsRules = !(self?.contentRulesConfigured ?? true)
+                    let rules = needsRules ? try await WebPreviewPolicy.contentRules() : nil
                     guard !Task.isCancelled, let self, let view, self.webView === view else { return }
-                    view.configuration.userContentController.add(rules)
-                    view.configuration.websiteDataStore.proxyConfigurations = [proxy]
+                    if let rules {
+                        view.configuration.userContentController.add(rules)
+                        self.contentRulesConfigured = true
+                    }
+                    if WebPreviewPolicy.needsProxyRefresh(configuredPort: self.configuredPort, currentPort: port) {
+                        let proxy = NetworkBoundaryProxy.configuration(port: port)
+                        view.configuration.websiteDataStore.proxyConfigurations = [proxy]
+                        self.configuredPort = port
+                    }
                     self.gatewayReady = true
-                    self.currentRequestedURL = self.parent.url
-                    view.load(URLRequest(url: self.parent.url))
+                    if let onReady {
+                        onReady()
+                    } else {
+                        self.currentRequestedURL = self.parent.url
+                        view.load(URLRequest(url: self.parent.url))
+                    }
                 } catch {
                     guard !Task.isCancelled, let self, let view, self.webView === view else { return }
                     self.parent.isLoading = false
@@ -197,6 +215,7 @@ struct ArticleWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             guard self.webView === webView, navigation === activeNavigation else { return }
+            hasRetriedProvisionalFailure = false
             parent.isLoading = false
             updateHistory(webView)
         }
@@ -221,6 +240,21 @@ struct ArticleWebView: NSViewRepresentable {
         func webView(
             _ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error
         ) {
+            guard self.webView === webView, navigation === activeNavigation else { return }
+            if (error as NSError).code != NSURLErrorCancelled, !hasRetriedProvisionalFailure {
+                hasRetriedProvisionalFailure = true
+                // Retry the address that failed, never the page still in history: with story A shown, a failed
+                // load of story B must not reload A under B's reader.
+                let failed = ((error as NSError).userInfo[NSURLErrorFailingURLErrorKey] as? URL) ?? parent.url
+                let story = parent.url
+                prepareGateway(webView) { [weak self, weak webView] in
+                    // The reader may have moved to another story while the gateway was refreshed.
+                    guard let self, let webView, self.webView === webView, self.parent.url == story else { return }
+                    self.parent.loadError = nil
+                    webView.load(URLRequest(url: failed))
+                }
+                return
+            }
             didFail(webView, navigation: navigation, error: error)
         }
     }

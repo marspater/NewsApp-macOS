@@ -2291,6 +2291,22 @@ struct NewsTests {
         }
         task.cancel()
 
+        // Proxy refresh is required whenever the gateway listener port changes (#807).
+        assertTrue(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: nil, currentPort: 8080),
+            "Unconfigured port needs refresh")
+        assertTrue(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: 8080, currentPort: 8081), "Changed port needs refresh")
+        assertFalse(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: 8080, currentPort: 8080),
+            "Unchanged port does not refresh")
+        assertTrue(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: UInt16(8080), currentPort: UInt16(8081)),
+            "UInt16 changed port needs refresh")
+        assertFalse(
+            WebPreviewPolicy.needsProxyRefresh(configuredPort: UInt16(8080), currentPort: UInt16(8080)),
+            "UInt16 unchanged port does not refresh")
+
         // A refused subframe is dropped quietly; only a refused main frame reports an error (#802).
         var insecureRefused = false
         do { try await SecureHTTPClient.shared.validateDestination(URL(string: "http://example.com/frame")!) } catch {
