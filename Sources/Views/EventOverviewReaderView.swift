@@ -899,7 +899,7 @@ struct EventOverviewReaderView: View {
                         .accessibilityLabel(
                             Self.readArticleAccessibilityLabel(title: article.title, source: article.publisherName))
 
-                        if let url = URL(string: article.link) {
+                        if let url = WebLink.url(article.link) {
                             Button {
                                 NSWorkspace.shared.open(url)
                             } label: {

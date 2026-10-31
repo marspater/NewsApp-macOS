@@ -11,7 +11,6 @@ struct ArticleDetailView: View {
 
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var articleStore: ArticleStore
-    @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var themeManager: ThemeManager
@@ -168,7 +167,9 @@ struct ArticleDetailView: View {
                 guard summaryExpanded else { return }
                 await startArticleAnalysis()
             }
-            .task(id: "\(activeArticle.id):\(articleStore.revision)") {
+            // Publisher updates are recorded only when the story's publisher input changes; other stories'
+            // writes leave them as they are (#778).
+            .task(id: "\(activeArticle.id):\(currentArticle.publisherInputHash)") {
                 let id = activeArticle.id
                 let revisions = try? await articleStore.database.publisherContentRevisions(for: id)
                 guard !Task.isCancelled, activeArticle.id == id else { return }
@@ -729,7 +730,8 @@ struct ArticleDetailView: View {
         .environment(
             \.openURL,
             OpenURLAction { url in
-                guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return .systemAction }
+                // A link of any other scheme in an article is not opened at all (#799).
+                guard let url = WebLink.url(url.absoluteString) else { return .discarded }
                 NSWorkspace.shared.open(url)
                 return .handled
             })
@@ -1140,7 +1142,7 @@ struct ArticleDetailView: View {
     }
 
     private func openInBrowser() {
-        if let url = URL(string: currentArticle.link) {
+        if let url = WebLink.url(currentArticle.link) {
             NSWorkspace.shared.open(url)
         }
     }
@@ -1588,7 +1590,7 @@ struct ArticleDetailView: View {
         }
 
         let eventID = summary.eventID
-        let membershipVersion = summary.membershipVersion
+        let membershipVersion = summary.eventVersion
 
         if let existing = currentOverview,
             existing.eventID == eventID,

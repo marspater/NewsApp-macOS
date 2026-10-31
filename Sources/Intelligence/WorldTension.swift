@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 enum WorldTensionFactor: String, CaseIterable, Codable, Sendable {
     case novelty = "Novelty"
@@ -13,6 +14,13 @@ struct WorldTensionHeadline: Codable, Equatable, Sendable {
     let publisher: String
     /// The story link, so the sheet can open what drives the score. Never sent to the model.
     var link: String? = nil
+
+    /// The link when it is a web address a surface may open in the browser.
+    var webURL: URL? {
+        guard let url = link.flatMap({ URL(string: $0) }), ["http", "https"].contains(url.scheme?.lowercased())
+        else { return nil }
+        return url
+    }
 }
 
 struct WorldTensionAssessment: Codable, Equatable, Sendable {
@@ -288,6 +296,12 @@ struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
     let headlines: [WorldTensionHeadline]
     var assessment: WorldTensionAssessment
     var id: Date { TensionMethodology.day(containing: evaluatedAt).start }
+
+    /// The reading of the UTC day containing `day`, never a neighbouring day's.
+    static func reading(on day: Date, in readings: [WorldTensionReading]) -> WorldTensionReading? {
+        let start = TensionMethodology.day(containing: day).start
+        return readings.first { $0.id == start }
+    }
     var level: TensionLevel { TensionLevel(index: Double(assessment.score)) }
 
     /// The current headlines behind the score. Model-named drivers count only when the explanation shares a word with
@@ -304,6 +318,17 @@ struct WorldTensionReading: Codable, Equatable, Sendable, Identifiable {
         let ranked = current.map { ($0, WorldTensionAssessment.weight(of: $0)) }.filter { $0.1 > 0 }
         return ranked.sorted { $0.1 > $1.1 }.prefix(3).map(\.0)
     }
+
+    /// A keyword estimate that stands in while the model cannot assess the headlines; it is never saved and the model is
+    /// asked again next time. A saved estimate is the day's reading for headlines the model declined (#523).
+    var isProvisionalEstimate: Bool { assessment.isEstimate == true && inputHash.hasSuffix(":estimate") }
+
+    /// The UTC day the reading belongs to, as the trend's axis labels it ("Oct 28").
+    var dayText: String {
+        var style = Date.FormatStyle.dateTime.month(.abbreviated).day()
+        style.timeZone = .gmt
+        return id.formatted(style)
+    }
 }
 
 enum WorldTensionError: LocalizedError {
@@ -311,7 +336,7 @@ enum WorldTensionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .rejected:
-            return "The on-device model declined these headlines. A keyword estimate stands in until they change."
+            return "The on-device model declined today's headlines. It is asked again when new headlines arrive."
         case .disabled: return "Enable on-device AI and panel collection to assess World Tension."
         case .deferred: return "Assessment is paused while Low Power Mode or thermal limits are active."
         case .insufficientCoverage:
@@ -575,4 +600,162 @@ actor WorldTensionService {
         throw parsed ? WorldTensionError.unsupported : WorldTensionError.generationFailed
     }
 
+}
+
+/// The one World Tension state of a window (#781). `MainView` owns it, reloads it and puts it in the environment once;
+/// the sidebar foot, the Briefing strip and the sheet read it there, so they cannot disagree, and the story list never
+/// takes it as an input, so a reload does not re-evaluate the list.
+@MainActor @Observable final class WorldTensionModel {
+    var state: WorldTensionState
+
+    init(state: WorldTensionState = WorldTensionState()) {
+        self.state = state
+    }
+}
+
+/// What every World Tension surface shows (#781): one value, held by `WorldTensionModel`.
+struct WorldTensionState: Equatable, Sendable {
+    enum Status: Equatable, Sendable {
+        /// AI story analysis or panel collection is off: nothing is assessed or shown.
+        case aiOff, collectionOff
+        /// No reading yet: the first assessment is running or has not started.
+        case assessing
+        /// Today's (UTC) on-device assessment.
+        case assessed
+        /// Today's keyword estimate, shown because the model could not assess the headlines.
+        case estimate
+        /// The newest reading belongs to an earlier UTC day.
+        case stale
+        /// No reading exists and the assessment failed.
+        case unavailable
+    }
+
+    var aiEnabled = true
+    var collectionEnabled = true
+    /// Readings as shown (methodology v3), oldest first.
+    var history: [WorldTensionReading] = []
+    /// When the state was loaded; its UTC day decides whether the newest reading is today's.
+    var loadedAt = Date()
+    /// Why the last assessment did not complete, in words for the reader; nil when it completed.
+    var problem: String?
+    /// Today's panel headlines when today has no reading, so the sheet can show what is waiting to be assessed.
+    var panelHeadlines: [WorldTensionHeadline] = []
+    var isLoading = false
+
+    private var today: Date { TensionMethodology.day(containing: loadedAt).start }
+
+    var status: Status {
+        guard aiEnabled else { return .aiOff }
+        guard collectionEnabled else { return .collectionOff }
+        guard let latest = history.last else { return problem == nil || isLoading ? .assessing : .unavailable }
+        if latest.id < today { return .stale }
+        return latest.assessment.isEstimate == true ? .estimate : .assessed
+    }
+
+    /// The reading every surface shows, nil when there is none to show.
+    var reading: WorldTensionReading? { aiEnabled && collectionEnabled ? history.last : nil }
+
+    /// The state in a few words, the same on every surface: the sidebar's second line, the Briefing strip's tag and the
+    /// sheet's caption. Nil for today's assessment, which needs no qualifier.
+    var note: String? {
+        switch status {
+        case .aiOff: return "AI story analysis is off"
+        case .collectionOff: return "Panel collection is off"
+        case .assessing: return "Assessing headlines"
+        case .assessed: return nil
+        case .estimate: return "Keyword estimate"
+        case .stale: return "Reading from \(staleDay)"
+        case .unavailable: return "Assessment unavailable"
+        }
+    }
+
+    /// The note as a title, for the sheet's empty state.
+    var heading: String {
+        switch status {
+        case .aiOff: return "AI Story Analysis Is Off"
+        case .collectionOff: return "Panel Collection Is Off"
+        case .assessing: return "Assessing Headlines"
+        case .unavailable: return "Assessment Unavailable"
+        case .assessed, .estimate, .stale: return "World Tension"
+        }
+    }
+
+    /// One sentence on why the state is what it is and what happens next; nil for an assessment that stands.
+    var explanation: String? {
+        switch status {
+        case .aiOff: return "Turn on AI story analysis in Settings → Intelligence to assess World Tension."
+        case .collectionOff: return "Turn on panel feed collection in Settings → Intelligence to assess World Tension."
+        case .assessing: return "Today's international panel headlines are being assessed on this Mac."
+        case .assessed:
+            return problem == nil
+                ? nil : "The latest headlines could not be assessed, so today's earlier assessment stands."
+        case .estimate:
+            return history.last?.isProvisionalEstimate == true
+                ? "The on-device model could not assess today's headlines. A keyword estimate stands in, and the model is asked again after the next refresh."
+                : "The on-device model declined today's headlines. A keyword estimate stands in until new headlines arrive."
+        case .stale, .unavailable:
+            // A running assessment outranks the previous run's failure.
+            if isLoading { return "Today's international panel headlines are being assessed on this Mac." }
+            return problem ?? "Today's headlines have not been assessed yet."
+        }
+    }
+
+    /// The newest reading's UTC day in words, the measure staleness uses: "yesterday", else its day ("Oct 28"). A
+    /// reading made at 23:30 UTC is yesterday's at 00:05 UTC, however few minutes have passed.
+    private var staleDay: String {
+        guard let latest = history.last else { return "" }
+        return today.timeIntervalSince(latest.id) <= 86400 ? "yesterday" : latest.dayText
+    }
+
+    /// The readings of the last `days` UTC days, today included.
+    func trend(days: Int) -> [WorldTensionReading] {
+        let start = today.addingTimeInterval(-Double(days - 1) * 86400)
+        return history.filter { $0.id >= start }
+    }
+
+    /// Chart series for `readings`: a new one starts after a missing day or a model change, so a line never bridges a
+    /// gap in the history.
+    static func segments(_ readings: [WorldTensionReading]) -> [Int] {
+        var segment = 0
+        return readings.indices.map { index in
+            if index > 0,
+                readings[index].id.timeIntervalSince(readings[index - 1].id) > 86400
+                    || readings[index].modelGeneration != readings[index - 1].modelGeneration
+            {
+                segment += 1
+            }
+            return segment
+        }
+    }
+
+    /// Assesses the day through `service` and gathers what the surfaces show. When the assessment fails, the stored
+    /// history (as shown, methodology v3) stays with the reason, plus today's panel headlines when today has no reading.
+    /// Only cancellation throws.
+    static func load(
+        service: WorldTensionService, database: DatabaseEngine, now: Date, aiEnabled: Bool, collectionEnabled: Bool,
+        force: Bool = false
+    ) async throws -> Self {
+        var state = Self(aiEnabled: aiEnabled, collectionEnabled: collectionEnabled, loadedAt: now)
+        guard aiEnabled, collectionEnabled else { return state }
+        do {
+            state.history = try await service.assess(
+                database: database, now: now, aiEnabled: aiEnabled, collectionEnabled: collectionEnabled, force: force)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            try Task.checkCancellation()
+            state.problem =
+                (error as? WorldTensionError)?.errorDescription
+                ?? "The assessment could not be completed. It is tried again after the next refresh."
+            state.history = WorldTensionSmoothing.displayed((try? await database.worldTensionHistory()) ?? [])
+            if state.history.last.map({ $0.id < state.today }) ?? true {
+                let rows = try? await database.tensionCorpus(
+                    day: DateInterval(start: now.addingTimeInterval(-86400), end: now),
+                    feedURLs: TensionMethodology.v1.panel.map(\.url))
+                state.panelHeadlines = WorldTensionService.headlines(rows ?? [], prefix: "C", limit: 12)
+            }
+        }
+        try Task.checkCancellation()
+        return state
+    }
 }

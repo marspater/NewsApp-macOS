@@ -19,8 +19,6 @@ struct SidebarView: View {
     @Binding var mastheadNotice: MastheadNotice?
     /// Panel collection is on, so the sidebar foot shows the news tension reading.
     var showsTensionReading = false
-    var tensionReading: WorldTensionReading?
-    var tensionStatus = "Not assessed"
     var openTension: () -> Void = {
         // Default no-op action
     }
@@ -61,7 +59,7 @@ struct SidebarView: View {
             if showsTensionReading {
                 VStack(spacing: 0) {
                     Divider()
-                    TensionSidebarButton(reading: tensionReading, open: openTension, status: tensionStatus)
+                    TensionSidebarButton(open: openTension)
                         .padding(.horizontal, AppLayout.sidebarInset)
                         .padding(.vertical, AppSpacing.xs)
                 }
@@ -274,7 +272,7 @@ struct SidebarView: View {
         if feedManager.addFeed(url: urlString) {
             showConfirmation("Subscribed to \(URL(string: urlString)?.host ?? "feed")")
         } else {
-            feedManager.articleStore.operationError = "Feed not added. Check the URL or whether you already subscribe."
+            feedManager.articleStore.operationError = AppSettings.addFeedFailureMessage(for: urlString)
         }
     }
 

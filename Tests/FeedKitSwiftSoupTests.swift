@@ -223,6 +223,65 @@ enum FeedKitSwiftSoupTests {
             FeedXMLParser(data: Data(rdf.utf8), feedURL: base).parse().first?.title == "RDF report",
             "FeedKit maps a Dublin Core title not handled by the compatibility parser")
 
+        // #795: podcast and aggregator vocabularies never append to the item's own fields.
+        let podcast = """
+            <rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:googleplay="http://www.google.com/schemas/play-podcasts/1.0">
+            <channel><title>Show</title><itunes:title>Show again</itunes:title><item><title>Episode one</title>
+            <itunes:title>Episode one</itunes:title><link>https://example.com/episode</link>
+            <description>Desc text here</description><itunes:summary>Desc text here</itunes:summary>
+            <googleplay:description>Desc text here</googleplay:description></item></channel></rss>
+            """
+        let episode = FeedXMLParser(data: Data(podcast.utf8), feedURL: base).parse().first
+        check(
+            episode?.title == "Episode one" && episode?.description == "Desc text here",
+            "itunes and googleplay elements do not append to the item's title or summary")
+        check(episode?.source == "Show", "A channel itunes:title does not append to the channel title")
+        let aggregated = """
+            <feed xmlns="http://www.w3.org/2005/Atom"><title>Planet</title><entry><title>Real headline</title>
+            <link href="https://example.com/real"/><id>urn:real</id><summary>Entry summary</summary>
+            <source><title>Origin Blog</title><subtitle>Origin summary</subtitle></source></entry></feed>
+            """
+        let entry = FeedXMLParser(data: Data(aggregated.utf8), feedURL: base).parse().first
+        check(
+            entry?.title == "Real headline" && entry?.description == "Entry summary",
+            "An Atom entry's source title and subtitle stay out of the entry")
+        let sourcedContent = """
+            <feed xmlns="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+            <title>Planet</title><entry><title>Sourced</title><link href="https://example.com/sourced"/>
+            <id>urn:sourced</id><source><title>Origin</title><content:encoded>Origin feed text</content:encoded></source>
+            </entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(sourcedContent.utf8), feedURL: base).parse().first?.fullContent?
+                .contains("Origin feed text") != true,
+            "Content inside an Atom entry's source stays out of the entry's text")
+        let sourcedLink = """
+            <feed xmlns="http://www.w3.org/2005/Atom"><title>Planet</title><entry><title>Linked</title>
+            <id>urn:linked</id><source><link href="https://origin.example/"/><title>Origin</title></source>
+            <link href="https://example.com/linked"/></entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(sourcedLink.utf8), feedURL: base).parse().first?.link
+                == "https://example.com/linked",
+            "A link inside an Atom entry's source does not become the entry's link")
+        let sourcedCategory = """
+            <feed xmlns="http://www.w3.org/2005/Atom"><title>Planet</title><entry><title>Tagged</title>
+            <id>urn:tagged</id><source><category term="Origin"/><title>Origin</title></source>
+            <category term="News"/><link href="https://example.com/tagged"/></entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(sourcedCategory.utf8), feedURL: base).parse().first?.category == "News",
+            "A category inside an Atom entry's source does not block the entry's own category")
+        let vendorNested = """
+            <rss version="2.0" xmlns:vendor="https://vendor.example/ns"><channel><title>Feed</title><item>
+            <title>Own title</title><vendor:details><title>Other</title><category>Vendor</category></vendor:details>
+            <category>News</category><link>https://example.com/own</link></item></channel></rss>
+            """
+        let vendorItem = FeedXMLParser(data: Data(vendorNested.utf8), feedURL: base).parse().first
+        check(
+            vendorItem?.title == "Own title" && vendorItem?.category == "News",
+            "Fields nested inside a foreign element do not fill the item's title or category")
+
         let malicious =
             "<!DOCTYPE rss [<!ENTITY payload 'expanded'>]><rss><channel><item><title>&payload;</title></item></channel></rss>"
         let entityParser = FeedXMLParser(data: Data(malicious.utf8), feedURL: base)
@@ -302,6 +361,40 @@ enum FeedKitSwiftSoupTests {
 
         check(DateParser.parse("Tues, 6 November 2007 12:00:00 GMT") != nil, "Permissive weekday spellings work")
         check(DateParser.parse("impossible") == nil, "Invalid dates do not become current time")
+        // #796: two-digit years and zone names beyond RFC 822.
+        let utc = { (text: String) in ISO8601DateFormatter().date(from: text) }
+        check(
+            DateParser.parse("Fri, 30 Oct 26 10:00:00 GMT") == utc("2026-10-30T10:00:00Z"),
+            "A two-digit RFC 822 year is in the 2000s")
+        check(DateParser.parse("30 Oct 26 10:00 +0000") == utc("2026-10-30T10:00:00Z"), "Without a weekday too")
+        check(
+            DateParser.parse("Fri, 31 Dec 99 23:30:00 -0500") == utc("2100-01-01T04:30:00Z"),
+            "A zone offset that crosses the year boundary keeps the widened century")
+        check(DateParser.parse("Oct 30, 26") == utc("2026-10-30T00:00:00Z"), "A month-first two-digit year too")
+        for (zone, instant) in [
+            ("BST", "2026-10-30T09:00:00Z"), ("CET", "2026-10-30T09:00:00Z"), ("CEST", "2026-10-30T08:00:00Z"),
+            ("IST", "2026-10-30T04:30:00Z"), ("AEST", "2026-10-30T00:00:00Z"), ("GMT", "2026-10-30T10:00:00Z"),
+        ] {
+            check(
+                DateParser.parse("Fri, 30 Oct 2026 10:00:00 \(zone)") == utc(instant),
+                "\(zone) maps to its offset")
+        }
+        let zoned = """
+            <rss><channel><title>Publisher</title><item><title>Zoned</title><link>https://example.com/zoned</link>
+            <pubDate>Fri, 30 Oct 2026 10:00:00 CEST</pubDate></item></channel></rss>
+            """
+        check(
+            FeedXMLParser(data: Data(zoned.utf8), feedURL: base).parse().first?.pubDate
+                == utc("2026-10-30T08:00:00Z"),
+            "An RSS item in CEST is dated before the FeedKit fallback can mis-offset it")
+        let modifiedOnly: [String: Any] = [
+            "version": "https://jsonfeed.org/version/1.1",
+            "items": [["id": "m", "url": "https://example.com/m", "date_modified": "2026-10-30T10:00:00Z"]],
+        ]
+        check(
+            JSONFeedParser.parse(data: try! JSONSerialization.data(withJSONObject: modifiedOnly), feedURL: base)?
+                .first?.pubDate == utc("2026-10-30T10:00:00Z"),
+            "A JSON Feed item with only date_modified is dated by it")
 
         // HTML entity decoding in title & category and source name newline cleaning
         let xmlWithEntities = """

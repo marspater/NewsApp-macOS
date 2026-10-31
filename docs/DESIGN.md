@@ -129,6 +129,8 @@ One card component for list, grid, Briefing, search, Saved Stories and History.
 | Keyboard focus | Accent ring (1.5 pt) and focus shadow token |
 | Click | The whole card is one `Button`: a single click opens the story and selects it, also as the first click on an inactive window. The coverage disclosure (section 8.3) and the context menu are the only other targets |
 
+In the grid a card is as tall as its own content and never stretches to the height of its row: the headline and the dek keep room for two lines each below the text, the footer keeps the intelligence tag's height, the coverage row keeps one line (its last update abbreviated, "updated 3 hr ago"), and a card without coverage keeps the coverage row's space, so the collapsed cards of a row end level. Expanding an event card's coverage grows that card alone and moves only the rows below it (#779).
+
 Cards use `AppColor.surface`, the card radius, a separator-color hairline and the resting shadow token. No gradients, glass or extra tinting. Every action on a card is also in its context menu and in its accessibility actions. Cards never overlap in hit testing: a clipped figure takes `contentShape(Rectangle())` after `clipped()` (or `allowsHitTesting(false)`), so an image that overflows its frame cannot take the click meant for the card above it.
 
 ### 8.3 Event coverage

@@ -511,8 +511,10 @@ private struct LanePlanner {
         NotificationService.leadKey(of: article, event: key(article), delivery: delivery)
     }
 
+    /// The keys a banner announces: the story itself and its event, if any, so any event the story is in later counts
+    /// as announced (#790).
     func announces(_ article: FeedArticle) -> [String: String] {
-        delivery.events[article.id].map { [$0: lead(article)] } ?? [:]
+        Dictionary([(key(article), lead(article)), (article.id, lead(article))]) { first, _ in first }
     }
 
     func publishers(_ article: FeedArticle) -> Int {
@@ -522,8 +524,7 @@ private struct LanePlanner {
     /// Whether the story's key may post in `lane`: not announced, a new lead headline, or a higher lane. A new event of
     /// a story another of whose events was announced adds to that story and posts only in a higher lane (#740).
     func fresh(_ article: FeedArticle, in lane: NotificationLane) -> Bool {
-        guard let event = delivery.events[article.id] else { return true }
-        if let seen = delivery.ledger.announced[event] {
+        if let seen = delivery.ledger.announced[key(article)] {
             // A new lead notifies again; a higher lane only above the story's highest announced lane.
             return seen.leadKey != lead(article) || lane > max(seen.lane, storyLanes[story(article)] ?? seen.lane)
         }
@@ -615,7 +616,9 @@ private struct LanePlanner {
             PlannedBanner(
                 lane: .priority, grouped: true, title: "Major news", headlines: perStory.prefix(2).map(\.title),
                 count: perStory.count, thread: "priority", sound: true,
-                announces: Dictionary(overflow.map { ($0.event, $0.leadKey) }) { first, _ in first },
+                announces: Dictionary(
+                    overflow.flatMap { [($0.event, $0.leadKey), ($0.story, $0.leadKey)] }.filter { !$0.0.isEmpty }
+                ) { first, _ in first },
                 members: overflow.map(\.story).filter { !$0.isEmpty }))
         taken.formUnion(overflow.map { delivery.stories[$0.event] ?? $0.event })
         return []

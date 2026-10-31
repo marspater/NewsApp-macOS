@@ -55,6 +55,9 @@ struct EventFeedSummary: Hashable, Sendable {
     let membershipVersion: Int
     let seenVersion: Int?
     let members: [EventFeedMember]
+    /// The opened event's own membership version, which versions its overview. `membershipVersion` sums the
+    /// story's events for the update mark and can fall when a merge folds one away (#789).
+    var eventVersion = 1
 
     /// A single remaining member is shown as an ordinary publication.
     var isConfirmed: Bool { members.count >= 2 }
@@ -196,11 +199,14 @@ enum FeedUpdateResult: Equatable, Sendable {
 struct FeedUpdateBuffer: Equatable, Sendable {
     private(set) var displayed = FeedSnapshot()
     private(set) var pending: FeedSnapshot?
+    /// A subscription's refresh finished while an article was open: closing the reader shows it (#782).
+    var holdsSubscription = false
 
     /// A different query, or the reader asked to see the update.
     mutating func replace(with snapshot: FeedSnapshot) {
         displayed = snapshot
         pending = nil
+        holdsSubscription = false
     }
 
     mutating func applyPending() {
@@ -213,6 +219,12 @@ struct FeedUpdateBuffer: Equatable, Sendable {
         let known = Set(displayed.articles.map(\.id))
         displayed.articles += page.filter { !known.contains($0.id) }
         displayed.events = events
+    }
+
+    /// A subscription was added: its first refresh is the reader's and shows its stories at once instead of waiting
+    /// (#782).
+    static func subscriptionAdded(from previous: [String], to current: [String]) -> Bool {
+        !Set(current).isSubset(of: Set(previous))
     }
 
     /// Bursts of store revisions are debounced, but a section's first page is shown at once.
