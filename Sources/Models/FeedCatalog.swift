@@ -75,7 +75,7 @@ enum CatalogSet: String, CaseIterable, Identifiable, Hashable, Sendable {
 
 enum FeedCatalog {
     /// Date the entries below were last fetched and checked for freshness, parseability and access.
-    static let verifiedOn = "2026-10-08"
+    static let verifiedOn = "2026-10-31"
 
     /// Languages offered in production. Event matching does not work without a word-class model, which macOS lacks for
     /// the other catalog languages (#264), so their entries stay below but are parked until it does.
@@ -134,6 +134,38 @@ enum FeedCatalog {
             evidenceLinks: ["https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml"],
             uncertainty: .known,
             suggestedAlternativeFeedIDs: ["guardian-world", "bbc-world"]
+        ),
+        "https://www.semafor.com/feed.xml": FeedAdvisory(
+            date: "2026-10-31",
+            reason: .technicalDeterioration,
+            summary: "HTTP 404 from the feed URL.",
+            evidenceLinks: ["https://www.semafor.com/feed.xml"],
+            uncertainty: .known,
+            suggestedAlternativeFeedIDs: ["bbc-world", "guardian-world"]
+        ),
+        "https://rollcall.com/feed": FeedAdvisory(
+            date: "2026-10-31",
+            reason: .technicalDeterioration,
+            summary: "Feed fails to parse as Malformed XML feed because it redefines xmlns:media.",
+            evidenceLinks: ["https://rollcall.com/feed"],
+            uncertainty: .known,
+            suggestedAlternativeFeedIDs: ["bbc-politics", "guardian-politics", "pbs-politics"]
+        ),
+        "https://www.smithsonianmag.com/rss/smart-news": FeedAdvisory(
+            date: "2026-10-31",
+            reason: .technicalDeterioration,
+            summary: "HTTP 403 Cloudflare challenge for automated readers.",
+            evidenceLinks: ["https://www.smithsonianmag.com/rss/smart-news"],
+            uncertainty: .known,
+            suggestedAlternativeFeedIDs: ["science-news", "bbc-science", "quanta"]
+        ),
+        "https://www.abc.net.au/news/feed/52278/rss.xml": FeedAdvisory(
+            date: "2026-10-31",
+            reason: .technicalDeterioration,
+            summary: "HTTP 404 gone from the feed URL.",
+            evidenceLinks: ["https://www.abc.net.au/news/feed/52278/rss.xml"],
+            uncertainty: .known,
+            suggestedAlternativeFeedIDs: ["bbc-world", "dw-english"]
         ),
     ]
 
@@ -201,11 +233,6 @@ enum FeedCatalog {
             language: "en", region: "GB", topic: .general, set: .world,
             fullText: .summary, hasImages: true, availability: .available),
         CatalogFeed(
-            id: "semafor-world", title: "Semafor · World", publisher: "Semafor",
-            url: "https://www.semafor.com/feed.xml",
-            language: "en", region: "US", topic: .general, set: .world,
-            fullText: .summary, hasImages: true, availability: .available),
-        CatalogFeed(
             id: "politico", title: "Politico · Politics", publisher: "Politico",
             url: "https://rss.politico.com/politics-news.xml",
             language: "en", region: "US", topic: .politics, set: .politics,
@@ -223,11 +250,6 @@ enum FeedCatalog {
         CatalogFeed(
             id: "pbs-politics", title: "PBS NewsHour · Politics", publisher: "PBS NewsHour",
             url: "https://www.pbs.org/newshour/feeds/rss/politics",
-            language: "en", region: "US", topic: .politics, set: .politics,
-            fullText: .summary, hasImages: true, availability: .available),
-        CatalogFeed(
-            id: "roll-call", title: "Roll Call · News", publisher: "Roll Call",
-            url: "https://rollcall.com/feed",
             language: "en", region: "US", topic: .politics, set: .politics,
             fullText: .summary, hasImages: true, availability: .available),
         CatalogFeed(
@@ -340,11 +362,6 @@ enum FeedCatalog {
             url: "https://kffhealthnews.org/feed",
             language: "en", region: "US", topic: .health, set: .scienceHealth,
             fullText: .full, hasImages: true, availability: .available),
-        CatalogFeed(
-            id: "smithsonian", title: "Smithsonian Magazine · Science", publisher: "Smithsonian",
-            url: "https://www.smithsonianmag.com/rss/smart-news",
-            language: "en", region: "US", topic: .science, set: .scienceHealth,
-            fullText: .summary, hasImages: true, availability: .available),
         CatalogFeed(
             id: "phys-org", title: "Phys.org · Spotlight", publisher: "Phys.org",
             url: "https://phys.org/rss-feed",
@@ -469,11 +486,6 @@ enum FeedCatalog {
             id: "cna", title: "CNA · World and Asia", publisher: "CNA",
             url: "https://www.channelnewsasia.com/rssfeeds/8395884",
             language: "en", region: "SG", topic: .general, set: .regional,
-            fullText: .summary, hasImages: true, availability: .available),
-        CatalogFeed(
-            id: "abc-australia", title: "ABC News · International", publisher: "ABC News Australia",
-            url: "https://www.abc.net.au/news/feed/52278/rss.xml",
-            language: "en", region: "AU", topic: .general, set: .regional,
             fullText: .summary, hasImages: true, availability: .available),
     ]
 }
