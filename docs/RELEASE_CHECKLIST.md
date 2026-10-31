@@ -17,11 +17,12 @@ stat -f %Lp "$HOME/news-eval/library-copy.sqlite3"   # must print 600: the copy 
 ## 0. Everything, once
 
 ```sh
-NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=$HOME/news-eval/library-copy.sqlite3 ./test.sh
+NEWS_TEST_FORCE=1 ./test.sh
 ```
 
 `./test.sh` runs the design lint, the Python evaluation self-checks, the whole Swift suite as parallel jobs and the
-three headless runners. `NEWS_TEST_FORCE=1` reruns it even if the same inputs passed on this machine. Also check that
+three headless runners. `NEWS_TEST_FORCE=1` reruns it even if the same inputs passed on this machine. It does not read the library copy:
+that is exercised by the manual migration step in item 1 and by the holdout in item 3. Also check that
 `CI=1 script/format.sh --check` and `./build.sh` succeed. Without `CI` set, the format script passes with only a warning
 when no swift-format is installed, so also confirm `xcrun --find swift-format` prints a path, or the check proved nothing. The items below name the part of this run that proves each gate,
 plus the extra commands that are not in the plain run.
@@ -32,7 +33,7 @@ plus the extra commands that are not in the plain run.
   the migration fixture, the pre-migration backup and newer-schema guard, and backup restore
   (`testRealLibraryMigrationFixture`, `testLibraryBackupAndFutureSchemaGuard`, `testLibraryBackupRestore` in
   `Tests/NewsTests.swift`).
-- On the real-library copy: `NEWS_TEST_FORCE=1 NEWS_SNAPSHOT_DB=<copy> ./test.sh` (item 0). Manual: compare the copy's
+- On the real-library copy (manual, below): compare the copy's
   schema version and story, read and saved counts before and after, as the v2 completion plan does:
   `sqlite3 <file> "PRAGMA user_version; SELECT count(*) FROM articles; SELECT count(*) FROM article_state WHERE is_read = 1; SELECT count(*) FROM article_state WHERE is_saved = 1;"`.
 - Manual, migration and restore on the copy. `script/run_isolated.sh` builds the app under the bundle id
@@ -49,7 +50,7 @@ plus the extra commands that are not in the plain run.
   Without `--seed` the script leaves the staged file alone. After the app has opened it, quit it and check
   `ls "$D"`: a `news-before-v<N>-…sqlite3` backup must sit beside `news.sqlite3`, and
   `sqlite3 "$D/news.sqlite3" "PRAGMA user_version; SELECT count(*) FROM articles; SELECT count(*) FROM article_state WHERE is_read = 1; SELECT count(*) FROM article_state WHERE is_saved = 1;"` must show the new schema and
-  the original story, read and saved counts. Then restore: copy the backup to `$TMPDIR/restore/news.sqlite3` and run
+  the original story, read and saved counts. Then restore: `mkdir -p "$TMPDIR/restore"`, copy the backup to `$TMPDIR/restore/news.sqlite3` and run
   `sqlite3 <restored> "PRAGMA integrity_check; PRAGMA user_version; SELECT count(*) FROM articles; SELECT count(*) FROM article_state WHERE is_read = 1; SELECT count(*) FROM article_state WHERE is_saved = 1;"` (expect `ok`,
   the pre-migration schema version and the original story, read and saved counts). Put that file back at `$D/news.sqlite3` (after removing
   any `-wal` and `-shm` beside it), run `./script/run_isolated.sh` again and confirm it migrates to the same three counts. Story, read and saved counts must all match the
