@@ -11,6 +11,16 @@ actor NetworkBoundaryProxy {
     /// Whether a connection that reports `.waiting` with this error is refused for good, so the next address (or a
     /// rejection) should follow at once. Any other waiting error may clear by itself (a saturated machine, a path
     /// change); the tunnel's handshake timeout bounds the wait and still fails closed (#769).
+    /// The error's domain and numeric code, safe to log publicly; never a host or address.
+    nonisolated static func logDescription(_ error: NWError) -> String {
+        switch error {
+        case .posix(let code): return "posix \(code.rawValue)"
+        case .dns(let code): return "dns \(code)"
+        case .tls(let code): return "tls \(code)"
+        default: return "other"
+        }
+    }
+
     nonisolated static func waitingFailsAtOnce(_ error: NWError) -> Bool {
         guard case .posix(let code) = error else { return false }
         return [.ECONNREFUSED, .ENETUNREACH, .EHOSTUNREACH, .ENETDOWN, .EACCES, .EPERM].contains(code)
@@ -379,17 +389,22 @@ private final class SOCKSTunnel: @unchecked Sendable {
                         self.relay(from: connection, to: self.client)
                     })
             case .failed(let error):
-                NetworkBoundaryProxy.logger.error("Upstream connect to port \(port) failed: \(error)")
+                let reason = NetworkBoundaryProxy.logDescription(error)
+                NetworkBoundaryProxy.logger.error(
+                    "Upstream connect to port \(port, privacy: .public) failed: \(reason, privacy: .public)")
                 connection.stateUpdateHandler = nil
                 connection.cancel()
                 self.connect(addresses: addresses.dropFirst(), port: port)
             case .waiting(let error):
+                let reason = NetworkBoundaryProxy.logDescription(error)
                 guard NetworkBoundaryProxy.waitingFailsAtOnce(error) else {
                     // May resolve to .ready or .failed; the handshake timeout ends a connect that never does.
-                    NetworkBoundaryProxy.logger.notice("Upstream connect to port \(port) is waiting: \(error)")
+                    NetworkBoundaryProxy.logger.notice(
+                        "Upstream connect to port \(port, privacy: .public) is waiting: \(reason, privacy: .public)")
                     return
                 }
-                NetworkBoundaryProxy.logger.error("Upstream connect to port \(port) refused: \(error)")
+                NetworkBoundaryProxy.logger.error(
+                    "Upstream connect to port \(port, privacy: .public) refused: \(reason, privacy: .public)")
                 connection.stateUpdateHandler = nil
                 connection.cancel()
                 self.connect(addresses: addresses.dropFirst(), port: port)

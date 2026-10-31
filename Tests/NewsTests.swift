@@ -17962,6 +17962,9 @@ struct NewsTests {
                 NetworkBoundaryProxy.waitingFailsAtOnce(.posix(code)),
                 "\(code) may clear under load, so the handshake timeout bounds the wait")
         }
+        assertEqual(
+            NetworkBoundaryProxy.logDescription(.posix(.ECONNREFUSED)), "posix 61", "The log names domain and code only"
+        )
         assertFalse(
             NetworkBoundaryProxy.waitingFailsAtOnce(.dns(DNSServiceErrorType(kDNSServiceErr_Timeout))),
             "A non-POSIX waiting error is waited out")
