@@ -152,14 +152,14 @@ final class AppSettings: ObservableObject {
             defaults.set(upgraded, forKey: Self.firstLaunchCompletedKey)
         }
 
+        // Settings from the first retirement stored only a flag; it means version 1 was applied.
+        let applied =
+            defaults.object(forKey: Self.retiredFeedsVersionKey) as? Int
+            ?? (defaults.bool(forKey: "retired_default_feeds_v1") ? 1 : 0)
+        let retired = Set(Self.retiredFeeds.filter { $0.version > applied }.map(\.url))
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
             // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
             let parked = Set(FeedCatalog.parkedFeeds.map(\.url))
-            // Settings from the first retirement stored only a flag; it means version 1 was applied.
-            let applied =
-                defaults.object(forKey: Self.retiredFeedsVersionKey) as? Int
-                ?? (defaults.bool(forKey: "retired_default_feeds_v1") ? 1 : 0)
-            let retired = Set(Self.retiredFeeds.filter { $0.version > applied }.map(\.url))
             let kept = savedUrls.filter { !parked.contains($0) && !retired.contains($0) }
             if kept.count != savedUrls.count { defaults.set(kept, forKey: Self.feedURLsKey) }
             self.feedURLs = kept
@@ -226,7 +226,10 @@ final class AppSettings: ObservableObject {
             sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
             topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [],
             topicSets: defaults.stringArray(forKey: Self.mutedTopicSetsKey) ?? [])
-        let starred = Set(defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? [])
+        // A retired feed gives its star slot back with its subscription (#800).
+        let storedStars = defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? []
+        let starred = Set(storedStars.filter { !retired.contains($0) })
+        if starred.count != storedStars.count { defaults.set(starred.sorted(), forKey: Self.starredFeedURLsKey) }
         self.starredFeedURLs = starred
         // A star from before star times were kept counts from now.
         var times = (defaults.dictionary(forKey: Self.starredFeedTimesKey) as? [String: Double] ?? [:]).filter {
