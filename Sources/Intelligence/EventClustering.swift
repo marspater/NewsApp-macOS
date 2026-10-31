@@ -71,6 +71,8 @@ enum EventClusterer {
             return await PairScorer.shared.probabilities(a, b)
         }
         var report = EventClusteringReport()
+        // The pass writes under the generation it started in; a clear of derived data ends it (#844).
+        let analysisGeneration = await database.analysisGeneration
         /// The reader's verdicts move the pair model's cutoff by at most ±0.05 (#629); nil, and today's cutoff, below 50.
         // The reader's verdicts as stored, unless an evaluation supplies the rows it read before clearing them (#629).
         let storedRows =
@@ -268,11 +270,14 @@ enum EventClusterer {
             for id in ids { inclusions[id] = found[id] ?? [] }
             inclusionLookups.formUnion(ids)
         }
-        func store() async {
-            try? await database.storeClusteringPass(
-                DatabaseEngine.ClusteringPassWrites(
-                    features: newFeatures, embeddings: newEmbeddings, decisions: Array(decisions.values),
-                    cleared: Array(cleared.values), readTexts: readTexts), at: now)
+        func store() async throws {
+            let stored =
+                (try? await database.storeClusteringPass(
+                    DatabaseEngine.ClusteringPassWrites(
+                        features: newFeatures, embeddings: newEmbeddings, decisions: Array(decisions.values),
+                        cleared: Array(cleared.values), readTexts: readTexts), at: now,
+                    expectedGeneration: analysisGeneration)) ?? true
+            guard stored else { throw CancellationError() }
             newFeatures = [:]
             newEmbeddings = [:]
             decisions = [:]
@@ -446,7 +451,7 @@ enum EventClusterer {
                 }
             }
             // Match state is already committed per article; a later throw or cancellation keeps this batch's work.
-            await store()
+            try await store()
             if !deferred.isEmpty {
                 try await database.markEventMatchProcessed(
                     Array(deferred), matcherVersion: EventMatcher.version - 1, at: now)
@@ -875,7 +880,7 @@ enum EventClusterer {
         let merges = try await mergeFragments()
         report.merged = merges.merged
         report.changedEvents.formUnion(merges.changedEvents)
-        await store()
+        try await store()
         // The story pass reads every active event and lone report (#581). It runs when the pass processed a report
         // or changed an event, once per launch, and after a reader verdict; otherwise an unchanged archive stays
         // at zero work. Skipped work remains pending until a pass with energy completes it.

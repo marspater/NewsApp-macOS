@@ -7,9 +7,10 @@ extension DatabaseEngine {
     // MARK: - Event Overviews
 
     @discardableResult
-    func recordEventOverview(_ overview: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil) throws
-        -> Bool
-    {
+    func recordEventOverview(
+        _ overview: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil,
+        expectedGeneration: Int? = nil
+    ) throws -> Bool {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
@@ -19,6 +20,8 @@ extension DatabaseEngine {
         defer {
             if sqlite3_get_autocommit(db) == 0 { try? rollbackTransaction() }
         }
+        // A result generated before a clear of derived data is stale (#844).
+        if let expectedGeneration, expectedGeneration != analysisGeneration { return false }
 
         if let expectedArticleInputs {
             for (id, hash) in expectedArticleInputs {
@@ -1565,7 +1568,12 @@ extension DatabaseEngine {
     /// of pairs that no longer qualify, in one actor turn. Values of an article that is gone or reads differently
     /// from `readTexts` now are skipped: the rematch trigger dropped what was stored for the old text, and the next
     /// pass computes the new one.
-    func storeClusteringPass(_ writes: ClusteringPassWrites, at date: Date = Date()) throws {
+    /// False when the pass started before a clear of derived data: nothing is written (#844).
+    @discardableResult
+    func storeClusteringPass(
+        _ writes: ClusteringPassWrites, at date: Date = Date(), expectedGeneration: Int? = nil
+    ) throws -> Bool {
+        if let expectedGeneration, expectedGeneration != analysisGeneration { return false }
         var current: [String: String] = [:]
         let ids = Array(writes.readTexts.keys)
         for start in stride(from: 0, to: ids.count, by: 500) {
@@ -1586,7 +1594,7 @@ extension DatabaseEngine {
         try upsertPairDecisions(
             writes.decisions.filter { !changed.contains($0.articleID) && !changed.contains($0.otherArticleID) },
             matcherVersion: EventMatcher.version, at: date)
-        guard !writes.cleared.isEmpty else { return }
+        guard !writes.cleared.isEmpty else { return true }
         try inEventTransaction { () throws -> Void in
             for (low, high) in writes.cleared {
                 try eventRows(
@@ -1594,6 +1602,7 @@ extension DatabaseEngine {
                     [.text(low), .text(high)])
             }
         }
+        return true
     }
 
     /// A clusterer decision about one pair, keyed low ID first.

@@ -43,6 +43,7 @@ class FeedManager: NSObject, ObservableObject {
     private var subscriptionUpdates: AnyCancellable?
     private var subscriptionTask: Task<Void, Never>?
     private var terminationObserver: AnyCancellable?
+    private var analysisClearedObserver: AnyCancellable?
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
@@ -140,6 +141,17 @@ class FeedManager: NSObject, ObservableObject {
         terminationObserver = NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.stopBackgroundWork() }
+            }
+        // Clear AI Analysis (#805): the store refuses the in-flight writes; the session state goes here.
+        analysisClearedObserver = NotificationCenter.default.publisher(for: .aiAnalysisCleared)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let queue = self?.enrichmentQueue else { return }
+                    Task {
+                        await queue.analysisCleared()
+                        await OverviewGenerationCoordinator.shared.analysisCleared()
+                    }
+                }
             }
         // NSWorkspace posts sleep and wake on the main thread.
         if let center = powerEvents ?? (schedulesRefresh ? NSWorkspace.shared.notificationCenter : nil) {
@@ -411,6 +423,7 @@ class FeedManager: NSObject, ObservableObject {
         storeUpdates?.cancel()
         storeUpdates = nil
         terminationObserver?.cancel()
+        analysisClearedObserver?.cancel()
         terminationObserver = nil
         for observer in powerObservers {
             observer.cancel()

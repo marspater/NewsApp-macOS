@@ -15835,6 +15835,8 @@ struct NewsTests {
         let articleC = FeedArticle(
             title: "Quarterly Earnings Beat Expectations", link: "https://example.com/earnings", guid: "eq-3",
             description: "Revenue and profit exceed analyst forecasts", pubDate: Date(), source: "Markets")
+        // Only a stored classification counts as finished (#820).
+        _ = try? await store.database.upsertArticles([articleC])
         await queue.enqueue(article: articleC, priority: .interactive)
         await eventually("Article C finishes classification") { await queue.state(for: articleC.id) == .completed }
         assertFalse(

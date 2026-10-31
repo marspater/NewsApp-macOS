@@ -3382,11 +3382,14 @@ actor DatabaseEngine {
         var image: String? = nil
         var readerDocument: ReaderDocument? = nil
         var expectedInputHash: String? = nil
+        /// The `analysisGeneration` the work started under; a clear since then refuses the write (#844).
+        var expectedGeneration: Int? = nil
     }
 
     @discardableResult
     func updateEnrichment(articleId: String, update: EnrichmentUpdate) throws -> Bool {
         let articleId = try resolvedArticleID(articleId)
+        if let expected = update.expectedGeneration, expected != analysisGeneration { return false }
         if let expected = update.expectedInputHash {
             guard try fetchArticles(limit: 1, id: articleId).first?.publisherInputHash == expected else { return false }
         }
@@ -3534,9 +3537,11 @@ actor DatabaseEngine {
 
     /// Persists structured ArticleAnalysis into article_enrichment.
     @discardableResult
-    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil)
-        throws -> Bool
-    {
+    func saveArticleAnalysis(
+        _ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil,
+        expectedGeneration: Int? = nil
+    ) throws -> Bool {
+        if let expectedGeneration, expectedGeneration != analysisGeneration { return false }
         let articleId = try resolvedArticleID(articleId)
         guard let article = try fetchArticles(limit: 1, id: articleId).first else { return false }
         let inputHash = article.publisherInputHash
@@ -3697,11 +3702,17 @@ actor DatabaseEngine {
     /// Clears all AI analysis data: summaries, key points, entities, event overviews, story embeddings, stored matcher
     /// signals, the pair decisions' stored signals (which resets the verdict calibration, #629) and the World Tension
     /// history. Articles, events, pair decisions and subscriptions remain intact.
+    /// Bumped by every clear of derived data (#844). Background work captures it when it starts and hands it back
+    /// as `expectedGeneration` on its write; a write from an earlier generation is refused inside the transaction,
+    /// so nothing computed before a clear comes back. In memory only: in-flight work does not outlive the process.
+    private(set) var analysisGeneration = 0
+
     func clearArticleEnrichment() throws {
         guard db != nil else { return }
         try requireWritable()
         try beginTransaction()
         do {
+            analysisGeneration &+= 1
             try clearWorldTensionHistory()
             try executeSimple("DELETE FROM article_enrichment;")
             try clearEventOverviews()
@@ -3744,6 +3755,7 @@ actor DatabaseEngine {
         try clearWorldTensionHistory()
         try beginTransaction()
         do {
+            analysisGeneration &+= 1
             try executeSimple("DELETE FROM article_enrichment;")
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
@@ -3810,51 +3822,41 @@ actor DatabaseEngine {
             guard sqlite3_step(stmt) == SQLITE_DONE else { throw sqliteError(db, "Retention \(step) failed") }
             changes = Int(sqlite3_changes(db))
         }
-        try commitTransaction()
-        // The only delete of stories: SQLite may reuse a deleted top rowid, so the spelling cache key could repeat.
-        if changes > 0 {
-            spellingCache = nil
-            repeatedImageCache = [:]
-        }
+        // The follow-up steps commit with the deletes, and a failure rolls everything back (#814).
         try pruneEmptyEvents()
 
         // Prune derived intelligence rows that are no longer needed for active clustering (#537):
         // 1. Pair assessments older than 30 days.
-        let pairCutoff = nowTimestamp - 30 * 86400
-        var pairStmt: OpaquePointer?
         // A pair the reader judged keeps its signals: the verdict calibration (#629) fits on them.
-        let prunePairs = """
+        try eventRows(
+            """
             DELETE FROM pair_assessments WHERE assessed_at < ?
                 AND NOT EXISTS (SELECT 1 FROM event_inclusions i
                     WHERE i.article_id = pair_assessments.article_id AND i.other_article_id = pair_assessments.other_article_id)
                 AND NOT EXISTS (SELECT 1 FROM event_exclusions x
                     WHERE x.article_id = pair_assessments.article_id AND x.other_article_id = pair_assessments.other_article_id);
-            """
-        if sqlite3_prepare_v2(db, prunePairs, -1, &pairStmt, nil) == SQLITE_OK {
-            defer { sqlite3_finalize(pairStmt) }
-            sqlite3_bind_double(pairStmt, 1, pairCutoff)
-            _ = sqlite3_step(pairStmt)
-        }
+            """, [.real(nowTimestamp - 30 * 86400)])
 
         // 2. Cached matcher features and sentence embeddings for articles outside the 72-hour active clustering
         //    window that are not members of any stored event.
-        let activeWindowCutoff = nowTimestamp - 72 * 3600
         let staleSingletonArticleIDs = """
             SELECT a.id FROM articles a
             WHERE \(Self.articleDateOrder) < ?
                 AND NOT EXISTS (SELECT 1 FROM event_members m WHERE m.article_id = a.id)
             """
         for derivedTable in ["article_features", "article_embeddings"] {
-            var derivedStmt: OpaquePointer?
-            let derivedSQL = "DELETE FROM \(derivedTable) WHERE article_id IN (\(staleSingletonArticleIDs));"
-            if sqlite3_prepare_v2(db, derivedSQL, -1, &derivedStmt, nil) == SQLITE_OK {
-                defer { sqlite3_finalize(derivedStmt) }
-                sqlite3_bind_double(derivedStmt, 1, activeWindowCutoff)
-                _ = sqlite3_step(derivedStmt)
-            }
+            try eventRows(
+                "DELETE FROM \(derivedTable) WHERE article_id IN (\(staleSingletonArticleIDs));",
+                [.real(nowTimestamp - 72 * 3600)])
+        }
+        try commitTransaction()
+        // The only delete of stories: SQLite may reuse a deleted top rowid, so the spelling cache key could repeat.
+        if changes > 0 {
+            spellingCache = nil
+            repeatedImageCache = [:]
         }
 
-        // Return freed pages to the filesystem without a full-table rebuild (#536).
+        // Return freed pages to the filesystem without a full-table rebuild (#536). Not part of the transaction.
         try executeSimple("PRAGMA incremental_vacuum;")
 
         if changes > 0 {
@@ -4052,6 +4054,10 @@ actor DatabaseEngine {
     /// The delivery tables as of `now` (#665). A time later than `now`, left by a clock set back, is rewritten as `now`
     /// first, so no window outlasts its length; rows past their use are dropped.
     func notificationLedger(now: Date) throws -> NotificationLedger {
+        try inEventTransaction { try notificationLedgerUnguarded(now: now) }
+    }
+
+    private func notificationLedgerUnguarded(now: Date) throws -> NotificationLedger {
         let clock = now.timeIntervalSince1970
         try eventRows(
             "UPDATE notification_deliveries SET delivered_at = ? WHERE delivered_at > ?;", [.real(clock), .real(clock)])
@@ -4162,7 +4168,13 @@ actor DatabaseEngine {
 
     /// Records one posted banner (#665): its delivery row, and each event it announces with the highest lane that
     /// covered it in the last day. Announced events leave the priority queue; rows older than a week go.
+    /// One transaction: a quit between the delivery row and the event's announcement would otherwise count the
+    /// banner against the rate limits without marking the event announced, so it posts again (#814).
     func recordNotification(_ banner: PlannedBanner, at date: Date) throws {
+        try inEventTransaction { try recordNotificationUnguarded(banner, at: date) }
+    }
+
+    private func recordNotificationUnguarded(_ banner: PlannedBanner, at date: Date) throws {
         let now = date.timeIntervalSince1970
         try eventRows(
             """
@@ -4191,6 +4203,10 @@ actor DatabaseEngine {
 
     /// Priority keys over both priority limits wait here for the next grouped priority banner, at most a day.
     func queuePriority(_ waiting: [QueuedPriority], at date: Date) throws {
+        try inEventTransaction { try queuePriorityUnguarded(waiting, at: date) }
+    }
+
+    private func queuePriorityUnguarded(_ waiting: [QueuedPriority], at date: Date) throws {
         for item in waiting {
             try eventRows(
                 """

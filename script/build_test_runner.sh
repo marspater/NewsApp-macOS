@@ -36,6 +36,7 @@ struct NewsRegressionRunner {
             if selected("Tests/BriefingIntelligenceTests.swift") { await BriefingIntelligenceTests.run() }
             if selected("Tests/BriefingImpactTests.swift") { await BriefingImpactTests.run() }
             if selected("Tests/BriefingSignalsTests.swift") { await BriefingSignalsTests.run() }
+            if selected("Tests/AnalysisGenerationTests.swift") { await AnalysisGenerationTests.run() }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
         }
     }
@@ -141,6 +142,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Tests/BriefingIntelligenceTests.swift \
     Tests/BriefingImpactTests.swift \
     Tests/BriefingSignalsTests.swift \
+    Tests/AnalysisGenerationTests.swift \
     "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift "$TEST_STAGE/Runner.swift" \
     Tests/TestDefaults.swift \
     -o "$OUTPUT"

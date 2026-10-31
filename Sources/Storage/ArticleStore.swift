@@ -2,6 +2,11 @@ import Foundation
 import SwiftUI
 import os
 
+extension Notification.Name {
+    /// Clear AI Analysis ran: queues and caches of derived data drop their session state (#805).
+    static let aiAnalysisCleared = Notification.Name("aiAnalysisCleared")
+}
+
 /// High-level, observable application store managing article persistence,
 /// reactive UI state, full-text search, and legacy migration.
 @MainActor
@@ -319,6 +324,7 @@ final class ArticleStore: ObservableObject {
         readerDocument: ReaderDocument? = nil,
         identityEvidence: DocumentIdentityEvidence? = nil,
         expectedInputHash: String? = nil,
+        expectedGeneration: Int? = nil,
         coalescesPublication: Bool = false
     ) async -> Bool {
         do {
@@ -329,7 +335,8 @@ final class ArticleStore: ObservableObject {
                     update: .init(
                         summary: summary, category: category, sentiment: sentiment,
                         entities: entities, topics: topics, content: content,
-                        image: image, readerDocument: readerDocument, expectedInputHash: expectedInputHash)
+                        image: image, readerDocument: readerDocument, expectedInputHash: expectedInputHash,
+                        expectedGeneration: expectedGeneration)
                 )
             else { return false }
             if let identityEvidence {
@@ -439,12 +446,18 @@ final class ArticleStore: ObservableObject {
     // MARK: - Structured Article Analysis
 
     @discardableResult
-    func saveArticleAnalysis(_ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil) async
+    func saveArticleAnalysis(
+        _ analysis: ArticleAnalysis, for articleId: String, expectedInputHash: String? = nil,
+        expectedGeneration: Int? = nil
+    ) async
         -> Bool
     {
         do {
             let articleId = try await database.resolvedArticleID(articleId)
-            guard try await database.saveArticleAnalysis(analysis, for: articleId, expectedInputHash: expectedInputHash)
+            guard
+                try await database.saveArticleAnalysis(
+                    analysis, for: articleId, expectedInputHash: expectedInputHash,
+                    expectedGeneration: expectedGeneration)
             else { return false }
             try await publishStoredArticles([articleId])
             return true
@@ -463,6 +476,8 @@ final class ArticleStore: ObservableObject {
     /// Purges all generated AI analysis data while preserving articles and subscriptions.
     func clearAIAnalysis() async throws {
         try await database.clearArticleEnrichment()
+        // Running work is refused at commit by the generation bump; its session state is reset here (#805).
+        NotificationCenter.default.post(name: .aiAnalysisCleared, object: nil)
         await refreshState()
     }
 
@@ -583,10 +598,12 @@ final class ArticleStore: ObservableObject {
     // MARK: - Event Overviews
 
     @discardableResult
-    func recordEventOverview(_ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil)
-        async throws -> Bool
-    {
-        let stored = try await database.recordEventOverview(document, expectedArticleInputs: expectedArticleInputs)
+    func recordEventOverview(
+        _ document: EventOverviewDocument, expectedArticleInputs: [String: String]? = nil,
+        expectedGeneration: Int? = nil
+    ) async throws -> Bool {
+        let stored = try await database.recordEventOverview(
+            document, expectedArticleInputs: expectedArticleInputs, expectedGeneration: expectedGeneration)
         if stored { overviewRevision &+= 1 }
         return stored
     }
