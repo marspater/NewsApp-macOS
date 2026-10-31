@@ -42,9 +42,18 @@ final class ArticleStore: ObservableObject {
         self.migrationCoordinator = migrationCoordinator ?? (database == nil ? MigrationCoordinator(database: db) : nil)
         self.spotlightIndexer = spotlightIndexer
 
-        Task {
+        startup = Task {
             await initialize()
         }
+    }
+
+    /// The task the initializer started; it ends when the library has opened or failed to, ready or not.
+    private var startup: Task<Void, Never>?
+
+    /// Resolves once the startup open has finished, so the health notice is settled. A damaged library never
+    /// becomes `isReady`, so callers wait on this instead.
+    func waitForStartup() async {
+        await startup?.value
     }
 
     func initialize() async {

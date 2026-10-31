@@ -454,9 +454,16 @@ class FeedManager: NSObject, ObservableObject {
         await OverviewGenerationCoordinator.shared.analysisCleared()
     }
 
+    /// The library's read-only reason, or nil while it is writable. The store opens asynchronously at launch, so
+    /// this waits for the store's startup open rather than trusting a notice that may not be set yet.
+    func readOnlyNotice() async -> String? {
+        await articleStore.waitForStartup()
+        return articleStore.databaseHealthNotice
+    }
+
     /// True while the library is read-only; a manual refresh then says why, once (#787).
-    private func refusesCollectionWhileReadOnly(manual: Bool) -> Bool {
-        guard let notice = articleStore.databaseHealthNotice else { return false }
+    private func refusesCollectionWhileReadOnly(manual: Bool) async -> Bool {
+        guard let notice = await readOnlyNotice() else { return false }
         if manual { articleStore.operationError = "Refresh is off while the library is read-only. \(notice)" }
         return true
     }
@@ -467,7 +474,8 @@ class FeedManager: NSObject, ObservableObject {
     /// A read-only library (a notice is set) cannot store anything, so nothing is downloaded. A scheduled refresh
     /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
     func fetchFeedsAsync(scheduled: Bool = false) async {
-        guard !isStopped, !refusesCollectionWhileReadOnly(manual: !scheduled) else { return }
+        guard !isStopped else { return }
+        if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
         if let refreshTask {
             _ = await refreshTask.value
             return
@@ -497,6 +505,11 @@ class FeedManager: NSObject, ObservableObject {
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
         guard !Task.isCancelled, !isStopped else { return }
+        await notifyAndEnrich(newArticles)
+    }
+
+    /// Triage and notify the new stories of a finished refresh, then enrich in the background.
+    private func notifyAndEnrich(_ newArticles: [FeedArticle]) async {
         let eligible: Set<String>
         do {
             eligible = try await articleStore.database.notificationStoryIDs(newArticles.map(\.id))

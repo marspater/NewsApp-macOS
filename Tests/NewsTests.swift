@@ -1545,12 +1545,18 @@ struct NewsTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("library.sqlite3").path
-        try Data("not a valid sqlite3 header at all - corrupted payload bytes".utf8).write(
-            to: URL(fileURLWithPath: path))
+        // A readable library saved by a newer build opens read-only, and loads without any startup error.
+        let seed = DatabaseEngine(path: path)
+        try await seed.open()
+        await seed.close()
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the seeded library")
+        sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil)
+        sqlite3_close(handle)
         let engine = DatabaseEngine(path: path)
         let store = ArticleStore(database: engine)
-        await store.initialize()
-        assertTrue(store.databaseHealthNotice != nil, "The damaged library opens read-only with a notice")
+        await store.waitForStartup()
+        assertTrue(store.databaseHealthNotice != nil, "The newer library opens read-only with a notice")
 
         let suite = testDefaultsSuite("test.readonly.refresh")
         let defaults = UserDefaults(suiteName: suite)!
@@ -1566,13 +1572,15 @@ struct NewsTests {
             })
         defer { manager.stopBackgroundWork() }
 
-        // The store's own startup task can still report that the library could not be loaded; let it finish first.
-        try await Task.sleep(for: .milliseconds(300))
-        store.operationError = nil
+        assertTrue(store.operationError == nil, "A readable read-only library starts without an alert")
         await manager.fetchFeedsAsync(scheduled: true)
         assertEqual(await fetches.batches.count, 0, "A scheduled refresh downloads nothing while read-only")
         assertTrue(store.operationError == nil, "A scheduled refresh raises no alert while read-only")
 
+        let refreshDialog = try await RefreshFeedsIntent(feedManager: manager).perform()
+        assertTrue(
+            extractDialogText(from: refreshDialog)?.contains("read-only") == true,
+            "The Refresh Feeds shortcut reports the read-only library instead of success")
         await manager.fetchFeedsAsync()
         assertEqual(await fetches.batches.count, 0, "A manual refresh downloads nothing while read-only")
         assertTrue(
