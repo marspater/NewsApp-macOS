@@ -68,10 +68,16 @@ struct BriefingPriorityData: Equatable, Sendable {
     }
 
     /// A publisher's text that carries another agency's wire copy. A wire agency's own report is original.
+    /// Only the attribution zone is read, the dateline and credit at the start, so a body that merely mentions an
+    /// agency stays original. The source footprint uses the same rule.
     static func isWireCopy(text: String, publisher: String) -> Bool {
-        OverviewPerspectivesExtractor.detectWireSource(in: text, articleSource: publisher) != nil
+        OverviewPerspectivesExtractor.detectWireSource(
+            in: String(text.prefix(attributionZoneLength)), articleSource: publisher) != nil
             && OverviewPerspectivesExtractor.detectWireSource(in: "", articleSource: publisher) == nil
     }
+
+    /// Characters of a report's start that hold its dateline and wire credit.
+    static let attributionZoneLength = 200
 
     /// Distinct publishers with at least one report that is not wire copy.
     static func originalReports(_ reports: [(publisher: String, text: String)]) -> Int {
