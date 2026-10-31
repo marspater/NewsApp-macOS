@@ -2291,6 +2291,60 @@ struct NewsTests {
         }
         task.cancel()
 
+        // Redirect safety state is keyed per task object, not by task identifier across sessions (#808). The
+        // injected resolver keeps the allowed redirect off the network.
+        let keyed = SecureSessionDelegateCoordinator(resolver: { _ in .allowed(ips: ["93.184.216.34"]) })
+        let sessionConfig = URLSessionConfiguration.ephemeral
+        let sessionA = URLSession(configuration: sessionConfig)
+        let sessionB = URLSession(configuration: sessionConfig)
+        defer {
+            sessionA.invalidateAndCancel()
+            sessionB.invalidateAndCancel()
+        }
+        let taskA = sessionA.dataTask(with: URL(string: "http://example.com/start")!)
+        let taskB = sessionB.dataTask(with: URL(string: "https://example.com/start")!)
+        assertEqual(
+            taskA.taskIdentifier, taskB.taskIdentifier,
+            "Two distinct sessions issue overlapping task identifiers starting at 1")
+
+        let responseA = HTTPURLResponse(
+            url: taskA.originalRequest!.url!, statusCode: 302, httpVersion: nil, headerFields: nil)!
+        var redirectedA: URLRequest? = nil
+        keyed.urlSession(
+            sessionA, task: taskA, willPerformHTTPRedirection: responseA,
+            newRequest: URLRequest(url: URL(string: "http://example.com/next")!)
+        ) { redirectedA = $0 }
+        assertTrue(redirectedA != nil, "Task A with HTTP scheme permits HTTP redirect")
+
+        let responseB = HTTPURLResponse(
+            url: taskB.originalRequest!.url!, statusCode: 302, httpVersion: nil, headerFields: nil)!
+        var redirectedB: URLRequest? = nil
+        keyed.urlSession(
+            sessionB, task: taskB, willPerformHTTPRedirection: responseB,
+            newRequest: URLRequest(url: URL(string: "http://example.com/downgrade")!)
+        ) { redirectedB = $0 }
+        assertTrue(
+            redirectedB == nil,
+            "Task B with HTTPS scheme refuses downgrade to HTTP despite matching task identifier")
+
+        // Task B uses up its redirect depth, then task A completes; a dropped state would start B at zero again.
+        let safe = URLRequest(url: URL(string: "https://example.com/safe")!)
+        for _ in 1..<SecureHTTPClient.maxRedirects {
+            keyed.urlSession(sessionB, task: taskB, willPerformHTTPRedirection: responseB, newRequest: safe) { _ in }
+        }
+        keyed.urlSession(sessionA, task: taskA, didCompleteWithError: nil)
+
+        var redirectedB2: URLRequest? = URLRequest(url: URL(string: "https://example.com/unset")!)
+        keyed.urlSession(sessionB, task: taskB, willPerformHTTPRedirection: responseB, newRequest: safe) {
+            redirectedB2 = $0
+        }
+        assertTrue(
+            redirectedB2 == nil,
+            "Task B keeps its redirect count after task A completes, so the redirect past the limit is refused")
+
+        taskA.cancel()
+        taskB.cancel()
+
         // Proxy refresh is required whenever the gateway listener port changes (#807).
         assertTrue(
             WebPreviewPolicy.needsProxyRefresh(configuredPort: nil, currentPort: 8080),
