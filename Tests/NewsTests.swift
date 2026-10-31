@@ -910,6 +910,7 @@ struct NewsTests {
         await testNotificationServiceErrorLogging()
         try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot)
         try await testNotificationLanesAcrossRefreshes(fixtureRoot: fixtureRoot)
+        try await testNotifyBeforeClustering()
         await testArticleStoreErrorResilience()
         await testSystemErrorHardeningAndResilience()
         await testFeedArticleWrapContextNavigation()
@@ -19432,8 +19433,9 @@ struct NewsTests {
         priority = NotificationService.plan(new: [], pending: [:], delivery: delivery)
         assertEqual(priority.banners.map(\.count), [5], "The waiting keys arrive in the next grouped banner")
         assertEqual(
-            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []), Set((0..<5).map { "major-\($0)" }),
-            "The grouped banner announces every waiting key")
+            Set(priority.banners.first.map { Array($0.announces.keys) } ?? []),
+            Set((0..<5).map { "major-\($0)" } + (priority.banners.first?.members ?? [])),
+            "The grouped banner announces every waiting key and each key's own report (#790)")
         delivery.ledger.priorityLastHalfHour = 0
         delivery.ledger.priorityQueue = []
 
@@ -19643,6 +19645,70 @@ struct NewsTests {
         } catch {
             assertTrue(false, "Notification delivery storage failed: \(error)")
         }
+    }
+
+    /// #790: a banner for a report outside any event records the report itself. When another outlet's report later
+    /// clusters with it, the event counts as announced, so the new report posts no second banner on another thread.
+    @MainActor
+    static func testNotifyBeforeClustering() async throws {
+        print("  - Testing a report notified before clustering announces its later event (#790)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        func report(_ id: String, _ title: String, hoursAgo: Double, source: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: title, link: "https://notify.invalid/\(id)", guid: id, description: "",
+                pubDate: now.addingTimeInterval(-hoursAgo * 3600), source: source)
+        }
+        let first = report("n790-a", "Breaking: Mosul dam failure, emergency declared", hoursAgo: 2, source: "Wire One")
+        let second = report(
+            "n790-b", "Breaking: Mosul dam bursts, emergency declared", hoursAgo: 1, source: "Daily Two")
+        _ = try await db.upsertArticles([first, second])
+
+        let alone = NotificationService.plan(
+            new: [(article: first, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(mode: .full, now: now, ledger: try await db.notificationLedger(now: now)))
+        assertEqual(alone.banners.count, 1, "The report alone posts a banner")
+        assertEqual(
+            alone.banners.first?.announces, [first.id: EventFeedSummary.titleKey(first.title)],
+            "A report outside any event is announced under its own ID")
+        for banner in alone.banners { try await db.recordNotification(banner, at: now) }
+        var ledger = try await db.notificationLedger(now: now.addingTimeInterval(60))
+        assertTrue(
+            NotificationService.plan(
+                new: [(article: first, score: 0.9)], pending: [:],
+                delivery: NotificationDelivery(mode: .full, now: now.addingTimeInterval(60), ledger: ledger)
+            ).banners.isEmpty, "The announced report alone does not post again")
+
+        let event = try await db.createEvent(memberArticleIDs: [first.id, second.id], at: now)
+        let later = now.addingTimeInterval(600)
+        ledger = try await db.notificationLedger(now: later)
+        let announced = NotificationLedger.Announcement(leadKey: EventFeedSummary.titleKey(first.title), lane: .normal)
+        assertEqual(
+            ledger.announced, [event.id: announced, first.id: announced],
+            "The report's announcement is copied to the event it joined, under the event's lead headline, and kept")
+        let clustered = NotificationService.plan(
+            new: [(article: second, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(
+                mode: .full, events: [first.id: event.id, second.id: event.id], publishers: [event.id: 2],
+                leadTitles: [event.id: first.title], now: later, ledger: ledger))
+        assertTrue(clustered.banners.isEmpty, "The second outlet's report of the announced event posts no banner")
+
+        // The report keeps its own row: separated into another event, it makes that event announced too.
+        let third = report("n790-c", "Breaking: Mosul dam failure floods villages", hoursAgo: 0.5, source: "Post")
+        _ = try await db.upsertArticles([third])
+        _ = try await db.separateArticle(first.id, fromEvent: event.id)
+        let moved = try await db.createEvent(memberArticleIDs: [first.id, third.id], at: later)
+        ledger = try await db.notificationLedger(now: later.addingTimeInterval(60))
+        assertEqual(
+            ledger.announced[moved.id]?.lane, .normal, "The event the separated report joins inherits its announcement")
+        let separated = NotificationService.plan(
+            new: [(article: third, score: 0.9)], pending: [:],
+            delivery: NotificationDelivery(
+                mode: .full, events: [first.id: moved.id, third.id: moved.id], publishers: [moved.id: 2],
+                leadTitles: [moved.id: first.title], now: later.addingTimeInterval(60), ledger: ledger))
+        assertTrue(separated.banners.isEmpty, "The separated report's new event posts no duplicate banner")
+        await db.close()
     }
 
     /// Notification lanes through `FeedManager` (#665): the normal limit rolls across refreshes and a relaunch, delivery
