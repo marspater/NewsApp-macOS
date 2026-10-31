@@ -28,6 +28,7 @@ final class AppSettings: ObservableObject {
     static let retiredFeedsVersionKey = "retired_feeds_version"
     static let dismissedAdvisoriesKey = "dismissed_advisories"
     static let firstLaunchCompletedKey = "first_launch_completed"
+    static let briefingModuleOrderKey = "briefing_module_order"
 
     /// Everything this class persists; a library backup carries these values (#563).
     static let backedUpKeys = [
@@ -35,6 +36,7 @@ final class AppSettings: ObservableObject {
         showsDockBadgeKey, showsMenuBarExtraKey, aiEnabledKey, privateNotificationsEnabledKey, notificationModeKey,
         allowInsecureHTTPKey, mutedSourcesKey, mutedTopicsKey, mutedTopicSetsKey, starredFeedURLsKey,
         starredFeedTimesKey, tensionCollectionOptInKey, retiredFeedsVersionKey, dismissedAdvisoriesKey,
+        briefingModuleOrderKey,
     ]
 
     /// The backed-up keys' stored values as a binary property list.
@@ -135,9 +137,13 @@ final class AppSettings: ObservableObject {
     @Published private(set) var dismissedAdvisories: [String: String]
     /// The first-launch sheet has been completed (#562). Settings written by an earlier version count as completed.
     @Published private(set) var firstLaunchCompleted: Bool
+    /// The Briefing's visible modules in order per pillar (pillar raw value to module raw values); nil keeps the
+    /// default. Read it as `briefingLayout` (BriefingModules.swift).
+    @Published private(set) var briefingModuleOrder: [String: [String]]?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        self.briefingModuleOrder = defaults.dictionary(forKey: Self.briefingModuleOrderKey) as? [String: [String]]
 
         // Read before this initializer writes any key. Subscriptions or a notification mode (written on every first
         // load) mean an earlier version ran, so people upgrading never see the sheet; a fresh install stores false
@@ -613,6 +619,12 @@ final class AppSettings: ObservableObject {
 
     private func saveSections() {
         defaults.set(userSections, forKey: Self.userSectionsKey)
+    }
+
+    /// Saves the Briefing's module order; nil returns it to the default.
+    func setBriefingModuleOrder(_ order: [String: [String]]?) {
+        briefingModuleOrder = order
+        defaults.set(order, forKey: Self.briefingModuleOrderKey)
     }
 }
 
