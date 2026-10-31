@@ -390,9 +390,9 @@ class FeedManager: NSObject, ObservableObject {
 
     // MARK: - Ingestion Pipeline
 
-    func fetchFeeds() {
+    func fetchFeeds(scheduled: Bool = false) {
         Task {
-            await fetchFeedsAsync()
+            await fetchFeedsAsync(scheduled: scheduled)
         }
     }
 
@@ -463,7 +463,10 @@ class FeedManager: NSObject, ObservableObject {
 
     /// True while the library is read-only; a manual refresh then says why, once (#787).
     private func refusesCollectionWhileReadOnly(manual: Bool) async -> Bool {
-        guard let notice = await readOnlyNotice() else { return false }
+        let notice = await readOnlyNotice()
+        // Stopped or cancelled while waiting for startup: do not report or start anything.
+        guard !isStopped, !Task.isCancelled else { return true }
+        guard let notice else { return false }
         if manual { articleStore.operationError = "Refresh is off while the library is read-only. \(notice)" }
         return true
     }

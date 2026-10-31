@@ -80,7 +80,10 @@ final class ArticleStore: ObservableObject {
             self.isReady = loaded
             if !loaded { operationError = "Stored articles could not be loaded. Please try again." }
             // Only the app's own library owns the Spotlight domain; a restore relaunches into this path (#812).
-            if loaded, database === DatabaseEngine.shared { await rebuildSpotlightIndex() }
+            // It runs after startup is signalled, so a large saved library never delays the first refresh.
+            if loaded, database === DatabaseEngine.shared {
+                Task { [weak self] in await self?.rebuildSpotlightIndex() }
+            }
         } catch {
             self.databaseHealthNotice = await database.databaseHealthNotice()
             isReady = false
