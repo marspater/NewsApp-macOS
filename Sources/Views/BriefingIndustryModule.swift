@@ -142,7 +142,7 @@ enum BriefingOverviews {
         FeedEntry, EventOverviewDocument
     )] {
         var overviews: [(FeedEntry, EventOverviewDocument)] = []
-        for entry in entries {
+        for entry in entries where !Task.isCancelled {
             let overview: EventOverviewDocument?
             switch entry {
             case .event(let summary, _, _): overview = try? await store.fetchEventOverview(eventID: summary.eventID)
