@@ -84,18 +84,26 @@ struct BriefingTimelineData: Equatable, Sendable {
         let now = Date(timeIntervalSince1970: 1_793_372_400)
         let entry = BriefingRegionsData.sampleEntry(
             id: "timeline-0", title: "Shipping corridor security tightens off Yemen", publishers: 11, date: now)
-        let steps: [(String, String, Double)] = [
-            ("Mon", "First incident reported in the corridor", 4),
-            ("Tue", "Two more vessels named by the coast guard", 3),
-            ("Wed", "Insurers suspend new war-risk cover", 2),
-            ("Thu", "Attacks escalated as the security level is raised", 1),
-            ("Today", "Naval escorts begin for inbound vessels", 0.1),
+        let steps: [SampleStep] = [
+            SampleStep(day: "Mon", summary: "First incident reported in the corridor", daysAgo: 4),
+            SampleStep(day: "Tue", summary: "Two more vessels named by the coast guard", daysAgo: 3),
+            SampleStep(day: "Wed", summary: "Insurers suspend new war-risk cover", daysAgo: 2),
+            SampleStep(day: "Thu", summary: "Attacks escalated as the security level is raised", daysAgo: 1),
+            SampleStep(day: "Today", summary: "Naval escorts begin for inbound vessels", daysAgo: 0.1),
         ]
         let timeline = steps.map {
-            OverviewTimelineItem(dateText: $0.0, summary: $0.1, eventDate: now.addingTimeInterval(-$0.2 * 86_400))
+            OverviewTimelineItem(
+                dateText: $0.day, summary: $0.summary, eventDate: now.addingTimeInterval(-$0.daysAgo * 86_400))
         }
         return thread(entry: entry, timeline: timeline, now: now).map { Self(threads: [$0]) }
     }
+}
+
+/// One capture fixture turning point.
+private struct SampleStep {
+    let day: String
+    let summary: String
+    let daysAgo: Double
 }
 
 private enum Metrics {

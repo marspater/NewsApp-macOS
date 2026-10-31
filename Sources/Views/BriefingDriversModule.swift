@@ -100,20 +100,28 @@ struct BriefingDriversData: Equatable, Sendable {
     /// Sample data for `Tests/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         let now = Date(timeIntervalSince1970: 1_793_372_400)
-        let samples: [(String, Int, TensionEventType)] = [
-            ("Drones intercepted near an oil terminal in Saudi Arabia", 6, .armedConflict),
-            ("Protest bans extended in two capitals", 5, .civilUnrest),
-            ("Containment perimeter widens in Uganda", 3, .healthEmergency),
-            ("Cyber incident at a regional utility in Canada", 1, .cyberAttack),
+        let samples: [SampleDriver] = [
+            SampleDriver(
+                title: "Drones intercepted near an oil terminal in Saudi Arabia", publishers: 6, type: .armedConflict),
+            SampleDriver(title: "Protest bans extended in two capitals", publishers: 5, type: .civilUnrest),
+            SampleDriver(title: "Containment perimeter widens in Uganda", publishers: 3, type: .healthEmergency),
+            SampleDriver(title: "Cyber incident at a regional utility in Canada", publishers: 1, type: .cyberAttack),
         ]
         return Self(
             events: samples.enumerated().map { index, sample in
                 Event(
                     entry: BriefingRegionsData.sampleEntry(
-                        id: "driver-\(index)", title: sample.0, publishers: sample.1, date: now),
-                    type: sample.2)
+                        id: "driver-\(index)", title: sample.title, publishers: sample.publishers, date: now),
+                    type: sample.type)
             })
     }
+}
+
+/// One capture fixture story.
+private struct SampleDriver {
+    let title: String
+    let publishers: Int
+    let type: TensionEventType
 }
 
 private enum Metrics {

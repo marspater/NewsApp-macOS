@@ -95,44 +95,47 @@ struct BriefingRegionsData: Equatable, Sendable {
     /// Sample data for `Tests/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         let now = Date(timeIntervalSince1970: 1_793_372_400)
-        let stories: [(String, Int, Double, String, TensionMacroRegion)] = [
-            (
-                "Shipping corridor security tightens off Yemen", 11, 0.2, "All inbound vessels are now escorted.",
-                .middleEastNorthAfrica
-            ),
-            (
-                "Drones intercepted near an oil terminal in Saudi Arabia", 4, 0.6,
-                "Air defences engaged two drones overnight.", .middleEastNorthAfrica
-            ),
-            (
-                "Ceasefire talks resume in Cairo", 3, 2, "Delegations met for four hours on Thursday.",
-                .middleEastNorthAfrica
-            ),
-            ("Protest bans extended in two capitals", 5, 3, "The ban now runs until the end of the month.", .europe),
-            (
-                "Containment perimeter widens in Uganda", 2, 4, "Cases were confirmed in two more districts.",
-                .subSaharanAfrica
-            ),
-            (
-                "Export rules on critical minerals tighten in China", 2, 5, "Licences are now required for exports.",
-                .eastSoutheastAsia
-            ),
-            (
-                "Cyber incident at a regional utility in Canada", 1, 6, "Billing systems were taken offline.",
-                .northAmerica
-            ),
+        let stories: [SampleStory] = [
+            SampleStory(
+                title: "Shipping corridor security tightens off Yemen", publishers: 11, hoursAgo: 0.2,
+                fact: "All inbound vessels are now escorted.",
+                region: .middleEastNorthAfrica),
+            SampleStory(
+                title: "Drones intercepted near an oil terminal in Saudi Arabia", publishers: 4, hoursAgo: 0.6,
+                fact: "Air defences engaged two drones overnight.",
+                region: .middleEastNorthAfrica),
+            SampleStory(
+                title: "Ceasefire talks resume in Cairo", publishers: 3, hoursAgo: 2,
+                fact: "Delegations met for four hours on Thursday.",
+                region: .middleEastNorthAfrica),
+            SampleStory(
+                title: "Protest bans extended in two capitals", publishers: 5, hoursAgo: 3,
+                fact: "The ban now runs until the end of the month.",
+                region: .europe),
+            SampleStory(
+                title: "Containment perimeter widens in Uganda", publishers: 2, hoursAgo: 4,
+                fact: "Cases were confirmed in two more districts.",
+                region: .subSaharanAfrica),
+            SampleStory(
+                title: "Export rules on critical minerals tighten in China", publishers: 2, hoursAgo: 5,
+                fact: "Licences are now required for exports.",
+                region: .eastSoutheastAsia),
+            SampleStory(
+                title: "Cyber incident at a regional utility in Canada", publishers: 1, hoursAgo: 6,
+                fact: "Billing systems were taken offline.",
+                region: .northAmerica),
         ]
         var entries: [FeedEntry] = []
         var map: [String: Set<TensionMacroRegion>] = [:]
         var facts: [String: BriefingCitedFact] = [:]
         for (index, story) in stories.enumerated() {
             let entry = sampleEntry(
-                id: "region-\(index)", title: story.0, publishers: story.1,
-                date: now.addingTimeInterval(-story.2 * 3600))
+                id: "region-\(index)", title: story.title, publishers: story.publishers,
+                date: now.addingTimeInterval(-story.hoursAgo * 3600))
             entries.append(entry)
-            map[entry.id] = [story.4]
+            map[entry.id] = [story.region]
             facts[entry.id] = BriefingCitedFact(
-                text: story.3, isCited: true, citationPublisher: "Publisher \(index + 1)")
+                text: story.fact, isCited: true, citationPublisher: "Publisher \(index + 1)")
         }
         return make(entries: entries, regionsByEntry: map, facts: facts, now: now)
     }
@@ -169,6 +172,15 @@ extension TensionMacroRegion {
         case .oceania: return "Oceania"
         }
     }
+}
+
+/// One capture fixture story.
+private struct SampleStory {
+    let title: String
+    let publishers: Int
+    let hoursAgo: Double
+    let fact: String
+    let region: TensionMacroRegion
 }
 
 private enum Metrics {

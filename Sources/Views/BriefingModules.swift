@@ -487,22 +487,19 @@ enum BriefingRegion {
 
     /// Western Asia, Iran and North Africa are the Middle East & North Africa; the rest follows the UN regions, with
     /// Central Asia in South Asia.
+    /// UN subregions checked first, then UN continents.
+    private static let subregions: [String: TensionMacroRegion] = [
+        "145": .middleEastNorthAfrica, "021": .northAmerica, "034": .southAsia, "143": .southAsia,
+        "030": .eastSoutheastAsia, "035": .eastSoutheastAsia,
+    ]
+    private static let continents: [String: TensionMacroRegion] = [
+        "002": .subSaharanAfrica, "150": .europe, "019": .latinAmerica, "419": .latinAmerica, "009": .oceania,
+    ]
+
     static func region(code: String) -> TensionMacroRegion? {
         if ["IR", "EG", "DZ", "LY", "MA", "TN", "SD", "EH"].contains(code) { return .middleEastNorthAfrica }
         let subregion = Locale.Region(code).containingRegion
-        switch subregion?.identifier {
-        case "145": return .middleEastNorthAfrica
-        case "021": return .northAmerica
-        case "034", "143": return .southAsia
-        case "030", "035": return .eastSoutheastAsia
-        default: break
-        }
-        switch subregion?.containingRegion?.identifier {
-        case "002": return .subSaharanAfrica
-        case "150": return .europe
-        case "019", "419": return .latinAmerica
-        case "009": return .oceania
-        default: return nil
-        }
+        if let region = subregion.flatMap({ subregions[$0.identifier] }) { return region }
+        return subregion?.containingRegion.flatMap { continents[$0.identifier] }
     }
 }
