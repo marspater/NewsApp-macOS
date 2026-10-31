@@ -99,6 +99,11 @@ final class AppSettings: ObservableObject {
         ("https://www.ft.com/world?format=rss", 3),
         // Every story answers HTTP 403 to the reader (21 October 2026 catalog reader-access run).
         ("https://thehill.com/feed", 3),
+        // Gone or unparseable on 31 October 2026 (#800): HTTP 404, 404, a Cloudflare 403 and a malformed feed.
+        ("https://www.semafor.com/feed.xml", 4),
+        ("https://www.abc.net.au/news/feed/52278/rss.xml", 4),
+        ("https://www.smithsonianmag.com/rss/smart-news", 4),
+        ("https://rollcall.com/feed", 4),
     ]
     static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 
