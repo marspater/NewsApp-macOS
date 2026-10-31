@@ -158,6 +158,7 @@ struct ArticleWebView: NSViewRepresentable {
             let generation = requestGeneration
             let allowHTTP = parent.allowHTTP
             let opensNewWindow = navigationAction.targetFrame == nil
+            let isMainFrame = WebPreviewPolicy.isMainFrame(targetFrameIsMain: navigationAction.targetFrame?.isMainFrame)
             Task { @MainActor [weak self, weak webView] in
                 do {
                     // Navigation delegates cover documents, not WebKit subresource traffic.
@@ -175,12 +176,14 @@ struct ArticleWebView: NSViewRepresentable {
                     }
                     decisionHandler(.allow)
                 } catch {
-                    if let self, let webView, self.webView === webView, self.requestGeneration == generation {
-                        self.parent.loadError =
-                            "This address was blocked by the app’s network policy. Open the publisher in your browser if needed."
+                    let refusal = WebPreviewPolicy.refusalPolicy(isMainFrame: isMainFrame)
+                    if let message = refusal.error, let self, let webView, self.webView === webView,
+                        self.requestGeneration == generation
+                    {
+                        self.parent.loadError = message
                         self.parent.isLoading = false
                     }
-                    decisionHandler(.cancel)
+                    decisionHandler(refusal.decision)
                 }
             }
         }
