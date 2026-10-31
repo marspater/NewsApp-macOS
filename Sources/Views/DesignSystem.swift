@@ -225,6 +225,20 @@ enum AppLayout {
     static let minimumHitTarget: CGFloat = 44
     /// World Tension strip: driving headlines take three columns on a wide board and two at the narrowest window.
     static let tensionDriverMinimum: CGFloat = 260
+    // Briefing war room (#848).
+    /// The board's measure, as on the canvas; the Briefing masthead uses it too so the two align.
+    static let briefingMaxWidth: CGFloat = 1360
+    /// Below this content width the right column of Situational awareness wraps under the carousel.
+    static let briefingSplitMinimum: CGFloat = 960
+    /// Below this content width Weak signals and Forward watch stack instead of sitting side by side.
+    static let briefingPairMinimum: CGFloat = 1056
+    /// Modules that share a row of their pillar are at least this wide.
+    static let briefingModuleMinimum: CGFloat = 420
+    /// The Customize Briefing sheet.
+    static let briefingCustomizeWidth: CGFloat = 420
+    static let briefingCustomizeHeight: CGFloat = 520
+    /// The Briefing's most-covered story tile carries an accent border this wide.
+    static let leadTileStroke: CGFloat = 2
     // Control and toolbar heights belong to the system (DESIGN.md 12).
 }
 
@@ -279,6 +293,8 @@ enum AppTypography {
     static let lede = Font.title3
     /// Publisher and kicker; pair with `eyebrowTracking` and `.textCase(.uppercase)`.
     static let eyebrow = Font.caption2.weight(.semibold)
+    /// A cited fact in the publisher's voice: the editorial serif at callout size (Briefing, #848).
+    static let quote = Font.system(.callout, design: .serif)
 
     static func cardHeadline(_ layout: StoryCardLayout) -> Font {
         switch layout {

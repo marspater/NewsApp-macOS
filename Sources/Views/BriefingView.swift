@@ -26,6 +26,18 @@ struct BriefingActions {
     var onToggleSave: (FeedArticle) -> Void = { _ in
         // Captures have no library to save to.
     }
+    /// Filters the board to a region, or clears the filter with nil (Regions module, #850).
+    var onSelectRegion: (TensionMacroRegion?) -> Void = { _ in
+        // The board keeps the filter itself; the list needs no word of it.
+    }
+    /// Opens a quoted line's publisher page. Only http(s) links open (#799).
+    var onOpenURL: (URL) -> Void = { url in
+        if let safe = WebLink.url(url.absoluteString) { NSWorkspace.shared.open(safe) }
+    }
+    /// Presents the Customize Briefing sheet.
+    var onCustomize: () -> Void = {
+        // Captures have no sheet to present.
+    }
 
     init(
         onOpenArticle: @escaping (FeedArticle) -> Void,
@@ -33,7 +45,8 @@ struct BriefingActions {
         onStartNewBriefing: @escaping () -> Void,
         onBackToToday: @escaping () -> Void,
         onToggleRead: @escaping (FeedArticle) -> Void = { _ in },
-        onToggleSave: @escaping (FeedArticle) -> Void = { _ in }
+        onToggleSave: @escaping (FeedArticle) -> Void = { _ in },
+        onCustomize: @escaping () -> Void = {}
     ) {
         self.onOpenArticle = onOpenArticle
         self.onOpenEvent = onOpenEvent
@@ -41,6 +54,7 @@ struct BriefingActions {
         self.onBackToToday = onBackToToday
         self.onToggleRead = onToggleRead
         self.onToggleSave = onToggleSave
+        self.onCustomize = onCustomize
     }
 
     /// An event opens its overview and a single story its reader, as their cards do (DESIGN.md 8.3).
@@ -399,17 +413,69 @@ struct BriefingCompletionBanner: View {
     }
 }
 
-// MARK: - Root Briefing Situation Board Shell
+// MARK: - Split row
 
-/// Root Situation Board view presenting the finite daily Briefing (Epic R): the hero carousel, the World Tension strip,
-/// the stories as tiles grouped by topic, and the completion banner. It scrolls with the list's masthead inside the
-/// list's own scroll view and takes plain values; the list loads them. Only the strip reads the window's World
-/// Tension model.
+/// Two views side by side, the leading one taking `leadingFraction` of the width, both as tall as the taller; below
+/// `minimumWidth` they stack. The canvas's flex rows (carousel 2 : column 1, Weak signals 1 : Forward watch 1).
+struct BriefingSplitLayout: Layout {
+    var leadingFraction: CGFloat
+    var minimumWidth: CGFloat
+    var spacing: CGFloat = AppLayout.cardGap
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let width = proposal.width ?? minimumWidth
+        return CGSize(width: width, height: frames(width: width, subviews: subviews).map(\.maxY).max() ?? 0)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        for (subview, frame) in zip(subviews, frames(width: bounds.width, subviews: subviews)) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY), anchor: .topLeading,
+                proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    private func frames(width: CGFloat, subviews: Subviews) -> [CGRect] {
+        guard subviews.count == 2 else {
+            var y: CGFloat = 0
+            return subviews.map { subview in
+                let height = subview.sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+                defer { y += height + spacing }
+                return CGRect(x: 0, y: y, width: width, height: height)
+            }
+        }
+        if width >= minimumWidth {
+            let leading = ((width - spacing) * leadingFraction).rounded()
+            let trailing = width - spacing - leading
+            let height = max(
+                subviews[0].sizeThatFits(ProposedViewSize(width: leading, height: nil)).height,
+                subviews[1].sizeThatFits(ProposedViewSize(width: trailing, height: nil)).height)
+            return [
+                CGRect(x: 0, y: 0, width: leading, height: height),
+                CGRect(x: leading + spacing, y: 0, width: trailing, height: height),
+            ]
+        }
+        let first = subviews[0].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        let second = subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        return [
+            CGRect(x: 0, y: 0, width: width, height: first),
+            CGRect(x: 0, y: first + spacing, width: width, height: second),
+        ]
+    }
+}
+
+// MARK: - Root Briefing board
+
+/// The Briefing war room (DESIGN.md 8.4): the modules of `BriefingLayout`, grouped under their pillars in board order,
+/// each shown only when it has something true to show; then the completion banner. It scrolls with the list's
+/// masthead inside the list's own scroll view and takes plain values; the list loads them. Only the World Tension tile
+/// reads the window's model.
 struct BriefingView: View {
     let entries: [FeedEntry]
     let briefing: FiniteBriefing?
-    /// One cited fact and the best image per story, read from the library by the list.
-    var details = BriefingStoryDetails()
+    /// Every module's data, read from the library by the list.
+    var data = BriefingBoardData()
+    var layout = BriefingLayout.default
     var readIDs: Set<String> = []
     var savedIDs: Set<String> = []
     /// The story the list's keyboard focus is on, ringed like a focused card.
@@ -420,10 +486,13 @@ struct BriefingView: View {
     let clock: any CarouselClock
     let actions: BriefingActions
 
+    @State private var filter = BriefingBoardFilter()
+
     init(
         entries: [FeedEntry],
         briefing: FiniteBriefing?,
-        details: BriefingStoryDetails = BriefingStoryDetails(),
+        data: BriefingBoardData = BriefingBoardData(),
+        layout: BriefingLayout = .default,
         readIDs: Set<String> = [],
         savedIDs: Set<String> = [],
         focusedID: String? = nil,
@@ -434,7 +503,8 @@ struct BriefingView: View {
     ) {
         self.entries = entries
         self.briefing = briefing
-        self.details = details
+        self.data = data
+        self.layout = layout
         self.readIDs = readIDs
         self.savedIDs = savedIDs
         self.focusedID = focusedID
@@ -473,28 +543,179 @@ struct BriefingView: View {
 
     static let otherSection = "More Stories"
 
+    /// The modules the board shows, in pillar and layout order: visible in the layout and with data.
+    static func visibleModules(
+        layout: BriefingLayout, data: BriefingBoardData, hasStories: Bool = true
+    ) -> [BriefingModuleKind] {
+        BriefingPillar.allCases.flatMap { pillar in
+            layout.modules(in: pillar).filter { data.hasData(for: $0, hasStories: hasStories) }
+        }
+    }
+
+    /// An event that gained a report in the last hour.
+    static func isDeveloping(_ entry: FeedEntry, now: Date) -> Bool {
+        guard case .event(let summary, _, _) = entry, summary.isConfirmed, let latest = summary.latestDate else {
+            return false
+        }
+        return now.timeIntervalSince(latest) <= 3600
+    }
+
+    /// The board's actions, with region selection applied to the board's own filter first.
+    private var boardActions: BriefingActions {
+        var board = actions
+        board.onSelectRegion = { [actions] region in
+            filter.region = region
+            actions.onSelectRegion(region)
+        }
+        return board
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.lg) {
-            let hero = Self.heroEntries(entries)
-            if !hero.isEmpty {
-                BriefingHeroCarouselView(
-                    entries: hero, images: details.images, readIDs: readIDs, clock: clock,
-                    isReaderOpen: isMotionPaused, onOpen: actions.open)
+        let modules = Self.visibleModules(layout: layout, data: data, hasStories: !entries.isEmpty)
+        let pillars = BriefingPillar.allCases.filter { pillar in modules.contains { $0.pillar == pillar } }
+        VStack(alignment: .leading, spacing: AppSpacing.xl) {
+            ForEach(pillars.filter { $0 != .weakSignals && $0 != .forwardWatch }, id: \.self) { pillar in
+                pillarSection(pillar, modules: modules.filter { $0.pillar == pillar })
             }
-            // Reads the window's World Tension model, as the sidebar does (#781).
-            BriefingTensionStripView()
-            BriefingTileGridView(
-                sections: Self.sections(entries), facts: details.facts, readIDs: readIDs, savedIDs: savedIDs,
-                focusedID: focusedID, actions: actions)
+            signalsAndWatch(modules)
             if let briefing {
-                BriefingCompletionBanner(
-                    briefing: briefing, readIDs: readIDs, nextEdition: nextEdition,
-                    onBackToToday: actions.onBackToToday)
+                VStack(spacing: 0) {
+                    Divider()
+                    BriefingCompletionBanner(
+                        briefing: briefing, readIDs: readIDs, nextEdition: nextEdition,
+                        onBackToToday: actions.onBackToToday)
+                }
             }
         }
         .padding(.horizontal, AppLayout.pageInset)
         .padding(.bottom, AppSpacing.xl)
-        .frame(maxWidth: AppLayout.listMaxWidth + 2 * AppLayout.pageInset)
+        .frame(maxWidth: AppLayout.briefingMaxWidth + 2 * AppLayout.pageInset)
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    /// Weak signals and Forward watch sit side by side on a wide board, as on the canvas.
+    @ViewBuilder
+    private func signalsAndWatch(_ modules: [BriefingModuleKind]) -> some View {
+        let signals = modules.filter { $0.pillar == .weakSignals }
+        let watch = modules.filter { $0.pillar == .forwardWatch }
+        if !signals.isEmpty, !watch.isEmpty {
+            BriefingSplitLayout(leadingFraction: 0.5, minimumWidth: AppLayout.briefingPairMinimum) {
+                pillarSection(.weakSignals, modules: signals).frame(maxHeight: .infinity, alignment: .top)
+                pillarSection(.forwardWatch, modules: watch).frame(maxHeight: .infinity, alignment: .top)
+            }
+        } else if !signals.isEmpty {
+            pillarSection(.weakSignals, modules: signals)
+        } else if !watch.isEmpty {
+            pillarSection(.forwardWatch, modules: watch)
+        }
+    }
+
+    private func pillarSection(_ pillar: BriefingPillar, modules: [BriefingModuleKind]) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            BriefingPillarHeader(pillar)
+            if pillar == .situationalAwareness {
+                situationalAwareness(modules)
+            } else {
+                flow(modules)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    /// As the canvas lays it out: the carousel (two thirds) beside a column with World Tension and Since your last
+    /// briefing in layout order, wrapping below the carousel on a narrow board; the Executive sitrep full width below.
+    @ViewBuilder
+    private func situationalAwareness(_ modules: [BriefingModuleKind]) -> some View {
+        let column = modules.filter { $0 == .worldTension || $0 == .sinceLastBriefing }
+        VStack(alignment: .leading, spacing: AppLayout.cardGap) {
+            if modules.contains(.heroCarousel), !column.isEmpty {
+                BriefingSplitLayout(leadingFraction: 2.0 / 3.0, minimumWidth: AppLayout.briefingSplitMinimum) {
+                    module(.heroCarousel)
+                    VStack(spacing: AppLayout.cardGap) {
+                        ForEach(column, id: \.self) { module($0) }
+                    }
+                    .frame(maxHeight: .infinity, alignment: .top)
+                }
+            } else if modules.contains(.heroCarousel) {
+                module(.heroCarousel)
+            } else {
+                ForEach(column, id: \.self) { module($0) }
+            }
+            if modules.contains(.executiveSitrep) { module(.executiveSitrep) }
+        }
+    }
+
+    /// The other pillars: full-width modules take their own row; the rest share rows in a grid, in layout order.
+    private func flow(_ modules: [BriefingModuleKind]) -> some View {
+        var rows: [[BriefingModuleKind]] = []
+        for kind in modules {
+            if kind.spansFullWidth || rows.last?.first?.spansFullWidth != false {
+                rows.append([kind])
+            } else {
+                rows[rows.count - 1].append(kind)
+            }
+        }
+        return VStack(alignment: .leading, spacing: AppLayout.cardGap) {
+            ForEach(rows, id: \.self) { row in
+                if row.count == 1 {
+                    module(row[0])
+                } else {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(
+                                .adaptive(minimum: AppLayout.briefingModuleMinimum), spacing: AppLayout.cardGap,
+                                alignment: .top)
+                        ],
+                        alignment: .leading, spacing: AppLayout.cardGap
+                    ) {
+                        ForEach(row, id: \.self) { module($0) }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func module(_ kind: BriefingModuleKind) -> some View {
+        let actions = boardActions
+        switch kind {
+        case .heroCarousel:
+            BriefingHeroCarouselView(
+                entries: Self.heroEntries(entries.filter(filter.includes)), images: data.details.images,
+                readIDs: readIDs, clock: clock, isReaderOpen: isMotionPaused, onOpen: actions.open)
+        case .worldTension:
+            // Reads the window's World Tension model, as the sidebar does (#781).
+            BriefingTensionStripView(onOpenURL: actions.onOpenURL, onCustomize: actions.onCustomize)
+        case .sinceLastBriefing:
+            if let value = data.sinceLast { BriefingSinceLastModuleView(data: value, filter: filter, actions: actions) }
+        case .executiveSitrep:
+            if let value = data.sitrep { BriefingSitrepModuleView(data: value, filter: filter, actions: actions) }
+        case .priorityDevelopments:
+            if let value = data.priority { BriefingPriorityModuleView(data: value, filter: filter, actions: actions) }
+        case .sourceFootprint:
+            if let value = data.footprint {
+                BriefingFootprintModuleView(data: value, filter: filter, actions: actions)
+            }
+        case .tensionDrivers:
+            if let value = data.drivers { BriefingDriversModuleView(data: value, filter: filter, actions: actions) }
+        case .industryImpact:
+            if let value = data.industry { BriefingIndustryModuleView(data: value, filter: filter, actions: actions) }
+        case .regions:
+            if let value = data.regions { BriefingRegionsModuleView(data: value, filter: filter, actions: actions) }
+        case .regionTiles:
+            if let value = data.regions {
+                BriefingRegionTilesModuleView(data: value, filter: filter, actions: actions)
+            }
+        case .weakSignals:
+            if let value = data.weakSignals {
+                BriefingWeakSignalsModuleView(data: value, filter: filter, actions: actions)
+            }
+        case .forwardWatch:
+            if let value = data.forwardWatch {
+                BriefingForwardWatchModuleView(data: value, filter: filter, actions: actions)
+            }
+        case .escalationTimeline:
+            if let value = data.timeline { BriefingTimelineModuleView(data: value, filter: filter, actions: actions) }
+        }
     }
 }

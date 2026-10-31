@@ -329,6 +329,9 @@ struct ListViewCommands: Commands {
             Button("New Briefing") { listActions?.newBriefing?() }
                 .disabled(listActions?.newBriefing == nil)
 
+            Button("Customize Briefing…") { listActions?.customizeBriefing?() }
+                .disabled(listActions?.customizeBriefing == nil)
+
             Button("World Tension…") {
                 NotificationCenter.default.post(name: .showNewsTensionCommand, object: nil)
             }

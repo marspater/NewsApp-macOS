@@ -364,13 +364,19 @@ extension OverviewCaptures {
     /// content; returns 1 on failure.
     @MainActor
     static func render<V: View>(
-        _ view: V, name: String, size: NSSize, dark: Bool, trim: Bool = false, into output: URL
+        _ view: V, name: String, size: NSSize, dark: Bool, contrast: ColorSchemeContrast = .standard,
+        trim: Bool = false, into output: URL
     ) -> Int {
         let host = NSHostingView(
             rootView: view.frame(width: size.width, height: size.height).background(AppColor.background)
                 .environment(\.colorScheme, dark ? .dark : .light)
-                .environment(\.overrideContrast, .standard).environment(\.overrideReduceMotion, true))
-        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua) ?? NSAppearance.currentDrawing()
+                .environment(\.overrideContrast, contrast).environment(\.overrideReduceMotion, true))
+        let increased = contrast == .increased
+        let appearanceName: NSAppearance.Name =
+            dark
+            ? (increased ? .accessibilityHighContrastDarkAqua : .darkAqua)
+            : (increased ? .accessibilityHighContrastAqua : .aqua)
+        let appearance = NSAppearance(named: appearanceName) ?? NSAppearance.currentDrawing()
         host.appearance = appearance
         host.frame = NSRect(origin: .zero, size: size)
         var rendered: NSBitmapImageRep?
@@ -397,8 +403,9 @@ extension OverviewCaptures {
 // MARK: - Briefing situation board (#780)
 
 extension OverviewCaptures {
-    /// The board at the detail width of a 1,600 pt window and of the 900 pt minimum window, light and dark, with a
-    /// masthead stand-in in the list's tokens above it (the list draws the real one, and the toolbar is not offscreen).
+    /// The board at the detail width of a 1,440 pt window and of the 900 pt minimum window, light, dark and dark with
+    /// Increase Contrast, with a masthead stand-in in the list's tokens above it (the list draws the real one, and the
+    /// toolbar is not offscreen).
     /// Images are drawn here and put in the decoded-image cache, so nothing is fetched.
     @MainActor
     static func captureBriefing(into output: URL) -> Int {
@@ -414,9 +421,14 @@ extension OverviewCaptures {
         defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: UserDefaults(suiteName: suite) ?? .standard)
         var failures = 0
-        // 1,600 pt and 900 pt windows less the sidebar's ideal and minimum widths.
-        for (window, width) in [(1600, 1360), (900, 680)] {
-            for dark in [false, true] {
+        // Every module's capture sample; a module without one stays hidden, as on a board without its data.
+        let data = BriefingBoardData.captureFixture(details: BriefingStoryDetails(facts: facts, images: images))
+        let appearances: [(String, Bool, ColorSchemeContrast)] = [
+            ("light", false, .standard), ("dark", true, .standard), ("dark-ic", true, .increased),
+        ]
+        // 1,440 pt and 900 pt windows less the sidebar's width.
+        for (window, width) in [(1440, 1200), (900, 680)] {
+            for (appearance, dark, contrast) in appearances {
                 let board = VStack(alignment: .leading, spacing: 0) {
                     VStack(alignment: .leading, spacing: AppSpacing.xxs) {
                         Text("Briefing").font(AppTypography.masthead).foregroundStyle(AppColor.primaryText)
@@ -429,7 +441,7 @@ extension OverviewCaptures {
                     .padding(.bottom, AppLayout.cardGap)
                     BriefingView(
                         entries: entries, briefing: briefing,
-                        details: BriefingStoryDetails(facts: facts, images: images), readIDs: readIDs,
+                        data: data, readIDs: readIDs,
                         savedIDs: [entries[3].id], focusedID: nil, nextEdition: now.addingTimeInterval(16 * 3600),
                         actions: BriefingActions(
                             onOpenArticle: { _ in }, onOpenEvent: { _ in }, onStartNewBriefing: {}, onBackToToday: {}))
@@ -438,8 +450,9 @@ extension OverviewCaptures {
                 .environmentObject(readManager).environmentObject(savedStories).environmentObject(settings)
                 .environment(tension)
                 failures += render(
-                    board, name: "briefing-\(window)pt-\(dark ? "dark" : "light")",
-                    size: NSSize(width: width, height: 2600), dark: dark, trim: true, into: output)
+                    board, name: "briefing-\(window)pt-\(appearance)",
+                    size: NSSize(width: width, height: 2600), dark: dark, contrast: contrast, trim: true,
+                    into: output)
             }
         }
         return failures
