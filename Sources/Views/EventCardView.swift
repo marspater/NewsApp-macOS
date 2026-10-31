@@ -69,7 +69,9 @@ struct EventCardView: View {
     @ViewBuilder
     private var coverage: some View {
         Divider()
-        coverageToggle
+        // The row's "updated 5 minutes ago" and its spoken label age by the minute; the equatable card is not
+        // redrawn by a refresh (#839).
+        TimelineView(.everyMinute) { _ in coverageToggle }
         if isExpanded {
             Divider()
             sourceList
