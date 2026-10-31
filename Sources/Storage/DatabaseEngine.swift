@@ -42,7 +42,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 28
+    static let schemaVersion = 29
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
     static let busyTimeoutMilliseconds: Int32 = 5_000
 
@@ -1577,6 +1577,33 @@ actor DatabaseEngine {
                         """)
                 try Task.checkCancellation()
                 try setUserVersion(28)
+                try commitTransaction()
+            } catch {
+                try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 29 {
+            try beginTransaction()
+            do {
+                // Briefing edition snapshots and the sitrep cache (#849).
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS briefing_sitrep (
+                        event_id TEXT PRIMARY KEY,
+                        input_hash TEXT NOT NULL,
+                        text TEXT NOT NULL,
+                        is_generated INTEGER NOT NULL,
+                        created_at REAL NOT NULL);
+                    CREATE TABLE IF NOT EXISTS briefing_edition_snapshots (
+                        edition_started_at REAL NOT NULL,
+                        event_id TEXT NOT NULL,
+                        membership_version INTEGER NOT NULL,
+                        publisher_count INTEGER NOT NULL,
+                        escalation TEXT,
+                        PRIMARY KEY (edition_started_at, event_id));
+                    """)
+                try setUserVersion(29)
                 try commitTransaction()
             } catch {
                 try? rollbackTransaction()
@@ -3678,6 +3705,8 @@ actor DatabaseEngine {
             try clearWorldTensionHistory()
             try executeSimple("DELETE FROM article_enrichment;")
             try clearEventOverviews()
+            // Sitrep lines restate overview highlights, so they go with the overviews.
+            try executeSimple("DELETE FROM briefing_sitrep;")
             try executeSimple("DELETE FROM article_embeddings;")
             try executeSimple("DELETE FROM article_features;")
             try executeSimple("UPDATE pair_assessments SET features = NULL;")

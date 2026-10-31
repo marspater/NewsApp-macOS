@@ -1,6 +1,6 @@
 ---
 name: unit tests
-discover: printf '%s\n' Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift Tests/NewsTests.swift
+discover: printf '%s\n' Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift Tests/BriefingE2ETests.swift Tests/NewsTests.swift
 run: script/ci_testsuite.sh "<< outputs.junit >>" << test.atoms >>
 analysis: script/ci_testsuite.sh --lcov "<< outputs.lcov >>" << test.atoms >>
 options:
