@@ -101,6 +101,11 @@ final class AppSettings: ObservableObject {
         ("https://www.ft.com/world?format=rss", 3),
         // Every story answers HTTP 403 to the reader (21 October 2026 catalog reader-access run).
         ("https://thehill.com/feed", 3),
+        // Gone or unparseable on 31 October 2026 (#800): HTTP 404, 404, a Cloudflare 403 and a malformed feed.
+        ("https://www.semafor.com/feed.xml", 4),
+        ("https://www.abc.net.au/news/feed/52278/rss.xml", 4),
+        ("https://www.smithsonianmag.com/rss/smart-news", 4),
+        ("https://rollcall.com/feed", 4),
     ]
     static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 
@@ -153,15 +158,16 @@ final class AppSettings: ObservableObject {
             defaults.set(upgraded, forKey: Self.firstLaunchCompletedKey)
         }
 
+        // Settings from the first retirement stored only a flag; it means version 1 was applied.
+        let applied =
+            defaults.object(forKey: Self.retiredFeedsVersionKey) as? Int
+            ?? (defaults.bool(forKey: "retired_default_feeds_v1") ? 1 : 0)
+        // Matched by feed key, so a subscription or star stored with a trailing slash is retired too.
+        let retired = Set(Self.retiredFeeds.filter { $0.version > applied }.map { Self.feedKey($0.url) })
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
             // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
             let parked = Set(FeedCatalog.parkedFeeds.map(\.url))
-            // Settings from the first retirement stored only a flag; it means version 1 was applied.
-            let applied =
-                defaults.object(forKey: Self.retiredFeedsVersionKey) as? Int
-                ?? (defaults.bool(forKey: "retired_default_feeds_v1") ? 1 : 0)
-            let retired = Set(Self.retiredFeeds.filter { $0.version > applied }.map(\.url))
-            let kept = savedUrls.filter { !parked.contains($0) && !retired.contains($0) }
+            let kept = savedUrls.filter { !parked.contains($0) && !retired.contains(Self.feedKey($0)) }
             if kept.count != savedUrls.count { defaults.set(kept, forKey: Self.feedURLsKey) }
             self.feedURLs = kept
         } else {
@@ -227,7 +233,10 @@ final class AppSettings: ObservableObject {
             sources: defaults.stringArray(forKey: Self.mutedSourcesKey) ?? [],
             topics: defaults.stringArray(forKey: Self.mutedTopicsKey) ?? [],
             topicSets: defaults.stringArray(forKey: Self.mutedTopicSetsKey) ?? [])
-        let starred = Set(defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? [])
+        // A retired feed gives its star slot back with its subscription (#800).
+        let storedStars = defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? []
+        let starred = Set(storedStars.filter { !retired.contains(Self.feedKey($0)) })
+        if starred.count != storedStars.count { defaults.set(starred.sorted(), forKey: Self.starredFeedURLsKey) }
         self.starredFeedURLs = starred
         // A star from before star times were kept counts from now.
         var times = (defaults.dictionary(forKey: Self.starredFeedTimesKey) as? [String: Double] ?? [:]).filter {
