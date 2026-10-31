@@ -3715,6 +3715,39 @@ struct NewsTests {
         let feed = feedURL.absoluteString
         settings.feedURLs = [feed]
         settings.aiEnabled = false
+        // #799: only web links enter the library; an item without a link keeps its GUID identity.
+        let linked = [
+            "smb://evil.example/share", "x-apple.systempreferences:com.apple.preference.security",
+            "file:///etc/passwd", "https://example.com/story", "http://example.com/older", "",
+        ].map {
+            FeedArticle(title: "Item", link: $0, guid: $0, description: "", pubDate: Date(), source: "Publisher")
+        }
+        assertEqual(
+            FeedFetcher.webArticles(linked).map(\.link), ["https://example.com/story", "http://example.com/older", ""],
+            "Feed items whose links are not web addresses are dropped")
+        for link in [
+            "smb://evil.example/share", "x-apple.systempreferences:com.apple.preference.security",
+            "file:///etc/passwd", "javascript:alert(1)", "https:///no-host", "",
+        ] {
+            assertTrue(WebLink.url(link) == nil, "Every open site refuses \(link.isEmpty ? "an empty link" : link)")
+        }
+        assertEqual(
+            WebLink.url(" https://example.com/story ")?.absoluteString, "https://example.com/story",
+            "A web link opens, trimmed")
+        let linkless = JSONFeedParser.parse(
+            data: Data(
+                #"{"version":"https://jsonfeed.org/version/1.1","title":"T","items":[{"id":"123","content_text":"Story"}]}"#
+                    .utf8),
+            feedURL: "https://example.com/feed.json")
+        assertEqual(
+            FeedFetcher.webArticles(linkless ?? []).map(\.guid), ["123"],
+            "A JSON Feed item without a URL is kept by its ID")
+        let emptyURL = JSONFeedParser.parse(
+            data: Data(
+                #"{"version":"https://jsonfeed.org/version/1.1","title":"T","items":[{"id":"https://example.com/a","url":"","content_text":"Story"}]}"#
+                    .utf8),
+            feedURL: "https://example.com/feed.json")
+        assertEqual(emptyURL?.first?.link, "https://example.com/a", "An empty url falls back to a web ID")
         let fetcher = FeedFetcher(client: client)
         var notified = 0
         // No image lookup: it outlives fetchFeedsAsync and its write transaction would hold the lock the trigger edits need.

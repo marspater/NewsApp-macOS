@@ -43,7 +43,7 @@ actor FeedFetcher {
                 let parsed = JSONFeedParser.parse(data: data, feedURL: urlString)
                 try Task.checkCancellation()
                 if let parsed {
-                    return (urlString, parsed, nil, fresh)
+                    return (urlString, Self.webArticles(parsed), nil, fresh)
                 } else {
                     return (urlString, nil, .parseFailed("Malformed JSON Feed"), nil)
                 }
@@ -54,12 +54,21 @@ actor FeedFetcher {
                 if let error = xmlParser.parseError {
                     return (urlString, nil, .parseFailed(error), nil)
                 }
-                return (urlString, parsed, nil, fresh)
+                return (urlString, Self.webArticles(parsed), nil, fresh)
             }
         } catch let error as FeedError {
             return (urlString, nil, error, nil)
         } catch {
             return (urlString, nil, .network(error.localizedDescription), nil)
+        }
+    }
+
+    /// Feed-supplied links are opened in the browser and fetched for the reader, so an item whose link is not a web
+    /// address (`smb:`, `file:`, another app's URL scheme) never enters the library (#799). Items without a link keep
+    /// their GUID identity.
+    static func webArticles(_ articles: [FeedArticle]) -> [FeedArticle] {
+        articles.filter { article in
+            article.link.isEmpty || WebLink.url(article.link) != nil
         }
     }
 

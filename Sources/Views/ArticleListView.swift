@@ -365,7 +365,7 @@ struct ArticleListView: View {
     private func handleOpenInBrowser() {
         guard articlePath.isEmpty, let id = focusedArticleID,
             let art = filteredArticles.first(where: { $0.id == id }),
-            let url = URL(string: art.link)
+            let url = WebLink.url(art.link)
         else { return }
         NSWorkspace.shared.open(url)
     }
@@ -1090,7 +1090,7 @@ struct ArticleListView: View {
                 return .handled
             } else if press.characters == "o" {
                 if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }),
-                    let url = URL(string: art.link)
+                    let url = WebLink.url(art.link)
                 {
                     NSWorkspace.shared.open(url)
                 }

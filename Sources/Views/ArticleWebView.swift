@@ -169,7 +169,7 @@ struct ArticleWebView: NSViewRepresentable {
                         return
                     }
                     if opensNewWindow {
-                        NSWorkspace.shared.open(requestURL)
+                        if let url = WebLink.url(requestURL.absoluteString) { NSWorkspace.shared.open(url) }
                         decisionHandler(.cancel)
                         return
                     }
