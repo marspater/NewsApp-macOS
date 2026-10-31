@@ -118,6 +118,7 @@ final class ArticleStore: ObservableObject {
         let generation = newCountRequest()
         guard let counts = try? await database.counts(muting: muting), generation == countSequence else { return }
         unreadCount = counts.unread
+        savedCount = counts.saved
         revision &+= 1
     }
 
