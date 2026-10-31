@@ -89,7 +89,9 @@ final class ArticleStore: ObservableObject {
     func refreshState() async -> Bool {
         do {
             // A read or save change that lands while this loads makes the loaded read and saved state stale: load again
-            // instead of overwriting it. ponytail: three tries, then the change stays and the next refresh catches up.
+            // instead of overwriting it. ponytail: three tries, then it reports failure; a retry loop with backoff if
+            // changes ever arrive faster than a load.
+            var published = false
             for _ in 1...3 {
                 let changesAtStart = stateChanges
                 let fetched = try await database.fetchArticles(limit: 500)
@@ -104,10 +106,12 @@ final class ArticleStore: ObservableObject {
                 self.savedArticleIDs = Set(saved.map { $0.id })
                 self.unreadCount = counts.unread
                 self.savedCount = counts.saved
+                published = true
                 break
             }
             revision &+= 1
-            return true
+            if !published { logger.error("Refresh kept being overtaken by read or save changes") }
+            return published
         } catch {
             logger.error("Failed to refresh ArticleStore state: \(error.localizedDescription)")
             return false
@@ -230,6 +234,7 @@ final class ArticleStore: ObservableObject {
     func markAsRead(ids: [String]) async {
         do {
             try await database.markReadBatch(articleIds: ids, isRead: true)
+            stateChanges &+= 1
             await refreshState()
         } catch {
             operationError = "Could not mark stories as read. Please try again."
@@ -249,6 +254,7 @@ final class ArticleStore: ObservableObject {
         }
         do {
             try await database.markAllRead(feedUrl: feedUrl, muting: muting)
+            stateChanges &+= 1
             await refreshState()
             return true
         } catch {
@@ -308,6 +314,7 @@ final class ArticleStore: ObservableObject {
         for article in currentSaved {
             _ = try? await database.setSaved(articleId: article.id, isSaved: false)
         }
+        stateChanges &+= 1
         await serialSpotlight { await $0.removeAllSavedArticles() }
         await refreshState()
     }

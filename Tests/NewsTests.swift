@@ -1148,7 +1148,7 @@ struct NewsTests {
                 source: "Publisher")
         }
         try await db.upsertArticles(stories)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         await store.markAsRead(id: stories[0].id)
         assertTrue(store.readArticleIDs.contains(stories[0].id), "The story starts read")
@@ -1166,6 +1166,18 @@ struct NewsTests {
         assertTrue(store.savedArticleIDs.contains(stories[1].id), "A save made while loading survives")
         assertEqual(store.unreadCount, 3, "The unread count follows the change")
         assertEqual(store.savedCount, 1, "The saved count follows the change")
+
+        // A bulk change made while an older refresh loads: the older snapshot must not overwrite it.
+        landed = false
+        store.refreshLoadedHook = {
+            guard !landed else { return }
+            landed = true
+            await store.markAsRead(ids: [stories[2].id])
+        }
+        let refreshed = await store.refreshState()
+        store.refreshLoadedHook = nil
+        assertTrue(refreshed, "The refresh publishes after reloading")
+        assertTrue(store.readArticleIDs.contains(stories[2].id), "A bulk read change made while loading survives")
         await db.close()
     }
 
