@@ -785,6 +785,7 @@ struct NewsTests {
             await testFTS5SearchAndOperators()
             try await testUnchangedFTSRefresh()
             try await testSearchSpellingSuggestion()
+            try await testRefreshStateKeepsChangesMadeWhileLoading()
             try await testFTSRowIDMigration()
             try await testDatabaseHealthAndDerivedRetention()
             try await testRealLibraryMigrationFixture()
@@ -948,6 +949,10 @@ struct NewsTests {
             ("testFTS5SearchAndOperators", { await testFTS5SearchAndOperators() }),
             ("testUnchangedFTSRefresh", { try await testUnchangedFTSRefresh() }),
             ("testSearchSpellingSuggestion", { try await testSearchSpellingSuggestion() }),
+            (
+                "testRefreshStateKeepsChangesMadeWhileLoading",
+                { try await testRefreshStateKeepsChangesMadeWhileLoading() }
+            ),
             ("testFTSRowIDMigration", { try await testFTSRowIDMigration() }),
             ("testDatabaseHealthAndDerivedRetention", { try await testDatabaseHealthAndDerivedRetention() }),
             ("testRealLibraryMigrationFixture", { try await testRealLibraryMigrationFixture() }),
@@ -1129,6 +1134,38 @@ struct NewsTests {
         assertEqual(rowID(), migratedID, "Existing v11 database receives a durable FTS key")
         assertEqual(indexData(), migratedIndex, "Existing v11 database receives the guarded trigger")
         assertEqual(try await db.searchArticles(query: "Updated").count, 1, "Migration preserves searchable rows")
+        await db.close()
+    }
+
+    /// #786: a read or save change that lands while `refreshState` loads is not overwritten by the older snapshot.
+    @MainActor static func testRefreshStateKeepsChangesMadeWhileLoading() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let stories = (0..<3).map { index in
+            FeedArticle(
+                title: "Race story \(index)", link: "https://example.com/race-\(index)", guid: "race-\(index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000 - Double(index) * 60),
+                source: "Publisher")
+        }
+        try await db.upsertArticles(stories)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        await store.markAsRead(id: stories[0].id)
+        assertTrue(store.readArticleIDs.contains(stories[0].id), "The story starts read")
+
+        var landed = false
+        store.refreshLoadedHook = {
+            guard !landed else { return }
+            landed = true
+            await store.markAsRead(id: stories[0].id, isRead: false)
+            _ = await store.setSaved(article: stories[1], isSaved: true)
+        }
+        await store.refreshState()
+        store.refreshLoadedHook = nil
+        assertFalse(store.readArticleIDs.contains(stories[0].id), "A read change made while loading survives")
+        assertTrue(store.savedArticleIDs.contains(stories[1].id), "A save made while loading survives")
+        assertEqual(store.unreadCount, 3, "The unread count follows the change")
+        assertEqual(store.savedCount, 1, "The saved count follows the change")
         await db.close()
     }
 
