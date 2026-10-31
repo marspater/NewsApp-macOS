@@ -916,8 +916,9 @@ struct ArticleListView: View {
                     onToggleSave: { toggleSaved($0) }
                 )
             )
-            // Stored overview highlights and each hero event's best image; nothing is generated here.
-            .task(id: listed.map(\.id)) {
+            // Stored overview highlights and each hero event's best image; nothing is generated here. Reloads when
+            // the stories, their event membership or a stored overview change.
+            .task(id: "\(listed.map(\.id)):\(articleStore.eventRevision):\(articleStore.overviewRevision)") {
                 let loaded = await BriefingStoryDetails.load(
                     for: listed, heroIDs: Set(BriefingView.heroEntries(listed).map(\.id)), store: articleStore)
                 if !Task.isCancelled { briefingDetails = loaded }
