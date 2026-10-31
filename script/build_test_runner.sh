@@ -15,13 +15,17 @@ export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 TEST_STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-tests.XXXXXX")
 trap 'rm -rf "$TEST_STAGE"' EXIT
 # Keep the existing runner unchanged while including the dedicated parsing checks in every full regression run.
-sed '/^@main$/d' Tests/NewsTests.swift > "$TEST_STAGE/NewsTests.swift"
+# The staged copies blank the lines they drop and name their source file, so an assertion still reports the real
+# file and line.
+stage() {
+    { echo "#sourceLocation(file: \"$1\", line: 1)"; sed -e 's/^@main$//' "${@:2}" "$1"; } > "$TEST_STAGE/$(basename "$1")"
+}
+stage Tests/NewsTests.swift
 # The headless harnesses (Story Overview sections, reader accessibility, tension calibration) compile into the same
 # runner, so a plain ./test.sh builds once; their scripts still build standalone binaries for CI jobs. Both harness
 # files declare the reader's command notification names that NewsApp.swift provides in the app; one copy is kept.
-sed '/^@main$/d' Tests/EventOverviewAccessibilityTests.swift > "$TEST_STAGE/EventOverviewAccessibilityTests.swift"
-sed -e '/^@main$/d' -e '/^extension Notification.Name {$/,/^}$/d' Tests/ReaderAccessibilityTests.swift \
-    > "$TEST_STAGE/ReaderAccessibilityTests.swift"
+stage Tests/EventOverviewAccessibilityTests.swift
+stage Tests/ReaderAccessibilityTests.swift -e '/^extension Notification.Name {$/,/^}$/s/.*//'
 cat > "$TEST_STAGE/Runner.swift" <<'SWIFT'
 import Foundation
 

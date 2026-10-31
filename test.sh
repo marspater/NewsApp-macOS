@@ -63,7 +63,14 @@ else
     # binary instead of compiling three more. NEWS_TEST_JOBS bounds how many run at once. Each job's output is
     # printed whole once it ends, so logs never interleave; a failed job's log is printed again at the end.
     SHARDS="${NEWS_TEST_SHARDS:-4}"
-    JOBS="${NEWS_TEST_JOBS:-$(( SHARDS + 2 ))}"
+    CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    JOBS="${NEWS_TEST_JOBS:-$(( SHARDS + 2 < CORES ? SHARDS + 2 : CORES ))}"
+    for setting in "NEWS_TEST_SHARDS=$SHARDS" "NEWS_TEST_JOBS=$JOBS"; do
+        if ! [[ "${setting#*=}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "❌ $setting must be a positive integer." >&2
+            exit 2
+        fi
+    done
     LOGS=$(mktemp -d "${TMPDIR:-/tmp}/news-test-jobs.XXXXXX")
     JOB_LIST="$LOGS/jobs"
     : > "$JOB_LIST"
@@ -81,22 +88,31 @@ else
     } | while read -r atom; do
         job "$(basename "$atom" .swift)" "NEWS_TEST_ATOM=$atom ./test_runner"
     done
-    echo "Running $(wc -l < "$JOB_LIST" | tr -d ' ') test jobs, $JOBS at a time..."
+    JOB_COUNT=$(wc -l < "$JOB_LIST" | tr -d ' ')
+    echo "Running $JOB_COUNT test jobs, $JOBS at a time..."
     export LOGS
     set +e
-    xargs -P "$JOBS" -L 1 sh -c '
+    # Core ML compiles a model into a cache named after the executable, and two processes compiling the same model
+    # under one name race on the bundle rename (seen on CI), so every job runs its own copy of the runner.
+    # shellcheck disable=SC2016 # the pool script expands its variables inside the worker, by design
+    xargs -P "$JOBS" -L 1 bash -c '
         name="$0"
         start=$(date +%s)
-        ( eval "$*" ) > "$LOGS/$name.log" 2>&1
+        cp test_runner "$LOGS/$name.runner"
+        command="${*//.\/test_runner/$LOGS/$name.runner}"
+        ( eval "$command" ) > "$LOGS/$name.log" 2>&1
         status=$?
         echo "$status" > "$LOGS/$name.status"
-        if [ "$status" -eq 0 ]; then mark="✅"; else mark="❌"; fi
+        rm -f "$LOGS/$name.runner"
+        if [[ "$status" -eq 0 ]]; then mark="✅"; else mark="❌"; fi
         printf "%s %s (%ss)\n" "$mark" "$name" "$(( $(date +%s) - start ))"
         cat "$LOGS/$name.log"
         exit "$status"
     ' < "$JOB_LIST"
+    POOL_STATUS=$?
     set -e
     rm -f test_runner
+    STATUS_COUNT=$(ls "$LOGS"/*.status 2>/dev/null | wc -l | tr -d ' ')
     FAILED=$(grep -L '^0$' "$LOGS"/*.status 2>/dev/null || true)
     if [[ -n "$FAILED" ]]; then
         while read -r status; do
@@ -104,6 +120,9 @@ else
             echo "❌ $name failed; its log again:"
             tail -n 40 "$LOGS/$name.log"
         done <<< "$FAILED"
+    fi
+    if [[ -n "$FAILED" || "$STATUS_COUNT" -ne "$JOB_COUNT" || "$POOL_STATUS" -ne 0 ]]; then
+        echo "❌ $STATUS_COUNT of $JOB_COUNT test jobs finished; the pool exited $POOL_STATUS." >&2
         rm -rf "$LOGS"
         exit 1
     fi

@@ -352,11 +352,22 @@ struct NewsTests {
         guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"] else { return true }
         if spec == "slow" { return slowTests.contains(name) }
         let parts = spec.split(separator: "/").compactMap { Int($0) }
-        guard parts.count == 2, parts[1] > 0 else { return true }
         return !slowTests.contains(name) && index % parts[1] == parts[0]
     }
 
+    /// A malformed or out-of-range shard would run nothing and pass; it stops the process instead.
+    static func validateShard() {
+        guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"], spec != "slow" else { return }
+        let parts = spec.split(separator: "/", omittingEmptySubsequences: false).map { Int($0) }
+        guard parts.count == 2, let shard = parts[0], let count = parts[1], count > 0, (0..<count).contains(shard)
+        else {
+            print("❌ NEWS_TEST_SHARD must be \"slow\" or i/n with 0 <= i < n, not \"\(spec)\"")
+            exit(2)
+        }
+    }
+
     static func runSharded(_ tests: [(name: String, run: () async throws -> Void)]) async throws {
+        validateShard()
         let timing = ProcessInfo.processInfo.environment["NEWS_TEST_TIMING"] == "1"
         for (index, test) in tests.enumerated() where shardIncludes(index, name: test.name) {
             let start = ContinuousClock.now
