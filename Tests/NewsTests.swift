@@ -25307,6 +25307,49 @@ struct NewsTests {
                 "DecodedImageCache must not contain image from cancelled load")
         }
 
+        // Cancelling the only waiter stops the shared download; a clear() does not let a finished old load
+        // remove a newer load's entry.
+        final class LoaderProbe: @unchecked Sendable {
+            let lock = NSLock()
+            var started = 0
+            var cancelled = 0
+            func record(started s: Int = 0, cancelled c: Int = 0) {
+                lock.lock()
+                started += s
+                cancelled += c
+                lock.unlock()
+            }
+        }
+        let probe = LoaderProbe()
+        let hangingLoader: @Sendable (URL) async throws -> CGImage = { _ in
+            probe.record(started: 1)
+            do { try await Task.sleep(for: .seconds(30)) } catch {
+                probe.record(cancelled: 1)
+                throw error
+            }
+            throw CancellationError()
+        }
+        let cancelURL = URL(string: "https://example.com/cancel_\(UUID().uuidString).jpg")!
+        let first = Task { @MainActor in _ = try? await DecodedImageCache.load(cancelURL, using: hangingLoader) }
+        let second = Task { @MainActor in _ = try? await DecodedImageCache.load(cancelURL, using: hangingLoader) }
+        try await Task.sleep(for: .milliseconds(100))
+        first.cancel()
+        try await Task.sleep(for: .milliseconds(100))
+        assertEqual(probe.cancelled, 0, "A shared download keeps running while a waiter is left")
+        second.cancel()
+        _ = await first.value
+        _ = await second.value
+        assertEqual(probe.started, 1, "Two waiters on one URL share one download")
+        assertEqual(probe.cancelled, 1, "The shared download stops once its last waiter cancels")
+
+        await MainActor.run {
+            let oldLoad = DecodedImageCache.SharedLoad(task: Task { throw CancellationError() })
+            oldLoad.join()
+            oldLoad.join()
+            assertFalse(oldLoad.leave(), "One of two waiters cancelling keeps the download")
+            assertTrue(oldLoad.leave(), "The last waiter cancelling stops the download")
+        }
+
         // 2. DatabaseEngine directory creation on custom path & deinit safety
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
             "news_test_dir_\(UUID().uuidString)")
