@@ -31,7 +31,10 @@ enum ReaderMode: Hashable {
 }
 
 /// Window-scoped bindings and actions let menu commands operate on the same reader as its toolbar.
-struct ReaderCommandActions {
+/// Equatable for the same reason as `ListCommandActions`: a focused value holding closures compares unequal on
+/// every render and keeps the window re-rendering. Equality reads what the commands read: the bound values and
+/// which actions exist.
+struct ReaderCommandActions: Equatable {
     let mode: Binding<ReaderMode>
     let textScale: Binding<CGFloat>
     let showReadingOptions: () -> Void
@@ -41,6 +44,12 @@ struct ReaderCommandActions {
     let copyLink: () -> Void
     let webBack: (() -> Void)?
     let webForward: (() -> Void)?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.mode.wrappedValue == rhs.mode.wrappedValue && lhs.textScale.wrappedValue == rhs.textScale.wrappedValue
+            && lhs.hasOverview == rhs.hasOverview && (lhs.reload == nil) == (rhs.reload == nil)
+            && (lhs.webBack == nil) == (rhs.webBack == nil) && (lhs.webForward == nil) == (rhs.webForward == nil)
+    }
 }
 
 struct ReaderCommandActionsKey: FocusedValueKey { typealias Value = ReaderCommandActions }
