@@ -1,0 +1,3 @@
+# Test sources are compiled into the instrumented runner; report app code only.
+ignore:
+  - "Tests/**"
