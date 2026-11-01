@@ -154,8 +154,8 @@ final class ArticleStore: ObservableObject {
                 let saved = try await database.getSavedArticles()
                 let counts = try await database.counts(muting: muting)
                 await refreshLoadedHook?()
-                self.articles = fetched
                 guard changesAtStart == stateChanges else { continue }
+                self.articles = fetched
                 self.readArticleIDs = readIDs
                 self.savedArticles = saved
                 self.savedArticleIDs = Set(saved.map { $0.id })
@@ -527,6 +527,7 @@ final class ArticleStore: ObservableObject {
             }
         }
         guard revised else { return failed }
+        stateChanges &+= 1
         if listChanged { articles = listed }
         if savedChanged { savedArticles = saved }
         revision &+= 1

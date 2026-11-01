@@ -1191,6 +1191,23 @@ struct NewsTests {
         store.refreshLoadedHook = nil
         assertTrue(refreshed, "The refresh publishes after reloading")
         assertTrue(store.readArticleIDs.contains(stories[2].id), "A bulk read change made while loading survives")
+
+        // An article analysis publication that lands while refreshState loads must not be overwritten (#888).
+        let analysis = ArticleAnalysis(
+            summary: "Enriched summary", keyPoints: ["Point 1"], entities: [], category: "World",
+            modelIdentifier: "test", analysisVersion: 1)
+        landed = false
+        store.refreshLoadedHook = {
+            guard !landed else { return }
+            landed = true
+            _ = await store.saveArticleAnalysis(analysis, for: stories[0].id)
+        }
+        let categoryRefreshed = await store.refreshState()
+        store.refreshLoadedHook = nil
+        assertTrue(categoryRefreshed, "The refresh publishes after reloading on publication")
+        assertEqual(
+            store.articles.first { $0.id == stories[0].id }?.category, "World",
+            "Category publication that landed while loading survives (#888)")
         await db.close()
     }
 
