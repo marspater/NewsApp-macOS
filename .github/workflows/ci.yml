@@ -70,7 +70,8 @@ jobs:
         # Informational: Run Unit Tests above is the gate, so a flaky rerun never fails the job.
         continue-on-error: true
         run: |
-          eval "$(sed -n 's/^discover: //p' .circleci/test-suites.yml)" | xargs script/ci_testsuite.sh --lcov coverage.lcov
+          eval "$(sed -n 's/^discover: //p' .circleci/test-suites.yml)" | xargs script/ci_testsuite.sh --lcov coverage.lcov \
+            || { rm -f coverage.lcov; exit 1; } # a failed export can leave a partial report
 
       - name: Upload Coverage to Codecov
         if: hashFiles('coverage.lcov') != ''
