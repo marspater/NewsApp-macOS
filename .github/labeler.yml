@@ -2,9 +2,10 @@ app-code:
   - changed-files:
       - any-glob-to-any-file: 'Sources/**'
 
+# Only PRs that change nothing but tests: most PRs touch Tests/ alongside the code.
 tests:
   - changed-files:
-      - any-glob-to-any-file: 'Tests/**'
+      - all-globs-to-all-files: 'Tests/**'
 
 build-infra:
   - changed-files:
