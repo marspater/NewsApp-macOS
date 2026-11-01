@@ -13891,6 +13891,27 @@ struct NewsTests {
         try await singleDb.upsertArticles(loneStories)
         let loneReport = try await EventClusterer.run(in: singleDb, now: now.addingTimeInterval(180))
         assertEqual(loneReport.changedEvents.count, 0, "No stories changed when no multi-report events exist (#893)")
+
+        // When multi-report events exist alongside unclustered stories, candidate pruning only processes relevant stories (#893).
+        let eventStories = [
+            FeedArticle(
+                title: "SpaceX Falcon rocket launches from Cape Canaveral",
+                link: "https://story.invalid/spacex-1",
+                guid: "spacex-1", description: "SpaceX orbital spaceflight from Cape Canaveral",
+                pubDate: now.addingTimeInterval(0),
+                source: "Publisher 1"),
+            FeedArticle(
+                title: "Falcon rocket launches from Cape Canaveral in SpaceX mission",
+                link: "https://story.invalid/spacex-2",
+                guid: "spacex-2", description: "SpaceX orbital spaceflight from Cape Canaveral",
+                pubDate: now.addingTimeInterval(60),
+                source: "Publisher 2"),
+        ]
+        try await singleDb.upsertArticles(eventStories)
+        _ = try await EventClusterer.run(in: singleDb, now: now.addingTimeInterval(240))
+        let eventArtID = try await singleDb.resolvedArticleID(for: eventStories[0])
+        let createdEventID = try await singleDb.eventID(forArticle: eventArtID)
+        assertTrue(createdEventID != nil, "SpaceX stories form an active multi-report event")
         await singleDb.close()
         await db.close()
     }
