@@ -190,9 +190,17 @@ enum AnalysisGenerationTests {
             "store.analysisGeneration matches db.analysisGeneration after text clear")
         check(await queue.state(for: stored.id) == nil, "Clear Story Text forgets what was classified (#886)")
 
-        // Clear All Database Cache also bumps analysisGeneration
+        // Clear All Database Cache also bumps analysisGeneration, published only after the reset handler finishes,
+        // even when a refresh runs meanwhile; published earlier, it starts work the handler then cancels.
         let beforeAllGen = store.analysisGeneration
+        var seenByHandler: Int?
+        store.analysisClearedHandler = {
+            _ = await store.refreshState()
+            seenByHandler = store.analysisGeneration
+            await queue.analysisCleared()
+        }
         try await store.clearAllDatabaseCache()
+        check(seenByHandler == beforeAllGen, "The generation is published after the clear's reset handler")
         check(store.analysisGeneration > beforeAllGen, "Clear All Database Cache bumps store.analysisGeneration (#901)")
         check(
             store.analysisGeneration == (await db.analysisGeneration),

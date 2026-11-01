@@ -170,7 +170,8 @@ enum NotificationActionRouter {
         activateApp: @MainActor () -> Void
     ) async {
         activateApp()
-        await store.waitForStartup()
+        // Set without waiting for startup: MainView opens it once the store is ready, and a link opened meanwhile
+        // replaces it instead of being overwritten when startup ends.
         store.pendingNavigation = .init(
             articleID: target.articleID,
             link: target.articleLink ?? ""

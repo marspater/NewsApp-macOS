@@ -199,13 +199,12 @@ struct ArticleRemoteImage<Content: View>: View {
                         NotificationCenter.default.post(
                             name: .readerImageFinished, object: url, userInfo: ["success": true])
                         return
-                    } catch let error where error is CancellationError || (error as? URLError)?.code == .cancelled {
-                        guard !Task.isCancelled else { return }
-                        if attempt >= 2 {
-                            return
-                        }
                     } catch {
+                        // Our own cancellation exits silently. A shared load cancelled under us (a cache clear) is
+                        // retried, and reported as a failure once the retries run out, never left on the placeholder.
                         guard !Task.isCancelled else { return }
+                        let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
+                        if cancelled, attempt < 2 { continue }
                         phase = .failure(error)
                         NotificationCenter.default.post(
                             name: .readerImageFinished, object: url, userInfo: ["success": false])
