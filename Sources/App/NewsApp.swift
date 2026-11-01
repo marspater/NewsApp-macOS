@@ -417,6 +417,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                     // Feed URLs can carry tokens: keep them out of breadcrumbs and failed-request events.
                     options.enableNetworkBreadcrumbs = false
                     options.enableCaptureFailedRequests = false
+                    // Publishers must never receive sentry-trace or baggage headers.
+                    options.tracePropagationTargets = []
                     options.tracesSampleRate = 1.0
                     options.configureProfiling = { profiling in
                         profiling.sessionSampleRate = 1.0
