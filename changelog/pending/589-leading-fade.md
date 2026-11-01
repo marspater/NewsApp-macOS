@@ -1,0 +1,1 @@
+- Notification images stay sharp at the banner's edge and dissolve toward the text instead of away from it.
