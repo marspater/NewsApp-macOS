@@ -26,33 +26,33 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Storage/ArticleStore+Events.swift \
     Sources/Storage/SpotlightIndexer.swift \
     Sources/Intelligence/ArticleIntelligence.swift \
-    Sources/Intelligence/OverviewPassageSelector.swift \
+    Sources/Intelligence/Overview/OverviewPassageSelector.swift \
     Sources/Intelligence/PromptDefense.swift \
-    Sources/Intelligence/PassageFactExtractor.swift \
-    Sources/Intelligence/TensionMethodology.swift \
-    Sources/Intelligence/WorldTension.swift \
-    Sources/Intelligence/OverviewComposer.swift \
-    Sources/Intelligence/OverviewTimelineBuilder.swift \
-    Sources/Intelligence/OverviewQualityAuditor.swift \
-    Sources/Intelligence/OverviewClaimVerifier.swift \
-    Sources/Intelligence/OverviewTimelineExtractor.swift \
-    Sources/Intelligence/OverviewPerspectivesExtractor.swift \
-    Sources/Intelligence/OverviewThematicAngleExtractor.swift \
-    Sources/Intelligence/OverviewIndustryImpactExtractor.swift \
-    Sources/Intelligence/CoverageSentimentEvaluator.swift \
-    Sources/Intelligence/EventCandidates.swift \
+    Sources/Intelligence/Overview/PassageFactExtractor.swift \
+    Sources/Intelligence/Tension/TensionMethodology.swift \
+    Sources/Intelligence/Tension/WorldTension.swift \
+    Sources/Intelligence/Overview/OverviewComposer.swift \
+    Sources/Intelligence/Overview/OverviewTimelineBuilder.swift \
+    Sources/Intelligence/Overview/OverviewQualityAuditor.swift \
+    Sources/Intelligence/Overview/OverviewClaimVerifier.swift \
+    Sources/Intelligence/Overview/OverviewTimelineExtractor.swift \
+    Sources/Intelligence/Overview/OverviewPerspectivesExtractor.swift \
+    Sources/Intelligence/Overview/OverviewThematicAngleExtractor.swift \
+    Sources/Intelligence/Overview/OverviewIndustryImpactExtractor.swift \
+    Sources/Intelligence/Overview/CoverageSentimentEvaluator.swift \
+    Sources/Intelligence/Events/EventCandidates.swift \
     Sources/Intelligence/IntelligencePolicy.swift \
-    Sources/Intelligence/ActClass.swift \
-    Sources/Intelligence/EventMatcher.swift \
-    Sources/Intelligence/EventClustering.swift \
-    Sources/Intelligence/SentenceEmbedder.swift \
-    Sources/Intelligence/EventJudge.swift \
-    Sources/Intelligence/StoryImportance.swift \
-    Sources/Intelligence/ContentExtractionPipeline.swift \
-    Sources/Intelligence/EnrichmentQueue.swift \
-    Sources/Intelligence/OverviewGenerationCoordinator.swift \
+    Sources/Intelligence/Events/ActClass.swift \
+    Sources/Intelligence/Events/EventMatcher.swift \
+    Sources/Intelligence/Events/EventClustering.swift \
+    Sources/Intelligence/Events/SentenceEmbedder.swift \
+    Sources/Intelligence/Events/EventJudge.swift \
+    Sources/Intelligence/Events/StoryImportance.swift \
+    Sources/Intelligence/Extraction/ContentExtractionPipeline.swift \
+    Sources/Intelligence/Extraction/EnrichmentQueue.swift \
+    Sources/Intelligence/Overview/OverviewGenerationCoordinator.swift \
     Sources/Services/NetworkBoundaryProxy.swift \
-    Sources/Views/WebPreviewPolicy.swift \
+    Sources/Views/Reader/WebPreviewPolicy.swift \
     Sources/Services/SecureHTTPClient.swift \
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \
@@ -66,12 +66,12 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \
     Sources/Views/DesignSystem.swift \
-    Sources/Views/ArticleCardView.swift \
-    Sources/Views/ArticleWebView.swift \
-    Sources/Views/ArticleRemoteImage.swift \
-    Sources/Views/EventOverviewReaderView.swift \
-    Sources/Views/ArticleDetailView.swift \
-    Sources/Views/ReaderSupportViews.swift \
+    Sources/Views/List/ArticleCardView.swift \
+    Sources/Views/Reader/ArticleWebView.swift \
+    Sources/Views/Reader/ArticleRemoteImage.swift \
+    Sources/Views/Reader/EventOverviewReaderView.swift \
+    Sources/Views/Reader/ArticleDetailView.swift \
+    Sources/Views/Reader/ReaderSupportViews.swift \
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
     Sources/App/NewsSignposts.swift \

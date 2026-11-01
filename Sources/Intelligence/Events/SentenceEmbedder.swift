@@ -156,14 +156,14 @@ final class BertWordPieceTokenizer: Sendable {
 private func bundledModelResource(_ name: String, _ ext: String) -> URL {
     #if SWIFT_PACKAGE
         let moduleURL =
-            Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Resources/Models")
-            ?? Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Models")
+            Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Resources/CoreML")
+            ?? Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "CoreML")
     #else
         let moduleURL: URL? = nil
     #endif
-    return Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Models")
+    return Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "CoreML")
         ?? moduleURL
-        ?? URL(fileURLWithPath: "Sources/Resources/Models/\(name).\(ext)")
+        ?? URL(fileURLWithPath: "Sources/Resources/CoreML/\(name).\(ext)")
 }
 
 /// On-device neural sentence embedding engine using bundled CoreML + Accelerate vDSP (#127, #307).

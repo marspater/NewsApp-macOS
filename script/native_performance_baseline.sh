@@ -16,7 +16,7 @@ if [[ "${NEWS_READING_FULL_APP:-0}" == "1" ]]; then
     sed -i '' 's|Sources/App/NewsApp.swift \\|Sources/App/NewsApp.swift Tests/NativeReadingMemory.swift Tests/TestDefaults.swift \\|; s|<string>com.marspater.news</string>|<string>com.marspater.news.workloadcheck</string>|' "$STAGE/src/build.sh"
     # Observe native didFinish, rather than treating cancellation as a successful Web load.
     # This hook exists only in the staged verification bundle, never in shipping sources.
-    python3 - "$STAGE/src/Sources/Views/ArticleWebView.swift" <<'PY_WEB'
+    python3 - "$STAGE/src/Sources/Views/Reader/ArticleWebView.swift" <<'PY_WEB'
 import pathlib, sys
 path = pathlib.Path(sys.argv[1])
 source = path.read_text()
@@ -58,9 +58,9 @@ if [[ "${NEWS_NATIVE_BODY_COUNTS:-0}" == "1" ]]; then
     for view in MainView SidebarView ArticleListView ArticleCardView EventCardView ArticleDetailView; do
         perl -0pi -e "s/(var body: some View \{)/\$1 let _ = BodyCount.tick(\"$view\");/" "$STAGE/Sources/Views/$view.swift"
     done
-    perl -0pi -e 's/(private func fetchPage\([^{]*\{)/$1 BodyCount.tick("ListFetch");/' "$STAGE/Sources/Views/ArticleListView.swift"
+    perl -0pi -e 's/(private func fetchPage\([^{]*\{)/$1 BodyCount.tick("ListFetch");/' "$STAGE/Sources/Views/List/ArticleListView.swift"
     perl -0pi -e 's/(let revisions = try\? await articleStore\.database\.publisherContentRevisions)/BodyCount.tick("ReaderRevisionQuery"); $1/' \
-        "$STAGE/Sources/Views/ArticleDetailView.swift"
+        "$STAGE/Sources/Views/Reader/ArticleDetailView.swift"
     SOURCE_DIR="$STAGE/Sources"
 fi
 sed '/^@main$/d' "$SOURCE_DIR/App/NewsApp.swift" > "$STAGE/NewsApp.swift"

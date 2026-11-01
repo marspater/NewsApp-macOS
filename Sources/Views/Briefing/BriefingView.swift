@@ -1,4 +1,4 @@
-// Sources/Views/BriefingView.swift
+// Sources/Views/Briefing/BriefingView.swift
 // Epic R (#608) — Briefing Redesign as a Situation Board
 // Strict conformance to docs/DESIGN.md (§8.4, §13, §16, §17, §18)
 

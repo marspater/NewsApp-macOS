@@ -45,7 +45,7 @@ from convert_minilm import (
 from wordpiece import Tokenizer, require
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-MODELS = ROOT / 'Sources/Resources/Models'
+MODELS = ROOT / 'Sources/Resources/CoreML'
 FIXTURE = ROOT / 'Tests/Fixtures/story-corpus/matcher-regressions-v1.json'
 PAIR_LENGTHS = (64, 128, 256)  # PairScorer.sequenceLengths
 MODES = {

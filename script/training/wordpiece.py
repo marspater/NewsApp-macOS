@@ -5,7 +5,7 @@ it needs no torch, so `test.sh` can run the builder's self-check with the system
 import pathlib
 import unicodedata
 
-VOCAB = pathlib.Path(__file__).resolve().parents[2] / 'Sources/Resources/Models/vocab.txt'
+VOCAB = pathlib.Path(__file__).resolve().parents[2] / 'Sources/Resources/CoreML/vocab.txt'
 MAX_LENGTH = 256
 
 

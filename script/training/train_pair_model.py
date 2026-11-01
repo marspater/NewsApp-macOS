@@ -5,7 +5,7 @@ Mars's Mac only, never CI: run it from a virtual environment built from `script/
 
 `train_pair_model.py PAIRS.csv OUT_DIR [--pretrain A.csv B.csv ...]` reads the private `./test.sh --export-pairs` CSV
 (headline and lead text with the app's own word pieces, `weight` and `marginal` columns), fine-tunes a three-way pair
-classifier (#627: different, related, same) initialized from `Sources/Resources/Models/minilm.mlmodelc`, reports numbers
+classifier (#627: different, related, same) initialized from `Sources/Resources/CoreML/minilm.mlmodelc`, reports numbers
 on a tenth of the articles held out (an in-distribution check, not the gate), writes OUT_DIR/pairscorer.mlpackage (one
 output, `probabilities`: different, related, same), OUT_DIR/metadata.json (inputs with SHA-256, epochs, rates, versions,
 held-out numbers) and checks that Core ML and PyTorch agree. With `--pretrain` (#624) the model first trains on the
@@ -65,7 +65,7 @@ from wordpiece import MAX_LENGTH, Tokenizer, require
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BATCH = 32  # training batch size, both stages
-SHIPPED = ROOT / 'Sources/Resources/Models/minilm.mlmodelc'
+SHIPPED = ROOT / 'Sources/Resources/CoreML/minilm.mlmodelc'
 CLASSES = ('different', 'related', 'same')
 SMOOTHING = 0.05
 FROZEN_LAYERS = 2  # stage 2 keeps the embeddings and this many lower encoder layers fixed (#627)
