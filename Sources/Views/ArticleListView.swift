@@ -4,13 +4,25 @@
 import AppKit
 import SwiftUI
 
-struct ListCommandActions {
+/// A focused scene value is compared on every view update. Without `Equatable`, SwiftUI compares the closures'
+/// heap contexts, which differ on every render; the App then re-renders the window, the list sets the value
+/// again, and the main thread spins at a full core for as long as the window is key. Equality therefore reads
+/// what the commands read: which actions exist, never the closures themselves.
+struct ListCommandActions: Equatable {
     let canGroupStories: Bool
     let newBriefing: (() -> Void)?
     /// Leaves the Briefing for the destination shown before it (Navigate › Back).
     var back: (() -> Void)? = nil
+    /// Where `back` leads; part of equality, so a new destination reaches the menu's copy of the action.
+    var backDestination: String? = nil
     /// Presents the Customize Briefing sheet (View › Customize Briefing…).
     var customizeBriefing: (() -> Void)? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.canGroupStories == rhs.canGroupStories && (lhs.newBriefing == nil) == (rhs.newBriefing == nil)
+            && (lhs.back == nil) == (rhs.back == nil) && lhs.backDestination == rhs.backDestination
+            && (lhs.customizeBriefing == nil) == (rhs.customizeBriefing == nil)
+    }
 }
 
 private struct ListCommandActionsKey: FocusedValueKey { typealias Value = ListCommandActions }
@@ -242,7 +254,7 @@ struct ArticleListView: View {
         guard articlePath.isEmpty else { return nil }
         return ListCommandActions(
             canGroupStories: true, newBriefing: isBriefing ? { startNewBriefing() } : nil,
-            back: isBriefing ? { leaveBriefing() } : nil,
+            back: isBriefing ? { leaveBriefing() } : nil, backDestination: isBriefing ? previousTopic : nil,
             customizeBriefing: isBriefing ? { showsCustomizeBriefing = true } : nil)
     }
 

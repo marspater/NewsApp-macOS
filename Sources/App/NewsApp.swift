@@ -71,7 +71,12 @@ struct NewsApp: App {
                         set: { if !$0 { onboardingClosed = true } }),
                     onDismiss: { appSettings.completeFirstLaunch() }
                 ) {
+                    // A sheet reads the environment where it is attached, outside the objects given to MainView,
+                    // so the ones the sheet reads are given again here.
                     OnboardingView()
+                        .environmentObject(appSettings)
+                        .environmentObject(feedManager)
+                        .modifier(SystemSettingsOverrideModifier())
                 }
         }
         .windowToolbarStyle(.unified)
