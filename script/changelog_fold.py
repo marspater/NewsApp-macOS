@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Fold CHANGELOG.d fragments into CHANGELOG.md under the Unreleased heading.
+"""Fold changelog/pending fragments into CHANGELOG.md under the Unreleased heading.
 
-Each fragment is CHANGELOG.d/<issue>[-<slug>].md with one or more "- " bullet lines. Fragments are inserted
+Each fragment is changelog/pending/<issue>[-<slug>].md with one or more "- " bullet lines. Fragments are inserted
 newest issue first, above the bullets already under the heading, and deleted. `--check` only reports what would
 be folded and exits 1 when fragments exist, for a release gate; `--dry-run` prints the result without writing.
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANGELOG = ROOT / "CHANGELOG.md"
-FRAGMENTS = ROOT / "CHANGELOG.d"
+FRAGMENTS = ROOT / "changelog" / "pending"
 HEADING = re.compile(r"^## ")
 
 
@@ -40,7 +40,9 @@ def fold(text, entries):
             insert = index + 1
             while insert < len(lines) and not lines[insert].strip():
                 insert += 1
-            return "\n".join(lines[:index + 1] + [""] + entries + lines[insert:]) + "\n"
+            # A blank line keeps the next release heading apart from the folded bullets.
+            gap = [""] if insert < len(lines) and HEADING.match(lines[insert]) else []
+            return "\n".join(lines[:index + 1] + [""] + entries + gap + lines[insert:]) + "\n"
     sys.exit("CHANGELOG.md has no '## ' heading to fold under")
 
 
