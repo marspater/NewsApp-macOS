@@ -2305,7 +2305,13 @@ actor DatabaseEngine {
         for article in articles {
             try Task.checkCancellation()
             let identityFeedURL = feedUrl ?? article.identityFeedURL
-            let id = try resolvedArticleID(for: article, feedURL: identityFeedURL)
+            let id: String
+            do {
+                id = try resolvedArticleID(for: article, feedURL: identityFeedURL)
+            } catch {
+                logger.error("Skipping article with unresolvable identity: \(error.localizedDescription)")
+                continue
+            }
             let url = URL(string: article.normalizedLink)
             let validLink = url?.host?.isEmpty == false && ["http", "https"].contains(url?.scheme?.lowercased() ?? "")
             let canonical = article.normalizedLink

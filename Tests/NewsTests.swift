@@ -7226,22 +7226,24 @@ struct NewsTests {
         assertEqual(
             try await db.resolvedArticleID(for: unrelated), unrelated.id, "No known signal means no guessed merge")
 
-        // Use another known, unambiguous document rather than the historical conflict.
+        // When known ID and URL conflict, the conflicting item is skipped inside the batch rather than aborting the feed (#885).
         let separate = variant(
             "separate-guid", fixtureRoot.appendingPathComponent("aliases/separate").absoluteString, "Separate report")
         try await db.upsertArticles([separate])
         let contradictory = variant(first.id, separate.link, "Contradictory report")
-        do {
-            try await db.upsertArticles([contradictory])
-            assertTrue(false, "Contradictory known ID and URL must be reported")
-        } catch {
-            assertEqual(
-                try await db.fetchArticles(id: first.id).first?.title, "Original report",
-                "Conflicting signals must not overwrite the original")
-            assertEqual(
-                try await db.fetchArticles(id: separate.id).first?.title, separate.title,
-                "Conflicting signals must not overwrite the other document")
-        }
+        let batchItem = variant(
+            "batch-guid", fixtureRoot.appendingPathComponent("aliases/valid-batch-item").absoluteString,
+            "Valid batch report")
+        let inserted = try await db.upsertArticles([contradictory, batchItem])
+        assertTrue(
+            inserted.contains(batchItem.id),
+            "Valid batch items are stored when a conflicting item is in the batch (#885)")
+        assertEqual(
+            try await db.fetchArticles(id: first.id).first?.title, "Original report",
+            "Conflicting signals must not overwrite the original")
+        assertEqual(
+            try await db.fetchArticles(id: separate.id).first?.title, separate.title,
+            "Conflicting signals must not overwrite the other document")
 
         // An alias write failure must roll back the article update and its FTS trigger too.
         execute(
