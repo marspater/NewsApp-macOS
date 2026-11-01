@@ -1208,6 +1208,25 @@ struct NewsTests {
         assertEqual(
             store.articles.first { $0.id == stories[0].id }?.category, "World",
             "Category publication that landed while loading survives (#888)")
+
+        // Overtaken on every try: the refresh reports failure and a follow-up publishes what was stored.
+        let late = FeedArticle(
+            title: "Late story", link: "https://example.org/late", guid: "late", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_100), source: "Publisher")
+        try await db.upsertArticles([late])
+        var overtakes = 0
+        store.refreshLoadedHook = {
+            guard overtakes < 3 else { return }
+            overtakes += 1
+            await store.markAsRead(id: stories[2].id, isRead: overtakes % 2 == 0)
+        }
+        let overtaken = await store.refreshState()
+        assertFalse(overtaken, "A refresh overtaken on every try reports failure")
+        for _ in 0..<40 where !store.articles.contains(where: { $0.id == late.id }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        store.refreshLoadedHook = nil
+        assertTrue(store.articles.contains { $0.id == late.id }, "A follow-up refresh publishes the stored story")
         await db.close()
     }
 
@@ -6602,12 +6621,14 @@ struct NewsTests {
                     <outline title="" text="Empty Title Folder">
                         <outline title="   " text="Empty Title Feed" xmlUrl="https://example.com/feed4.xml"/>
                     </outline>
+                    <outline text="Plain URL Feed" url="https://example.com/plain.xml"/>
+                    <outline text="Bookmark" type="link" url="https://example.com/page"/>
                 </body>
             </opml>
             """.data(using: .utf8)!
 
         let advancedItems = OPMLParser.parse(data: advancedOPML)
-        assertEqual(advancedItems.count, 5, "Should parse 5 feeds, treating category with web url as folder")
+        assertEqual(advancedItems.count, 6, "Should parse 6 feeds, treating category with web url as folder")
         assertEqual(advancedItems[0].title, "Capital Title Feed", "Case-insensitive Title attribute")
         assertEqual(advancedItems[0].url, "https://example.com/feed1.xml", "Prioritizes xmlUrl over url")
         assertEqual(advancedItems[0].folder, nil, "Root item has nil folder")
@@ -6626,6 +6647,11 @@ struct NewsTests {
         assertEqual(advancedItems[4].title, "Empty Title Feed", "Falls back to text when title is whitespace")
         assertEqual(advancedItems[4].url, "https://example.com/feed4.xml", "Extracts feed url")
         assertEqual(advancedItems[4].folder, "Empty Title Folder", "Folder falls back to text when title is empty")
+
+        // An untyped url outline without children was imported before #901 and still is; a typed web link is not.
+        assertEqual(advancedItems[5].title, "Plain URL Feed", "Untyped url outline without children stays a feed")
+        assertEqual(advancedItems[5].url, "https://example.com/plain.xml", "Its url is the feed url")
+        assertEqual(advancedItems[5].folder, nil, "Root url-only feed has nil folder")
     }
 
     @MainActor

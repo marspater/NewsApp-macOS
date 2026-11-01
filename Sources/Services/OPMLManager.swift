@@ -18,6 +18,9 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     private var items: [OPMLItem] = []
     private var folderStack: [String] = []
     private var outlineStack: [Bool] = []
+    /// Per open outline: an untyped `url` outline, imported as a feed when it ends without children. With children it
+    /// is a category whose `url` is its website.
+    private var urlOnlyLeaves: [OPMLItem?] = []
 
     public static func parse(data: Data) -> [OPMLItem] {
         (try? parseValidated(data: data)) ?? []
@@ -76,14 +79,22 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
             title = ""
         }
 
+        if !urlOnlyLeaves.isEmpty { urlOnlyLeaves[urlOnlyLeaves.count - 1] = nil }
+        let untyped = attrs["type"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
+        let urlOnlyLeaf = attrs["url"].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap { untyped && !$0.isEmpty ? OPMLItem(title: title, url: $0, folder: folderStack.last) : nil }
+
         if let feedUrl, !feedUrl.isEmpty {
             items.append(OPMLItem(title: title, url: feedUrl, folder: folderStack.last))
             outlineStack.append(false)
+            urlOnlyLeaves.append(nil)
         } else if !title.isEmpty {
             folderStack.append(title)
             outlineStack.append(true)
+            urlOnlyLeaves.append(urlOnlyLeaf)
         } else {
             outlineStack.append(false)
+            urlOnlyLeaves.append(urlOnlyLeaf)
         }
     }
 
@@ -94,6 +105,7 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         if let isFolder = outlineStack.popLast(), isFolder {
             _ = folderStack.popLast()
         }
+        if let leaf = urlOnlyLeaves.popLast() ?? nil { items.append(leaf) }
     }
 }
 
