@@ -145,7 +145,8 @@ SWIFT_SOURCES=(
     Sources/App/NewsApp.swift \
 )
 source script/app_intents_metadata.sh
-swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${NEWS_APP_INTENTS_FLAGS[@]}" -swift-version 6 -O -parse-as-library \
+source script/sentry_dev.sh
+swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${NEWS_SENTRY_FLAGS[@]}" "${NEWS_APP_INTENTS_FLAGS[@]}" -swift-version 6 -O -parse-as-library \
     -target "arm64-apple-macos${TARGET_MACOS}" "${SWIFT_SOURCES[@]}" -o "${MACOS_DIR}/${APP_NAME}"
 news_app_intents_metadata "${RESOURCES_DIR}" "${TARGET_MACOS}"
 
@@ -203,6 +204,9 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
+if [[ -n "$SENTRY_DSN" ]]; then
+    plutil -insert SentryDSN -string "$SENTRY_DSN" "${CONTENTS_DIR}/Info.plist"
+fi
 plutil -lint "${CONTENTS_DIR}/Info.plist" >/dev/null
 
 echo "Signing binary..."

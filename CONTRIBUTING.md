@@ -78,6 +78,7 @@ NEWS_ENERGY=0 ./test.sh --matcher-regressions # The rules-only pass of Low Power
 ./test.sh --corpus-pages DIR --corpus-urls requests.json # Opt-in protected publisher-page evidence; [{"id":"doc-1","url":"https://…"}]
 ./test.sh --corpus-page-texts DIR # Offline private readability evidence; no matching predictions
 ./build.sh                        # arm64 app with ad-hoc verification signing
+SENTRY_DSN=https://… ./build.sh     # Dev build with Sentry crash reporting (script/sentry_dev.sh; or put the DSN in the untracked .sentry-dsn); build_release.sh never links Sentry
 NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional controlled-network and publisher checks
 ./test.sh --model-outcome-check   # Opt-in, local: the real on-device model over authored violent reports; outcome labels in the NewsTextModel log category (#508)
 NEWS_SNAPSHOT_DB=copy.sqlite3 NEWS_EVENT_OUTPUT=DIR ./test.sh --export-categories # Local: 200-story sample with publisher and assigned categories for the topic-classifier audit (#546); NEWS_CATEGORY_IDS=file re-exports a labelled sample
