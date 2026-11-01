@@ -191,7 +191,7 @@ struct ArticleRemoteImage<Content: View>: View {
                     return
                 }
                 phase = .empty
-                for attempt in 0..<2 {
+                for attempt in 0..<3 {
                     do {
                         let image = try await DecodedImageCache.load(url, using: loadImage)
                         try Task.checkCancellation()
@@ -201,10 +201,7 @@ struct ArticleRemoteImage<Content: View>: View {
                         return
                     } catch is CancellationError {
                         guard !Task.isCancelled else { return }
-                        if attempt >= 1 {
-                            phase = .failure(CancellationError())
-                            NotificationCenter.default.post(
-                                name: .readerImageFinished, object: url, userInfo: ["success": false])
+                        if attempt >= 2 {
                             return
                         }
                     } catch {
