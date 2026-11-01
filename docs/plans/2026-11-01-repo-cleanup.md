@@ -24,16 +24,28 @@ No `.orig`, `.bak`, `.tmp`, `.rej` or editor backup files exist. `git status --i
 `.antigravity/`, `.codacy/`, `.swiftpm/`, `.claude/settings.local.json` and `all state of
 local tools.
 
-### Left for a decision
+### Second pass, after Mars's review (same day)
 
-| Item | Why it is still here | Suggested action |
-|---|---|---|
-| `.claude/worktrees/briefing-board-v2-7bf33f` (`release/2.0.0`, #894 merged) | one uncommitted change in the tree | look at `git -C .claude/worktrees/briefing-board-v2-7bf33f status`, then `git worktree remove --force .claude/worktrees/briefing-board-v2-7bf33f` |
-| `.claude/worktrees/data-sufficiency-check-378dd6` (`fix/799-web-links`, #830 merged) | two uncommitted changes, and another session's scratchpad hangs five more worktrees off it (`stackfix`, `wt781`, `wt816`, `wt817`, `wtadr`, all with merged PRs #827, #821, #832, #836, #843) | remove the five scratchpad worktrees first (`git worktree remove` each), then this one |
-| `.claude/worktrees/{agent-pr705, event-feature-fallback, m-540-lint, m-581-story-layer-fix, m-integrated-2026-10-29, m-review-scripts, pr729}` | branches with no pull request and commits not on `main`; 96–125 MB each | if the work is finished elsewhere, `git worktree remove` and `git branch -D` |
-| `.antigravity/worktrees/voiceover-qa` and 5 worktrees under `~/.gemini/antigravity/worktrees/News` | other tools' worktrees; `antigravity/voiceover-qa`, `analyze_epic_m_prs`, `analyze_project_missing_features` and `fix_codeql_and_board` are fully merged by ancestry, `fix_codacy_issues_pr705` and `fix/808-redirect-state-per-task` (#865 merged) are not | remove from those tools, or `git worktree remove` each |
-| 34 local branches already merged into `origin/main` by ancestry (`batch/*`, `mars/*`, `worktree-agent-*`, …) | no worktree, nothing lost | `git branch --merged origin/main \| grep -v main \| xargs git branch -d` |
-| `Sources/News.docc` (DocC catalog: `News.md`, four articles, one symbol page; added by #660) | nothing builds it: no `docc` call in `build.sh`, the CI workflows, `Makefile` or `CONTRIBUTING.md`; `README.md` does not mention it | delete, or add a `docc` step to a doc-only job so it stays true |
+Every remaining worktree and branch was reviewed: a branch whose pull request is merged or closed is stale (its
+work is on `main` as a squash); a branch with no pull request was checked for commits not on `main`, whether it
+still merges, and whether the work landed through another branch. Result:
+
+- Removed the other 20 worktrees: the 9 left under `.claude/worktrees`, the 5 scratchpad worktrees of another
+  session, 5 Antigravity worktrees and `.antigravity/worktrees/voiceover-qa`. The two dirty ones held only agent
+  state (`.claude/`) and two plan drafts already on `main` or superseded by `2026-10-30-v2-completion.md`.
+- Deleted 179 local branches (33 merged by ancestry, 146 superseded) and 45 remote branches whose pull requests
+  were merged or closed, plus 403 stale `refs/remotes/pr/*` refs left by a removed remote. `main` and this PR's
+  branch are what remain, locally and on GitHub.
+- The one branch with work not on `main` that is still wanted, `claude/event-feature-fallback` (plain-word event
+  matching for languages without a word-class model, parked with the English-only release scope), no longer
+  merges after the Epic M matcher rewrite; its diff and commit message are logged on #264 before deletion. The
+  other no-PR branches (`agent-pr705`, `m-540-lint`, `m-581-story-layer-fix`, `mars/m-integrated-2026-10-29`,
+  `m-review-scripts`, `pr729`, `fix_codacy_issues_pr705`, `l-546-work`, `scratch/l-549-importance-judge`,
+  `fix/737-story-recall`, `docs-847-rebase`, `fix-780-local`, `fix/808-network-boundary`, integration and tmp
+  branches) were integration or review copies of Epic L, M, T and the v2 bug pass, all shipped through their
+  stack PRs; each conflicted with `main` and added nothing that is not there.
+- Cleared the Swift module cache, the test pass stamps and the News test leftovers under `$TMPDIR`.
+- Deleted `Sources/News.docc` (approved).
 
 ## 2. `CHANGELOG.d` → `changelog/pending`
 
@@ -58,11 +70,11 @@ of this document (section 8).
 
 | Candidate | Reason | Suggested action |
 |---|---|---|
-| `docs/audits/SONAR_REVIEW.md` | the only undated audit name; a 30 September backlog review superseded by `2026-10-09-sonar-slices.md`; nothing links it | rename to `2026-09-30-sonar-review.md` or delete |
+| `docs/audits/SONAR_REVIEW.md` | the only undated audit name; a 30 September backlog review superseded by `2026-10-09-sonar-slices.md`; nothing links it | renamed to `2026-09-30-sonar-review.md` (audits stay by policy) |
 | `docs/benchmarks/2026-10-10-overview-bounded-comparison-receipt.json`, `…-overview-bounded-comparison.json` | the audit of the same name cites neither file by name | delete, or cite them from the audit |
 | `docs/benchmarks/2026-10-17-release-core.json` | cited only by `docs/plans/2026-10-17-release-simplification.md` | keep (a plan cites it) |
 | `docs/benchmarks/2026-10-25-embedding-throughput.json` | nothing cites it; the throughput numbers are in `CHANGELOG.md` and the Epic M verification audit | delete, or cite it from `2026-10-30-epic-m-verification.md` |
-| `docs/plans/2026-10-21-state-and-next-development.md`, `2026-10-28-board-status-and-projections.md`, `2026-10-31-v2-release-gate.md` | plans nothing links; the work they planned is merged (v2 shipped 31 October) | move to `docs/plans/archive/` or leave; they are small and dated |
+| `docs/plans/2026-10-21-state-and-next-development.md`, `2026-10-28-board-status-and-projections.md`, `2026-10-31-v2-release-gate.md` | plans nothing links; the work they planned is merged (v2 shipped 31 October) | deleted (approved) |
 | the other ten plans (`2026-09-30-story-experience.md` … `2026-10-31-adr-001-strengthen-the-platform.md`) | each is linked from `README.md`, `CONTRIBUTING.md`, `docs/DESIGN.md`, `docs/ARCHITECTURE.md`, `docs/RELEASE_CHECKLIST.md`, `.claude/agents/forensic.md` or another plan | keep |
 
 Everything else in `docs/` is linked: `ARCHITECTURE.md`, `DESIGN.md`, `RELEASE_CHECKLIST.md`,
@@ -173,17 +185,18 @@ time.
 
 ## 6. File placement
 
-`Package.swift` globs `Sources/` (path-based target), so a move does not change the module. But `build.sh`,
+`Package.swift` globs `Sources/` (path-based target), so a move does not change the module. `build.sh`,
 `build_release.sh`, `script/build_test_runner.sh`, `script/native_performance_baseline.sh`,
 `script/test_native_ui_qa.sh`, `script/test_reader_accessibility.sh`, `script/test_event_overview_accessibility.sh`
 and `script/test_tension_calibration.sh` list every Swift file by path (398 path lines; `NewsApp.swift` must stay
-last because the harness scripts append their entry points after it), `.sonarcloud.properties` scopes one rule to
-`Sources/Intelligence/**/*` (a glob, unaffected), and 24 docs name `Sources/Intelligence/...` paths. The
-precondition in the brief, that the build globs directories, does not hold, so nothing was moved. The layout and
-the exact commands are here for approval; apply after #896 merges, since it edits `Sources/Views/ArticleListView.swift`
-and `ReaderSupportViews.swift` and a rename under it would conflict.
+last because the harness scripts append their entry points after it), and `script/design_lint_baseline.txt` keys
+its baseline on paths. The moves below are applied in this PR with the recipe at the end of this section; every
+old path in those scripts, the lint baseline, `docs/ARCHITECTURE.md`, `docs/DESIGN.md` and two file-header
+comments is rewritten, and a grep for each old path over the scripts, `Sources`, `Tests`, the CI configs and the
+living docs finds none. `.sonarcloud.properties` scopes one rule to `Sources/Intelligence/**/*`, a glob, so it is
+unaffected. Dated audits and plans keep the old paths: they describe the tree at their date.
 
-### `Sources/Intelligence` (28 files → 5 folders + 3 at the root)
+### `Sources/Intelligence` (28 files → 5 folders + 3 at the root), applied
 
 | Folder | Files |
 |---|---|
@@ -194,7 +207,7 @@ and `ReaderSupportViews.swift` and a rename under it would conflict.
 | `Tension/` | `WorldTension`, `TensionMethodology` |
 | root | `ArticleIntelligence` (the model session every extractor uses), `IntelligencePolicy`, `PromptDefense` |
 
-### `Sources/Views` (30 files → 3 folders + 7 at the root)
+### `Sources/Views` (30 files → 3 folders + 7 at the root), applied
 
 | Folder | Files |
 |---|---|
@@ -208,15 +221,58 @@ and `ReaderSupportViews.swift` and a rename under it would conflict.
 Eleven files, three of them extensions named after their base type. Leave flat: a `Database/` and `Store/` split
 would hold four and five files and hide the `+Events`/`+Briefing` pairing the names already show.
 
-### How to apply
+### The recipe that was run
 
 ```bash
 # 1. One line per file, from the two tables above: "<folder> <file>" (the Views table in the same form).
 moves='Intelligence/Overview OverviewComposer
 Intelligence/Overview OverviewGenerationCoordinator
+Intelligence/Overview OverviewPassageSelector
+Intelligence/Overview OverviewQualityAuditor
+Intelligence/Overview OverviewClaimVerifier
+Intelligence/Overview OverviewTimelineBuilder
+Intelligence/Overview OverviewTimelineExtractor
+Intelligence/Overview OverviewPerspectivesExtractor
+Intelligence/Overview OverviewThematicAngleExtractor
+Intelligence/Overview OverviewIndustryImpactExtractor
+Intelligence/Overview PassageFactExtractor
+Intelligence/Overview CoverageSentimentEvaluator
+Intelligence/Events EventCandidates
 Intelligence/Events EventMatcher
+Intelligence/Events EventClustering
+Intelligence/Events EventJudge
+Intelligence/Events ActClass
+Intelligence/Events SentenceEmbedder
+Intelligence/Events StoryImportance
+Intelligence/Extraction ContentExtractionPipeline
+Intelligence/Extraction EnrichmentQueue
+Intelligence/Briefing BriefingSitrepComposer
+Intelligence/Briefing ForwardWatchExtractor
+Intelligence/Tension WorldTension
+Intelligence/Tension TensionMethodology
 Views/Briefing BriefingView
-Views/Reader ArticleDetailView'   # ... every file of both tables
+Views/Briefing BriefingComponents
+Views/Briefing BriefingModules
+Views/Briefing BriefingSitrepModule
+Views/Briefing BriefingSinceLastModule
+Views/Briefing BriefingPriorityModule
+Views/Briefing BriefingFootprintModule
+Views/Briefing BriefingRegionsModule
+Views/Briefing BriefingIndustryModule
+Views/Briefing BriefingDriversModule
+Views/Briefing BriefingTimelineModule
+Views/Briefing BriefingWeakSignalsModule
+Views/Briefing BriefingForwardWatchModule
+Views/Reader ArticleDetailView
+Views/Reader ArticleWebView
+Views/Reader EventOverviewReaderView
+Views/Reader ReaderSupportViews
+Views/Reader WebPreviewPolicy
+Views/Reader ArticleRemoteImage
+Views/List ArticleListView
+Views/List ArticleCardView
+Views/List EventCardView
+Views/List FeedHealthLine'   # the 48 moved files
 scripts=(build.sh build_release.sh script/build_test_runner.sh script/native_performance_baseline.sh
   script/test_native_ui_qa.sh script/test_reader_accessibility.sh script/test_event_overview_accessibility.sh
   script/test_tension_calibration.sh)
@@ -235,29 +291,31 @@ Docs that name old paths (24 audits and plans) can keep them: they describe the 
 ## 7. The on-device models
 
 There is no `.mlmodel` or `.mlpackage` in the repository and no weights compiled into Swift. The two models ship as
-compiled Core ML bundles under `Sources/Resources/Models/`, which is why the Finder view of `Sources/Intelligence`
-shows no model files:
+compiled Core ML bundles under `Sources/Resources/CoreML/` (until this PR `Sources/Resources/Models/`, a name that
+collided with `Sources/Models`, the folder of Swift data types such as `FeedArticle`; the bundles stay under
+`Resources` because SwiftPM copies that folder as a resource, and the app bundle now carries them in
+`Contents/Resources/CoreML/`), which is why the Finder view of `Sources/Intelligence` shows no model files:
 
 | Path | What it is |
 |---|---|
-| `Sources/Resources/Models/minilm.mlmodelc/` (44 MB: `weights/weight.bin`, `model.mil`, `coremldata.bin`, `metadata.json`) | the sentence encoder, `sentence-transformers/all-MiniLM-L6-v2`, fp16, one function per padded length (16/32/64/128) so it runs on the Neural Engine (#554) |
-| `Sources/Resources/Models/pairscorer.mlmodelc/` (44 MB, same layout) | the in-house pair cross-encoder (#525), fine-tuned from the MiniLM weights on pairs from `./test.sh --export-pairs` and the public pretraining sets; functions for 64/128/256 tokens; output `probability` (different / related / same, #627) |
-| `Sources/Resources/Models/vocab.txt` | the WordPiece vocabulary both models and `script/training/wordpiece.py` tokenize with |
-| `Sources/Resources/Models/{minilm,pairscorer}-metadata.json` | provenance: base weights, training state SHA-256, conversion tool versions, parity checks, and the audit that measured them |
+| `Sources/Resources/CoreML/minilm.mlmodelc/` (44 MB: `weights/weight.bin`, `model.mil`, `coremldata.bin`, `metadata.json`) | the sentence encoder, `sentence-transformers/all-MiniLM-L6-v2`, fp16, one function per padded length (16/32/64/128) so it runs on the Neural Engine (#554) |
+| `Sources/Resources/CoreML/pairscorer.mlmodelc/` (44 MB, same layout) | the in-house pair cross-encoder (#525), fine-tuned from the MiniLM weights on pairs from `./test.sh --export-pairs` and the public pretraining sets; functions for 64/128/256 tokens; output `probability` (different / related / same, #627) |
+| `Sources/Resources/CoreML/vocab.txt` | the WordPiece vocabulary both models and `script/training/wordpiece.py` tokenize with |
+| `Sources/Resources/CoreML/{minilm,pairscorer}-metadata.json` | provenance: base weights, training state SHA-256, conversion tool versions, parity checks, and the audit that measured them |
 
 A `.mlmodelc` is a directory (Core ML's compiled form), so Finder shows it as a folder, not a model icon; the
 editable `.mlpackage` is never committed. Produced by `script/training/convert_minilm.py` (Hub revision → Core ML),
 `train_pair_model.py` (fine-tune and export), `compress_models.py` (fp16 fixed-length export of both, 27 October);
 training states (`.pt`) and pair CSVs stay outside the checkout, with their SHA-256 in the audits. Shipped by
-`build.sh` and `build_release.sh`, which copy `Sources/Resources/Models/*` into `News.app/Contents/Resources/Models/`;
-SwiftPM copies the same folder as a resource. Loaded in `Sources/Intelligence/SentenceEmbedder.swift`
-(`bundledModelResource`, lines 159–166: `Bundle.module` for SwiftPM, then `Bundle.main` `Models/`, then the source
+`build.sh` and `build_release.sh`, which copy `Sources/Resources/CoreML/*` into `News.app/Contents/Resources/CoreML/`;
+SwiftPM copies the same folder as a resource. Loaded in `Sources/Intelligence/Events/SentenceEmbedder.swift`
+(`bundledModelResource`, lines 156–167: `Bundle.module` for SwiftPM, then `Bundle.main` `CoreML/`, then the source
 path for the test runner) with `MLModel(contentsOf:)` and `cpuAndNeuralEngine`; `PairScorer` in the same file is
 what `EventClustering.swift` calls for pair probabilities. The "decision head" of `fit_pair_head.py` is an
 evaluation tool that prints a Swift literal for review; the shipped cutoff calibration lives in
 `EventMatcher.swift` (#629), not as model weights. Nothing is downloaded at run time.
 
-## 8. Every file in `docs/`
+## 8. Every file in `docs/` (as surveyed, before the deletions above)
 
 | Last commit | File | Referenced by (outside docs/) | Links from other docs |
 |---|---|---|---|
