@@ -28,9 +28,9 @@ local tools.
 
 | Item | Why it is still here | Suggested action |
 |---|---|---|
-| `(`release/2.0.0`, #894 merged) | one uncommitted change in the tree | look at `git -C status`, then `git worktree remove --force` |
-| `(`fix/799-web-links`, #830 merged) | two uncommitted changes, and another session's scratchpad hangs five more worktrees off it (`stackfix`, `wt781`, `wt816`, `wt817`, `wtadr`, all with merged PRs #827, #821, #832, #836, #843) | remove the five scratchpad worktrees first (`git worktree remove` each), then this one |
-| `event-feature-fallback, m-540-lint, m-581-story-layer-fix, m-integrated-2026-10-29, m-review-scripts, pr729}` | branches with no pull request and commits not on `main`; 96–125 MB each | if the work is finished elsewhere, `git worktree remove` and `git branch -D` |
+| `.claude/worktrees/briefing-board-v2-7bf33f` (`release/2.0.0`, #894 merged) | one uncommitted change in the tree | look at `git -C .claude/worktrees/briefing-board-v2-7bf33f status`, then `git worktree remove --force .claude/worktrees/briefing-board-v2-7bf33f` |
+| `.claude/worktrees/data-sufficiency-check-378dd6` (`fix/799-web-links`, #830 merged) | two uncommitted changes, and another session's scratchpad hangs five more worktrees off it (`stackfix`, `wt781`, `wt816`, `wt817`, `wtadr`, all with merged PRs #827, #821, #832, #836, #843) | remove the five scratchpad worktrees first (`git worktree remove` each), then this one |
+| `.claude/worktrees/{agent-pr705, event-feature-fallback, m-540-lint, m-581-story-layer-fix, m-integrated-2026-10-29, m-review-scripts, pr729}` | branches with no pull request and commits not on `main`; 96–125 MB each | if the work is finished elsewhere, `git worktree remove` and `git branch -D` |
 | `.antigravity/worktrees/voiceover-qa` and 5 worktrees under `~/.gemini/antigravity/worktrees/News` | other tools' worktrees; `antigravity/voiceover-qa`, `analyze_epic_m_prs`, `analyze_project_missing_features` and `fix_codeql_and_board` are fully merged by ancestry, `fix_codacy_issues_pr705` and `fix/808-redirect-state-per-task` (#865 merged) are not | remove from those tools, or `git worktree remove` each |
 | 34 local branches already merged into `origin/main` by ancestry (`batch/*`, `mars/*`, `worktree-agent-*`, …) | no worktree, nothing lost | `git branch --merged origin/main \| grep -v main \| xargs git branch -d` |
 | `Sources/News.docc` (DocC catalog: `News.md`, four articles, one symbol page; added by #660) | nothing builds it: no `docc` call in `build.sh`, the CI workflows, `Makefile` or `CONTRIBUTING.md`; `README.md` does not mention it | delete, or add a `docc` step to a doc-only job so it stays true |
@@ -85,7 +85,7 @@ notes from `TensionMethodology.swift`, `calibrate_tension.py` and `ARCHITECTURE.
 | `native_performance_baseline.sh` | all three CI providers with `NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift`; by hand for the other harnesses |
 | `evaluation/{evaluate, publisher_review, publisher_dates, overview_review, importance_review, relation_review, catalog_review, fit_pair_head, calibrate_tension}.py` | `test.sh` self-checks; CircleCI `checks` (all but `calibrate_tension`) |
 | `training/pretrain_pairs.py` (`--self-check`) | `test.sh` |
-| `training/{train_pair_model, train_embedding, convert_minilm, compress_models}.py`, `wordpiece.py`, `requirements.txt` | by hand on Mars's Mac only (their docstrings say never CI); `wordpiece.py` is imported by the other three |
+| `training/{train_pair_model, train_embedding, convert_minilm, compress_models}.py`, `wordpiece.py`, `requirements.txt` | by hand on Mars's Mac only (the four training scripts' docstrings say "Mars's Mac only, never CI"); `wordpiece.py` is the tokenizer the other three import and `requirements.txt` their virtual environment |
 | `evaluation/sample_pairs.py`, `evaluation/build_corpus.py` | by hand (`CONTRIBUTING.md`; the story-corpus fixture README) |
 | `build_and_run.sh` | `make run`, `README.md` |
 | `distribution/{notarize, package_dmg}.sh` | by hand at release; `NewsTests.swift` checks their text |
@@ -211,16 +211,22 @@ would hold four and five files and hide the `+Events`/`+Briefing` pairing the na
 ### How to apply
 
 ```bash
-# 1. Move (one line per file; the same pattern for the Views table).
-git mv Sources/Intelligence/OverviewComposer.swift Sources/Intelligence/Overview/OverviewComposer.swift
-# ...
-# 2. Rewrite every listed path in the scripts that enumerate files.
-sed -i '' -e 's#Sources/Intelligence/Overview\([A-Za-z]*\)\.swift#Sources/Intelligence/Overview/Overview\1.swift#' \
-  build.sh build_release.sh script/build_test_runner.sh script/native_performance_baseline.sh \
-  script/test_native_ui_qa.sh script/test_reader_accessibility.sh script/test_event_overview_accessibility.sh \
-  script/test_tension_calibration.sh
-# 3. Check: no stale path remains, then build and test.
-grep -rn 'Sources/Intelligence/Overview[A-Z]' build.sh build_release.sh script/*.sh && echo STALE
+# 1. One line per file, from the two tables above: "<folder> <file>" (the Views table in the same form).
+moves='Intelligence/Overview OverviewComposer
+Intelligence/Overview OverviewGenerationCoordinator
+Intelligence/Events EventMatcher
+Views/Briefing BriefingView
+Views/Reader ArticleDetailView'   # ... every file of both tables
+scripts=(build.sh build_release.sh script/build_test_runner.sh script/native_performance_baseline.sh
+  script/test_native_ui_qa.sh script/test_reader_accessibility.sh script/test_event_overview_accessibility.sh
+  script/test_tension_calibration.sh)
+# 2. Create each destination folder, move the file, and rewrite its old path in every script that lists files.
+echo "$moves" | while read -r folder file; do
+  old="Sources/${folder%/*}/$file.swift"; new="Sources/$folder/$file.swift"
+  mkdir -p "$(dirname "$new")" && git mv "$old" "$new" && sed -i '' "s#$old#$new#g" "${scripts[@]}"
+done
+# 3. Check every old path is gone from the scripts, then build and test.
+echo "$moves" | while read -r folder file; do grep -n "Sources/${folder%/*}/$file.swift" "${scripts[@]}"; done | grep . && echo STALE
 ./build.sh && NEWS_TEST_FORCE=1 ./test.sh
 ```
 
