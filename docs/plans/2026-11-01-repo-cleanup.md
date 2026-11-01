@@ -209,6 +209,10 @@ unaffected. Dated audits and plans keep the old paths: they describe the tree at
 
 ### `Sources/Views` (30 files → 3 folders + 7 at the root), applied
 
+Codacy flagged `BriefingView.swift` (684 non-comment lines) once the move made it a new file to the analyzer, so it is
+split at its two seams: `BriefingHeroCarouselView.swift` (the hero carousel) and `BriefingBoardLayout.swift` (the
+section, tile grid, completion banner and split layout). `BriefingView.swift` keeps the actions bundle and the board.
+
 | Folder | Files |
 |---|---|
 | `Briefing/` | `BriefingView`, `BriefingComponents`, `BriefingModules` and the ten `Briefing*Module` files |

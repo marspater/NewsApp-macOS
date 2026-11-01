@@ -106,6 +106,8 @@ SWIFT_SOURCES=(
     Sources/Views/List/ArticleListView.swift \
     Sources/Views/Briefing/BriefingComponents.swift \
     Sources/Views/Briefing/BriefingView.swift \
+    Sources/Views/Briefing/BriefingHeroCarouselView.swift \
+    Sources/Views/Briefing/BriefingBoardLayout.swift \
     Sources/Views/Briefing/BriefingModules.swift \
     Sources/Views/Briefing/BriefingSitrepModule.swift \
     Sources/Views/Briefing/BriefingSinceLastModule.swift \
