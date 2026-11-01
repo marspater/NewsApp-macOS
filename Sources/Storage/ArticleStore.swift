@@ -170,7 +170,8 @@ final class ArticleStore: ObservableObject {
             }
             revision &+= 1
             let dbAnalysisGen = await database.analysisGeneration
-            if self.analysisGeneration != dbAnalysisGen {
+            // A clear in progress publishes the generation itself, once its reset handler has finished.
+            if analysisClearsInProgress == 0, self.analysisGeneration != dbAnalysisGen {
                 self.analysisGeneration = dbAnalysisGen
             }
             if !published { logger.error("Refresh kept being overtaken by read or save changes") }
@@ -573,27 +574,34 @@ final class ArticleStore: ObservableObject {
     /// Purges all generated AI analysis data while preserving articles and subscriptions.
     func clearAIAnalysis() async throws {
         try await database.clearArticleEnrichment()
-        analysisGeneration = await database.analysisGeneration
         // Running work is refused at commit by the generation bump; its session state is reset here (#805).
-        await analysisClearedHandler?()
-        await refreshState()
+        await finishAnalysisClear()
     }
 
     /// Clears cached full article content while preserving subscriptions, saved stories, and read history.
     func clearArticleCache() async throws {
         try await database.clearArticleCache()
-        analysisGeneration = await database.analysisGeneration
         // This clear removes enrichment for unsaved stories too, so running work and its session state are reset (#886).
-        await analysisClearedHandler?()
-        await refreshState()
+        await finishAnalysisClear()
     }
 
     /// Clears replaceable caches while preserving subscriptions, history and saved bodies.
     func clearAllDatabaseCache() async throws {
         try await database.clearAllDatabaseCache()
-        analysisGeneration = await database.analysisGeneration
         // This clear removes enrichment too, so running work and its session state are reset the same way (#805).
+        await finishAnalysisClear()
+    }
+
+    /// Clears running at once; while any runs, `refreshState` leaves `analysisGeneration` alone.
+    private var analysisClearsInProgress = 0
+
+    /// Runs the reset handler, then publishes the new generation. Published first, it would start work (World Tension's
+    /// assessment) that the handler then cancels.
+    private func finishAnalysisClear() async {
+        analysisClearsInProgress += 1
         await analysisClearedHandler?()
+        analysisClearsInProgress -= 1
+        analysisGeneration = await database.analysisGeneration
         await refreshState()
     }
 
