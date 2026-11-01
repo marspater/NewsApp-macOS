@@ -5,15 +5,13 @@ build/
 *.xcuserstate
 xcuserdata/
 *.swp
-test_runner
-main
+/test_runner
+/main
 .build/
 *.dmg
 *.zip
 *.sha256
-Centauri/
-FTABHarvest/
-powerlog/
+!Tests/Fixtures/**/*.sha256
 .sourcekit-lsp/
 # Generated SwiftPM/Xcode workspace state
 .swiftpm/
@@ -26,3 +24,17 @@ __pycache__/
 
 # Agent teamwork scratch state
 .agents/
+
+# Claude Code per-user state
+.claude/settings.local.json
+.claude/worktrees/
+
+# Secrets and signing material: never commit
+.env
+.env.*
+.sentry-dsn
+.sentryclirc
+*.p8
+*.p12
+*.mobileprovision
+*.provisionprofile
