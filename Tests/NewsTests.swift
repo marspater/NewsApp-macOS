@@ -3367,7 +3367,7 @@ struct NewsTests {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(
             "news-reader-\(UUID().uuidString).sqlite3"
         ).path
-        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) } }
+        defer { removeTemporaryLibrary(atPath: path) }
         let database = DatabaseEngine(path: path)
         do {
             try await database.open()
@@ -8541,9 +8541,7 @@ struct NewsTests {
             let repairPath = FileManager.default.temporaryDirectory.appendingPathComponent(
                 "news-topic-repair-\(UUID().uuidString).sqlite3"
             ).path
-            defer {
-                for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: repairPath + suffix) }
-            }
+            defer { removeTemporaryLibrary(atPath: repairPath) }
             let legacyTopics = DatabaseEngine(path: repairPath)
             try await legacyTopics.open()
             let mislabeled = FeedArticle(
@@ -10986,7 +10984,7 @@ struct NewsTests {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(
             "news-orphan-\(UUID().uuidString).sqlite3"
         ).path
-        defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) } }
+        defer { removeTemporaryLibrary(atPath: path) }
         let db = DatabaseEngine(path: path)
         try await db.open()
         let old = Date().addingTimeInterval(-40 * 86_400)
@@ -15589,7 +15587,7 @@ struct NewsTests {
         }
         func quoted(_ value: String) -> String { "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
         // The app's own word pieces travel with each text, so training sees exactly the ids the app will send.
-        let tokenizer = try BertWordPieceTokenizer(vocabURL: URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt"))
+        let tokenizer = try BertWordPieceTokenizer(vocabURL: URL(fileURLWithPath: "Sources/Resources/CoreML/vocab.txt"))
         func pieces(_ text: String) -> String { tokenizer.pieces(text).map { String($0) }.joined(separator: " ") }
         var lines = ["label,group,text_a,text_b,pieces_a,pieces_b,weight,marginal"]
         var seen = Set<String>()
@@ -20779,9 +20777,7 @@ struct NewsTests {
         let service = NotificationService(post: { await recorder.record($0) }, spacing: .zero)
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("lanes-\(UUID().uuidString).sqlite3")
             .path
-        defer {
-            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
-        }
+        defer { removeTemporaryLibrary(atPath: path) }
         var store = ArticleStore(database: DatabaseEngine(path: path))
         await store.initialize()
         // A refresh without a clock reads the real one at the pass, as the app does, after its stories are stored. It
