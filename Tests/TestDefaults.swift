@@ -20,8 +20,10 @@ func removeTemporaryLibrary(atPath path: String) {
     let url = URL(fileURLWithPath: path)
     let folder = url.deletingLastPathComponent()
     let stem = url.deletingPathExtension().lastPathComponent
+    let base = url.lastPathComponent
+    let exact: Set<String> = [base, base + "-wal", base + "-shm", base + ".migration-lock"]
     let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
-    for name in names where name.hasPrefix(stem) {
+    for name in names where exact.contains(name) || name.hasPrefix(stem + "-before-v") {
         try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
     }
 }
