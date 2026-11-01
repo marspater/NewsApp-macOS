@@ -83,6 +83,7 @@ struct NativeUIQAChecks {
             ArticleListView.prefetchStart(visibleIndex: 12, currentStart: backwardStart), backwardStart,
             "Cards already inside the window do not restart prefetch")
         await testRemoteImageReuse()
+        await testRemoteImageCancellationRetry()
         await testOverviewLeadImageUsesProtectedLoader()
         await testCardImageOverflowTakesNoClicks()
 
@@ -351,6 +352,41 @@ struct NativeUIQAChecks {
             "New image appears after its own load completes")
         await warmup.value
         assertEqual(probe.requests.count, 2, "Prefetch and a mounted card share one load and decode")
+    }
+
+    static func testRemoteImageCancellationRetry() async {
+        print("  - Testing remote image retry on URLError.cancelled (#901)...")
+        let url = URL(string: "https://images.example/\(UUID().uuidString)/retry.jpg")!
+        let image = CGContext(
+            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
+        nonisolated(unsafe) var calls = 0
+        func fixture() -> some View {
+            ArticleRemoteImage(url: url) { phase in
+                Text(phase.image == nil ? "Waiting" : "Ready")
+            }.environment(\.readerImageLoader) { _ in
+                calls += 1
+                if calls == 1 {
+                    throw URLError(.cancelled)
+                }
+                return image
+            }
+        }
+        let host = NSHostingView(rootView: AnyView(fixture()))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 200, height: 100),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.close() }
+        func waitUntil(_ condition: () -> Bool) async -> Bool {
+            let deadline = Date().addingTimeInterval(5)
+            while !condition(), Date() < deadline { await Task.yield() }
+            return condition()
+        }
+        let finished = await waitUntil { calls >= 2 && DecodedImageCache.images.object(forKey: url as NSURL) != nil }
+        assertTrue(finished, "URLError.cancelled triggers retry and succeeds on subsequent attempt (#901)")
     }
 
     static func testOverviewLeadImageUsesProtectedLoader() async {

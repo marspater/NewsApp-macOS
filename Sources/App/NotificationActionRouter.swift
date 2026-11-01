@@ -78,15 +78,15 @@ enum NotificationActionRouter {
         activateApp: @MainActor () -> Void = { NSApp?.activate() }
     ) async {
         guard let target = resolveTarget(from: userInfo) else { return }
-        await articleStore.waitForStartup()
-
         switch actionIdentifier {
         case NotificationActionIdentifier.save:
+            await articleStore.waitForStartup()
             await handleSave(target: target, store: articleStore, savedStories: savedStories)
         case NotificationActionIdentifier.markRead:
+            await articleStore.waitForStartup()
             await handleMarkRead(target: target, store: articleStore, readManager: readManager)
         case NotificationActionIdentifier.open, UNNotificationDefaultActionIdentifier:
-            handleOpen(target: target, store: articleStore, activateApp: activateApp)
+            await handleOpen(target: target, store: articleStore, activateApp: activateApp)
         default:
             break
         }
@@ -168,8 +168,9 @@ enum NotificationActionRouter {
         target: NotificationTarget,
         store: ArticleStore,
         activateApp: @MainActor () -> Void
-    ) {
+    ) async {
         activateApp()
+        await store.waitForStartup()
         store.pendingNavigation = .init(
             articleID: target.articleID,
             link: target.articleLink ?? ""

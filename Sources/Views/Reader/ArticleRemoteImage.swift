@@ -199,7 +199,7 @@ struct ArticleRemoteImage<Content: View>: View {
                         NotificationCenter.default.post(
                             name: .readerImageFinished, object: url, userInfo: ["success": true])
                         return
-                    } catch is CancellationError {
+                    } catch let error where error is CancellationError || (error as? URLError)?.code == .cancelled {
                         guard !Task.isCancelled else { return }
                         if attempt >= 2 {
                             return

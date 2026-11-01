@@ -168,8 +168,13 @@ enum AnalysisGenerationTests {
         check(await queue.state(for: stored.id) != .completed, "A changed input queues the story again")
 
         await eventually("The changed input settles") { await queue.retainsJob(for: stored.id) == false }
+        let initialGen = store.analysisGeneration
         // The clear returns only once the queue has reset, so an enqueue right after it is not skipped.
         try await store.clearAIAnalysis()
+        check(store.analysisGeneration > initialGen, "Clear AI Analysis bumps store.analysisGeneration (#901)")
+        check(
+            store.analysisGeneration == (await db.analysisGeneration),
+            "store.analysisGeneration matches db.analysisGeneration")
         check(await queue.state(for: stored.id) == nil, "Clear AI Analysis forgets what was classified")
         await queue.enqueue(article: stored, priority: .interactive)
         await eventually("The story is classified again after the clear") {
@@ -177,8 +182,21 @@ enum AnalysisGenerationTests {
         }
 
         // Clear Story Text also resets the queue (#886)
+        let beforeTextGen = store.analysisGeneration
         try await store.clearArticleCache()
+        check(store.analysisGeneration > beforeTextGen, "Clear Story Text bumps store.analysisGeneration (#901)")
+        check(
+            store.analysisGeneration == (await db.analysisGeneration),
+            "store.analysisGeneration matches db.analysisGeneration after text clear")
         check(await queue.state(for: stored.id) == nil, "Clear Story Text forgets what was classified (#886)")
+
+        // Clear All Database Cache also bumps analysisGeneration
+        let beforeAllGen = store.analysisGeneration
+        try await store.clearAllDatabaseCache()
+        check(store.analysisGeneration > beforeAllGen, "Clear All Database Cache bumps store.analysisGeneration (#901)")
+        check(
+            store.analysisGeneration == (await db.analysisGeneration),
+            "store.analysisGeneration matches db.analysisGeneration after all clear")
     }
 
     /// A background warm-up never cancels the generation running for the visible event (#792): the rule, then the

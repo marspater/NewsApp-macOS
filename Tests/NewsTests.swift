@@ -26249,6 +26249,7 @@ struct NewsTests {
         assertTrue(readManager.isRead(article.id), "MARK_READ_ACTION routes to ReadManager (#560)")
 
         // 3. OPEN_ACTION activates app and sets pendingNavigation
+        var activatedBeforeNavigation = false
         var activated = false
         await NotificationActionRouter.route(
             actionIdentifier: NotificationActionIdentifier.open,
@@ -26256,9 +26257,15 @@ struct NewsTests {
             articleStore: store,
             readManager: readManager,
             savedStories: savedManager,
-            activateApp: { activated = true }
+            activateApp: {
+                activated = true
+                if store.pendingNavigation == nil {
+                    activatedBeforeNavigation = true
+                }
+            }
         )
         assertTrue(activated, "OPEN_ACTION activates the application (#560)")
+        assertTrue(activatedBeforeNavigation, "OPEN_ACTION activates app before pendingNavigation is set")
         assertEqual(store.pendingNavigation?.articleID, article.id, "OPEN_ACTION sets pendingNavigation articleID")
         assertEqual(store.pendingNavigation?.link, article.link, "OPEN_ACTION sets pendingNavigation link")
 
@@ -26309,6 +26316,7 @@ struct NewsTests {
         let errorDB = DatabaseEngine(path: ":memory:")
         let errorStore = ArticleStore(database: errorDB, spotlightIndexer: MockSpotlightIndexer())
         await errorStore.initialize()
+        await errorStore.waitForStartup()
         await errorDB.close()
         await NotificationActionRouter.route(
             actionIdentifier: NotificationActionIdentifier.save,

@@ -42,6 +42,8 @@ final class ArticleStore: ObservableObject {
     @Published var overviewRevision: UInt64 = 0
     @Published var operationError: String?
     @Published private(set) var databaseHealthNotice: String?
+    /// Bumped when AI analysis or article caches are purged so views reload fresh state (#901).
+    @Published private(set) var analysisGeneration: Int = 0
 
     init(
         database: DatabaseEngine? = nil,
@@ -167,6 +169,10 @@ final class ArticleStore: ObservableObject {
                 break
             }
             revision &+= 1
+            let dbAnalysisGen = await database.analysisGeneration
+            if self.analysisGeneration != dbAnalysisGen {
+                self.analysisGeneration = dbAnalysisGen
+            }
             if !published { logger.error("Refresh kept being overtaken by read or save changes") }
             return published
         } catch {
@@ -567,6 +573,7 @@ final class ArticleStore: ObservableObject {
     /// Purges all generated AI analysis data while preserving articles and subscriptions.
     func clearAIAnalysis() async throws {
         try await database.clearArticleEnrichment()
+        analysisGeneration = await database.analysisGeneration
         // Running work is refused at commit by the generation bump; its session state is reset here (#805).
         await analysisClearedHandler?()
         await refreshState()
@@ -575,6 +582,7 @@ final class ArticleStore: ObservableObject {
     /// Clears cached full article content while preserving subscriptions, saved stories, and read history.
     func clearArticleCache() async throws {
         try await database.clearArticleCache()
+        analysisGeneration = await database.analysisGeneration
         // This clear removes enrichment for unsaved stories too, so running work and its session state are reset (#886).
         await analysisClearedHandler?()
         await refreshState()
@@ -583,6 +591,7 @@ final class ArticleStore: ObservableObject {
     /// Clears replaceable caches while preserving subscriptions, history and saved bodies.
     func clearAllDatabaseCache() async throws {
         try await database.clearAllDatabaseCache()
+        analysisGeneration = await database.analysisGeneration
         // This clear removes enrichment too, so running work and its session state are reset the same way (#805).
         await analysisClearedHandler?()
         await refreshState()
