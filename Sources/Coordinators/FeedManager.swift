@@ -61,8 +61,9 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshInterruptedBySleep = false
     /// Stories a cancelled refresh had already committed; the next completed refresh notifies them.
     private var pendingNotificationArticles: [FeedArticle] = []
-    /// The latest notification pass; the next one waits for it.
-    private var notificationPass: Task<Void, Never>?
+    /// The latest notification pass; the next one waits for it. Banners post minutes apart, so a pass outlives the
+    /// refresh that started it; `stopBackgroundWork` cancels it.
+    private(set) var notificationPass: Task<Void, Never>?
     /// Stories a full-mode banner has covered since launch (`PlannedBanner.stories`), for the Dock badge (#584).
     @Published private(set) var notifiedStoryIDs: Set<String> = []
     /// Retention runs at most once a day per launch, after a completed refresh.
@@ -446,6 +447,8 @@ class FeedManager: NSObject, ObservableObject {
         wakeTask?.cancel()
         wakeTask = nil
         cancelRefresh()
+        notificationPass?.cancel()
+        notificationPass = nil
         enrichmentTask?.cancel()
         enrichmentTask = nil
         overviewWarmupTask?.cancel()
@@ -493,8 +496,8 @@ class FeedManager: NSObject, ObservableObject {
         return true
     }
 
-    /// Returns once new articles are collected and published. Notification triage and background classification
-    /// follow for the caller that started the run, but never hold the refresh, its spinner or the next Cmd-R.
+    /// Returns once new articles are collected, published and rated. Notification banners and background
+    /// classification then run on their own: banners post minutes apart, so no caller waits for them.
     ///
     /// A read-only library (a notice is set) cannot store anything, so nothing is downloaded. A scheduled refresh
     /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
@@ -533,7 +536,7 @@ class FeedManager: NSObject, ObservableObject {
         await notifyAndEnrich(newArticles)
     }
 
-    /// Triage and notify the new stories of a finished refresh, then enrich in the background.
+    /// Starts the notification pass for the new stories of a finished refresh and enriches in the background.
     private func notifyAndEnrich(_ newArticles: [FeedArticle]) async {
         let eligible: Set<String>
         do {
@@ -549,17 +552,11 @@ class FeedManager: NSObject, ObservableObject {
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
             // Passes run one at a time: each reads the delivery tables only after the previous one has recorded its
-            // banners (#665).
+            // banners (#665). Nobody awaits a pass: its banners post minutes apart.
             let previous = notificationPass
-            let pass = Task { [weak self] in
+            notificationPass = Task { [weak self] in
                 await previous?.value
                 await self?.deliverNotifications(notifiable)
-            }
-            notificationPass = pass
-            await withTaskCancellationHandler {
-                await pass.value
-            } onCancel: {
-                pass.cancel()
             }
         }
         guard !Task.isCancelled, !isStopped else { return }
@@ -597,7 +594,10 @@ class FeedManager: NSObject, ObservableObject {
             delivery.interests = await Self.triageInterests(
                 database: database, now: posted, resetAt: appSettings.readingInterestsResetDate)
             delivery.record = { [weak self] banner in
-                try? await database.recordNotification(banner, at: posted)
+                // Banners post minutes apart: each is recorded when it posts, not when the pass began, so the
+                // rolling windows measure from the banner the reader saw.
+                let at = await self?.now() ?? posted
+                try? await database.recordNotification(banner, at: at)
                 await self?.markNotified(banner.stories)
             }
             delivery.queue = { waiting in

@@ -111,8 +111,10 @@ final class NotificationService: Sendable {
     private let logger = Logger(subsystem: "com.marspater.news", category: "NotificationService")
     /// Posts one request; the default goes to the user notification center and skips unbundled test processes.
     private let post: @Sendable (UNNotificationRequest) async throws -> Void
-    /// Pause between two banners of one refresh: posted at once, macOS stacks them and one hides behind the other.
+    /// Pause between two banners of one refresh, so a refresh reads as a trickle of stories, not one burst.
     private let spacing: Duration
+    /// Five minutes (#587, docs/notifications.md); a pass of five normal banners takes 20 minutes.
+    static let bannerSpacing: Duration = .seconds(5 * 60)
 
     /// A story this strong is breaking news: it notifies on its own, and its banner sounds and interrupts like any
     /// alert; the rest are passive.
@@ -130,7 +132,7 @@ final class NotificationService: Sendable {
     static let starredWindow: TimeInterval = 20 * 60
 
     init(
-        post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = .seconds(2)
+        post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = bannerSpacing
     ) {
         self.post =
             post ?? { request in
@@ -265,7 +267,8 @@ final class NotificationService: Sendable {
     }
 
     /// Dispatches notifications according to the active NotificationMode. Full mode posts the planned banners one at
-    /// a time, a pause apart (#587), and records each as soon as it posts (#665).
+    /// a time, `spacing` apart (#587), and records each as soon as it posts (#665). Cancelling the pass (quitting)
+    /// drops the banners not yet posted.
     func triageAndNotify(newArticles: [FeedArticle], delivery: NotificationDelivery) async {
         guard !newArticles.isEmpty else { return }
 
