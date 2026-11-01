@@ -20,8 +20,11 @@ if [[ -n "$SENTRY_DSN" ]]; then
         curl -fsSL --proto "=https" --proto-redir "=https" --tlsv1.2 -o "${SENTRY_DIR}/Sentry.xcframework.zip" \
             "https://github.com/getsentry/sentry-cocoa/releases/download/${SENTRY_VERSION}/Sentry.xcframework.zip"
         echo "${XCFRAMEWORK_SHA256}  ${SENTRY_DIR}/Sentry.xcframework.zip" | shasum -a 256 -c - >&2
-        ditto -x -k "${SENTRY_DIR}/Sentry.xcframework.zip" "$SENTRY_DIR"
-        rm "${SENTRY_DIR}/Sentry.xcframework.zip"
+        # Extract beside it, then rename: an interrupted extraction never leaves a half framework that passes the check above.
+        SENTRY_EXTRACT=$(mktemp -d "${SENTRY_DIR}/extract.XXXXXX")
+        ditto -x -k "${SENTRY_DIR}/Sentry.xcframework.zip" "$SENTRY_EXTRACT"
+        mv "${SENTRY_EXTRACT}/Sentry.xcframework" "${SENTRY_DIR}/Sentry.xcframework"
+        rm -rf "$SENTRY_EXTRACT" "${SENTRY_DIR}/Sentry.xcframework.zip"
     fi
     SENTRY_SLICE=$(find "${SENTRY_DIR}/Sentry.xcframework" -maxdepth 1 -type d -name 'macos-*' | head -1)
     NEWS_SENTRY_FLAGS=(-D NEWS_SENTRY -F "$SENTRY_SLICE" -framework Sentry -lc++ -lz)
