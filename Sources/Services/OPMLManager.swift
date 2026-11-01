@@ -65,7 +65,16 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
             feedUrl = nil
         }
 
-        let title = attrs["title"] ?? attrs["text"] ?? ""
+        let rawTitle = attrs["title"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawText = attrs["text"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let title: String
+        if let rawTitle, !rawTitle.isEmpty {
+            title = rawTitle
+        } else if let rawText, !rawText.isEmpty {
+            title = rawText
+        } else {
+            title = ""
+        }
 
         if let feedUrl, !feedUrl.isEmpty {
             items.append(OPMLItem(title: title, url: feedUrl, folder: folderStack.last))

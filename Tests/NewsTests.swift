@@ -6599,12 +6599,15 @@ struct NewsTests {
                     <outline text="Category With Website" url="https://example.com/category">
                         <outline title="Nested Tech" type="rss" xmlUrl="https://example.com/tech.xml" url="https://example.com/tech"/>
                     </outline>
+                    <outline title="" text="Empty Title Folder">
+                        <outline title="   " text="Empty Title Feed" xmlUrl="https://example.com/feed4.xml"/>
+                    </outline>
                 </body>
             </opml>
             """.data(using: .utf8)!
 
         let advancedItems = OPMLParser.parse(data: advancedOPML)
-        assertEqual(advancedItems.count, 4, "Should parse 4 feeds, treating category with web url as folder")
+        assertEqual(advancedItems.count, 5, "Should parse 5 feeds, treating category with web url as folder")
         assertEqual(advancedItems[0].title, "Capital Title Feed", "Case-insensitive Title attribute")
         assertEqual(advancedItems[0].url, "https://example.com/feed1.xml", "Prioritizes xmlUrl over url")
         assertEqual(advancedItems[0].folder, nil, "Root item has nil folder")
@@ -6619,6 +6622,10 @@ struct NewsTests {
         assertEqual(advancedItems[3].title, "Nested Tech", "Extracts nested feed title")
         assertEqual(advancedItems[3].url, "https://example.com/tech.xml", "Prioritizes xmlUrl in nested feed")
         assertEqual(advancedItems[3].folder, "Category With Website", "Nested inside Category With Website folder")
+
+        assertEqual(advancedItems[4].title, "Empty Title Feed", "Falls back to text when title is whitespace")
+        assertEqual(advancedItems[4].url, "https://example.com/feed4.xml", "Extracts feed url")
+        assertEqual(advancedItems[4].folder, "Empty Title Folder", "Folder falls back to text when title is empty")
     }
 
     @MainActor
