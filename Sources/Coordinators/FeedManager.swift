@@ -61,8 +61,9 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshInterruptedBySleep = false
     /// Stories a cancelled refresh had already committed; the next completed refresh notifies them.
     private var pendingNotificationArticles: [FeedArticle] = []
-    /// The latest notification pass; the next one waits for it.
-    private var notificationPass: Task<Void, Never>?
+    /// The latest notification pass; the next one waits for it. Banners post minutes apart, so a pass outlives the
+    /// refresh that started it; `stopBackgroundWork` cancels it.
+    private(set) var notificationPass: Task<Void, Never>?
     /// Stories a full-mode banner has covered since launch (`PlannedBanner.stories`), for the Dock badge (#584).
     @Published private(set) var notifiedStoryIDs: Set<String> = []
     /// Retention runs at most once a day per launch, after a completed refresh.
@@ -446,6 +447,8 @@ class FeedManager: NSObject, ObservableObject {
         wakeTask?.cancel()
         wakeTask = nil
         cancelRefresh()
+        notificationPass?.cancel()
+        notificationPass = nil
         enrichmentTask?.cancel()
         enrichmentTask = nil
         overviewWarmupTask?.cancel()
@@ -493,8 +496,8 @@ class FeedManager: NSObject, ObservableObject {
         return true
     }
 
-    /// Returns once new articles are collected and published. Notification triage and background classification
-    /// follow for the caller that started the run, but never hold the refresh, its spinner or the next Cmd-R.
+    /// Returns once new articles are collected, published and rated. Notification banners and background
+    /// classification then run on their own: banners post minutes apart, so no caller waits for them.
     ///
     /// A read-only library (a notice is set) cannot store anything, so nothing is downloaded. A scheduled refresh
     /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
@@ -533,7 +536,7 @@ class FeedManager: NSObject, ObservableObject {
         await notifyAndEnrich(newArticles)
     }
 
-    /// Triage and notify the new stories of a finished refresh, then enrich in the background.
+    /// Starts the notification pass for the new stories of a finished refresh and enriches in the background.
     private func notifyAndEnrich(_ newArticles: [FeedArticle]) async {
         let eligible: Set<String>
         do {
@@ -549,17 +552,18 @@ class FeedManager: NSObject, ObservableObject {
         let notifiable = newArticles.filter { eligible.contains($0.id) && !muting.mutes($0) }
         if appSettings.notificationsEnabled && !notifiable.isEmpty {
             // Passes run one at a time: each reads the delivery tables only after the previous one has recorded its
-            // banners (#665).
+            // banners (#665). Nobody awaits a pass: its banners post minutes apart.
             let previous = notificationPass
-            let pass = Task { [weak self] in
-                await previous?.value
+            notificationPass = Task { [weak self] in
+                // Cancelling the latest pass (stopBackgroundWork) cancels the one it waits for as well.
+                await withTaskCancellationHandler {
+                    await previous?.value
+                } onCancel: {
+                    previous?.cancel()
+                }
+                // The wait can last minutes: a pass queued before notifications were turned off posts nothing.
+                guard await self?.notificationsStillEnabled() == true else { return }
                 await self?.deliverNotifications(notifiable)
-            }
-            notificationPass = pass
-            await withTaskCancellationHandler {
-                await pass.value
-            } onCancel: {
-                pass.cancel()
             }
         }
         guard !Task.isCancelled, !isStopped else { return }
@@ -596,8 +600,16 @@ class FeedManager: NSObject, ObservableObject {
             storyIDs += delivery.starredPending.values.flatMap { $0.map(\.id) }
             delivery.interests = await Self.triageInterests(
                 database: database, now: posted, resetAt: appSettings.readingInterestsResetDate)
+            delivery.continues = { [weak self] in
+                await self?.allowsFullBanners() ?? false
+            }
             delivery.record = { [weak self] banner in
-                try? await database.recordNotification(banner, at: posted)
+                // Banners post minutes apart: a priority or normal banner is recorded when it posts, so its rolling
+                // window measures from the banner the reader saw. A starred banner is recorded at the pass start,
+                // the cutoff its pending stories were read at, so a starred story that arrives while the banner
+                // waits is still pending for the next one.
+                let at = banner.lane == .starred ? posted : (await self?.currentDate() ?? posted)
+                try? await database.recordNotification(banner, at: at)
                 await self?.markNotified(banner.stories)
             }
             delivery.queue = { waiting in
@@ -620,6 +632,19 @@ class FeedManager: NSObject, ObservableObject {
 
     private func markNotified(_ stories: [String]) {
         notifiedStoryIDs.formUnion(stories)
+    }
+
+    /// The injected clock, read on the main actor so a `@Sendable` closure can ask for the time.
+    private func currentDate() -> Date { now() }
+
+    /// Whether a running full-mode pass may post its next banner: the live mode, not the one it started with.
+    private func allowsFullBanners() -> Bool {
+        appSettings.notificationsEnabled && appSettings.notificationMode == .full
+    }
+
+    /// Whether a queued pass may start at all once its wait ends; the mode it reads then is already live.
+    private func notificationsStillEnabled() -> Bool {
+        appSettings.notificationsEnabled && !isStopped
     }
 
     /// Deletes read, unsaved stories older than the retention setting, once a day after a completed refresh.
