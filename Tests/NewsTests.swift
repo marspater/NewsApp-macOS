@@ -20119,7 +20119,11 @@ struct NewsTests {
         assertEqual(articlesAfterEnrichmentClear.count, 2, "Articles must remain intact after enrichment purge")
 
         // 3. Test clearArticleCache(): clears non-saved article bodies, keeps saved stories intact
+        let genBeforeContentClear = await db.analysisGeneration
         try await db.clearArticleCache()
+        assertEqual(
+            await db.analysisGeneration, genBeforeContentClear + 1,
+            "Clearing article text bumps analysis generation (#886)")
         let articlesAfterContentClear = try await db.fetchArticles(limit: 10)
         let savedArticle = articlesAfterContentClear.first { $0.id == article1.id }
         assertEqual(savedArticle?.fullContent, "Content One", "Saved article content must NOT be cleared")

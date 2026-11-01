@@ -175,6 +175,10 @@ enum AnalysisGenerationTests {
         await eventually("The story is classified again after the clear") {
             await queue.state(for: stored.id) == .completed
         }
+
+        // Clear Story Text also resets the queue (#886)
+        try await store.clearArticleCache()
+        check(await queue.state(for: stored.id) == nil, "Clear Story Text forgets what was classified (#886)")
     }
 
     /// A background warm-up never cancels the generation running for the visible event (#792): the rule, then the

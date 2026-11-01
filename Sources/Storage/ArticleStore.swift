@@ -574,6 +574,8 @@ final class ArticleStore: ObservableObject {
     /// Clears cached full article content while preserving subscriptions, saved stories, and read history.
     func clearArticleCache() async throws {
         try await database.clearArticleCache()
+        // This clear removes enrichment for unsaved stories too, so running work and its session state are reset (#886).
+        await analysisClearedHandler?()
         await refreshState()
     }
 

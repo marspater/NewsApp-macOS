@@ -3794,6 +3794,7 @@ actor DatabaseEngine {
         repeatedImageCache = [:]
         try beginTransaction()
         do {
+            analysisGeneration &+= 1
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
             )
