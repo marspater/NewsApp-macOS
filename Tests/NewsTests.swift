@@ -20294,7 +20294,12 @@ struct NewsTests {
         let haltedRecorder = Recorder()
         let halted = NotificationService(post: { await haltedRecorder.record(Posted($0)) }, spacing: .zero)
         var haltedDelivery = NotificationDelivery(mode: .full, events: pairEvents)
-        haltedDelivery.continues = { false }
+        let asked = TestCounter()
+        // Allowed once (the first banner's check before its post), refused from then on.
+        haltedDelivery.continues = {
+            await asked.increment()
+            return await asked.value <= 1
+        }
         await halted.triageAndNotify(newArticles: [quiet, loud, fourth, fifth], delivery: haltedDelivery)
         assertEqual(
             (await haltedRecorder.posted).count, 1,

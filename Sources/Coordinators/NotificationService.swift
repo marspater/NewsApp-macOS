@@ -298,7 +298,9 @@ final class NotificationService: Sendable {
                     guard await delivery.continues() else { break }
                 }
                 guard !Task.isCancelled else { break }
-                if await triggerFullNotification(banner, at: delivery.now) { await delivery.record(banner) }
+                if await triggerFullNotification(banner, at: delivery.now, continues: delivery.continues) {
+                    await delivery.record(banner)
+                }
             }
         }
     }
@@ -370,7 +372,11 @@ final class NotificationService: Sendable {
 
     /// Posts one banner. The thread groups later reports of the same story under it in Notification Center; a banner
     /// with sound interrupts like any alert, one without is passive (listed, no sound, no wake).
-    private func triggerFullNotification(_ banner: PlannedBanner, at now: Date) async -> Bool {
+    /// Posts one full-mode banner; `continues` is asked again right before the post, after the image download,
+    /// so a reader who switched to Privacy or turned notifications off during the download sees no headline.
+    private func triggerFullNotification(
+        _ banner: PlannedBanner, at now: Date, continues: @Sendable () async -> Bool = { true }
+    ) async -> Bool {
         let content = UNMutableNotificationContent()
         content.sound = banner.sound ? .default : nil
         content.threadIdentifier = banner.thread
@@ -388,8 +394,8 @@ final class NotificationService: Sendable {
             {
                 content.attachments = [attachment]
             }
-            // The download swallows cancellation; a pass cancelled during it must not post.
-            guard !Task.isCancelled else { return false }
+            // The download swallows cancellation, and settings can change while it runs; neither may post.
+            guard !Task.isCancelled, await continues() else { return false }
             identifier = Self.notificationIdentifier(for: article)
         } else {
             content.title = banner.title

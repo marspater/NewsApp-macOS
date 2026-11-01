@@ -561,6 +561,8 @@ class FeedManager: NSObject, ObservableObject {
                 } onCancel: {
                     previous?.cancel()
                 }
+                // The wait can last minutes: a pass queued before notifications were turned off posts nothing.
+                guard await self?.notificationsStillEnabled() == true else { return }
                 await self?.deliverNotifications(notifiable)
             }
         }
@@ -638,6 +640,11 @@ class FeedManager: NSObject, ObservableObject {
     /// Whether a running full-mode pass may post its next banner: the live mode, not the one it started with.
     private func allowsFullBanners() -> Bool {
         appSettings.notificationsEnabled && appSettings.notificationMode == .full
+    }
+
+    /// Whether a queued pass may start at all once its wait ends; the mode it reads then is already live.
+    private func notificationsStillEnabled() -> Bool {
+        appSettings.notificationsEnabled && !isStopped
     }
 
     /// Deletes read, unsaved stories older than the retention setting, once a day after a completed refresh.
