@@ -48,6 +48,14 @@ if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/d
     fi
 fi
 
+# What a runner process leaves under ~/Library, keyed by its executable name: the Neural Engine's compiled-model
+# cache (com.apple.e5rt.e5bundlecache, about 100 MB per run and never reused, since every run compiles a new binary),
+# the URL cache, HTTP storage and a preferences plist. Removed after each run so they do not pile up (11 GB seen).
+prune_runner_state() {
+    rm -rf "$HOME/Library/Caches/$1" "$HOME/Library/HTTPStorages/$1" "$HOME/Library/Preferences/$1.plist"
+}
+export -f prune_runner_state
+
 script/build_test_runner.sh test_runner "${TEST_OPT_FLAGS[@]}"
 
 if [[ $# -gt 0 ]]; then
@@ -55,6 +63,7 @@ if [[ $# -gt 0 ]]; then
     echo "Running unit tests..."
     ./test_runner "$@"
     rm -f test_runner
+    prune_runner_state test_runner
 else
     # The plain run is one job pool over the one runner binary: every test file is its own process,
     # Tests/NewsTests.swift is split into NEWS_TEST_SHARDS processes plus one for its slow tests (see NEWS_TEST_SHARD
@@ -104,6 +113,7 @@ else
         status=$?
         echo "$status" > "$LOGS/$name.status"
         rm -f "$LOGS/$name.runner"
+        prune_runner_state "$name.runner"
         if [[ "$status" -eq 0 ]]; then mark="✅"; else mark="❌"; fi
         # One finished job prints at a time (mkdir is the portable lock), so log blocks never interleave.
         until mkdir "$LOGS/print.lock" 2>/dev/null; do sleep 0.05; done
