@@ -56,7 +56,10 @@ if [[ "${NEWS_NATIVE_BODY_COUNTS:-0}" == "1" ]]; then
     # carry no counters.
     cp -R Sources "$STAGE/Sources"
     for view in MainView SidebarView ArticleListView ArticleCardView EventCardView ArticleDetailView; do
-        perl -0pi -e "s/(var body: some View \{)/\$1 let _ = BodyCount.tick(\"$view\");/" "$STAGE/Sources/Views/$view.swift"
+        # The views live in sub-folders of Views (List, Reader, ...), so find each by name.
+        file=$(find "$STAGE/Sources/Views" -name "$view.swift" -print -quit)
+        if [[ -z "$file" ]]; then echo "❌ Counted view $view.swift not found under Sources/Views" >&2; exit 1; fi
+        perl -0pi -e "s/(var body: some View \{)/\$1 let _ = BodyCount.tick(\"$view\");/" "$file"
     done
     perl -0pi -e 's/(private func fetchPage\([^{]*\{)/$1 BodyCount.tick("ListFetch");/' "$STAGE/Sources/Views/List/ArticleListView.swift"
     perl -0pi -e 's/(let revisions = try\? await articleStore\.database\.publisherContentRevisions)/BodyCount.tick("ReaderRevisionQuery"); $1/' \
