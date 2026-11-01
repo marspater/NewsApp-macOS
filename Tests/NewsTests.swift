@@ -6621,6 +6621,7 @@ struct NewsTests {
         assertEqual(advancedItems[3].folder, "Category With Website", "Nested inside Category With Website folder")
     }
 
+    @MainActor
     static func testOfflineCacheAndResilience() async {
         print("  - Testing Offline Cache & Resilience...")
 
@@ -6631,6 +6632,32 @@ struct NewsTests {
         CacheManager.shared.clearWebCache()
         let sizeAfter = CacheManager.shared.calculateTotalCacheSize()
         assertTrue(sizeAfter >= 0, "Cache clear should succeed non-destructively")
+
+        // Test Clear All Caches clears DecodedImageCache as well as database and web caches (#media-cache-leak)
+        let dummyImageURL = URL(string: "https://example.com/clear_all_test_\(UUID().uuidString).jpg")!
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let ctx = CGContext(
+            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let dummyImage = ctx.makeImage()!
+        DecodedImageCache.images.setObject(dummyImage, forKey: dummyImageURL as NSURL)
+        assertTrue(
+            DecodedImageCache.images.object(forKey: dummyImageURL as NSURL) != nil,
+            "Precondition: dummy image is cached in DecodedImageCache"
+        )
+
+        let testDB = DatabaseEngine(path: ":memory:")
+        let testStore = ArticleStore(database: testDB, spotlightIndexer: MockSpotlightIndexer())
+        await testStore.initialize()
+        let settingsView = SettingsView()
+        let clearTask = settingsView.clearEverythingData(articleStore: testStore)
+        await clearTask.value
+
+        assertTrue(
+            DecodedImageCache.images.object(forKey: dummyImageURL as NSURL) == nil,
+            "Clear All Caches must clear DecodedImageCache"
+        )
+        await testDB.close()
     }
 
     /// One publisher, one headline, two GUIDs and two URLs within hours: one story (#583). A recurring headline a day

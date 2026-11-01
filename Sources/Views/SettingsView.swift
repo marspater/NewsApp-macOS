@@ -1256,11 +1256,15 @@ struct SettingsView: View {
         }
     }
 
-    private func clearEverythingData() {
-        Task {
+    @MainActor
+    @discardableResult
+    func clearEverythingData(articleStore: ArticleStore? = nil) -> Task<Void, Never> {
+        let store = articleStore ?? self.articleStore
+        return Task {
             CacheManager.shared.clearWebCache()
+            DecodedImageCache.clear()
             do {
-                try await articleStore.clearAllDatabaseCache()
+                try await store.clearAllDatabaseCache()
                 calculateStorageSizes()
                 showActionMessage("All local caches cleared.")
             } catch {
