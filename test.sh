@@ -95,12 +95,7 @@ else
     for ((i = 0; i < SHARDS; i++)); do
         job "NewsTests-$i-of-$SHARDS" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=$i/$SHARDS"
     done
-    {
-        printf '%s\n' Tests/EventOverviewAccessibilityTests.swift Tests/ReaderAccessibilityTests.swift \
-            Tests/TensionCalibrationTests.swift
-        grep -oE 'selected\("Tests/[A-Za-z0-9]+\.swift"\)' script/build_test_runner.sh \
-            | grep -oE 'Tests/[A-Za-z0-9]+\.swift' | sort -u | grep -v '^Tests/NewsTests\.swift$'
-    } | while read -r atom; do
+    script/test_atoms.sh | grep -v '^Tests/NewsTests\.swift$' | while read -r atom; do
         job "$(basename "$atom" .swift)" "NEWS_TEST_ATOM=$atom"
     done
     JOB_COUNT=$(wc -l < "$JOB_LIST" | tr -d ' ')

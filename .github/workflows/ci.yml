@@ -65,12 +65,12 @@ jobs:
       - name: Run Unit Tests
         run: ./test.sh
 
-      # Same test atoms as CircleCI Smarter Testing (every atom the runner dispatches on), rerun with an instrumented runner for LCOV.
+      # Every runner atom (script/test_atoms.sh, as test.sh and CircleCI Smarter Testing use), rerun with an instrumented runner for LCOV.
       - name: Collect Coverage
         # Informational: Run Unit Tests above is the gate, so a flaky rerun never fails the job.
         continue-on-error: true
         run: |
-          eval "$(sed -n 's/^discover: //p' .circleci/test-suites.yml)" | xargs script/ci_testsuite.sh --lcov coverage.lcov \
+          script/test_atoms.sh | xargs script/ci_testsuite.sh --lcov coverage.lcov \
             || { rm -f coverage.lcov; exit 1; } # a failed export can leave a partial report
 
       - name: Upload Coverage to Codecov

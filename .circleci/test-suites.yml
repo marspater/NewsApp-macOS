@@ -1,7 +1,6 @@
 ---
 name: unit tests
-# Every atom the runner dispatches on, as test.sh enumerates them; a hand-kept list missed new atoms.
-discover: grep -oE 'selected\("Tests/[A-Za-z0-9]+\.swift"\)' script/build_test_runner.sh | grep -oE 'Tests/[A-Za-z0-9]+\.swift' | sort -u
+discover: script/test_atoms.sh
 run: script/ci_testsuite.sh "<< outputs.junit >>" << test.atoms >>
 analysis: script/ci_testsuite.sh --lcov "<< outputs.lcov >>" << test.atoms >>
 options:
@@ -13,6 +12,7 @@ options:
     - test.sh
     - script/build_test_runner.sh
     - script/ci_testsuite.sh
+    - script/test_atoms.sh
     - script/swiftpm_dependencies.sh
     - Package.swift
     - Package.resolved
