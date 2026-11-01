@@ -20295,16 +20295,17 @@ struct NewsTests {
         let halted = NotificationService(post: { await haltedRecorder.record(Posted($0)) }, spacing: .zero)
         var haltedDelivery = NotificationDelivery(mode: .full, events: pairEvents)
         let asked = TestCounter()
-        // Allowed once (the first banner's check before its post), refused from then on.
+        // Allowed for the first banner's two checks (before its image download and before its post), refused
+        // from then on.
         haltedDelivery.continues = {
             await asked.increment()
-            return await asked.value <= 1
+            return await asked.value <= 2
         }
         await halted.triageAndNotify(newArticles: [quiet, loud, fourth, fifth], delivery: haltedDelivery)
         assertEqual(
             (await haltedRecorder.posted).count, 1,
             "Once the settings no longer allow full banners, the pass stops after the banner already posting")
-        assertEqual(await asked.value, 2, "A halt ends the pass: no further gap is waited out and asked again")
+        assertEqual(await asked.value, 3, "A halt ends the pass: no further gap is waited out and asked again")
         let quietRecorder = Recorder()
         let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
         await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))

@@ -281,6 +281,8 @@ final class NotificationService: Sendable {
             // ALWAYS exactly one coalesced notification with singular/plural grammar
             let ranked = await Self.representatives(
                 of: newArticles, events: delivery.events.mapValues { delivery.stories[$0] ?? $0 })
+            // Scoring takes a moment; a pass stopped meanwhile posts nothing.
+            guard !Task.isCancelled else { return }
             await triggerMinimalNotification(for: ranked.map(\.article))
 
         case .privacy:
@@ -395,6 +397,8 @@ final class NotificationService: Sendable {
             content.userInfo = ["articleLink": article.link, "articleID": article.id]
             // Save, Mark as Read and Open (#560) act on one story, so only a story's own banner carries them.
             content.categoryIdentifier = NotificationActionIdentifier.category
+            // No image request once the reader has left Full mode (PRIVACY.md): asked right before the download.
+            guard await continues(), !Task.isCancelled else { return .halted }
             if let imageUrl = FeedArticle.bestCardImage(in: [article]),
                 let attachment = await downloadNotificationAttachment(from: imageUrl)
             {
