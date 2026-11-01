@@ -16,6 +16,11 @@ workflows:
           include: true
           source: false
       cancel_previous_builds: true
+    # SwiftPM checkouts and dependency builds, as in the GitHub Actions and CircleCI caches.
+    cache:
+      cache_paths:
+        - $CM_BUILD_DIR/.build
+        - $HOME/Library/Caches/org.swift.swiftpm
     # Documentation-only changes need no macOS build (same rule as the GitHub workflow and CircleCI).
     when:
       changeset:
