@@ -298,9 +298,10 @@ final class NotificationService: Sendable {
                     guard await delivery.continues() else { break }
                 }
                 guard !Task.isCancelled else { break }
-                if await triggerFullNotification(banner, at: delivery.now, continues: delivery.continues) {
-                    await delivery.record(banner)
-                }
+                let outcome = await triggerFullNotification(banner, at: delivery.now, continues: delivery.continues)
+                // A halt is final: the pass must not wait out another gap and post its old banners once Full is back.
+                if outcome == .halted { break }
+                if outcome == .posted { await delivery.record(banner) }
             }
         }
     }
@@ -374,9 +375,14 @@ final class NotificationService: Sendable {
     /// with sound interrupts like any alert, one without is passive (listed, no sound, no wake).
     /// Posts one full-mode banner; `continues` is asked again right before the post, after the image download,
     /// so a reader who switched to Privacy or turned notifications off during the download sees no headline.
+    /// How one banner ended: posted, refused by the notification center, or halted because the pass may not go on.
+    enum PostOutcome: Equatable {
+        case posted, failed, halted
+    }
+
     private func triggerFullNotification(
         _ banner: PlannedBanner, at now: Date, continues: @Sendable () async -> Bool = { true }
-    ) async -> Bool {
+    ) async -> PostOutcome {
         let content = UNMutableNotificationContent()
         content.sound = banner.sound ? .default : nil
         content.threadIdentifier = banner.thread
@@ -395,7 +401,8 @@ final class NotificationService: Sendable {
                 content.attachments = [attachment]
             }
             // The download swallows cancellation, and settings can change while it runs; neither may post.
-            guard !Task.isCancelled, await continues() else { return false }
+            // Cancellation is read again after the callback, which may have suspended across a stop.
+            guard await continues(), !Task.isCancelled else { return .halted }
             identifier = Self.notificationIdentifier(for: article)
         } else {
             content.title = banner.title
@@ -408,10 +415,10 @@ final class NotificationService: Sendable {
             try await post(request)
             logger.debug(
                 "Successfully scheduled full notification: \(identifier); attachments=\(content.attachments.count)")
-            return true
+            return .posted
         } catch {
             logger.error("Failed to schedule full notification '\(identifier)': \(error.localizedDescription)")
-            return false
+            return .failed
         }
     }
 

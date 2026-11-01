@@ -20304,6 +20304,7 @@ struct NewsTests {
         assertEqual(
             (await haltedRecorder.posted).count, 1,
             "Once the settings no longer allow full banners, the pass stops after the banner already posting")
+        assertEqual(await asked.value, 2, "A halt ends the pass: no further gap is waited out and asked again")
         let quietRecorder = Recorder()
         let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
         await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
