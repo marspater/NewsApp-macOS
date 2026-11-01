@@ -400,9 +400,6 @@ final class NotificationService: Sendable {
             {
                 content.attachments = [attachment]
             }
-            // The download swallows cancellation, and settings can change while it runs; neither may post.
-            // Cancellation is read again after the callback, which may have suspended across a stop.
-            guard await continues(), !Task.isCancelled else { return .halted }
             identifier = Self.notificationIdentifier(for: article)
         } else {
             content.title = banner.title
@@ -410,6 +407,10 @@ final class NotificationService: Sendable {
             // Each group is its own banner; a later group must not replace an earlier one.
             identifier = "\(banner.thread)-\(Int(now.timeIntervalSince1970))"
         }
+        // Every banner, grouped ones included, asks right before posting: the image download swallows
+        // cancellation, and the settings can change while it runs or while the banner was prepared. Cancellation
+        // is read again after the callback, which may have suspended across a stop.
+        guard await continues(), !Task.isCancelled else { return .halted }
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
             try await post(request)
