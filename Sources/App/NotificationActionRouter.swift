@@ -133,9 +133,9 @@ enum NotificationActionRouter {
             savedStories.save(article)
         } else {
             do {
-                if let resolved = try await store.articleForNavigation(
-                    .init(articleID: target.articleID, link: target.articleLink ?? "")
-                ) {
+                // An ID never falls back to a link here, for the same reason as above.
+                let link = target.articleID == nil ? target.articleLink ?? "" : ""
+                if let resolved = try await store.articleForNavigation(.init(articleID: target.articleID, link: link)) {
                     savedStories.save(resolved)
                 } else {
                     store.operationError = "This story is no longer available in your archive."

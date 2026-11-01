@@ -611,11 +611,12 @@ final class ArticleStore: ObservableObject {
     private var analysisClearsInProgress = 0
 
     /// Runs the reset handler, then publishes the new generation. Published first, it would start work (World Tension's
-    /// assessment) that the handler then cancels.
+    /// assessment) that the handler then cancels. With clears overlapping, only the last reset to finish publishes.
     private func finishAnalysisClear() async {
         analysisClearsInProgress += 1
         await analysisClearedHandler?()
         analysisClearsInProgress -= 1
+        guard analysisClearsInProgress == 0 else { return }
         analysisGeneration = await database.analysisGeneration
         await refreshState()
     }

@@ -201,6 +201,23 @@ enum AnalysisGenerationTests {
         }
         try await store.clearAllDatabaseCache()
         check(seenByHandler == beforeAllGen, "The generation is published after the clear's reset handler")
+
+        // Overlapping clears: the one that finishes first while another reset runs publishes nothing.
+        let beforeOverlap = store.analysisGeneration
+        var publishedWhileOuterRan: Int?
+        var nested = false
+        store.analysisClearedHandler = {
+            if !nested {
+                nested = true
+                try? await store.clearArticleCache()
+                publishedWhileOuterRan = store.analysisGeneration
+            }
+            await queue.analysisCleared()
+        }
+        try await store.clearAllDatabaseCache()
+        check(publishedWhileOuterRan == beforeOverlap, "Only the last overlapping reset publishes the generation")
+        check(
+            store.analysisGeneration == (await db.analysisGeneration), "The last reset publishes the final generation")
         check(store.analysisGeneration > beforeAllGen, "Clear All Database Cache bumps store.analysisGeneration (#901)")
         check(
             store.analysisGeneration == (await db.analysisGeneration),
