@@ -116,9 +116,12 @@ else
         cp test_runner "$LOGS/$name.runner"
         env "$@" "$LOGS/$name.runner" > "$LOGS/$name.log" 2>&1
         status=$?
+        # Cleanup that fails marks the job failed, so a run never passes while runner state is left behind.
+        if ! rm -f "$LOGS/$name.runner" || ! prune_runner_state "$name.runner"; then
+            echo "❌ $name: could not remove the runner copy or its Library state" >> "$LOGS/$name.log"
+            [[ "$status" -eq 0 ]] && status=1
+        fi
         echo "$status" > "$LOGS/$name.status"
-        rm -f "$LOGS/$name.runner"
-        prune_runner_state "$name.runner"
         if [[ "$status" -eq 0 ]]; then mark="✅"; else mark="❌"; fi
         # One finished job prints at a time (mkdir is the portable lock), so log blocks never interleave.
         until mkdir "$LOGS/print.lock" 2>/dev/null; do sleep 0.05; done
