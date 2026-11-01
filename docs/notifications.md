@@ -197,8 +197,14 @@ Reads:
 - a starred window reads the feed's latest starred row;
 - an event's announced lane and lead key come from `event_notifications` in the last 24 h.
 
-A banner is recorded **immediately after it posts**, before the 2-second pause of #587, so quitting mid-pass loses no
-count. A banner whose post fails is not recorded and counts toward nothing.
+The banners of one pass post **5 minutes apart** (#587), in posting order, so a refresh reads as a trickle of stories
+rather than one burst; a pass of five normal banners takes 20 minutes and the next pass waits for it. No refresh,
+spinner or Shortcut waits for a pass. Before each banner after the first, the pass reads the live settings: once the
+mode is no longer Full, or notifications are off, the rest of the pass is dropped. A banner is recorded **immediately
+after it posts**: a priority or normal banner at the time it posts, so its window measures from the banner the reader
+saw; a starred banner at the pass start, the cutoff its pending stories were read at, so a starred story that arrives
+while the banner waits stays pending for the next one. Quitting mid-pass therefore loses no count; the banners the
+pass had not yet posted are dropped. A banner whose post fails is not recorded and counts toward nothing.
 
 ## What other features read
 
@@ -217,7 +223,7 @@ delivered in the last hour.
 - The earthquake key is priority and posts one priority banner; the starred report of it is part of that key.
 - The other three starred stories post one grouped banner, `3 new stories`.
 - 3 of the 8 normal stories post, highest score first.
-- Posting order: priority, starred, normal, 2 seconds apart.
+- Posting order: priority, starred, normal, 5 minutes apart.
 
 ## Busy starred feed
 

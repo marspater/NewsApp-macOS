@@ -32,6 +32,10 @@ struct NotificationDelivery: Sendable {
     /// Starred feed → its pending stories: visible, unmuted, created since its last starred banner, its star time or
     /// 24 h ago, whichever is latest. Includes this pass's new stories from the feed.
     var starredPending: [String: [FeedArticle]] = [:]
+    /// Asked before each banner after the first: whether full banners may still post. The pass copies the mode when
+    /// it starts and its banners are minutes apart, so a reader who switches to Privacy or turns notifications off
+    /// meanwhile must not get the rest.
+    var continues: @Sendable () async -> Bool = { true }
     /// Called after each banner posts, so the pass records it before the next.
     var record: @Sendable (PlannedBanner) async -> Void = { _ in
         // Without a library (tests, summary modes) there is nothing to record.
@@ -111,8 +115,10 @@ final class NotificationService: Sendable {
     private let logger = Logger(subsystem: "com.marspater.news", category: "NotificationService")
     /// Posts one request; the default goes to the user notification center and skips unbundled test processes.
     private let post: @Sendable (UNNotificationRequest) async throws -> Void
-    /// Pause between two banners of one refresh: posted at once, macOS stacks them and one hides behind the other.
+    /// Pause between two banners of one refresh, so a refresh reads as a trickle of stories, not one burst.
     private let spacing: Duration
+    /// Five minutes (#587, docs/notifications.md); a pass of five normal banners takes 20 minutes.
+    static let bannerSpacing: Duration = .seconds(5 * 60)
 
     /// A story this strong is breaking news: it notifies on its own, and its banner sounds and interrupts like any
     /// alert; the rest are passive.
@@ -130,7 +136,7 @@ final class NotificationService: Sendable {
     static let starredWindow: TimeInterval = 20 * 60
 
     init(
-        post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = .seconds(2)
+        post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = bannerSpacing
     ) {
         self.post =
             post ?? { request in
@@ -265,7 +271,8 @@ final class NotificationService: Sendable {
     }
 
     /// Dispatches notifications according to the active NotificationMode. Full mode posts the planned banners one at
-    /// a time, a pause apart (#587), and records each as soon as it posts (#665).
+    /// a time, `spacing` apart (#587), and records each as soon as it posts (#665). Cancelling the pass (quitting)
+    /// drops the banners not yet posted.
     func triageAndNotify(newArticles: [FeedArticle], delivery: NotificationDelivery) async {
         guard !newArticles.isEmpty else { return }
 
@@ -274,10 +281,13 @@ final class NotificationService: Sendable {
             // ALWAYS exactly one coalesced notification with singular/plural grammar
             let ranked = await Self.representatives(
                 of: newArticles, events: delivery.events.mapValues { delivery.stories[$0] ?? $0 })
+            // Scoring takes a moment; a pass stopped meanwhile posts nothing.
+            guard !Task.isCancelled else { return }
             await triggerMinimalNotification(for: ranked.map(\.article))
 
         case .privacy:
             // Exactly one generic notification with ZERO identifying source or headline details
+            guard !Task.isCancelled else { return }
             await triggerPrivateNotification()
 
         case .full:
@@ -286,9 +296,15 @@ final class NotificationService: Sendable {
             let plan = Self.plan(new: await Self.scored(newArticles), pending: pending, delivery: delivery)
             if !plan.queued.isEmpty { await delivery.queue(plan.queued) }
             for (index, banner) in plan.banners.enumerated() {
-                if index > 0 { try? await Task.sleep(for: spacing) }
+                if index > 0 {
+                    try? await Task.sleep(for: spacing)
+                    guard await delivery.continues() else { break }
+                }
                 guard !Task.isCancelled else { break }
-                if await triggerFullNotification(banner, at: delivery.now) { await delivery.record(banner) }
+                let outcome = await triggerFullNotification(banner, at: delivery.now, continues: delivery.continues)
+                // A halt is final: the pass must not wait out another gap and post its old banners once Full is back.
+                if outcome == .halted { break }
+                if outcome == .posted { await delivery.record(banner) }
             }
         }
     }
@@ -360,7 +376,16 @@ final class NotificationService: Sendable {
 
     /// Posts one banner. The thread groups later reports of the same story under it in Notification Center; a banner
     /// with sound interrupts like any alert, one without is passive (listed, no sound, no wake).
-    private func triggerFullNotification(_ banner: PlannedBanner, at now: Date) async -> Bool {
+    /// Posts one full-mode banner; `continues` is asked again right before the post, after the image download,
+    /// so a reader who switched to Privacy or turned notifications off during the download sees no headline.
+    /// How one banner ended: posted, refused by the notification center, or halted because the pass may not go on.
+    enum PostOutcome: Equatable {
+        case posted, failed, halted
+    }
+
+    private func triggerFullNotification(
+        _ banner: PlannedBanner, at now: Date, continues: @Sendable () async -> Bool = { true }
+    ) async -> PostOutcome {
         let content = UNMutableNotificationContent()
         content.sound = banner.sound ? .default : nil
         content.threadIdentifier = banner.thread
@@ -373,6 +398,8 @@ final class NotificationService: Sendable {
             content.userInfo = ["articleLink": article.link, "articleID": article.id]
             // Save, Mark as Read and Open (#560) act on one story, so only a story's own banner carries them.
             content.categoryIdentifier = NotificationActionIdentifier.category
+            // No image request once the reader has left Full mode (PRIVACY.md): asked right before the download.
+            guard await continues(), !Task.isCancelled else { return .halted }
             if let imageUrl = FeedArticle.bestCardImage(in: [article]),
                 let attachment = await downloadNotificationAttachment(from: imageUrl)
             {
@@ -385,15 +412,19 @@ final class NotificationService: Sendable {
             // Each group is its own banner; a later group must not replace an earlier one.
             identifier = "\(banner.thread)-\(Int(now.timeIntervalSince1970))"
         }
+        // Every banner, grouped ones included, asks right before posting: the image download swallows
+        // cancellation, and the settings can change while it runs or while the banner was prepared. Cancellation
+        // is read again after the callback, which may have suspended across a stop.
+        guard await continues(), !Task.isCancelled else { return .halted }
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
             try await post(request)
             logger.debug(
                 "Successfully scheduled full notification: \(identifier); attachments=\(content.attachments.count)")
-            return true
+            return .posted
         } catch {
             logger.error("Failed to schedule full notification '\(identifier)': \(error.localizedDescription)")
-            return false
+            return .failed
         }
     }
 

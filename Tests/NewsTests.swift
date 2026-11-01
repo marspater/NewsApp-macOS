@@ -4101,6 +4101,7 @@ struct NewsTests {
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) },
             imageFinder: .unavailable)
         await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
         let freshID = ArticleIdentity.scopedGUID(fresh.guid, feedURL: settings.feedURLs[0])!
         assertTrue(
             manager.articles.contains { $0.id == freshID }, "Notified undated story remains in the visible snapshot")
@@ -4124,6 +4125,7 @@ struct NewsTests {
             fetchBatch: { urls, _ in urls.map { ($0, [failed], nil, nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await failureManager.fetchFeedsAsync()
+        await failureManager.notificationPass?.value
         assertEqual(notified, [freshID], "Failed ingestion cannot send new-story notifications")
         assertFalse(
             failureManager.articles.contains { $0.id == failed.id },
@@ -4133,6 +4135,7 @@ struct NewsTests {
         let snapshot = failureManager.articles
         await db.close()
         await failureManager.fetchFeedsAsync()
+        await failureManager.notificationPass?.value
         assertEqual(failureManager.articles, snapshot, "Refresh read errors retain the visible library")
         failureManager.stopBackgroundWork()
     }
@@ -4245,6 +4248,7 @@ struct NewsTests {
         seen = []
         serve(["a", "b"], headers: ["ETag": "\"v1\"", "Last-Modified": modified])
         await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
         assertEqual(seen.count, 1, "First refresh requests the feed once")
         assertEqual(seen.first?.value(forHTTPHeaderField: "If-None-Match"), nil, "First refresh is unconditional")
         assertEqual(manager.articles.count, 2, "First refresh ingests the feed")
@@ -4628,6 +4632,7 @@ struct NewsTests {
         await gate.open()
         await first.value
         await second.value
+        await manager.notificationPass?.value
         assertEqual(await gate.arrivals, 2, "Then its notification pass runs")
         manager.stopBackgroundWork()
 
@@ -5178,6 +5183,7 @@ struct NewsTests {
             fetchBatch: { urls, _ in urls.map { ($0, [stories[0], stories[3]], nil, nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map(\.title)) })
         await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
         assertEqual(notified, [stories[3].title], "Only unmuted new stories notify")
         assertEqual(manager.articles.count, 2, "Muted stories are still stored")
         manager.stopBackgroundWork()
@@ -7994,9 +8000,11 @@ struct NewsTests {
             fetchBatch: { urls, _ in urls.map { ($0, [first, duplicate], nil, nil) } },
             notifyBatch: { articles, _ in notifications.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
         assertEqual(manager.articles.count, 1, "Refresh displays exact content variants once")
         assertEqual(notifications, [first.id], "Refresh notifies only the committed document")
         await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
         assertEqual(notifications, [first.id], "Repeated content variants never notify again")
         manager.stopBackgroundWork()
         await store.database.close()
@@ -8186,10 +8194,12 @@ struct NewsTests {
                 }
             }, notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) })
         await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
         assertEqual(
             Set(notified), Set([first.id, second.id]), "Both colliding publishers notify with committed, distinct IDs")
         assertEqual(notified.count, 2, "Duplicate RSS rows and overlapping feeds notify once per stored document")
         await manager.fetchFeedsAsync()
+        await manager.notificationPass?.value
         assertEqual(notified.count, 2, "Repeated refresh does not re-notify either publisher")
         assertEqual(
             Set(manager.articles.map { $0.id }), Set([first.id, second.id]),
@@ -20280,6 +20290,22 @@ struct NewsTests {
         assertTrue(
             posted.allSatisfy { $0.category == NotificationActionIdentifier.category },
             "A story's banner carries Save, Mark as Read and Open (#560)")
+        // Banners are minutes apart, so the pass asks before each one whether full banners are still allowed.
+        let haltedRecorder = Recorder()
+        let halted = NotificationService(post: { await haltedRecorder.record(Posted($0)) }, spacing: .zero)
+        var haltedDelivery = NotificationDelivery(mode: .full, events: pairEvents)
+        let asked = TestCounter()
+        // Allowed for the first banner's two checks (before its image download and before its post), refused
+        // from then on.
+        haltedDelivery.continues = {
+            await asked.increment()
+            return await asked.value <= 2
+        }
+        await halted.triageAndNotify(newArticles: [quiet, loud, fourth, fifth], delivery: haltedDelivery)
+        assertEqual(
+            (await haltedRecorder.posted).count, 1,
+            "Once the settings no longer allow full banners, the pass stops after the banner already posting")
+        assertEqual(await asked.value, 3, "A halt ends the pass: no further gap is waited out and asked again")
         let quietRecorder = Recorder()
         let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
         await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
@@ -20770,6 +20796,8 @@ struct NewsTests {
                     await service.triageAndNotify(newArticles: articles, delivery: delivery)
                 }, imageFinder: .unavailable, now: { clock ?? Date() })
             await manager.fetchFeedsAsync()
+            // The pass runs on after the refresh returns; this waits for its banners before reading them.
+            await manager.notificationPass?.value
             manager.stopBackgroundWork()
             return Set(store.articles.filter { manager.notifiedStoryIDs.contains($0.id) }.map(\.title))
         }
@@ -20883,6 +20911,7 @@ struct NewsTests {
                     await service.triageAndNotify(newArticles: articles, delivery: delivery)
                 }, imageFinder: .unavailable)
             await manager.fetchFeedsAsync()
+            await manager.notificationPass?.value
             manager.stopBackgroundWork()
         }
 
