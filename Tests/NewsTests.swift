@@ -5717,14 +5717,28 @@ struct NewsTests {
         let reopened = DatabaseEngine(path: path)
         try await reopened.open()
         assertEqual(try await reopened.worldTensionHistory().count, 2, "Separate AI history survives relaunch")
+        let preClearGen = await reopened.analysisGeneration
         try await reopened.clearArticleEnrichment()
         assertEqual(try await reopened.worldTensionHistory().count, 0, "Clearing AI data clears World Tension history")
+        let staleSaved = try await reopened.saveWorldTensionReading(
+            replacement, expectedGeneration: preClearGen)
+        assertFalse(staleSaved, "A reading computed before clear is rejected (#887)")
+        assertEqual(
+            try await reopened.worldTensionHistory().count, 0,
+            "Rejected reading is not added to the cleared history (#887)")
+        let currentGen = await reopened.analysisGeneration
+        let freshSaved = try await reopened.saveWorldTensionReading(
+            replacement, expectedGeneration: currentGen)
+        assertTrue(freshSaved, "A reading matching the current generation is saved (#887)")
+        assertEqual(try await reopened.worldTensionHistory().count, 1, "Fresh reading is stored in history")
+        try await reopened.clearArticleEnrichment()
         assertEqual(
             try await reopened.tensionCorpus(
                 day: DateInterval(start: now.addingTimeInterval(-86400), end: now),
                 feedURLs: TensionMethodology.v1.panel.map(\.url)
             ).count, 13, "Clearing AI data preserves source articles, including the filtered soft story")
         await reopened.close()
+        await WorldTensionService.shared.analysisCleared()
     }
 
     static func testTensionMethodology() async throws {

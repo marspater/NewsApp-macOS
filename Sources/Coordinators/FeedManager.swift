@@ -475,6 +475,7 @@ class FeedManager: NSObject, ObservableObject {
         clusteringRunID = nil
         await enrichmentQueue.analysisCleared()
         await OverviewGenerationCoordinator.shared.analysisCleared()
+        await WorldTensionService.shared.analysisCleared()
     }
 
     /// Why nothing can be stored, or nil while the library is writable: its read-only reason, or that it never opened.

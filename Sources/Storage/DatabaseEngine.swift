@@ -4692,11 +4692,15 @@ actor DatabaseEngine {
     }
 
     /// Replaces the day's reading. With `keepingAssessment`, a model assessment already saved for that day stays and
-    /// nothing is written (false), so a keyword estimate never replaces one (#523).
+    /// nothing is written (false), so a keyword estimate never replaces one (#523). A clear since the assessment
+    /// started refuses the write (#887).
     @discardableResult
-    func saveWorldTensionReading(_ reading: WorldTensionReading, keepingAssessment: Bool = false) throws -> Bool {
+    func saveWorldTensionReading(
+        _ reading: WorldTensionReading, keepingAssessment: Bool = false, expectedGeneration: Int? = nil
+    ) throws -> Bool {
         try Task.checkCancellation()
         try requireWritable()
+        if let expectedGeneration, expectedGeneration != analysisGeneration { return false }
         guard reading.assessment.isValid(headlines: reading.headlines),
             reading.evaluatedAt.timeIntervalSince1970.isFinite
         else { throw CocoaError(.fileWriteInvalidFileName) }
