@@ -36,6 +36,11 @@ jobs:
       - run:
           name: "Ensure permissions"
           command: chmod +x test.sh build.sh build_release.sh script/build_test_runner.sh script/ci_testsuite.sh
+      # Same paths and key scheme as the GitHub Actions cache. The release job (deploy-marker) stays uncached.
+      - restore_cache:
+          keys:
+            - swiftpm-macos-xcode27-{{ checksum "Package.resolved" }}
+            - swiftpm-macos-xcode27-
       - run:
           name: "Run unit tests and regressions via Smarter Testing"
           command: circleci testsuite run "unit tests"
@@ -51,6 +56,11 @@ jobs:
       - run:
           name: "Verify Swift Package Manager build"
           command: swift build --force-resolved-versions --target News
+      - save_cache:
+          key: swiftpm-macos-xcode27-{{ checksum "Package.resolved" }}
+          paths:
+            - .build
+            - ~/Library/Caches/org.swift.swiftpm
 
   deploy-marker:
     macos:
