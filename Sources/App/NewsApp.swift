@@ -414,6 +414,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                     options.dsn = dsn
                     options.environment = "development"
                     options.sendDefaultPii = false
+                    // Feed URLs can carry tokens: keep them out of breadcrumbs and failed-request events.
+                    options.enableNetworkBreadcrumbs = false
+                    options.enableCaptureFailedRequests = false
                     options.tracesSampleRate = 1.0
                     options.configureProfiling = { profiling in
                         profiling.sessionSampleRate = 1.0
