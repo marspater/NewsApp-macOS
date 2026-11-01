@@ -4,6 +4,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 
+#if NEWS_SENTRY
+    import Sentry
+#endif
+
 /// Notification posted when the user clicks a notification banner or uses keyboard navigation.
 extension Notification.Name {
     static let refreshFeedsCommand = Notification.Name("refreshFeedsCommand")
@@ -403,6 +407,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     private var notificationPermission: NotificationPermissionRequest?
 
     func applicationDidFinishLaunching(_ _: Notification) {
+        #if NEWS_SENTRY
+            // Dev builds only (script/sentry_dev.sh); release builds never link Sentry.
+            if let dsn = Bundle.main.object(forInfoDictionaryKey: "SentryDSN") as? String {
+                SentrySDK.start { options in
+                    options.dsn = dsn
+                    options.environment = "development"
+                    options.sendDefaultPii = false
+                    options.tracesSampleRate = 1.0
+                    options.configureProfiling = { profiling in
+                        profiling.sessionSampleRate = 1.0
+                        profiling.lifecycle = .trace
+                    }
+                }
+            }
+        #endif
         CacheManager.shared.configureOfflineCache()
         NotificationActionIdentifier.registerCategories()
         UNUserNotificationCenter.current().delegate = self
