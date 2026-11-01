@@ -8,11 +8,11 @@ SENTRY_DSN="${SENTRY_DSN:-$(cat .sentry-dsn 2>/dev/null || true)}"
 # Caller scripts consume this array after sourcing.
 # shellcheck disable=SC2034
 NEWS_SENTRY_FLAGS=()
-if [ -n "$SENTRY_DSN" ]; then
+if [[ -n "$SENTRY_DSN" ]]; then
     SENTRY_DIR="build/sentry-${SENTRY_VERSION}"
-    if [ ! -d "${SENTRY_DIR}/Sentry.xcframework" ]; then
+    if [[ ! -d "${SENTRY_DIR}/Sentry.xcframework" ]]; then
         mkdir -p "$SENTRY_DIR"
-        curl -fsSL -o "${SENTRY_DIR}/Sentry.xcframework.zip" \
+        curl -fsSL --proto "=https" --proto-redir "=https" --tlsv1.2 -o "${SENTRY_DIR}/Sentry.xcframework.zip" \
             "https://github.com/getsentry/sentry-cocoa/releases/download/${SENTRY_VERSION}/Sentry.xcframework.zip"
         echo "${SENTRY_SHA256}  ${SENTRY_DIR}/Sentry.xcframework.zip" | shasum -a 256 -c - >&2
         ditto -x -k "${SENTRY_DIR}/Sentry.xcframework.zip" "$SENTRY_DIR"

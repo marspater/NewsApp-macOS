@@ -204,7 +204,7 @@ cat > "${CONTENTS_DIR}/Info.plist" <<EOF
 </dict>
 </plist>
 EOF
-if [ -n "$SENTRY_DSN" ]; then
+if [[ -n "$SENTRY_DSN" ]]; then
     plutil -insert SentryDSN -string "$SENTRY_DSN" "${CONTENTS_DIR}/Info.plist"
 fi
 plutil -lint "${CONTENTS_DIR}/Info.plist" >/dev/null
