@@ -1995,6 +1995,8 @@ actor DatabaseEngine {
         return ids.map { targets[Data($0.utf8)] ?? $0 }
     }
 
+    static let identityConflictMessage = "Conflicting article identity signals"
+
     /// Keep observed identities across serial URL/GUID changes without rewriting keys.
     func resolvedArticleID(for article: FeedArticle, feedURL: String? = nil) throws -> String {
         let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: feedURL ?? article.identityFeedURL)
@@ -2006,7 +2008,7 @@ actor DatabaseEngine {
         if let idTarget, let urlTarget, idTarget != urlTarget {
             throw NSError(
                 domain: "DatabaseEngine", code: -1,
-                userInfo: [NSLocalizedDescriptionKey: "Conflicting article identity signals"])
+                userInfo: [NSLocalizedDescriptionKey: Self.identityConflictMessage])
         }
         if let target = idTarget ?? urlTarget { return target }
         if let target = try publisherTextTarget(article) { return target }
@@ -2327,8 +2329,11 @@ actor DatabaseEngine {
             let id: String
             do {
                 id = try resolvedArticleID(for: article, feedURL: identityFeedURL)
-            } catch {
-                logger.error("Skipping article with unresolvable identity: \(error.localizedDescription)")
+            } catch let error as NSError
+                where error.domain == "DatabaseEngine"
+                && error.localizedDescription == Self.identityConflictMessage
+            {
+                logger.warning("Skipping article '\(article.id)' with conflicting identity signals (#885)")
                 continue
             }
             let url = URL(string: article.normalizedLink)
