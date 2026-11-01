@@ -1,0 +1,27 @@
+app-code:
+  - changed-files:
+      - any-glob-to-any-file: 'Sources/**'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: 'Tests/**'
+
+build-infra:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'BuildSupport/**'
+          - 'script/**'
+          - '*.sh'
+          - 'Makefile'
+          - 'Package.swift'
+          - 'Package.resolved'
+          - 'codemagic.yaml'
+          - '.circleci/**'
+          - '.github/**'
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docs/**'
+          - 'changelog/**'
+          - '*.md'
