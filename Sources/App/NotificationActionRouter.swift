@@ -113,9 +113,11 @@ enum NotificationActionRouter {
         store: ArticleStore,
         savedStories: SavedStoriesManager
     ) async {
+        // A link matches only when the banner carries no ID: stories can share a URL, and an ID outside the loaded
+        // list is resolved by `articleForNavigation`, not by another story's link.
         if let id = target.articleID, let article = store.articles.first(where: { $0.id == id }) {
             savedStories.save(article)
-        } else if let link = target.articleLink,
+        } else if target.articleID == nil, let link = target.articleLink,
             let article = store.articles.first(where: {
                 $0.link == link || $0.normalizedLink == ArticleIdentity.canonicalizeURL(link)
             })
@@ -123,7 +125,7 @@ enum NotificationActionRouter {
             savedStories.save(article)
         } else if let id = target.articleID, let article = savedStories.savedArticles.first(where: { $0.id == id }) {
             savedStories.save(article)
-        } else if let link = target.articleLink,
+        } else if target.articleID == nil, let link = target.articleLink,
             let article = savedStories.savedArticles.first(where: {
                 $0.link == link || $0.normalizedLink == ArticleIdentity.canonicalizeURL(link)
             })

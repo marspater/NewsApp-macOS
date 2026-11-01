@@ -145,8 +145,8 @@ final class ArticleStore: ObservableObject {
     func refreshState() async -> Bool {
         do {
             // A read or save change that lands while this loads makes the loaded read and saved state stale: load again
-            // instead of overwriting it. ponytail: three tries, then it reports failure; a retry loop with backoff if
-            // changes ever arrive faster than a load.
+            // instead of overwriting it. After three tries a follow-up refresh is scheduled, so stories a caller just
+            // stored are never left unpublished.
             var published = false
             for _ in 1...3 {
                 let changesAtStart = stateChanges
@@ -174,11 +174,26 @@ final class ArticleStore: ObservableObject {
             if analysisClearsInProgress == 0, self.analysisGeneration != dbAnalysisGen {
                 self.analysisGeneration = dbAnalysisGen
             }
-            if !published { logger.error("Refresh kept being overtaken by read or save changes") }
+            if !published {
+                logger.error("Refresh kept being overtaken by read or save changes; trying again shortly")
+                scheduleFollowUpRefresh()
+            }
             return published
         } catch {
             logger.error("Failed to refresh ArticleStore state: \(error.localizedDescription)")
             return false
+        }
+    }
+
+    private var followUpRefresh: Task<Void, Never>?
+
+    /// One coalesced retry for a refresh that kept being overtaken; it waits briefly so the changes can settle.
+    private func scheduleFollowUpRefresh() {
+        guard followUpRefresh == nil else { return }
+        followUpRefresh = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            self?.followUpRefresh = nil
+            await self?.refreshState()
         }
     }
 
