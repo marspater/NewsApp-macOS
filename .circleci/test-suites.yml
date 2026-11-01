@@ -1,6 +1,6 @@
 ---
 name: unit tests
-discover: printf '%s\n' Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift Tests/BriefingE2ETests.swift Tests/NewsTests.swift
+discover: script/test_atoms.sh
 run: script/ci_testsuite.sh "<< outputs.junit >>" << test.atoms >>
 analysis: script/ci_testsuite.sh --lcov "<< outputs.lcov >>" << test.atoms >>
 options:
@@ -12,6 +12,7 @@ options:
     - test.sh
     - script/build_test_runner.sh
     - script/ci_testsuite.sh
+    - script/test_atoms.sh
     - script/swiftpm_dependencies.sh
     - Package.swift
     - Package.resolved

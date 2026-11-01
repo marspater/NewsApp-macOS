@@ -65,6 +65,26 @@ jobs:
       - name: Run Unit Tests
         run: ./test.sh
 
+      # Every runner atom (script/test_atoms.sh, as test.sh and CircleCI Smarter Testing use), rerun with an instrumented runner for LCOV.
+      - name: Collect Coverage
+        # Informational: Run Unit Tests above is the gate, so a flaky rerun never fails the job.
+        continue-on-error: true
+        run: |
+          script/test_atoms.sh | xargs script/ci_testsuite.sh --lcov coverage.lcov \
+            || { rm -f coverage.lcov; exit 1; } # a failed export can leave a partial report
+
+      - name: Upload Coverage to Codecov
+        if: hashFiles('coverage.lcov') != ''
+        # fail_ci_if_error keeps a failed CLI integrity check fatal inside the action; the step stays non-blocking.
+        continue-on-error: true
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.lcov
+          disable_search: true
+          flags: macos-26
+          fail_ci_if_error: true
+
       - name: Verify Publisher Excerpts
         run: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
 

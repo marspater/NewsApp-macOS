@@ -38,3 +38,6 @@ __pycache__/
 *.p12
 *.mobileprovision
 *.provisionprofile
+
+# Coverage report from script/ci_testsuite.sh --lcov
+coverage.lcov
