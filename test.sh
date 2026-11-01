@@ -52,7 +52,8 @@ fi
 # cache (com.apple.e5rt.e5bundlecache, about 100 MB per run and never reused, since every run compiles a new binary),
 # the URL cache, HTTP storage and a preferences plist. Removed after each run so they do not pile up (11 GB seen).
 prune_runner_state() {
-    rm -rf "$HOME/Library/Caches/$1" "$HOME/Library/HTTPStorages/$1" "$HOME/Library/Preferences/$1.plist"
+    local runner="$1"
+    rm -rf "$HOME/Library/Caches/$runner" "$HOME/Library/HTTPStorages/$runner" "$HOME/Library/Preferences/$runner.plist"
 }
 export -f prune_runner_state
 
@@ -61,9 +62,13 @@ script/build_test_runner.sh test_runner "${TEST_OPT_FLAGS[@]}"
 if [[ $# -gt 0 ]]; then
     # A run with arguments is a single targeted mode.
     echo "Running unit tests..."
+    set +e
     ./test_runner "$@"
+    RUNNER_STATUS=$?
+    set -e
     rm -f test_runner
     prune_runner_state test_runner
+    if [[ "$RUNNER_STATUS" -ne 0 ]]; then exit "$RUNNER_STATUS"; fi
 else
     # The plain run is one job pool over the one runner binary: every test file is its own process,
     # Tests/NewsTests.swift is split into NEWS_TEST_SHARDS processes plus one for its slow tests (see NEWS_TEST_SHARD

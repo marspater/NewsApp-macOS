@@ -1736,7 +1736,7 @@ struct BriefingE2ETests {
         let resetTimestamp = Date(timeIntervalSince1970: 1_780_000_000)
         let suite = testDefaultsSuite("test.briefing.settings")
         defer { removeTestDefaults(suite) }
-        let storedDefaults = UserDefaults(suiteName: suite) ?? .standard
+        let storedDefaults = UserDefaults(suiteName: suite)!
         storedDefaults.set(resetTimestamp.timeIntervalSince1970, forKey: "readingInterestsResetAt")
         let retrieved = storedDefaults.double(forKey: "readingInterestsResetAt")
         assertEqual(retrieved, resetTimestamp.timeIntervalSince1970, "Settings tab successfully writes reset timestamp")
