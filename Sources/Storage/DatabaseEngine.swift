@@ -495,30 +495,40 @@ actor DatabaseEngine {
     /// Writes a user backup to `destination` (#563): an online copy of the library that also carries `settings` and the
     /// World Tension history in ``backupExtrasTable``. It is built in a scratch folder on the destination's volume and
     /// moved into place whole, so a file already there is only ever replaced by a complete backup.
-    func writeBackup(to destination: URL, settings: Data) throws {
-        guard dbPath != ":memory:" else { throw CocoaError(.fileNoSuchFile) }
+    /// Returns true if `path` resolves or links to the live library or its WAL/SHM files (#889).
+    private func isSameFileAsLiveLibrary(_ path: String) -> Bool {
+        guard dbPath != ":memory:" else { return false }
         let fileManager = FileManager.default
-        // Replacing the library (or its WAL files) with its own backup would destroy it: compare resolved paths, and the
-        // file identity for an existing file, so a symbolic or hard link to the library is refused too.
-        func identity(_ path: String) -> (resolved: String, file: [Int]?) {
-            let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        func identity(_ p: String) -> (resolved: String, file: [Int]?) {
+            let resolved = URL(fileURLWithPath: p).resolvingSymlinksInPath().path
             let attributes = try? fileManager.attributesOfItem(atPath: resolved)
             let file = (attributes?[.systemNumber] as? Int).flatMap { device in
                 (attributes?[.systemFileNumber] as? Int).map { [device, $0] }
             }
             return (resolved, file)
         }
-        let target = identity(destination.path)
-        for path in [dbPath, dbPath + "-wal", dbPath + "-shm"] {
-            let live = identity(path)
-            guard target.resolved != live.resolved, target.file == nil || target.file != live.file else {
-                throw NSError(
-                    domain: "DatabaseEngine", code: -1,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "That file is the News library itself. Choose another name or folder for the backup."
-                    ])
+        let target = identity(path)
+        for livePath in [dbPath, dbPath + "-wal", dbPath + "-shm"] {
+            let live = identity(livePath)
+            if target.resolved == live.resolved || (target.file != nil && target.file == live.file) {
+                return true
             }
+        }
+        return false
+    }
+
+    func writeBackup(to destination: URL, settings: Data) throws {
+        guard dbPath != ":memory:" else { throw CocoaError(.fileNoSuchFile) }
+        let fileManager = FileManager.default
+        // Replacing the library (or its WAL files) with its own backup would destroy it: compare resolved paths, and the
+        // file identity for an existing file, so a symbolic or hard link to the library is refused too.
+        guard !isSameFileAsLiveLibrary(destination.path) else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "That file is the News library itself. Choose another name or folder for the backup."
+                ])
         }
         let scratch =
             (try? fileManager.url(
@@ -569,6 +579,15 @@ actor DatabaseEngine {
     func restoreBackup(from archive: URL) async throws -> Data? {
         guard dbPath != ":memory:" else { throw CocoaError(.fileNoSuchFile) }
         let fileManager = FileManager.default
+        let resolvedArchive = archive.resolvingSymlinksInPath()
+        guard !isSameFileAsLiveLibrary(archive.path), !isSameFileAsLiveLibrary(resolvedArchive.path) else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "That file is the News library itself. Choose another backup to restore."
+                ])
+        }
         let library = URL(fileURLWithPath: dbPath)
         // A folder of its own beside the library: the trial open below writes its lock and any migration copy there.
         let stagingFolder = library.deletingLastPathComponent().appendingPathComponent(
@@ -577,7 +596,7 @@ actor DatabaseEngine {
         defer { try? fileManager.removeItem(at: stagingFolder) }
         try? fileManager.removeItem(at: stagingFolder)
         try fileManager.createDirectory(at: stagingFolder, withIntermediateDirectories: false)
-        try fileManager.copyItem(at: archive, to: staging)
+        try fileManager.copyItem(at: resolvedArchive, to: staging)
         // The restored library gets the current one's permissions, not whatever the chosen file had.
         let resolvedPath = library.resolvingSymlinksInPath().path
         let permissions = (try? fileManager.attributesOfItem(atPath: resolvedPath)[.posixPermissions]) ?? 0o600

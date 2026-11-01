@@ -2072,9 +2072,12 @@ struct NewsTests {
             sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil),
             SQLITE_OK, "Mark the fixture as saved by a newer build")
         sqlite3_close(handle)
+        let liveSymlink = directory.appendingPathComponent("symlink-to-live.sqlite3")
+        try fileManager.createSymbolicLink(at: liveSymlink, withDestinationURL: library)
         for (name, file, message) in [
-            ("damaged", corrupt, "damaged"), ("damaged-page", damagedPages, "damaged"), ("foreign", foreign, "damaged"),
-            ("newer", newer, "newer version"),
+            ("damaged", corrupt, "damaged"), ("damaged-page", damagedPages, "damaged"),
+            ("foreign", foreign, "damaged"), ("newer", newer, "newer version"),
+            ("live", library, "News library itself"), ("live-symlink", liveSymlink, "News library itself"),
         ] {
             do {
                 _ = try await db.restoreBackup(from: file)
