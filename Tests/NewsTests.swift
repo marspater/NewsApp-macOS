@@ -6584,6 +6584,41 @@ struct NewsTests {
         if let item = xxeItems.first {
             assertTrue(!item.title.contains("root:"), "OPMLParser must not resolve external file entities")
         }
+
+        // OPML attribute order, category parsing, and case-insensitivity
+        let advancedOPML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="2.0">
+                <head>
+                    <title>Advanced Feeds</title>
+                </head>
+                <body>
+                    <outline Title="Capital Title Feed" xmlUrl="https://example.com/feed1.xml" url="https://example.com/home1"/>
+                    <outline Text="Capital Text Feed" type="rss" url="https://example.com/feed2.xml"/>
+                    <outline text="Atom Feed" type="atom" url="https://example.com/feed3.xml"/>
+                    <outline text="Category With Website" url="https://example.com/category">
+                        <outline title="Nested Tech" type="rss" xmlUrl="https://example.com/tech.xml" url="https://example.com/tech"/>
+                    </outline>
+                </body>
+            </opml>
+            """.data(using: .utf8)!
+
+        let advancedItems = OPMLParser.parse(data: advancedOPML)
+        assertEqual(advancedItems.count, 4, "Should parse 4 feeds, treating category with web url as folder")
+        assertEqual(advancedItems[0].title, "Capital Title Feed", "Case-insensitive Title attribute")
+        assertEqual(advancedItems[0].url, "https://example.com/feed1.xml", "Prioritizes xmlUrl over url")
+        assertEqual(advancedItems[0].folder, nil, "Root item has nil folder")
+
+        assertEqual(advancedItems[1].title, "Capital Text Feed", "Case-insensitive Text attribute")
+        assertEqual(advancedItems[1].url, "https://example.com/feed2.xml", "Accepts url when type is rss")
+        assertEqual(advancedItems[1].folder, nil, "Root item has nil folder")
+
+        assertEqual(advancedItems[2].title, "Atom Feed", "Extracts atom feed title")
+        assertEqual(advancedItems[2].url, "https://example.com/feed3.xml", "Accepts url when type is atom")
+
+        assertEqual(advancedItems[3].title, "Nested Tech", "Extracts nested feed title")
+        assertEqual(advancedItems[3].url, "https://example.com/tech.xml", "Prioritizes xmlUrl in nested feed")
+        assertEqual(advancedItems[3].folder, "Category With Website", "Nested inside Category With Website folder")
     }
 
     static func testOfflineCacheAndResilience() async {

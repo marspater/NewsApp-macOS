@@ -48,18 +48,26 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     ) {
         guard elementName.lowercased() == "outline" else { return }
 
-        var xmlUrl: String?
+        var attrs: [String: String] = [:]
         for (key, val) in attributeDict {
-            let lowerKey = key.lowercased()
-            if lowerKey == "xmlurl" || lowerKey == "url" {
-                xmlUrl = val.trimmingCharacters(in: .whitespacesAndNewlines)
-                break
-            }
+            attrs[key.lowercased()] = val
         }
 
-        let title = attributeDict["title"] ?? attributeDict["text"] ?? ""
+        let feedUrl: String?
+        if let xml = attrs["xmlurl"]?.trimmingCharacters(in: .whitespacesAndNewlines), !xml.isEmpty {
+            feedUrl = xml
+        } else if let type = attrs["type"]?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
+            type == "rss" || type == "atom",
+            let url = attrs["url"]?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty
+        {
+            feedUrl = url
+        } else {
+            feedUrl = nil
+        }
 
-        if let feedUrl = xmlUrl, !feedUrl.isEmpty {
+        let title = attrs["title"] ?? attrs["text"] ?? ""
+
+        if let feedUrl, !feedUrl.isEmpty {
             items.append(OPMLItem(title: title, url: feedUrl, folder: folderStack.last))
             outlineStack.append(false)
         } else if !title.isEmpty {

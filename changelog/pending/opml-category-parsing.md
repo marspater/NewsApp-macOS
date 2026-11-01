@@ -1,0 +1,1 @@
+- Prioritize xmlUrl over url, require rss or atom types for url, and parse outline titles case-insensitively during OPML import.
