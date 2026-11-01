@@ -126,7 +126,7 @@ NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/ListInvalidationBaseline.swi
 - Manual (#815, #569): read `PRIVACY.md`, `README.md`, `docs/ARCHITECTURE.md` and `CONTRIBUTING.md` against the
   code for anything this release changed (network access, stored data, notification limits, supported macOS).
   Run `python3 script/changelog_fold.py` when cutting the tag: it rewrites `CHANGELOG.md` and deletes the
-  `CHANGELOG.d/` fragments. Check the result and commit it before tagging, so the tag contains the folded changelog.
+  `changelog/pending/` fragments. Check the result and commit it before tagging, so the tag contains the folded changelog.
 
 ## Cutting the tag
 

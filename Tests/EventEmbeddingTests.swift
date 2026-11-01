@@ -134,8 +134,8 @@ extension NewsTests {
 
     private static func testBertTokenizer() throws {
         let vocabURL =
-            Bundle.main.url(forResource: "vocab", withExtension: "txt", subdirectory: "Models")
-            ?? URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt")
+            Bundle.main.url(forResource: "vocab", withExtension: "txt", subdirectory: "CoreML")
+            ?? URL(fileURLWithPath: "Sources/Resources/CoreML/vocab.txt")
         let tokenizer = try BertWordPieceTokenizer(vocabURL: vocabURL)
 
         // 1. Punctuation handling, CLS/SEP tokens and padding
@@ -200,7 +200,7 @@ extension NewsTests {
         let isAvailable = await embedder.isAvailable
         assertTrue(
             isAvailable,
-            "SentenceEmbedder CoreML model and vocab must be available and loadable in bundle or Sources/Resources/Models"
+            "SentenceEmbedder CoreML model and vocab must be available and loadable in bundle or Sources/Resources/CoreML"
         )
 
         // 1. Verify embedding dimension and unit length
@@ -259,8 +259,8 @@ extension NewsTests {
     // MARK: - SentenceEmbedder throughput regressions (#540)
 
     private static func embeddingResource(_ name: String, _ ext: String) -> URL {
-        Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "Models")
-            ?? URL(fileURLWithPath: "Sources/Resources/Models/\(name).\(ext)")
+        Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "CoreML")
+            ?? URL(fileURLWithPath: "Sources/Resources/CoreML/\(name).\(ext)")
     }
 
     private static func testSentenceEmbedderUnavailableResources() async throws {
@@ -776,16 +776,16 @@ extension NewsTests {
     static func reportComputePlacement() async throws {
         let environment = ProcessInfo.processInfo.environment
         let minilm = URL(
-            fileURLWithPath: environment["NEWS_EMBEDDING_MODEL_PATH"] ?? "Sources/Resources/Models/minilm.mlmodelc")
+            fileURLWithPath: environment["NEWS_EMBEDDING_MODEL_PATH"] ?? "Sources/Resources/CoreML/minilm.mlmodelc")
         let pairscorer = URL(
-            fileURLWithPath: environment["NEWS_PAIR_MODEL_PATH"] ?? "Sources/Resources/Models/pairscorer.mlmodelc")
+            fileURLWithPath: environment["NEWS_PAIR_MODEL_PATH"] ?? "Sources/Resources/CoreML/pairscorer.mlmodelc")
         struct Item: Decodable { let title: String, description: String? }
         struct Fixture: Decodable { let articles: [Item] }
         let texts = try JSONDecoder().decode(
             Fixture.self,
             from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/story-corpus/matcher-regressions-v1.json"))
         ).articles.map { EventFeatures.matchingText(title: $0.title, description: $0.description ?? "") }
-        let tokenizer = try BertWordPieceTokenizer(vocabURL: URL(fileURLWithPath: "Sources/Resources/Models/vocab.txt"))
+        let tokenizer = try BertWordPieceTokenizer(vocabURL: URL(fileURLWithPath: "Sources/Resources/CoreML/vocab.txt"))
         let lengths = texts.map { text in tokenizer.encode(text).attentionMask.filter { $0 == 1 }.count }.sorted()
         var report: [String: Any] = [
             "texts": texts.count, "tokens_median": lengths[lengths.count / 2], "tokens_max": lengths.last ?? 0,

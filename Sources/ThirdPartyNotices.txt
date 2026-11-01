@@ -59,9 +59,9 @@ SOFTWARE.
 all-MiniLM-L6-v2 and the pair model
 -----------------------------------
 
-Sources/Resources/Models/minilm.mlmodelc and vocab.txt are sentence-transformers/all-MiniLM-L6-v2
+Sources/Resources/CoreML/minilm.mlmodelc and vocab.txt are sentence-transformers/all-MiniLM-L6-v2
 <https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2>, converted to Core ML.
-Sources/Resources/Models/pairscorer.mlmodelc is a derivative of it: the News project fine-tuned it
+Sources/Resources/CoreML/pairscorer.mlmodelc is a derivative of it: the News project fine-tuned it
 as a classifier of report pairs (#525) and converted it to Core ML; those modifications are the
 project's own. Both are licensed under the Apache License, Version 2.0:
 
