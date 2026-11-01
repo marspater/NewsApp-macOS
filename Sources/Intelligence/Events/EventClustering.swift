@@ -607,6 +607,9 @@ enum EventClusterer {
                         if titleTokens.contains(where: { anchorTokens.contains($0) }) { return true }
                         if tokens(in: single.description).contains(where: { anchorTokens.contains($0) }) { return true }
                     }
+                    if !allAnchorTerms.isEmpty && !features(single).specificAnchors.isDisjoint(with: allAnchorTerms) {
+                        return true
+                    }
                     if checkingCountry && !activeCountries.isEmpty
                         && !features(single).countries.isDisjoint(with: activeCountries)
                     {

@@ -13987,6 +13987,38 @@ struct NewsTests {
         assertTrue(countryFeature.countries.contains("@US"), "American resolves to canonical @US country feature")
         assertFalse(
             countryFeature.countries.isDisjoint(with: ["@US"]), "Canonical @US intersects active @US country set")
+
+        // Candidate prefilter retains reports whose specificAnchors overlap allAnchorTerms (#893, review fix).
+        let boosterStory = FeedArticle(
+            title: "Touchdown confirmed",
+            link: "https://story.invalid/booster-1",
+            guid: "booster-1", description: "First stage recovered safely.",
+            pubDate: now.addingTimeInterval(300),
+            source: "Publisher 3")
+        try await singleDb.upsertArticles([boosterStory])
+        let boosterID = try await singleDb.resolvedArticleID(for: boosterStory)
+        var boosterFeatures = EventFeatures(
+            title: boosterStory.title, description: boosterStory.description,
+            date: boosterStory.pubDate)
+        boosterFeatures.organizations.insert(EventFeatures.normalized("SpaceX"))
+        boosterFeatures.keywords.insert("rocket")
+        try await singleDb.upsertArticleFeatures([boosterID: boosterFeatures], version: EventFeatures.storageVersion)
+        var prefilterPolicy = EventMatchPolicy.standard
+        prefilterPolicy.storyModelThreshold = 0.8
+        prefilterPolicy.semanticVetoThreshold = 0.0
+        _ = try await EventClusterer.run(
+            in: singleDb, matchPolicy: prefilterPolicy, now: now.addingTimeInterval(360), allowsEnergy: true,
+            storyProbabilities: { @Sendable _, _ in (0.6, 0.35) })
+        if let boosterEvent = try await singleDb.eventID(forArticle: boosterID),
+            let targetEvent = createdEventID
+        {
+            let lead = try await singleDb.storyID(forEvent: targetEvent)
+            assertEqual(
+                try await singleDb.storyID(forEvent: boosterEvent), lead,
+                "Candidate prefilter retains reports whose specificAnchors overlap allAnchorTerms")
+        } else {
+            assertTrue(false, "Booster story should have an event and attach to the SpaceX story")
+        }
         await singleDb.close()
         await db.close()
     }
