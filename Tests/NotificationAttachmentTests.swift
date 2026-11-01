@@ -64,7 +64,9 @@ enum NotificationAttachmentTests {
                 "Crop carries alpha")
             precondition(alpha(image, x: 1, y: 450) < 16, "Leading edge fades to transparent")
             precondition(alpha(image, x: 580, y: 450) == 255, "Trailing side is opaque")
-            precondition(alpha(image, x: 580, y: 1) == 255, "Blur keeps the top edge opaque")
+            // x = 300 is past the fade (45%) but inside the blur ramp (60%), where an unclamped blur thins the edges.
+            precondition(alpha(image, x: 300, y: 0) == 255, "Blur keeps the top edge opaque")
+            precondition(alpha(image, x: 300, y: 899) == 255, "Blur keeps the bottom edge opaque")
             let again = try Data(contentsOf: try NotificationService.makeImageAttachment(data: landscape).url)
             precondition(again == bytes, "The same source renders the same bytes")
             let small = try NotificationService.makeImageAttachment(data: png(width: 200, height: 200))
