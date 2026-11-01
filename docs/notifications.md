@@ -199,9 +199,12 @@ Reads:
 
 The banners of one pass post **5 minutes apart** (#587), in posting order, so a refresh reads as a trickle of stories
 rather than one burst; a pass of five normal banners takes 20 minutes and the next pass waits for it. No refresh,
-spinner or Shortcut waits for a pass. A banner is recorded **immediately after it posts**, at the time it posts, so
-quitting mid-pass loses no count; the banners the pass had not yet posted are dropped. A banner whose post fails is
-not recorded and counts toward nothing.
+spinner or Shortcut waits for a pass. Before each banner after the first, the pass reads the live settings: once the
+mode is no longer Full, or notifications are off, the rest of the pass is dropped. A banner is recorded **immediately
+after it posts**: a priority or normal banner at the time it posts, so its window measures from the banner the reader
+saw; a starred banner at the pass start, the cutoff its pending stories were read at, so a starred story that arrives
+while the banner waits stays pending for the next one. Quitting mid-pass therefore loses no count; the banners the
+pass had not yet posted are dropped. A banner whose post fails is not recorded and counts toward nothing.
 
 ## What other features read
 

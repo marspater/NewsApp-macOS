@@ -32,6 +32,10 @@ struct NotificationDelivery: Sendable {
     /// Starred feed → its pending stories: visible, unmuted, created since its last starred banner, its star time or
     /// 24 h ago, whichever is latest. Includes this pass's new stories from the feed.
     var starredPending: [String: [FeedArticle]] = [:]
+    /// Asked before each banner after the first: whether full banners may still post. The pass copies the mode when
+    /// it starts and its banners are minutes apart, so a reader who switches to Privacy or turns notifications off
+    /// meanwhile must not get the rest.
+    var continues: @Sendable () async -> Bool = { true }
     /// Called after each banner posts, so the pass records it before the next.
     var record: @Sendable (PlannedBanner) async -> Void = { _ in
         // Without a library (tests, summary modes) there is nothing to record.
@@ -289,7 +293,10 @@ final class NotificationService: Sendable {
             let plan = Self.plan(new: await Self.scored(newArticles), pending: pending, delivery: delivery)
             if !plan.queued.isEmpty { await delivery.queue(plan.queued) }
             for (index, banner) in plan.banners.enumerated() {
-                if index > 0 { try? await Task.sleep(for: spacing) }
+                if index > 0 {
+                    try? await Task.sleep(for: spacing)
+                    guard await delivery.continues() else { break }
+                }
                 guard !Task.isCancelled else { break }
                 if await triggerFullNotification(banner, at: delivery.now) { await delivery.record(banner) }
             }
@@ -381,6 +388,8 @@ final class NotificationService: Sendable {
             {
                 content.attachments = [attachment]
             }
+            // The download swallows cancellation; a pass cancelled during it must not post.
+            guard !Task.isCancelled else { return false }
             identifier = Self.notificationIdentifier(for: article)
         } else {
             content.title = banner.title

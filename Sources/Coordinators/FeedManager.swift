@@ -555,7 +555,12 @@ class FeedManager: NSObject, ObservableObject {
             // banners (#665). Nobody awaits a pass: its banners post minutes apart.
             let previous = notificationPass
             notificationPass = Task { [weak self] in
-                await previous?.value
+                // Cancelling the latest pass (stopBackgroundWork) cancels the one it waits for as well.
+                await withTaskCancellationHandler {
+                    await previous?.value
+                } onCancel: {
+                    previous?.cancel()
+                }
                 await self?.deliverNotifications(notifiable)
             }
         }
@@ -593,10 +598,15 @@ class FeedManager: NSObject, ObservableObject {
             storyIDs += delivery.starredPending.values.flatMap { $0.map(\.id) }
             delivery.interests = await Self.triageInterests(
                 database: database, now: posted, resetAt: appSettings.readingInterestsResetDate)
+            delivery.continues = { [weak self] in
+                await self?.allowsFullBanners() ?? false
+            }
             delivery.record = { [weak self] banner in
-                // Banners post minutes apart: each is recorded when it posts, not when the pass began, so the
-                // rolling windows measure from the banner the reader saw.
-                let at = await self?.now() ?? posted
+                // Banners post minutes apart: a priority or normal banner is recorded when it posts, so its rolling
+                // window measures from the banner the reader saw. A starred banner is recorded at the pass start,
+                // the cutoff its pending stories were read at, so a starred story that arrives while the banner
+                // waits is still pending for the next one.
+                let at = banner.lane == .starred ? posted : (await self?.currentDate() ?? posted)
                 try? await database.recordNotification(banner, at: at)
                 await self?.markNotified(banner.stories)
             }
@@ -620,6 +630,14 @@ class FeedManager: NSObject, ObservableObject {
 
     private func markNotified(_ stories: [String]) {
         notifiedStoryIDs.formUnion(stories)
+    }
+
+    /// The injected clock, read on the main actor so a `@Sendable` closure can ask for the time.
+    private func currentDate() -> Date { now() }
+
+    /// Whether a running full-mode pass may post its next banner: the live mode, not the one it started with.
+    private func allowsFullBanners() -> Bool {
+        appSettings.notificationsEnabled && appSettings.notificationMode == .full
     }
 
     /// Deletes read, unsaved stories older than the retention setting, once a day after a completed refresh.

@@ -20290,6 +20290,15 @@ struct NewsTests {
         assertTrue(
             posted.allSatisfy { $0.category == NotificationActionIdentifier.category },
             "A story's banner carries Save, Mark as Read and Open (#560)")
+        // Banners are minutes apart, so the pass asks before each one whether full banners are still allowed.
+        let haltedRecorder = Recorder()
+        let halted = NotificationService(post: { await haltedRecorder.record(Posted($0)) }, spacing: .zero)
+        var haltedDelivery = NotificationDelivery(mode: .full, events: pairEvents)
+        haltedDelivery.continues = { false }
+        await halted.triageAndNotify(newArticles: [quiet, loud, fourth, fifth], delivery: haltedDelivery)
+        assertEqual(
+            (await haltedRecorder.posted).count, 1,
+            "Once the settings no longer allow full banners, the pass stops after the banner already posting")
         let quietRecorder = Recorder()
         let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
         await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
