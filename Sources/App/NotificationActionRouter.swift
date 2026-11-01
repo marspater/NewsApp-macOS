@@ -78,6 +78,7 @@ enum NotificationActionRouter {
         activateApp: @MainActor () -> Void = { NSApp?.activate() }
     ) async {
         guard let target = resolveTarget(from: userInfo) else { return }
+        await articleStore.waitForStartup()
 
         switch actionIdentifier {
         case NotificationActionIdentifier.save:
@@ -128,12 +129,18 @@ enum NotificationActionRouter {
             })
         {
             savedStories.save(article)
-        } else if let resolved = try? await store.articleForNavigation(
-            .init(articleID: target.articleID, link: target.articleLink ?? "")
-        ) {
-            savedStories.save(resolved)
         } else {
-            store.operationError = "This story is no longer available in your archive."
+            do {
+                if let resolved = try await store.articleForNavigation(
+                    .init(articleID: target.articleID, link: target.articleLink ?? "")
+                ) {
+                    savedStories.save(resolved)
+                } else {
+                    store.operationError = "This story is no longer available in your archive."
+                }
+            } catch {
+                store.operationError = "The notification story could not be loaded. Please try again."
+            }
         }
     }
 

@@ -13981,6 +13981,12 @@ struct NewsTests {
         let eventArtID = try await singleDb.resolvedArticleID(for: eventStories[0])
         let createdEventID = try await singleDb.eventID(forArticle: eventArtID)
         assertTrue(createdEventID != nil, "SpaceX stories form an active multi-report event")
+        // Canonical country features like @US match candidate reports mentioning demonyms or full country names
+        let countryFeature = EventFeatures(
+            title: "American diplomat arrives for summit", description: "Diplomatic mission", date: now)
+        assertTrue(countryFeature.countries.contains("@US"), "American resolves to canonical @US country feature")
+        assertFalse(
+            countryFeature.countries.isDisjoint(with: ["@US"]), "Canonical @US intersects active @US country set")
         await singleDb.close()
         await db.close()
     }
@@ -26298,6 +26304,23 @@ struct NewsTests {
         assertEqual(
             store.operationError, "This story is no longer available in your archive.",
             "Missing story reports clear error message (#890)")
+
+        // 7. Save action on storage failure reports load failure rather than pruned story
+        let errorDB = DatabaseEngine(path: ":memory:")
+        let errorStore = ArticleStore(database: errorDB, spotlightIndexer: MockSpotlightIndexer())
+        await errorStore.initialize()
+        await errorDB.close()
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.save,
+            userInfo: ["articleID": "error-id", "articleLink": "https://example.com/error"],
+            articleStore: errorStore,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        assertEqual(
+            errorStore.operationError, "The notification story could not be loaded. Please try again.",
+            "Storage lookup failure is distinguished from a pruned story")
         await db.close()
     }
 

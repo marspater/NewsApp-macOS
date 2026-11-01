@@ -518,7 +518,12 @@ actor WorldTensionService {
             title: "world-tension-v2:\(TensionMethodology.day(containing: now).start.timeIntervalSince1970)",
             description: NewsTextModel.generation, content: prompt)
         let history = try await database.worldTensionHistory()
-        if !force, history.last?.inputHash == hash { return WorldTensionSmoothing.displayed(history) }
+        if !force, history.last?.inputHash == hash {
+            guard await database.analysisGeneration == expectedGeneration else {
+                throw CancellationError()
+            }
+            return WorldTensionSmoothing.displayed(history)
+        }
         let today = TensionMethodology.day(containing: now).start
         /// A saved estimate is the day's stand-in, not an assessment: only a model reading blocks the fallback.
         func hasAssessment(_ readings: [WorldTensionReading]) -> Bool {
@@ -561,11 +566,17 @@ actor WorldTensionService {
                 evaluatedAt: now, inputHash: error == .rejected ? hash : hash + ":estimate",
                 modelGeneration: NewsTextModel.generation, headlines: current + previous, assessment: estimate)
             guard error == .rejected else {
+                guard await database.analysisGeneration == expectedGeneration else {
+                    throw CancellationError()
+                }
                 return WorldTensionSmoothing.displayed(latest.filter { $0.id != today } + [reading])
             }
             if try await !database.saveWorldTensionReading(
                 reading, keepingAssessment: true, expectedGeneration: expectedGeneration)
             {
+                if await database.analysisGeneration != expectedGeneration {
+                    throw CancellationError()
+                }
                 rejectedHashes.insert(hash)
                 throw error
             }

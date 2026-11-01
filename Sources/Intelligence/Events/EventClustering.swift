@@ -586,7 +586,7 @@ enum EventClusterer {
                 ? Set(
                     events.flatMap { event in
                         event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).countries) }
-                    }.map { $0.lowercased() })
+                    })
                 : []
 
             let rawSingles =
@@ -608,8 +608,7 @@ enum EventClusterer {
                         if tokens(in: single.description).contains(where: { anchorTokens.contains($0) }) { return true }
                     }
                     if checkingCountry && !activeCountries.isEmpty {
-                        let text = (single.title + " " + single.description).lowercased()
-                        if activeCountries.contains(where: { text.contains($0) }) { return true }
+                        if !features(single).countries.isDisjoint(with: activeCountries) { return true }
                     }
                     return false
                 }
