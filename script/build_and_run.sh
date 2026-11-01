@@ -20,7 +20,8 @@ done
 
 APP="$PWD/News.app"
 if [[ "$BUNDLE_ID" == "com.marspater.news" ]]; then
-    ./build.sh
+    # The real library never gets a Sentry build.
+    NEWS_SENTRY_DISABLED=1 ./build.sh
 else
     # Same build with the development id, written straight to its own bundle so a --real-library launch from this
     # checkout keeps its News.app and is never matched by the process lookups below. The container-migration plist
