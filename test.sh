@@ -48,13 +48,27 @@ if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/d
     fi
 fi
 
+# What a runner process leaves under ~/Library, keyed by its executable name: the Neural Engine's compiled-model
+# cache (com.apple.e5rt.e5bundlecache, about 100 MB per run and never reused, since every run compiles a new binary),
+# the URL cache, HTTP storage and a preferences plist. Removed after each run so they do not pile up (11 GB seen).
+prune_runner_state() {
+    local runner="$1"
+    rm -rf "$HOME/Library/Caches/$runner" "$HOME/Library/HTTPStorages/$runner" "$HOME/Library/Preferences/$runner.plist"
+}
+export -f prune_runner_state
+
 script/build_test_runner.sh test_runner "${TEST_OPT_FLAGS[@]}"
 
 if [[ $# -gt 0 ]]; then
     # A run with arguments is a single targeted mode.
     echo "Running unit tests..."
+    set +e
     ./test_runner "$@"
+    RUNNER_STATUS=$?
+    set -e
     rm -f test_runner
+    prune_runner_state test_runner
+    if [[ "$RUNNER_STATUS" -ne 0 ]]; then exit "$RUNNER_STATUS"; fi
 else
     # The plain run is one job pool over the one runner binary: every test file is its own process,
     # Tests/NewsTests.swift is split into NEWS_TEST_SHARDS processes plus one for its slow tests (see NEWS_TEST_SHARD
@@ -102,8 +116,12 @@ else
         cp test_runner "$LOGS/$name.runner"
         env "$@" "$LOGS/$name.runner" > "$LOGS/$name.log" 2>&1
         status=$?
+        # Cleanup that fails marks the job failed, so a run never passes while runner state is left behind.
+        if ! rm -f "$LOGS/$name.runner" || ! prune_runner_state "$name.runner"; then
+            echo "❌ $name: could not remove the runner copy or its Library state" >> "$LOGS/$name.log"
+            [[ "$status" -eq 0 ]] && status=1
+        fi
         echo "$status" > "$LOGS/$name.status"
-        rm -f "$LOGS/$name.runner"
         if [[ "$status" -eq 0 ]]; then mark="✅"; else mark="❌"; fi
         # One finished job prints at a time (mkdir is the portable lock), so log blocks never interleave.
         until mkdir "$LOGS/print.lock" 2>/dev/null; do sleep 0.05; done
