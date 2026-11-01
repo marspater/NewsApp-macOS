@@ -13877,6 +13877,21 @@ struct NewsTests {
             assertTrue(false, "The appointment is attached to the vote's story as an event of its own")
         }
         await attach.close()
+        // When there are no active multi-report events, the story pass skips story linking (#893).
+        let singleDb = DatabaseEngine(path: ":memory:")
+        try await singleDb.open()
+        let loneStories = (0..<10).map { index in
+            FeedArticle(
+                title: "Lone report \(index) on distinct topic",
+                link: "https://story.invalid/lone-\(index)",
+                guid: "lone-\(index)", description: "Unclustered article",
+                pubDate: now.addingTimeInterval(Double(index) * 60),
+                source: "Publisher \(index)")
+        }
+        try await singleDb.upsertArticles(loneStories)
+        let loneReport = try await EventClusterer.run(in: singleDb, now: now.addingTimeInterval(180))
+        assertEqual(loneReport.changedEvents.count, 0, "No stories changed when no multi-report events exist (#893)")
+        await singleDb.close()
         await db.close()
     }
 

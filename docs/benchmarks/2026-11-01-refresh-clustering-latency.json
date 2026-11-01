@@ -1,0 +1,40 @@
+{
+  "final_library_rows" : 10001,
+  "lead_story_scenario" : false,
+  "library_rows" : 10000,
+  "mock_lead_image_requests" : 0,
+  "os" : "Version 27.2 (Build 26B123)",
+  "peak_process_rss_bytes" : 523780096,
+  "physical_memory_bytes" : 25769803776,
+  "publishers" : 20,
+  "refresh_one_mocked_feed_ms" : 31.050291669089347,
+  "scope" : "Seeded native MainView, offline synthetic articles; optionally a mock publisher image on first Today entry. First-card samples measure time to bitmap containing the title (prior failed capture\/OCR polls included, successful OCR excluded). Scroll samples measure synchronous clip move\/layout\/display\/bitmap readback, not GPU latency or FPS. Memory includes setup, SwiftUI and Vision. Not cold launch, network or model timing.",
+  "scroll_frame_capture_ms" : [
+    95.448458334431052,
+    107.24954161560163,
+    94.144666683860123,
+    105.12295830994844,
+    113.26245835516602,
+    93.145958380773664,
+    100.77666665893048,
+    113.78112499369308,
+    92.537749966140836,
+    94.701249967329204,
+    108.53133333148435,
+    91.280458320397884,
+    100.2839999855496,
+    113.48537501180544,
+    94.303458346985281
+  ],
+  "scroll_frame_count" : 15,
+  "snapshot_rows" : 500,
+  "window_height" : 800,
+  "window_to_first_card_bitmap_ms" : [
+    1156.7894583567977,
+    340.46333335572854,
+    344.35341670177877,
+    342.47675002552569,
+    337.43029163451865
+  ],
+  "window_width" : 1100
+}

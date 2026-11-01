@@ -565,6 +565,9 @@ enum EventClusterer {
             let activeSince = now.addingTimeInterval(-candidatePolicy.activeEventLifetime)
             let active = try await database.activeEventMembers(since: activeSince)
             let events = active.filter { $0.members.count >= 2 }
+            guard !events.isEmpty else {
+                return try await database.assignStories([], attaching: [:], since: activeSince, at: now)
+            }
             let singles =
                 active.filter { $0.members.count == 1 }.flatMap(\.members)
                 + (try await database.unclusteredEventMatchRows(
