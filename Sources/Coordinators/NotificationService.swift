@@ -287,6 +287,7 @@ final class NotificationService: Sendable {
 
         case .privacy:
             // Exactly one generic notification with ZERO identifying source or headline details
+            guard !Task.isCancelled else { return }
             await triggerPrivateNotification()
 
         case .full:
