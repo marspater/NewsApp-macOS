@@ -26166,6 +26166,25 @@ struct NewsTests {
             activateApp: {}
         )
         assertTrue(store.pendingNavigation == nil, "Empty userInfo is ignored safely")
+
+        // 6. Save action on a pruned story does not insert placeholder (#890)
+        let prunedID = "pruned-story-id"
+        let savedCountBefore = savedManager.savedArticles.count
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.save,
+            userInfo: ["articleID": prunedID, "articleLink": "https://example.com/pruned"],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        await savedManager.waitForPendingChanges()
+        assertEqual(
+            savedManager.savedArticles.count, savedCountBefore,
+            "Pruned story is not saved as a placeholder (#890)")
+        assertEqual(
+            store.operationError, "This story is no longer available in your archive.",
+            "Missing story reports clear error message (#890)")
         await db.close()
     }
 

@@ -120,21 +120,20 @@ enum NotificationActionRouter {
             })
         {
             savedStories.save(article)
+        } else if let id = target.articleID, let article = savedStories.savedArticles.first(where: { $0.id == id }) {
+            savedStories.save(article)
+        } else if let link = target.articleLink,
+            let article = savedStories.savedArticles.first(where: {
+                $0.link == link || $0.normalizedLink == ArticleIdentity.canonicalizeURL(link)
+            })
+        {
+            savedStories.save(article)
         } else if let resolved = try? await store.articleForNavigation(
             .init(articleID: target.articleID, link: target.articleLink ?? "")
         ) {
             savedStories.save(resolved)
-        } else if let id = target.articleID {
-            let fallback = FeedArticle(
-                storedID: id,
-                title: "Saved Story",
-                link: target.articleLink ?? "",
-                guid: id,
-                description: "",
-                pubDate: Date(),
-                source: "Notification"
-            )
-            savedStories.save(fallback)
+        } else {
+            store.operationError = "This story is no longer available in your archive."
         }
     }
 

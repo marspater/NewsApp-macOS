@@ -433,6 +433,8 @@ enum EpicNE2ETests {
             title: "Notif Article",
             link: "https://example.com/notif-1"
         )
+        try? await store22.database.open()
+        await store22.batchUpsert(articles: [notifArticle])
         await EpicNContracts.NotificationActionRouter.route(
             actionIdentifier: EpicNContracts.NotificationActionIdentifier.save,
             userInfo: ["articleID": notifArticle.id, "articleLink": notifArticle.link],
@@ -947,6 +949,8 @@ enum EpicNE2ETests {
             link: "https://example.com/notif-saved",
             description: "Summary"
         )
+        try? await store62.database.open()
+        await store62.batchUpsert(articles: [story62])
         menuBar62.unreadCount = 3
 
         await EpicNContracts.NotificationActionRouter.route(
