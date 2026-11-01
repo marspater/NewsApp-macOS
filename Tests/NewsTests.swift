@@ -23658,6 +23658,14 @@ struct NewsTests {
         cancelledRequest.cancel()
         await cancelledRequestGate.open()
         assertTrue(await cancelledRequest.value == nil, "A cancelled request never returns a cached overview")
+
+        // A lower membership version finishing after a newer version is cached returns nil (#overview-staleness)
+        let lowerVersionResult = await coordinator.requestOverview(
+            eventID: "event-reopened", eventTitle: "Harbour bridge closed",
+            membershipVersion: 0, articles: editedArticles)
+        assertTrue(
+            lowerVersionResult == nil,
+            "Requesting lower membership version returns nil when newer version is cached")
         await db.close()
     }
 

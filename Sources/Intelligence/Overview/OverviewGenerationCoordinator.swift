@@ -361,7 +361,7 @@ actor OverviewGenerationCoordinator {
             logger.info(
                 "Dropping stale overview result for \(eventID): v\(membershipVersion) < current v\(existing.membershipVersion)"
             )
-            return true
+            return false
         }
 
         // DatabaseEngine also atomically prevents an older result from overwriting newer
