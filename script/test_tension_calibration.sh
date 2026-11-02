@@ -60,6 +60,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/App/AppSettings.swift \
     Sources/Services/FeedXMLParser.swift \
     Sources/Coordinators/NotificationService.swift \
+    Sources/Coordinators/NotificationImage.swift \
     Sources/Services/FeedFetcher.swift \
     Sources/Services/JSONFeedParser.swift \
     Sources/Storage/ReadManager.swift \
