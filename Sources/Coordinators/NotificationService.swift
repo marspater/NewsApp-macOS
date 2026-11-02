@@ -1,9 +1,6 @@
-import CoreImage
-import CoreImage.CIFilterBuiltins
+import AppKit
 import Foundation
-import ImageIO
 import NaturalLanguage
-import UniformTypeIdentifiers
 import UserNotifications
 import os
 
@@ -141,6 +138,11 @@ final class NotificationService: Sendable {
         self.post =
             post ?? { request in
                 guard Bundle.main.bundleIdentifier != nil else { return }
+                // Whether News was active when it posted tells, next to the delegate's log, if macOS asked it (#926).
+                let active = await MainActor.run { NSApplication.shared.isActive }
+                Logger(subsystem: "com.marspater.news", category: "StoryBanner").notice(
+                    "post \(request.identifier, privacy: .private(mask: .hash)) active=\(active, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
+                )
                 try await UNUserNotificationCenter.current().add(request)
             }
         self.spacing = spacing
@@ -399,7 +401,8 @@ final class NotificationService: Sendable {
         let content = UNMutableNotificationContent()
         content.sound = banner.sound ? .default : nil
         content.threadIdentifier = banner.thread
-        content.interruptionLevel = banner.sound ? .active : .passive
+        // The Help sample is active: macOS may deliver a passive notification without asking the app (#926).
+        content.interruptionLevel = banner.sound || sampleIdentifier != nil ? .active : .passive
         let identifier: String
         if let article = banner.article {
             content.title = Self.sourceName(article)
@@ -451,83 +454,6 @@ final class NotificationService: Sendable {
                 "Notification image attachment failed: domain=\(error.domain, privacy: .public) code=\(error.code)")
             return nil
         }
-    }
-
-    /// Notification attachments do not support every format the protected reader can decode (notably WebP/AVIF).
-    /// The attachment is the tall fading crop of `notificationImage`, or the decoded image when the source is small.
-    static func makeImageAttachment(data: Data) throws -> UNNotificationAttachment {
-        let decoded = try SecureHTTPClient.decodeReaderImage(data)
-        let image = notificationImage(decoded) ?? decoded
-        let encoded = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(encoded, UTType.png.identifier as CFString, 1, nil)
-        else { throw URLError(.cannotDecodeContentData) }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination), encoded.length <= Self.attachmentLimit else {
-            throw URLError(.cannotDecodeContentData)
-        }
-        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
-        do {
-            try (encoded as Data).write(to: fileURL)
-            // The notification framework takes ownership after successful attachment creation.
-            return try UNNotificationAttachment(identifier: UUID().uuidString, url: fileURL, options: nil)
-        } catch {
-            try? FileManager.default.removeItem(at: fileURL)
-            throw error
-        }
-    }
-
-    /// Short side a source needs for the tall crop; smaller images stay as they are.
-    static let notificationImageMinimumSide = 300
-    /// Rendered width of the tall crop; the height is 1.5 times it.
-    static let notificationImageWidth = 600
-
-    /// A portrait crop (2:3) of the image, at most 600 × 900, sharp at its trailing edge, that blurs progressively and
-    /// fades to transparent toward its leading edge, the banner's text (#589). macOS has no custom banner layout, so the effect is baked into the PNG the system
-    /// places as the thumbnail. Rendered on the CPU, so the same input gives the same bytes. nil when the source's
-    /// short side is under 300 px, when the square the system shows is the better choice.
-    static func notificationImage(_ image: CGImage) -> CGImage? {
-        guard min(image.width, image.height) >= notificationImageMinimumSide else { return nil }
-        return dissolvingCrop(image, aspect: 2.0 / 3.0, maxWidth: notificationImageWidth)
-    }
-
-    /// The centred crop of `image` at `aspect` (width over height), at most `maxWidth` px wide, sharp and opaque at its
-    /// trailing edge and dissolving toward its leading edge. The system thumbnail and the app-drawn banner share it.
-    static func dissolvingCrop(_ image: CGImage, aspect: Double, maxWidth: Int) -> CGImage? {
-        let width = Double(image.width)
-        let height = Double(image.height)
-        var cropWidth = width
-        var cropHeight = height
-        if cropWidth / cropHeight > aspect { cropWidth = cropHeight * aspect } else { cropHeight = cropWidth / aspect }
-        let crop = CGRect(
-            x: (width - cropWidth) / 2, y: (height - cropHeight) / 2, width: cropWidth, height: cropHeight
-        ).integral
-        guard let cropped = image.cropping(to: crop) else { return nil }
-        let scale = min(1, Double(maxWidth) / Double(cropped.width))
-        let source = CIImage(cgImage: cropped).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-        let extent = source.extent.integral
-        // The trailing edge stays sharp and opaque, where the system pins the thumbnail to the banner's side. Toward
-        // the text the blur rises from nothing at 60% of the width to full at the leading edge; the fade starts at 45%.
-        func ramp(over span: Double) -> CIImage? {
-            let gradient = CIFilter.linearGradient()
-            gradient.point0 = CGPoint(x: extent.minX + extent.width * span, y: extent.midY)
-            gradient.point1 = CGPoint(x: extent.minX, y: extent.midY)
-            gradient.color0 = .black
-            gradient.color1 = .white
-            return gradient.outputImage?.cropped(to: extent)
-        }
-        let blur = CIFilter.maskedVariableBlur()
-        // Clamped so the blur samples edge pixels, not transparency, along the top and bottom.
-        blur.inputImage = source.clampedToExtent()
-        blur.mask = ramp(over: 0.6)
-        blur.radius = 18
-        let fade = CIFilter.blendWithMask()
-        fade.inputImage = CIImage(color: .clear).cropped(to: extent)
-        fade.backgroundImage = blur.outputImage?.cropped(to: extent)
-        fade.maskImage = ramp(over: 0.45)
-        guard let output = fade.outputImage?.cropped(to: extent) else { return nil }
-        let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
-        return context.createCGImage(
-            output, from: extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB))
     }
 }
 

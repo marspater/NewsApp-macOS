@@ -16,6 +16,7 @@ import AppKit
 import Combine
 import SwiftUI
 import UserNotifications
+import os
 
 /// A story notification as the app draws it while it is in front (DESIGN.md 8.7). The system banner cannot show the
 /// photo edge to edge, so the notification is filed in Notification Center without a system banner and this one shows.
@@ -132,6 +133,8 @@ struct StoryBannerView: View {
 @MainActor
 final class StoryBannerPresenter {
     static let shared = StoryBannerPresenter()
+    /// Every decision on the way to a banner, at notice level so `log show` keeps it (#926). No story text is logged.
+    nonisolated static let log = Logger(subsystem: "com.marspater.news", category: "StoryBanner")
     /// How long a banner stays while the pointer is not over it.
     static let lifetime: Duration = .seconds(6)
 
@@ -180,9 +183,17 @@ final class StoryBannerPresenter {
     /// Shows the banner when a News window is open on screen, and says whether it did; the caller then files the
     /// notification without a system banner. The text shows at once and the photo joins when it loads.
     func present(_ banner: StoryBanner) -> Bool {
-        guard let window = Self.openWindow(), let screen = window.screen ?? NSScreen.main else { return false }
+        let window = Self.openWindow()
+        Self.log.notice(
+            "present \(banner.id, privacy: .private(mask: .hash)): active=\(NSApp?.isActive ?? false, privacy: .public) window=\(window != nil, privacy: .public)"
+        )
+        guard let window, let screen = window.screen ?? NSScreen.main else { return false }
         shown = Shown(banner: banner)
-        show(banner, on: screen)
+        guard show(banner, on: screen) else {
+            // Clears an earlier banner and its timer too, so it can't stay beside the system banner.
+            dismiss()
+            return false
+        }
         Task { [weak self] in
             // A banner replaced or closed while its photo loaded keeps no photo.
             guard let photo = await Self.photo(at: banner.imageURL, scale: screen.backingScaleFactor),
@@ -242,15 +253,26 @@ final class StoryBannerPresenter {
         host?.rootView = view(for: shown.banner, photo: shown.photo, hovering: shown.hovering)
     }
 
-    private func show(_ banner: StoryBanner, on screen: NSScreen) {
+    /// Puts the banner on screen, or says it could not, so the caller falls back to the system banner instead of an
+    /// invisible one.
+    private func show(_ banner: StoryBanner, on screen: NSScreen) -> Bool {
         let panel = panel ?? makePanel()
         self.panel = panel
         // The photo is the banner's background, so adding it later leaves the size measured here unchanged.
         let host = FirstClickHostingView(rootView: view(for: banner, photo: nil, hovering: false))
         host.hover = { [weak self] inside in self?.hold(inside) }
+        // Measured before the panel lays it out, which on a deferred, empty panel can come back empty.
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
+        guard size.width > 1, size.height > 1 else {
+            Self.log.error(
+                "banner measured \(size.width, privacy: .public)x\(size.height, privacy: .public); system banner instead"
+            )
+            return false
+        }
         self.host = host
         panel.contentView = host
-        let frame = Self.frame(for: host.fittingSize, in: screen.visibleFrame)
+        let frame = Self.frame(for: size, in: screen.visibleFrame)
         // Slides in from the trailing edge like the system banner; only fades under Reduce Motion.
         let slide = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : AppLayout.bannerMargin * 2
         panel.setFrame(frame.offsetBy(dx: slide, dy: 0), display: false)
@@ -270,6 +292,10 @@ final class StoryBannerPresenter {
             ])
         // A banner that replaces another under a resting pointer gets no mouseEntered, so it starts from the pointer.
         hold(frame.contains(NSEvent.mouseLocation))
+        Self.log.notice(
+            "shown \(banner.id, privacy: .private(mask: .hash)): frame=\(NSStringFromRect(frame), privacy: .public) visible=\(panel.isVisible, privacy: .public) screen=\(NSStringFromRect(screen.visibleFrame), privacy: .public)"
+        )
+        return true
     }
 
     /// Pauses the dismissal while the pointer is over the banner and restarts it when the pointer leaves.
