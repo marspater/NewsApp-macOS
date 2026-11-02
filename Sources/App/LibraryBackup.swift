@@ -68,16 +68,19 @@ enum LibraryBackup {
             let configuration = NSWorkspace.OpenConfiguration()
             configuration.createsNewApplicationInstance = true
             NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
-                let launched = app != nil && error == nil
                 Task { @MainActor in
-                    // This instance quits only once the new one is running, so News never just disappears.
-                    guard launched else {
-                        return showAlert("The library was restored. Quit and reopen News to use it.")
-                    }
-                    NSApp.terminate(nil)
+                    handleRelaunchCompletion(app: app, error: error)
                 }
             }
         }
+    }
+
+    @MainActor private static func handleRelaunchCompletion(app: NSRunningApplication?, error: Error?) {
+        // This instance quits only once the new one is running, so News never just disappears.
+        guard app != nil && error == nil else {
+            return showAlert("The library was restored. Quit and reopen News to use it.")
+        }
+        NSApp.terminate(nil)
     }
 
     @MainActor private static func showAlert(_ message: String) {
