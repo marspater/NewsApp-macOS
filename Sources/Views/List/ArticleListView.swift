@@ -345,6 +345,7 @@ struct ArticleListView: View {
             }
             // A subscription's stories held while an article was open appear when the reader closes.
             .onChange(of: articlePath.isEmpty) { _, isClosed in
+                // Opening a story, from any path, closes the preview.
                 if !isClosed { StoryQuickLookCoordinator.shared.close() }
                 guard isClosed, buffer.holdsSubscription else { return }
                 showPendingUpdates()
@@ -1211,6 +1212,11 @@ struct ArticleListView: View {
             press.modifiers.intersection([.command, .control, .option]).isEmpty
         else { return .ignored }
 
+        // An open preview takes Esc before Back or clearing the search.
+        if press.key == .escape, StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.close()
+            return .handled
+        }
         if press.key == .escape || press.key == .leftArrow || press.characters == "b" || press.characters == "h" {
             if searchState.returnStory != nil {
                 searchState.returnToStory(path: &articlePath)
@@ -1232,20 +1238,11 @@ struct ArticleListView: View {
             navigateList(offset: -1, proxy: proxy)
             return .handled
         case .return:
-            if StoryQuickLookCoordinator.shared.isOpen {
-                StoryQuickLookCoordinator.shared.close()
-            }
             openFocusedArticle()
             return .handled
         case .space:
             toggleQuickLook()
             return .handled
-        case .escape:
-            if StoryQuickLookCoordinator.shared.isOpen {
-                StoryQuickLookCoordinator.shared.close()
-                return .handled
-            }
-            return .ignored
         default:
             if press.characters == "j" {
                 navigateList(offset: 1, proxy: proxy)
@@ -1347,7 +1344,6 @@ struct ArticleListView: View {
         context: [FeedArticle]? = nil,
         initialExperienceMode: ReaderExperienceMode? = nil
     ) {
-        StoryQuickLookCoordinator.shared.close()
         let context = context ?? filteredArticles
         focusedArticleID = article.id
         if initialExperienceMode?.marksOpenedStoryRead ?? true { readManager.markAsRead(article.id) }
@@ -1483,7 +1479,7 @@ struct KeyboardShortcutsView: View {
             [
                 ("J or ↓", "Next story"),
                 ("K or ↑", "Previous story"),
-                ("Space", "Quick Look preview"),
+                ("Space or ⌘Y", "Quick Look preview"),
                 ("↵", "Open focused story"),
                 ("Esc, ← or B", "Back to list"),
             ]

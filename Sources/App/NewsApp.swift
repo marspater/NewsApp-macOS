@@ -280,6 +280,13 @@ struct NewsApp: App {
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(selectedStory == nil)
 
+                // Finder's Quick Look shortcut; Space does the same while the list has focus.
+                Button("Quick Look") {
+                    NotificationCenter.default.post(name: .quickLookCommand, object: nil)
+                }
+                .keyboardShortcut("y", modifiers: .command)
+                .disabled(listActions == nil)
+
                 if let story = selectedStory, let url = URL(string: story.link) {
                     ShareLink(item: url, subject: Text(story.title)) { Text("Share Story") }
                 }

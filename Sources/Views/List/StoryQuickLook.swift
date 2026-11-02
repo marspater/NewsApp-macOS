@@ -13,68 +13,28 @@
 // limitations under the License.
 
 import AppKit
-import CoreGraphics
 import Foundation
 import QuickLookUI
-
-// MARK: - Notification Names
 
 extension Notification.Name {
     static let quickLookCommand = Notification.Name("quickLookCommand")
     static let openFocusedStoryCommand = Notification.Name("openFocusedStoryCommand")
 }
 
-// MARK: - Navigation Index Mapping
-
-/// Pure navigation index and identifier resolution for story lists and Quick Look cycling.
-enum StoryQuickLookNavigation: Sendable {
-    static func targetIndex(currentIndex: Int?, count: Int, offset: Int) -> Int? {
-        guard count > 0 else { return nil }
-        let current: Int
-        if let currentIndex {
-            current = currentIndex
-        } else {
-            current = offset > 0 ? -1 : count
-        }
-        return max(0, min(count - 1, current + offset))
-    }
-
-    static func targetID(currentID: String?, itemIDs: [String], offset: Int) -> String? {
-        guard !itemIDs.isEmpty else { return nil }
-        let currentIndex = currentID.flatMap { itemIDs.firstIndex(of: $0) }
-        guard let targetIdx = targetIndex(currentIndex: currentIndex, count: itemIDs.count, offset: offset) else {
-            return nil
-        }
-        return itemIDs[targetIdx]
-    }
-}
-
-// MARK: - Preview Document Renderer
-
-/// Renders a local, privacy-preserving preview document for Quick Look peek.
-/// ZERO network calls: uses only local text and DecodedImageCache.
-enum StoryQuickLookRenderer: Sendable {
-    struct RenderData: Sendable {
+/// Renders a one-page PDF preview from local text and the decoded image cache; it never fetches (#707).
+@MainActor
+enum StoryQuickLookRenderer {
+    struct RenderData {
         let title: String
         let publisher: String
         let dateText: String
         let excerpt: String
-        let image: CGImage?
-
-        init(
-            title: String,
-            publisher: String,
-            dateText: String,
-            excerpt: String,
-            image: CGImage? = nil
-        ) {
-            self.title = title
-            self.publisher = publisher
-            self.dateText = dateText
-            self.excerpt = excerpt
-            self.image = image
-        }
+        var image: CGImage? = nil
     }
+
+    private static let pageSize = CGSize(width: 600, height: 750)
+    private static let margin = AppSpacing.xl
+    private static var contentWidth: CGFloat { pageSize.width - margin * 2 }
 
     static func makeExcerpt(for article: FeedArticle) -> String {
         if let blocks = article.readerDocument?.blocks, !blocks.isEmpty {
@@ -99,32 +59,19 @@ enum StoryQuickLookRenderer: Sendable {
         return ""
     }
 
-    @MainActor
     static func renderData(for article: FeedArticle) -> RenderData {
-        let excerpt = makeExcerpt(for: article)
-        var cachedImage: CGImage? = nil
-        let targetURL =
-            FeedArticle.bestCardImage(in: [article])
-            ?? article.imageUrl.flatMap { URL(string: $0) }
-        if let targetURL {
-            cachedImage = DecodedImageCache.images.object(forKey: targetURL as NSURL)
-        }
+        let imageURL = FeedArticle.bestCardImage(in: [article]) ?? article.imageUrl.flatMap { URL(string: $0) }
         return RenderData(
             title: article.title,
             publisher: article.publisherName,
             dateText: article.publicationDateText,
-            excerpt: excerpt,
-            image: cachedImage
+            excerpt: makeExcerpt(for: article),
+            image: imageURL.flatMap { DecodedImageCache.images.object(forKey: $0 as NSURL) }
         )
     }
 
-    /// Renders an offscreen single-page PDF containing exclusively local article content.
-    @MainActor
     static func renderPDF(data: RenderData, to fileURL: URL, isDark: Bool = false) -> Bool {
-        let pageWidth: CGFloat = 600
-        let pageHeight: CGFloat = 750
-        var mediaBox = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
-
+        var mediaBox = CGRect(origin: .zero, size: pageSize)
         guard let consumer = CGDataConsumer(url: fileURL as CFURL),
             let context = CGContext(consumer: consumer, mediaBox: &mediaBox, nil)
         else {
@@ -132,120 +79,100 @@ enum StoryQuickLookRenderer: Sendable {
         }
 
         context.beginPDFPage(nil)
-        let nsContext = NSGraphicsContext(cgContext: context, flipped: true)
+        // `flipped: true` only tells AppKit the transform is flipped; flip it so layout runs top-down.
+        context.translateBy(x: 0, y: pageSize.height)
+        context.scaleBy(x: 1, y: -1)
         NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = nsContext
-
-        let appearance = NSApp?.effectiveAppearance ?? NSAppearance(named: isDark ? .darkAqua : .aqua)!
-        appearance.performAsCurrentDrawingAppearance {
-            // Background fill
-            let bgColor =
-                isDark
-                ? NSColor(calibratedRed: 0.12, green: 0.12, blue: 0.13, alpha: 1.0)
-                : NSColor(calibratedRed: 0.98, green: 0.98, blue: 0.99, alpha: 1.0)
-            bgColor.setFill()
-            NSRect(x: 0, y: 0, width: pageWidth, height: pageHeight).fill()
-
-            // Outer border for high contrast
-            if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast {
-                NSColor.separatorColor.setStroke()
-                let borderPath = NSBezierPath(
-                    rect: NSRect(x: 0.5, y: 0.5, width: pageWidth - 1, height: pageHeight - 1))
-                borderPath.lineWidth = 1
-                borderPath.stroke()
-            }
-
-            let margin: CGFloat = 44
-            let contentWidth = pageWidth - (margin * 2)
-            var currentY: CGFloat = 40
-
-            // 1. Eyebrow: Publisher • Date
-            let eyebrowText = "\(data.publisher) • \(data.dateText)"
-            let eyebrowAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: NSColor.secondaryLabelColor,
-            ]
-            (eyebrowText as NSString).draw(
-                in: NSRect(x: margin, y: currentY, width: contentWidth, height: 18),
-                withAttributes: eyebrowAttrs
-            )
-            currentY += 26
-
-            // 2. Headline
-            let titleAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 22, weight: .bold),
-                .foregroundColor: NSColor.labelColor,
-            ]
-            let titleBounding = (data.title as NSString).boundingRect(
-                with: NSSize(width: contentWidth, height: 100),
-                options: [.usesLineFragmentOrigin, .usesFontLeading],
-                attributes: titleAttrs
-            )
-            (data.title as NSString).draw(
-                in: NSRect(x: margin, y: currentY, width: contentWidth, height: ceil(titleBounding.height)),
-                withAttributes: titleAttrs
-            )
-            currentY += ceil(titleBounding.height) + 16
-
-            // 3. Lead Image (if locally cached in DecodedImageCache)
-            if let image = data.image {
-                let imgWidth = contentWidth
-                let aspectRatio = CGFloat(image.width) / CGFloat(max(1, image.height))
-                let imgHeight = min(200, max(120, imgWidth / max(0.5, aspectRatio)))
-                let imgRect = NSRect(x: margin, y: currentY, width: imgWidth, height: imgHeight)
-
-                NSGraphicsContext.saveGraphicsState()
-                let clipPath = NSBezierPath(roundedRect: imgRect, xRadius: 8, yRadius: 8)
-                clipPath.addClip()
-                let nsImage = NSImage(cgImage: image, size: imgRect.size)
-                nsImage.draw(in: imgRect)
-                NSGraphicsContext.restoreGraphicsState()
-
-                currentY += imgHeight + 16
-            }
-
-            // 4. Body excerpt
-            if !data.excerpt.isEmpty {
-                let paragraphStyle = NSMutableParagraphStyle()
-                paragraphStyle.lineSpacing = 4
-                paragraphStyle.paragraphSpacing = 10
-                let bodyAttrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(ofSize: 14, weight: .regular),
-                    .foregroundColor: NSColor.labelColor,
-                    .paragraphStyle: paragraphStyle,
-                ]
-                let remainingHeight = max(80, pageHeight - currentY - 54)
-                (data.excerpt as NSString).draw(
-                    in: NSRect(x: margin, y: currentY, width: contentWidth, height: remainingHeight),
-                    withAttributes: bodyAttrs
-                )
-            }
-
-            // 5. Divider and footer prompt
-            let dividerY = pageHeight - 44
-            NSColor.separatorColor.setFill()
-            NSRect(x: margin, y: dividerY, width: contentWidth, height: 1).fill()
-
-            let footerText = "↵ Open in Reader   •   Space / ⎋ Close"
-            let footerAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                .foregroundColor: NSColor.tertiaryLabelColor,
-            ]
-            (footerText as NSString).draw(
-                in: NSRect(x: margin, y: dividerY + 10, width: contentWidth, height: 18),
-                withAttributes: footerAttrs
-            )
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        NSAppearance(named: isDark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance {
+            drawPage(data)
         }
-
         NSGraphicsContext.restoreGraphicsState()
         context.endPDFPage()
         context.closePDF()
-
         return true
     }
-}
 
-// MARK: - Quick Look Preview Item
+    private static func drawPage(_ data: RenderData) {
+        let page = NSRect(origin: .zero, size: pageSize)
+        NSColor.textBackgroundColor.setFill()
+        page.fill()
+        if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast {
+            NSColor.separatorColor.setStroke()
+            NSBezierPath(rect: page.insetBy(dx: 0.5, dy: 0.5)).stroke()
+        }
+
+        var top = margin
+        top +=
+            drawText(
+                "\(data.publisher) • \(data.dateText)", font: font(.caption2, bold: true),
+                color: .secondaryLabelColor, top: top, maxHeight: 40) + AppSpacing.xs
+        top += drawText(data.title, font: font(.title1, bold: true), top: top, maxHeight: 100) + AppSpacing.md
+        if let image = data.image {
+            top += drawImage(image, top: top) + AppSpacing.md
+        }
+
+        let dividerY = pageSize.height - margin
+        if !data.excerpt.isEmpty {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineSpacing = AppSpacing.xxs
+            paragraph.paragraphSpacing = AppSpacing.xs
+            drawText(
+                data.excerpt, font: font(.body), top: top, maxHeight: max(80, dividerY - AppSpacing.md - top),
+                paragraph: paragraph)
+        }
+
+        NSColor.separatorColor.setFill()
+        NSRect(x: margin, y: dividerY, width: contentWidth, height: 1).fill()
+        drawText(
+            "↵ Open in Reader   •   Space / ⎋ Close", font: font(.subheadline), color: .tertiaryLabelColor,
+            top: dividerY + AppSpacing.xs, maxHeight: 20)
+    }
+
+    /// Draws text at the content width, truncated to `maxHeight`; returns the height it took.
+    @discardableResult
+    private static func drawText(
+        _ text: String, font: NSFont, color: NSColor = .labelColor, top: CGFloat, maxHeight: CGFloat,
+        paragraph: NSParagraphStyle = .default
+    ) -> CGFloat {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font, .foregroundColor: color, .paragraphStyle: paragraph,
+        ]
+        let options: NSString.DrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine]
+        let bounds = (text as NSString).boundingRect(
+            with: NSSize(width: contentWidth, height: maxHeight), options: options, attributes: attributes)
+        let height = min(maxHeight, ceil(bounds.height))
+        (text as NSString).draw(
+            with: NSRect(x: margin, y: top, width: contentWidth, height: height), options: options,
+            attributes: attributes, context: nil)
+        return height
+    }
+
+    /// Draws the lead image filling a rounded frame without stretching; returns the frame height.
+    private static func drawImage(_ image: CGImage, top: CGFloat) -> CGFloat {
+        let imageWidth = CGFloat(image.width)
+        let imageHeight = CGFloat(max(1, image.height))
+        let frame = NSRect(
+            x: margin, y: top, width: contentWidth,
+            height: min(200, max(120, contentWidth / max(0.5, imageWidth / imageHeight))))
+        let scale = max(frame.width / max(1, imageWidth), frame.height / imageHeight)
+        let size = NSSize(width: imageWidth * scale, height: imageHeight * scale)
+
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: frame, xRadius: AppRadius.card, yRadius: AppRadius.card).addClip()
+        NSImage(cgImage: image, size: size).draw(
+            in: NSRect(
+                x: frame.midX - size.width / 2, y: frame.midY - size.height / 2, width: size.width, height: size.height)
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        return frame.height
+    }
+
+    private static func font(_ style: NSFont.TextStyle, bold: Bool = false) -> NSFont {
+        let font = NSFont.preferredFont(forTextStyle: style)
+        return bold ? NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask) : font
+    }
+}
 
 final class StoryQuickLookPreviewItem: NSObject, QLPreviewItem, Sendable {
     let previewItemURL: URL?
@@ -258,16 +185,17 @@ final class StoryQuickLookPreviewItem: NSObject, QLPreviewItem, Sendable {
     }
 }
 
-// MARK: - Quick Look Coordinator
-
+/// Owns the shared Quick Look panel and the one preview file it shows; Space, Esc, Return, arrows and J/K drive the
+/// list while the panel is key.
 @MainActor
 final class StoryQuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelDataSource,
     @preconcurrency QLPreviewPanelDelegate
 {
     static let shared = StoryQuickLookCoordinator()
 
+    private let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "com.marspater.news.quicklook", isDirectory: true)
     private var currentItem: StoryQuickLookPreviewItem?
-    private var currentTempURL: URL?
     private var closeObserver: (any NSObjectProtocol)?
 
     var isOpen: Bool {
@@ -276,132 +204,90 @@ final class StoryQuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelD
 
     override private init() {
         super.init()
-    }
-
-    deinit {
-        if let url = currentTempURL {
-            try? FileManager.default.removeItem(at: url)
-        }
+        // Previews left behind by a quit or crash go before the first new one.
+        try? FileManager.default.removeItem(at: directory)
     }
 
     func present(article: FeedArticle) {
-        let renderData = StoryQuickLookRenderer.renderData(for: article)
-        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "com.marspater.news.quicklook", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let newURL = tempDir.appendingPathComponent("\(UUID().uuidString).pdf")
-
-        let appearance = NSApp?.effectiveAppearance ?? NSAppearance(named: .aqua)!
-        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        guard StoryQuickLookRenderer.renderPDF(data: renderData, to: newURL, isDark: isDark) else {
+        guard let panel = QLPreviewPanel.shared() else { return }
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("\(UUID().uuidString).pdf")
+        let isDark = NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        guard
+            StoryQuickLookRenderer.renderPDF(
+                data: StoryQuickLookRenderer.renderData(for: article), to: url, isDark: isDark)
+        else {
+            // Never leave the previous story on screen as if it were this one.
+            try? FileManager.default.removeItem(at: url)
+            close()
             return
         }
 
-        cleanupCurrentTempFile()
-        currentTempURL = newURL
-        currentItem = StoryQuickLookPreviewItem(url: newURL, title: article.title)
-
-        guard let panel = QLPreviewPanel.shared() else { return }
+        removeCurrentItem()
+        currentItem = StoryQuickLookPreviewItem(url: url, title: article.title)
         panel.dataSource = self
         panel.delegate = self
         panel.reloadData()
-
-        registerCloseObserver(for: panel)
-
+        closeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.removeCurrentItem() }
+        }
         if !panel.isVisible {
             panel.makeKeyAndOrderFront(nil)
         }
     }
 
-    func toggle(for article: FeedArticle) {
-        if isOpen {
-            close()
-        } else {
-            present(article: article)
-        }
-    }
-
     func close() {
-        if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible {
-            panel.orderOut(nil)
+        if isOpen {
+            QLPreviewPanel.shared()?.orderOut(nil)
         }
-        cleanupCurrentTempFile()
-        currentItem = nil
-        unregisterCloseObserver()
+        removeCurrentItem()
     }
 
-    private func cleanupCurrentTempFile() {
-        if let url = currentTempURL {
+    private func removeCurrentItem() {
+        if let url = currentItem?.previewItemURL {
             try? FileManager.default.removeItem(at: url)
-            currentTempURL = nil
         }
-    }
-
-    private func registerCloseObserver(for panel: QLPreviewPanel) {
-        unregisterCloseObserver()
-        closeObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.willCloseNotification,
-            object: panel,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.cleanupCurrentTempFile()
-                self?.currentItem = nil
-                self?.unregisterCloseObserver()
-            }
+        currentItem = nil
+        if let closeObserver {
+            NotificationCenter.default.removeObserver(closeObserver)
         }
-    }
-
-    private func unregisterCloseObserver() {
-        if let observer = closeObserver {
-            NotificationCenter.default.removeObserver(observer)
-            closeObserver = nil
-        }
+        closeObserver = nil
     }
 
     // MARK: - QLPreviewPanelDataSource
 
-    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        return currentItem == nil ? 0 : 1
+    func numberOfPreviewItems(in _: QLPreviewPanel!) -> Int {
+        currentItem == nil ? 0 : 1
     }
 
-    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
-        return currentItem
+    func previewPanel(_: QLPreviewPanel!, previewItemAt _: Int) -> (any QLPreviewItem)! {
+        currentItem
     }
 
     // MARK: - QLPreviewPanelDelegate
 
-    func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
-        guard event.type == .keyDown else { return false }
-        let modifiers = event.modifierFlags.intersection([.command, .control, .option])
-        guard modifiers.isEmpty else { return false }
-
-        switch event.keyCode {
-        case 49:  // Space
-            close()
-            return true
-        case 53:  // Esc
-            close()
-            return true
-        case 36, 76:  // Return / Enter
-            close()
-            NotificationCenter.default.post(name: .openFocusedStoryCommand, object: nil)
-            return true
-        case 125:  // Down arrow
-            NotificationCenter.default.post(name: .nextArticleCommand, object: nil)
-            return true
-        case 126:  // Up arrow
-            NotificationCenter.default.post(name: .prevArticleCommand, object: nil)
-            return true
-        default:
-            if event.charactersIgnoringModifiers == "j" {
-                NotificationCenter.default.post(name: .nextArticleCommand, object: nil)
-                return true
-            } else if event.charactersIgnoringModifiers == "k" {
-                NotificationCenter.default.post(name: .prevArticleCommand, object: nil)
-                return true
-            }
+    func previewPanel(_: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+        guard event.type == .keyDown, event.modifierFlags.intersection([.command, .control, .option]).isEmpty else {
             return false
         }
+        let character = event.charactersIgnoringModifiers
+        switch event.keyCode {
+        case 49, 53:  // Space, Esc
+            close()
+        case 36, 76:  // Return, Enter
+            close()
+            NotificationCenter.default.post(name: .openFocusedStoryCommand, object: nil)
+        case 125:  // Down arrow
+            NotificationCenter.default.post(name: .nextArticleCommand, object: nil)
+        case 126:  // Up arrow
+            NotificationCenter.default.post(name: .prevArticleCommand, object: nil)
+        default:
+            guard character == "j" || character == "k" else { return false }
+            NotificationCenter.default.post(
+                name: character == "j" ? .nextArticleCommand : .prevArticleCommand, object: nil)
+        }
+        return true
     }
 }

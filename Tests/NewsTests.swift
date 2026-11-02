@@ -6,6 +6,7 @@ import Foundation
 import ImageIO
 import NaturalLanguage
 import Network
+import PDFKit
 import SQLite3
 import SwiftUI
 import UniformTypeIdentifiers
@@ -1043,7 +1044,7 @@ struct NewsTests {
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
-            ("testStoryQuickLookNavigationAndPrivacy", { await testStoryQuickLookNavigationAndPrivacy() }),
+            ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
         try await runSharded(tests)
 
@@ -26895,58 +26896,14 @@ struct NewsTests {
     }
 
     @MainActor
-    static func testStoryQuickLookNavigationAndPrivacy() async {
-        print("  - Testing Story Quick Look navigation mapping and strict privacy constraints...")
-
-        // 1. Pure navigation index mapping
-        assertEqual(
-            StoryQuickLookNavigation.targetIndex(currentIndex: nil, count: 0, offset: 1), nil, "Empty count returns nil"
-        )
-        assertEqual(
-            StoryQuickLookNavigation.targetIndex(currentIndex: nil, count: 5, offset: 1), 0,
-            "Initial downward navigation selects 0")
-        assertEqual(
-            StoryQuickLookNavigation.targetIndex(currentIndex: nil, count: 5, offset: -1), 4,
-            "Initial upward navigation selects last")
-        assertEqual(
-            StoryQuickLookNavigation.targetIndex(currentIndex: 0, count: 5, offset: 1), 1, "Next index from 0 is 1")
-        assertEqual(
-            StoryQuickLookNavigation.targetIndex(currentIndex: 4, count: 5, offset: 1), 4,
-            "Next index at end clamps to 4")
-        assertEqual(
-            StoryQuickLookNavigation.targetIndex(currentIndex: 0, count: 5, offset: -1), 0,
-            "Prev index at start clamps to 0")
-        assertEqual(
-            StoryQuickLookNavigation.targetIndex(currentIndex: 3, count: 5, offset: -1), 2, "Prev index from 3 is 2")
-
-        let ids = ["art-1", "art-2", "art-3"]
-        assertEqual(
-            StoryQuickLookNavigation.targetID(currentID: nil, itemIDs: ids, offset: 1), "art-1",
-            "Target ID without selection picks first")
-        assertEqual(
-            StoryQuickLookNavigation.targetID(currentID: "art-1", itemIDs: ids, offset: 1), "art-2",
-            "Target ID advances to next item")
-        assertEqual(
-            StoryQuickLookNavigation.targetID(currentID: "art-3", itemIDs: ids, offset: 1), "art-3",
-            "Target ID at end clamps")
-        assertEqual(
-            StoryQuickLookNavigation.targetID(currentID: "art-1", itemIDs: ids, offset: -1), "art-1",
-            "Target ID at start clamps")
-        assertEqual(
-            StoryQuickLookNavigation.targetID(currentID: "art-2", itemIDs: ids, offset: -1), "art-1",
-            "Target ID steps backwards")
-        assertEqual(
-            StoryQuickLookNavigation.targetID(currentID: nil, itemIDs: [], offset: 1), nil,
-            "Target ID with empty list is nil")
-
-        // 2. Local preview rendering and strict privacy constraint
+    static func testStoryQuickLookPreview() async {
+        print("  - Testing the Quick Look preview: local content, upright page, no remote references (#707)...")
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "com.marspater.news.quicklook.test", isDirectory: true)
+            "com.marspater.news.quicklook.test-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        let previewFile = tempDir.appendingPathComponent("test-preview-\(UUID().uuidString).pdf")
-        defer { try? FileManager.default.removeItem(at: previewFile) }
+        defer { try? FileManager.default.removeItem(at: tempDir) }
 
-        // Article containing remote URLs and HTML formatting in description and fullContent
+        // Remote links and a tracking pixel in the feed text must never reach the preview.
         let article = FeedArticle(
             storedID: "test-ql-1",
             title: "Autonomous Space Tug Successfully Completes Orbital Test",
@@ -26964,37 +26921,32 @@ struct NewsTests {
         let renderData = StoryQuickLookRenderer.renderData(for: article)
         assertEqual(renderData.title, article.title, "Render data captures article title")
         assertEqual(renderData.publisher, "Aerospace Daily", "Render data uses publisher name")
+        assertTrue(renderData.image == nil, "An image that is not decoded yet is never fetched for the preview")
         assertFalse(renderData.excerpt.isEmpty, "Excerpt is extracted from local data")
-        assertFalse(renderData.excerpt.contains("<p>"), "HTML tags are stripped from excerpt")
-        assertFalse(renderData.excerpt.contains("<a href"), "HTML links are stripped from excerpt")
+        assertFalse(renderData.excerpt.contains("<"), "HTML is stripped from the excerpt")
 
-        // Render PDF offline
-        let success = StoryQuickLookRenderer.renderPDF(data: renderData, to: previewFile, isDark: false)
-        assertTrue(success, "renderPDF succeeds offline")
-        assertTrue(FileManager.default.fileExists(atPath: previewFile.path), "Generated PDF file exists on disk")
+        for isDark in [false, true] {
+            let previewFile = tempDir.appendingPathComponent("preview-\(isDark).pdf")
+            assertTrue(
+                StoryQuickLookRenderer.renderPDF(data: renderData, to: previewFile, isDark: isDark),
+                "renderPDF succeeds offline (dark: \(isDark))")
+            let pdfData = (try? Data(contentsOf: previewFile)) ?? Data()
+            let pdfString = String(decoding: pdfData, as: UTF8.self)
+            for marker in ["http://", "https://", "/URI", "/Launch", "adnetwork", "tracker"] {
+                assertFalse(pdfString.contains(marker), "Generated PDF contains no \(marker) (dark: \(isDark))")
+            }
 
-        let pdfData = try! Data(contentsOf: previewFile)
-        assertTrue(pdfData.count > 1000, "PDF data is populated (\(pdfData.count) bytes)")
-
-        // Verify PDF data contains zero network references or remote URLs
-        let pdfString = String(decoding: pdfData, as: UTF8.self)
-        assertFalse(pdfString.contains("http://"), "Generated PDF must contain zero 'http://' references")
-        assertFalse(pdfString.contains("https://"), "Generated PDF must contain zero 'https://' references")
-        assertFalse(pdfString.contains("/URI"), "Generated PDF must contain zero PDF /URI actions")
-        assertFalse(pdfString.contains("/Launch"), "Generated PDF must contain zero PDF /Launch actions")
-        assertFalse(pdfString.contains("adnetwork.com"), "Generated PDF must contain zero ad tracker links")
-        assertFalse(pdfString.contains("tracking"), "Generated PDF must contain zero tracking references")
-
-        // Verify dark appearance rendering
-        let darkPreviewFile = tempDir.appendingPathComponent("test-preview-dark-\(UUID().uuidString).pdf")
-        defer { try? FileManager.default.removeItem(at: darkPreviewFile) }
-        let darkSuccess = StoryQuickLookRenderer.renderPDF(data: renderData, to: darkPreviewFile, isDark: true)
-        assertTrue(darkSuccess, "renderPDF succeeds in dark appearance")
-        let darkData = try! Data(contentsOf: darkPreviewFile)
-        assertTrue(darkData.count > 1000, "Dark appearance PDF data is populated")
-
-        // Clean up
-        try? FileManager.default.removeItem(at: tempDir)
-        print("  ✓ Story Quick Look navigation and privacy checks passed")
+            // PDF space has its origin at the bottom left, so text near the top of the page has a large y.
+            guard let page = PDFDocument(url: previewFile)?.page(at: 0), let text = page.string as NSString? else {
+                assertTrue(false, "The preview PDF has a readable page (dark: \(isDark))")
+                continue
+            }
+            let height = page.bounds(for: .mediaBox).height
+            let titleBounds = page.selection(for: text.range(of: "Autonomous Space Tug"))?.bounds(for: page) ?? .zero
+            let footerBounds = page.selection(for: text.range(of: "Open in Reader"))?.bounds(for: page) ?? .zero
+            assertTrue(titleBounds.minY > height * 0.7, "The headline sits at the top of an upright page")
+            assertTrue(
+                footerBounds.maxY > 0 && footerBounds.maxY < height * 0.15, "The footer sits at the bottom of the page")
+        }
     }
 }

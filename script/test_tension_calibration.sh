@@ -72,7 +72,6 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Storage/SavedStoriesManager.swift \
     Sources/Services/OPMLManager.swift \
     Sources/Views/DesignSystem.swift \
-    Sources/Views/List/StoryQuickLook.swift \
     Sources/Views/Reader/ArticleRemoteImage.swift \
     Sources/Views/Reader/ReaderSupportViews.swift \
     Sources/Views/Reader/EventOverviewReaderView.swift \

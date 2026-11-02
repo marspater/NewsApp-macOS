@@ -70,7 +70,6 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/App/AppContainer.swift \
     Sources/Views/DesignSystem.swift \
     Sources/Views/List/ArticleCardView.swift \
-    Sources/Views/List/StoryQuickLook.swift \
     Sources/Views/Reader/ArticleWebView.swift \
     Sources/Views/Reader/ArticleRemoteImage.swift \
     Sources/Views/Reader/EventOverviewReaderView.swift \
