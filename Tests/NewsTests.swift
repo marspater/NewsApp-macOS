@@ -26986,8 +26986,18 @@ struct NewsTests {
                 return Float(sqrt(1.0 - 0.10 * 0.10) / sqrt(Double(dim / 2)))
             }
         }
+        // Below the threshold: as close as the typos measured on a real library, so never a semantic match.
+        let artC = FeedArticle(
+            storedID: "art-weather", title: "Weekend weather outlook", link: "https://example.com/weather",
+            guid: "weather-1", description: "Showers clearing by Sunday",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_200),
+            source: "Met Desk")
+        try await db.upsertArticles([artC])
+        let artCVec: [Float] = (0..<dim).map { i in
+            Float((i % 2 == 0 ? 0.30 : sqrt(1.0 - 0.30 * 0.30)) / sqrt(Double(dim / 2)))
+        }
         try await db.upsertArticleEmbeddings(
-            ["art-jwst": artAVec, "art-lexical": artBVec],
+            ["art-jwst": artAVec, "art-lexical": artBVec, "art-weather": artCVec],
             modelVersion: SentenceEmbedder.modelVersion
         )
 
@@ -27025,6 +27035,14 @@ struct NewsTests {
         assertEqual(
             try await db.listTotals(search: "astronomy cosmic exploration").stories, 2,
             "The masthead total counts the semantic match the list shows")
+
+        // A quoted phrase (an entity tag) asks for those exact words: no semantic matches, in the list or the count.
+        let phrase = try await db.searchArticles(
+            query: "\"astronomy cosmic exploration\"", limit: 10, queryEmbedding: queryVec)
+        assertEqual(phrase.map(\.id), ["art-lexical"], "A quoted phrase stays lexical")
+        assertEqual(
+            try await db.listTotals(search: "\"astronomy cosmic exploration\"").stories, 1,
+            "A quoted phrase's total counts lexical matches only")
     }
 
     static func testHybridSearchMutingAndFilters() async throws {

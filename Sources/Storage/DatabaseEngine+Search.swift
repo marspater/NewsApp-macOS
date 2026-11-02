@@ -19,9 +19,11 @@ import Foundation
 extension DatabaseEngine {
     /// Reciprocal Rank Fusion constant: a story at rank r in an arm scores 1 / (k + r) there.
     static let rrfK = 60
-    /// Minimum cosine similarity for the semantic arm.
-    // ponytail: uncalibrated against a real library; measure precision on the holdout before tuning.
-    static let semanticSimilarityThreshold = 0.25
+    /// Minimum cosine similarity for the semantic arm. On a 1,536-story library (3 Nov 2026) typos and nonsense peaked
+    /// at 0.27–0.31 while topical matches ran 0.34–0.55, so 0.35 keeps a misspelled search empty, and its spelling
+    /// suggestion offered, instead of listing unrelated stories.
+    // ponytail: one library and eleven queries; re-measure on the library holdout when the embedder changes.
+    static let semanticSimilarityThreshold = 0.35
 
     /// Free text fuses the FTS5 BM25 order with the cosine order of `article_embeddings` (RRF); a query of operators
     /// only lists by date. Both arms apply the same visibility, collection, operator and mute conditions.
@@ -51,7 +53,9 @@ extension DatabaseEngine {
         let text = parsed.terms.joined(separator: " ")
         if let queryEmbedding {
             searchEmbedding = (text, queryEmbedding)
-        } else if searchEmbedding?.text != text, await SentenceEmbedder.shared.isAvailable {
+        } else if parsed.phraseTermIndices.isEmpty, searchEmbedding?.text != text,
+            await SentenceEmbedder.shared.isAvailable
+        {
             try Task.checkCancellation()
             let vector = await SentenceEmbedder.shared.embed(text)
             try Task.checkCancellation()
@@ -63,9 +67,11 @@ extension DatabaseEngine {
             in: executeQueryArticles(sql: sql, params: params, prepareErrorMessage: "Failed to prepare search query"))
     }
 
-    /// The stored query vector for this search's text, when it has the model's dimension.
+    /// The stored query vector for this search's text, when it has the model's dimension. A quoted phrase (an entity
+    /// tag, #930) asks for those exact words, so it gets none and stays lexical.
     private func searchVector(for parsed: ArticleFilterQuery) -> [Float]? {
-        guard let searchEmbedding, searchEmbedding.text == parsed.terms.joined(separator: " "),
+        guard parsed.phraseTermIndices.isEmpty, let searchEmbedding,
+            searchEmbedding.text == parsed.terms.joined(separator: " "),
             searchEmbedding.vector.count == SentenceEmbedder.vectorDimension
         else { return nil }
         return searchEmbedding.vector
