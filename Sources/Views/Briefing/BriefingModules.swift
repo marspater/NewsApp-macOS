@@ -292,8 +292,9 @@ struct BriefingBoardFilter: Equatable, Sendable {
     /// it, by the loader's regions when known and the countries its headline names otherwise.
     func includes(_ entry: FeedEntry) -> Bool {
         guard let region else { return true }
+        let target = region.briefingRegion
         let regions = regionsByEntry[entry.id] ?? BriefingRegion.regions(of: entry.representative)
-        return regions.contains(region)
+        return regions.contains { $0.briefingRegion == target }
     }
 }
 
@@ -347,14 +348,19 @@ struct BriefingModuleCard<Content: View, Options: View>: View {
         }
         .padding(AppSpacing.md)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .background {
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .fill(AppColor.surface)
+                .shadow(
+                    color: AppShadow.cardRestingColor, radius: AppShadow.cardRestingRadius, x: 0,
+                    y: AppShadow.cardRestingY)
+        }
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                 .strokeBorder(
                     AppColor.border(for: contrast),
                     lineWidth: contrast == .increased ? AppLayout.hoverStroke : AppLayout.hairline)
         )
-        .shadow(color: AppShadow.cardRestingColor, radius: AppShadow.cardRestingRadius, x: 0, y: AppShadow.cardRestingY)
         .accessibilityElement(children: .contain)
     }
 }
@@ -473,45 +479,167 @@ struct BriefingCustomizeSheet: View {
 
 // MARK: - Region mapping (#850)
 
-/// Maps stories to the World Tension macro regions for the board's region filter.
+/// Maps stories to the five Briefing macro regions (`Europe`, `North America`, `APAC`, `Middle East and Africa`,
+/// `LATAM`) for the board's region filter.
 enum BriefingRegion {
-    /// The regions of every country the headline names (the matcher's place names, aliases and demonyms included),
-    /// else of those in the description's opening.
-    static func regions(of story: FeedArticle) -> Set<TensionMacroRegion> {
-        for text in [story.title, String(ArticleContentRedactor.cleanText(story.description).prefix(240))] {
-            let words = text.split { !$0.isLetter && $0 != "'" && $0 != "\u{2019}" && $0 != "." }.map(String.init)
-            var found = Set<TensionMacroRegion>()
-            var index = 0
-            while index < words.count {
-                // Longest name first, and its words are consumed: "South Sudan" never also counts "Sudan".
-                var consumed = 1
-                for length in [3, 2, 1] where index + length <= words.count {
-                    let place = EventPlaces.canonical(words[index..<(index + length)].joined(separator: " "))
-                    guard place.hasPrefix("@") else { continue }
-                    if let region = region(code: String(place.dropFirst())) { found.insert(region) }
-                    consumed = length
-                    break
-                }
-                index += consumed
-            }
-            if !found.isEmpty { return found }
-        }
-        return []
+    private static let placeRegions: [String: TensionMacroRegion] = [
+        // Europe
+        "europe": .europe, "european": .europe, "european union": .europe, "eu": .europe, "kyiv": .europe,
+        "kherson": .europe, "oleshky": .europe, "donbas": .europe, "crimea": .europe, "moscow": .europe,
+        "kremlin": .europe, "london": .europe, "paris": .europe, "berlin": .europe, "rome": .europe,
+        "madrid": .europe, "warsaw": .europe, "brussels": .europe, "geneva": .europe, "vienna": .europe,
+        "amsterdam": .europe, "dublin": .europe, "athens": .europe, "stockholm": .europe, "oslo": .europe,
+        "helsinki": .europe, "copenhagen": .europe, "lisbon": .europe, "prague": .europe, "budapest": .europe,
+        "bucharest": .europe, "belgrade": .europe, "balkans": .europe,
+        // North America (US & Canada only)
+        "north america": .northAmerica, "washington": .northAmerica, "white house": .northAmerica,
+        "pentagon": .northAmerica, "capitol hill": .northAmerica, "wall street": .northAmerica,
+        "new york": .northAmerica, "california": .northAmerica, "texas": .northAmerica, "florida": .northAmerica,
+        "michigan": .northAmerica, "illinois": .northAmerica, "pennsylvania": .northAmerica, "ohio": .northAmerica,
+        "arizona": .northAmerica, "virginia": .northAmerica, "massachusetts": .northAmerica,
+        "chicago": .northAmerica, "los angeles": .northAmerica, "san francisco": .northAmerica,
+        "boston": .northAmerica, "seattle": .northAmerica, "houston": .northAmerica, "atlanta": .northAmerica,
+        "miami": .northAmerica, "detroit": .northAmerica, "ottawa": .northAmerica, "toronto": .northAmerica,
+        "montreal": .northAmerica, "vancouver": .northAmerica, "ontario": .northAmerica, "quebec": .northAmerica,
+        "alberta": .northAmerica, "british columbia": .northAmerica,
+        // APAC (East Asia, South Asia, Southeast Asia, Central Asia & Oceania)
+        "apac": .southAsia, "asia": .southAsia, "asian": .southAsia, "indo-pacific": .southAsia,
+        "east asia": .southAsia, "south asia": .southAsia, "southeast asia": .southAsia, "oceania": .southAsia,
+        "asean": .southAsia, "tokyo": .southAsia, "beijing": .southAsia, "shanghai": .southAsia,
+        "hong kong": .southAsia, "shenzhen": .southAsia, "taipei": .southAsia, "seoul": .southAsia,
+        "new delhi": .southAsia, "delhi": .southAsia, "mumbai": .southAsia, "bengaluru": .southAsia,
+        "kolkata": .southAsia, "chennai": .southAsia, "islamabad": .southAsia, "karachi": .southAsia,
+        "dhaka": .southAsia, "colombo": .southAsia, "kathmandu": .southAsia, "bangkok": .southAsia,
+        "jakarta": .southAsia, "manila": .southAsia, "kuala lumpur": .southAsia, "hanoi": .southAsia,
+        "sydney": .southAsia, "melbourne": .southAsia, "canberra": .southAsia, "auckland": .southAsia,
+        "wellington": .southAsia,
+        // Middle East and Africa (Middle East, North Africa, Levant & Sub-Saharan Africa)
+        "middle east": .middleEastNorthAfrica, "north africa": .middleEastNorthAfrica,
+        "levant": .middleEastNorthAfrica, "gaza": .middleEastNorthAfrica, "west bank": .middleEastNorthAfrica,
+        "jerusalem": .middleEastNorthAfrica, "tel aviv": .middleEastNorthAfrica, "ramallah": .middleEastNorthAfrica,
+        "beirut": .middleEastNorthAfrica, "damascus": .middleEastNorthAfrica, "baghdad": .middleEastNorthAfrica,
+        "tehran": .middleEastNorthAfrica, "riyadh": .middleEastNorthAfrica, "jeddah": .middleEastNorthAfrica,
+        "doha": .middleEastNorthAfrica, "dubai": .middleEastNorthAfrica, "abu dhabi": .middleEastNorthAfrica,
+        "sanaa": .middleEastNorthAfrica, "red sea": .middleEastNorthAfrica, "aden": .middleEastNorthAfrica,
+        "hormuz": .middleEastNorthAfrica, "cairo": .middleEastNorthAfrica, "alexandria": .middleEastNorthAfrica,
+        "tripoli": .middleEastNorthAfrica, "tunis": .middleEastNorthAfrica, "algiers": .middleEastNorthAfrica,
+        "rabat": .middleEastNorthAfrica, "casablanca": .middleEastNorthAfrica, "khartoum": .middleEastNorthAfrica,
+        "darfur": .middleEastNorthAfrica, "africa": .middleEastNorthAfrica, "african": .middleEastNorthAfrica,
+        "sahel": .middleEastNorthAfrica, "lagos": .middleEastNorthAfrica, "abuja": .middleEastNorthAfrica,
+        "nairobi": .middleEastNorthAfrica, "johannesburg": .middleEastNorthAfrica,
+        "cape town": .middleEastNorthAfrica, "pretoria": .middleEastNorthAfrica,
+        "addis ababa": .middleEastNorthAfrica, "kinshasa": .middleEastNorthAfrica, "accra": .middleEastNorthAfrica,
+        "dakar": .middleEastNorthAfrica, "kampala": .middleEastNorthAfrica, "mogadishu": .middleEastNorthAfrica,
+        // LATAM (Central America, South America & Caribbean)
+        "latam": .latinAmerica, "latin america": .latinAmerica, "latin american": .latinAmerica,
+        "south america": .latinAmerica, "central america": .latinAmerica, "caribbean": .latinAmerica,
+        "sao paulo": .latinAmerica, "rio de janeiro": .latinAmerica, "brasilia": .latinAmerica,
+        "mexico city": .latinAmerica, "buenos aires": .latinAmerica, "bogota": .latinAmerica,
+        "lima": .latinAmerica, "santiago": .latinAmerica, "caracas": .latinAmerica, "quito": .latinAmerica,
+        "la paz": .latinAmerica, "montevideo": .latinAmerica, "asuncion": .latinAmerica, "havana": .latinAmerica,
+        "port-au-prince": .latinAmerica, "santo domingo": .latinAmerica, "san juan": .latinAmerica,
+        "panama city": .latinAmerica,
+    ]
+
+    /// Regions named in the headline itself (country names, aliases, demonyms and regional places).
+    static func headlineRegions(of story: FeedArticle) -> Set<TensionMacroRegion> {
+        regions(in: story.title)
     }
 
-    /// Western Asia, Iran and North Africa are the Middle East & North Africa; the rest follows the UN regions, with
-    /// Central Asia in South Asia.
-    /// UN subregions checked first, then UN continents.
+    /// The regions of every country or regional place the headline names, else of those in the description's opening.
+    static func regions(of story: FeedArticle) -> Set<TensionMacroRegion> {
+        let fromHeadline = regions(in: story.title)
+        if !fromHeadline.isEmpty { return fromHeadline }
+        return regions(in: String(ArticleContentRedactor.cleanText(story.description).prefix(240)))
+    }
+
+    /// Resolves a single candidate place or country phrase to its macro-region.
+    private static func matchPlace(_ candidate: String) -> TensionMacroRegion? {
+        let normalized = EventFeatures.normalized(candidate)
+        if let direct = placeRegions[normalized] {
+            return direct
+        }
+        let place = EventPlaces.canonical(candidate)
+        guard place.hasPrefix("@") else { return nil }
+        return region(code: String(place.dropFirst()))
+    }
+
+    /// Extracts all macro-regions mentioned in the supplied text, matching multi-word names first and splitting
+    /// unmatched hyphenated compound tokens (e.g. "Russia-Ukraine" or "Israel-Iran").
+    static func regions(in text: String) -> Set<TensionMacroRegion> {
+        let words = text.split { !$0.isLetter && $0 != "'" && $0 != "\u{2019}" && $0 != "." && $0 != "-" }
+            .map(String.init)
+        var found = Set<TensionMacroRegion>()
+        var index = 0
+        while index < words.count {
+            // Longest name first, and its words are consumed: "South Sudan" never also counts "Sudan".
+            var consumed = 1
+            var matched = false
+            for length in [3, 2, 1] where index + length <= words.count {
+                let candidate = words[index..<(index + length)].joined(separator: " ")
+                if let region = matchPlace(candidate) {
+                    found.insert(region)
+                    consumed = length
+                    matched = true
+                    break
+                }
+            }
+            if !matched, words[index].contains("-") {
+                let parts = words[index].split(separator: "-").map(String.init).filter { !$0.isEmpty }
+                if index > 0, let firstPart = parts.first,
+                    let region = matchPlace("\(words[index - 1]) \(firstPart)")
+                {
+                    found.insert(region)
+                }
+                if index + 1 < words.count, let lastPart = parts.last,
+                    let region = matchPlace("\(lastPart) \(words[index + 1])")
+                {
+                    found.insert(region)
+                }
+                for part in parts {
+                    if let region = matchPlace(part) {
+                        found.insert(region)
+                    }
+                }
+            }
+            index += consumed
+        }
+        return found
+    }
+
+    /// Maps ISO-3166 alpha-2 country codes to the five Briefing regions:
+    /// - North America: US and Canada only (`US`, `CA`).
+    /// - APAC (`.southAsia`): East Asia (`030`), South Asia (`034`), Southeast Asia (`035`), Central Asia (`143`) and Oceania (`009`).
+    /// - Middle East and Africa (`.middleEastNorthAfrica`): Western Asia (`145`), Iran, North Africa (`015`) and Sub-Saharan Africa (`002`).
+    /// - Europe (`.europe`): Europe (`150`).
+    /// - LATAM (`.latinAmerica`): Central America (`013`), South America (`005`), the Caribbean (`029`) and Latin America (`419`, `019` excluding US/CA).
     private static let subregions: [String: TensionMacroRegion] = [
-        "145": .middleEastNorthAfrica, "021": .northAmerica, "034": .southAsia, "143": .southAsia,
-        "030": .eastSoutheastAsia, "035": .eastSoutheastAsia,
+        "145": .middleEastNorthAfrica, "015": .middleEastNorthAfrica,
+        "034": .southAsia, "143": .southAsia, "030": .southAsia, "035": .southAsia,
+        "005": .latinAmerica, "013": .latinAmerica, "029": .latinAmerica,
     ]
     private static let continents: [String: TensionMacroRegion] = [
-        "002": .subSaharanAfrica, "150": .europe, "019": .latinAmerica, "419": .latinAmerica, "009": .oceania,
+        "002": .middleEastNorthAfrica, "150": .europe, "019": .latinAmerica, "419": .latinAmerica, "009": .southAsia,
     ]
 
+    /// Maps an ISO-3166 alpha-2 country code to its canonical Briefing macro-region.
     static func region(code: String) -> TensionMacroRegion? {
-        if ["IR", "EG", "DZ", "LY", "MA", "TN", "SD", "EH"].contains(code) { return .middleEastNorthAfrica }
+        let lower = code.lowercased()
+        if ["us", "ca"].contains(lower) { return .northAmerica }
+        if ["gl", "bm", "pm"].contains(lower) { return nil }
+        if ["ir", "eg", "dz", "ly", "ma", "tn", "sd", "eh", "ss"].contains(lower) { return .middleEastNorthAfrica }
+        if [
+            "au", "nz", "fj", "pg", "sb", "vu", "ws", "to", "jp", "cn", "kr", "kp", "tw", "hk", "mo", "sg",
+            "in", "pk", "bd", "lk", "np", "af", "kz", "uz", "vn", "th", "id", "my", "ph", "mm", "kh", "la",
+        ].contains(lower) {
+            return .southAsia
+        }
+        if [
+            "br", "mx", "co", "ar", "cl", "pe", "ve", "ec", "bo", "py", "uy", "cu", "ht", "do", "jm", "tt",
+            "bs", "bb", "gt", "hn", "sv", "ni", "cr", "pa", "bz", "gy", "sr",
+        ].contains(lower) {
+            return .latinAmerica
+        }
         let subregion = Locale.Region(code).containingRegion
         if let region = subregion.flatMap({ subregions[$0.identifier] }) { return region }
         return subregion?.containingRegion.flatMap { continents[$0.identifier] }

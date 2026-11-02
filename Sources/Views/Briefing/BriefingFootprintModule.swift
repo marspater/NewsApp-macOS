@@ -84,13 +84,24 @@ struct BriefingFootprintModuleView: View {
     let filter: BriefingBoardFilter
     let actions: BriefingActions
 
-    private var footer: String {
-        let original = "\(data.originalCount) original report\(data.originalCount == 1 ? "" : "s")"
-        switch data.wireCopyCount {
-        case 0: return "\(original); none carry a wire agency's text."
-        case 1: return "\(original); 1 carries a wire agency's text, so it counts once."
-        default: return "\(original); \(data.wireCopyCount) carry a wire agency's text, so they count once."
+    /// Human-readable explanation of how many publisher reports are original vs syndicated wire copy.
+    static func footerText(originalCount: Int, wireCopyCount: Int) -> String {
+        let original = "\(originalCount) original report\(originalCount == 1 ? "" : "s")"
+        switch wireCopyCount {
+        case 0:
+            return originalCount == 1
+                ? "1 original publisher report (no syndicated wire-agency reprints)."
+                : "All \(original) are independent publisher reporting (no syndicated wire-agency reprints)."
+        case 1:
+            return "\(original) from independent newsrooms · 1 outlet republished a wire-agency dispatch."
+        default:
+            return
+                "\(original) from independent newsrooms · \(wireCopyCount) outlets republished wire-agency dispatches."
         }
+    }
+
+    private var footer: String {
+        Self.footerText(originalCount: data.originalCount, wireCopyCount: data.wireCopyCount)
     }
 
     private enum Metrics {

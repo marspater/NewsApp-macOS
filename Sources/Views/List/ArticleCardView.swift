@@ -427,6 +427,7 @@ struct CoverageRowLabel: View {
     let hasUpdate: Bool
     let isExpanded: Bool
     let isGrid: Bool
+    var now: Date = Date()
 
     @Environment(\.effectiveContrast) private var contrast
 
@@ -441,7 +442,7 @@ struct CoverageRowLabel: View {
                     .layoutPriority(1)
                 if let latestDate {
                     Text(
-                        "· updated \(latestDate, format: .relative(presentation: .named, unitsStyle: isGrid ? .abbreviated : .wide))"
+                        "· updated \(FeedArticle.relativeUpdateText(for: latestDate, now: now, abbreviated: isGrid))"
                     )
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.tertiaryText(for: contrast))

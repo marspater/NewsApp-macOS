@@ -38,7 +38,8 @@ struct BriefingDriversData: Equatable, Sendable {
 
         /// "Publishers in Europe, North America", in the regions' canonical order; nil when none is known.
         var regionsText: String? {
-            let names = TensionMacroRegion.allCases.filter(publisherRegions.contains).map(\.briefingTitle)
+            let canonical = Set(publisherRegions.map(\.briefingRegion))
+            let names = TensionMacroRegion.briefingRegions.filter(canonical.contains).map(\.briefingTitle)
             return names.isEmpty ? nil : "Publishers in " + names.joined(separator: ", ")
         }
         var coverageText: String { BriefingDriversData.coverageText(publishers: publishers) }
