@@ -245,6 +245,22 @@ enum BriefingImpactTests {
                 publisherCount: notableEntry.publisherCount, representative: notableEntry.representative,
                 momentum: .steady) == .notable,
             "Multi-publisher story thread is rated Notable")
+        let conflictEntry = BriefingRegionsData.sampleEntry(
+            id: "imp-conflict", title: "Missile strikes kill 50 people across frontline cities",
+            publishers: 6, date: now)
+        check(
+            BriefingPriorityData.assessImportance(
+                publisherCount: conflictEntry.publisherCount, representative: conflictEntry.representative,
+                momentum: .rising) == .major,
+            "Armed conflict story is rated Major")
+        let nonTensionEntry = BriefingRegionsData.sampleEntry(
+            id: "imp-culture", title: "Local gallery exhibits retrospective of classical landscape paintings",
+            publishers: 1, date: now)
+        check(
+            BriefingPriorityData.assessImportance(
+                publisherCount: nonTensionEntry.publisherCount, representative: nonTensionEntry.representative,
+                momentum: .steady) == .minor,
+            "Low-coverage culture story is rated Minor")
 
         // 2. World Tension sparkline tight dynamic Y-axis domain
         let domain = BriefingTensionSparklineView.yDomain(for: [], baseline: 38)
@@ -428,6 +444,15 @@ enum BriefingImpactTests {
             onOpen: {}, onToggleRead: {}, onToggleSave: {}
         )
         _ = tileDeveloping.body
+        check(
+            BriefingTileView.restingWidth(isLead: true, contrast: .standard) == AppLayout.leadTileStroke,
+            "Lead tile stroke is leadTileStroke")
+        check(
+            BriefingTileView.restingWidth(isLead: false, contrast: .increased) == AppLayout.hoverStroke,
+            "Increased contrast non-lead resting stroke is hoverStroke")
+        check(
+            BriefingTileView.restingWidth(isLead: false, contrast: .standard) == AppLayout.hairline,
+            "Standard contrast non-lead resting stroke is hairline")
 
         // 4. BriefingRegionsModuleView & BriefingRegionTilesModuleView evaluation
         if let regionsData = BriefingRegionsData.captureFixture {
@@ -456,7 +481,26 @@ enum BriefingImpactTests {
             let priorityView = BriefingPriorityModuleView(
                 data: priorityData, filter: BriefingBoardFilter(), actions: actions)
             _ = priorityView.body
+            check(
+                BriefingPriorityModuleView.strokeLineWidth(isLead: true, contrast: .standard)
+                    == AppLayout.leadTileStroke,
+                "Lead card stroke is leadTileStroke")
+            check(
+                BriefingPriorityModuleView.strokeLineWidth(isLead: false, contrast: .increased)
+                    == AppLayout.hoverStroke,
+                "Increased contrast non-lead card stroke is hoverStroke")
+            check(
+                BriefingPriorityModuleView.strokeLineWidth(isLead: false, contrast: .standard) == AppLayout.hairline,
+                "Standard contrast non-lead card stroke is hairline")
         }
+
+        // Test BriefingActions default closure bodies
+        var defaultActions = BriefingActions(
+            onOpenArticle: { _ in }, onOpenEvent: { _ in }, onStartNewBriefing: {}, onBackToToday: {}
+        )
+        defaultActions.onToggleRead(sampleArticle)
+        defaultActions.onToggleSave(sampleArticle)
+        defaultActions.onCustomize()
 
         // 6. BriefingFootprintModuleView evaluation
         let footprintData = BriefingFootprintData.make([

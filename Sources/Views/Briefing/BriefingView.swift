@@ -44,9 +44,15 @@ struct BriefingActions {
         onOpenEvent: @escaping (EventFeedSummary) -> Void,
         onStartNewBriefing: @escaping () -> Void,
         onBackToToday: @escaping () -> Void,
-        onToggleRead: @escaping (FeedArticle) -> Void = { _ in },
-        onToggleSave: @escaping (FeedArticle) -> Void = { _ in },
-        onCustomize: @escaping () -> Void = {}
+        onToggleRead: @escaping (FeedArticle) -> Void = { _ in
+            // Default no-op for previews and standalone usage
+        },
+        onToggleSave: @escaping (FeedArticle) -> Void = { _ in
+            // Default no-op for previews and standalone usage
+        },
+        onCustomize: @escaping () -> Void = {
+            // Default no-op for previews and standalone usage
+        }
     ) {
         self.onOpenArticle = onOpenArticle
         self.onOpenEvent = onOpenEvent

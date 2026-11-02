@@ -475,14 +475,21 @@ struct BriefingTileView: View {
                 y: AppShadow.cardHoverY
             )
         }
+        let restingWidth = Self.restingWidth(isLead: isLead, contrast: contrast)
         return BriefingTileAppearance(
             border: isLead ? AppColor.accent : AppColor.border(for: contrast),
-            width: isLead
-                ? AppLayout.leadTileStroke : contrast == .increased ? AppLayout.hoverStroke : AppLayout.hairline,
+            width: restingWidth,
             shadow: AppShadow.cardRestingColor,
             radius: AppShadow.cardRestingRadius,
             y: AppShadow.cardRestingY
         )
+    }
+
+    static func restingWidth(isLead: Bool, contrast: ColorSchemeContrast) -> CGFloat {
+        if isLead {
+            return AppLayout.leadTileStroke
+        }
+        return contrast == .increased ? AppLayout.hoverStroke : AppLayout.hairline
     }
 
     var body: some View {

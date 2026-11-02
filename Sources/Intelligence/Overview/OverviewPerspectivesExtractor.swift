@@ -506,10 +506,10 @@ struct OverviewPerspectivesExtractor: Sendable {
         }
 
         // Identical or strongly overlapping position statement (syndicated quote)
-        if positionOverlap && (pos1.count >= 4 || pos2.count >= 4) {
-            if existing.originalWireSource != nil || candidate.originalWireSource != nil {
-                return true
-            }
+        if positionOverlap && (pos1.count >= 4 || pos2.count >= 4)
+            && (existing.originalWireSource != nil || candidate.originalWireSource != nil)
+        {
+            return true
         }
 
         return false

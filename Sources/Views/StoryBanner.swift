@@ -158,7 +158,15 @@ final class StoryBannerPresenter {
             center.publisher(for: NSWindow.willCloseNotification),
             center.publisher(for: NSWindow.didMiniaturizeNotification)
         )
-        .sink { [weak self] _ in
+        .receive(on: RunLoop.main)
+        .sink { [weak self] notification in
+            if notification.name == NSWindow.willCloseNotification,
+                let window = notification.object as? NSWindow,
+                let panel = self?.panel,
+                window === panel
+            {
+                return
+            }
             // A closing window still counts as visible while it closes; the check runs once it is gone.
             Task { @MainActor in
                 if Self.openWindow() == nil { self?.dismiss() }
@@ -340,7 +348,8 @@ final class StoryBannerPresenter {
 
 /// Takes the first click although the panel never becomes key, so one click opens the story, and reports the pointer
 /// entering and leaving even while News is not the active app, where SwiftUI's hover tracking stays silent.
-private final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+@MainActor
+final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     var hover: ((Bool) -> Void)?
 
     override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }

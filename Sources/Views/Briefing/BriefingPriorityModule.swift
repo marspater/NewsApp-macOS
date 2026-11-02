@@ -134,7 +134,14 @@ struct BriefingPriorityData: Equatable, Sendable {
         let hasCasualtiesOrScale =
             classified.deaths != TensionMagnitude.notReported || classified.affected != TensionMagnitude.notReported
         let isEscalating = classified.escalation == TensionEscalation.escalating
-        let typeScore = isHighSeverity ? 2 : (classified.type != nil ? 1 : 0)
+        let typeScore: Int
+        if isHighSeverity {
+            typeScore = 2
+        } else if classified.type != nil {
+            typeScore = 1
+        } else {
+            typeScore = 0
+        }
         return typeScore + ((hasCasualtiesOrScale || isEscalating) ? 1 : 0)
     }
 
@@ -194,11 +201,19 @@ struct BriefingPriorityData: Equatable, Sendable {
             let reportedQuote =
                 overview.flatMap { reported($0, links: links) }
                 ?? fallbackReported(representative: thread.representative, members: members)
+            let state: String?
+            if isDeveloping {
+                state = "Developing"
+            } else if summary.hasSubstantiveUpdate {
+                state = "Updated"
+            } else {
+                state = nil
+            }
             cards.append(
                 Card(
                     id: summary.eventID, summary: summary,
                     meta: "\(thread.publisherCount) publishers · \(BriefingThread.ago(latest, now: context.now))",
-                    state: isDeveloping ? "Developing" : summary.hasSubstantiveUpdate ? "Updated" : nil,
+                    state: state,
                     headline: thread.representative.title,
                     impact: impactText(resolvedImportance),
                     momentum: threadMomentum,
@@ -376,11 +391,20 @@ struct BriefingPriorityModuleView: View {
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                 .strokeBorder(
                     card.isLead ? AppColor.accent : AppColor.border(for: contrast),
-                    lineWidth: card.isLead
-                        ? AppLayout.leadTileStroke
-                        : contrast == .increased ? AppLayout.hoverStroke : AppLayout.hairline)
+                    lineWidth: strokeLineWidth(for: card))
         )
         .accessibilityElement(children: .contain)
+    }
+
+    static func strokeLineWidth(isLead: Bool, contrast: ColorSchemeContrast) -> CGFloat {
+        if isLead {
+            return AppLayout.leadTileStroke
+        }
+        return contrast == .increased ? AppLayout.hoverStroke : AppLayout.hairline
+    }
+
+    private func strokeLineWidth(for card: BriefingPriorityData.Card) -> CGFloat {
+        Self.strokeLineWidth(isLead: card.isLead, contrast: contrast)
     }
 
     private func stats(_ card: BriefingPriorityData.Card) -> some View {
