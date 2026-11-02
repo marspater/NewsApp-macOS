@@ -529,21 +529,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
+    private var terminationReplied = false
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        Task { @MainActor in
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    await DatabaseEngine.shared.checkpointAndOptimize()
-                }
-                group.addTask {
-                    try? await Task.sleep(for: .seconds(2))
-                }
-                _ = await group.next()
-                group.cancelAll()
+        terminationReplied = false
+        Task.detached(priority: .userInitiated) {
+            await DatabaseEngine.shared.checkpointAndOptimize()
+            await MainActor.run { [weak self] in
+                self?.finishTermination(sender)
             }
-            sender.reply(toApplicationShouldTerminate: true)
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            self.finishTermination(sender)
         }
         return .terminateLater
+    }
+
+    private func finishTermination(_ sender: NSApplication) {
+        guard !terminationReplied else { return }
+        terminationReplied = true
+        sender.reply(toApplicationShouldTerminate: true)
     }
 
     func applicationWillTerminate(_ _: Notification) {
