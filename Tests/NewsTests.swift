@@ -2291,6 +2291,24 @@ struct NewsTests {
             try await db.isSaved(articleId: "sqlite-a"), "A refused restore leaves the library open and writable")
         try await db.setSaved(articleId: "sqlite-b", isSaved: true)
 
+        // Remove All Saved is one statement: every saved story is unsaved, or none is.
+        assertEqual(try await db.counts().saved, 2, "Two stories are saved before Remove All")
+        try await db.removeAllSaved()
+        assertEqual(try await db.counts().saved, 0, "Remove All unsaves every story")
+        try await db.setSaved(articleId: "sqlite-a", isSaved: true)
+
+        // Nothing cached survives a close: a library swapped in while closed reports its own counts.
+        assertEqual(try await db.counts().saved, 1, "Counts are cached for the open library")
+        await db.close()
+        var swapper: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &swapper), SQLITE_OK, "Open the closed library directly")
+        assertEqual(
+            sqlite3_exec(swapper, "UPDATE article_state SET is_saved = 1;", nil, nil, nil), SQLITE_OK,
+            "Change the library while the engine is closed")
+        sqlite3_close(swapper)
+        try await db.open()
+        assertEqual(try await db.counts().saved, 2, "A reopened library is counted afresh")
+
         // A query that fails throws instead of answering zero or false.
         assertTrue(try await db.isSaved(articleId: "sqlite-a"), "Saved state reads before the failure")
         assertEqual(
@@ -8920,6 +8938,20 @@ struct NewsTests {
 
         let version = tempDefaults.integer(forKey: MigrationCoordinator.migrationVersionKey)
         assertEqual(version, MigrationCoordinator.currentMigrationVersion, "Migration version must be set to 1")
+
+        // Legacy data that exists but can't be decoded is not a fresh install: the migration stays open (#946).
+        let unreadableSuite = suiteName + ".unreadable"
+        let unreadableDefaults = UserDefaults(suiteName: unreadableSuite)!
+        defer { removeTestDefaults(unreadableSuite) }
+        unreadableDefaults.set(Data("not json".utf8), forKey: "com.marspater.news.savedStories")
+        let unreadableCoordinator = MigrationCoordinator(
+            database: db, userDefaults: unreadableDefaults, fileManager: .default)
+        let unreadableStats = try await unreadableCoordinator.migrateIfNeeded()
+        assertEqual(unreadableStats.failures, 1, "Unreadable legacy data counts as a failure")
+        assertTrue(
+            await unreadableCoordinator.isMigrationNeeded(), "Unreadable legacy data keeps the migration open")
+        assertTrue(
+            unreadableDefaults.data(forKey: "com.marspater.news.savedStories") != nil, "Unreadable legacy data is kept")
 
         // Real legacy data: a saved story, and a read list that also names a story no longer cached.
         let legacySuite = suiteName + ".legacy"

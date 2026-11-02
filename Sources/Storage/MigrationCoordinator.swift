@@ -54,6 +54,9 @@ actor MigrationCoordinator {
         var stats = MigrationStats()
 
         // 1. Locate and load legacy JSON article cache
+        // Legacy data that exists but can't be read keeps the migration open, so it is retried instead of being taken for
+        // a fresh install; the files are never removed (#946).
+        var unreadable = false
         var legacyArticles: [FeedArticle] = []
         let cacheDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("com.marspater.news.cache")
@@ -66,6 +69,7 @@ actor MigrationCoordinator {
                 legacyArticles = decoded
                 stats.articlesFound = decoded.count
             } catch {
+                unreadable = true
                 logger.error(
                     "Failed to decode legacy article cache at \(cacheFile.path): \(error.localizedDescription)")
             }
@@ -79,6 +83,7 @@ actor MigrationCoordinator {
                 legacySaved = decoded
                 stats.savedStories = decoded.count
             } catch {
+                unreadable = true
                 logger.error("Failed to decode legacy saved stories from UserDefaults: \(error.localizedDescription)")
             }
         }
@@ -92,6 +97,11 @@ actor MigrationCoordinator {
 
         // If there is no legacy data at all (fresh install), mark migration complete and return
         if legacyArticles.isEmpty && legacySaved.isEmpty && legacyReadIDs.isEmpty {
+            guard !unreadable else {
+                stats.failures += 1
+                logger.error("Legacy data could not be read; migration stays open and is retried, data preserved.")
+                return stats
+            }
             userDefaults.set(Self.currentMigrationVersion, forKey: Self.migrationVersionKey)
             logger.info("Fresh installation detected. Migration version set to \(Self.currentMigrationVersion).")
             return stats
@@ -129,7 +139,12 @@ actor MigrationCoordinator {
 
             stats.articlesImported = allArticlesToImport.count
 
-            // Mark migration complete ONLY AFTER every step succeeded!
+            // Mark migration complete ONLY AFTER every step succeeded, and only when all legacy data could be read!
+            guard !unreadable else {
+                stats.failures += 1
+                logger.error("Some legacy data could not be read; migration stays open and is retried.")
+                return stats
+            }
             userDefaults.set(Self.currentMigrationVersion, forKey: Self.migrationVersionKey)
 
             logger.info(
