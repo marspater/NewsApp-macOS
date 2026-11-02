@@ -82,6 +82,15 @@ struct NativeUIQAChecks {
         assertEqual(
             ArticleListView.prefetchStart(visibleIndex: 12, currentStart: backwardStart), backwardStart,
             "Cards already inside the window do not restart prefetch")
+        assertEqual(
+            ArticleListView.headerMaxWidth(isBriefing: true, gridLayout: false), AppLayout.briefingMaxWidth,
+            "Briefing header width is briefingMaxWidth")
+        assertEqual(
+            ArticleListView.headerMaxWidth(isBriefing: false, gridLayout: true), .infinity,
+            "Grid header width is infinity")
+        assertEqual(
+            ArticleListView.headerMaxWidth(isBriefing: false, gridLayout: false), AppLayout.listMaxWidth,
+            "List header width is listMaxWidth")
         await testRemoteImageReuse()
         await testRemoteImageCancellationRetry()
         await testOverviewLeadImageUsesProtectedLoader()

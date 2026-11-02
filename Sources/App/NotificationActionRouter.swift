@@ -60,6 +60,8 @@ final class NotificationPermissionRequest {
             .sink { [weak self] _, enabled, onboarded in
                 guard let self, !self.hasRequested, enabled, onboarded else { return }
                 self.hasRequested = true
+                self.subscription?.cancel()
+                self.subscription = nil
                 request()
             }
     }
