@@ -366,6 +366,8 @@ struct MainView: View {
             guard !Task.isCancelled else { return }
             tension.state = WorldTensionState(aiEnabled: aiEnabled, collectionEnabled: collectionEnabled)
         } catch {
+            guard !Task.isCancelled else { return }
+            tension.state.isLoading = false
             return
         }
     }
@@ -649,7 +651,7 @@ private struct CompactArchiveSearch: NSViewRepresentable {
 /// infinite `App` -> `Window` re-evaluation loop when the window is key (#778).
 struct FocusedCommandAction: Equatable {
     let perform: () -> Void
-    static func == (lhs: Self, rhs: Self) -> Bool { true }
+    static func == (_: Self, _: Self) -> Bool { true }
 }
 
 private struct ArchiveSearchKey: FocusedValueKey { typealias Value = FocusedCommandAction }
