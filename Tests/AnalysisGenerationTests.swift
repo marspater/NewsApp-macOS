@@ -137,12 +137,12 @@ enum AnalysisGenerationTests {
     /// inclusion read is not "no correction by the reader".
     static func clusteringStorageFailuresEndThePass() async throws {
         let now = Date(timeIntervalSince1970: 1_793_188_800 + 3600)
-        for (failure, message) in [
+        for (failure, cause, message) in [
             (
                 "CREATE TRIGGER fail_features BEFORE INSERT ON article_features BEGIN SELECT RAISE(ABORT, 'fixture'); END;",
-                "A failed clustering write ends the pass with its error"
+                "fixture", "A failed clustering write ends the pass with its error"
             ),
-            ("DROP TABLE event_inclusions;", "A failed inclusion read ends the pass with its error"),
+            ("DROP TABLE event_inclusions;", "no such table", "A failed inclusion read ends the pass with its error"),
         ] {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
@@ -152,7 +152,7 @@ enum AnalysisGenerationTests {
                 _ = try await EventClusterer.run(in: db, now: now, allowsEnergy: false)
                 check(false, message)
             } catch {
-                check(!(error is CancellationError), message)
+                check(error.localizedDescription.contains(cause), message)
             }
             await db.close()
         }
@@ -175,12 +175,36 @@ enum AnalysisGenerationTests {
         do {
             _ = try await EventClusterer.run(in: db, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
             check(false, "The failed write ends the pass without energy")
-        } catch {}
+        } catch {
+            check(error.localizedDescription.contains("fixture"), "The fixture's write failure ends the pass")
+        }
+        let behind = try await db.eventRows(
+            "SELECT count(*) FROM event_match_state WHERE matcher_version = ?;", [.integer(EventMatcher.version - 1)])
+        check(behind.first?.first == "2", "Both deferred rows are marked one matcher version behind")
         try await db.eventRows("DROP TRIGGER fail_features;")
         let withEnergy = try await EventClusterer.run(
             in: db, now: start.addingTimeInterval(6 * 3600), allowsEnergy: true, pairProbability: { _, _ in 0.99 })
         check(withEnergy.processed >= 2, "Rows deferred before a failed write are read again with energy")
         await db.close()
+
+        // A failed deferred marker still stores the batch's derived writes before the pass ends.
+        let marking = DatabaseEngine(path: ":memory:")
+        try await marking.open()
+        try await marking.upsertArticles(floods)
+        try await marking.eventRows(
+            """
+            CREATE TRIGGER fail_marker BEFORE UPDATE ON event_match_state
+            WHEN NEW.matcher_version = \(EventMatcher.version - 1) BEGIN SELECT RAISE(ABORT, 'marker'); END;
+            """)
+        do {
+            _ = try await EventClusterer.run(in: marking, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
+            check(false, "The failed marker ends the pass")
+        } catch {
+            check(error.localizedDescription.contains("marker"), "The fixture's marker failure ends the pass")
+        }
+        let features = try await marking.eventRows("SELECT count(*) FROM article_features;")
+        check(features.first?.first == "2", "The batch's features are stored although the marker failed")
+        await marking.close()
     }
 
     /// A job counts as completed only when its write succeeded (#820), a changed input or a clear makes the story
