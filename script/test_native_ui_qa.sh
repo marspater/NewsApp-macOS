@@ -64,6 +64,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/App/ThemeManager.swift \
     Sources/Models/FeedArticle.swift \
     Sources/Models/ArchiveSearchToken.swift \
+    Sources/Models/SmartBinder.swift \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \
@@ -103,6 +104,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/App/LibraryBackup.swift \
     Sources/Views/List/FeedHealthLine.swift \
     Sources/Views/FeedCatalogView.swift \
+    Sources/Views/SmartBinderSheet.swift \
     Sources/Views/TensionIndexView.swift \
     Sources/Views/SettingsView.swift \
     Tests/NativeUIQAChecks.swift \

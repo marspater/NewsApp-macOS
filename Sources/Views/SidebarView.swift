@@ -23,6 +23,7 @@ struct SidebarView: View {
         // Default no-op action
     }
 
+    @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var articleStore: ArticleStore
@@ -32,6 +33,9 @@ struct SidebarView: View {
     @State private var newFeedURL: String = ""
     @State private var isDropTargeted = false
     @State private var pendingSectionRemoval: String?
+    @State private var editingSmartBinder: SmartBinder?
+    @State private var pendingBinderRemoval: SmartBinder?
+    @State private var isNewSmartBinderSheetPresented = false
     /// On macOS 27 a row click does not keep keyboard focus in the sidebar once the window title and toolbar
     /// search update for the new section, so arrow keys reached the story list instead.
     @FocusState private var isListFocused: Bool
@@ -148,6 +152,22 @@ struct SidebarView: View {
                         }
                     }
             }
+            ForEach(appSettings.smartBinders) { binder in
+                smartBinderRow(binder: binder)
+                    .contextMenu {
+                        Button {
+                            editingSmartBinder = binder
+                        } label: {
+                            Label("Edit Smart Binder…", systemImage: "pencil")
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            pendingBinderRemoval = binder
+                        } label: {
+                            Label("Remove Smart Binder…", systemImage: "trash")
+                        }
+                    }
+            }
         }
         .confirmationDialog(
             "Remove the section “\(pendingSectionRemoval ?? "")”?",
@@ -159,6 +179,45 @@ struct SidebarView: View {
         } message: { _ in
             Text("Stories stay in your library; only the sidebar entry goes.")
         }
+        .confirmationDialog(
+            "Remove the smart binder “\(pendingBinderRemoval?.name ?? "")”?",
+            isPresented: Binding(
+                get: { pendingBinderRemoval != nil }, set: { if !$0 { pendingBinderRemoval = nil } }),
+            presenting: pendingBinderRemoval
+        ) { binder in
+            Button("Remove Smart Binder", role: .destructive) {
+                if selectedTopic == binder.sidebarTag {
+                    selectedTopic = "Today"
+                }
+                appSettings.removeSmartBinder(binder)
+            }
+        } message: { _ in
+            Text("Stories stay in your library; only the virtual section goes.")
+        }
+        .sheet(item: $editingSmartBinder) { binder in
+            SmartBinderSheet(binder: binder)
+                .environmentObject(appSettings)
+        }
+        .sheet(isPresented: $isNewSmartBinderSheetPresented) {
+            SmartBinderSheet()
+                .environmentObject(appSettings)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newSmartBinderCommand)) { _ in
+            isNewSmartBinderSheetPresented = true
+        }
+    }
+
+    @ViewBuilder
+    private func smartBinderRow(binder: SmartBinder) -> some View {
+        let tag = binder.sidebarTag
+        Label(binder.name, systemImage: binder.icon.isEmpty ? "folder" : binder.icon)
+            .symbolVariant((selectedTopic ?? "Today") == tag ? .fill : .none)
+            .symbolRenderingMode(.monochrome)
+            .transaction { $0.animation = nil }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture().onEnded { selectedTopic = tag })
+            .tag(tag)
     }
 
     // MARK: - Popover

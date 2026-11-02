@@ -131,6 +131,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Storage/ReadManager.swift \
     Sources/App/ThemeManager.swift \
     Sources/Models/FeedArticle.swift \
+    Sources/Models/SmartBinder.swift \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \
@@ -169,6 +170,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/App/LibraryBackup.swift \
     Sources/Views/List/FeedHealthLine.swift \
     Sources/Views/FeedCatalogView.swift \
+    Sources/Views/SmartBinderSheet.swift \
     Sources/Views/TensionIndexView.swift \
     Sources/Views/SettingsView.swift \
     Tests/StoryCorpus.swift \

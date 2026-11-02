@@ -224,11 +224,13 @@ final class ArticleStore: ObservableObject {
 
     func fetchArticles(
         section: String? = nil,
+        smartBinder: SmartBinder? = nil,
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         limit: Int? = 500
     ) async throws -> [FeedArticle] {
-        try await database.fetchArticles(section: section, isRead: isRead, isSaved: isSaved, limit: limit)
+        try await database.fetchArticles(
+            section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, limit: limit)
     }
 
     struct NavigationRequest: Equatable, Sendable {

@@ -66,6 +66,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Storage/ReadManager.swift \
     Sources/App/ThemeManager.swift \
     Sources/Models/FeedArticle.swift \
+    Sources/Models/SmartBinder.swift \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \
@@ -74,6 +75,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Views/DesignSystem.swift \
     Sources/Views/Reader/ArticleRemoteImage.swift \
     Sources/Views/Reader/ReaderSupportViews.swift \
+    Sources/Views/SmartBinderSheet.swift \
     Sources/Views/Reader/EventOverviewReaderView.swift \
     Sources/App/NewsSignposts.swift \
     Sources/App/UpdateChecker.swift \

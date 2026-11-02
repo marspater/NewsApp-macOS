@@ -79,6 +79,7 @@ extension Notification.Name {
     static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
     static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
     static let showFeedUpdatesCommand = Notification.Name("showFeedUpdatesCommand")
+    static let newSmartBinderCommand = Notification.Name("newSmartBinderCommand")
 }
 
 @main
@@ -169,6 +170,12 @@ struct NewsApp: App {
                 Divider()
                 Button("Back Up Library…") { LibraryBackup.backUpLibrary() }
                 Button("Restore Library…") { LibraryBackup.restoreLibrary() }
+            }
+            CommandGroup(replacing: .newItem) {
+                Button("New Smart Binder…") {
+                    NotificationCenter.default.post(name: .newSmartBinderCommand, object: nil)
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
             }
             CommandGroup(replacing: .importExport) {
                 Button("Add Feed…") { addFeedSubscription?.perform() }

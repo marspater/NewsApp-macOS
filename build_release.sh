@@ -90,6 +90,7 @@ SWIFT_SOURCES=(
     Sources/App/ThemeManager.swift
     Sources/Models/FeedArticle.swift
     Sources/Models/ArchiveSearchToken.swift
+    Sources/Models/SmartBinder.swift
     Sources/Storage/CacheManager.swift
     Sources/Coordinators/FeedManager.swift
     Sources/App/AppContainer.swift
@@ -124,6 +125,7 @@ SWIFT_SOURCES=(
     Sources/Views/MainView.swift
     Sources/Views/SettingsView.swift
     Sources/Views/FeedCatalogView.swift
+    Sources/Views/SmartBinderSheet.swift
     Sources/Views/OnboardingView.swift
     Sources/Views/List/FeedHealthLine.swift
     Sources/Storage/SavedStoriesManager.swift
