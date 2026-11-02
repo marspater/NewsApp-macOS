@@ -310,10 +310,12 @@ final class NotificationService: Sendable {
     }
 
     /// Posts one story banner now, outside triage and its limits (Help > Show Sample Notification), so the banner can be
-    /// checked without waiting for a refresh. Nothing is recorded in the delivery log.
-    func postSample(_ article: FeedArticle) async {
+    /// checked without waiting for a refresh. Nothing is recorded in the delivery log, and its own identifier keeps it
+    /// from replacing or clearing the story's real banner. `continues` is asked before the image download and the post,
+    /// as for a real banner, so a reader outside Full mode gets no headline and no image request.
+    func postSample(_ article: FeedArticle, continues: @Sendable () async -> Bool) async {
         let banner = PlannedBanner(lane: .normal, grouped: false, article: article, thread: "news-sample", sound: false)
-        _ = await triggerFullNotification(banner, at: Date())
+        _ = await triggerFullNotification(banner, at: Date(), identifier: "news-sample", continues: continues)
     }
 
     /// Stable across launches, so a story replaces its earlier banner; `hashValue` is reseeded per process.
@@ -391,7 +393,8 @@ final class NotificationService: Sendable {
     }
 
     private func triggerFullNotification(
-        _ banner: PlannedBanner, at now: Date, continues: @Sendable () async -> Bool = { true }
+        _ banner: PlannedBanner, at now: Date, identifier sampleIdentifier: String? = nil,
+        continues: @Sendable () async -> Bool = { true }
     ) async -> PostOutcome {
         let content = UNMutableNotificationContent()
         content.sound = banner.sound ? .default : nil
@@ -414,7 +417,7 @@ final class NotificationService: Sendable {
                 // The app-drawn banner loads the photo again through the reader's image cache.
                 content.userInfo["imageURL"] = imageUrl.absoluteString
             }
-            identifier = Self.notificationIdentifier(for: article)
+            identifier = sampleIdentifier ?? Self.notificationIdentifier(for: article)
         } else {
             content.title = banner.title
             content.body = Self.groupedBody(banner)

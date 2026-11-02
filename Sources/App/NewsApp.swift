@@ -445,7 +445,13 @@ struct KeyboardShortcutsCommands: Commands {
                 let stories = ArticleStore.shared.articles
                 guard let story = stories.first(where: { FeedArticle.bestCardImage(in: [$0]) != nil }) ?? stories.first
                 else { return }
-                Task { await NotificationService.shared.postSample(story) }
+                Task {
+                    await NotificationService.shared.postSample(story) {
+                        await MainActor.run {
+                            AppSettings.shared.notificationsEnabled && AppSettings.shared.notificationMode == .full
+                        }
+                    }
+                }
             }
             Button("Export Diagnostics…") {
                 DiagnosticsExport.run(
@@ -540,7 +546,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // A reader who set News's alert style to None gets no banner from the app either.
         guard let banner = StoryBanner(notification.request) else { return [.banner, .list, .sound] }
         let settings = await center.notificationSettings()
-        guard settings.alertSetting == .enabled, settings.alertStyle != .none else { return [.banner, .list, .sound] }
+        // Only the banner style is the app's: Alerts stay until dismissed and hidden previews redact, both as the system
+        // draws them. Focus has no public signal here, so a story arriving during Focus can still show this banner.
+        guard settings.alertSetting == .enabled, settings.alertStyle == .banner, settings.showPreviewsSetting != .never
+        else { return [.banner, .list, .sound] }
         return await StoryBannerPresenter.shared.present(banner) ? [.list, .sound] : [.banner, .list, .sound]
     }
 
