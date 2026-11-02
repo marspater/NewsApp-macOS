@@ -66,6 +66,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -target "$(uname -m)-apple-macos${TARGET_MA
     Sources/Storage/ReadManager.swift \
     Sources/App/ThemeManager.swift \
     Sources/Models/FeedArticle.swift \
+    Sources/Models/ArchiveSearchToken.swift \
+    Sources/Models/ArticleSearchState.swift \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \

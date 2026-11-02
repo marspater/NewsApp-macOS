@@ -58,6 +58,7 @@ struct ReaderAccessibilityTests {
         testKeyboardShortcutsAndModifiers()
         testLeadImageFraming()
         testEarlierInStoryState()
+        testReaderTagSearchAccessibilityAndNavigation()
 
         print("Finished \(testsRun) reader accessibility checks with \(failures) failures.")
         if failures > 0 {
@@ -348,5 +349,84 @@ struct ReaderAccessibilityTests {
         assertTrue(path.isEmpty, "Reselecting the section or ⌘1 returns to the list")
         ArticleDetailView.stepBack(&path)
         assertTrue(path.isEmpty, "Stepping back from the list is a no-op")
+    }
+
+    // MARK: - 11. Reader Clickable Tag Search Accessibility & Navigation (U4 #930)
+    static func testReaderTagSearchAccessibilityAndNavigation() {
+        print("  - Testing Reader Tag Search Accessibility & Breadcrumbs (U4 #930)...")
+
+        // 1. Accessibility labels and hints
+        let categoryName = "Science"
+        let entityName = "Cold Fusion"
+        let categoryLabel = "Search for \(categoryName)"
+        let entityLabel = "Search for \(entityName)"
+        let categoryHint = "Opens archive search for this category"
+        let entityHint = "Opens archive search for this topic"
+        let categoryContextMenu = "Search for “\(categoryName)”"
+        let entityContextMenu = "Search for “\(entityName)”"
+
+        assertEqual(categoryLabel, "Search for Science", "Category tag button accessibility label")
+        assertEqual(entityLabel, "Search for Cold Fusion", "Entity tag button accessibility label")
+        assertEqual(categoryHint, "Opens archive search for this category", "Category tag accessibility hint")
+        assertEqual(entityHint, "Opens archive search for this topic", "Entity tag accessibility hint")
+        assertEqual(categoryContextMenu, "Search for “Science”", "Category context menu item title")
+        assertEqual(entityContextMenu, "Search for “Cold Fusion”", "Entity context menu item title")
+
+        // 2. Pure query transformations: category tokens
+        let techToken = ArticleSearchState.categoryToken(for: "Technology")
+        assertEqual(techToken.expression, "category:technology", "Category token has category: prefix")
+        assertEqual(techToken.displayName, "Category: technology", "Category token formatted display name")
+
+        let diacriticCat = ArticleSearchState.categoryToken(for: "Santé")
+        assertEqual(diacriticCat.expression, "category:santé", "Category preserves diacritics in token")
+
+        let multiWordCat = ArticleSearchState.categoryToken(for: "Artificial Intelligence")
+        assertEqual(
+            multiWordCat.expression, "category:artificial-intelligence", "Multi-word category converted cleanly")
+
+        // 3. Pure query transformations: entity quoted phrases
+        let multiWordEntity = ArticleSearchState.entityQuery(for: "Cold Fusion")
+        assertEqual(multiWordEntity, "\"Cold Fusion\"", "Multi-word entity quoted as phrase")
+
+        let alreadyQuoted = ArticleSearchState.entityQuery(for: "\"Cold Fusion\"")
+        assertEqual(alreadyQuoted, "\"Cold Fusion\"", "Surrounding quotes not duplicated")
+
+        let curlyQuoted = ArticleSearchState.entityQuery(for: "“Cold Fusion”")
+        assertEqual(curlyQuoted, "\"Cold Fusion\"", "Typographical curly quotes normalized")
+
+        let diacriticEntity = ArticleSearchState.entityQuery(for: "Beyoncé")
+        assertEqual(diacriticEntity, "\"Beyoncé\"", "Diacritics preserved in entity phrase")
+
+        let internalQuotes = ArticleSearchState.entityQuery(for: "Dwight \"The Rock\" Johnson")
+        assertEqual(internalQuotes, "\"Dwight 'The Rock' Johnson\"", "Internal quotes converted to single quotes")
+
+        // 4. Navigation breadcrumb flow
+        let testArticle = FeedArticle(
+            title: "Breakthrough in Fusion Energy",
+            link: "https://example.com/fusion",
+            guid: "fusion-guid-1",
+            description: "Scientists achieve sustained reaction",
+            pubDate: Date(),
+            source: "Nature",
+            category: "Science"
+        )
+        let wrap = FeedArticleWrap(article: testArticle, contextArticles: [testArticle])
+        let state = ArticleSearchState()
+        var navPath = NavigationPath()
+        navPath.append(wrap)
+
+        // Click tag -> reveals search, keeps return breadcrumb
+        state.openTag(tag: "Cold Fusion", isCategory: false, from: wrap, path: &navPath)
+        assertTrue(navPath.isEmpty, "Navigation path popped to display archive search results")
+        assertEqual(state.searchText, "\"Cold Fusion\"", "Search text populated with entity phrase")
+        assertTrue(state.searchPresented, "Search presented state is active")
+        assertEqual(state.returnStory?.article.id, testArticle.id, "Return breadcrumb points to originating story")
+
+        // Back / Esc -> returns to story, collapses search presentation, keeps query in history
+        state.returnToStory(path: &navPath)
+        assertEqual(navPath.count, 1, "Navigation path restored originating story")
+        assertFalse(state.searchPresented, "Search presentation collapsed upon return")
+        assertTrue(state.returnStory == nil, "Return breadcrumb cleared upon returning")
+        assertTrue(state.searchHistory.contains("\"Cold Fusion\""), "Search history keeps the query after return")
     }
 }

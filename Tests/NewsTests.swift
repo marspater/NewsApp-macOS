@@ -16616,6 +16616,164 @@ struct NewsTests {
         let fallbackToken = ArchiveSearchToken(expression: "custom:term")
         assertEqual(fallbackToken.displayName, "custom:term", "Fallback token keeps raw expression")
         assertEqual(fallbackToken.systemImage, "magnifyingglass", "Fallback token uses magnifyingglass")
+
+        // 8. ArticleSearchState tag search transformations and navigation breadcrumbs (#930)
+        // Category token generation and sanitization
+        assertEqual(
+            ArticleSearchState.sanitizeCategory("Science"),
+            "science",
+            "Category sanitization lowercases and trims"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeCategory("category:Science"),
+            "science",
+            "Category sanitization strips existing category: prefix"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeCategory("  World  News  "),
+            "world-news",
+            "Multi-word category converts whitespace runs to hyphens"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeCategory("Économie & Finance"),
+            "économie-&-finance",
+            "Category sanitization preserves diacritics"
+        )
+        assertEqual(
+            ArticleSearchState.categoryToken(for: "Science").expression,
+            "category:science",
+            "Category token produces category: prefix"
+        )
+        assertEqual(
+            ArticleSearchState.categoryToken(for: "Technology").displayName,
+            "Category: technology",
+            "Category token has human-readable display name"
+        )
+        assertEqual(
+            ArticleSearchState.categoryToken(for: "Science").systemImage,
+            "tag",
+            "Category token uses tag SF Symbol"
+        )
+
+        // Entity phrase query generation and sanitization
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("Cold Fusion"),
+            "Cold Fusion",
+            "Entity sanitization preserves title casing"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("\"Cold Fusion\""),
+            "Cold Fusion",
+            "Entity sanitization strips existing surrounding quotes"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("“Cold Fusion”"),
+            "Cold Fusion",
+            "Entity sanitization strips curly quotes"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("«Cold Fusion»"),
+            "Cold Fusion",
+            "Entity sanitization strips guillemets"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("Beyoncé"),
+            "Beyoncé",
+            "Entity sanitization preserves diacritics"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("Apple Inc."),
+            "Apple Inc.",
+            "Entity sanitization preserves punctuation"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("Dwight \"The Rock\" Johnson"),
+            "Dwight 'The Rock' Johnson",
+            "Internal double quotes become single quotes"
+        )
+        assertEqual(
+            ArticleSearchState.entityQuery(for: "Cold Fusion"),
+            "\"Cold Fusion\"",
+            "Entity query wraps name in phrase quotes"
+        )
+        assertEqual(
+            ArticleSearchState.entityQuery(for: "\"Cold Fusion\""),
+            "\"Cold Fusion\"",
+            "Already quoted entity is not double-quoted"
+        )
+        assertEqual(
+            ArticleSearchState.entityQuery(for: "   "),
+            "",
+            "Empty entity produces empty query"
+        )
+
+        // Combined searchQuery helper and ArticleFilterQuery compatibility
+        let catQuery = ArticleSearchState.searchQuery(for: "Science", isCategory: true)
+        assertEqual(catQuery.token?.expression, "category:science", "Category query sets token")
+        assertEqual(catQuery.text, "", "Category query has empty text")
+        assertEqual(catQuery.query, "category:science", "Combined query string matches token")
+        let parsedCat = ArticleFilterQuery.parse(catQuery.query)
+        assertEqual(parsedCat.categoryFilter, "science", "ArticleFilterQuery extracts category from query")
+
+        let entQuery = ArticleSearchState.searchQuery(for: "Cold Fusion", isCategory: false)
+        assertEqual(entQuery.token, nil, "Entity query has no token")
+        assertEqual(entQuery.text, "\"Cold Fusion\"", "Entity query wraps phrase in quotes")
+        assertEqual(entQuery.query, "\"Cold Fusion\"", "Combined entity query is quoted phrase")
+        let parsedEnt = ArticleFilterQuery.parse(entQuery.query)
+        assertEqual(parsedEnt.terms, ["cold", "fusion"], "ArticleFilterQuery extracts entity terms")
+
+        // State & Navigation breadcrumb round trip
+        await MainActor.run {
+            let testSearchState = ArticleSearchState()
+            assertEqual(testSearchState.isSearching, false, "Initial search state is not searching")
+            assertEqual(testSearchState.returnStory, nil, "Initial return story is nil")
+
+            var navPath = NavigationPath()
+            let wrapA = FeedArticleWrap(article: art1, contextArticles: [art1, art2])
+            navPath.append(wrapA)
+            assertEqual(navPath.count, 1, "Navigation path has originating story")
+
+            // Clicking a tag opens search, empties path, saves breadcrumb
+            testSearchState.openTag(tag: "Cold Fusion", isCategory: false, from: wrapA, path: &navPath)
+            assertEqual(navPath.count, 0, "Navigation path is cleared to reveal search results")
+            assertEqual(testSearchState.isSearching, true, "Search state is active")
+            assertEqual(testSearchState.searchText, "\"Cold Fusion\"", "Search text holds quoted entity")
+            assertEqual(testSearchState.searchPresented, true, "Search is marked presented")
+            assertEqual(testSearchState.returnStory?.article.id, art1.id, "Return story points to originating story")
+            assertTrue(testSearchState.searchHistory.contains("\"Cold Fusion\""), "Search history records query")
+
+            // Esc or Back returns to story
+            testSearchState.returnToStory(path: &navPath)
+            assertEqual(navPath.count, 1, "Navigation path restores originating story")
+            assertEqual(testSearchState.returnStory, nil, "Return story is cleared on return")
+            assertEqual(testSearchState.searchPresented, false, "Search presentation collapses on return")
+            assertEqual(testSearchState.searchText, "", "Search text is cleared on return")
+            assertTrue(
+                testSearchState.searchHistory.contains("\"Cold Fusion\""),
+                "Search history keeps query after return")
+
+            // Nested search tags (Story A -> tag search 1 -> Story B -> tag search 2)
+            let wrapB = FeedArticleWrap(article: art2, contextArticles: [art2])
+            navPath = NavigationPath()
+            navPath.append(wrapA)
+            testSearchState.openTag(tag: "Science", isCategory: true, from: wrapA, path: &navPath)
+            assertEqual(testSearchState.searchTokens.first?.expression, "category:science", "Category token is active")
+            assertEqual(testSearchState.returnStory?.article.id, art1.id, "Return story is art1")
+
+            // User opens Story B from search results, then clicks an entity tag
+            navPath.append(wrapB)
+            testSearchState.openTag(tag: "AI Silicon", isCategory: false, from: wrapB, path: &navPath)
+            assertEqual(testSearchState.returnStory?.article.id, art2.id, "Top return story is art2")
+
+            // First Back returns to Story B
+            testSearchState.returnToStory(path: &navPath)
+            assertEqual(navPath.count, 1, "Restored Story B")
+
+            // Second Back returns to Story A
+            testSearchState.returnToStory(path: &navPath)
+            assertEqual(navPath.count, 2, "Restored Story A")
+            assertEqual(testSearchState.returnStory, nil, "Return stack is now empty")
+        }
     }
 
     static func testDistributionAndEntitlementsIntegrity() async {
