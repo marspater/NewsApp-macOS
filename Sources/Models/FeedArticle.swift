@@ -55,7 +55,7 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         return pubDate.formatted(.dateTime.year().month(.abbreviated).day())
     }
 
-    /// One formatter for every card: cards made one each per render, which showed in scrolling (#778).
+    ///One formatter for every card: cards made one each per render, which showed in scrolling (#778).
     @MainActor private static let cardRelativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = .autoupdatingCurrent
@@ -63,6 +63,28 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         formatter.dateTimeStyle = .numeric
         return formatter
     }()
+
+    @MainActor private static let cardNamedAbbreviatedFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.unitsStyle = .abbreviated
+        formatter.dateTimeStyle = .named
+        return formatter
+    }()
+
+    @MainActor private static let cardNamedWideFormatter: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = .autoupdatingCurrent
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
+        return formatter
+    }()
+
+    @MainActor
+    static func relativeUpdateText(for date: Date, now: Date = Date(), abbreviated: Bool) -> String {
+        let formatter = abbreviated ? cardNamedAbbreviatedFormatter : cardNamedWideFormatter
+        return formatter.localizedString(for: date, relativeTo: now)
+    }
 
     /// The publisher to show: the catalog's name for the story's site, else the first line of the feed's own title,
     /// which is often a section ("World news") or a slogan.

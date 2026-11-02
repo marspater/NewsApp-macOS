@@ -90,14 +90,13 @@ struct ArticleListView: View {
     @AppStorage("briefingEditionSelectedAt") private var briefingEditionSelectedAt = 0.0
     @AppStorage("briefingEditionArticleIDs") private var briefingEditionArticleIDs = ""
     @AppStorage("readingInterestsResetAt") private var readingInterestsResetAt = 0.0
-    @State private var imagePrefetchStart = 0
     @Environment(\.readerImageLoader) private var imageLoader
     /// Launch shows the cached snapshot once, in one transition (DESIGN.md 13, #602); later windows start settled.
     @MainActor static var hasSettledLaunch = false
     @State private var isSettled = ArticleListView.hasSettledLaunch
 
-    private var imagePrefetchURLs: [URL] {
-        buffer.displayed.articles.dropFirst(imagePrefetchStart).prefix(30).compactMap {
+    private var initialPrefetchURLs: [URL] {
+        buffer.displayed.articles.prefix(30).compactMap {
             $0.imageUrl.flatMap(URL.init(string:))
         }
     }
@@ -108,8 +107,7 @@ struct ArticleListView: View {
     }
 
     private func prefetchAhead(of id: String) {
-        guard let index = buffer.displayed.articles.firstIndex(where: { $0.id == id }) else { return }
-        imagePrefetchStart = Self.prefetchStart(visibleIndex: index, currentStart: imagePrefetchStart)
+        groupedEntries.prefetchAhead(of: id, in: buffer.displayed.articles, using: imageLoader)
     }
     @State private var buffer = FeedUpdateBuffer()
     @State private var pageRequest = 0
@@ -273,9 +271,9 @@ struct ArticleListView: View {
         .navigationTitle(locationTitle)
         // The masthead shows the location, so the toolbar does not repeat it (DESIGN.md 5).
         .toolbar(removing: .title)
-        .task(id: imagePrefetchURLs) {
+        .task(id: initialPrefetchURLs) {
             guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
-            await DecodedImageCache.prefetch(imagePrefetchURLs, using: imageLoader)
+            await DecodedImageCache.prefetch(initialPrefetchURLs, using: imageLoader)
         }
         .task(id: taskQueryReloadKey) {
             await performQueryReload()
@@ -508,7 +506,7 @@ struct ArticleListView: View {
         loadedPageRequest = pageRequest
         if isNewQuery {
             buffer = FeedUpdateBuffer()
-            imagePrefetchStart = 0
+            groupedEntries.resetPrefetch()
             cursor = nil
             hasMoreResults = false
             expandedEvents = []
@@ -1053,7 +1051,8 @@ struct ArticleListView: View {
                         initialExperienceMode: .sourcePublication)
                 },
                 separate: { member in separate(member, from: summary.eventID) },
-                combine: { related in combine(related, into: summary.eventID) }
+                combine: { related in combine(related, into: summary.eventID) },
+                store: articleStore
             )
             .equatable()
             .id(entry.id)
@@ -1329,21 +1328,54 @@ struct ArticleListView: View {
     }
 }
 
-/// Memoizes `FeedSnapshot.entries(_:)`. An unchanged snapshot compares in constant time, since its arrays share
-/// storage with the cached one; regrouping a 200-story page on every read showed in scrolling (#778).
+/// Memoizes `FeedSnapshot.entries(_:)` and manages scroll-ahead image prefetching without invalidating `ArticleListView`
+/// during scroll gestures (#778).
 @MainActor
 private final class GroupedEntries {
     private var snapshot: FeedSnapshot?
     private var mode: FeedGroupingMode?
     private var cached: [FeedEntry] = []
+    private var indexByID: [String: Int] = [:]
+    private var prefetchStart = 0
+    private var prefetchTask: Task<Void, Never>?
 
     func entries(of snapshot: FeedSnapshot, mode: FeedGroupingMode) -> [FeedEntry] {
         if snapshot != self.snapshot || mode != self.mode {
             cached = snapshot.entries(mode)
+            if snapshot.articles != self.snapshot?.articles {
+                var map: [String: Int] = [:]
+                map.reserveCapacity(snapshot.articles.count)
+                for (index, article) in snapshot.articles.enumerated() where map[article.id] == nil {
+                    map[article.id] = index
+                }
+                indexByID = map
+            }
             self.snapshot = snapshot
             self.mode = mode
         }
         return cached
+    }
+
+    func resetPrefetch() {
+        prefetchStart = 0
+        prefetchTask?.cancel()
+        prefetchTask = nil
+    }
+
+    func prefetchAhead(
+        of id: String, in articles: [FeedArticle],
+        using loader: @escaping @Sendable (URL) async throws -> CGImage
+    ) {
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        guard let index = indexByID[id] ?? articles.firstIndex(where: { $0.id == id }) else { return }
+        let nextStart = ArticleListView.prefetchStart(visibleIndex: index, currentStart: prefetchStart)
+        guard nextStart != prefetchStart else { return }
+        prefetchStart = nextStart
+        let urls = articles.dropFirst(nextStart).prefix(30).compactMap { $0.imageUrl.flatMap(URL.init(string:)) }
+        prefetchTask?.cancel()
+        prefetchTask = Task {
+            await DecodedImageCache.prefetch(urls, using: loader)
+        }
     }
 }
 

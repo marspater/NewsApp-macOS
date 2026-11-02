@@ -301,8 +301,7 @@ struct BriefingTensionStripView: View {
     }
 }
 
-/// The last seven UTC days of readings as a small line; a missing day breaks the line. One reading or none shows a
-/// flat baseline.
+/// The last seven UTC days of readings as a sparkline; one reading or none shows a baseline with a point marker.
 struct BriefingTensionSparklineView: View {
     let readings: [WorldTensionReading]
     /// Where the flat line sits without two readings this week: the reading shown, which may be older than the week.
@@ -310,33 +309,75 @@ struct BriefingTensionSparklineView: View {
 
     private static let chartWidth: CGFloat = 140
     private static let chartHeight: CGFloat = 36
+    private static let areaTopOpacity: Double = 0.24
+    private static let areaBottomOpacity: Double = 0.02
+    private static let baselineOpacity: Double = 0.55
+
+    static func yDomain(for readings: [WorldTensionReading], baseline: Int) -> ClosedRange<Int> {
+        let scores = readings.map(\.assessment.score)
+        guard let minScore = scores.min(), let maxScore = scores.max() else {
+            let low = max(0, baseline - 8)
+            return low...min(100, max(low + 8, baseline + 8))
+        }
+        let span = max(6, maxScore - minScore)
+        let pad = max(3, span / 2)
+        let lower = max(0, minScore - pad)
+        let upper = min(100, max(lower + 8, maxScore + pad))
+        return lower...upper
+    }
 
     var body: some View {
-        let segments = WorldTensionState.segments(readings)
+        let domain = Self.yDomain(for: readings, baseline: baseline)
+        let activeLevel = readings.last?.level ?? TensionLevel(index: Double(baseline))
+        let tint = AppColor.tension(activeLevel)
         Chart {
             if readings.count >= 2 {
-                ForEach(Array(readings.enumerated()), id: \.element.id) { index, item in
-                    LineMark(
+                ForEach(readings) { item in
+                    AreaMark(
                         x: .value("Day", item.id),
-                        y: .value("Reading", item.assessment.score),
-                        series: .value("Segment", segments[index])
+                        yStart: .value("Floor", domain.lowerBound),
+                        yEnd: .value("Reading", item.assessment.score)
                     )
                     .interpolationMethod(.catmullRom)
-                    .foregroundStyle(AppColor.secondaryText)
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [tint.opacity(Self.areaTopOpacity), tint.opacity(Self.areaBottomOpacity)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+
+                    LineMark(
+                        x: .value("Day", item.id),
+                        y: .value("Reading", item.assessment.score)
+                    )
+                    .interpolationMethod(.catmullRom)
+                    .lineStyle(StrokeStyle(lineWidth: AppLayout.hoverStroke, lineCap: .round, lineJoin: .round))
+                    .foregroundStyle(tint)
 
                     PointMark(
                         x: .value("Day", item.id),
                         y: .value("Reading", item.assessment.score)
                     )
+                    .symbolSize(24)
                     .foregroundStyle(AppColor.tension(item.level))
                 }
             } else {
-                RuleMark(y: .value("Baseline", readings.last?.assessment.score ?? baseline))
-                    .foregroundStyle(AppColor.borderSubtle)
-                    .lineStyle(StrokeStyle(lineWidth: AppLayout.hairline, dash: [4, 4]))
+                let score = readings.last?.assessment.score ?? baseline
+                RuleMark(y: .value("Baseline", score))
+                    .foregroundStyle(tint.opacity(Self.baselineOpacity))
+                    .lineStyle(StrokeStyle(lineWidth: AppLayout.hoverStroke, dash: [4, 3]))
+                if let single = readings.last {
+                    PointMark(
+                        x: .value("Day", single.id),
+                        y: .value("Reading", single.assessment.score)
+                    )
+                    .symbolSize(30)
+                    .foregroundStyle(AppColor.tension(single.level))
+                }
             }
         }
-        .chartYScale(domain: 0...100)
+        .chartYScale(domain: domain)
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .frame(width: Self.chartWidth, height: Self.chartHeight)
@@ -461,13 +502,16 @@ struct BriefingTileView: View {
         .contextMenu {
             StoryContextMenuItems(article: article)
         }
-        .background(AppColor.surface)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .background {
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .fill(AppColor.surface)
+                .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
+        }
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                 .strokeBorder(appearance.border, lineWidth: appearance.width)
         )
-        .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
         .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
         .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
         .onHover { isHovered = $0 }

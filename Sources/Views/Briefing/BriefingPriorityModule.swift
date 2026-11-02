@@ -56,15 +56,75 @@ struct BriefingPriorityData: Equatable, Sendable {
 
     let cards: [Card]
 
-    /// Reports in the last six hours against the six hours before.
+    /// Reports in the last six hours against the six hours before, with fallback velocity over earlier windows and
+    /// active breaking bursts so freshly updated threads are rated accurately.
     static func momentum(dates: [Date], now: Date) -> Momentum {
         let window: TimeInterval = 6 * 3600
-        let recent = dates.filter { $0 <= now && now.timeIntervalSince($0) < window }.count
-        let before = dates.filter { now.timeIntervalSince($0) >= window && now.timeIntervalSince($0) < 2 * window }
-            .count
+        let validDates = dates.filter { $0 <= now.addingTimeInterval(300) }
+        let burst = validDates.filter { now.timeIntervalSince($0) < 2 * 3600 }.count
+        let recent = validDates.filter { now.timeIntervalSince($0) < window }.count
+        let before = validDates.filter {
+            let age = now.timeIntervalSince($0)
+            return age >= window && age < 2 * window
+        }.count
+        if burst >= 2 && recent >= before { return .rising }
         if recent > before { return .rising }
-        if recent < before { return .fading }
+        if recent < before {
+            // A thread with multiple fresh reports in the last two hours is still actively developing, not fading.
+            if burst >= 2 { return .steady }
+            return .fading
+        }
         return .steady
+    }
+
+    /// Deterministic impact rating (`Major`, `Notable`, `Minor`) when no stored `StoryImportance` is present, combining
+    /// publisher convergence, original reporting breadth, crisis/escalation classification and velocity.
+    static func assessImportance(
+        stored: StoryImportance? = nil,
+        publisherCount: Int,
+        originalCount: Int? = nil,
+        representative: FeedArticle,
+        overview: EventOverviewDocument? = nil,
+        momentum: Momentum = .steady,
+        isDeveloping: Bool = false
+    ) -> StoryImportance {
+        if let stored { return stored }
+        let quoteText = [representative.title, representative.description].joined(separator: ". ")
+        let fact = PassageAnchoredFact(
+            id: "imp_\(representative.id)",
+            statement: representative.title,
+            passageID: "p_\(representative.id)",
+            quote: quoteText,
+            articleID: representative.id
+        )
+        let classified = TensionEventClassifier.classify([fact])
+        let highSeverityTypes: Set<TensionEventType> = [
+            .armedConflict, .terrorism, .healthEmergency, .disaster,
+        ]
+        let isHighSeverity = classified.type.map { highSeverityTypes.contains($0) } ?? false
+        let hasCasualtiesOrScale =
+            classified.deaths != TensionMagnitude.notReported || classified.affected != TensionMagnitude.notReported
+        let isEscalating = classified.escalation == TensionEscalation.escalating
+        let hasSectorImpact = !(overview?.industryImpact.isEmpty ?? true)
+        let original = originalCount ?? publisherCount
+
+        var score = 0
+        if publisherCount >= 8 {
+            score += 3
+        } else if publisherCount >= 5 {
+            score += 2
+        } else if publisherCount >= 3 {
+            score += 1
+        }
+        if original >= 5 { score += 1 }
+        if isHighSeverity { score += 2 } else if classified.type != nil { score += 1 }
+        if hasCasualtiesOrScale || isEscalating { score += 1 }
+        if hasSectorImpact { score += 1 }
+        if momentum == .rising || isDeveloping { score += 1 }
+
+        if score >= 4 { return .major }
+        if score >= 2 || publisherCount >= 2 { return .notable }
+        return .minor
     }
 
     /// A publisher's text that carries another agency's wire copy. A wire agency's own report is original.
@@ -107,20 +167,31 @@ struct BriefingPriorityData: Equatable, Sendable {
             let links = Dictionary(members.map { ($0.id, $0.link) }, uniquingKeysWith: { first, _ in first })
             let firstReport = members.map(\.pubDate).min()
             let latest = summary.latestDate ?? thread.representative.pubDate
+            let isDeveloping = BriefingView.isDeveloping(
+                .event(summary, representative: thread.representative, visibleMembers: []), now: context.now)
+            let threadMomentum = momentum(dates: summary.members.map(\.date), now: context.now)
+            let resolvedImportance = assessImportance(
+                stored: priorities[thread.representative.id]?.importance,
+                publisherCount: thread.publisherCount,
+                originalCount: original,
+                representative: thread.representative,
+                overview: overview,
+                momentum: threadMomentum,
+                isDeveloping: isDeveloping
+            )
+            let reportedQuote =
+                overview.flatMap { reported($0, links: links) }
+                ?? fallbackReported(representative: thread.representative, members: members)
             cards.append(
                 Card(
                     id: summary.eventID, summary: summary,
                     meta: "\(thread.publisherCount) publishers · \(BriefingThread.ago(latest, now: context.now))",
-                    state: BriefingView.isDeveloping(
-                        .event(
-                            summary, representative: thread.representative,
-                            visibleMembers: []), now: context.now)
-                        ? "Developing" : summary.hasSubstantiveUpdate ? "Updated" : nil,
+                    state: isDeveloping ? "Developing" : summary.hasSubstantiveUpdate ? "Updated" : nil,
                     headline: thread.representative.title,
-                    impact: impactText(priorities[thread.representative.id]?.importance),
-                    momentum: momentum(dates: summary.members.map(\.date), now: context.now),
+                    impact: impactText(resolvedImportance),
+                    momentum: threadMomentum,
                     original: original.map { "\($0) of \(thread.publisherCount)" },
-                    reported: overview.flatMap { reported($0, links: links) }, accounts: overview.map(accounts) ?? [],
+                    reported: reportedQuote, accounts: overview.map(accounts) ?? [],
                     notYetReported: overview.flatMap { notYetReported($0, links: links) },
                     threadDay: firstReport.map {
                         (Calendar.current.dateComponents([.day], from: $0, to: context.now).day ?? 0) + 1
@@ -130,13 +201,30 @@ struct BriefingPriorityData: Equatable, Sendable {
         return Self(cards: cards)
     }
 
-    private static func impactText(_ importance: StoryImportance?) -> String {
+    static func impactText(_ importance: StoryImportance?) -> String {
         switch importance {
         case .major: return "Major"
         case .notable: return "Notable"
         case .minor: return "Minor"
-        case nil: return "Not rated"
+        case nil: return "Notable"
         }
+    }
+
+    private static func fallbackReported(representative: FeedArticle, members: [FeedArticle]) -> Quote? {
+        for candidate in [representative] + members {
+            let cleaned = ArticleContentRedactor.cleanText(candidate.description)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard cleaned.count >= 35,
+                cleaned.lowercased() != candidate.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            else { continue }
+            let snippet = cleaned.count > 240 ? String(cleaned.prefix(237)) + "…" : cleaned
+            return Quote(
+                text: snippet,
+                publisher: candidate.publisherName,
+                url: WebLink.url(candidate.link)
+            )
+        }
+        return nil
     }
 
     /// The quote keeps its publisher as plain text when neither the citation nor the cited member report has an http(s)
@@ -203,7 +291,7 @@ struct BriefingPriorityData: Equatable, Sendable {
                 ], notYetReported: nil, threadDay: 9, isLead: false),
             Card(
                 id: "p3", summary: nil, meta: "6 publishers · 2 h ago", state: "Updated",
-                headline: "Health officials widen containment perimeter after new cases", impact: "Not rated",
+                headline: "Health officials widen containment perimeter after new cases", impact: "Notable",
                 momentum: .rising, original: "4 of 6",
                 reported: Quote(
                     text: "Health officials confirmed cases in two districts outside the zone.",

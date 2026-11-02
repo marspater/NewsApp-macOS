@@ -58,18 +58,21 @@ struct BriefingHeroCarouselView: View {
         }
         .frame(height: AppLayout.leadStoryHeight)
         .frame(maxWidth: .infinity)
-        .background(AppColor.leadPlaceholder)
         .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .background {
+            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                .fill(AppColor.leadPlaceholder)
+                .shadow(
+                    color: isCarouselFocused ? AppShadow.cardFocusRingColor : AppShadow.cardRestingColor,
+                    radius: isCarouselFocused ? AppShadow.cardFocusRingRadius : AppShadow.cardRestingRadius, x: 0,
+                    y: isCarouselFocused ? AppShadow.cardFocusRingY : AppShadow.cardRestingY
+                )
+        }
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
                 .strokeBorder(
                     isCarouselFocused ? AppColor.accent : AppColor.border(for: contrast),
                     lineWidth: isCarouselFocused ? AppLayout.focusStroke : AppLayout.hairline)
-        )
-        .shadow(
-            color: isCarouselFocused ? AppShadow.cardFocusRingColor : AppShadow.cardRestingColor,
-            radius: isCarouselFocused ? AppShadow.cardFocusRingRadius : AppShadow.cardRestingRadius, x: 0,
-            y: isCarouselFocused ? AppShadow.cardFocusRingY : AppShadow.cardRestingY
         )
         .onHover { isHovered = $0 }
         // Focusable, so keyboard focus pauses the rotation and the arrow keys move between stories.

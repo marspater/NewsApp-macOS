@@ -35,6 +35,7 @@ enum BriefingImpactTests {
         industryGrouping()
         driversCoverage()
         timelineOrdering()
+        dynamicIndicatorsAndOverviewQuality()
         print("Finished \(checks) Briefing strategic impact checks with \(failures) failures.")
         if failures > 0 { exit(1) }
     }
@@ -42,16 +43,23 @@ enum BriefingImpactTests {
     static let now = Date(timeIntervalSince1970: 1_793_372_400)
 
     static func regionMapping() {
-        check(BriefingRegion.region(code: "IR") == .middleEastNorthAfrica, "Iran is Middle East")
-        check(BriefingRegion.region(code: "IL") == .middleEastNorthAfrica, "Western Asia is Middle East")
-        check(BriefingRegion.region(code: "LY") == .middleEastNorthAfrica, "Libya is North Africa")
-        check(BriefingRegion.region(code: "NG") == .subSaharanAfrica, "Nigeria is Sub-Saharan Africa")
+        check(BriefingRegion.region(code: "IR") == .middleEastNorthAfrica, "Iran is Middle East and Africa")
+        check(BriefingRegion.region(code: "IL") == .middleEastNorthAfrica, "Western Asia is Middle East and Africa")
+        check(BriefingRegion.region(code: "LY") == .middleEastNorthAfrica, "Libya is Middle East and Africa")
+        check(BriefingRegion.region(code: "NG") == .middleEastNorthAfrica, "Nigeria is Middle East and Africa")
         check(BriefingRegion.region(code: "FR") == .europe, "France is Europe")
         check(BriefingRegion.region(code: "US") == .northAmerica, "US is North America")
-        check(BriefingRegion.region(code: "MX") == .latinAmerica, "Mexico is Latin America")
-        check(BriefingRegion.region(code: "KZ") == .southAsia, "Central Asia joins South Asia")
-        check(BriefingRegion.region(code: "VN") == .eastSoutheastAsia, "Vietnam is East & Southeast Asia")
-        check(BriefingRegion.region(code: "AU") == .oceania, "Australia is Oceania")
+        check(BriefingRegion.region(code: "CA") == .northAmerica, "Canada is North America")
+        check(BriefingRegion.region(code: "BM") == nil, "North America is restricted to US and Canada")
+        check(BriefingRegion.region(code: "MX") == .latinAmerica, "Mexico is LATAM")
+        check(BriefingRegion.region(code: "BR") == .latinAmerica, "Brazil is LATAM")
+        check(BriefingRegion.region(code: "KZ") == .southAsia, "Central Asia joins APAC")
+        check(BriefingRegion.region(code: "VN") == .southAsia, "Vietnam is APAC")
+        check(BriefingRegion.region(code: "AU") == .southAsia, "Australia is APAC")
+        check(BriefingRegion.region(code: "JP") == .southAsia, "Japan is APAC")
+        check(TensionMacroRegion.southAsia.briefingTitle == "APAC", "APAC title")
+        check(TensionMacroRegion.middleEastNorthAfrica.briefingTitle == "Middle East and Africa", "MEA title")
+        check(TensionMacroRegion.latinAmerica.briefingTitle == "LATAM", "LATAM title")
         let story = BriefingRegionsData.sampleEntry(
             id: "impact-text", title: "Ceasefire talks resume in Egypt as Ukrainian aid arrives", publishers: 1,
             date: now)
@@ -61,7 +69,25 @@ enum BriefingImpactTests {
         let nested = BriefingRegionsData.sampleEntry(
             id: "impact-nested", title: "Aid reaches South Sudan", publishers: 1, date: now)
         check(
-            BriefingRegion.regions(of: nested.representative) == [.subSaharanAfrica], "South Sudan never counts Sudan")
+            BriefingRegion.regions(of: nested.representative) == [.middleEastNorthAfrica],
+            "South Sudan maps to Middle East and Africa without double-counting Sudan")
+        let ukraineArticle = FeedArticle(
+            storedID: "ukraine-ceasefire",
+            title: "Ukraine: Six-day localized ceasefire in Oleshky comes to end",
+            link: "https://www.dw.com/en/ukraine-ceasefire",
+            guid: "ukraine-ceasefire",
+            description:
+                "A US-brokered ceasefire in Ukraine's southern Kherson region ended on Sunday night with no violations reported.",
+            pubDate: now,
+            source: "Deutsche Welle")
+        let ukraineEntry = FeedEntry.article(ukraineArticle)
+        let ukraineFeatures = EventFeatures(places: ["@UA", "@US"], date: now)
+        let resolvedUkraine = BriefingRegionsData.resolveRegions(
+            for: ukraineEntry, features: [ukraineArticle.id: ukraineFeatures])
+        check(
+            resolvedUkraine == Set([TensionMacroRegion.europe]),
+            "Ukraine story with US-brokered in description resolves strictly to Europe, not North America: \(resolvedUkraine)"
+        )
     }
 
     static func regionFilter() {
@@ -72,8 +98,8 @@ enum BriefingImpactTests {
         var filter = BriefingBoardFilter()
         check(filter.includes(cairo) && filter.includes(tokyo), "no region includes everything")
         filter.region = .middleEastNorthAfrica
-        check(filter.includes(cairo), "Egypt is in Middle East & North Africa")
-        check(!filter.includes(tokyo), "Japan is outside Middle East & North Africa")
+        check(filter.includes(cairo), "Egypt is in Middle East and Africa")
+        check(!filter.includes(tokyo), "Japan is outside Middle East and Africa")
         // The loader's resolved regions win over the headline.
         filter.regionsByEntry = [tokyo.id: [.middleEastNorthAfrica]]
         check(filter.includes(tokyo), "resolved regions are used when known")
@@ -82,7 +108,7 @@ enum BriefingImpactTests {
             entries: [tokyo, cairo],
             regionsByEntry: [cairo.id: [.middleEastNorthAfrica], tokyo.id: [.eastSoutheastAsia]],
             facts: [:], now: now)
-        check(data?.rows.map(\.region) == [.middleEastNorthAfrica, .eastSoutheastAsia], "ties keep canonical order")
+        check(data?.rows.map(\.region) == [.middleEastNorthAfrica, .southAsia], "ties keep canonical order")
         check(data?.rows.first?.countText == "Zen · 1 story", "count text says stories")
         check(
             BriefingRegionsData.make(entries: [tokyo], regionsByEntry: [:], facts: [:], now: now) == nil, "empty is nil"
@@ -198,5 +224,99 @@ enum BriefingImpactTests {
             BriefingTimelineData.captureFixture?.hasRows(under: BriefingBoardFilter(region: .oceania)) == false,
             "no thread outside the filter")
         check(BriefingTimelineData.items(many, now: now)?.map(\.id) == ["3", "4", "5", "6", "7"], "latest five")
+    }
+
+    static func dynamicIndicatorsAndOverviewQuality() {
+        // 1. Priority Developments dynamic Impact rating (never nil / "Not rated")
+        let majorEntry = BriefingRegionsData.sampleEntry(
+            id: "imp-major", title: "Ukraine: Six-day localized ceasefire in Oleshky comes to end", publishers: 6,
+            date: now)
+        check(
+            BriefingPriorityData.assessImportance(
+                publisherCount: majorEntry.publisherCount, representative: majorEntry.representative, momentum: .fading)
+                == .major,
+            "High-coverage ceasefire story is rated Major")
+        let notableEntry = BriefingRegionsData.sampleEntry(
+            id: "imp-notable", title: "Parliament committee reviews trade tariff proposals", publishers: 3, date: now)
+        check(
+            BriefingPriorityData.assessImportance(
+                publisherCount: notableEntry.publisherCount, representative: notableEntry.representative,
+                momentum: .steady) == .notable,
+            "Multi-publisher story thread is rated Notable")
+
+        // 2. World Tension sparkline tight dynamic Y-axis domain
+        let domain = BriefingTensionSparklineView.yDomain(for: [], baseline: 38)
+        check(domain.upperBound - domain.lowerBound <= 20, "Sparkline domain zooms to week's range rather than 0...100")
+
+        // 3. Source Footprint clear footer copy
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 7, wireCopyCount: 0)
+                == "All 7 original reports are independent publisher reporting (no syndicated wire-agency reprints).",
+            "Clear human-readable footprint summary when wireCopyCount is 0")
+
+        // 4. Highlights terminal period normalization
+        check(
+            OverviewComposer.ensureTerminalPeriod(
+                "Trump invites Michigan Democrat Stevens to join the Republican Party")
+                == "Trump invites Michigan Democrat Stevens to join the Republican Party.",
+            "Highlight without period receives a terminal period")
+
+        // 5. Perspectives: nested quote attribution ("I don't know Haley...," Trump said)
+        let haleyQuoteText =
+            "\"I don't know Haley. I've never met Haley. But Haley said what few people were willing to say,\" Trump said."
+        let haleyPassage = EvidencePassage(id: "p_haley", articleID: "a_haley", text: haleyQuoteText)
+        let haleyArticle = FeedArticle(
+            storedID: "a_haley", title: "Michigan Senate Race", link: "https://bbc.com/haley",
+            guid: "g_haley", description: haleyQuoteText, pubDate: now, source: "BBC News")
+        let haleyCit = OverviewCitation(
+            id: "c_haley", articleID: "a_haley", passageID: "p_haley",
+            passageFingerprint: haleyPassage.fingerprint, quote: haleyQuoteText)
+        let haleyPerspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [haleyPassage], articles: [haleyArticle], existingCitations: ["c_haley": haleyCit])
+        check(
+            haleyPerspectives.map(\.participant) == ["Trump"],
+            "Nested speech inside Trump's quote is not attributed to Haley")
+        check(
+            EventOverviewReaderView.cleanDisplayPosition(haleyPerspectives.first?.position ?? "").hasSuffix(",")
+                == false,
+            "Display position strips trailing comma")
+
+        // 6. Perspectives: Mr. Nawrocki vs Nawrocki voice collapse, abbreviation period handling, and Tusk fragment rejection
+        let nawrockiText =
+            "\"Tonight, there was a breach of public order in the Republic of Poland and a forcible takeover of a constitutional body,\" Mr. Nawrocki said in a statement read out by an aide outside the court early on Saturday (October 31, 2026), after the President had turned back mid-flight from a trip to Africa to address the situation."
+        let tribunalText =
+            "The Constitutional Tribunal said its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Nawrocki."
+        let tuskText = "\"And everything is clear,\" Tusk wrote on X."
+        let pNawrocki = EvidencePassage(id: "p_naw", articleID: "a_hindu", text: nawrockiText)
+        let pTribunal = EvidencePassage(id: "p_trib", articleID: "a_hindu", text: tribunalText)
+        let pTusk = EvidencePassage(id: "p_tusk", articleID: "a_guardian", text: tuskText)
+        let artHindu = FeedArticle(
+            storedID: "a_hindu", title: "Poland court dispute", link: "https://thehindu.com/poland",
+            guid: "g_hindu", description: nawrockiText, pubDate: now, source: "The Hindu")
+        let artGuardian = FeedArticle(
+            storedID: "a_guardian", title: "Poland tribunal crisis", link: "https://theguardian.com/poland",
+            guid: "g_guardian", description: tuskText, pubDate: now, source: "The Guardian")
+        let cits: [String: OverviewCitation] = [
+            "c_naw": OverviewCitation(
+                id: "c_naw", articleID: "a_hindu", passageID: "p_naw",
+                passageFingerprint: pNawrocki.fingerprint, quote: nawrockiText),
+            "c_trib": OverviewCitation(
+                id: "c_trib", articleID: "a_hindu", passageID: "p_trib",
+                passageFingerprint: pTribunal.fingerprint, quote: tribunalText),
+            "c_tusk": OverviewCitation(
+                id: "c_tusk", articleID: "a_guardian", passageID: "p_tusk",
+                passageFingerprint: pTusk.fingerprint, quote: tuskText),
+        ]
+        let polandPerspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [pNawrocki, pTribunal, pTusk], articles: [artHindu, artGuardian], existingCitations: cits)
+        check(
+            polandPerspectives.map(\.participant) == ["Mr. Nawrocki"],
+            "Single article with direct quote emits only Mr. Nawrocki (no duplicate Nawrocki or unquoted paraphrase, and Tusk fragment rejected)"
+        )
+        let tribunalOnly = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [pTribunal], articles: [artHindu], existingCitations: ["c_trib": cits["c_trib"]!])
+        check(
+            tribunalOnly.first?.position.hasSuffix("appointee of Mr. Nawrocki") == true,
+            "Abbreviation 'Mr.' does not truncate statement at 'Mr'")
     }
 }

@@ -5,10 +5,10 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-private struct AddFeedSubscriptionKey: FocusedValueKey { typealias Value = () -> Void }
+private struct AddFeedSubscriptionKey: FocusedValueKey { typealias Value = FocusedCommandAction }
 
 extension FocusedValues {
-    var addFeedSubscription: (() -> Void)? {
+    var addFeedSubscription: FocusedCommandAction? {
         get { self[AddFeedSubscriptionKey.self] }
         set { self[AddFeedSubscriptionKey.self] = newValue }
     }
@@ -64,7 +64,7 @@ struct SidebarView: View {
                 }
             }
         }
-        .focusedSceneValue(\.addFeedSubscription, { isSubscribePopoverPresented = true })
+        .focusedSceneValue(\.addFeedSubscription, FocusedCommandAction { isSubscribePopoverPresented = true })
         .listStyle(.sidebar)
         .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 300)
         .toolbar {

@@ -88,7 +88,7 @@ struct NewsApp: App {
             SidebarCommands()
             KeyboardShortcutsCommands()
             CommandGroup(after: .textEditing) {
-                Button("Search Archive") { archiveSearch?() }
+                Button("Search Archive") { archiveSearch?.perform() }
                     .keyboardShortcut("f", modifiers: .command)
                     .disabled(archiveSearch == nil)
             }
@@ -110,7 +110,7 @@ struct NewsApp: App {
                 Button("Restore Library…") { LibraryBackup.restoreLibrary() }
             }
             CommandGroup(replacing: .importExport) {
-                Button("Add Feed…") { addFeedSubscription?() }
+                Button("Add Feed…") { addFeedSubscription?.perform() }
                     .disabled(addFeedSubscription == nil)
                 Divider()
                 Button("Import Subscriptions (OPML)…") {
