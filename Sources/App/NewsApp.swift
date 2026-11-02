@@ -538,9 +538,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
         // A reader who set News's alert style to None gets no banner from the app either.
-        guard let banner = StoryBanner(notification.request),
-            await center.notificationSettings().alertSetting == .enabled
-        else { return [.banner, .list, .sound] }
+        guard let banner = StoryBanner(notification.request) else { return [.banner, .list, .sound] }
+        let settings = await center.notificationSettings()
+        guard settings.alertSetting == .enabled, settings.alertStyle != .none else { return [.banner, .list, .sound] }
         return await StoryBannerPresenter.shared.present(banner) ? [.list, .sound] : [.banner, .list, .sound]
     }
 
