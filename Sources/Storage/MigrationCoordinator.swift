@@ -54,6 +54,10 @@ actor MigrationCoordinator {
         var stats = MigrationStats()
 
         // 1. Locate and load legacy JSON article cache
+        // Legacy data that exists but can't be read is not a fresh install: with nothing readable to import, the migration
+        // stays open and is retried. Once readable data is imported the migration completes, so a retry never replays
+        // saved or read state the reader has changed since; an unreadable file is kept and logged (#946).
+        var unreadable = false
         var legacyArticles: [FeedArticle] = []
         let cacheDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
             .appendingPathComponent("com.marspater.news.cache")
@@ -66,6 +70,7 @@ actor MigrationCoordinator {
                 legacyArticles = decoded
                 stats.articlesFound = decoded.count
             } catch {
+                unreadable = true
                 logger.error(
                     "Failed to decode legacy article cache at \(cacheFile.path): \(error.localizedDescription)")
             }
@@ -79,6 +84,7 @@ actor MigrationCoordinator {
                 legacySaved = decoded
                 stats.savedStories = decoded.count
             } catch {
+                unreadable = true
                 logger.error("Failed to decode legacy saved stories from UserDefaults: \(error.localizedDescription)")
             }
         }
@@ -92,6 +98,11 @@ actor MigrationCoordinator {
 
         // If there is no legacy data at all (fresh install), mark migration complete and return
         if legacyArticles.isEmpty && legacySaved.isEmpty && legacyReadIDs.isEmpty {
+            guard !unreadable else {
+                stats.failures += 1
+                logger.error("Legacy data could not be read; migration stays open and is retried, data preserved.")
+                return stats
+            }
             userDefaults.set(Self.currentMigrationVersion, forKey: Self.migrationVersionKey)
             logger.info("Fresh installation detected. Migration version set to \(Self.currentMigrationVersion).")
             return stats
@@ -130,6 +141,10 @@ actor MigrationCoordinator {
             stats.articlesImported = allArticlesToImport.count
 
             // Mark migration complete ONLY AFTER every step succeeded!
+            if unreadable {
+                stats.failures += 1
+                logger.error("Some legacy data could not be read and was not imported. Legacy data preserved.")
+            }
             userDefaults.set(Self.currentMigrationVersion, forKey: Self.migrationVersionKey)
 
             logger.info(

@@ -86,6 +86,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Models/EventFeed.swift \
     Sources/Models/OnboardingStep.swift \
     Sources/Models/ArchiveSearchToken.swift \
+    Sources/Models/ArticleSearchState.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
     Sources/Storage/DatabaseEngine+Search.swift \
@@ -139,6 +140,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Services/OPMLManager.swift \
     Sources/Views/DesignSystem.swift \
     Sources/Views/List/ArticleCardView.swift \
+    Sources/Views/List/StoryQuickLook.swift \
     Sources/Views/Briefing/BriefingComponents.swift \
     Sources/Views/Briefing/BriefingView.swift \
     Sources/Views/Briefing/BriefingHeroCarouselView.swift \

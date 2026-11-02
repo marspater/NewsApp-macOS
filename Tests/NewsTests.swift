@@ -6,6 +6,7 @@ import Foundation
 import ImageIO
 import NaturalLanguage
 import Network
+import PDFKit
 import SQLite3
 import SwiftUI
 import UniformTypeIdentifiers
@@ -641,6 +642,7 @@ struct NewsTests {
             try await testRealLibraryMigrationFixture()
             try await testLibraryBackupAndFutureSchemaGuard()
             try await testLibraryBackupRestore()
+            try await testSQLiteFailuresAreNotEmptyResults()
             return
         }
         if CommandLine.arguments.contains("--export-pairs") {
@@ -969,6 +971,7 @@ struct NewsTests {
             ("testLibraryBackupAndFutureSchemaGuard", { try await testLibraryBackupAndFutureSchemaGuard() }),
             ("testReadOnlyLibraryRefresh", { try await testReadOnlyLibraryRefresh() }),
             ("testLibraryBackupRestore", { try await testLibraryBackupRestore() }),
+            ("testSQLiteFailuresAreNotEmptyResults", { try await testSQLiteFailuresAreNotEmptyResults() }),
             ("testMigrationCoordinatorAtomicity", { try await testMigrationCoordinatorAtomicity() }),
             ("testArticleRetentionPolicy", { await testArticleRetentionPolicy() }),
             ("testContentExtractionPipelineDeep", { await testContentExtractionPipelineDeep() }),
@@ -1049,6 +1052,7 @@ struct NewsTests {
             ("testHybridSearchMutingAndFilters", { try await testHybridSearchMutingAndFilters() }),
             ("testHybridSearchCursorPagination", { try await testHybridSearchCursorPagination() }),
             ("testPureOperatorSearchRemainsLexical", { try await testPureOperatorSearchRemainsLexical() }),
+            ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
         try await runSharded(tests)
 
@@ -1359,8 +1363,11 @@ struct NewsTests {
         assertEqual(correction("2027"), nil, "A number is never corrected to another number")
         assertEqual(
             SearchSpelling.corrected("Nvida \"artifical\" source:reuters", vocabulary: vocabulary),
-            "nvidia artificial source:reuters", "Misspelled terms change; operators stay")
+            "nvidia \"artificial\" source:reuters", "Misspelled terms change; quotes and operators stay")
         assertEqual(SearchSpelling.corrected("nvidia chips", vocabulary: vocabulary), nil, "Known words, no suggestion")
+        assertEqual(
+            SearchSpelling.corrected("\"nvida chps\" is:unread", vocabulary: vocabulary),
+            "\"nvidia chips\" is:unread", "Corrections retain phrase boundaries and filters")
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1377,6 +1384,9 @@ struct NewsTests {
             try await db.searchSuggestion(query: "nvida chips"), "nvidia chips", "The suggestion fixes the typo")
         assertEqual(
             try await db.searchSuggestion(query: "nvidia tariffs"), nil, "A word with nothing close gets no suggestion")
+        assertEqual(
+            try await db.searchSuggestion(query: "\"nvida unveils\""), "\"nvidia unveils\"",
+            "A corrected phrase remains a phrase in a search suggestion")
         // A re-worded headline keeps the story count and rowid; the cached word list must still see the new words.
         try await db.upsertArticles([
             FeedArticle(
@@ -2200,6 +2210,138 @@ struct NewsTests {
             value(kept, "SELECT count(*) FROM articles;"), "3", "The first copy still holds the original library")
         let second = directory.appendingPathComponent(afterSecond.first { $0 != kept.lastPathComponent } ?? "")
         assertEqual(value(second, "SELECT count(*) FROM articles;"), "2", "The second copy holds the restored library")
+    }
+
+    static func testSQLiteFailuresAreNotEmptyResults() async throws {
+        print("  - Testing that SQLite failures never read as empty results (#946)...")
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-sqlite-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+        func value(_ file: URL, _ sql: String) -> String? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            defer { sqlite3_close(handle) }
+            guard sqlite3_open_v2(file.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+                sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK
+            else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+
+        // The file-level safety copy keeps commits that are still only in the write-ahead log.
+        let walLibrary = directory.appendingPathComponent("wal.sqlite3")
+        var writer: OpaquePointer?
+        assertEqual(sqlite3_open(walLibrary.path, &writer), SQLITE_OK, "Open the WAL fixture")
+        for sql in [
+            "PRAGMA journal_mode = WAL;", "PRAGMA wal_autocheckpoint = 0;", "CREATE TABLE notes (body TEXT);",
+            "INSERT INTO notes VALUES ('one'), ('two'), ('three');",
+        ] {
+            assertEqual(sqlite3_exec(writer, sql, nil, nil, nil), SQLITE_OK, "WAL fixture: \(sql)")
+        }
+        let mainOnly = directory.appendingPathComponent("main-only.sqlite3")
+        try fileManager.copyItem(at: walLibrary, to: mainOnly)
+        assertTrue(
+            value(mainOnly, "SELECT count(*) FROM notes;") == nil,
+            "The fixture's commits are only in the log, so a main-file copy misses them")
+        let kept = directory.appendingPathComponent("kept.sqlite3")
+        try DatabaseEngine.copyLibraryFiles(of: walLibrary.path, to: kept)
+        sqlite3_close(writer)
+        assertEqual(value(kept, "SELECT count(*) FROM notes;"), "3", "The file-level copy keeps every commit")
+        assertEqual(value(kept, "PRAGMA journal_mode;"), "delete", "The log is folded into one self-contained file")
+        assertTrue(!fileManager.fileExists(atPath: kept.path + "-wal"), "No log is left beside a folded copy")
+
+        // Stored overview data that doesn't decode is a cache miss, never an overview without its facts.
+        let library = directory.appendingPathComponent("news.sqlite3")
+        let db = DatabaseEngine(path: library.path)
+        try await db.open()
+        func article(_ name: String) -> FeedArticle {
+            FeedArticle(
+                storedID: "sqlite-\(name)", title: "SQLite report \(name)", link: "https://sqlite.test/\(name)",
+                guid: "sqlite-guid-\(name)", description: "SQLite body \(name)", pubDate: Date(),
+                source: "SQLite Publisher")
+        }
+        try await db.upsertArticles([article("a"), article("b")])
+        try await db.setSaved(articleId: "sqlite-a", isSaved: true)
+        guard
+            case .created(let eventID) = try await db.applyEventMatch(
+                "sqlite-a", .create(with: ["sqlite-b"]), matcherVersion: EventMatcher.version)
+        else { return assertTrue(false, "Create the fixture event") }
+        let version = try await db.fetchEvent(id: eventID)?.membershipVersion ?? 1
+        let overview = EventOverviewDocument(
+            eventID: eventID,
+            version: OverviewVersionContext(membershipVersion: version, inputTextHash: "sqlite-input"),
+            content: OverviewContent(title: "Overview", summary: "", facts: [], citations: []),
+            provenance: OverviewProvenance(memberArticleIDs: ["sqlite-a", "sqlite-b"], kind: .fallbackExcerpts))
+        assertTrue(try await db.recordEventOverview(overview), "Store the fixture overview")
+        assertTrue(try await db.fetchEventOverview(eventID: eventID) != nil, "The stored overview reads back")
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &handle), SQLITE_OK, "Open a second connection")
+        sqlite3_busy_timeout(handle, 5000)
+        assertEqual(
+            sqlite3_exec(handle, "UPDATE event_overviews SET facts_json = 'not json';", nil, nil, nil), SQLITE_OK,
+            "Damage the stored facts")
+        assertTrue(
+            try await db.fetchEventOverview(eventID: eventID) == nil, "Undecodable facts read as a cache miss")
+        assertTrue(try await db.recordEventOverview(overview), "A rebuilt overview replaces the damaged row")
+        assertTrue(try await db.fetchEventOverview(eventID: eventID) != nil, "The rebuilt overview reads back")
+
+        // A restore is refused while another connection has the library open: its writes would be lost in the swap.
+        let archive = directory.appendingPathComponent("backup.sqlite3")
+        try await db.writeBackup(to: archive, settings: Data())
+        var reader: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &reader), SQLITE_OK, "Open another connection")
+        assertEqual(
+            sqlite3_exec(reader, "BEGIN; SELECT count(*) FROM articles;", nil, nil, nil), SQLITE_OK,
+            "Hold a read on the library")
+        do {
+            _ = try await db.restoreBackup(from: archive)
+            assertTrue(false, "A restore while another connection uses the library is refused")
+        } catch {
+            assertTrue(error.localizedDescription.contains("still in use"), "The refusal says the library is in use")
+        }
+        sqlite3_exec(reader, "ROLLBACK;", nil, nil, nil)
+        sqlite3_close(reader)
+        assertTrue(
+            try await db.isSaved(articleId: "sqlite-a"), "A refused restore leaves the library open and writable")
+        try await db.setSaved(articleId: "sqlite-b", isSaved: true)
+
+        // Remove All Saved is one statement: every saved story is unsaved, or none is.
+        assertEqual(try await db.counts().saved, 2, "Two stories are saved before Remove All")
+        try await db.removeAllSaved()
+        assertEqual(try await db.counts().saved, 0, "Remove All unsaves every story")
+        try await db.setSaved(articleId: "sqlite-a", isSaved: true)
+
+        // Nothing cached survives a close: a library swapped in while closed reports its own counts.
+        assertEqual(try await db.counts().saved, 1, "Counts are cached for the open library")
+        await db.close()
+        var swapper: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &swapper), SQLITE_OK, "Open the closed library directly")
+        assertEqual(
+            sqlite3_exec(swapper, "UPDATE article_state SET is_saved = 1;", nil, nil, nil), SQLITE_OK,
+            "Change the library while the engine is closed")
+        sqlite3_close(swapper)
+        try await db.open()
+        assertEqual(try await db.counts().saved, 2, "A reopened library is counted afresh")
+
+        // A query that fails throws instead of answering zero or false.
+        assertTrue(try await db.isSaved(articleId: "sqlite-a"), "Saved state reads before the failure")
+        assertEqual(
+            sqlite3_exec(handle, "ALTER TABLE article_state RENAME TO article_state_hidden;", nil, nil, nil),
+            SQLITE_OK, "Hide the state table from the engine")
+        sqlite3_close(handle)
+        for (name, read) in [
+            ("isSaved", { _ = try await db.isSaved(articleId: "sqlite-a") }),
+            ("isRead", { _ = try await db.isRead(articleId: "sqlite-a") }),
+            ("counts", { _ = try await db.counts() }),
+        ] as [(String, () async throws -> Void)] {
+            do {
+                try await read()
+                assertTrue(false, "\(name) throws when its query fails")
+            } catch {}
+        }
+        await db.close()
     }
 
     static func testRealLibraryMigrationFixture() async throws {
@@ -8651,6 +8793,49 @@ struct NewsTests {
                 try await db.searchArticles(query: "qubit \"\"").map(\.id), [artA.id],
                 "An empty quoted term beside a real one is ignored")
 
+            let adjacent = FeedArticle(
+                title: "Cold Fusion research", link: "https://example.com/adjacent", guid: "adjacent",
+                description: "A new experiment.", pubDate: Date(), source: "Science", category: "Science")
+            let separated = FeedArticle(
+                title: "A cold morning", link: "https://example.com/separated", guid: "separated",
+                description: "The temperature dropped. Later, fusion researchers met.", pubDate: Date(),
+                source: "Science")
+            let splitFields = FeedArticle(
+                title: "A cold", link: "https://example.com/fields", guid: "fields",
+                description: "Fusion research", pubDate: Date(), source: "Science")
+            let phrase = ArticleFilterQuery.parse(ArticleSearchState.entityQuery(for: "Cold Fusion"))
+            assertTrue(
+                phrase.matches(article: adjacent, isRead: false, isSaved: false), "Adjacent entity matches in memory")
+            assertFalse(
+                phrase.matches(article: separated, isRead: false, isSaved: false), "Separate sentences do not match")
+            assertFalse(
+                phrase.matches(article: splitFields, isRead: false, isSaved: false), "A phrase cannot span fields")
+            let phraseDB = DatabaseEngine(path: ":memory:")
+            try await phraseDB.open()
+            try await phraseDB.upsertArticles([adjacent, separated])
+            assertEqual(
+                try await phraseDB.searchArticles(query: "\"Cold Fusion\"").map(\.id), [adjacent.id],
+                "Entity phrase excludes words in separate sentences from FTS results")
+            assertEqual(
+                Set(try await phraseDB.searchArticles(query: "cold fusion").map(\.id)),
+                Set([adjacent.id, separated.id]),
+                "Unquoted terms still match independently")
+            assertEqual(
+                try await phraseDB.searchArticles(query: "\"Cold Fusion\" category:Science").map(\.id), [adjacent.id],
+                "Phrase and operator work together")
+            let wellness = FeedArticle(
+                title: "Sleep study", link: "https://example.com/wellness", guid: "wellness",
+                description: "Rest matters.", pubDate: Date(), source: "Clinic", category: "Health & Wellness")
+            try await phraseDB.upsertArticles([wellness])
+            let wellnessTag = ArticleSearchState.categoryToken(for: "Health & Wellness").expression
+            assertTrue(
+                ArticleFilterQuery.parse(wellnessTag).matches(article: wellness, isRead: false, isSaved: false),
+                "A multiword category tag matches its story in memory")
+            assertEqual(
+                try await phraseDB.searchArticles(query: wellnessTag).map(\.id), [wellness.id],
+                "A multiword category tag finds its story")
+            await phraseDB.close()
+
             // Operator searches
             let searchSource = try await db.searchArticles(query: "source:Nature")
             assertEqual(searchSource.count, 1, "Should match source operator")
@@ -8840,6 +9025,29 @@ struct NewsTests {
 
         let version = tempDefaults.integer(forKey: MigrationCoordinator.migrationVersionKey)
         assertEqual(version, MigrationCoordinator.currentMigrationVersion, "Migration version must be set to 1")
+
+        // Legacy data that exists but can't be decoded is not a fresh install: the migration stays open (#946).
+        let unreadableSuite = suiteName + ".unreadable"
+        let unreadableDefaults = UserDefaults(suiteName: unreadableSuite)!
+        defer { removeTestDefaults(unreadableSuite) }
+        unreadableDefaults.set(Data("not json".utf8), forKey: "com.marspater.news.savedStories")
+        let unreadableCoordinator = MigrationCoordinator(
+            database: db, userDefaults: unreadableDefaults, fileManager: .default)
+        let unreadableStats = try await unreadableCoordinator.migrateIfNeeded()
+        assertEqual(unreadableStats.failures, 1, "Unreadable legacy data counts as a failure")
+        assertTrue(
+            await unreadableCoordinator.isMigrationNeeded(), "Unreadable legacy data keeps the migration open")
+        assertTrue(
+            unreadableDefaults.data(forKey: "com.marspater.news.savedStories") != nil, "Unreadable legacy data is kept")
+        // With readable legacy data beside it, the import completes, so a later launch never replays stale state.
+        unreadableDefaults.set(["legacy-read-only"], forKey: "com.marspater.news.readArticlesList")
+        let partialStats = try await unreadableCoordinator.migrateIfNeeded()
+        assertEqual(partialStats.failures, 1, "The unreadable part is still reported")
+        assertFalse(
+            await unreadableCoordinator.isMigrationNeeded(), "A migration that imported readable data completes")
+        assertTrue(
+            unreadableDefaults.data(forKey: "com.marspater.news.savedStories") != nil,
+            "Unreadable legacy data is still kept")
 
         // Real legacy data: a saved story, and a read list that also names a story no longer cached.
         let legacySuite = suiteName + ".legacy"
@@ -16652,6 +16860,182 @@ struct NewsTests {
         let fallbackToken = ArchiveSearchToken(expression: "custom:term")
         assertEqual(fallbackToken.displayName, "custom:term", "Fallback token keeps raw expression")
         assertEqual(fallbackToken.systemImage, "magnifyingglass", "Fallback token uses magnifyingglass")
+
+        // 8. ArticleSearchState tag search transformations and navigation breadcrumbs (#930)
+        // Category token generation and sanitization
+        assertEqual(
+            ArticleSearchState.sanitizeCategory("Science"),
+            "science",
+            "Category sanitization lowercases and trims"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeCategory("category:Science"),
+            "science",
+            "Category sanitization strips existing category: prefix"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeCategory("  World  News  "),
+            "world-news",
+            "Multi-word category converts whitespace runs to hyphens"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeCategory("Économie & Finance"),
+            "économie-&-finance",
+            "Category sanitization preserves diacritics"
+        )
+        assertEqual(
+            ArticleSearchState.categoryToken(for: "Science").expression,
+            "category:science",
+            "Category token produces category: prefix"
+        )
+        assertEqual(
+            ArticleSearchState.categoryToken(for: "Technology").displayName,
+            "Category: technology",
+            "Category token has human-readable display name"
+        )
+        assertEqual(
+            ArticleSearchState.categoryToken(for: "Science").systemImage,
+            "tag",
+            "Category token uses tag SF Symbol"
+        )
+
+        // Entity phrase query generation and sanitization
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("Cold Fusion"),
+            "Cold Fusion",
+            "Entity sanitization preserves title casing"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("\"Cold Fusion\""),
+            "Cold Fusion",
+            "Entity sanitization strips existing surrounding quotes"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("“Cold Fusion”"),
+            "Cold Fusion",
+            "Entity sanitization strips curly quotes"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("«Cold Fusion»"),
+            "Cold Fusion",
+            "Entity sanitization strips guillemets"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("Beyoncé"),
+            "Beyoncé",
+            "Entity sanitization preserves diacritics"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("Apple Inc."),
+            "Apple Inc.",
+            "Entity sanitization preserves punctuation"
+        )
+        assertEqual(
+            ArticleSearchState.sanitizeEntityName("Dwight \"The Rock\" Johnson"),
+            "Dwight 'The Rock' Johnson",
+            "Internal double quotes become single quotes"
+        )
+        assertEqual(
+            ArticleSearchState.entityQuery(for: "Cold Fusion"),
+            "\"Cold Fusion\"",
+            "Entity query wraps name in phrase quotes"
+        )
+        assertEqual(
+            ArticleSearchState.entityQuery(for: "\"Cold Fusion\""),
+            "\"Cold Fusion\"",
+            "Already quoted entity is not double-quoted"
+        )
+        assertEqual(
+            ArticleSearchState.entityQuery(for: "   "),
+            "",
+            "Empty entity produces empty query"
+        )
+
+        // Combined searchQuery helper and ArticleFilterQuery compatibility
+        let catQuery = ArticleSearchState.searchQuery(for: "Science", isCategory: true)
+        assertEqual(catQuery.token?.expression, "category:science", "Category query sets token")
+        assertEqual(catQuery.text, "", "Category query has empty text")
+        assertEqual(catQuery.query, "category:science", "Combined query string matches token")
+        let parsedCat = ArticleFilterQuery.parse(catQuery.query)
+        assertEqual(parsedCat.categoryFilter, "science", "ArticleFilterQuery extracts category from query")
+
+        let entQuery = ArticleSearchState.searchQuery(for: "Cold Fusion", isCategory: false)
+        assertEqual(entQuery.token, nil, "Entity query has no token")
+        assertEqual(entQuery.text, "\"Cold Fusion\"", "Entity query wraps phrase in quotes")
+        assertEqual(entQuery.query, "\"Cold Fusion\"", "Combined entity query is quoted phrase")
+        let parsedEnt = ArticleFilterQuery.parse(entQuery.query)
+        assertEqual(parsedEnt.terms, ["cold fusion"], "ArticleFilterQuery retains the entity phrase")
+        let mixed = ArticleFilterQuery.parse("climate \"Cold Fusion\" is:unread")
+        assertEqual(mixed.terms, ["climate", "cold fusion"], "Mixed words and phrases remain distinct")
+        assertEqual(mixed.isReadFilter, false, "An operator outside the phrase still applies")
+        assertEqual(ArticleFilterQuery.parse("\"is:read\"").terms, ["is:read"], "A quoted operator is text")
+
+        // State & Navigation breadcrumb round trip
+        await MainActor.run {
+            let testSearchState = ArticleSearchState()
+            assertEqual(testSearchState.isSearching, false, "Initial search state is not searching")
+            assertEqual(testSearchState.returnStory, nil, "Initial return story is nil")
+
+            var navPath = NavigationPath()
+            let wrapA = FeedArticleWrap(article: art1, contextArticles: [art1, art2])
+            navPath.append(wrapA)
+            assertEqual(navPath.count, 1, "Navigation path has originating story")
+
+            // Clicking a tag opens search, empties path, saves breadcrumb
+            testSearchState.openTag(tag: "Cold Fusion", isCategory: false, from: wrapA, path: &navPath)
+            assertEqual(navPath.count, 0, "Navigation path is cleared to reveal search results")
+            assertEqual(testSearchState.isSearching, true, "Search state is active")
+            assertEqual(testSearchState.searchText, "\"Cold Fusion\"", "Search text holds quoted entity")
+            assertEqual(testSearchState.searchPresented, true, "Search is marked presented")
+            assertEqual(testSearchState.returnStory?.article.id, art1.id, "Return story points to originating story")
+            assertTrue(testSearchState.searchHistory.contains("\"Cold Fusion\""), "Search history records query")
+
+            // Esc or Back returns to story
+            testSearchState.returnToStory(path: &navPath)
+            assertEqual(navPath.count, 1, "Navigation path restores originating story")
+            assertEqual(testSearchState.returnStory, nil, "Return story is cleared on return")
+            assertEqual(testSearchState.searchPresented, false, "Search presentation collapses on return")
+            assertEqual(testSearchState.searchText, "", "Search text is cleared on return")
+            assertTrue(testSearchState.consumeReturnTextChange(""), "Return reset is ignored by the text observer")
+            assertFalse(testSearchState.consumeReturnTextChange(""), "A later text edit is not ignored")
+            assertTrue(
+                testSearchState.searchHistory.contains("\"Cold Fusion\""),
+                "Search history keeps query after return")
+
+            // Nested search tags (Story A -> tag search 1 -> Story B -> tag search 2)
+            let wrapB = FeedArticleWrap(article: art2, contextArticles: [art2])
+            navPath = NavigationPath()
+            navPath.append(wrapA)
+            testSearchState.openTag(tag: "Science", isCategory: true, from: wrapA, path: &navPath)
+            assertEqual(testSearchState.searchTokens.first?.expression, "category:science", "Category token is active")
+            assertEqual(testSearchState.returnStory?.article.id, art1.id, "Return story is art1")
+
+            // User opens Story B from search results, then clicks an entity tag
+            navPath.append(wrapB)
+            testSearchState.openTag(tag: "AI Silicon", isCategory: false, from: wrapB, path: &navPath)
+            assertEqual(testSearchState.returnStory?.article.id, art2.id, "Top return story is art2")
+
+            // First Back returns to Story B
+            testSearchState.returnToStory(path: &navPath)
+            assertEqual(navPath.count, 1, "Restored Story B")
+
+            assertTrue(testSearchState.consumeReturnTextChange(""), "Nested return ignores its text reset")
+            // A token search reset is tracked independently from text.
+            testSearchState.searchTokens = [ArticleSearchState.categoryToken(for: "Science")]
+            // Second Back returns to Story A
+            testSearchState.returnToStory(path: &navPath)
+            assertEqual(navPath.count, 2, "Restored Story A")
+            assertTrue(testSearchState.consumeReturnTokensChange([]), "Return ignores the token reset")
+            assertFalse(testSearchState.consumeReturnTokensChange([]), "A later token edit is not ignored")
+            assertEqual(testSearchState.returnStory, nil, "Return stack is now empty")
+
+            testSearchState.openTag(tag: "Cold Fusion", isCategory: false, from: wrapA, path: &navPath)
+            testSearchState.searchTokens = [ArticleSearchState.categoryToken(for: "Science")]
+            testSearchState.returnToStory(path: &navPath)
+            testSearchState.cancelPendingReturnChanges()
+            assertFalse(testSearchState.consumeReturnTextChange(""), "A real edit cancels text reset suppression")
+            assertFalse(testSearchState.consumeReturnTokensChange([]), "A real edit cancels token reset suppression")
+        }
     }
 
     static func testDistributionAndEntitlementsIntegrity() async {
@@ -26832,5 +27216,58 @@ struct NewsTests {
 
         let results = try await db.searchArticles(query: "is:unread", limit: 10)
         assertEqual(results.map(\.id), ["op-2", "op-1"], "Pure operator query orders by publication date descending")
+    @MainActor
+    static func testStoryQuickLookPreview() async {
+        print("  - Testing the Quick Look preview: local content, upright page, no remote references (#707)...")
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "com.marspater.news.quicklook.test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // Remote links and a tracking pixel in the feed text must never reach the preview.
+        let article = FeedArticle(
+            storedID: "test-ql-1",
+            title: "Autonomous Space Tug Successfully Completes Orbital Test",
+            link: "https://publisher.example.com/stories/space-tug-2026",
+            guid: "space-tug-12345",
+            description:
+                "<p>The orbital tug demonstrated automated rendezvous with a target satellite. <a href=\"https://tracking.adnetwork.com/click?id=99\">Read sponsor message</a></p>",
+            pubDate: Date(timeIntervalSince1970: 1_770_000_000),
+            source: "Aerospace Daily",
+            imageUrl: "https://images.example.com/satellite.jpg",
+            fullContent:
+                "Full story with tracker: <img src=\"https://tracker.analytics.com/pixel.gif\" /> and more content."
+        )
+
+        let renderData = StoryQuickLookRenderer.renderData(for: article)
+        assertEqual(renderData.title, article.title, "Render data captures article title")
+        assertEqual(renderData.publisher, "Aerospace Daily", "Render data uses publisher name")
+        assertTrue(renderData.image == nil, "An image that is not decoded yet is never fetched for the preview")
+        assertFalse(renderData.excerpt.isEmpty, "Excerpt is extracted from local data")
+        assertFalse(renderData.excerpt.contains("<"), "HTML is stripped from the excerpt")
+
+        for isDark in [false, true] {
+            let previewFile = tempDir.appendingPathComponent("preview-\(isDark).pdf")
+            assertTrue(
+                StoryQuickLookRenderer.renderPDF(data: renderData, to: previewFile, isDark: isDark),
+                "renderPDF succeeds offline (dark: \(isDark))")
+            let pdfData = (try? Data(contentsOf: previewFile)) ?? Data()
+            let pdfString = String(decoding: pdfData, as: UTF8.self)
+            for marker in ["http://", "https://", "/URI", "/Launch", "adnetwork", "tracker"] {
+                assertFalse(pdfString.contains(marker), "Generated PDF contains no \(marker) (dark: \(isDark))")
+            }
+
+            // PDF space has its origin at the bottom left, so text near the top of the page has a large y.
+            guard let page = PDFDocument(url: previewFile)?.page(at: 0), let text = page.string as NSString? else {
+                assertTrue(false, "The preview PDF has a readable page (dark: \(isDark))")
+                continue
+            }
+            let height = page.bounds(for: .mediaBox).height
+            let titleBounds = page.selection(for: text.range(of: "Autonomous Space Tug"))?.bounds(for: page) ?? .zero
+            let footerBounds = page.selection(for: text.range(of: "Open in Reader"))?.bounds(for: page) ?? .zero
+            assertTrue(titleBounds.minY > height * 0.7, "The headline sits at the top of an upright page")
+            assertTrue(
+                footerBounds.maxY > 0 && footerBounds.maxY < height * 0.15, "The footer sits at the bottom of the page")
+        }
     }
 }

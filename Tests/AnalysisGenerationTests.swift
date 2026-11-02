@@ -36,6 +36,7 @@ enum AnalysisGenerationTests {
             try await queueForgetsRefusedAndClearedWork()
             try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
+            try await clusteringStorageFailuresEndThePass()
         } catch {
             check(false, "Unexpected error: \(error)")
         }
@@ -130,6 +131,133 @@ enum AnalysisGenerationTests {
             try await db.fetchArticleEmbeddings(
                 articleIDs: [stored.id], modelVersion: SentenceEmbedder.modelVersion
             ).count == 1, "one vector")
+    }
+
+    /// A clustering pass whose storage fails ends with the error: a failed write is not a stored pass, and a failed
+    /// inclusion read is not "no correction by the reader".
+    static func clusteringStorageFailuresEndThePass() async throws {
+        let now = Date(timeIntervalSince1970: 1_793_188_800 + 3600)
+        for (failure, cause, message) in [
+            (
+                "CREATE TRIGGER fail_features BEFORE INSERT ON article_features BEGIN SELECT RAISE(ABORT, 'fixture'); END;",
+                "fixture", "A failed clustering write ends the pass with its error"
+            ),
+            ("DROP TABLE event_inclusions;", "no such table", "A failed inclusion read ends the pass with its error"),
+        ] {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles([article("cluster-fail")])
+            try await db.eventRows(failure)
+            do {
+                _ = try await EventClusterer.run(in: db, now: now, allowsEnergy: false)
+                check(false, message)
+            } catch {
+                check(error.localizedDescription.contains(cause), message)
+            }
+            await db.close()
+        }
+
+        // Rows the energy rule deferred (#534) are still read again by a pass with energy after a failed write.
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let floods = [
+            ("Floods kill dozens across Pakistan after monsoon rains", 0.0),
+            ("Pakistan flood death toll climbs as monsoon rains continue", 3.0),
+        ].enumerated().map { index, story in
+            FeedArticle(
+                title: story.0, link: "https://grey.invalid/\(index)", guid: "grey-\(index)", description: "",
+                pubDate: start.addingTimeInterval(story.1 * 3600), source: "Publisher \(index)")
+        }
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        try await db.upsertArticles(floods)
+        try await db.eventRows(
+            "CREATE TRIGGER fail_features BEFORE INSERT ON article_features BEGIN SELECT RAISE(ABORT, 'fixture'); END;")
+        do {
+            _ = try await EventClusterer.run(in: db, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
+            check(false, "The failed write ends the pass without energy")
+        } catch {
+            check(error.localizedDescription.contains("fixture"), "The fixture's write failure ends the pass")
+        }
+        let behind = try await db.eventRows(
+            "SELECT count(*) FROM event_match_state WHERE matcher_version = ?;", [.integer(EventMatcher.version - 1)])
+        check(behind.first?.first == "2", "Both deferred rows are marked one matcher version behind")
+        try await db.eventRows("DROP TRIGGER fail_features;")
+        let withEnergy = try await EventClusterer.run(
+            in: db, now: start.addingTimeInterval(6 * 3600), allowsEnergy: true, pairProbability: { _, _ in 0.99 })
+        check(withEnergy.processed >= 2, "Rows deferred before a failed write are read again with energy")
+        await db.close()
+
+        // A failed deferred marker still stores the batch's derived writes before the pass ends.
+        let marking = DatabaseEngine(path: ":memory:")
+        try await marking.open()
+        try await marking.upsertArticles(floods)
+        try await marking.eventRows(
+            """
+            CREATE TRIGGER fail_marker BEFORE UPDATE ON event_match_state
+            WHEN NEW.matcher_version = \(EventMatcher.version - 1) BEGIN SELECT RAISE(ABORT, 'marker'); END;
+            """)
+        do {
+            _ = try await EventClusterer.run(in: marking, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
+            check(false, "The failed marker ends the pass")
+        } catch {
+            check(error.localizedDescription.contains("marker"), "The fixture's marker failure ends the pass")
+        }
+        let features = try await marking.eventRows("SELECT count(*) FROM article_features;")
+        check(features.first?.first == "2", "The batch's features are stored although the marker failed")
+        await marking.close()
+
+        // A row that throws inside the batch still leaves the rows before it deferred and stored (#952): here the
+        // second report's own match marker fails.
+        let midBatch = DatabaseEngine(path: ":memory:")
+        try await midBatch.open()
+        try await midBatch.upsertArticles(floods)
+        try await midBatch.eventRows(
+            """
+            CREATE TRIGGER fail_second BEFORE INSERT ON event_match_state
+            WHEN NEW.matcher_version = \(EventMatcher.version)
+                AND (SELECT count(*) FROM event_match_state WHERE matcher_version = \(EventMatcher.version)) >= 1
+            BEGIN SELECT RAISE(ABORT, 'second'); END;
+            """)
+        do {
+            _ = try await EventClusterer.run(in: midBatch, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
+            check(false, "The second report's failure ends the pass")
+        } catch {
+            check(error.localizedDescription.contains("second"), "The second report's own error is reported")
+        }
+        let current = try await midBatch.eventRows(
+            "SELECT count(*) FROM event_match_state WHERE matcher_version = ?;", [.integer(EventMatcher.version)])
+        check(current.first?.first == "0", "No deferred report of the batch stays marked current")
+        let storedFirst = try await midBatch.eventRows("SELECT count(*) FROM article_features;")
+        check(storedFirst.first?.first == "2", "The batch's features are stored although a later row failed")
+        await midBatch.close()
+
+        // A cancelled rules-only pass still leaves the reports it deferred to a pass with energy (#952). Rows run newest
+        // first, so older reports keep the batch running after the flood reports commit; a pass that finishes before
+        // the cancel lands flushes them too.
+        let cancelled = DatabaseEngine(path: ":memory:")
+        try await cancelled.open()
+        let fillers = (1...90).map { index in
+            FeedArticle(
+                title: "Harbour museum opens exhibit \(index) on regional shipbuilding",
+                link: "https://filler.invalid/\(index)", guid: "filler-\(index)", description: "",
+                pubDate: start.addingTimeInterval(Double(-index) * 600), source: "Gazette \(index)")
+        }
+        try await cancelled.upsertArticles(floods + fillers)
+        let pass = Task {
+            try await EventClusterer.run(in: cancelled, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
+        }
+        await eventually("The pass commits its first report") {
+            let marked = try? await cancelled.eventRows("SELECT count(*) FROM event_match_state;")
+            return (marked?.first?.first ?? nil) != "0"
+        }
+        pass.cancel()
+        _ = await pass.result
+        // A flood report the cancel reached first has no marker and stays pending, which is fine; none stays current.
+        let currentFloods = try await cancelled.eventRows(
+            "SELECT count(*) FROM event_match_state WHERE article_id IN ('grey-0', 'grey-1') AND matcher_version = ?;",
+            [.integer(EventMatcher.version)])
+        check(currentFloods.first?.first == "0", "No flood report deferred before the cancel stays marked current")
+        await cancelled.close()
     }
 
     /// A job counts as completed only when its write succeeded (#820), a changed input or a clear makes the story
