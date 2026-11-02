@@ -24,7 +24,7 @@ enum NotificationAttachmentTests {
         } catch {}
 
         // The tall fading crop (#589): a 1200 × 1200 source becomes a 600 × 900 portrait PNG with alpha,
-        // opaque on the leading side and transparent at the trailing edge; the same input renders the same bytes,
+        // transparent at the leading edge and opaque at the trailing edge; the same input renders the same bytes,
         // and a small source keeps its own size.
         func png(width: Int, height: Int) -> Data {
             let space = CGColorSpace(name: CGColorSpace.sRGB)!
@@ -62,8 +62,11 @@ enum NotificationAttachmentTests {
             precondition(
                 image.alphaInfo != .none && image.alphaInfo != .noneSkipLast && image.alphaInfo != .noneSkipFirst,
                 "Crop carries alpha")
-            precondition(alpha(image, x: 20, y: 450) == 255, "Leading side is opaque")
-            precondition(alpha(image, x: 598, y: 450) < 16, "Trailing edge fades to transparent")
+            precondition(alpha(image, x: 1, y: 450) < 16, "Leading edge fades to transparent")
+            precondition(alpha(image, x: 580, y: 450) == 255, "Trailing side is opaque")
+            // x = 300 is past the fade (45%) but inside the blur ramp (60%), where an unclamped blur thins the edges.
+            precondition(alpha(image, x: 300, y: 0) == 255, "Blur keeps the top edge opaque")
+            precondition(alpha(image, x: 300, y: 899) == 255, "Blur keeps the bottom edge opaque")
             let again = try Data(contentsOf: try NotificationService.makeImageAttachment(data: landscape).url)
             precondition(again == bytes, "The same source renders the same bytes")
             let small = try NotificationService.makeImageAttachment(data: png(width: 200, height: 200))

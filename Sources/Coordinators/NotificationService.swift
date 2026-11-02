@@ -469,8 +469,8 @@ final class NotificationService: Sendable {
     /// Rendered width of the tall crop; the height is 1.5 times it.
     static let notificationImageWidth = 600
 
-    /// A portrait crop (2:3) of the image, at most 600 × 900, that blurs progressively and fades to transparent toward
-    /// its trailing edge (#589). macOS has no custom banner layout, so the effect is baked into the PNG the system
+    /// A portrait crop (2:3) of the image, at most 600 × 900, sharp at its trailing edge, that blurs progressively and
+    /// fades to transparent toward its leading edge, the banner's text (#589). macOS has no custom banner layout, so the effect is baked into the PNG the system
     /// places as the thumbnail. Rendered on the CPU, so the same input gives the same bytes. nil when the source's
     /// short side is under 300 px, when the square the system shows is the better choice.
     static func notificationImage(_ image: CGImage) -> CGImage? {
@@ -487,23 +487,25 @@ final class NotificationService: Sendable {
         let scale = min(1, Double(notificationImageWidth) / Double(cropped.width))
         let source = CIImage(cgImage: cropped).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let extent = source.extent.integral
-        // Blur rises from nothing at 55% of the width to full at the trailing edge; the fade starts at 70%.
-        func ramp(from start: Double) -> CIImage? {
+        // The trailing edge stays sharp and opaque, where the system pins the thumbnail to the banner's side. Toward
+        // the text the blur rises from nothing at 60% of the width to full at the leading edge; the fade starts at 45%.
+        func ramp(over span: Double) -> CIImage? {
             let gradient = CIFilter.linearGradient()
-            gradient.point0 = CGPoint(x: extent.minX + extent.width * start, y: extent.midY)
-            gradient.point1 = CGPoint(x: extent.maxX, y: extent.midY)
+            gradient.point0 = CGPoint(x: extent.minX + extent.width * span, y: extent.midY)
+            gradient.point1 = CGPoint(x: extent.minX, y: extent.midY)
             gradient.color0 = .black
             gradient.color1 = .white
             return gradient.outputImage?.cropped(to: extent)
         }
         let blur = CIFilter.maskedVariableBlur()
-        blur.inputImage = source
-        blur.mask = ramp(from: 0.55)
+        // Clamped so the blur samples edge pixels, not transparency, along the top and bottom.
+        blur.inputImage = source.clampedToExtent()
+        blur.mask = ramp(over: 0.6)
         blur.radius = 18
         let fade = CIFilter.blendWithMask()
         fade.inputImage = CIImage(color: .clear).cropped(to: extent)
         fade.backgroundImage = blur.outputImage?.cropped(to: extent)
-        fade.maskImage = ramp(from: 0.7)
+        fade.maskImage = ramp(over: 0.45)
         guard let output = fade.outputImage?.cropped(to: extent) else { return nil }
         let context = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
         return context.createCGImage(
