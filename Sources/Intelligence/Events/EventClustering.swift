@@ -282,176 +282,10 @@ enum EventClusterer {
             decisions = [:]
             cleared = [:]
         }
-        var remaining = limit
-        matching: while remaining > 0 {
-            try Task.checkCancellation()
-            // Without energy, members already matched are not revalidated: the rules alone could split what the
-            // model joined. They wait, pending, for a pass with energy.
-            let pending = try await database.pendingEventMatchRows(
-                activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
-                matcherVersion: EventMatcher.version, limit: min(batchSize, remaining), revalidating: allowsEnergy)
-            guard !pending.isEmpty else { break }
-            try await prefetch(pending)
-            for row in pending where !handled.contains(row.id) {
-                // Only this batch ends here: the flush below still runs, and the pass ends on the next budget check.
-                guard remaining > 0 else { break }
-                try Task.checkCancellation()
-                deferredCurrentRow = false
-                defer { if deferredCurrentRow { deferred.insert(row.id) } }
-                if row.previouslyMatched, let eventID = row.eventID,
-                    let event = try await database.fetchEvent(id: eventID),
-                    event.updatedAt >= now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
-                    let snapshot = try await database.eventMatchMembers(eventID: event.id)
-                {
-                    let members = snapshot.members.sorted { ($0.date, $0.id) < ($1.date, $1.id) }
-                    guard members.count <= remaining else { break matching }
-                    try await prefetch(members)
-                    try await refreshInclusions(members)
-                    let exclusions = try await database.eventExclusions(for: members.map(\.id))
-                    var groups: [[EventMatchRow]] = []
-                    for member in members {
-                        try Task.checkCancellation()
-                        var partnerIndex: Int? = nil
-                        for (idx, group) in groups.enumerated() {
-                            guard !group.contains(where: { exclusions[member.id, default: []].contains($0.id) }) else {
-                                continue
-                            }
-                            let pairs = try await assessed(member, with: group)
-                            if EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil {
-                                partnerIndex = idx
-                                break
-                            }
-                        }
-                        if let partnerIndex { groups[partnerIndex].append(member) } else { groups.append([member]) }
-                    }
-                    remaining -= members.count
-                    report.processed += members.count
-                    if let changed = try await database.repartitionEvent(
-                        event.id, expectedVersion: snapshot.version, expectedMembers: snapshot.members,
-                        groups: groups.map { $0.map(\.id) }, matcherVersion: EventMatcher.version,
-                        activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime), at: now)
-                    {
-                        handled.formUnion(members.map(\.id))
-                        report.detached += groups.dropFirst().reduce(0) { $0 + $1.count }
-                        report.changedEvents.formUnion(changed)
-                    } else {
-                        report.conflicts += 1
-                    }
-                    continue
-                }
-                remaining -= 1
-                report.processed += 1
-                let excluded = try await database.eventExclusions(of: row.id)
-
-                // Active version upgrades were partitioned above. Archived unchanged groups stay intact;
-                // edited members must still fit their remaining event.
-                if let current = row.eventID, let event = try await database.eventMatchMembers(eventID: current) {
-                    let others = event.members.filter { $0.id != row.id }
-                    if !others.isEmpty {
-                        try await refreshInclusions(event.members)
-                        let pairs = try await assessed(row, with: others)
-                        let isExcluded = others.contains { excluded.contains($0.id) }
-                        let fits =
-                            row.previouslyMatched
-                            || (!isExcluded && EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil)
-                        if fits || (!allowsEnergy && deferredCurrentRow) {
-                            try await database.markEventMatchProcessed(
-                                [row.id], matcherVersion: EventMatcher.version, at: now)
-                            continue
-                        }
-                        try await database.removeArticles([row.id], fromEvent: event.id, at: now)
-                        report.detached += 1
-                        report.changedEvents.insert(event.id)
-                    }
-                }
-
-                let probe = FeedArticle(
-                    storedID: row.id, title: row.title, link: "", guid: nil,
-                    description: row.description, pubDate: row.date, source: row.source)
-                let candidates = try await EventCandidateFinder.candidates(
-                    for: probe, in: database, policy: candidatePolicy, now: now)
-                let rows = Dictionary(
-                    try await database.eventMatchRows(articleIDs: candidates.map(\.articleID)).map { ($0.id, $0) },
-                    uniquingKeysWith: { first, _ in first })
-                try await prefetch(Array(rows.values))
-
-                // Join the best active event the article fits as a whole.
-                var best: (id: String, version: Int, score: Double)?
-                for eventID in Set(candidates.compactMap(\.eventID)).sorted() {
-                    try Task.checkCancellation()
-                    guard let event = try await database.eventMatchMembers(eventID: eventID) else { continue }
-                    let members = event.members.filter { $0.id != row.id }
-                    guard !members.isEmpty, members.count < matchPolicy.maximumEventSize,
-                        !members.contains(where: { excluded.contains($0.id) })
-                    else { continue }
-                    try await prefetch(members)
-                    let pairs = try await assessed(row, with: members)
-                    guard let score = EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) else { continue }
-                    if score > (best?.score ?? 0) { best = (event.id, event.version, score) }
-                }
-
-                var decision: EventMatchDecision?
-                if let best {
-                    decision = .join(eventID: best.id, expectedVersion: best.version)
-                } else {
-                    // Otherwise start an event with unclustered candidates that match strongly and
-                    // stay compatible with each other.
-                    var scored: [(row: EventMatchRow, score: Double)] = []
-                    for candidate in candidates
-                    where candidate.eventID == nil && !excluded.contains(candidate.articleID) {
-                        guard let candidateRow = rows[candidate.articleID] else { continue }
-                        let pair = try await assessed(row, candidateRow)
-                        if pair.isMatch { scored.append((candidateRow, pair.score)) }
-                    }
-                    scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.row.id < $1.row.id }
-                    var group: [EventMatchRow] = []
-                    for candidate in scored where group.count < min(remaining, matchPolicy.maximumEventSize - 1) {
-                        var candidatePairs: [EventPairAssessment] = []
-                        for partner in ([row] + group) {
-                            candidatePairs.append(try await assessed(candidate.row, partner))
-                        }
-                        guard EventMatcher.eventScore(pairs: candidatePairs, policy: matchPolicy) != nil else {
-                            continue
-                        }
-                        let partnerExclusions = try await database.eventExclusions(of: candidate.row.id)
-                        guard !group.contains(where: { partnerExclusions.contains($0.id) }) else { continue }
-                        group.append(candidate.row)
-                    }
-                    if !group.isEmpty { decision = .create(with: group.map(\.id)) }
-                }
-
-                guard let decision else {
-                    try await database.markEventMatchProcessed([row.id], matcherVersion: EventMatcher.version, at: now)
-                    continue
-                }
-                let outcome = try await database.applyEventMatch(
-                    row.id, decision, matcherVersion: EventMatcher.version, at: now)
-                switch outcome {
-                case .joined(let id):
-                    report.joined += 1
-                    report.changedEvents.insert(id)
-                case .created(let id):
-                    report.created += 1
-                    report.changedEvents.insert(id)
-                    if case .create(let partners) = decision {
-                        handled.formUnion(partners)
-                        report.processed += partners.count
-                        remaining -= partners.count
-                        if deferredCurrentRow { deferred.formUnion(partners) }
-                    }
-                case .conflict:
-                    // Membership changed underneath the decision; the next batch decides again.
-                    report.conflicts += 1
-                    attempts[row.id, default: 0] += 1
-                    if attempts[row.id, default: 0] >= maximumAttempts {
-                        try await database.markEventMatchProcessed(
-                            [row.id], matcherVersion: EventMatcher.version, at: now)
-                    }
-                }
-            }
-            // Match state is already committed per article; a later throw or cancellation keeps this batch's work.
-            // Deferred rows are marked and the derived writes stored even if the other of the two fails, so either
-            // failure still leaves the deferred rows to a pass with energy and the batch's decisions stored.
+        /// Ends a batch: deferred rows are marked one matcher version behind and the derived writes stored, each even
+        /// if the other fails, so either failure still leaves the deferred rows to a pass with energy and the batch's
+        /// decisions stored. Match state is already committed per article.
+        func flushBatch() async throws {
             var markerError: Error?
             if !deferred.isEmpty {
                 do {
@@ -466,6 +300,186 @@ enum EventClusterer {
             try await store()
             if let markerError { throw markerError }
         }
+        var remaining = limit
+        matching: while remaining > 0 {
+            try Task.checkCancellation()
+            // Without energy, members already matched are not revalidated: the rules alone could split what the
+            // model joined. They wait, pending, for a pass with energy.
+            let pending = try await database.pendingEventMatchRows(
+                activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
+                matcherVersion: EventMatcher.version, limit: min(batchSize, remaining), revalidating: allowsEnergy)
+            guard !pending.isEmpty else { break }
+            try await prefetch(pending)
+            do {
+                for row in pending where !handled.contains(row.id) {
+                    // Only this batch ends here: the flush below still runs, and the pass ends on the next budget check.
+                    guard remaining > 0 else { break }
+                    try Task.checkCancellation()
+                    deferredCurrentRow = false
+                    defer { if deferredCurrentRow { deferred.insert(row.id) } }
+                    if row.previouslyMatched, let eventID = row.eventID,
+                        let event = try await database.fetchEvent(id: eventID),
+                        event.updatedAt >= now.addingTimeInterval(-candidatePolicy.activeEventLifetime),
+                        let snapshot = try await database.eventMatchMembers(eventID: event.id)
+                    {
+                        let members = snapshot.members.sorted { ($0.date, $0.id) < ($1.date, $1.id) }
+                        guard members.count <= remaining else { break matching }
+                        try await prefetch(members)
+                        try await refreshInclusions(members)
+                        let exclusions = try await database.eventExclusions(for: members.map(\.id))
+                        var groups: [[EventMatchRow]] = []
+                        for member in members {
+                            try Task.checkCancellation()
+                            var partnerIndex: Int? = nil
+                            for (idx, group) in groups.enumerated() {
+                                guard !group.contains(where: { exclusions[member.id, default: []].contains($0.id) })
+                                else {
+                                    continue
+                                }
+                                let pairs = try await assessed(member, with: group)
+                                if EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil {
+                                    partnerIndex = idx
+                                    break
+                                }
+                            }
+                            if let partnerIndex { groups[partnerIndex].append(member) } else { groups.append([member]) }
+                        }
+                        remaining -= members.count
+                        report.processed += members.count
+                        if let changed = try await database.repartitionEvent(
+                            event.id, expectedVersion: snapshot.version, expectedMembers: snapshot.members,
+                            groups: groups.map { $0.map(\.id) }, matcherVersion: EventMatcher.version,
+                            activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime), at: now)
+                        {
+                            handled.formUnion(members.map(\.id))
+                            report.detached += groups.dropFirst().reduce(0) { $0 + $1.count }
+                            report.changedEvents.formUnion(changed)
+                        } else {
+                            report.conflicts += 1
+                        }
+                        continue
+                    }
+                    remaining -= 1
+                    report.processed += 1
+                    let excluded = try await database.eventExclusions(of: row.id)
+
+                    // Active version upgrades were partitioned above. Archived unchanged groups stay intact;
+                    // edited members must still fit their remaining event.
+                    if let current = row.eventID, let event = try await database.eventMatchMembers(eventID: current) {
+                        let others = event.members.filter { $0.id != row.id }
+                        if !others.isEmpty {
+                            try await refreshInclusions(event.members)
+                            let pairs = try await assessed(row, with: others)
+                            let isExcluded = others.contains { excluded.contains($0.id) }
+                            let fits =
+                                row.previouslyMatched
+                                || (!isExcluded && EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) != nil)
+                            if fits || (!allowsEnergy && deferredCurrentRow) {
+                                try await database.markEventMatchProcessed(
+                                    [row.id], matcherVersion: EventMatcher.version, at: now)
+                                continue
+                            }
+                            try await database.removeArticles([row.id], fromEvent: event.id, at: now)
+                            report.detached += 1
+                            report.changedEvents.insert(event.id)
+                        }
+                    }
+
+                    let probe = FeedArticle(
+                        storedID: row.id, title: row.title, link: "", guid: nil,
+                        description: row.description, pubDate: row.date, source: row.source)
+                    let candidates = try await EventCandidateFinder.candidates(
+                        for: probe, in: database, policy: candidatePolicy, now: now)
+                    let rows = Dictionary(
+                        try await database.eventMatchRows(articleIDs: candidates.map(\.articleID)).map { ($0.id, $0) },
+                        uniquingKeysWith: { first, _ in first })
+                    try await prefetch(Array(rows.values))
+
+                    // Join the best active event the article fits as a whole.
+                    var best: (id: String, version: Int, score: Double)?
+                    for eventID in Set(candidates.compactMap(\.eventID)).sorted() {
+                        try Task.checkCancellation()
+                        guard let event = try await database.eventMatchMembers(eventID: eventID) else { continue }
+                        let members = event.members.filter { $0.id != row.id }
+                        guard !members.isEmpty, members.count < matchPolicy.maximumEventSize,
+                            !members.contains(where: { excluded.contains($0.id) })
+                        else { continue }
+                        try await prefetch(members)
+                        let pairs = try await assessed(row, with: members)
+                        guard let score = EventMatcher.eventScore(pairs: pairs, policy: matchPolicy) else { continue }
+                        if score > (best?.score ?? 0) { best = (event.id, event.version, score) }
+                    }
+
+                    var decision: EventMatchDecision?
+                    if let best {
+                        decision = .join(eventID: best.id, expectedVersion: best.version)
+                    } else {
+                        // Otherwise start an event with unclustered candidates that match strongly and
+                        // stay compatible with each other.
+                        var scored: [(row: EventMatchRow, score: Double)] = []
+                        for candidate in candidates
+                        where candidate.eventID == nil && !excluded.contains(candidate.articleID) {
+                            guard let candidateRow = rows[candidate.articleID] else { continue }
+                            let pair = try await assessed(row, candidateRow)
+                            if pair.isMatch { scored.append((candidateRow, pair.score)) }
+                        }
+                        scored.sort { $0.score != $1.score ? $0.score > $1.score : $0.row.id < $1.row.id }
+                        var group: [EventMatchRow] = []
+                        for candidate in scored where group.count < min(remaining, matchPolicy.maximumEventSize - 1) {
+                            var candidatePairs: [EventPairAssessment] = []
+                            for partner in ([row] + group) {
+                                candidatePairs.append(try await assessed(candidate.row, partner))
+                            }
+                            guard EventMatcher.eventScore(pairs: candidatePairs, policy: matchPolicy) != nil else {
+                                continue
+                            }
+                            let partnerExclusions = try await database.eventExclusions(of: candidate.row.id)
+                            guard !group.contains(where: { partnerExclusions.contains($0.id) }) else { continue }
+                            group.append(candidate.row)
+                        }
+                        if !group.isEmpty { decision = .create(with: group.map(\.id)) }
+                    }
+
+                    guard let decision else {
+                        try await database.markEventMatchProcessed(
+                            [row.id], matcherVersion: EventMatcher.version, at: now)
+                        continue
+                    }
+                    let outcome = try await database.applyEventMatch(
+                        row.id, decision, matcherVersion: EventMatcher.version, at: now)
+                    switch outcome {
+                    case .joined(let id):
+                        report.joined += 1
+                        report.changedEvents.insert(id)
+                    case .created(let id):
+                        report.created += 1
+                        report.changedEvents.insert(id)
+                        if case .create(let partners) = decision {
+                            handled.formUnion(partners)
+                            report.processed += partners.count
+                            remaining -= partners.count
+                            if deferredCurrentRow { deferred.formUnion(partners) }
+                        }
+                    case .conflict:
+                        // Membership changed underneath the decision; the next batch decides again.
+                        report.conflicts += 1
+                        attempts[row.id, default: 0] += 1
+                        if attempts[row.id, default: 0] >= maximumAttempts {
+                            try await database.markEventMatchProcessed(
+                                [row.id], matcherVersion: EventMatcher.version, at: now)
+                        }
+                    }
+                }
+            } catch {
+                // A row that throws still leaves the rows before it marked and their derived writes stored (#952);
+                // the row's own error is the one reported.
+                try? await flushBatch()
+                throw error
+            }
+            try await flushBatch()
+        }
+        // A spent budget (`break matching`) leaves the loop before the batch's flush.
+        try await flushBatch()
         /// Two thirds of the cross pairs between the earliest members of two events agree by the rules alone (#581): no
         /// conflict other than a different act, `storyLinkAnchors` shared specific names that are not common actors, and
         /// a shared keyword. A report alone (`single`) may instead share one such name, a headline figure ("70,000

@@ -205,6 +205,31 @@ enum AnalysisGenerationTests {
         let features = try await marking.eventRows("SELECT count(*) FROM article_features;")
         check(features.first?.first == "2", "The batch's features are stored although the marker failed")
         await marking.close()
+
+        // A row that throws inside the batch still leaves the rows before it deferred and stored (#952): here the
+        // second report's own match marker fails.
+        let midBatch = DatabaseEngine(path: ":memory:")
+        try await midBatch.open()
+        try await midBatch.upsertArticles(floods)
+        try await midBatch.eventRows(
+            """
+            CREATE TRIGGER fail_second BEFORE INSERT ON event_match_state
+            WHEN NEW.matcher_version = \(EventMatcher.version)
+                AND (SELECT count(*) FROM event_match_state WHERE matcher_version = \(EventMatcher.version)) >= 1
+            BEGIN SELECT RAISE(ABORT, 'second'); END;
+            """)
+        do {
+            _ = try await EventClusterer.run(in: midBatch, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
+            check(false, "The second report's failure ends the pass")
+        } catch {
+            check(error.localizedDescription.contains("second"), "The second report's own error is reported")
+        }
+        let current = try await midBatch.eventRows(
+            "SELECT count(*) FROM event_match_state WHERE matcher_version = ?;", [.integer(EventMatcher.version)])
+        check(current.first?.first == "0", "No deferred report of the batch stays marked current")
+        let storedFirst = try await midBatch.eventRows("SELECT count(*) FROM article_features;")
+        check(storedFirst.first?.first == "2", "The batch's features are stored although a later row failed")
+        await midBatch.close()
     }
 
     /// A job counts as completed only when its write succeeded (#820), a changed input or a clear makes the story
