@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import AppKit
+import Combine
 import SwiftUI
 import UserNotifications
 
@@ -140,21 +141,31 @@ final class StoryBannerPresenter {
     static let lifetime: Duration = .seconds(6)
 
     private var panel: NSPanel?
+    private var host: FirstClickHostingView<StoryBannerView>?
     private var shown: String?
     private var dismissal: Task<Void, Never>?
+    private var resignation: AnyCancellable?
 
-    /// Shows the banner when the app is frontmost with a window on screen, and says whether it will; the caller then
-    /// files the notification without a system banner.
+    init() {
+        // The banner belongs to the app in front: it leaves as soon as another app becomes active.
+        resignation = NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated { self?.dismiss() }
+            }
+    }
+
+    /// Shows the banner when the app is frontmost with a window on screen, and says whether it did; the caller then
+    /// files the notification without a system banner. The text shows at once and the photo joins when it loads.
     func present(_ banner: StoryBanner) -> Bool {
         guard NSApp.isActive,
             NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized && $0.canBecomeMain })
         else { return false }
         shown = banner.id
+        show(banner)
         Task {
-            let photo = await Self.photo(at: banner.imageURL)
-            // A newer banner replaced this one, or it was closed, while its photo loaded.
-            guard shown == banner.id else { return }
-            show(banner, photo: photo)
+            // A banner replaced, closed or dismissed by deactivation while its photo loaded keeps no photo.
+            guard let photo = await Self.photo(at: banner.imageURL), shown == banner.id else { return }
+            host?.rootView = view(for: banner, photo: photo)
         }
         return true
     }
@@ -195,15 +206,20 @@ final class StoryBannerPresenter {
             y: visible.maxY - size.height - AppLayout.bannerMargin, width: size.width, height: size.height)
     }
 
-    private func show(_ banner: StoryBanner, photo: CGImage?) {
-        let view = StoryBannerView(
+    private func view(for banner: StoryBanner, photo: CGImage?) -> StoryBannerView {
+        StoryBannerView(
             banner: banner, photo: photo,
             open: { [weak self] in self?.open(banner) },
             close: { [weak self] in self?.dismiss() },
             hover: { [weak self] inside in self?.hold(inside) })
+    }
+
+    private func show(_ banner: StoryBanner) {
         let panel = panel ?? makePanel()
         self.panel = panel
-        let host = FirstClickHostingView(rootView: view)
+        // The photo is the banner's background, so adding it later leaves the size measured here unchanged.
+        let host = FirstClickHostingView(rootView: view(for: banner, photo: nil))
+        self.host = host
         panel.contentView = host
         guard let screen = NSApp.keyWindow?.screen ?? NSScreen.main else { return }
         let frame = Self.frame(for: host.fittingSize, in: screen.visibleFrame)
