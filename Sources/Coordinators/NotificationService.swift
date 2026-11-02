@@ -1,3 +1,4 @@
+import AppKit
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
@@ -141,6 +142,11 @@ final class NotificationService: Sendable {
         self.post =
             post ?? { request in
                 guard Bundle.main.bundleIdentifier != nil else { return }
+                // Whether News was active when it posted tells, next to the delegate's log, if macOS asked it (#926).
+                let active = await MainActor.run { NSApplication.shared.isActive }
+                Logger(subsystem: "com.marspater.news", category: "StoryBanner").notice(
+                    "post \(request.identifier, privacy: .public) active=\(active, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
+                )
                 try await UNUserNotificationCenter.current().add(request)
             }
         self.spacing = spacing
@@ -399,7 +405,8 @@ final class NotificationService: Sendable {
         let content = UNMutableNotificationContent()
         content.sound = banner.sound ? .default : nil
         content.threadIdentifier = banner.thread
-        content.interruptionLevel = banner.sound ? .active : .passive
+        // The Help sample is active: macOS may deliver a passive notification without asking the app (#926).
+        content.interruptionLevel = banner.sound || sampleIdentifier != nil ? .active : .passive
         let identifier: String
         if let article = banner.article {
             content.title = Self.sourceName(article)

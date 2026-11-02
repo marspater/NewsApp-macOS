@@ -545,14 +545,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
+        let log = StoryBannerPresenter.log
+        let request = notification.request
+        log.notice(
+            "willPresent \(request.identifier, privacy: .public) category=\(request.content.categoryIdentifier, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
+        )
         // A reader who set News's alert style to None gets no banner from the app either.
-        guard let banner = StoryBanner(notification.request) else { return [.banner, .list, .sound] }
+        guard let banner = StoryBanner(request) else { return [.banner, .list, .sound] }
         let settings = await center.notificationSettings()
+        log.notice(
+            "settings alert=\(settings.alertSetting.rawValue, privacy: .public) style=\(settings.alertStyle.rawValue, privacy: .public) previews=\(settings.showPreviewsSetting.rawValue, privacy: .public)"
+        )
         // Only the banner style is the app's: Alerts stay until dismissed and hidden previews redact, both as the system
         // draws them. Focus has no public signal here, so a story arriving during Focus can still show this banner.
         guard settings.alertSetting == .enabled, settings.alertStyle == .banner, settings.showPreviewsSetting != .never
         else { return [.banner, .list, .sound] }
-        return await StoryBannerPresenter.shared.present(banner) ? [.list, .sound] : [.banner, .list, .sound]
+        let drawn = await StoryBannerPresenter.shared.present(banner)
+        log.notice("willPresent \(request.identifier, privacy: .public) drawn by app=\(drawn, privacy: .public)")
+        return drawn ? [.list, .sound] : [.banner, .list, .sound]
     }
 
     // Handle notification actions and default click (#560)
