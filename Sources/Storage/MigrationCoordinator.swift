@@ -54,8 +54,9 @@ actor MigrationCoordinator {
         var stats = MigrationStats()
 
         // 1. Locate and load legacy JSON article cache
-        // Legacy data that exists but can't be read keeps the migration open, so it is retried instead of being taken for
-        // a fresh install; the files are never removed (#946).
+        // Legacy data that exists but can't be read is not a fresh install: with nothing readable to import, the migration
+        // stays open and is retried. Once readable data is imported the migration completes, so a retry never replays
+        // saved or read state the reader has changed since; an unreadable file is kept and logged (#946).
         var unreadable = false
         var legacyArticles: [FeedArticle] = []
         let cacheDir = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first?
@@ -139,11 +140,10 @@ actor MigrationCoordinator {
 
             stats.articlesImported = allArticlesToImport.count
 
-            // Mark migration complete ONLY AFTER every step succeeded, and only when all legacy data could be read!
-            guard !unreadable else {
+            // Mark migration complete ONLY AFTER every step succeeded!
+            if unreadable {
                 stats.failures += 1
-                logger.error("Some legacy data could not be read; migration stays open and is retried.")
-                return stats
+                logger.error("Some legacy data could not be read and was not imported. Legacy data preserved.")
             }
             userDefaults.set(Self.currentMigrationVersion, forKey: Self.migrationVersionKey)
 

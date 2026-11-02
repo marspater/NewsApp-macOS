@@ -8952,6 +8952,15 @@ struct NewsTests {
             await unreadableCoordinator.isMigrationNeeded(), "Unreadable legacy data keeps the migration open")
         assertTrue(
             unreadableDefaults.data(forKey: "com.marspater.news.savedStories") != nil, "Unreadable legacy data is kept")
+        // With readable legacy data beside it, the import completes, so a later launch never replays stale state.
+        unreadableDefaults.set(["legacy-read-only"], forKey: "com.marspater.news.readArticlesList")
+        let partialStats = try await unreadableCoordinator.migrateIfNeeded()
+        assertEqual(partialStats.failures, 1, "The unreadable part is still reported")
+        assertFalse(
+            await unreadableCoordinator.isMigrationNeeded(), "A migration that imported readable data completes")
+        assertTrue(
+            unreadableDefaults.data(forKey: "com.marspater.news.savedStories") != nil,
+            "Unreadable legacy data is still kept")
 
         // Real legacy data: a saved story, and a read list that also names a story no longer cached.
         let legacySuite = suiteName + ".legacy"
