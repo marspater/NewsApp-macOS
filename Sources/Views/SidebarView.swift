@@ -141,10 +141,16 @@ struct SidebarView: View {
     }
 
     private var userSectionsSection: some View {
-        Section("Sections") {
+        Section {
             ForEach(feedManager.userSections, id: \.self) { section in
                 topicRow(title: section, icon: iconForSection(section))
                     .contextMenu {
+                        Button {
+                            isNewSmartBinderSheetPresented = true
+                        } label: {
+                            Label("New Smart Binder…", systemImage: "plus")
+                        }
+                        Divider()
                         Button(role: .destructive) {
                             pendingSectionRemoval = section
                         } label: {
@@ -160,6 +166,11 @@ struct SidebarView: View {
                         } label: {
                             Label("Edit Smart Binder…", systemImage: "pencil")
                         }
+                        Button {
+                            isNewSmartBinderSheetPresented = true
+                        } label: {
+                            Label("New Smart Binder…", systemImage: "plus")
+                        }
                         Divider()
                         Button(role: .destructive) {
                             pendingBinderRemoval = binder
@@ -167,6 +178,19 @@ struct SidebarView: View {
                             Label("Remove Smart Binder…", systemImage: "trash")
                         }
                     }
+            }
+        } header: {
+            HStack {
+                Text("Sections")
+                Spacer()
+                Button {
+                    isNewSmartBinderSheetPresented = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.plain)
+                .help("New Smart Binder")
+                .accessibilityLabel("New Smart Binder")
             }
         }
         .confirmationDialog(

@@ -41,6 +41,7 @@ actor DatabaseEngine {
     }
     private struct MutedCountKey: Hashable {
         let section: String?
+        let smartBinder: SmartBinder?
         let isRead: Bool?
         let isSaved: Bool?
         let search: String?
@@ -4203,9 +4204,9 @@ actor DatabaseEngine {
         // Without a change token nothing is cached or reused: another connection's commits would go unseen (#946).
         let changes = changeToken()
         if changes == nil || mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
-        let binderTag = smartBinder?.sidebarTag
         let key = MutedCountKey(
-            section: binderTag ?? section, isRead: isRead, isSaved: isSaved, search: search, muting: muting,
+            section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
+            muting: muting,
             scope: collectionOnlyFeedURLs)
         if let known = mutedCountCache.counts[key] { return known }
         let count = try listAggregates(

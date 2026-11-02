@@ -5585,12 +5585,26 @@ struct NewsTests {
         let binderTotals = try await db.listTotals(smartBinder: testBinder)
         assertEqual(binderTotals.stories, 2, "List totals reflects binder matching count")
 
+        // SQL and in-memory matching must agree when every keyword is required.
+        let strictBinder = SmartBinder(
+            name: "Strict", includeKeywords: ["apple", "developer"], matchAllKeywords: true)
+        let strictArticles = try await db.fetchArticles(smartBinder: strictBinder)
+        assertEqual(strictArticles.map(\.id), ["db-3"], "matchAllKeywords requires every keyword in SQL")
+        assertTrue(strictBinder.matches(article: dbStories[2]), "In-memory matching agrees for db-3")
+        assertFalse(strictBinder.matches(article: dbStories[0]), "In-memory matching agrees for db-1")
+
         // Mute rules strictly honoured: mute theverge.com
         var binderMuting = MuteRules(sources: ["theverge.com"])
         let mutedArticles = try await db.fetchArticles(smartBinder: testBinder, muting: binderMuting)
         assertEqual(mutedArticles.map(\.id), ["db-1"], "Muted publisher theverge.com is excluded from smart binder")
         let mutedCount = try await db.mutedArticleCount(smartBinder: testBinder, muting: binderMuting)
         assertEqual(mutedCount, 1, "Muted count reports exactly 1 story hidden by muting")
+
+        // Rule edits produce distinct cache entries without requiring database writes
+        var editedBinder = testBinder
+        editedBinder.includeKeywords = ["nonexistent"]
+        let editedMutedCount = try await db.mutedArticleCount(smartBinder: editedBinder, muting: binderMuting)
+        assertEqual(editedMutedCount, 0, "Edited binder rules use a distinct cache entry")
 
         // Mute by topic: mute "review"
         binderMuting.addTopic("review")

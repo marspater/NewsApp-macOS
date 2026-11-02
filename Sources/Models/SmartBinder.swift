@@ -36,7 +36,6 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         includeKeywords: [String] = [],
         excludeKeywords: [String] = [],
         publishers: [String] = [],
-        createdAt: Date = Date(),
         matchAllKeywords: Bool = false
     ) {
         self.id = id
@@ -46,7 +45,7 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         self.includeKeywords = includeKeywords
         self.excludeKeywords = excludeKeywords
         self.publishers = publishers
-        self.createdAt = createdAt
+        self.createdAt = Date()
         self.matchAllKeywords = matchAllKeywords
     }
 
@@ -105,75 +104,97 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
 
     // MARK: - Parameterized SQL Translation
 
+    private static func cleanTerms(_ terms: [String]) -> [String] {
+        terms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func categoryCondition() -> (clause: String?, parameters: [String]) {
+        let clean = Self.cleanTerms(categories)
+        guard !clean.isEmpty else { return (nil, []) }
+        let clauses = clean.map { _ in "coalesce(ae.category, a.category) LIKE ? ESCAPE '\\'" }
+        return ("(" + clauses.joined(separator: " OR ") + ")", clean.map { "%\(Self.escapeLikeWildcards($0))%" })
+    }
+
+    private func publisherCondition() -> (clause: String?, parameters: [String]) {
+        let clean = Self.cleanTerms(publishers)
+        guard !clean.isEmpty else { return (nil, []) }
+        let clauses = clean.map { _ in "(a.source LIKE ? ESCAPE '\\' OR a.canonical_url LIKE ? ESCAPE '\\')" }
+        var parameters: [String] = []
+        for pub in clean {
+            let escaped = Self.escapeLikeWildcards(pub)
+            parameters.append("%\(escaped)%")
+            parameters.append("%\(escaped)%")
+        }
+        return ("(" + clauses.joined(separator: " OR ") + ")", parameters)
+    }
+
+    private func includeKeywordsCondition() -> (clauses: [String], parameters: [String]) {
+        let clean = Self.cleanTerms(includeKeywords)
+        guard !clean.isEmpty else { return ([], []) }
+        var clauses: [String] = []
+        var parameters: [String] = []
+        if matchAllKeywords {
+            for kw in clean {
+                clauses.append("(a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')")
+                let escaped = Self.escapeLikeWildcards(kw)
+                parameters.append("%\(escaped)%")
+                parameters.append("%\(escaped)%")
+            }
+        } else {
+            let incClauses = clean.map { _ in
+                "(a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')"
+            }
+            clauses.append("(" + incClauses.joined(separator: " OR ") + ")")
+            for kw in clean {
+                let escaped = Self.escapeLikeWildcards(kw)
+                parameters.append("%\(escaped)%")
+                parameters.append("%\(escaped)%")
+            }
+        }
+        return (clauses, parameters)
+    }
+
+    private func excludeKeywordsCondition() -> (clauses: [String], parameters: [String]) {
+        let clean = Self.cleanTerms(excludeKeywords)
+        guard !clean.isEmpty else { return ([], []) }
+        var clauses: [String] = []
+        var parameters: [String] = []
+        for kw in clean {
+            clauses.append("NOT (a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')")
+            let escaped = Self.escapeLikeWildcards(kw)
+            parameters.append("%\(escaped)%")
+            parameters.append("%\(escaped)%")
+        }
+        return (clauses, parameters)
+    }
+
     /// Translates compound rules into 100% parameterised SQL query filter conditions.
     /// Never interpolates user text directly into the SQL query string.
     public func sqlCondition() -> (sql: String, parameters: [String]) {
         var clauses: [String] = []
         var parameters: [String] = []
 
-        let cleanCategories =
-            categories
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if !cleanCategories.isEmpty {
-            let catClauses = cleanCategories.map { _ in "coalesce(ae.category, a.category) LIKE ? ESCAPE '\\'" }
-            clauses.append("(" + catClauses.joined(separator: " OR ") + ")")
-            parameters.append(contentsOf: cleanCategories.map { "%\(Self.escapeLikeWildcards($0))%" })
+        let (catClause, catParams) = categoryCondition()
+        if let catClause {
+            clauses.append(catClause)
+            parameters.append(contentsOf: catParams)
         }
 
-        let cleanPublishers =
-            publishers
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if !cleanPublishers.isEmpty {
-            let pubClauses = cleanPublishers.map { _ in
-                "(a.source LIKE ? ESCAPE '\\' OR a.canonical_url LIKE ? ESCAPE '\\')"
-            }
-            clauses.append("(" + pubClauses.joined(separator: " OR ") + ")")
-            for pub in cleanPublishers {
-                let escaped = Self.escapeLikeWildcards(pub)
-                parameters.append("%\(escaped)%")
-                parameters.append("%\(escaped)%")
-            }
+        let (pubClause, pubParams) = publisherCondition()
+        if let pubClause {
+            clauses.append(pubClause)
+            parameters.append(contentsOf: pubParams)
         }
 
-        let cleanIncludes =
-            includeKeywords
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if !cleanIncludes.isEmpty {
-            if matchAllKeywords {
-                for kw in cleanIncludes {
-                    clauses.append("(a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')")
-                    let escaped = Self.escapeLikeWildcards(kw)
-                    parameters.append("%\(escaped)%")
-                    parameters.append("%\(escaped)%")
-                }
-            } else {
-                let incClauses = cleanIncludes.map { _ in
-                    "(a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')"
-                }
-                clauses.append("(" + incClauses.joined(separator: " OR ") + ")")
-                for kw in cleanIncludes {
-                    let escaped = Self.escapeLikeWildcards(kw)
-                    parameters.append("%\(escaped)%")
-                    parameters.append("%\(escaped)%")
-                }
-            }
-        }
+        let (incClauses, incParams) = includeKeywordsCondition()
+        clauses.append(contentsOf: incClauses)
+        parameters.append(contentsOf: incParams)
 
-        let cleanExcludes =
-            excludeKeywords
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if !cleanExcludes.isEmpty {
-            for kw in cleanExcludes {
-                clauses.append("NOT (a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')")
-                let escaped = Self.escapeLikeWildcards(kw)
-                parameters.append("%\(escaped)%")
-                parameters.append("%\(escaped)%")
-            }
-        }
+        let (excClauses, excParams) = excludeKeywordsCondition()
+        clauses.append(contentsOf: excClauses)
+        parameters.append(contentsOf: excParams)
 
         guard !clauses.isEmpty else { return ("", []) }
         return (" AND " + clauses.joined(separator: " AND "), parameters)
@@ -181,60 +202,49 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
 
     // MARK: - In-Memory Article Matching
 
-    /// Pure in-memory rule evaluation matching FeedArticle instances against compound topic rules.
-    func matches(article: FeedArticle) -> Bool {
-        let cleanCategories =
-            categories
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if !cleanCategories.isEmpty {
-            let cat = article.category?.lowercased() ?? ""
-            let matchesCat = cleanCategories.contains { cat.contains($0.lowercased()) }
-            if !matchesCat { return false }
+    private func matchesCategories(article: FeedArticle) -> Bool {
+        let clean = Self.cleanTerms(categories)
+        guard !clean.isEmpty else { return true }
+        let cat = article.category?.lowercased() ?? ""
+        return clean.contains { cat.contains($0.lowercased()) }
+    }
+
+    private func matchesPublishers(article: FeedArticle) -> Bool {
+        let clean = Self.cleanTerms(publishers)
+        guard !clean.isEmpty else { return true }
+        let source = article.source.lowercased()
+        let pubName = article.publisherName.lowercased()
+        let link = article.link.lowercased()
+        return clean.contains {
+            let p = $0.lowercased()
+            return source.contains(p) || pubName.contains(p) || link.contains(p)
         }
+    }
 
-        let cleanPublishers =
-            publishers
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        if !cleanPublishers.isEmpty {
-            let source = article.source.lowercased()
-            let pubName = article.publisherName.lowercased()
-            let link = article.link.lowercased()
-            let matchesPub = cleanPublishers.contains {
-                let p = $0.lowercased()
-                return source.contains(p) || pubName.contains(p) || link.contains(p)
-            }
-            if !matchesPub { return false }
-        }
-
-        let text = "\(article.title) \(article.description)".lowercased()
-
-        let cleanIncludes =
-            includeKeywords
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+    private func matchesKeywords(in text: String) -> Bool {
+        let cleanIncludes = Self.cleanTerms(includeKeywords)
         if !cleanIncludes.isEmpty {
             if matchAllKeywords {
-                for kw in cleanIncludes {
-                    if !text.contains(kw.lowercased()) { return false }
-                }
+                if !cleanIncludes.allSatisfy({ text.contains($0.lowercased()) }) { return false }
             } else {
-                let matchesInc = cleanIncludes.contains { text.contains($0.lowercased()) }
-                if !matchesInc { return false }
+                if !cleanIncludes.contains(where: { text.contains($0.lowercased()) }) { return false }
             }
         }
 
-        let cleanExcludes =
-            excludeKeywords
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        let cleanExcludes = Self.cleanTerms(excludeKeywords)
         if !cleanExcludes.isEmpty {
-            for kw in cleanExcludes {
-                if text.contains(kw.lowercased()) { return false }
-            }
+            if cleanExcludes.contains(where: { text.contains($0.lowercased()) }) { return false }
         }
 
         return true
+    }
+
+    /// Pure in-memory rule evaluation matching FeedArticle instances against compound topic rules.
+    func matches(article: FeedArticle) -> Bool {
+        guard matchesCategories(article: article),
+            matchesPublishers(article: article)
+        else { return false }
+        let text = "\(article.title) \(article.description)".lowercased()
+        return matchesKeywords(in: text)
     }
 }

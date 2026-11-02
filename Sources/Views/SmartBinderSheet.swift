@@ -26,6 +26,7 @@ struct SmartBinderSheet: View {
     @State private var selectedIcon: String = "folder"
     @State private var selectedCategories: Set<String> = []
     @State private var includeKeywordsText: String = ""
+    @State private var matchAllKeywords: Bool = false
     @State private var excludeKeywordsText: String = ""
     @State private var publishersText: String = ""
 
@@ -36,8 +37,8 @@ struct SmartBinderSheet: View {
 
     private static let standardCategories = [
         "Tech", "Business", "Science", "Entertainment",
-        "Politics", "World", "Lifestyle", "Sports",
-        "Health & Wellness", "Food",
+        "Politics", "U.S. Politics", "World", "Lifestyle",
+        "Sports", "Health & Wellness", "Food", "Travel", "Fashion",
     ]
 
     init(binder: SmartBinder? = nil) {
@@ -197,6 +198,12 @@ struct SmartBinderSheet: View {
                         .font(AppTypography.headline)
                     TextField("e.g. apple, silicon, m4", text: $includeKeywordsText)
                         .textFieldStyle(.roundedBorder)
+                    Picker("Keyword Matching", selection: $matchAllKeywords) {
+                        Text("Any Keyword").tag(false)
+                        Text("All Keywords").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                     Text("Separate multiple keywords with commas.")
                         .font(AppTypography.caption)
                         .foregroundStyle(AppColor.secondaryText)
@@ -253,6 +260,7 @@ struct SmartBinderSheet: View {
         selectedIcon = binder.icon
         selectedCategories = Set(binder.categories)
         includeKeywordsText = binder.includeKeywords.joined(separator: ", ")
+        matchAllKeywords = binder.matchAllKeywords
         excludeKeywordsText = binder.excludeKeywords.joined(separator: ", ")
         publishersText = binder.publishers.joined(separator: ", ")
     }
@@ -277,6 +285,7 @@ struct SmartBinderSheet: View {
             updated.includeKeywords = includes
             updated.excludeKeywords = excludes
             updated.publishers = pubs
+            updated.matchAllKeywords = matchAllKeywords
             appSettings.updateSmartBinder(updated)
         } else {
             let newBinder = SmartBinder(
@@ -285,7 +294,8 @@ struct SmartBinderSheet: View {
                 categories: cats,
                 includeKeywords: includes,
                 excludeKeywords: excludes,
-                publishers: pubs
+                publishers: pubs,
+                matchAllKeywords: matchAllKeywords
             )
             appSettings.addSmartBinder(newBinder)
         }
