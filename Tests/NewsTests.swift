@@ -3402,6 +3402,24 @@ struct NewsTests {
             EntityResult(name: "Jane Smith", type: .person),
         ])
         assertEqual(ambiguous.count, 3, "An ambiguous surname must not be merged into a guessed identity")
+        // #925: a reader document without a usable image still shows the page-lookup image the card shows.
+        var lookedUp = FeedArticle(
+            storedID: "quanta-cold-fusion", title: "Is There Anything Left in the Dream of Cold Fusion?",
+            link: "https://example.com/cold-fusion", guid: "quanta-cold-fusion", description: "Exotic atoms.",
+            pubDate: Date(), source: "Quanta Magazine")
+        lookedUp.imageUrl = "https://example.com/cold-fusion-og.jpg"
+        let paragraph = ReaderBlock(kind: .paragraph, text: "Cold fusion: now there's an idea.")
+        lookedUp.readerDocument = ReaderDocument(blocks: [paragraph, paragraph], images: [])
+        assertEqual(
+            ArticleDetailView.leadImage(for: lookedUp, blocks: [paragraph, paragraph]), lookedUp.imageUrl,
+            "The reader leads with the image the card shows")
+        let bodyFigure = ReaderBlock(kind: .figure, text: "", imageURL: "https://example.com/cold-fusion-og.jpg")
+        assertEqual(
+            ArticleDetailView.leadImage(for: lookedUp, blocks: [paragraph, paragraph, bodyFigure]), nil,
+            "No lead figure when the body already shows that image")
+        assertEqual(
+            ArticleDetailView.leadImage(for: lookedUp, blocks: [bodyFigure, paragraph]), nil,
+            "No lead figure when a figure opens the body")
 
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(
             "news-reader-\(UUID().uuidString).sqlite3"
