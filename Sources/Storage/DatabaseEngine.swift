@@ -769,9 +769,25 @@ actor DatabaseEngine {
         // A plain library file carries no extras and leaves the side file as it is.
         if !extras.isEmpty { try putTension(extras["world-tension"]) }
 
-        // Folded in first, so deleting the log loses nothing if the swap fails and the old library is reopened; a library
-        // too damaged to checkpoint has its log in the copy kept above (#946).
-        try? executeSimple("PRAGMA wal_checkpoint(TRUNCATE);")
+        // The log is folded in first and must be fully folded: it is deleted below, and the reopened library would lose
+        // the commits only it holds if the swap failed. A blocked checkpoint reports through its counts, not its status,
+        // so the counts are checked; an incomplete one stops the restore with the library untouched (#946). A library
+        // opened read-only can't checkpoint; its log is in the copy kept above.
+        if let db, sqlite3_db_readonly(db, "main") == 0 {
+            var logFrames: Int32 = -1
+            var checkpointed: Int32 = -1
+            let status = sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, &logFrames, &checkpointed)
+            guard status == SQLITE_OK, logFrames >= 0, logFrames == checkpointed else {
+                if !extras.isEmpty { try? putTension(previousTension) }
+                throw NSError(
+                    domain: "DatabaseEngine", code: Int(status),
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "The current library is still in use, so nothing was restored. "
+                            + "Quit other copies of News and try again."
+                    ])
+            }
+        }
         close()
         for sidecar in ["-wal", "-shm"] { try? fileManager.removeItem(atPath: dbPath + sidecar) }
         do {
