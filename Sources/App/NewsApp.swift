@@ -5,7 +5,54 @@ import UniformTypeIdentifiers
 import UserNotifications
 
 #if NEWS_SENTRY
+    import OSLog
     import Sentry
+
+    /// Dev builds only: forwards this app's warning, error and fault log entries to Sentry Logs every 30 seconds.
+    enum SentryLogForwarder {
+        static func start() {
+            Task.detached(priority: .utility) {
+                guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return }
+                let subsystem = NSPredicate(format: "subsystem == %@", "com.marspater.news")
+                var since = Date()
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(30))
+                    guard let entries = try? store.getEntries(at: store.position(date: since), matching: subsystem)
+                    else { continue }
+                    var newest = since
+                    // With Sentry running the store can return one entry twice; each is sent once.
+                    var sent = Set<String>()
+                    for case let entry as OSLogEntryLog in entries
+                    where entry.date > since && entry.level.rawValue >= OSLogEntryLog.Level.error.rawValue {
+                        let key = "\(entry.date.timeIntervalSince1970) \(entry.category) \(entry.composedMessage)"
+                        guard sent.insert(key).inserted else { continue }
+                        newest = max(newest, entry.date)
+                        let attributes = ["category": entry.category]
+                        if entry.level == .fault {
+                            SentrySDK.logger.fatal(redacted(entry), attributes: attributes)
+                        } else {
+                            SentrySDK.logger.error(redacted(entry), attributes: attributes)
+                        }
+                    }
+                    since = newest
+                }
+            }
+        }
+
+        /// Read in-process, the unified log returns private values in clear (feed URLs can carry tokens), so they are
+        /// redacted here as the system log would: only `.public` values and unannotated numbers are sent.
+        static func redacted(_ entry: OSLogEntryLog) -> String {
+            entry.components.map { component in
+                guard !component.placeholder.isEmpty else { return component.formatSubstring }
+                let numbers: [OSLogMessageComponent.ArgumentCategory] = [.double, .int64, .uInt64]
+                let number = numbers.contains(component.argumentCategory)
+                let shown =
+                    component.placeholder.contains("public") || (number && !component.placeholder.contains("private"))
+                let value = number ? component.argumentNumberValue?.stringValue : component.argumentStringValue
+                return component.formatSubstring + (shown ? value ?? "" : "<private>")
+            }.joined()
+        }
+    }
 #endif
 
 /// Notification posted when the user clicks a notification banner or uses keyboard navigation.
@@ -424,7 +471,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                         profiling.sessionSampleRate = 1.0
                         profiling.lifecycle = .trace
                     }
+                    options.enableLogs = true
                 }
+                SentryLogForwarder.start()
             }
         #endif
         CacheManager.shared.configureOfflineCache()
