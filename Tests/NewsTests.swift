@@ -990,8 +990,8 @@ struct NewsTests {
             ("EpicNE2ETests", { await EpicNE2ETests.run() }),
             ("testNotificationModeTriageAndGrammar", { await testNotificationModeTriageAndGrammar() }),
             ("testCompletionOnce", { await testCompletionOnce() }),
-            ("testSocketNetworkBoundary", { try await testSocketNetworkBoundary() }),
-            ("testTransportCancellation", { try await testTransportCancellation() }),
+            ("testSocketNetworkBoundary", { try await rerunningLoopbackFlake(testSocketNetworkBoundary) }),
+            ("testTransportCancellation", { try await rerunningLoopbackFlake(testTransportCancellation) }),
             ("testProxyWaitingClassification", { await testProxyWaitingClassification() }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
             ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
@@ -17532,6 +17532,18 @@ struct NewsTests {
             d10, .story(id: "story id with spaces"),
             "Percent-encoded story ID decoded")
 
+        let u10b = URL(string: "news://story/https%3A%2F%2Fexample.com%2Fstory%25201%2F")!
+        assertEqual(
+            NewsURLParser.parse(url: u10b, allowInsecureHTTP: false),
+            .story(id: "https://example.com/story%201/"),
+            "Percent-encoded story ID is decoded exactly once and keeps encoded slashes")
+
+        let u10c = URL(string: "news:story/https://example.com/story%25201")!
+        assertEqual(
+            NewsURLParser.parse(url: u10c, allowInsecureHTTP: false),
+            .story(id: "https://example.com/story%201"),
+            "Opaque news:story/ URL keeps double slashes and decodes once")
+
         // 11. Malformed and empty feeds safely rejected
         assertEqual(NewsURLParser.parse(urlString: "feed:", allowInsecureHTTP: false), nil, "Bare feed: rejected")
         assertEqual(NewsURLParser.parse(urlString: "feed://", allowInsecureHTTP: false), nil, "Bare feed:// rejected")
@@ -18411,7 +18423,7 @@ struct NewsTests {
                 DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
                     if once.claim() {
                         connection.cancel()
-                        continuation.resume(throwing: FeedError.timeout)
+                        continuation.resume(throwing: LoopbackTimeout())
                     }
                 }
                 connection.receive(minimumIncompleteLength: 1, maximumLength: count - data.count) {
@@ -18422,7 +18434,7 @@ struct NewsTests {
                     } else if let bytes, !bytes.isEmpty {
                         continuation.resume(returning: bytes)
                     } else {
-                        continuation.resume(throwing: eof ? FeedError.network("EOF") : FeedError.timeout)
+                        continuation.resume(throwing: eof ? FeedError.network("EOF") : LoopbackTimeout())
                     }
                 }
             }
@@ -18563,7 +18575,7 @@ struct NewsTests {
             queue.asyncAfter(deadline: .now() + 5) {
                 if once.claim() {
                     upstream.cancel()
-                    continuation.resume(throwing: FeedError.timeout)
+                    continuation.resume(throwing: LoopbackTimeout())
                 }
             }
             upstream.start(queue: queue)
@@ -18906,6 +18918,24 @@ struct NewsTests {
             assertEqual(claims, 1, "CompletionOnce must allow exactly one claim across concurrent tasks")
         }
         assertFalse(completion.claim(), "The completion stays claimed after all workers finish")
+    }
+
+    /// A loopback socket wait that ran out; distinct from `FeedError.timeout` (the WebKit boundary's navigation deadline),
+    /// which is never rerun.
+    struct LoopbackTimeout: Error {}
+
+    /// The loopback socket tests share ephemeral ports with every parallel test process. On a loaded machine
+    /// (CircleCI runs atoms side by side) a connect fails with EADDRINUSE, or parks in `.waiting` until a 5 s socket
+    /// read gives up, while the proxy's own 15 s handshake bound is still running. Such a transport error reruns the
+    /// test once; an assertion failure, any other error or a second transport error still fails.
+    @MainActor
+    static func rerunningLoopbackFlake(_ test: @MainActor () async throws -> Void) async throws {
+        do {
+            try await test()
+        } catch let error where error is LoopbackTimeout || error as? NWError == .posix(.EADDRINUSE) {
+            print("  ↻ Loopback transport error under load (\(error)); running the socket test once more")
+            try await test()
+        }
     }
 
     static func testSocketNetworkBoundary() async throws {
@@ -26219,6 +26249,16 @@ struct NewsTests {
             item?.attributeSet.contentURL?.absoluteString,
             "news://story/spotlight-unit-1",
             "Spotlight item links to news://story/<id> (#559)"
+        )
+        let scopedID = "https://example.com/feed.xml#guid:https://example.com/story%201/"
+        let scopedArticle = FeedArticle(
+            storedID: scopedID, title: "Scoped", link: "https://example.com/story%201/",
+            guid: "https://example.com/story%201/", description: "Summary", pubDate: pubDate, source: "Science Daily")
+        let scopedURL = SystemSpotlightIndexer.makeSearchableItem(for: scopedArticle).attributeSet.contentURL
+        assertEqual(
+            scopedURL.flatMap { NewsURLParser.parse(url: $0, allowInsecureHTTP: false) },
+            .story(id: scopedID),
+            "Spotlight contentURL round-trips scoped GUIDs with percent-encoding and trailing slashes"
         )
 
         // 2. Clear All Caches preserves saved-story Spotlight items

@@ -85,15 +85,18 @@ public struct NewsURLParser: Sendable {
         return .addFeed(url: targetURL)
     }
 
+    /// Parses a `news:` URL into a `.story(id:)` destination, preserving percent-encoded slashes and special characters.
     private static func parseNewsURL(_ url: URL) -> Destination? {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: true) else { return nil }
+        let rawPath = components.percentEncodedPath
         let storyID: String
-        if let host = url.host?.lowercased(), !host.isEmpty {
+        if let host = components.host?.lowercased(), !host.isEmpty {
             guard host == "story" else { return nil }
-            storyID = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            storyID = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         } else {
-            let comps = url.pathComponents.filter { $0 != "/" }
-            guard comps.first?.lowercased() == "story", comps.count >= 2 else { return nil }
-            storyID = comps.dropFirst().joined(separator: "/").trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let trimmed = rawPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard trimmed.lowercased().hasPrefix("story/") else { return nil }
+            storyID = String(trimmed.dropFirst(6)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         }
 
         guard !storyID.isEmpty else { return nil }

@@ -2,6 +2,7 @@ import Foundation
 
 /// Offline parser checks run by test.sh, including --parsing-regressions. No user state or network access.
 enum FeedKitSwiftSoupTests {
+    /// Executes offline XML, JSON Feed, HTML extraction, and URL parsing regression checks.
     static func run() {
         let pipeline = ContentExtractionPipeline.shared
         let base = "https://example.com/news/feed.xml"
@@ -281,6 +282,30 @@ enum FeedKitSwiftSoupTests {
         check(
             vendorItem?.title == "Own title" && vendorItem?.category == "News",
             "Fields nested inside a foreign element do not fill the item's title or category")
+        let mixedAtomRSS = """
+            <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Feed</title><item>
+            <title>Mixed item</title><atom:title>Second title</atom:title>
+            <atom:link href="https://example.com/mixed"/><link>https://example.com/mixed</link>
+            <description>Primary summary</description><atom:summary>Second summary</atom:summary>
+            <guid isPermaLink="false">primary-guid</guid><atom:id>urn:uuid:second-guid</atom:id>
+            <pubDate>Fri, 30 Oct 2026 10:00:00 GMT</pubDate><atom:published>2026-10-31T10:00:00Z</atom:published>
+            </item></channel></rss>
+            """
+        let mixedItem = FeedXMLParser(data: Data(mixedAtomRSS.utf8), feedURL: base).parse().first
+        check(
+            mixedItem?.title == "Mixed item" && mixedItem?.link == "https://example.com/mixed"
+                && mixedItem?.description == "Primary summary" && mixedItem?.guid == "primary-guid"
+                && mixedItem?.pubDate == DateParser.parse("Fri, 30 Oct 2026 10:00:00 GMT"),
+            "Duplicate or mixed RSS and Atom item fields do not concatenate into corrupted values")
+        let atomLinkWithText = """
+            <feed xmlns="http://www.w3.org/2005/Atom"><title>Planet</title><entry><title>Atom link text</title>
+            <id>urn:atom-link</id><link href="https://example.com/atom-story">Read full story</link>
+            <summary>Summary</summary></entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(atomLinkWithText.utf8), feedURL: base).parse().first?.link
+                == "https://example.com/atom-story",
+            "Character content inside an href-bearing Atom link does not corrupt the entry URL")
 
         let malicious =
             "<!DOCTYPE rss [<!ENTITY payload 'expanded'>]><rss><channel><item><title>&payload;</title></item></channel></rss>"
@@ -337,6 +362,41 @@ enum FeedKitSwiftSoupTests {
                 "Permissive RFC822 aliases parse without seconds or weekday")
             check(result[2].pubDate == DateParser.unknownDate, "Malformed dates retain the stable unknown sentinel")
         }
+        let relativeAndEntityJSON: [String: Any] = [
+            "version": "https://jsonfeed.org/version/1.1",
+            "title": "   ",
+            "items": [
+                [
+                    "id": "rel-1",
+                    "url": "/reports/bridge",
+                    "title": "Bridge &amp; Tunnel",
+                    "summary": "   ",
+                    "description": "<p>Summary with &amp; and <b>markup</b></p>",
+                    "image": "photos/lead.jpg",
+                    "tags": ["", "   ", "Sci&amp;Tech"],
+                ]
+            ],
+        ]
+        let parsedRelativeJSON = JSONFeedParser.parse(
+            data: try! JSONSerialization.data(withJSONObject: relativeAndEntityJSON), feedURL: base
+        )?.first
+        check(
+            parsedRelativeJSON?.link == "https://example.com/reports/bridge"
+                && parsedRelativeJSON?.imageUrl == "https://example.com/news/photos/lead.jpg",
+            "JSON Feed resolves relative item and image URLs against feedURL")
+        let redirectedRelativeJSON = JSONFeedParser.parse(
+            data: try! JSONSerialization.data(withJSONObject: relativeAndEntityJSON),
+            feedURL: "https://example.com/feed",
+            baseURL: "https://example.com/news/feed.json"
+        )?.first
+        check(
+            redirectedRelativeJSON?.imageUrl == "https://example.com/news/photos/lead.jpg",
+            "JSON Feed resolves relative URLs against redirected response baseURL")
+        check(
+            parsedRelativeJSON?.description == "Summary with & and markup"
+                && parsedRelativeJSON?.category == "Sci&Tech"
+                && parsedRelativeJSON?.source == "example.com",
+            "JSON Feed falls back from blank summary or feed title and skips empty tags")
         let manyXML =
             "<rss><channel>"
             + (0...500).map {
@@ -455,6 +515,24 @@ enum FeedKitSwiftSoupTests {
         check(
             ArticleContentRedactor.isBoilerplateLine("Published - October 18, 2026 09:36 am IST"),
             "Standalone dateline is boilerplate")
+        for id in [
+            "https://example.com/feed.xml#guid:https://example.com/story%201/",
+            "/2026/10/story%20id/",
+            "100%25-verified",
+        ] {
+            let saved = FeedArticle(
+                storedID: id, title: "Saved", link: "https://example.com/saved", guid: id,
+                description: "Summary", pubDate: Date(timeIntervalSince1970: 1_730_000_000), source: "Publisher")
+            let contentURL = SystemSpotlightIndexer.makeSearchableItem(for: saved).attributeSet.contentURL
+            check(
+                contentURL.flatMap { NewsURLParser.parse(url: $0, allowInsecureHTTP: false) } == .story(id: id),
+                "Spotlight contentURL round-trips story IDs with percent-encoding and slashes without double-decoding")
+        }
+        if let relativeStoryURL = URL(string: "entry", relativeTo: URL(string: "news://story/")) {
+            check(
+                NewsURLParser.parse(url: relativeStoryURL, allowInsecureHTTP: false) == .story(id: "entry"),
+                "Relative news://story/ URLs resolve against their base URL when parsed")
+        }
 
         print("✅ SwiftSoup / FeedKit parsing regressions passed")
     }
