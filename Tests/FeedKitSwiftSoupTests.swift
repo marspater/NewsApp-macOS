@@ -528,6 +528,11 @@ enum FeedKitSwiftSoupTests {
                 contentURL.flatMap { NewsURLParser.parse(url: $0, allowInsecureHTTP: false) } == .story(id: id),
                 "Spotlight contentURL round-trips story IDs with percent-encoding and slashes without double-decoding")
         }
+        if let relativeStoryURL = URL(string: "entry", relativeTo: URL(string: "news://story/")) {
+            check(
+                NewsURLParser.parse(url: relativeStoryURL, allowInsecureHTTP: false) == .story(id: "entry"),
+                "Relative news://story/ URLs resolve against their base URL when parsed")
+        }
 
         print("✅ SwiftSoup / FeedKit parsing regressions passed")
     }

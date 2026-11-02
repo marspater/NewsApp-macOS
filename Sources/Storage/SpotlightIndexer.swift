@@ -18,6 +18,7 @@ struct SystemSpotlightIndexer: SpotlightIndexing, Sendable {
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "SpotlightIndexer")
 
+    /// Creates a `CSSearchableItem` for a saved article with a single-percent-encoded `news://story/<id>` deep link.
     static func makeSearchableItem(for article: FeedArticle) -> CSSearchableItem {
         let attributeSet = CSSearchableItemAttributeSet(contentType: .content)
         attributeSet.title = article.title
