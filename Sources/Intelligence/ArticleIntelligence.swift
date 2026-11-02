@@ -353,6 +353,37 @@ extension EntityResult {
             return matches.count != 1
         }
     }
+
+    /// The reader tags for one story, most mentioned first. Each name scores its mentions in the body, with mentions in
+    /// the title and description counted three times, and needs a score of 2, so a name the story passes over once
+    /// makes no tag. A person counts their surname alone, since stories name people in full once.
+    public static func readerTags(
+        from entities: [EntityResult], title: String, description: String, text: String
+    ) -> [EntityResult] {
+        let scored = readerTags(from: entities).enumerated().map { offset, entity in
+            let words = entity.name.split(separator: " ")
+            let term =
+                entity.type == .person && words.count > 1 && words.last!.count >= 3 ? String(words.last!) : entity.name
+            let lead = mentions(of: term, in: title) + mentions(of: term, in: description)
+            return (entity: entity, score: 3 * lead + mentions(of: term, in: text), offset: offset)
+        }
+        return scored.filter { $0.score >= 2 }
+            .sorted { ($0.score, $1.offset) > ($1.score, $0.offset) }
+            .map(\.entity)
+    }
+
+    /// Whole-word occurrences of `term` in `text`, case-sensitive so a surname like Price is not the word "price".
+    static func mentions(of term: String, in text: String) -> Int {
+        var count = 0
+        var searched = text.startIndex..<text.endIndex
+        while let found = text.range(of: term, options: .diacriticInsensitive, range: searched) {
+            let before = found.lowerBound > text.startIndex ? text[text.index(before: found.lowerBound)] : " "
+            let after = found.upperBound < text.endIndex ? text[found.upperBound] : " "
+            if !before.isLetter, !before.isNumber, !after.isLetter, !after.isNumber { count += 1 }
+            searched = found.upperBound..<text.endIndex
+        }
+        return count
+    }
 }
 
 public struct SentimentResult: Sendable, Equatable, Codable, Hashable {
