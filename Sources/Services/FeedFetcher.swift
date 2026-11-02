@@ -25,6 +25,7 @@ actor FeedFetcher {
         self.now = now
     }
 
+    /// Fetches and parses a single RSS, Atom, or JSON feed URL with conditional request validators.
     func fetchSingleFeed(urlString: String, allowHTTP: Bool = false, validators: FeedValidators? = nil) async
         -> FeedFetchResult
     {
@@ -40,7 +41,8 @@ actor FeedFetcher {
             let sniffer =
                 String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if sniffer.hasPrefix("{") || sniffer.hasPrefix("[") {
-                let parsed = JSONFeedParser.parse(data: data, feedURL: urlString)
+                let parsed = JSONFeedParser.parse(
+                    data: data, feedURL: urlString, baseURL: response.url?.absoluteString)
                 try Task.checkCancellation()
                 if let parsed {
                     return (urlString, Self.webArticles(parsed), nil, fresh)
