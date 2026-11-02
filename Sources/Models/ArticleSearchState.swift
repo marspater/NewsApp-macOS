@@ -42,6 +42,8 @@ final class ArticleSearchState: ObservableObject {
     @Published var searchPresented: Bool = false
     @Published private(set) var returnStoryStack: [FeedArticleWrap] = []
     @Published private(set) var searchHistory: [String] = []
+    private var pendingReturnTextChange = false
+    private var pendingReturnTokensChange = false
 
     var returnStory: FeedArticleWrap? {
         returnStoryStack.last
@@ -59,6 +61,7 @@ final class ArticleSearchState: ObservableObject {
 
     /// Opens search pre-filled with the transformed tag query, pushing the originating article onto the return stack.
     func openTag(tag: String, isCategory: Bool, from wrap: FeedArticleWrap, path: inout NavigationPath) {
+        cancelPendingReturnChanges()
         returnStoryStack.append(wrap)
         let resolved = Self.searchQuery(for: tag, isCategory: isCategory)
         if let token = resolved.token {
@@ -80,9 +83,28 @@ final class ArticleSearchState: ObservableObject {
         guard let wrap = returnStoryStack.popLast() else { return }
         recordHistory(query: archiveQuery)
         searchPresented = false
+        pendingReturnTextChange = !searchText.isEmpty
+        pendingReturnTokensChange = !searchTokens.isEmpty
         searchText = ""
         searchTokens = []
         path.append(wrap)
+    }
+
+    /// Consume the deferred SwiftUI observations of the programmatic reset.
+    func consumeReturnTextChange(_ updated: String) -> Bool {
+        defer { pendingReturnTextChange = false }
+        return pendingReturnTextChange && updated.isEmpty && searchText.isEmpty
+    }
+
+    func consumeReturnTokensChange(_ updated: [ArchiveSearchToken]) -> Bool {
+        defer { pendingReturnTokensChange = false }
+        return pendingReturnTokensChange && updated.isEmpty && searchTokens.isEmpty
+    }
+
+    /// User edits and other programmatic resets supersede an unobserved return reset.
+    func cancelPendingReturnChanges() {
+        pendingReturnTextChange = false
+        pendingReturnTokensChange = false
     }
 
     /// Clears the return story breadcrumb stack without touching active search text.
@@ -92,6 +114,7 @@ final class ArticleSearchState: ObservableObject {
 
     /// Clears active search parameters, search presentation, and the return stack.
     func clear() {
+        cancelPendingReturnChanges()
         searchText = ""
         searchTokens = []
         searchPresented = false

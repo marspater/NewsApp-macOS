@@ -789,14 +789,7 @@ struct ArticleListView: View {
     @ToolbarContentBuilder
     private func listToolbar(proxy: ScrollViewProxy) -> some ToolbarContent {
         // The reader's Back, in the same place (DESIGN.md 5, #780).
-        if isBriefing {
-            ToolbarItem(placement: .navigation) {
-                Button(action: leaveBriefing) {
-                    Label("Back to \(previousTopic)", systemImage: "chevron.left")
-                }
-                .help("Back to \(previousTopic)")
-            }
-        } else if let returnStory = searchState.returnStory {
+        if let returnStory = searchState.returnStory {
             let storyTitle = returnStory.article.title
             ToolbarItem(placement: .navigation) {
                 Button {
@@ -806,6 +799,13 @@ struct ArticleListView: View {
                 }
                 .help("Back to \(storyTitle) (Esc)")
                 .accessibilityLabel("Back to \(storyTitle)")
+            }
+        } else if isBriefing {
+            ToolbarItem(placement: .navigation) {
+                Button(action: leaveBriefing) {
+                    Label("Back to \(previousTopic)", systemImage: "chevron.left")
+                }
+                .help("Back to \(previousTopic)")
             }
         }
         if articlePath.isEmpty, buffer.pending != nil {

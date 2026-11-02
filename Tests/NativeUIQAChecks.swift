@@ -130,6 +130,9 @@ struct NativeUIQAChecks {
                     text: "", tokens: [ArchiveSearchToken(completedExpression: "is:saved")!]
                 )
             ).isSavedFilter, true, "Saved filter works without free text")
+        let quoted = ArchiveSearchToken.promoteCompleted(in: "\"cold is:read fusion\" is:unread ")
+        assertEqual(quoted.text, "\"cold is:read fusion\" ", "Quoted operators stay in the phrase")
+        assertEqual(quoted.tokens.map(\.expression), ["is:unread"], "An operator outside the phrase is promoted")
         assertEqual(ArchiveSearchToken.promoteCompleted(in: "source:").tokens.count, 0, "Prefix waits for a value")
         assertEqual(
             ArchiveSearchToken.promoteCompleted(in: "economy is:re").tokens.count, 0, "Incomplete status stays editable"

@@ -1351,8 +1351,11 @@ struct NewsTests {
         assertEqual(correction("2027"), nil, "A number is never corrected to another number")
         assertEqual(
             SearchSpelling.corrected("Nvida \"artifical\" source:reuters", vocabulary: vocabulary),
-            "nvidia artificial source:reuters", "Misspelled terms change; operators stay")
+            "nvidia \"artificial\" source:reuters", "Misspelled terms change; quotes and operators stay")
         assertEqual(SearchSpelling.corrected("nvidia chips", vocabulary: vocabulary), nil, "Known words, no suggestion")
+        assertEqual(
+            SearchSpelling.corrected("\"nvida chps\" is:unread", vocabulary: vocabulary),
+            "\"nvidia chips\" is:unread", "Corrections retain phrase boundaries and filters")
 
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -1369,6 +1372,9 @@ struct NewsTests {
             try await db.searchSuggestion(query: "nvida chips"), "nvidia chips", "The suggestion fixes the typo")
         assertEqual(
             try await db.searchSuggestion(query: "nvidia tariffs"), nil, "A word with nothing close gets no suggestion")
+        assertEqual(
+            try await db.searchSuggestion(query: "\"nvida unveils\""), "\"nvidia unveils\"",
+            "A corrected phrase remains a phrase in a search suggestion")
         // A re-worded headline keeps the story count and rowid; the cached word list must still see the new words.
         try await db.upsertArticles([
             FeedArticle(
@@ -8614,6 +8620,38 @@ struct NewsTests {
             assertEqual(
                 try await db.searchArticles(query: "qubit \"\"").map(\.id), [artA.id],
                 "An empty quoted term beside a real one is ignored")
+
+            let adjacent = FeedArticle(
+                title: "Cold Fusion research", link: "https://example.com/adjacent", guid: "adjacent",
+                description: "A new experiment.", pubDate: Date(), source: "Science")
+            let separated = FeedArticle(
+                title: "A cold morning", link: "https://example.com/separated", guid: "separated",
+                description: "The temperature dropped. Later, fusion researchers met.", pubDate: Date(),
+                source: "Science")
+            let splitFields = FeedArticle(
+                title: "A cold", link: "https://example.com/fields", guid: "fields",
+                description: "Fusion research", pubDate: Date(), source: "Science")
+            let phrase = ArticleFilterQuery.parse(ArticleSearchState.entityQuery(for: "Cold Fusion"))
+            assertTrue(
+                phrase.matches(article: adjacent, isRead: false, isSaved: false), "Adjacent entity matches in memory")
+            assertFalse(
+                phrase.matches(article: separated, isRead: false, isSaved: false), "Separate sentences do not match")
+            assertFalse(
+                phrase.matches(article: splitFields, isRead: false, isSaved: false), "A phrase cannot span fields")
+            let phraseDB = DatabaseEngine(path: ":memory:")
+            try await phraseDB.open()
+            try await phraseDB.upsertArticles([adjacent, separated])
+            assertEqual(
+                try await phraseDB.searchArticles(query: "\"Cold Fusion\"").map(\.id), [adjacent.id],
+                "Entity phrase excludes words in separate sentences from FTS results")
+            assertEqual(
+                Set(try await phraseDB.searchArticles(query: "cold fusion").map(\.id)),
+                Set([adjacent.id, separated.id]),
+                "Unquoted terms still match independently")
+            assertEqual(
+                try await phraseDB.searchArticles(query: "\"Cold Fusion\" category:Science").map(\.id), [adjacent.id],
+                "Phrase and operator work together")
+            await phraseDB.close()
 
             // Operator searches
             let searchSource = try await db.searchArticles(query: "source:Nature")
@@ -16720,7 +16758,11 @@ struct NewsTests {
         assertEqual(entQuery.text, "\"Cold Fusion\"", "Entity query wraps phrase in quotes")
         assertEqual(entQuery.query, "\"Cold Fusion\"", "Combined entity query is quoted phrase")
         let parsedEnt = ArticleFilterQuery.parse(entQuery.query)
-        assertEqual(parsedEnt.terms, ["cold", "fusion"], "ArticleFilterQuery extracts entity terms")
+        assertEqual(parsedEnt.terms, ["cold fusion"], "ArticleFilterQuery retains the entity phrase")
+        let mixed = ArticleFilterQuery.parse("climate \"Cold Fusion\" is:unread")
+        assertEqual(mixed.terms, ["climate", "cold fusion"], "Mixed words and phrases remain distinct")
+        assertEqual(mixed.isReadFilter, false, "An operator outside the phrase still applies")
+        assertEqual(ArticleFilterQuery.parse("\"is:read\"").terms, ["is:read"], "A quoted operator is text")
 
         // State & Navigation breadcrumb round trip
         await MainActor.run {
@@ -16748,6 +16790,8 @@ struct NewsTests {
             assertEqual(testSearchState.returnStory, nil, "Return story is cleared on return")
             assertEqual(testSearchState.searchPresented, false, "Search presentation collapses on return")
             assertEqual(testSearchState.searchText, "", "Search text is cleared on return")
+            assertTrue(testSearchState.consumeReturnTextChange(""), "Return reset is ignored by the text observer")
+            assertFalse(testSearchState.consumeReturnTextChange(""), "A later text edit is not ignored")
             assertTrue(
                 testSearchState.searchHistory.contains("\"Cold Fusion\""),
                 "Search history keeps query after return")
@@ -16769,10 +16813,22 @@ struct NewsTests {
             testSearchState.returnToStory(path: &navPath)
             assertEqual(navPath.count, 1, "Restored Story B")
 
+            assertTrue(testSearchState.consumeReturnTextChange(""), "Nested return ignores its text reset")
+            // A token search reset is tracked independently from text.
+            testSearchState.searchTokens = [ArticleSearchState.categoryToken(for: "Science")]
             // Second Back returns to Story A
             testSearchState.returnToStory(path: &navPath)
             assertEqual(navPath.count, 2, "Restored Story A")
+            assertTrue(testSearchState.consumeReturnTokensChange([]), "Return ignores the token reset")
+            assertFalse(testSearchState.consumeReturnTokensChange([]), "A later token edit is not ignored")
             assertEqual(testSearchState.returnStory, nil, "Return stack is now empty")
+
+            testSearchState.openTag(tag: "Cold Fusion", isCategory: false, from: wrapA, path: &navPath)
+            testSearchState.searchTokens = [ArticleSearchState.categoryToken(for: "Science")]
+            testSearchState.returnToStory(path: &navPath)
+            testSearchState.cancelPendingReturnChanges()
+            assertFalse(testSearchState.consumeReturnTextChange(""), "A real edit cancels text reset suppression")
+            assertFalse(testSearchState.consumeReturnTokensChange([]), "A real edit cancels token reset suppression")
         }
     }
 

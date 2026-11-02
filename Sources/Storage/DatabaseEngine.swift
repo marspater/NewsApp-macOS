@@ -2657,9 +2657,12 @@ actor DatabaseEngine {
         if !parsed.terms.isEmpty {
             join =
                 " JOIN article_fts_rows f ON f.article_id = a.id JOIN articles_fts fts ON fts.rowid = f.fts_rowid WHERE articles_fts MATCH ?"
-            // Each term is a quoted prefix phrase, so typed text cannot inject FTS5 syntax (the parser already
-            // removed quotes themselves).
-            params.append(("text", parsed.terms.map { "\"\($0)\"*" }.joined(separator: " ")))
+            // Quote every term to prevent FTS syntax injection. Only unquoted searches use prefix matching.
+            let ftsTerms = parsed.terms.enumerated().map { index, term in
+                "\"\(term.replacingOccurrences(of: "\"", with: "\"\""))\""
+                    + (parsed.phraseTermIndices.contains(index) ? "" : "*")
+            }
+            params.append(("text", ftsTerms.joined(separator: " ")))
         }
         let scope = collectionScope()
         sql += scope.sql

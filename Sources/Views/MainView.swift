@@ -111,8 +111,8 @@ struct MainView: View {
             // One archive search in the trailing toolbar, shared by list and reader.
             .modifier(
                 ArchiveSearchToolbar(
-                    searchText: $searchState.searchText,
-                    searchTokens: $searchState.searchTokens,
+                    searchText: editableSearchText,
+                    searchTokens: editableSearchTokens,
                     searchPresented: $searchState.searchPresented,
                     archiveQuery: archiveQuery,
                     presentSearch: presentSearch,
@@ -274,10 +274,34 @@ struct MainView: View {
 
     // MARK: - Bindings & State Helpers
 
+    private var editableSearchText: Binding<String> {
+        Binding(
+            get: { searchState.searchText },
+            set: { value in
+                if value != searchState.searchText {
+                    searchState.cancelPendingReturnChanges()
+                    if !articlePath.isEmpty { articlePath = NavigationPath() }
+                    searchState.searchText = value
+                }
+            })
+    }
+
+    private var editableSearchTokens: Binding<[ArchiveSearchToken]> {
+        Binding(
+            get: { searchState.searchTokens },
+            set: { value in
+                if value != searchState.searchTokens {
+                    searchState.cancelPendingReturnChanges()
+                    if !articlePath.isEmpty { articlePath = NavigationPath() }
+                    searchState.searchTokens = value
+                }
+            })
+    }
+
     private var searchBinding: Binding<String> {
         Binding(
             get: { searchState.archiveQuery },
-            set: { searchState.searchText = $0 }
+            set: { editableSearchText.wrappedValue = $0 }
         )
     }
 
@@ -325,6 +349,7 @@ struct MainView: View {
     }
 
     private func handleSearchTextChange(_: String, _ updatedText: String) {
+        if searchState.consumeReturnTextChange(updatedText) { return }
         let promoted = ArchiveSearchToken.promoteCompleted(in: updatedText)
         if !promoted.tokens.isEmpty {
             for token in promoted.tokens where !searchState.searchTokens.contains(token) {
@@ -336,6 +361,7 @@ struct MainView: View {
     }
 
     private func handleSearchTokensChange(_: [ArchiveSearchToken], _ tokens: [ArchiveSearchToken]) {
+        if searchState.consumeReturnTokensChange(tokens) { return }
         let kept = ArchiveSearchToken.latestPerField(tokens)
         if kept != tokens { searchState.searchTokens = kept }
         if !articlePath.isEmpty { articlePath = NavigationPath() }
