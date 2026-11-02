@@ -465,7 +465,8 @@ actor DatabaseEngine {
                 return left > right
             }
         for old in copies.dropFirst(2) where old != target {
-            try? fileManager.removeItem(at: old)
+            // The log goes only with its copy: a copy left behind keeps the commits only its log holds.
+            guard (try? fileManager.removeItem(at: old)) != nil else { continue }
             try? fileManager.removeItem(atPath: old.path + "-wal")
         }
         return target
