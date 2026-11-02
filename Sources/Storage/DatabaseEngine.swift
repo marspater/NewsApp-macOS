@@ -31,14 +31,13 @@ actor DatabaseEngine {
     }
     private func changeToken() -> ChangeToken? {
         guard let db = db else { return nil }
-        var external = 0
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "PRAGMA data_version;", -1, &stmt, nil) == SQLITE_OK, sqlite3_step(stmt) == SQLITE_ROW
-        {
-            external = Int(sqlite3_column_int64(stmt, 0))
-        }
-        sqlite3_finalize(stmt)
-        return ChangeToken(own: Int(sqlite3_total_changes(db)), external: external)
+        defer { sqlite3_finalize(stmt) }
+        // No token when another connection's commits can't be seen: a cache keyed on it could serve stale values (#946).
+        guard sqlite3_prepare_v2(db, "PRAGMA data_version;", -1, &stmt, nil) == SQLITE_OK,
+            sqlite3_step(stmt) == SQLITE_ROW
+        else { return nil }
+        return ChangeToken(own: Int(sqlite3_total_changes(db)), external: Int(sqlite3_column_int64(stmt, 0)))
     }
     private struct MutedCountKey: Hashable {
         let section: String?
@@ -387,7 +386,8 @@ actor DatabaseEngine {
     /// keeps the newest two copies whose names start with `<name>-<group>`. The copy is written under a temporary name
     /// and renamed when complete; a copy with the same name is replaced atomically, so it survives if the new one can't
     /// be put in place. With `fallingBackToFile`, a library that can't be copied online (closed, or too damaged) is
-    /// copied as a file instead.
+    /// copied as files instead: the main file with its write-ahead log, so committed transactions not yet checkpointed
+    /// are kept (#946). A log that can't be folded into the copy stays beside it as `<copy>-wal`.
     @discardableResult
     private func keepCopyBeside(
         label: String, group: String, withTime: Bool = false, fallingBackToFile: Bool = false
@@ -403,20 +403,28 @@ actor DatabaseEngine {
         let partial = folder.appendingPathComponent(
             ".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier).partial")
         let fileManager = FileManager.default
+        let partialLog = URL(fileURLWithPath: partial.path + "-wal")
+        let targetLog = URL(fileURLWithPath: target.path + "-wal")
         do {
             try copyLibrary(to: partial)
         } catch  where fallingBackToFile {
             try? fileManager.removeItem(at: partial)
-            try fileManager.copyItem(at: library, to: partial)
+            try? fileManager.removeItem(at: partialLog)
+            try Self.copyLibraryFiles(of: dbPath, to: partial)
         }
         do {
+            try? fileManager.removeItem(at: targetLog)
             if fileManager.fileExists(atPath: target.path) {
                 _ = try fileManager.replaceItemAt(target, withItemAt: partial)
             } else {
                 try fileManager.moveItem(at: partial, to: target)
             }
+            if fileManager.fileExists(atPath: partialLog.path) {
+                try fileManager.moveItem(at: partialLog, to: targetLog)
+            }
         } catch {
             try? fileManager.removeItem(at: partial)
+            try? fileManager.removeItem(at: partialLog)
             throw error
         }
 
@@ -436,8 +444,36 @@ actor DatabaseEngine {
             }
         for old in copies.dropFirst(2) where old != target {
             try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(atPath: old.path + "-wal")
         }
         return target
+    }
+
+    /// The file-level fallback of ``keepCopyBeside``: copies the library and its write-ahead log to `partial`, then folds
+    /// the log into the copy and returns it to one self-contained file. Folding fails on a damaged library; the copy then
+    /// keeps `<partial>-wal` beside it, which SQLite replays when the copy is opened (#946).
+    nonisolated static func copyLibraryFiles(of library: String, to partial: URL) throws {
+        let fileManager = FileManager.default
+        let log = library + "-wal"
+        let partialLog = partial.path + "-wal"
+        try fileManager.copyItem(atPath: library, toPath: partial.path)
+        guard fileManager.fileExists(atPath: log) else { return }
+        do {
+            try fileManager.copyItem(atPath: log, toPath: partialLog)
+        } catch {
+            try? fileManager.removeItem(at: partial)
+            throw error
+        }
+        var copy: OpaquePointer?
+        defer {
+            sqlite3_close_v2(copy)
+            try? fileManager.removeItem(atPath: partial.path + "-shm")
+        }
+        guard sqlite3_open_v2(partial.path, &copy, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let copy,
+            sqlite3_exec(copy, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil) == SQLITE_OK,
+            sqlite3_exec(copy, "PRAGMA journal_mode = DELETE;", nil, nil, nil) == SQLITE_OK
+        else { return }
+        try? fileManager.removeItem(atPath: partialLog)
     }
 
     /// Writes a consistent, self-contained copy of the open library to `partial` with the SQLite online backup API,
@@ -473,7 +509,13 @@ actor DatabaseEngine {
         sqlite3_busy_timeout(copy, Self.busyTimeoutMilliseconds)
         let backup = sqlite3_backup_init(copy, "main", db, "main")
         var status = backup.map { backup in
-            let step = sqlite3_backup_step(backup, -1)
+            // A lock held elsewhere is retried for a few seconds before the copy counts as failed (#946).
+            let deadline = Date().addingTimeInterval(5)
+            var step = sqlite3_backup_step(backup, -1)
+            while step == SQLITE_BUSY || step == SQLITE_LOCKED, Date() < deadline {
+                sqlite3_sleep(50)
+                step = sqlite3_backup_step(backup, -1)
+            }
             let finish = sqlite3_backup_finish(backup)
             return step == SQLITE_DONE ? finish : step
         }
@@ -636,8 +678,8 @@ actor DatabaseEngine {
             if sqlite3_prepare_v2(copy, "SELECT name, value FROM \(Self.backupExtrasTable);", -1, &statement, nil)
                 == SQLITE_OK
             {
-                while sqlite3_step(statement) == SQLITE_ROW {
-                    guard let name = sqlite3_column_text(statement, 0).map({ String(cString: $0) }) else { continue }
+                try forEachRow(statement, on: copy, "Could not read the backup's settings") {
+                    guard let name = sqlite3_column_text(statement, 0).map({ String(cString: $0) }) else { return }
                     let bytes = sqlite3_column_blob(statement, 1)
                     extras[name] =
                         bytes.map { Data(bytes: $0, count: Int(sqlite3_column_bytes(statement, 1))) } ?? Data()
@@ -664,6 +706,7 @@ actor DatabaseEngine {
             let kept = try keepCopyBeside(
                 label: "before-restore", group: "before-restore", withTime: true, fallingBackToFile: true)
             try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path)
+            try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path + "-wal")
         }
         // The side file goes before the library: it is small, and the old one is put back from memory if the swap fails.
         let previousTension = try? Data(contentsOf: worldTensionURL)
@@ -677,6 +720,9 @@ actor DatabaseEngine {
         // A plain library file carries no extras and leaves the side file as it is.
         if !extras.isEmpty { try putTension(extras["world-tension"]) }
 
+        // Folded in first, so deleting the log loses nothing if the swap fails and the old library is reopened; a library
+        // too damaged to checkpoint has its log in the copy kept above (#946).
+        try? executeSimple("PRAGMA wal_checkpoint(TRUNCATE);")
         close()
         for sidecar in ["-wal", "-shm"] { try? fileManager.removeItem(atPath: dbPath + sidecar) }
         do {
@@ -1834,7 +1880,7 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(statement) }
         var columns = Set<String>()
-        while sqlite3_step(statement) == SQLITE_ROW {
+        try forEachRow(statement, on: db, "Cannot inspect \(table) schema") {
             if let name = sqlite3_column_text(statement, 1) { columns.insert(String(cString: name)) }
         }
         return columns
@@ -1864,6 +1910,19 @@ actor DatabaseEngine {
         NSError(
             domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)),
             userInfo: [NSLocalizedDescriptionKey: "\(context): \(String(cString: sqlite3_errmsg(db)))"])
+    }
+
+    /// Calls `row` for each result row of `statement`. A scan that stops on anything but `SQLITE_DONE` throws, so an
+    /// error midway never passes for a complete, shorter result (#946).
+    func forEachRow(
+        _ statement: OpaquePointer?, on handle: OpaquePointer, _ context: String, _ row: () throws -> Void
+    ) throws {
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
+            try row()
+            status = sqlite3_step(statement)
+        }
+        guard status == SQLITE_DONE else { throw sqliteError(handle, context) }
     }
 
     private func setUserVersion(_ version: Int) throws {
@@ -2053,6 +2112,10 @@ actor DatabaseEngine {
         guard article.pubDate != DateParser.unknownDate,
             let key = ArticleIdentity.publisherTitleKey(title: article.title, source: article.publisherName)
         else { return nil }
+        guard let db else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
         var statement: OpaquePointer?
         let sql = """
             SELECT id, title, canonical_url FROM articles
@@ -2073,12 +2136,12 @@ actor DatabaseEngine {
         let catalogued = FeedCatalog.publisher(forLink: article.link) != nil
         let host = MuteRules.linkHost(article.normalizedLink)
         var matches: [String] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
+        try forEachRow(statement, on: db, "Cannot run publisher title lookup") {
             guard let id = sqlite3_column_text(statement, 0), let title = sqlite3_column_text(statement, 1) else {
-                continue
+                return
             }
             let storedHost = sqlite3_column_text(statement, 2).flatMap { MuteRules.linkHost(String(cString: $0)) }
-            guard catalogued || (host != nil && storedHost == host) else { continue }
+            guard catalogued || (host != nil && storedHost == host) else { return }
             if ArticleIdentity.publisherTitleKey(title: String(cString: title), source: article.publisherName) == key {
                 matches.append(String(cString: id))
             }
@@ -3253,14 +3316,18 @@ actor DatabaseEngine {
         }
         let sql = "SELECT is_read FROM article_state WHERE article_id = ? LIMIT 1;"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw sqliteError(db, "Cannot read read state")
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            return sqlite3_column_int(stmt, 0) == 1
+        // Only a finished scan with no row means "no state"; a failed read must not pass for false (#946).
+        switch sqlite3_step(stmt) {
+        case SQLITE_ROW: return sqlite3_column_int(stmt, 0) == 1
+        case SQLITE_DONE: return false
+        default: throw sqliteError(db, "Cannot read read state")
         }
-        return false
     }
 
     func isSaved(articleId: String) throws -> Bool {
@@ -3271,14 +3338,18 @@ actor DatabaseEngine {
         }
         let sql = "SELECT is_saved FROM article_state WHERE article_id = ? LIMIT 1;"
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return false }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw sqliteError(db, "Cannot read saved state")
+        }
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            return sqlite3_column_int(stmt, 0) == 1
+        // Only a finished scan with no row means "no state"; a failed read must not pass for false (#946).
+        switch sqlite3_step(stmt) {
+        case SQLITE_ROW: return sqlite3_column_int(stmt, 0) == 1
+        case SQLITE_DONE: return false
+        default: throw sqliteError(db, "Cannot read saved state")
         }
-        return false
     }
 
     func getReadArticleIDs() throws -> Set<String> {
@@ -3958,8 +4029,9 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
 
-        guard let changes = changeToken() else { return (unread: 0, saved: 0, total: 0) }
-        if let cache = countsCache, cache.changes == changes, cache.scope == collectionOnlyFeedURLs,
+        // Without a change token the counts are computed and not cached; they are never reported as zero (#946).
+        let changes = changeToken()
+        if let changes, let cache = countsCache, cache.changes == changes, cache.scope == collectionOnlyFeedURLs,
             cache.muting == muting
         {
             return cache.value
@@ -3980,15 +4052,17 @@ actor DatabaseEngine {
             JOIN article_state s ON s.article_id = a.id
             WHERE \(Self.visibleArticle) \(scope.sql);
             """
-        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
-            defer { sqlite3_finalize(stmt) }
-            bind((muting.isEmpty ? [] : Self.mutingParameters(muting)) + scope.params, to: stmt)
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                total = Int(sqlite3_column_int(stmt, 0))
-                unread = Int(sqlite3_column_int(stmt, 1))
-                saved = Int(sqlite3_column_int(stmt, 2))
-                countsCache = (changes, collectionOnlyFeedURLs, muting, (unread: unread, saved: saved, total: total))
-            }
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            throw sqliteError(db, "Cannot count stories")
+        }
+        defer { sqlite3_finalize(stmt) }
+        bind((muting.isEmpty ? [] : Self.mutingParameters(muting)) + scope.params, to: stmt)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { throw sqliteError(db, "Cannot count stories") }
+        total = Int(sqlite3_column_int(stmt, 0))
+        unread = Int(sqlite3_column_int(stmt, 1))
+        saved = Int(sqlite3_column_int(stmt, 2))
+        if let changes {
+            countsCache = (changes, collectionOnlyFeedURLs, muting, (unread: unread, saved: saved, total: total))
         }
         return (unread: unread, saved: saved, total: total)
     }

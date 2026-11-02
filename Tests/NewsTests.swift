@@ -641,6 +641,7 @@ struct NewsTests {
             try await testRealLibraryMigrationFixture()
             try await testLibraryBackupAndFutureSchemaGuard()
             try await testLibraryBackupRestore()
+            try await testSQLiteFailuresAreNotEmptyResults()
             return
         }
         if CommandLine.arguments.contains("--export-pairs") {
@@ -969,6 +970,7 @@ struct NewsTests {
             ("testLibraryBackupAndFutureSchemaGuard", { try await testLibraryBackupAndFutureSchemaGuard() }),
             ("testReadOnlyLibraryRefresh", { try await testReadOnlyLibraryRefresh() }),
             ("testLibraryBackupRestore", { try await testLibraryBackupRestore() }),
+            ("testSQLiteFailuresAreNotEmptyResults", { try await testSQLiteFailuresAreNotEmptyResults() }),
             ("testMigrationCoordinatorAtomicity", { try await testMigrationCoordinatorAtomicity() }),
             ("testArticleRetentionPolicy", { await testArticleRetentionPolicy() }),
             ("testContentExtractionPipelineDeep", { await testContentExtractionPipelineDeep() }),
@@ -2192,6 +2194,98 @@ struct NewsTests {
             value(kept, "SELECT count(*) FROM articles;"), "3", "The first copy still holds the original library")
         let second = directory.appendingPathComponent(afterSecond.first { $0 != kept.lastPathComponent } ?? "")
         assertEqual(value(second, "SELECT count(*) FROM articles;"), "2", "The second copy holds the restored library")
+    }
+
+    static func testSQLiteFailuresAreNotEmptyResults() async throws {
+        print("  - Testing that SQLite failures never read as empty results (#946)...")
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-sqlite-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+        func value(_ file: URL, _ sql: String) -> String? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            defer { sqlite3_close(handle) }
+            guard sqlite3_open_v2(file.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK,
+                sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK
+            else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+
+        // The file-level safety copy keeps commits that are still only in the write-ahead log.
+        let walLibrary = directory.appendingPathComponent("wal.sqlite3")
+        var writer: OpaquePointer?
+        assertEqual(sqlite3_open(walLibrary.path, &writer), SQLITE_OK, "Open the WAL fixture")
+        for sql in [
+            "PRAGMA journal_mode = WAL;", "PRAGMA wal_autocheckpoint = 0;", "CREATE TABLE notes (body TEXT);",
+            "INSERT INTO notes VALUES ('one'), ('two'), ('three');",
+        ] {
+            assertEqual(sqlite3_exec(writer, sql, nil, nil, nil), SQLITE_OK, "WAL fixture: \(sql)")
+        }
+        let mainOnly = directory.appendingPathComponent("main-only.sqlite3")
+        try fileManager.copyItem(at: walLibrary, to: mainOnly)
+        assertTrue(
+            value(mainOnly, "SELECT count(*) FROM notes;") == nil,
+            "The fixture's commits are only in the log, so a main-file copy misses them")
+        let kept = directory.appendingPathComponent("kept.sqlite3")
+        try DatabaseEngine.copyLibraryFiles(of: walLibrary.path, to: kept)
+        sqlite3_close(writer)
+        assertEqual(value(kept, "SELECT count(*) FROM notes;"), "3", "The file-level copy keeps every commit")
+        assertEqual(value(kept, "PRAGMA journal_mode;"), "delete", "The log is folded into one self-contained file")
+        assertTrue(!fileManager.fileExists(atPath: kept.path + "-wal"), "No log is left beside a folded copy")
+
+        // Stored overview data that doesn't decode is a cache miss, never an overview without its facts.
+        let library = directory.appendingPathComponent("news.sqlite3")
+        let db = DatabaseEngine(path: library.path)
+        try await db.open()
+        func article(_ name: String) -> FeedArticle {
+            FeedArticle(
+                storedID: "sqlite-\(name)", title: "SQLite report \(name)", link: "https://sqlite.test/\(name)",
+                guid: "sqlite-guid-\(name)", description: "SQLite body \(name)", pubDate: Date(),
+                source: "SQLite Publisher")
+        }
+        try await db.upsertArticles([article("a"), article("b")])
+        try await db.setSaved(articleId: "sqlite-a", isSaved: true)
+        guard
+            case .created(let eventID) = try await db.applyEventMatch(
+                "sqlite-a", .create(with: ["sqlite-b"]), matcherVersion: EventMatcher.version)
+        else { return assertTrue(false, "Create the fixture event") }
+        let version = try await db.fetchEvent(id: eventID)?.membershipVersion ?? 1
+        let overview = EventOverviewDocument(
+            eventID: eventID,
+            version: OverviewVersionContext(membershipVersion: version, inputTextHash: "sqlite-input"),
+            content: OverviewContent(title: "Overview", summary: "", facts: [], citations: []),
+            provenance: OverviewProvenance(memberArticleIDs: ["sqlite-a", "sqlite-b"], kind: .fallbackExcerpts))
+        assertTrue(try await db.recordEventOverview(overview), "Store the fixture overview")
+        assertTrue(try await db.fetchEventOverview(eventID: eventID) != nil, "The stored overview reads back")
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &handle), SQLITE_OK, "Open a second connection")
+        sqlite3_busy_timeout(handle, 5000)
+        assertEqual(
+            sqlite3_exec(handle, "UPDATE event_overviews SET facts_json = 'not json';", nil, nil, nil), SQLITE_OK,
+            "Damage the stored facts")
+        assertTrue(
+            try await db.fetchEventOverview(eventID: eventID) == nil, "Undecodable facts read as a cache miss")
+
+        // A query that fails throws instead of answering zero or false.
+        assertTrue(try await db.isSaved(articleId: "sqlite-a"), "Saved state reads before the failure")
+        assertEqual(
+            sqlite3_exec(handle, "ALTER TABLE article_state RENAME TO article_state_hidden;", nil, nil, nil),
+            SQLITE_OK, "Hide the state table from the engine")
+        sqlite3_close(handle)
+        for (name, read) in [
+            ("isSaved", { _ = try await db.isSaved(articleId: "sqlite-a") }),
+            ("isRead", { _ = try await db.isRead(articleId: "sqlite-a") }),
+            ("counts", { _ = try await db.counts() }),
+        ] as [(String, () async throws -> Void)] {
+            do {
+                try await read()
+                assertTrue(false, "\(name) throws when its query fails")
+            } catch {}
+        }
+        await db.close()
     }
 
     static func testRealLibraryMigrationFixture() async throws {

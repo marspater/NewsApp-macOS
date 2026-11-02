@@ -254,14 +254,20 @@ extension DatabaseEngine {
                 let facts: [OverviewFact]
                 let evidenceSections: OverviewEvidenceSections?
             }
-            if let envelope = try? decoder.decode(OverviewFactsEnvelope.self, from: Data(factsJSON.utf8)) {
-                facts = envelope.facts
-                evidenceSections = envelope.evidenceSections
+            // Stored facts or members that don't decode are a cache miss, so the overview is rebuilt; never an
+            // overview without its facts (#946).
+            guard let envelope = try? decoder.decode(OverviewFactsEnvelope.self, from: Data(factsJSON.utf8)) else {
+                return nil
             }
+            facts = envelope.facts
+            evidenceSections = envelope.evidenceSections
         } else {
-            facts = (try? decoder.decode([OverviewFact].self, from: Data(factsJSON.utf8))) ?? []
+            guard let decoded = try? decoder.decode([OverviewFact].self, from: Data(factsJSON.utf8)) else { return nil }
+            facts = decoded
         }
-        let memberArticleIDs = (try? decoder.decode([String].self, from: Data(memberArticleIDsJSON.utf8))) ?? []
+        guard let memberArticleIDs = try? decoder.decode([String].self, from: Data(memberArticleIDsJSON.utf8)) else {
+            return nil
+        }
         var leadImage: OverviewLeadImage?
         if let lij = leadImageJSON, let data = lij.data(using: .utf8) {
             leadImage = try? decoder.decode(OverviewLeadImage.self, from: data)
@@ -285,7 +291,7 @@ extension DatabaseEngine {
 
         sqlite3_bind_text(citationStmt, 1, id, -1, Self.sqliteTransient)
         var citations: [OverviewCitation] = []
-        while sqlite3_step(citationStmt) == SQLITE_ROW {
+        try forEachRow(citationStmt, on: db, "Failed to read overview citations") {
             let citID = Self.citationID(
                 fromRowID: String(cString: sqlite3_column_text(citationStmt, 0)), overviewID: id)
             let articleID = String(cString: sqlite3_column_text(citationStmt, 1))
@@ -1695,6 +1701,10 @@ extension DatabaseEngine {
     /// Retrieves stored normalized embedding vectors for the given article IDs matching the model version.
     func fetchArticleEmbeddings(articleIDs: [String], modelVersion: Int) throws -> [String: [Float]] {
         guard !articleIDs.isEmpty else { return [:] }
+        guard let db else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
         var result: [String: [Float]] = [:]
         for start in stride(from: 0, to: articleIDs.count, by: 400) {
             let slice = Array(articleIDs[start..<min(start + 400, articleIDs.count)])
@@ -1712,14 +1722,14 @@ extension DatabaseEngine {
             for (idx, id) in slice.enumerated() {
                 sqlite3_bind_text(statement, Int32(idx + 2), id, -1, Self.sqliteTransient)
             }
-            while sqlite3_step(statement) == SQLITE_ROW {
+            try forEachRow(statement, on: db, "Failed to read embeddings") {
                 guard let idText = sqlite3_column_text(statement, 0),
                     let blobBytes = sqlite3_column_blob(statement, 1)
-                else { continue }
+                else { return }
                 let id = String(cString: idText)
                 let byteCount = Int(sqlite3_column_bytes(statement, 1))
                 let floatCount = byteCount / MemoryLayout<Float>.stride
-                guard floatCount == 384 else { continue }
+                guard floatCount == 384 else { return }
                 // SQLite does not promise Float alignment for blob memory, so copy the bytes instead of rebinding them.
                 let floats = [Float](unsafeUninitializedCapacity: floatCount) { buffer, initialized in
                     memcpy(buffer.baseAddress!, blobBytes, floatCount * MemoryLayout<Float>.stride)
