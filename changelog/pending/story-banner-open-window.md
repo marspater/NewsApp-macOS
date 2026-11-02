@@ -1,0 +1,1 @@
+- The app-drawn story banner now shows whenever a News window is open on screen, not only while News is the active app, and its close button and hover pause work there too. It leaves when News hides or its last window closes or goes to the Dock.

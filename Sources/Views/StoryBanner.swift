@@ -56,17 +56,15 @@ struct StoryBanner: Sendable, Equatable {
 struct StoryBannerView: View {
     let banner: StoryBanner
     let photo: CGImage?
-    // The presenter supplies all three; an offscreen render has nothing to open, close or hold.
+    /// Set by the panel's own tracking area, which follows the pointer while News is not the active app as well.
+    var hovering = false
+    // The presenter supplies both; an offscreen render has nothing to open or close.
     var open: () -> Void = {
         // Nothing to open offscreen.
     }
     var close: () -> Void = {
         // Nothing to close offscreen.
     }
-    var hover: (Bool) -> Void = { _ in
-        // No dismissal to hold offscreen.
-    }
-    @State private var hovering = false
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: AppRadius.banner, style: .continuous) }
@@ -118,10 +116,7 @@ struct StoryBannerView: View {
         }
         .contentShape(shape)
         .onTapGesture(perform: open)
-        .onHover { inside in
-            withAnimation(reduceMotion ? nil : AppMotion.hover) { hovering = inside }
-            hover(inside)
-        }
+        .animation(reduceMotion ? nil : AppMotion.hover, value: hovering)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             [banner.title, banner.headline, banner.body].filter { !$0.isEmpty }.joined(separator: ", ")
@@ -132,8 +127,8 @@ struct StoryBannerView: View {
     }
 }
 
-/// Shows story banners in a floating panel while the app is in front (DESIGN.md 8.7). Behind other apps, or with no
-/// window on screen, the system draws the banner as before.
+/// Shows story banners in a floating panel while a News window is open on screen, active or not (DESIGN.md 8.7).
+/// Hidden, minimized to the Dock or without a window, the system draws the banner as before.
 @MainActor
 final class StoryBannerPresenter {
     static let shared = StoryBannerPresenter()
@@ -142,30 +137,51 @@ final class StoryBannerPresenter {
 
     private var panel: NSPanel?
     private var host: FirstClickHostingView<StoryBannerView>?
-    private var shown: String?
+    /// The banner on screen, its photo once loaded, and whether the pointer is over it.
+    private struct Shown {
+        var banner: StoryBanner
+        var photo: CGImage?
+        var hovering = false
+    }
+    private var shown: Shown?
     private var dismissal: Task<Void, Never>?
-    private var resignation: AnyCancellable?
+    private var visibility: AnyCancellable?
 
     init() {
-        // The banner belongs to the app in front: it leaves as soon as another app becomes active.
-        resignation = NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.dismiss() }
+        // The banner follows the window: it leaves when News hides or its last window closes or goes to the Dock.
+        let center = NotificationCenter.default
+        visibility = Publishers.MergeMany(
+            center.publisher(for: NSApplication.didHideNotification),
+            center.publisher(for: NSWindow.willCloseNotification),
+            center.publisher(for: NSWindow.didMiniaturizeNotification)
+        )
+        .sink { [weak self] _ in
+            // A closing window still counts as visible while it closes; the check runs once it is gone.
+            Task { @MainActor in
+                if Self.openWindow() == nil { self?.dismiss() }
             }
+        }
     }
 
-    /// Shows the banner when the app is frontmost with a window on screen, and says whether it did; the caller then
-    /// files the notification without a system banner. The text shows at once and the photo joins when it loads.
+    /// The News window on screen: visible and not minimized, with the app not hidden. It need not be the active app.
+    static func openWindow() -> NSWindow? {
+        guard let app = NSApp, !app.isHidden else { return nil }
+        return app.windows.first { $0.isVisible && !$0.isMiniaturized && $0.canBecomeMain }
+    }
+
+    /// Shows the banner when a News window is open on screen, and says whether it did; the caller then files the
+    /// notification without a system banner. The text shows at once and the photo joins when it loads.
     func present(_ banner: StoryBanner) -> Bool {
-        guard NSApp.isActive,
-            NSApp.windows.contains(where: { $0.isVisible && !$0.isMiniaturized && $0.canBecomeMain })
-        else { return false }
-        shown = banner.id
-        show(banner)
-        Task {
-            // A banner replaced, closed or dismissed by deactivation while its photo loaded keeps no photo.
-            guard let photo = await Self.photo(at: banner.imageURL), shown == banner.id else { return }
-            host?.rootView = view(for: banner, photo: photo)
+        guard let window = Self.openWindow(), let screen = window.screen ?? NSScreen.main else { return false }
+        shown = Shown(banner: banner)
+        show(banner, on: screen)
+        Task { [weak self] in
+            // A banner replaced or closed while its photo loaded keeps no photo.
+            guard let photo = await Self.photo(at: banner.imageURL, scale: screen.backingScaleFactor),
+                let self, self.shown?.banner.id == banner.id
+            else { return }
+            self.shown?.photo = photo
+            self.render()
         }
         return true
     }
@@ -184,12 +200,11 @@ final class StoryBannerPresenter {
 
     /// The story photo through the reader's image cache, cropped to the banner's trailing side and dissolved toward
     /// the text at the screen's scale; nil without a photo or when it cannot load.
-    static func photo(at url: URL?) async -> CGImage? {
+    static func photo(at url: URL?, scale: CGFloat) async -> CGImage? {
         guard let url,
             let image = try? await DecodedImageCache.load(
                 url, using: { try await SecureHTTPClient.shared.fetchReaderImage(from: $0) })
         else { return nil }
-        let scale = NSScreen.main?.backingScaleFactor ?? 2
         return await Task.detached(priority: .userInitiated) { bannerPhoto(image, scale: scale) }.value
     }
 
@@ -206,22 +221,27 @@ final class StoryBannerPresenter {
             y: visible.maxY - size.height - AppLayout.bannerMargin, width: size.width, height: size.height)
     }
 
-    private func view(for banner: StoryBanner, photo: CGImage?) -> StoryBannerView {
+    private func view(for banner: StoryBanner, photo: CGImage?, hovering: Bool) -> StoryBannerView {
         StoryBannerView(
-            banner: banner, photo: photo,
+            banner: banner, photo: photo, hovering: hovering,
             open: { [weak self] in self?.open(banner) },
-            close: { [weak self] in self?.dismiss() },
-            hover: { [weak self] inside in self?.hold(inside) })
+            close: { [weak self] in self?.dismiss() })
     }
 
-    private func show(_ banner: StoryBanner) {
+    /// Redraws the banner on screen after its photo or hover state changed.
+    private func render() {
+        guard let shown else { return }
+        host?.rootView = view(for: shown.banner, photo: shown.photo, hovering: shown.hovering)
+    }
+
+    private func show(_ banner: StoryBanner, on screen: NSScreen) {
         let panel = panel ?? makePanel()
         self.panel = panel
         // The photo is the banner's background, so adding it later leaves the size measured here unchanged.
-        let host = FirstClickHostingView(rootView: view(for: banner, photo: nil))
+        let host = FirstClickHostingView(rootView: view(for: banner, photo: nil, hovering: false))
+        host.hover = { [weak self] inside in self?.hold(inside) }
         self.host = host
         panel.contentView = host
-        guard let screen = NSApp.keyWindow?.screen ?? NSScreen.main else { return }
         let frame = Self.frame(for: host.fittingSize, in: screen.visibleFrame)
         // Slides in from the trailing edge like the system banner; only fades under Reduce Motion.
         let slide = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : AppLayout.bannerMargin * 2
@@ -240,11 +260,16 @@ final class StoryBannerPresenter {
                 .announcement: [banner.title, banner.headline].joined(separator: ": "),
                 .priority: NSAccessibilityPriorityLevel.high.rawValue,
             ])
-        hold(false)
+        // A banner that replaces another under a resting pointer gets no mouseEntered, so it starts from the pointer.
+        hold(frame.contains(NSEvent.mouseLocation))
     }
 
     /// Pauses the dismissal while the pointer is over the banner and restarts it when the pointer leaves.
     private func hold(_ inside: Bool) {
+        if shown != nil, shown?.hovering != inside {
+            shown?.hovering = inside
+            render()
+        }
         dismissal?.cancel()
         guard !inside else { return }
         dismissal = Task { [weak self] in
@@ -287,7 +312,31 @@ final class StoryBannerPresenter {
     }
 }
 
-/// Takes the first click although the panel never becomes key, so one click opens the story.
+/// Takes the first click although the panel never becomes key, so one click opens the story, and reports the pointer
+/// entering and leaving even while News is not the active app, where SwiftUI's hover tracking stays silent.
 private final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    var hover: ((Bool) -> Void)?
+
     override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self && area.userInfo?["banner"] != nil {
+            removeTrackingArea(area)
+        }
+        addTrackingArea(
+            NSTrackingArea(
+                rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self,
+                userInfo: ["banner": true]))
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        hover?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        hover?(false)
+    }
 }
