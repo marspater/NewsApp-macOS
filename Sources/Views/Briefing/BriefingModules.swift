@@ -585,7 +585,18 @@ enum BriefingRegion {
                 }
             }
             if !matched, words[index].contains("-") {
-                for part in words[index].split(separator: "-").map(String.init) where !part.isEmpty {
+                let parts = words[index].split(separator: "-").map(String.init).filter { !$0.isEmpty }
+                if index > 0, let firstPart = parts.first,
+                    let region = matchPlace("\(words[index - 1]) \(firstPart)")
+                {
+                    found.insert(region)
+                }
+                if index + 1 < words.count, let lastPart = parts.last,
+                    let region = matchPlace("\(lastPart) \(words[index + 1])")
+                {
+                    found.insert(region)
+                }
+                for part in parts {
                     if let region = matchPlace(part) {
                         found.insert(region)
                     }

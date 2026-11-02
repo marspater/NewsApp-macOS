@@ -91,7 +91,7 @@ struct BriefingPriorityData: Equatable, Sendable {
         if let stored { return stored }
         let hasSectorImpact = !(overview?.industryImpact.isEmpty ?? true)
         let score =
-            coverageImportanceScore(publisherCount: publisherCount, originalCount: originalCount ?? publisherCount)
+            coverageImportanceScore(publisherCount: publisherCount, originalCount: originalCount ?? 0)
             + severityImportanceScore(for: representative)
             + (hasSectorImpact ? 1 : 0)
             + ((momentum == .rising || isDeveloping) ? 1 : 0)
