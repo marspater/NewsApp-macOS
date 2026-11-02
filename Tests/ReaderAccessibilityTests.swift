@@ -355,24 +355,7 @@ struct ReaderAccessibilityTests {
     static func testReaderTagSearchAccessibilityAndNavigation() {
         print("  - Testing Reader Tag Search Accessibility & Breadcrumbs (U4 #930)...")
 
-        // 1. Accessibility labels and hints
-        let categoryName = "Science"
-        let entityName = "Cold Fusion"
-        let categoryLabel = "Search for \(categoryName)"
-        let entityLabel = "Search for \(entityName)"
-        let categoryHint = "Opens archive search for this category"
-        let entityHint = "Opens archive search for this topic"
-        let categoryContextMenu = "Search for “\(categoryName)”"
-        let entityContextMenu = "Search for “\(entityName)”"
-
-        assertEqual(categoryLabel, "Search for Science", "Category tag button accessibility label")
-        assertEqual(entityLabel, "Search for Cold Fusion", "Entity tag button accessibility label")
-        assertEqual(categoryHint, "Opens archive search for this category", "Category tag accessibility hint")
-        assertEqual(entityHint, "Opens archive search for this topic", "Entity tag accessibility hint")
-        assertEqual(categoryContextMenu, "Search for “Science”", "Category context menu item title")
-        assertEqual(entityContextMenu, "Search for “Cold Fusion”", "Entity context menu item title")
-
-        // 2. Pure query transformations: category tokens
+        // 1. Pure query transformations: category tokens
         let techToken = ArticleSearchState.categoryToken(for: "Technology")
         assertEqual(techToken.expression, "category:technology", "Category token has category: prefix")
         assertEqual(techToken.displayName, "Category: technology", "Category token formatted display name")
@@ -384,7 +367,7 @@ struct ReaderAccessibilityTests {
         assertEqual(
             multiWordCat.expression, "category:artificial-intelligence", "Multi-word category converted cleanly")
 
-        // 3. Pure query transformations: entity quoted phrases
+        // 2. Pure query transformations: entity quoted phrases
         let multiWordEntity = ArticleSearchState.entityQuery(for: "Cold Fusion")
         assertEqual(multiWordEntity, "\"Cold Fusion\"", "Multi-word entity quoted as phrase")
 
@@ -400,7 +383,7 @@ struct ReaderAccessibilityTests {
         let internalQuotes = ArticleSearchState.entityQuery(for: "Dwight \"The Rock\" Johnson")
         assertEqual(internalQuotes, "\"Dwight 'The Rock' Johnson\"", "Internal quotes converted to single quotes")
 
-        // 4. Navigation breadcrumb flow
+        // 3. Navigation breadcrumb flow
         let testArticle = FeedArticle(
             title: "Breakthrough in Fusion Energy",
             link: "https://example.com/fusion",

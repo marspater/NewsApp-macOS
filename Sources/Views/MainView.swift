@@ -119,6 +119,7 @@ struct MainView: View {
                     suggestions: searchOperatorSuggestions
                 )
             )
+            .onSubmit(of: .search) { searchState.recordHistory(query: archiveQuery) }
             .frame(minWidth: 900, minHeight: 600)
             .onAppear(perform: handleAppear)
             .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
@@ -499,10 +500,16 @@ struct MainView: View {
     ]
 
     /// Filter operators, offered while the word being typed is empty or starts one; a choice completes onto the
-    /// words already typed.
+    /// words already typed. An empty field offers recent searches instead.
     @ViewBuilder
     private var searchOperatorSuggestions: some View {
-        if !searchState.searchText.isEmpty {
+        if searchState.searchText.isEmpty, searchState.searchTokens.isEmpty, !searchState.searchHistory.isEmpty {
+            Section("Recent Searches") {
+                ForEach(searchState.searchHistory.prefix(5), id: \.self) { query in
+                    Label(query, systemImage: "clock").searchCompletion(query)
+                }
+            }
+        } else if !searchState.searchText.isEmpty {
             let word =
                 searchState.searchText.last?.isWhitespace == false
                 ? String(searchState.searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""

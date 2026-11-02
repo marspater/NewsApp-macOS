@@ -2821,7 +2821,8 @@ actor DatabaseEngine {
             params.append(("text", "%\(sf)%"))
         }
         if let cf = parsed.categoryFilter {
-            sql += " AND coalesce(ae.category, a.category) LIKE ?"
+            // Category tokens join words with hyphens (`category:health-&-wellness`).
+            sql += " AND replace(coalesce(ae.category, a.category), ' ', '-') LIKE ?"
             params.append(("text", "%\(cf)%"))
         }
         if let rf = parsed.isReadFilter {

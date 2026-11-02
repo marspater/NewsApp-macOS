@@ -888,8 +888,7 @@ struct ArticleDetailView: View {
             contextArticles: allArticles,
             initialExperienceMode: experienceMode
         )
-        let state = searchState ?? ArticleSearchState.shared
-        state.openTag(tag: text, isCategory: isCategory, from: wrap, path: &path)
+        searchState?.openTag(tag: text, isCategory: isCategory, from: wrap, path: &path)
     }
 
     private var terminalAffordance: some View {

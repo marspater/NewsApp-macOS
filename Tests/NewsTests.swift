@@ -8757,7 +8757,7 @@ struct NewsTests {
 
             let adjacent = FeedArticle(
                 title: "Cold Fusion research", link: "https://example.com/adjacent", guid: "adjacent",
-                description: "A new experiment.", pubDate: Date(), source: "Science")
+                description: "A new experiment.", pubDate: Date(), source: "Science", category: "Science")
             let separated = FeedArticle(
                 title: "A cold morning", link: "https://example.com/separated", guid: "separated",
                 description: "The temperature dropped. Later, fusion researchers met.", pubDate: Date(),
@@ -8785,6 +8785,17 @@ struct NewsTests {
             assertEqual(
                 try await phraseDB.searchArticles(query: "\"Cold Fusion\" category:Science").map(\.id), [adjacent.id],
                 "Phrase and operator work together")
+            let wellness = FeedArticle(
+                title: "Sleep study", link: "https://example.com/wellness", guid: "wellness",
+                description: "Rest matters.", pubDate: Date(), source: "Clinic", category: "Health & Wellness")
+            try await phraseDB.upsertArticles([wellness])
+            let wellnessTag = ArticleSearchState.categoryToken(for: "Health & Wellness").expression
+            assertTrue(
+                ArticleFilterQuery.parse(wellnessTag).matches(article: wellness, isRead: false, isSaved: false),
+                "A multiword category tag matches its story in memory")
+            assertEqual(
+                try await phraseDB.searchArticles(query: wellnessTag).map(\.id), [wellness.id],
+                "A multiword category tag finds its story")
             await phraseDB.close()
 
             // Operator searches

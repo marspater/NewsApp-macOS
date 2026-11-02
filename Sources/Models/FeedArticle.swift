@@ -387,7 +387,8 @@ struct ArticleFilterQuery: Equatable, Sendable {
         }
 
         if let c = categoryFilter, !c.isEmpty {
-            guard let cat = article.category?.lowercased(), cat.contains(c) else { return false }
+            guard let cat = article.category?.lowercased().replacingOccurrences(of: " ", with: "-"), cat.contains(c)
+            else { return false }
         }
 
         if let r = isReadFilter, isRead != r { return false }

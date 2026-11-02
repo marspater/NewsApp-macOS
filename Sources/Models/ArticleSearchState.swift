@@ -34,9 +34,6 @@ struct ReaderTagSearchQuery: Equatable, Sendable {
 /// and breadcrumb history to return to an open story.
 @MainActor
 final class ArticleSearchState: ObservableObject {
-    /// Shared fallback instance for previews or harnesses without an injected environment object.
-    static let shared = ArticleSearchState()
-
     @Published var searchText: String = ""
     @Published var searchTokens: [ArchiveSearchToken] = []
     @Published var searchPresented: Bool = false

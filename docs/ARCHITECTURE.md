@@ -335,15 +335,8 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Muting (`MuteRules`) is the reader's own: hosts (cover subdomains) and whole-word topics on headline + feed summary. Applied in SQLite before `LIMIT` via `news_muted_source` / `news_muted_topic`.
 - `news_cosine(a, b)` scores two stored `article_embeddings` vectors in SQL through vDSP (`SentenceEmbedder.cosineSimilarity`); it is NULL unless both are 384-float blobs, so a caller filters by `model_version` and never compares vectors of different models. It is there for hybrid search (#708), which measures its full-scan latency before any vector index is considered.
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:7e41cf679cd23e2922dcb79594bd9c0755031ee9841b5b40d10d0dc9a503b324 -->
-
-- Archive search treats unquoted words as independent prefix terms and quoted spans as phrases. Filters outside quotes remain operators; quoted operators are text. Entity tags search for the quoted entity name.
+- Archive search treats unquoted words as independent prefix terms and quoted spans as phrases. Filters outside quotes remain operators; quoted operators are text. Entity tags search for the quoted entity name; a category tag joins a multiword category with hyphens, and the category filter compares the stored category the same way. `ArticleSearchState` keeps the last 20 tag and submitted queries for the window, shown as recent searches while the field is empty.
 - A search with no results asks `DatabaseEngine.searchSuggestion`: each word of four or more characters that starts no word of the visible headlines and feed summaries maps to the closest such word (`SearchSpelling`: optimal string alignment, one edit up to five characters, two beyond, ties to the commoner word). Corrections preserve phrase quotes. The list offers "Search for …" only when the corrected query finds stories. Surface words, not the porter stems in FTS5, so the suggestion is a real word; the word list is cached until stories are added, removed, re-worded or reconciled.
-
-
-<!-- /coderabbit-ai-generated:v1 -->
 
 - Lead images (`StoryCurator`, after a clustering pass): ≤30 imageless shown stories, `fetchArticleHead` reads ≤256 KiB. An image declared by two stories is a site default and dropped.
 
