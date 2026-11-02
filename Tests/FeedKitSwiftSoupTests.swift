@@ -2,6 +2,7 @@ import Foundation
 
 /// Offline parser checks run by test.sh, including --parsing-regressions. No user state or network access.
 enum FeedKitSwiftSoupTests {
+    /// Executes offline XML, JSON Feed, HTML extraction, and URL parsing regression checks.
     static func run() {
         let pipeline = ContentExtractionPipeline.shared
         let base = "https://example.com/news/feed.xml"
@@ -287,14 +288,14 @@ enum FeedKitSwiftSoupTests {
             <atom:link href="https://example.com/mixed"/><link>https://example.com/mixed</link>
             <description>Primary summary</description><atom:summary>Second summary</atom:summary>
             <guid isPermaLink="false">primary-guid</guid><atom:id>urn:uuid:second-guid</atom:id>
-            <pubDate>Fri, 30 Oct 2026 10:00:00 GMT</pubDate><atom:published>2026-10-30T10:00:00Z</atom:published>
+            <pubDate>Fri, 30 Oct 2026 10:00:00 GMT</pubDate><atom:published>2026-10-31T10:00:00Z</atom:published>
             </item></channel></rss>
             """
         let mixedItem = FeedXMLParser(data: Data(mixedAtomRSS.utf8), feedURL: base).parse().first
         check(
             mixedItem?.title == "Mixed item" && mixedItem?.link == "https://example.com/mixed"
                 && mixedItem?.description == "Primary summary" && mixedItem?.guid == "primary-guid"
-                && mixedItem?.pubDate != DateParser.unknownDate,
+                && mixedItem?.pubDate == DateParser.parse("Fri, 30 Oct 2026 10:00:00 GMT"),
             "Duplicate or mixed RSS and Atom item fields do not concatenate into corrupted values")
         let atomLinkWithText = """
             <feed xmlns="http://www.w3.org/2005/Atom"><title>Planet</title><entry><title>Atom link text</title>
@@ -383,6 +384,14 @@ enum FeedKitSwiftSoupTests {
             parsedRelativeJSON?.link == "https://example.com/reports/bridge"
                 && parsedRelativeJSON?.imageUrl == "https://example.com/news/photos/lead.jpg",
             "JSON Feed resolves relative item and image URLs against feedURL")
+        let redirectedRelativeJSON = JSONFeedParser.parse(
+            data: try! JSONSerialization.data(withJSONObject: relativeAndEntityJSON),
+            feedURL: "https://example.com/feed",
+            baseURL: "https://example.com/news/feed.json"
+        )?.first
+        check(
+            redirectedRelativeJSON?.imageUrl == "https://example.com/news/photos/lead.jpg",
+            "JSON Feed resolves relative URLs against redirected response baseURL")
         check(
             parsedRelativeJSON?.description == "Summary with & and markup"
                 && parsedRelativeJSON?.category == "Sci&Tech"

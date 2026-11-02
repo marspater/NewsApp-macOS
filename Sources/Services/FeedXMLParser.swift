@@ -173,6 +173,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
+    /// Processes an opening element inside an RSS `<item>` or Atom `<entry>`, capturing the first non-empty occurrence of each scalar field.
     private func handleItemElement(elementName: String, attributeDict: [String: String]) {
         let attributes = attributeDict.filter { !$0.key.hasPrefix("xmlns") }.sorted { $0.key < $1.key }.map {
             key, value in
@@ -230,6 +231,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
+    /// Resets per-item accumulator buffers when entering a new RSS `<item>` or Atom `<entry>`.
     private func resetItemState() {
         insideItem = true
         parsingChannelTitle = false
@@ -281,6 +283,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
+    /// Handles character data inside the active feed channel or item field.
     func parser(_ parser: XMLParser, foundCharacters string: String) {
         guard !Task.isCancelled else {
             parser.abortParsing()
@@ -315,6 +318,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
+    /// Returns the currently accumulated value for a single-value item text field, or `nil` if the element is not a tracked scalar field.
     private func itemFieldValue(for field: String) -> String? {
         switch field {
         case "title": return itemTitle
@@ -327,6 +331,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
+    /// Resets the target scalar item text buffer before collecting characters from a newly opened element.
     private func clearItemField(for field: String) {
         switch field {
         case "title": itemTitle = ""
@@ -339,6 +344,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
+    /// Appends character data to the buffer for the specified item text field.
     private func appendItemText(_ string: String, field: String) {
         switch field {
         case "title": itemTitle += string
@@ -359,6 +365,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         self.parser(parser, foundCharacters: str)
     }
 
+    /// Handles closing XML elements, finalizing the active text field or completed article item.
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName _: String?)
     {
         guard !Task.isCancelled else {
