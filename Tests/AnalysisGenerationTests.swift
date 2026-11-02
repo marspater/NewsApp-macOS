@@ -36,6 +36,7 @@ enum AnalysisGenerationTests {
             try await queueForgetsRefusedAndClearedWork()
             try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
+            try await clusteringStorageFailuresEndThePass()
         } catch {
             check(false, "Unexpected error: \(error)")
         }
@@ -130,6 +131,31 @@ enum AnalysisGenerationTests {
             try await db.fetchArticleEmbeddings(
                 articleIDs: [stored.id], modelVersion: SentenceEmbedder.modelVersion
             ).count == 1, "one vector")
+    }
+
+    /// A clustering pass whose storage fails ends with the error: a failed write is not a stored pass, and a failed
+    /// inclusion read is not "no correction by the reader".
+    static func clusteringStorageFailuresEndThePass() async throws {
+        let now = Date(timeIntervalSince1970: 1_793_188_800 + 3600)
+        for (failure, message) in [
+            (
+                "CREATE TRIGGER fail_features BEFORE INSERT ON article_features BEGIN SELECT RAISE(ABORT, 'fixture'); END;",
+                "A failed clustering write ends the pass with its error"
+            ),
+            ("DROP TABLE event_inclusions;", "A failed inclusion read ends the pass with its error"),
+        ] {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles([article("cluster-fail")])
+            try await db.eventRows(failure)
+            do {
+                _ = try await EventClusterer.run(in: db, now: now, allowsEnergy: false)
+                check(false, message)
+            } catch {
+                check(!(error is CancellationError), message)
+            }
+            await db.close()
+        }
     }
 
     /// A job counts as completed only when its write succeeded (#820), a changed input or a clear makes the story
