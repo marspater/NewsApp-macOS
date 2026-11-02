@@ -46,8 +46,8 @@ enum DiagnosticsExport {
                 let schema = try? await articleStore.database.storedSchemaVersion()
                 let summary = summary(settings: settings, feedHealth: feedManager.feedHealth, schema: schema, now: now)
                 let titles = (articleStore.articles + articleStore.savedArticles).map(\.title)
+                let log = try await currentLaunchLog(now: now)
                 try await Task.detached(priority: .userInitiated) {
-                    let log = try currentLaunchLog(now: now)
                     try archive(files(summary: summary, log: log, titles: titles), to: destination)
                 }.value
             } catch {
@@ -58,7 +58,19 @@ enum DiagnosticsExport {
 
     /// The unified log of this process only: a sandboxed app cannot read earlier launches, so the export covers the
     /// current launch, and of a launch older than a day only its last 24 hours.
-    static func currentLaunchLog(now: Date = Date()) throws -> [LogLine] {
+    ///
+    /// Reading the log waits on a synchronous XPC reply from logd that can take seconds, so the read always runs on
+    /// a detached task: awaiting this from the main actor (the export flow, tests, probes) never blocks the main
+    /// thread.
+    static func currentLaunchLog(now: Date = Date()) async throws -> [LogLine] {
+        try await Task.detached(priority: .userInitiated) {
+            try readLaunchLogBlocking(now: now)
+        }.value
+    }
+
+    /// The blocking `OSLogStore` read behind `currentLaunchLog(now:)`. Never call this on the main thread.
+    private static func readLaunchLogBlocking(now: Date) throws -> [LogLine] {
+        dispatchPrecondition(condition: .notOnQueue(.main))
         let store = try OSLogStore(scope: .currentProcessIdentifier)
         let start = store.position(date: now.addingTimeInterval(-window))
         let subsystem = NSPredicate(format: "subsystem == %@", NewsSignposts.subsystem)
