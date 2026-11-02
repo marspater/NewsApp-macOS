@@ -11,11 +11,15 @@ class JSONFeedParser {
                 .replacingOccurrences(of: "api.", with: "")
         }
 
-        let sourceName = feed.title ?? baseSource
+        let rawFeedTitle = (feed.title?.components(separatedBy: .newlines).first ?? feed.title ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let decodedFeedTitle = ContentExtractionPipeline.shared.decodeHTMLEntities(rawFeedTitle)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceName = decodedFeedTitle.isEmpty ? baseSource : decodedFeedTitle
         var articles = [FeedArticle]()
         for item in (feed.items ?? []).prefix(500) {
             guard !Task.isCancelled else { return nil }
-            if let article = article(from: item, sourceName: sourceName) { articles.append(article) }
+            if let article = article(from: item, sourceName: sourceName, feedURL: feedURL) { articles.append(article) }
         }
         return Task.isCancelled ? nil : articles
     }
@@ -40,7 +44,7 @@ class JSONFeedParser {
                 item["id"] = url
             }
             if (item["tags"] as? [String])?.isEmpty == true { item["tags"] = item["categories"] }
-            if item["summary"] == nil || item["summary"] is NSNull {
+            if (item["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
                 item["summary"] = FeedXMLParser.stripHTMLSimple(item["description"] as? String ?? "")
             }
             // An item with only a modification date is dated by it, as RSS and Atom fall back to `updated` (#796).
@@ -72,24 +76,36 @@ class JSONFeedParser {
         try? FeedKit.JSONFeed(data: data)
     }
 
-    private static func article(from item: FeedKit.JSONFeedItem, sourceName: String) -> FeedArticle? {
+    private static func resolvedURL(_ value: String, feedURL: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        return URL(string: trimmed, relativeTo: URL(string: feedURL))?.absoluteURL.absoluteString ?? trimmed
+    }
+
+    private static func article(from item: FeedKit.JSONFeedItem, sourceName: String, feedURL: String) -> FeedArticle? {
         // An item without a URL keeps its ID as identity; the ID is its link only when it is a web address (#799).
         let webID = item.id.flatMap {
             ["http", "https"].contains(URL(string: $0)?.scheme?.lowercased() ?? "") ? $0 : nil
         }
-        let link = item.url.flatMap { $0.isEmpty ? nil : $0 } ?? webID ?? ""
+        let rawLink =
+            item.url.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 } ?? webID ?? ""
+        let link = resolvedURL(rawLink, feedURL: feedURL)
         if link.isEmpty && (item.id ?? "").isEmpty { return nil }
 
         let title = item.title ?? "Untitled"
 
         let pubDate = item.datePublished ?? DateParser.unknownDate
 
-        let imageUrl = item.image
-
-        var category: String? = nil
-        if let tags = item.tags, !tags.isEmpty {
-            category = tags.first
+        let imageUrl = item.image.flatMap { raw -> String? in
+            let resolved = resolvedURL(raw, feedURL: feedURL)
+            return resolved.isEmpty ? nil : resolved
         }
+
+        let category = item.tags?
+            .map {
+                ContentExtractionPipeline.shared.decodeHTMLEntities($0).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .first { !$0.isEmpty }
 
         let cleanDesc = item.summary ?? ""
         let cleanContent = item.contentHtml.map(FeedXMLParser.stripHTMLSimple) ?? item.contentText

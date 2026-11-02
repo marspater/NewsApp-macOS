@@ -361,6 +361,33 @@ enum FeedKitSwiftSoupTests {
                 "Permissive RFC822 aliases parse without seconds or weekday")
             check(result[2].pubDate == DateParser.unknownDate, "Malformed dates retain the stable unknown sentinel")
         }
+        let relativeAndEntityJSON: [String: Any] = [
+            "version": "https://jsonfeed.org/version/1.1",
+            "title": "   ",
+            "items": [
+                [
+                    "id": "rel-1",
+                    "url": "/reports/bridge",
+                    "title": "Bridge &amp; Tunnel",
+                    "summary": "   ",
+                    "description": "<p>Summary with &amp; and <b>markup</b></p>",
+                    "image": "photos/lead.jpg",
+                    "tags": ["", "   ", "Sci&amp;Tech"],
+                ]
+            ],
+        ]
+        let parsedRelativeJSON = JSONFeedParser.parse(
+            data: try! JSONSerialization.data(withJSONObject: relativeAndEntityJSON), feedURL: base
+        )?.first
+        check(
+            parsedRelativeJSON?.link == "https://example.com/reports/bridge"
+                && parsedRelativeJSON?.imageUrl == "https://example.com/news/photos/lead.jpg",
+            "JSON Feed resolves relative item and image URLs against feedURL")
+        check(
+            parsedRelativeJSON?.description == "Summary with & and markup"
+                && parsedRelativeJSON?.category == "Sci&Tech"
+                && parsedRelativeJSON?.source == "example.com",
+            "JSON Feed falls back from blank summary or feed title and skips empty tags")
         let manyXML =
             "<rss><channel>"
             + (0...500).map {
