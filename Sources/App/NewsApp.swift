@@ -538,8 +538,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         _ = semaphore.wait(timeout: .now() + .seconds(2))
     }
 
-    // While the app is in front a story banner is the app's own (DESIGN.md 8.7), filed in Notification Center without
-    // the system banner; every other banner, and every banner while the app is behind, is the system's.
+    // While a News window is open on screen, active or not, a story banner is the app's own (DESIGN.md 8.7), filed in
+    // Notification Center without the system banner; every other banner, and every banner while News is hidden or
+    // only in the Dock, is the system's. Where macOS does not ask this delegate (an inactive app on some releases), the
+    // system banner shows, never both.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
