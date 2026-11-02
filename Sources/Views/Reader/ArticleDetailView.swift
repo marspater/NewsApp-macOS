@@ -1355,7 +1355,10 @@ struct ArticleDetailView: View {
                     if let category = displayCategory {
                         summaryTag(category, emphasized: true)
                     }
-                    ForEach(EntityResult.readerTags(from: analysis.entities).prefix(6), id: \.name) { entity in
+                    let tags = EntityResult.readerTags(
+                        from: analysis.entities, title: currentArticle.title,
+                        description: currentArticle.description, text: currentArticle.fullContent ?? "")
+                    ForEach(tags.prefix(6), id: \.name) { entity in
                         summaryTag(entity.name)
                     }
                 }

@@ -3402,6 +3402,25 @@ struct NewsTests {
             EntityResult(name: "Jane Smith", type: .person),
         ])
         assertEqual(ambiguous.count, 3, "An ambiguous surname must not be merged into a guessed identity")
+        // #924: a name the story mentions once in passing makes no tag; the people it is about lead.
+        let coldFusion = EntityResult.readerTags(
+            from: [
+                EntityResult(name: "Huw Price", type: .person, confidence: 0.9),
+                EntityResult(name: "Trinity College", type: .organization, confidence: 0.9),
+                EntityResult(name: "Strait of Hormuz", type: .place, confidence: 0.9),
+                EntityResult(name: "Matt Trevithick", type: .person, confidence: 0.9),
+            ],
+            title: "Is There Anything Left in the Dream of Cold Fusion?",
+            description: "A thriving research program with exotic atoms stretches the boundaries of physics.",
+            text: "Huw Price, a philosopher at Trinity College, argued scientists were too dismissive. Price wrote "
+                + "a paper; the price of energy rose while ships queued in the Strait of Hormuz. Matt Trevithick "
+                + "organised a review. Trevithick said the work continued, and Trevithick funded 28 papers; "
+                + "Trevithick's team kept going. "
+                + "Price disagreed.")
+        assertEqual(
+            coldFusion.map(\.name), ["Matt Trevithick", "Huw Price"],
+            "Tags rank by mentions and drop names mentioned once in passing")
+        assertEqual(EntityResult.mentions(of: "Price", in: "the price rose; Price, Priceless"), 1, "Whole words only")
 
         let path = FileManager.default.temporaryDirectory.appendingPathComponent(
             "news-reader-\(UUID().uuidString).sqlite3"
