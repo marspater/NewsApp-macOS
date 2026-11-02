@@ -525,12 +525,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         _ = semaphore.wait(timeout: .now() + .seconds(2))
     }
 
-    // Force macOS to show alert even if app is focused
+    // While the app is in front a story banner is the app's own (DESIGN.md 8.7), filed in Notification Center without
+    // the system banner; every other banner, and every banner while the app is behind, is the system's.
     nonisolated func userNotificationCenter(
-        _ _: UNUserNotificationCenter, willPresent _: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .sound])
+        _ _: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        guard let banner = StoryBanner(notification.request) else { return [.banner, .list, .sound] }
+        return await StoryBannerPresenter.shared.present(banner) ? [.list, .sound] : [.banner, .list, .sound]
     }
 
     // Handle notification actions and default click (#560)

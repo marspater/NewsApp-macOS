@@ -404,6 +404,8 @@ final class NotificationService: Sendable {
                 let attachment = await downloadNotificationAttachment(from: imageUrl)
             {
                 content.attachments = [attachment]
+                // The app-drawn banner loads the photo again through the reader's image cache.
+                content.userInfo["imageURL"] = imageUrl.absoluteString
             }
             identifier = Self.notificationIdentifier(for: article)
         } else {
@@ -475,16 +477,22 @@ final class NotificationService: Sendable {
     /// short side is under 300 px, when the square the system shows is the better choice.
     static func notificationImage(_ image: CGImage) -> CGImage? {
         guard min(image.width, image.height) >= notificationImageMinimumSide else { return nil }
+        return dissolvingCrop(image, aspect: 2.0 / 3.0, maxWidth: notificationImageWidth)
+    }
+
+    /// The centred crop of `image` at `aspect` (width over height), at most `maxWidth` px wide, sharp and opaque at its
+    /// trailing edge and dissolving toward its leading edge. The system thumbnail and the app-drawn banner share it.
+    static func dissolvingCrop(_ image: CGImage, aspect: Double, maxWidth: Int) -> CGImage? {
         let width = Double(image.width)
         let height = Double(image.height)
         var cropWidth = width
         var cropHeight = height
-        if cropWidth / cropHeight > 2.0 / 3.0 { cropWidth = cropHeight * 2 / 3 } else { cropHeight = cropWidth * 3 / 2 }
+        if cropWidth / cropHeight > aspect { cropWidth = cropHeight * aspect } else { cropHeight = cropWidth / aspect }
         let crop = CGRect(
             x: (width - cropWidth) / 2, y: (height - cropHeight) / 2, width: cropWidth, height: cropHeight
         ).integral
         guard let cropped = image.cropping(to: crop) else { return nil }
-        let scale = min(1, Double(notificationImageWidth) / Double(cropped.width))
+        let scale = min(1, Double(maxWidth) / Double(cropped.width))
         let source = CIImage(cgImage: cropped).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let extent = source.extent.integral
         // The trailing edge stays sharp and opaque, where the system pins the thumbnail to the banner's side. Toward

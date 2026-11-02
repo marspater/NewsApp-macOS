@@ -43,7 +43,10 @@ struct NewsRegressionRunner {
                 do { try await FeedKitSwiftSoupTests.runEmbeddingIntegration() }
                 catch { fatalError("Parser/embedding integration failed: \(error)") }
             }
-            if selected("Tests/NotificationAttachmentTests.swift") { NotificationAttachmentTests.run() }
+            if selected("Tests/NotificationAttachmentTests.swift") {
+                NotificationAttachmentTests.run()
+                await NotificationAttachmentTests.runBanner()
+            }
             if selected("Tests/BriefingE2ETests.swift") { await BriefingE2ETests.run() }
             if selected("Tests/BriefingWarRoomTests.swift") { await BriefingWarRoomTests.run() }
             if selected("Tests/BriefingIntelligenceTests.swift") { await BriefingIntelligenceTests.run() }
@@ -161,6 +164,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/App/NewsURLParser.swift \
     Sources/App/Intents.swift \
     Sources/App/NotificationActionRouter.swift \
+    Sources/Views/StoryBanner.swift \
     Sources/App/LibraryBackup.swift \
     Sources/Views/List/FeedHealthLine.swift \
     Sources/Views/FeedCatalogView.swift \
