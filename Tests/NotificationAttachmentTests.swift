@@ -121,6 +121,7 @@ enum NotificationAttachmentTests {
         }
 
         // Test StoryBannerPresenter presentation, openWindow, and dismissal
+        _ = NSApplication.shared
         let initialWindow = StoryBannerPresenter.openWindow()
         class BannerTestWindow: NSWindow {
             override var canBecomeMain: Bool { true }
@@ -130,6 +131,7 @@ enum NotificationAttachmentTests {
             contentRect: NSRect(x: 100, y: 100, width: 400, height: 300),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
+        testWindow.isReleasedWhenClosed = false
         testWindow.orderFront(nil)
         precondition(StoryBannerPresenter.openWindow() != nil, "A visible window is detected as open")
         precondition(StoryBannerPresenter.shared.present(banner), "Banner presents when a window is open")
