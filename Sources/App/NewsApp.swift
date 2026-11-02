@@ -528,9 +528,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // While the app is in front a story banner is the app's own (DESIGN.md 8.7), filed in Notification Center without
     // the system banner; every other banner, and every banner while the app is behind, is the system's.
     nonisolated func userNotificationCenter(
-        _ _: UNUserNotificationCenter, willPresent notification: UNNotification
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        guard let banner = StoryBanner(notification.request) else { return [.banner, .list, .sound] }
+        // A reader who set News's alert style to None gets no banner from the app either.
+        guard let banner = StoryBanner(notification.request),
+            await center.notificationSettings().alertSetting == .enabled
+        else { return [.banner, .list, .sound] }
         return await StoryBannerPresenter.shared.present(banner) ? [.list, .sound] : [.banner, .list, .sound]
     }
 
