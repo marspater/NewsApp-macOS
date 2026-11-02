@@ -639,6 +639,11 @@ actor DatabaseEngine {
         try? fileManager.removeItem(at: stagingFolder)
         try fileManager.createDirectory(at: stagingFolder, withIntermediateDirectories: false)
         try fileManager.copyItem(at: resolvedArchive, to: staging)
+        // A kept copy whose log couldn't be folded in has it beside it; SQLite replays it when the staged copy opens.
+        let archiveLog = resolvedArchive.path + "-wal"
+        if fileManager.fileExists(atPath: archiveLog) {
+            try fileManager.copyItem(atPath: archiveLog, toPath: staging.path + "-wal")
+        }
         // The restored library gets the current one's permissions, not whatever the chosen file had.
         let resolvedPath = library.resolvingSymlinksInPath().path
         let permissions = (try? fileManager.attributesOfItem(atPath: resolvedPath)[.posixPermissions]) ?? 0o600
@@ -4095,8 +4100,9 @@ actor DatabaseEngine {
     ) throws -> Int {
         guard !muting.isEmpty, db != nil else { return 0 }
         // The count scans the library through two SQL functions per row; it only changes when a write does (#839).
+        // Without a change token nothing is cached or reused: another connection's commits would go unseen (#946).
         let changes = changeToken()
-        if mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
+        if changes == nil || mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
         let key = MutedCountKey(
             section: section, isRead: isRead, isSaved: isSaved, search: search, muting: muting,
             scope: collectionOnlyFeedURLs)
@@ -4104,6 +4110,7 @@ actor DatabaseEngine {
         let count = try listAggregates(
             "count(*)", section: section, isRead: isRead, isSaved: isSaved, search: search,
             filter: " AND " + Self.mutedArticle, filterParameters: Self.mutingParameters(muting))[0]
+        guard changes != nil else { return count }
         if mutedCountCache.counts.count >= 32 { mutedCountCache.counts = [:] }
         mutedCountCache.counts[key] = count
         return count

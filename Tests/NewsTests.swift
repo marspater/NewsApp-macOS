@@ -2268,6 +2268,8 @@ struct NewsTests {
             "Damage the stored facts")
         assertTrue(
             try await db.fetchEventOverview(eventID: eventID) == nil, "Undecodable facts read as a cache miss")
+        assertTrue(try await db.recordEventOverview(overview), "A rebuilt overview replaces the damaged row")
+        assertTrue(try await db.fetchEventOverview(eventID: eventID) != nil, "The rebuilt overview reads back")
 
         // A query that fails throws instead of answering zero or false.
         assertTrue(try await db.isSaved(articleId: "sqlite-a"), "Saved state reads before the failure")
