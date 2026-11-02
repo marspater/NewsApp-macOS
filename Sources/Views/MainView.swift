@@ -647,13 +647,6 @@ private struct CompactArchiveSearch: NSViewRepresentable {
     }
 }
 
-/// A stateless focused command action: compares equal across renders so `.focusedSceneValue` does not trigger an
-/// infinite `App` -> `Window` re-evaluation loop when the window is key (#778).
-struct FocusedCommandAction: Equatable {
-    let perform: () -> Void
-    static func == (_: Self, _: Self) -> Bool { true }
-}
-
 private struct ArchiveSearchKey: FocusedValueKey { typealias Value = FocusedCommandAction }
 extension FocusedValues {
     var archiveSearch: FocusedCommandAction? {

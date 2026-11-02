@@ -475,14 +475,7 @@ struct BriefingTileView: View {
                 y: AppShadow.cardHoverY
             )
         }
-        let restingWidth: CGFloat
-        if isLead {
-            restingWidth = AppLayout.leadTileStroke
-        } else if contrast == .increased {
-            restingWidth = AppLayout.hoverStroke
-        } else {
-            restingWidth = AppLayout.hairline
-        }
+        let restingWidth = Self.restingWidth(isLead: isLead, contrast: contrast)
         return BriefingTileAppearance(
             border: isLead ? AppColor.accent : AppColor.border(for: contrast),
             width: restingWidth,
@@ -490,6 +483,13 @@ struct BriefingTileView: View {
             radius: AppShadow.cardRestingRadius,
             y: AppShadow.cardRestingY
         )
+    }
+
+    static func restingWidth(isLead: Bool, contrast: ColorSchemeContrast) -> CGFloat {
+        if isLead {
+            return AppLayout.leadTileStroke
+        }
+        return contrast == .increased ? AppLayout.hoverStroke : AppLayout.hairline
     }
 
     var body: some View {

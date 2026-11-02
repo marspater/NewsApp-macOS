@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -118,6 +119,51 @@ enum NotificationAttachmentTests {
                     && alpha(image, x: image.width - 1, y: image.height - 1) == 0,
                 "Banner and photo share the rounded corners")
         }
+
+        // Test StoryBannerPresenter presentation, openWindow, and dismissal
+        let initialWindow = StoryBannerPresenter.openWindow()
+        class BannerTestWindow: NSWindow {
+            override var canBecomeMain: Bool { true }
+            override var canBecomeKey: Bool { true }
+        }
+        let testWindow = BannerTestWindow(
+            contentRect: NSRect(x: 100, y: 100, width: 400, height: 300),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: false)
+        testWindow.orderFront(nil)
+        precondition(StoryBannerPresenter.openWindow() != nil, "A visible window is detected as open")
+        precondition(StoryBannerPresenter.shared.present(banner), "Banner presents when a window is open")
+
+        // Notification handlers
+        NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: NSWindow())
+        NotificationCenter.default.post(name: NSWindow.didMiniaturizeNotification, object: testWindow)
+        NotificationCenter.default.post(name: NSApplication.didHideNotification, object: nil)
+
+        StoryBannerPresenter.shared.dismiss()
+        testWindow.close()
+        precondition(initialWindow == nil || StoryBannerPresenter.openWindow() == initialWindow)
+
+        // FirstClickHostingView
+        let hostView = FirstClickHostingView(rootView: Text("Banner Test"))
+        precondition(hostView.acceptsFirstMouse(for: nil), "FirstClickHostingView accepts first mouse")
+        hostView.updateTrackingAreas()
+        var hoverDetected: Bool?
+        hostView.hover = { hoverDetected = $0 }
+        if let event = NSEvent.enterExitEvent(
+            with: .mouseEntered, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
+        ) {
+            hostView.mouseEntered(with: event)
+            precondition(hoverDetected == true, "mouseEntered triggers hover callback")
+        }
+        if let event = NSEvent.enterExitEvent(
+            with: .mouseExited, location: .zero, modifierFlags: [], timestamp: 0,
+            windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil
+        ) {
+            hostView.mouseExited(with: event)
+            precondition(hoverDetected == false, "mouseExited triggers hover callback")
+        }
+
         print("✅ Story banner regressions passed")
     }
 

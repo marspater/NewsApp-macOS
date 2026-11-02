@@ -396,11 +396,15 @@ struct BriefingPriorityModuleView: View {
         .accessibilityElement(children: .contain)
     }
 
-    private func strokeLineWidth(for card: BriefingPriorityData.Card) -> CGFloat {
-        if card.isLead {
+    static func strokeLineWidth(isLead: Bool, contrast: ColorSchemeContrast) -> CGFloat {
+        if isLead {
             return AppLayout.leadTileStroke
         }
         return contrast == .increased ? AppLayout.hoverStroke : AppLayout.hairline
+    }
+
+    private func strokeLineWidth(for card: BriefingPriorityData.Card) -> CGFloat {
+        Self.strokeLineWidth(isLead: card.isLead, contrast: contrast)
     }
 
     private func stats(_ card: BriefingPriorityData.Card) -> some View {
