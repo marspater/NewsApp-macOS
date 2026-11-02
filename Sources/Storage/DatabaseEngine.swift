@@ -774,11 +774,20 @@ actor DatabaseEngine {
         // the commits only it holds if the swap failed. A blocked checkpoint reports through its counts, not its status,
         // so the counts are checked; an incomplete one stops the restore with the library untouched (#946). A library
         // opened read-only can't checkpoint; its log is in the copy kept above.
+        // The connection then keeps an exclusive lock until close(): taking it fails while another process has the
+        // library open, so the restore is refused instead of discarding what that process writes before the swap.
         if let db, sqlite3_db_readonly(db, "main") == 0 {
+            let lockSQL = "PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;"
+            let exclusive = sqlite3_exec(db, lockSQL, nil, nil, nil) == SQLITE_OK
             var logFrames: Int32 = -1
             var checkpointed: Int32 = -1
-            let status = sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, &logFrames, &checkpointed)
+            let status =
+                exclusive
+                ? sqlite3_wal_checkpoint_v2(db, nil, SQLITE_CHECKPOINT_TRUNCATE, &logFrames, &checkpointed)
+                : SQLITE_BUSY
             guard status == SQLITE_OK, logFrames >= 0, logFrames == checkpointed else {
+                // Back to shared locking; the next read releases the exclusive lock.
+                sqlite3_exec(db, "PRAGMA locking_mode = NORMAL; SELECT count(*) FROM sqlite_master;", nil, nil, nil)
                 if !extras.isEmpty { try? putTension(previousTension) }
                 throw NSError(
                     domain: "DatabaseEngine", code: Int(status),

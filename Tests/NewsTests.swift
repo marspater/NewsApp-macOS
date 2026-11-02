@@ -2271,6 +2271,26 @@ struct NewsTests {
         assertTrue(try await db.recordEventOverview(overview), "A rebuilt overview replaces the damaged row")
         assertTrue(try await db.fetchEventOverview(eventID: eventID) != nil, "The rebuilt overview reads back")
 
+        // A restore is refused while another connection has the library open: its writes would be lost in the swap.
+        let archive = directory.appendingPathComponent("backup.sqlite3")
+        try await db.writeBackup(to: archive, settings: Data())
+        var reader: OpaquePointer?
+        assertEqual(sqlite3_open(library.path, &reader), SQLITE_OK, "Open another connection")
+        assertEqual(
+            sqlite3_exec(reader, "BEGIN; SELECT count(*) FROM articles;", nil, nil, nil), SQLITE_OK,
+            "Hold a read on the library")
+        do {
+            _ = try await db.restoreBackup(from: archive)
+            assertTrue(false, "A restore while another connection uses the library is refused")
+        } catch {
+            assertTrue(error.localizedDescription.contains("still in use"), "The refusal says the library is in use")
+        }
+        sqlite3_exec(reader, "ROLLBACK;", nil, nil, nil)
+        sqlite3_close(reader)
+        assertTrue(
+            try await db.isSaved(articleId: "sqlite-a"), "A refused restore leaves the library open and writable")
+        try await db.setSaved(articleId: "sqlite-b", isSaved: true)
+
         // A query that fails throws instead of answering zero or false.
         assertTrue(try await db.isSaved(articleId: "sqlite-a"), "Saved state reads before the failure")
         assertEqual(
