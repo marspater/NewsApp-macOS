@@ -117,8 +117,13 @@ actor DatabaseEngine {
             sqlite3_close_v2(handle)
             connection.handle = nil
         }
-        // A reopened library may hold other rows (a restore, or sources normalized on open).
+        // A reopened library may hold other rows (a restore, or sources normalized on open), and a new connection
+        // restarts the change token the caches are keyed on, so nothing cached survives a close (#946).
         repeatedImageCache = [:]
+        repeatedImageDataVersion = nil
+        countsCache = nil
+        mutedCountCache = (nil, [:])
+        spellingCache = nil
     }
 
     /// Runs `PRAGMA optimize;` and `PRAGMA wal_checkpoint(TRUNCATE);` before app termination (#536).
@@ -291,13 +296,8 @@ actor DatabaseEngine {
                 );
                 """
             )
-            if try !columnNames(of: "event_notifications").contains("lane") {
-                try executeSimple("ALTER TABLE event_notifications ADD COLUMN lane INTEGER NOT NULL DEFAULT 0;")
-            }
-            if try !columnNames(of: "notification_priority_queue").contains("story_id") {
-                try executeSimple(
-                    "ALTER TABLE notification_priority_queue ADD COLUMN story_id TEXT NOT NULL DEFAULT '';")
-            }
+            try addColumnIfMissing("event_notifications", "lane", "INTEGER NOT NULL DEFAULT 0")
+            try addColumnIfMissing("notification_priority_queue", "story_id", "TEXT NOT NULL DEFAULT ''")
             // Overviews stored under a story's summed version before #789 sit above their event's own version; a later
             // event version could equal it with unchanged inputs and read as current, so they regenerate instead.
             try executeSimple(
@@ -347,6 +347,17 @@ actor DatabaseEngine {
             }
         } else if let roHandle = roHandle {
             sqlite3_close_v2(roHandle)
+        }
+    }
+
+    /// Adds a column a side table created on open may lack. Another process opening the same library can add it between
+    /// the check and the `ALTER`; that duplicate is the outcome wanted, not a failed open (#946).
+    private func addColumnIfMissing(_ table: String, _ column: String, _ definition: String) throws {
+        guard try !columnNames(of: table).contains(column) else { return }
+        do {
+            try executeSimple("ALTER TABLE \(table) ADD COLUMN \(column) \(definition);")
+        } catch {
+            guard try columnNames(of: table).contains(column) else { throw error }
         }
     }
 
@@ -3357,6 +3368,11 @@ actor DatabaseEngine {
         let next = try !isSaved(articleId: articleId)
         try setSaved(articleId: articleId, isSaved: next)
         return next
+    }
+
+    /// Unsaves every saved story in one statement, so a failure leaves all of them saved (#946).
+    func removeAllSaved() throws {
+        try executeSimple("UPDATE article_state SET is_saved = 0, saved_at = NULL WHERE is_saved = 1;")
     }
 
     func setSaved(articleId: String, isSaved: Bool) throws {

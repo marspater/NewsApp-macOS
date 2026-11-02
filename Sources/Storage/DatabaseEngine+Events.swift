@@ -438,6 +438,9 @@ extension DatabaseEngine {
         NSError(domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
+    /// An event changed after the caller read it, so an optimistic merge was refused; the caller decides again later.
+    struct EventChanged: Error {}
+
     /// Runs one statement and returns its rows as text columns (NULL as nil).
     @discardableResult
     func eventRows(_ sql: String, _ values: [EventValue] = []) throws -> [[String?]] {
@@ -772,7 +775,7 @@ extension DatabaseEngine {
             if let expectedVersions,
                 expectedVersions.absorbed != absorbed.version || expectedVersions.survivor != survivor.version
             {
-                throw Self.eventError("An event changed before it could be merged")
+                throw EventChanged()
             }
             try moveMembers(of: absorbed, into: survivor, at: date.timeIntervalSince1970)
             return survivor.id

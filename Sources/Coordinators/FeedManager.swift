@@ -778,6 +778,8 @@ class FeedManager: NSObject, ObservableObject {
                     if !(error is CancellationError) {
                         self.logger.error("Event clustering failed: \(error.localizedDescription)")
                     }
+                    // Memberships commit per article: a pass that stopped early may still have changed events.
+                    self.articleStore.noteEventsChanged()
                 }
             } while self?.needsClusteringPass == true && !Task.isCancelled
             guard let self, self.clusteringRunID == runID else { return }
