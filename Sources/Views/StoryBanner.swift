@@ -177,12 +177,13 @@ final class StoryBannerPresenter {
     func present(_ banner: StoryBanner) -> Bool {
         let window = Self.openWindow()
         Self.log.notice(
-            "present \(banner.id, privacy: .public): active=\(NSApp?.isActive ?? false, privacy: .public) window=\(window != nil, privacy: .public)"
+            "present \(banner.id, privacy: .private(mask: .hash)): active=\(NSApp?.isActive ?? false, privacy: .public) window=\(window != nil, privacy: .public)"
         )
         guard let window, let screen = window.screen ?? NSScreen.main else { return false }
         shown = Shown(banner: banner)
         guard show(banner, on: screen) else {
-            shown = nil
+            // Clears an earlier banner and its timer too, so it can't stay beside the system banner.
+            dismiss()
             return false
         }
         Task { [weak self] in
@@ -284,7 +285,7 @@ final class StoryBannerPresenter {
         // A banner that replaces another under a resting pointer gets no mouseEntered, so it starts from the pointer.
         hold(frame.contains(NSEvent.mouseLocation))
         Self.log.notice(
-            "shown \(banner.id, privacy: .public): frame=\(NSStringFromRect(frame), privacy: .public) visible=\(panel.isVisible, privacy: .public) screen=\(NSStringFromRect(screen.visibleFrame), privacy: .public)"
+            "shown \(banner.id, privacy: .private(mask: .hash)): frame=\(NSStringFromRect(frame), privacy: .public) visible=\(panel.isVisible, privacy: .public) screen=\(NSStringFromRect(screen.visibleFrame), privacy: .public)"
         )
         return true
     }

@@ -141,7 +141,7 @@ final class NotificationService: Sendable {
                 // Whether News was active when it posted tells, next to the delegate's log, if macOS asked it (#926).
                 let active = await MainActor.run { NSApplication.shared.isActive }
                 Logger(subsystem: "com.marspater.news", category: "StoryBanner").notice(
-                    "post \(request.identifier, privacy: .public) active=\(active, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
+                    "post \(request.identifier, privacy: .private(mask: .hash)) active=\(active, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
                 )
                 try await UNUserNotificationCenter.current().add(request)
             }

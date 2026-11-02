@@ -548,7 +548,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let log = StoryBannerPresenter.log
         let request = notification.request
         log.notice(
-            "willPresent \(request.identifier, privacy: .public) category=\(request.content.categoryIdentifier, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
+            "willPresent \(request.identifier, privacy: .private(mask: .hash)) category=\(request.content.categoryIdentifier, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
         )
         // A reader who set News's alert style to None gets no banner from the app either.
         guard let banner = StoryBanner(request) else { return [.banner, .list, .sound] }
@@ -561,7 +561,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         guard settings.alertSetting == .enabled, settings.alertStyle == .banner, settings.showPreviewsSetting != .never
         else { return [.banner, .list, .sound] }
         let drawn = await StoryBannerPresenter.shared.present(banner)
-        log.notice("willPresent \(request.identifier, privacy: .public) drawn by app=\(drawn, privacy: .public)")
+        log.notice(
+            "willPresent \(request.identifier, privacy: .private(mask: .hash)) drawn by app=\(drawn, privacy: .public)")
         return drawn ? [.list, .sound] : [.banner, .list, .sound]
     }
 
