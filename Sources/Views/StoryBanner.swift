@@ -260,7 +260,8 @@ final class StoryBannerPresenter {
                 .announcement: [banner.title, banner.headline].joined(separator: ": "),
                 .priority: NSAccessibilityPriorityLevel.high.rawValue,
             ])
-        hold(false)
+        // A banner that replaces another under a resting pointer gets no mouseEntered, so it starts from the pointer.
+        hold(frame.contains(NSEvent.mouseLocation))
     }
 
     /// Pauses the dismissal while the pointer is over the banner and restarts it when the pointer leaves.
