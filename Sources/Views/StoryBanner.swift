@@ -55,9 +55,16 @@ struct StoryBanner: Sendable, Equatable {
 struct StoryBannerView: View {
     let banner: StoryBanner
     let photo: CGImage?
-    var open: () -> Void = {}
-    var close: () -> Void = {}
-    var hover: (Bool) -> Void = { _ in }
+    // The presenter supplies all three; an offscreen render has nothing to open, close or hold.
+    var open: () -> Void = {
+        // Nothing to open offscreen.
+    }
+    var close: () -> Void = {
+        // Nothing to close offscreen.
+    }
+    var hover: (Bool) -> Void = { _ in
+        // No dismissal to hold offscreen.
+    }
     @State private var hovering = false
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
@@ -266,5 +273,5 @@ final class StoryBannerPresenter {
 
 /// Takes the first click although the panel never becomes key, so one click opens the story.
 private final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
 }
