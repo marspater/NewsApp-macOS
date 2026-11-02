@@ -506,6 +506,19 @@ enum FeedKitSwiftSoupTests {
         check(
             ArticleContentRedactor.isBoilerplateLine("Published - October 18, 2026 09:36 am IST"),
             "Standalone dateline is boilerplate")
+        for id in [
+            "https://example.com/feed.xml#guid:https://example.com/story%201/",
+            "/2026/10/story%20id/",
+            "100%25-verified",
+        ] {
+            let saved = FeedArticle(
+                storedID: id, title: "Saved", link: "https://example.com/saved", guid: id,
+                description: "Summary", pubDate: Date(timeIntervalSince1970: 1_730_000_000), source: "Publisher")
+            let contentURL = SystemSpotlightIndexer.makeSearchableItem(for: saved).attributeSet.contentURL
+            check(
+                contentURL.flatMap { NewsURLParser.parse(url: $0, allowInsecureHTTP: false) } == .story(id: id),
+                "Spotlight contentURL round-trips story IDs with percent-encoding and slashes without double-decoding")
+        }
 
         print("✅ SwiftSoup / FeedKit parsing regressions passed")
     }

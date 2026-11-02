@@ -30,8 +30,9 @@ struct SystemSpotlightIndexer: SpotlightIndexing, Sendable {
         if article.pubDate != DateParser.unknownDate {
             attributeSet.contentCreationDate = article.pubDate
         }
+        let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))
         let encodedID =
-            article.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? article.id
+            article.id.addingPercentEncoding(withAllowedCharacters: allowed) ?? article.id
         attributeSet.contentURL = URL(string: "news://story/\(encodedID)")
 
         return CSSearchableItem(
