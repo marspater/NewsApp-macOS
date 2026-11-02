@@ -12,12 +12,13 @@ import UserNotifications
     enum SentryLogForwarder {
         static func start() {
             Task.detached(priority: .utility) {
-                guard let store = try? OSLogStore(scope: .currentProcessIdentifier) else { return }
                 let subsystem = NSPredicate(format: "subsystem == %@", "com.marspater.news")
                 var since = Date()
                 while !Task.isCancelled {
                     try? await Task.sleep(for: .seconds(30))
-                    guard let entries = try? store.getEntries(at: store.position(date: since), matching: subsystem)
+                    // Opened per pass: Apple does not document whether a store sees entries logged after it opened.
+                    guard let store = try? OSLogStore(scope: .currentProcessIdentifier),
+                        let entries = try? store.getEntries(at: store.position(date: since), matching: subsystem)
                     else { continue }
                     var newest = since
                     // With Sentry running the store can return one entry twice; each is sent once.
