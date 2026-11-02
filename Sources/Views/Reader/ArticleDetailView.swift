@@ -14,6 +14,7 @@ struct ArticleDetailView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var themeManager: ThemeManager
+    @Environment(\.articleSearchState) private var searchState: ArticleSearchState?
     @Environment(\.effectiveContrast) private var contrast
     @Environment(\.effectiveReduceMotion) private var reduceMotion
 
@@ -858,9 +859,36 @@ struct ArticleDetailView: View {
         }
     }
 
-    private func summaryTag(_ text: String, emphasized: Bool = false) -> some View {
-        TagView(title: text, tint: emphasized ? AppColor.accent : AppColor.secondaryLabel)
-            .fixedSize(horizontal: false, vertical: true)
+    private func summaryTag(_ text: String, isCategory: Bool = false) -> some View {
+        Button {
+            openSearchForTag(text, isCategory: isCategory)
+        } label: {
+            TagView(title: text, tint: isCategory ? AppColor.accent : AppColor.secondaryLabel)
+        }
+        .buttonStyle(.plain)
+        .buttonBorderShape(.capsule)
+        .accessibilityLabel("Search for \(text)")
+        .accessibilityHint(
+            isCategory ? "Opens archive search for this category" : "Opens archive search for this topic"
+        )
+        .contextMenu {
+            Button {
+                openSearchForTag(text, isCategory: isCategory)
+            } label: {
+                Label("Search for “\(text)”", systemImage: "magnifyingglass")
+            }
+        }
+        .help("Search for “\(text)”")
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func openSearchForTag(_ text: String, isCategory: Bool) {
+        let wrap = FeedArticleWrap(
+            article: currentArticle,
+            contextArticles: allArticles,
+            initialExperienceMode: experienceMode
+        )
+        searchState?.openTag(tag: text, isCategory: isCategory, from: wrap, path: &path)
     }
 
     private var terminalAffordance: some View {
@@ -1357,13 +1385,13 @@ struct ArticleDetailView: View {
 
                 ReaderTagLayout(spacing: AppSpacing.xs) {
                     if let category = displayCategory {
-                        summaryTag(category, emphasized: true)
+                        summaryTag(category, isCategory: true)
                     }
                     let tags = EntityResult.readerTags(
                         from: analysis.entities, title: currentArticle.title,
                         description: currentArticle.description, text: currentArticle.fullContent ?? "")
                     ForEach(tags.prefix(6), id: \.name) { entity in
-                        summaryTag(entity.name)
+                        summaryTag(entity.name, isCategory: false)
                     }
                 }
             }

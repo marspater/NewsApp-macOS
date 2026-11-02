@@ -21,9 +21,7 @@ extension Notification.Name {
 
 struct MainView: View {
     @State private var selectedTopic: String? = "Today"
-    @State private var searchText: String = ""
-    @State private var searchTokens: [ArchiveSearchToken] = []
-    @State private var searchPresented = false
+    @StateObject private var searchState = ArticleSearchState()
     @State private var mastheadNotice: MastheadNotice?
     @State private var articlePath = NavigationPath()
     @State private var pendingFeedConfirmationURL: URL?
@@ -113,14 +111,15 @@ struct MainView: View {
             // One archive search in the trailing toolbar, shared by list and reader.
             .modifier(
                 ArchiveSearchToolbar(
-                    searchText: $searchText,
-                    searchTokens: $searchTokens,
-                    searchPresented: $searchPresented,
+                    searchText: editableSearchText,
+                    searchTokens: editableSearchTokens,
+                    searchPresented: $searchState.searchPresented,
                     archiveQuery: archiveQuery,
                     presentSearch: presentSearch,
                     suggestions: searchOperatorSuggestions
                 )
             )
+            .onSubmit(of: .search) { searchState.recordHistory(query: archiveQuery) }
             .frame(minWidth: 900, minHeight: 600)
             .onAppear(perform: handleAppear)
             .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
@@ -132,10 +131,13 @@ struct MainView: View {
             }
             .onChange(of: selectedTopic) { old, new in
                 articlePath = NavigationPath()
-                if let old, old != new { previousTopic = old }
+                if let old, old != new {
+                    previousTopic = old
+                    searchState.clear()
+                }
             }
-            .onChange(of: searchText, handleSearchTextChange)
-            .onChange(of: searchTokens, handleSearchTokensChange)
+            .onChange(of: searchState.searchText, handleSearchTextChange)
+            .onChange(of: searchState.searchTokens, handleSearchTokensChange)
             // Notification Deep Link & Section Jump Routing
             .onReceive(NotificationCenter.default.publisher(for: .jumpToTodayCommand)) { _ in
                 showSection("Today")
@@ -235,6 +237,8 @@ struct MainView: View {
                 .environmentObject(themeManager)
                 .environmentObject(readManager)
                 .environmentObject(savedStories)
+                .environmentObject(searchState)
+                .environment(\.articleSearchState, searchState)
             }
             .navigationDestination(for: FeedArticleWrap.self) { wrap in
                 detailDestination(for: wrap)
@@ -259,6 +263,8 @@ struct MainView: View {
         .environmentObject(savedStories)
         .environmentObject(readManager)
         .environmentObject(themeManager)
+        .environmentObject(searchState)
+        .environment(\.articleSearchState, searchState)
     }
 
     @ViewBuilder
@@ -269,10 +275,34 @@ struct MainView: View {
 
     // MARK: - Bindings & State Helpers
 
+    private var editableSearchText: Binding<String> {
+        Binding(
+            get: { searchState.searchText },
+            set: { value in
+                if value != searchState.searchText {
+                    searchState.cancelPendingReturnChanges()
+                    if !articlePath.isEmpty { articlePath = NavigationPath() }
+                    searchState.searchText = value
+                }
+            })
+    }
+
+    private var editableSearchTokens: Binding<[ArchiveSearchToken]> {
+        Binding(
+            get: { searchState.searchTokens },
+            set: { value in
+                if value != searchState.searchTokens {
+                    searchState.cancelPendingReturnChanges()
+                    if !articlePath.isEmpty { articlePath = NavigationPath() }
+                    searchState.searchTokens = value
+                }
+            })
+    }
+
     private var searchBinding: Binding<String> {
         Binding(
-            get: { archiveQuery },
-            set: { searchText = $0 }
+            get: { searchState.archiveQuery },
+            set: { editableSearchText.wrappedValue = $0 }
         )
     }
 
@@ -288,7 +318,7 @@ struct MainView: View {
     }
 
     private func presentSearch() {
-        searchPresented = true
+        searchState.searchPresented = true
     }
 
     // MARK: - Lifecycle & Navigation Handlers
@@ -320,19 +350,21 @@ struct MainView: View {
     }
 
     private func handleSearchTextChange(_: String, _ updatedText: String) {
+        if searchState.consumeReturnTextChange(updatedText) { return }
         let promoted = ArchiveSearchToken.promoteCompleted(in: updatedText)
         if !promoted.tokens.isEmpty {
-            for token in promoted.tokens where !searchTokens.contains(token) {
-                searchTokens.append(token)
+            for token in promoted.tokens where !searchState.searchTokens.contains(token) {
+                searchState.searchTokens.append(token)
             }
-            searchText = promoted.text
+            searchState.searchText = promoted.text
         }
         if !articlePath.isEmpty { articlePath = NavigationPath() }
     }
 
     private func handleSearchTokensChange(_: [ArchiveSearchToken], _ tokens: [ArchiveSearchToken]) {
+        if searchState.consumeReturnTokensChange(tokens) { return }
         let kept = ArchiveSearchToken.latestPerField(tokens)
-        if kept != tokens { searchTokens = kept }
+        if kept != tokens { searchState.searchTokens = kept }
         if !articlePath.isEmpty { articlePath = NavigationPath() }
     }
 
@@ -456,7 +488,7 @@ struct MainView: View {
     // MARK: - Search Operators
 
     private var archiveQuery: String {
-        ArchiveSearchToken.query(text: searchText, tokens: searchTokens)
+        searchState.archiveQuery
     }
 
     private static let searchOperators: [(token: String, summary: String)] = [
@@ -468,14 +500,20 @@ struct MainView: View {
     ]
 
     /// Filter operators, offered while the word being typed is empty or starts one; a choice completes onto the
-    /// words already typed.
+    /// words already typed. An empty field offers recent searches instead.
     @ViewBuilder
     private var searchOperatorSuggestions: some View {
-        if !searchText.isEmpty {
+        if searchState.searchText.isEmpty, searchState.searchTokens.isEmpty, !searchState.searchHistory.isEmpty {
+            Section("Recent Searches") {
+                ForEach(searchState.searchHistory.prefix(5), id: \.self) { query in
+                    Label(query, systemImage: "clock").searchCompletion(query)
+                }
+            }
+        } else if !searchState.searchText.isEmpty {
             let word =
-                searchText.last?.isWhitespace == false
-                ? String(searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""
-            let typed = String(searchText.dropLast(word.count))
+                searchState.searchText.last?.isWhitespace == false
+                ? String(searchState.searchText.split(whereSeparator: \.isWhitespace).last ?? "") : ""
+            let typed = String(searchState.searchText.dropLast(word.count))
             let lowered = word.lowercased()
             ForEach(
                 Self.searchOperators.filter { lowered.isEmpty || ($0.token.hasPrefix(lowered) && $0.token != lowered) },

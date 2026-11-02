@@ -300,6 +300,7 @@ struct ArticleFilterQuery: Equatable, Sendable {
     var isReadFilter: Bool?
     var isSavedFilter: Bool?
     var terms: [String] = []
+    private(set) var phraseTermIndices: Set<Int> = []
 
     var isEmpty: Bool {
         sourceFilter == nil && categoryFilter == nil && isReadFilter == nil && isSavedFilter == nil && terms.isEmpty
@@ -319,20 +320,48 @@ struct ArticleFilterQuery: Equatable, Sendable {
         self.terms = terms
     }
 
-    static func parse(_ rawText: String) -> ArticleFilterQuery {
-        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return ArticleFilterQuery() }
+    /// Split free text at whitespace and quotes, retaining ranges for spelling suggestions.
+    static func lexemes(in text: String) -> [(range: Range<String.Index>, quoted: Bool)] {
+        var result: [(range: Range<String.Index>, quoted: Bool)] = []
+        var index = text.startIndex
+        while index < text.endIndex {
+            if text[index].isWhitespace {
+                index = text.index(after: index)
+                continue
+            }
+            let start = index
+            let quoted = text[index] == "\""
+            if quoted {
+                index = text.index(after: index)
+                while index < text.endIndex && text[index] != "\"" { index = text.index(after: index) }
+                if index < text.endIndex { index = text.index(after: index) }
+            } else {
+                while index < text.endIndex && !text[index].isWhitespace && text[index] != "\"" {
+                    index = text.index(after: index)
+                }
+            }
+            result.append((start..<index, quoted))
+        }
+        return result
+    }
 
+    static func parse(_ rawText: String) -> ArticleFilterQuery {
         var query = ArticleFilterQuery()
-        // Words are separate terms with or without operators, so "trump tariffs" matches non-adjacent words.
-        for token in trimmed.components(separatedBy: .whitespacesAndNewlines) {
+        for lexeme in lexemes(in: rawText) {
+            let token = String(rawText[lexeme.range])
             let lowerToken = token.lowercased()
-            if lowerToken.hasPrefix("source:") {
-                let publisher = String(token.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if lexeme.quoted {
+                let term = lowerToken.replacingOccurrences(of: "\"", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !term.isEmpty {
+                    query.phraseTermIndices.insert(query.terms.count)
+                    query.terms.append(term)
+                }
+            } else if lowerToken.hasPrefix("source:") {
+                let publisher = String(token.dropFirst(7)).lowercased()
                 query.sourceFilter = publisher == "ft" ? "financial times" : publisher
             } else if lowerToken.hasPrefix("category:") {
-                query.categoryFilter = String(token.dropFirst(9)).trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased()
+                query.categoryFilter = String(token.dropFirst(9)).lowercased()
             } else if lowerToken == "is:read" {
                 query.isReadFilter = true
             } else if lowerToken == "is:unread" {
@@ -341,14 +370,10 @@ struct ArticleFilterQuery: Equatable, Sendable {
                 query.isSavedFilter = true
             } else if lowerToken == "ft" {
                 query.terms += ["financial", "times"]
-            } else if !token.isEmpty {
-                // Quotes never reach FTS5 (each term is quoted there); a token that is only quotes is no term at all,
-                // and every consumer (ranking, the FTS join, in-memory matching) must agree on that.
-                let term = lowerToken.replacingOccurrences(of: "\"", with: "")
-                if !term.isEmpty { query.terms.append(term) }
+            } else {
+                query.terms.append(lowerToken)
             }
         }
-
         return query
     }
 
@@ -362,7 +387,8 @@ struct ArticleFilterQuery: Equatable, Sendable {
         }
 
         if let c = categoryFilter, !c.isEmpty {
-            guard let cat = article.category?.lowercased(), cat.contains(c) else { return false }
+            guard let cat = article.category?.lowercased().replacingOccurrences(of: " ", with: "-"), cat.contains(c)
+            else { return false }
         }
 
         if let r = isReadFilter, isRead != r { return false }
@@ -370,11 +396,16 @@ struct ArticleFilterQuery: Equatable, Sendable {
         if let sv = isSavedFilter, isSaved != sv { return false }
 
         if !terms.isEmpty {
-            let combined =
-                "\(article.title) \(article.description) \(article.category ?? "") \(article.source) \(article.publisherName)"
-                .lowercased()
-            for term in terms where !combined.contains(term) {
-                return false
+            let fields = [
+                article.title, article.description, article.category ?? "", article.source, article.publisherName,
+            ]
+            .map { $0.lowercased() }
+            let combined = fields.joined(separator: " ")
+            for (index, term) in terms.enumerated() {
+                let found =
+                    phraseTermIndices.contains(index)
+                    ? fields.contains { $0.contains(term) } : combined.contains(term)
+                if !found { return false }
             }
         }
 
@@ -436,14 +467,42 @@ enum SearchSpelling {
 
     /// The query with every misspelled term replaced, operators and other words kept; nil when nothing changed.
     static func corrected(_ query: String, vocabulary: [String: Int]) -> String? {
-        var replacements: [String: String] = [:]
-        for term in ArticleFilterQuery.parse(query).terms {
-            if let word = correction(for: term, in: vocabulary) { replacements[term] = word }
+        var corrected = ""
+        var cursor = query.startIndex
+        var changed = false
+        for lexeme in ArticleFilterQuery.lexemes(in: query) {
+            corrected += query[cursor..<lexeme.range.lowerBound]
+            let token = String(query[lexeme.range])
+            cursor = lexeme.range.upperBound
+            if !lexeme.quoted && (token.contains(":") || token.lowercased() == "ft") {
+                corrected += token
+                continue
+            }
+            var replacement = ""
+            var word = ""
+            func flushWord() {
+                guard !word.isEmpty else { return }
+                if let correction = correction(for: word.lowercased(), in: vocabulary) {
+                    replacement += correction
+                    changed = true
+                } else {
+                    replacement += word
+                }
+                word = ""
+            }
+            for character in token {
+                if character.isLetter || character.isNumber {
+                    word.append(character)
+                } else {
+                    flushWord()
+                    replacement.append(character)
+                }
+            }
+            flushWord()
+            corrected += replacement
         }
-        guard !replacements.isEmpty else { return nil }
-        return query.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }.map { token in
-            replacements[token.lowercased().replacingOccurrences(of: "\"", with: "")] ?? token
-        }.joined(separator: " ")
+        corrected += query[cursor...]
+        return changed ? corrected : nil
     }
 }
 

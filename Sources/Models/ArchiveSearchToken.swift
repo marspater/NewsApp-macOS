@@ -70,8 +70,11 @@ struct ArchiveSearchToken: Hashable, Identifiable {
         let endsWithSpace = text.last?.isWhitespace == true
         var remaining: [String] = []
         var tokens: [ArchiveSearchToken] = []
+        var insideQuotes = false
         for (index, word) in words.enumerated() {
-            if index < words.count - 1 || endsWithSpace,
+            let quoted = insideQuotes || word.contains("\"")
+            if word.filter({ $0 == "\"" }).count % 2 == 1 { insideQuotes.toggle() }
+            if !quoted, index < words.count - 1 || endsWithSpace,
                 let token = ArchiveSearchToken(completedExpression: word)
             {
                 tokens.append(token)
