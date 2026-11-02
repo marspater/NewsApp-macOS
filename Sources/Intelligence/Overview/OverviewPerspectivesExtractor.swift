@@ -23,7 +23,16 @@ struct OverviewPerspectiveValidationResult: Sendable, Equatable {
     }
 
     /// Each rejection reason in `OverviewPerspectivesValidator` ends with fixed text after any quoted value.
-    private static let reasonEndings: [(ending: String, rule: Rule)] = [\n        ("Perspective has no source citation", .noCitation),\n        ("not found in overview citations", .unknownCitation),\n        ("has empty quote", .emptyQuote),\n        ("Participant name is empty or too short", .shortParticipant),\n        ("is an unattributed generality", .vagueParticipant),\n        ("Position statement is empty or too short", .shortPosition),\n        ("Position statement is a time phrase, not a position", .timePhrase),\n        ("is not grounded in cited passage text (synthetic or hallucinated claim)", .ungrounded),\n    ]
+    private static let reasonEndings: [(ending: String, rule: Rule)] = [
+        ("Perspective has no source citation", .noCitation),
+        ("not found in overview citations", .unknownCitation),
+        ("has empty quote", .emptyQuote),
+        ("Participant name is empty or too short", .shortParticipant),
+        ("is an unattributed generality", .vagueParticipant),
+        ("Position statement is empty or too short", .shortPosition),
+        ("Position statement is a time phrase, not a position", .timePhrase),
+        ("is not grounded in cited passage text (synthetic or hallucinated claim)", .ungrounded),
+    ]
 }
 
 /// Counts why an event's perspectives section is absent or thin (#313). Holds no passage or speaker text.
@@ -50,11 +59,26 @@ struct OverviewPerspectivesDiagnosis: Sendable, Equatable, Codable {
 struct OverviewPerspectivesValidator: Sendable {
 
     /// Known vague, anonymous, or unattributed speaker generalities that must never count as attributed participants.
-    static let vagueParticipants: Set<String> = [\n        "critics", "critics say", "observers", "observers say", "observers note",\n        "some people", "people", "many people", "many believe", "analysts", "analysts say",\n        "sources", "sources say", "sources claim", "unnamed sources", "anonymous sources",\n        "opponents", "opponents claim", "opponents argue", "skeptics", "the other side",\n        "officials say", "experts", "experts say", "commentators", "officials", "authorities", "many", "some", "others",\n        "several",\n        // A pronoun names no participant on its own.\n        "he", "she", "it", "they", "we", "i", "you",\n    ]
+    static let vagueParticipants: Set<String> = [
+        "critics", "critics say", "observers", "observers say", "observers note",
+        "some people", "people", "many people", "many believe", "analysts", "analysts say",
+        "sources", "sources say", "sources claim", "unnamed sources", "anonymous sources",
+        "opponents", "opponents claim", "opponents argue", "skeptics", "the other side",
+        "officials say", "experts", "experts say", "commentators", "officials", "authorities", "many", "some", "others",
+        "several",
+        // A pronoun names no participant on its own.
+        "he", "she", "it", "they", "we", "i", "you",
+    ]
 
-    private static let pureTimePhrases: Set<String> = [\n        "earlier this year", "earlier this month", "earlier today", "earlier this week",\n        "late last year", "late last month", "late last week", "last year", "last month",\n        "this year", "this month", "this week", "earlier", "later",\n    ]
+    private static let pureTimePhrases: Set<String> = [
+        "earlier this year", "earlier this month", "earlier today", "earlier this week",
+        "late last year", "late last month", "late last week", "last year", "last month",
+        "this year", "this month", "this week", "earlier", "later",
+    ]
 
-    private static let dayNames: Set<String> = [\n        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",\n    ]
+    private static let dayNames: Set<String> = [
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    ]
 
     /// When a remark was made rather than what was said: "earlier this year", or "Thursday, warning…" left
     /// over from "said Thursday". A possessive such as "Monday's vote" is a position.
@@ -66,9 +90,16 @@ struct OverviewPerspectivesValidator: Sendable {
         return dayNames.contains(first.trimmingCharacters(in: punctuation))
     }
 
-    private static let fragmentLeadConjunctions: Set<String> = [\n        "and", "but", "or", "so", "yet", "yes", "oh", "okay", "ok", "sure",\n    ]
+    private static let fragmentLeadConjunctions: Set<String> = [
+        "and", "but", "or", "so", "yet", "yes", "oh", "okay", "ok", "sure",
+    ]
 
-    private static let genericFragmentWords: Set<String> = [\n        "and", "but", "or", "so", "yet", "the", "this", "that", "these", "those", "everything", "nothing",\n        "something", "anything", "everyone", "anyone", "clear", "good", "fine", "true", "false", "right",\n        "wrong", "here", "there", "very", "much", "more", "most", "some", "many", "have", "been", "were",\n        "will", "would", "could", "should", "what", "when", "where", "which", "who",\n    ]
+    private static let genericFragmentWords: Set<String> = [
+        "and", "but", "or", "so", "yet", "the", "this", "that", "these", "those", "everything", "nothing",
+        "something", "anything", "everyone", "anyone", "clear", "good", "fine", "true", "false", "right",
+        "wrong", "here", "there", "very", "much", "more", "most", "some", "many", "have", "been", "were",
+        "will", "would", "could", "should", "what", "when", "where", "which", "who",
+    ]
 
     /// Rejects short conversational quips (e.g. "And everything is clear,") that carry no standalone position out of context.
     static func isConversationalFragment(_ position: String) -> Bool {
@@ -207,7 +238,15 @@ struct OverviewPerspectivesValidator: Sendable {
 struct OverviewPerspectivesExtractor: Sendable {
 
     /// Recognized syndicated wire news agencies.
-    private static let recognizedWireServices: [(name: String, markers: [String])] = [\n        ("Reuters", ["(reuters)", "reuters", "— reuters", "by reuters"]),\n        ("Associated Press", ["(ap)", "associated press", "— ap", "by associated press", "ap news"]),\n        ("AFP", ["(afp)", "agence france-presse", "— afp", "by afp"]),\n        ("Bloomberg", ["bloomberg news", "bloomberg", "— bloomberg"]),\n        ("UPI", ["united press international", "(upi)", "upi"]),\n        ("PR Newswire", ["pr newswire", "(pr newswire)"]),\n        ("Business Wire", ["business wire", "(business wire)"]),\n    ]
+    private static let recognizedWireServices: [(name: String, markers: [String])] = [
+        ("Reuters", ["(reuters)", "reuters", "— reuters", "by reuters"]),
+        ("Associated Press", ["(ap)", "associated press", "— ap", "by associated press", "ap news"]),
+        ("AFP", ["(afp)", "agence france-presse", "— afp", "by afp"]),
+        ("Bloomberg", ["bloomberg news", "bloomberg", "— bloomberg"]),
+        ("UPI", ["united press international", "(upi)", "upi"]),
+        ("PR Newswire", ["pr newswire", "(pr newswire)"]),
+        ("Business Wire", ["business wire", "(business wire)"]),
+    ]
 
     /// Candidate attributed perspective discovered during text extraction.
     private struct ExtractedCandidate {
@@ -415,7 +454,11 @@ struct OverviewPerspectivesExtractor: Sendable {
         return speechVerbs?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
-    private static let leadingTitlesToStrip: Set<String> = [\n        "mr", "mrs", "ms", "dr", "prof", "sir", "president", "prime", "minister", "chancellor",\n        "senator", "sen", "rep", "representative", "governor", "gov", "mayor", "judge", "justice",\n        "general", "gen", "colonel", "col", "spokesperson", "spokesman", "spokeswoman",\n    ]
+    private static let leadingTitlesToStrip: Set<String> = [
+        "mr", "mrs", "ms", "dr", "prof", "sir", "president", "prime", "minister", "chancellor",
+        "senator", "sen", "rep", "representative", "governor", "gov", "mayor", "judge", "justice",
+        "general", "gen", "colonel", "col", "spokesperson", "spokesman", "spokeswoman",
+    ]
 
     /// Canonical lowercase name tokens with honorifics/titles stripped so "Mr. Nawrocki" and "Nawrocki" match.
     static func canonicalParticipantTokens(_ participant: String) -> [String] {
