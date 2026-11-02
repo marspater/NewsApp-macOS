@@ -91,7 +91,7 @@ struct OverviewPerspectivesValidator: Sendable {
     }
 
     private static let fragmentLeadConjunctions: Set<String> = [
-        "and", "but", "or", "so", "yet", "well", "yes", "no", "oh", "okay", "ok", "sure",
+        "and", "but", "or", "so", "yet", "yes", "oh", "okay", "ok", "sure",
     ]
 
     private static let genericFragmentWords: Set<String> = [
@@ -397,18 +397,20 @@ struct OverviewPerspectivesExtractor: Sendable {
         return collapsed
     }
 
-    /// The voice's first statement, with the longer participant name and any wire or publisher credit.
+    /// The voice's chosen statement (preferring a direct quotation over an unquoted paraphrase), keeping the
+    /// chosen candidate's provenance along with the longer participant name and any wire or publisher credit.
     private static func merged(_ existing: ExtractedCandidate, with cand: ExtractedCandidate) -> ExtractedCandidate {
         let chosen = (!existing.isDirectQuote && cand.isDirectQuote) ? cand : existing
+        let other = (!existing.isDirectQuote && cand.isDirectQuote) ? existing : cand
         return ExtractedCandidate(
             participant: existing.participant.count >= cand.participant.count ? existing.participant : cand.participant,
             position: chosen.position,
             quote: chosen.quote,
-            citationID: existing.citationID,
-            passageID: existing.passageID,
-            articleID: existing.articleID,
-            originalWireSource: existing.originalWireSource ?? cand.originalWireSource,
-            sourcePublisher: existing.sourcePublisher ?? cand.sourcePublisher,
+            citationID: chosen.citationID,
+            passageID: chosen.passageID,
+            articleID: chosen.articleID,
+            originalWireSource: chosen.originalWireSource ?? other.originalWireSource,
+            sourcePublisher: chosen.sourcePublisher ?? other.sourcePublisher,
             isDirectQuote: existing.isDirectQuote || cand.isDirectQuote
         )
     }
@@ -467,25 +469,22 @@ struct OverviewPerspectivesExtractor: Sendable {
         return stripped.isEmpty ? allTokens : stripped
     }
 
+    /// Evaluates whether two canonical token lists refer to the same speaker, avoiding collapsing distinct
+    /// institutions that only share a generic head noun (e.g. "Justice Department" vs "State Department").
+    static func isSameCanonicalSpeaker(_ lhs: [String], _ rhs: [String]) -> Bool {
+        guard !lhs.isEmpty, !rhs.isEmpty else { return false }
+        if lhs == rhs { return true }
+        guard let last = lhs.last, last == rhs.last, !institutionNouns.contains(last) else { return false }
+        return Set(lhs).isSubset(of: Set(rhs)) || Set(rhs).isSubset(of: Set(lhs))
+    }
+
     /// Evaluates whether two extracted candidates represent the same voice or syndicated reprint.
     private static func isSameVoice(existing: ExtractedCandidate, candidate: ExtractedCandidate) -> Bool {
         let p1 = existing.participant.lowercased()
         let p2 = candidate.participant.lowercased()
         let t1 = canonicalParticipantTokens(existing.participant)
         let t2 = canonicalParticipantTokens(candidate.participant)
-
-        let sameCanonical: Bool
-        if !t1.isEmpty && !t2.isEmpty {
-            if t1 == t2 {
-                sameCanonical = true
-            } else if t1.last == t2.last && (Set(t1).isSubset(of: Set(t2)) || Set(t2).isSubset(of: Set(t1))) {
-                sameCanonical = true
-            } else {
-                sameCanonical = false
-            }
-        } else {
-            sameCanonical = false
-        }
+        let sameCanonical = isSameCanonicalSpeaker(t1, t2)
 
         let sameParticipant = sameCanonical || p1 == p2 || p1.contains(p2) || p2.contains(p1)
 
@@ -783,6 +782,13 @@ struct OverviewPerspectivesExtractor: Sendable {
         return last == "\"" || last == "\u{201D}"
     }
 
+    /// Single match extracted by an attribution pattern.
+    private struct AttributedMatch {
+        let participant: String
+        let statement: String
+        let isDirectQuote: Bool
+    }
+
     /// Runs one attribution pattern and keeps matches that name a participant and carry a statement
     /// of at least `minimumStatementLength` characters.
     private static func attributedMatches(
@@ -791,9 +797,9 @@ struct OverviewPerspectivesExtractor: Sendable {
         participantGroup: Int,
         statementGroup: Int,
         minimumStatementLength: Int
-    ) -> [(participant: String, statement: String, isDirectQuote: Bool)] {
+    ) -> [AttributedMatch] {
         let matches = regex.matches(in: nsString as String, range: NSRange(location: 0, length: nsString.length))
-        return matches.compactMap { match -> (participant: String, statement: String, isDirectQuote: Bool)? in
+        return matches.compactMap { match -> AttributedMatch? in
             guard match.numberOfRanges >= 3 else { return nil }
             if isInsideOpenQuote(at: match.range.location, in: nsString) {
                 return nil
@@ -865,7 +871,7 @@ struct OverviewPerspectivesExtractor: Sendable {
             {
                 return nil
             }
-            return (participant, statement, quoted)
+            return AttributedMatch(participant: participant, statement: statement, isDirectQuote: quoted)
         }
     }
 
@@ -1018,7 +1024,7 @@ struct OverviewPerspectivesExtractor: Sendable {
     private static let institutionNouns: Set<String> = [
         "ministry", "military", "army", "police", "government", "prosecutors", "prosecutor", "court", "agency",
         "council", "commission", "committee", "spokesperson", "spokesman", "spokeswoman", "minister", "president",
-        "governor", "mayor", "embassy", "regulator", "director", "chief", "commander",
+        "governor", "mayor", "embassy", "regulator", "director", "chief", "commander", "department",
     ]
 
     private static let leadingAdverbials: Set<String> = [

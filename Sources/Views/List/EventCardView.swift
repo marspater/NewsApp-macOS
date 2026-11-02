@@ -70,7 +70,9 @@ struct EventCardView: View {
     @ViewBuilder
     private var coverage: some View {
         Divider()
-        coverageToggle
+        TimelineView(.everyMinute) { context in
+            coverageToggle(now: context.date)
+        }
         if isExpanded {
             Divider()
             sourceList
@@ -78,7 +80,7 @@ struct EventCardView: View {
         }
     }
 
-    private var coverageToggle: some View {
+    private func coverageToggle(now: Date) -> some View {
         Button {
             withAnimation(reduceMotion ? nil : AppMotion.state) { setExpanded(!isExpanded) }
             if !isExpanded {
@@ -89,21 +91,22 @@ struct EventCardView: View {
         } label: {
             CoverageRowLabel(
                 coverageText: summary.coverageText, latestDate: summary.latestDate,
-                hasUpdate: summary.hasSubstantiveUpdate, isExpanded: isExpanded, isGrid: !compact && !isLead
+                hasUpdate: summary.hasSubstantiveUpdate, isExpanded: isExpanded, isGrid: !compact && !isLead,
+                now: now
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(isExpanded ? "Hide the sources covering this story (E)" : "Show every source covering this story (E)")
-        .accessibilityLabel(coverageDescription)
+        .accessibilityLabel(coverageDescription(now: now))
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint("Lists every source covering this story")
     }
 
-    private var coverageDescription: String {
+    private func coverageDescription(now: Date) -> String {
         var parts = ["Event: \(summary.coverageText)"]
         if let latest = summary.latestDate {
-            parts.append("updated \(FeedArticle.relativeUpdateText(for: latest, abbreviated: false))")
+            parts.append("updated \(FeedArticle.relativeUpdateText(for: latest, now: now, abbreviated: false))")
         }
         if summary.hasSubstantiveUpdate { parts.append("new reporting since you last opened it") }
         return parts.joined(separator: ", ")

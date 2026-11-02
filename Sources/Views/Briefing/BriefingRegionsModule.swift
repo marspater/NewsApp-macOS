@@ -84,10 +84,9 @@ struct BriefingRegionsData: Equatable, Sendable {
         var grouped: [TensionMacroRegion: [FeedEntry]] = [:]
         var seenInRegion: [TensionMacroRegion: Set<String>] = [:]
         for entry in entries {
-            for region in normalizedMap[entry.id] ?? [] {
-                if seenInRegion[region, default: []].insert(entry.id).inserted {
-                    grouped[region, default: []].append(entry)
-                }
+            for region in normalizedMap[entry.id] ?? []
+            where seenInRegion[region, default: []].insert(entry.id).inserted {
+                grouped[region, default: []].append(entry)
             }
         }
         let rows = TensionMacroRegion.briefingRegions.compactMap { region -> Row? in
@@ -272,6 +271,7 @@ extension TensionMacroRegion {
         .middleEastNorthAfrica, .europe, .northAmerica, .latinAmerica, .southAsia,
     ]
 
+    /// Maps any legacy eight-region value onto the five canonical Briefing regions.
     var briefingRegion: TensionMacroRegion {
         switch self {
         case .middleEastNorthAfrica, .subSaharanAfrica:

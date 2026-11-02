@@ -271,10 +271,7 @@ struct EventOverviewReaderView: View {
             if !straightQuotes.isMultiple(of: 2) { continue }
             let tokens = OverviewPerspectivesExtractor.canonicalParticipantTokens(item.participant)
             let isDup = seenCanonical.contains { existing in
-                guard !existing.isEmpty, !tokens.isEmpty else { return false }
-                if existing == tokens { return true }
-                return existing.last == tokens.last
-                    && (Set(existing).isSubset(of: Set(tokens)) || Set(tokens).isSubset(of: Set(existing)))
+                OverviewPerspectivesExtractor.isSameCanonicalSpeaker(existing, tokens)
             }
             if !isDup {
                 seenCanonical.append(tokens)
@@ -1293,7 +1290,7 @@ struct EventOverviewReaderView: View {
         .accessibilityLabel(
             Self.perspectiveAccessibilityLabel(
                 participant: perspective.participant,
-                position: perspective.position,
+                position: Self.cleanDisplayPosition(perspective.position),
                 source: source,
                 citations: citations
             )

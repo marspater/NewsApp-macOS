@@ -80,6 +80,7 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         return formatter
     }()
 
+    /// Formats relative time elapsed since the event's most recent update, using cached formatters to avoid allocations during scroll.
     @MainActor
     static func relativeUpdateText(for date: Date, now: Date = Date(), abbreviated: Bool) -> String {
         let formatter = abbreviated ? cardNamedAbbreviatedFormatter : cardNamedWideFormatter

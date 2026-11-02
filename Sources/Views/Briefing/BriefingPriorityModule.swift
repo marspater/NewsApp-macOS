@@ -89,6 +89,35 @@ struct BriefingPriorityData: Equatable, Sendable {
         isDeveloping: Bool = false
     ) -> StoryImportance {
         if let stored { return stored }
+        let hasSectorImpact = !(overview?.industryImpact.isEmpty ?? true)
+        let score =
+            coverageImportanceScore(publisherCount: publisherCount, originalCount: originalCount ?? publisherCount)
+            + severityImportanceScore(for: representative)
+            + (hasSectorImpact ? 1 : 0)
+            + ((momentum == .rising || isDeveloping) ? 1 : 0)
+
+        if score >= 4 { return .major }
+        if score >= 2 || publisherCount >= 2 { return .notable }
+        return .minor
+    }
+
+    /// Computes the coverage breadth component of the dynamic importance score.
+    private static func coverageImportanceScore(publisherCount: Int, originalCount: Int) -> Int {
+        let base: Int
+        if publisherCount >= 8 {
+            base = 3
+        } else if publisherCount >= 5 {
+            base = 2
+        } else if publisherCount >= 3 {
+            base = 1
+        } else {
+            base = 0
+        }
+        return base + (originalCount >= 5 ? 1 : 0)
+    }
+
+    /// Computes the crisis severity and scale component of the dynamic importance score.
+    private static func severityImportanceScore(for representative: FeedArticle) -> Int {
         let quoteText = [representative.title, representative.description].joined(separator: ". ")
         let fact = PassageAnchoredFact(
             id: "imp_\(representative.id)",
@@ -105,26 +134,8 @@ struct BriefingPriorityData: Equatable, Sendable {
         let hasCasualtiesOrScale =
             classified.deaths != TensionMagnitude.notReported || classified.affected != TensionMagnitude.notReported
         let isEscalating = classified.escalation == TensionEscalation.escalating
-        let hasSectorImpact = !(overview?.industryImpact.isEmpty ?? true)
-        let original = originalCount ?? publisherCount
-
-        var score = 0
-        if publisherCount >= 8 {
-            score += 3
-        } else if publisherCount >= 5 {
-            score += 2
-        } else if publisherCount >= 3 {
-            score += 1
-        }
-        if original >= 5 { score += 1 }
-        if isHighSeverity { score += 2 } else if classified.type != nil { score += 1 }
-        if hasCasualtiesOrScale || isEscalating { score += 1 }
-        if hasSectorImpact { score += 1 }
-        if momentum == .rising || isDeveloping { score += 1 }
-
-        if score >= 4 { return .major }
-        if score >= 2 || publisherCount >= 2 { return .notable }
-        return .minor
+        let typeScore = isHighSeverity ? 2 : (classified.type != nil ? 1 : 0)
+        return typeScore + ((hasCasualtiesOrScale || isEscalating) ? 1 : 0)
     }
 
     /// A publisher's text that carries another agency's wire copy. A wire agency's own report is original.
@@ -144,6 +155,7 @@ struct BriefingPriorityData: Equatable, Sendable {
         Set(reports.filter { !isWireCopy(text: $0.text, publisher: $0.publisher) }.map(\.publisher)).count
     }
 
+    /// Concatenates the article's title, summary, and full body text for wire-attribution detection.
     static func reportText(_ article: FeedArticle) -> String {
         [article.title, article.description, article.fullContent ?? ""].joined(separator: "\n")
     }
@@ -201,6 +213,7 @@ struct BriefingPriorityData: Equatable, Sendable {
         return Self(cards: cards)
     }
 
+    /// Formats the resolved `StoryImportance` as a display label for the Priority Developments card.
     static func impactText(_ importance: StoryImportance?) -> String {
         switch importance {
         case .major: return "Major"
@@ -210,6 +223,7 @@ struct BriefingPriorityData: Equatable, Sendable {
         }
     }
 
+    /// Extracts a fallback reported snippet from the representative or member feed descriptions when no overview is stored yet.
     private static func fallbackReported(representative: FeedArticle, members: [FeedArticle]) -> Quote? {
         for candidate in [representative] + members {
             let cleaned = ArticleContentRedactor.cleanText(candidate.description)

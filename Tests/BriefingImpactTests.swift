@@ -318,5 +318,57 @@ enum BriefingImpactTests {
         check(
             tribunalOnly.first?.position.hasSuffix("appointee of Mr. Nawrocki") == true,
             "Abbreviation 'Mr.' does not truncate statement at 'Mr'")
+
+        // 7. Hyphenated compound place names match both regions
+        let hyphenRegions = BriefingRegion.regions(in: "Russia-Ukraine ceasefire agreement signed")
+        check(hyphenRegions.contains(.europe), "Hyphenated country names match regions")
+        let meRegions = BriefingRegion.regions(in: "Israel-Iran tensions escalate")
+        check(meRegions.contains(.middleEastNorthAfrica), "Middle East hyphenated names match")
+
+        // 8. Canonical speaker equality and distinct institution preservation
+        let justice = OverviewPerspectivesExtractor.canonicalParticipantTokens("Justice Department")
+        let state = OverviewPerspectivesExtractor.canonicalParticipantTokens("State Department")
+        check(
+            OverviewPerspectivesExtractor.isSameCanonicalSpeaker(justice, state) == false,
+            "Justice Department and State Department are distinct canonical speakers")
+        let mrNawrocki = OverviewPerspectivesExtractor.canonicalParticipantTokens("Mr. Nawrocki")
+        let nawrocki = OverviewPerspectivesExtractor.canonicalParticipantTokens("Nawrocki")
+        check(
+            OverviewPerspectivesExtractor.isSameCanonicalSpeaker(mrNawrocki, nawrocki) == true,
+            "Mr. Nawrocki and Nawrocki collapse to same canonical speaker")
+
+        // 9. Card date and relative update text
+        let articleJustNow = FeedArticle(
+            storedID: "art-now", title: "Breaking", link: "https://example.com/now",
+            guid: "now", description: "Desc", pubDate: now.addingTimeInterval(-30), source: "Test")
+        Task { @MainActor in
+            check(articleJustNow.cardDateText(now: now) == "Just now", "Under 60 seconds is Just now")
+            let updateAbbr = FeedArticle.relativeUpdateText(
+                for: now.addingTimeInterval(-120), now: now, abbreviated: true)
+            check(!updateAbbr.isEmpty, "Abbreviated relative update text generates non-empty string")
+            let updateFull = FeedArticle.relativeUpdateText(
+                for: now.addingTimeInterval(-120), now: now, abbreviated: false)
+            check(!updateFull.isEmpty, "Full relative update text generates non-empty string")
+        }
+
+        // 10. Footprint footer text variants
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 1, wireCopyCount: 0)
+                == "1 original publisher report (no syndicated wire-agency reprints).",
+            "Single original report without wire copy")
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 5, wireCopyCount: 1)
+                == "5 original reports from independent newsrooms · 1 outlet republished a wire-agency dispatch.",
+            "Footprint with 1 wire copy")
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 4, wireCopyCount: 3)
+                == "4 original reports from independent newsrooms · 3 outlets republished wire-agency dispatches.",
+            "Footprint with multiple wire copies")
+
+        // 11. Priority impact text helper coverage
+        check(BriefingPriorityData.impactText(.major) == "Major", "Major text")
+        check(BriefingPriorityData.impactText(.notable) == "Notable", "Notable text")
+        check(BriefingPriorityData.impactText(.minor) == "Minor", "Minor text")
+        check(BriefingPriorityData.impactText(nil) == "Notable", "Default text is Notable")
     }
 }

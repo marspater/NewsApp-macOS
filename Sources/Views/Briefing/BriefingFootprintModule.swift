@@ -84,6 +84,7 @@ struct BriefingFootprintModuleView: View {
     let filter: BriefingBoardFilter
     let actions: BriefingActions
 
+    /// Human-readable explanation of how many publisher reports are original vs syndicated wire copy.
     static func footerText(originalCount: Int, wireCopyCount: Int) -> String {
         let original = "\(originalCount) original report\(originalCount == 1 ? "" : "s")"
         switch wireCopyCount {

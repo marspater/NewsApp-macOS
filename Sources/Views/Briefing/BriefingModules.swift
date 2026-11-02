@@ -493,10 +493,9 @@ enum BriefingRegion {
         "bucharest": .europe, "belgrade": .europe, "balkans": .europe,
         // North America (US & Canada only)
         "north america": .northAmerica, "washington": .northAmerica, "white house": .northAmerica,
-        "pentagon": .northAmerica, "capitol hill": .northAmerica, "congress": .northAmerica, "senate": .northAmerica,
-        "supreme court": .northAmerica, "wall street": .northAmerica, "new york": .northAmerica,
-        "california": .northAmerica, "texas": .northAmerica, "florida": .northAmerica, "michigan": .northAmerica,
-        "illinois": .northAmerica, "pennsylvania": .northAmerica, "ohio": .northAmerica, "georgia": .northAmerica,
+        "pentagon": .northAmerica, "capitol hill": .northAmerica, "wall street": .northAmerica,
+        "new york": .northAmerica, "california": .northAmerica, "texas": .northAmerica, "florida": .northAmerica,
+        "michigan": .northAmerica, "illinois": .northAmerica, "pennsylvania": .northAmerica, "ohio": .northAmerica,
         "arizona": .northAmerica, "virginia": .northAmerica, "massachusetts": .northAmerica,
         "chicago": .northAmerica, "los angeles": .northAmerica, "san francisco": .northAmerica,
         "boston": .northAmerica, "seattle": .northAmerica, "houston": .northAmerica, "atlanta": .northAmerica,
@@ -539,7 +538,7 @@ enum BriefingRegion {
         "lima": .latinAmerica, "santiago": .latinAmerica, "caracas": .latinAmerica, "quito": .latinAmerica,
         "la paz": .latinAmerica, "montevideo": .latinAmerica, "asuncion": .latinAmerica, "havana": .latinAmerica,
         "port-au-prince": .latinAmerica, "santo domingo": .latinAmerica, "san juan": .latinAmerica,
-        "panama city": .latinAmerica, "amazon": .latinAmerica,
+        "panama city": .latinAmerica,
     ]
 
     /// Regions named in the headline itself (country names, aliases, demonyms and regional places).
@@ -554,6 +553,19 @@ enum BriefingRegion {
         return regions(in: String(ArticleContentRedactor.cleanText(story.description).prefix(240)))
     }
 
+    /// Resolves a single candidate place or country phrase to its macro-region.
+    private static func matchPlace(_ candidate: String) -> TensionMacroRegion? {
+        let normalized = EventFeatures.normalized(candidate)
+        if let direct = placeRegions[normalized] {
+            return direct
+        }
+        let place = EventPlaces.canonical(candidate)
+        guard place.hasPrefix("@") else { return nil }
+        return region(code: String(place.dropFirst()))
+    }
+
+    /// Extracts all macro-regions mentioned in the supplied text, matching multi-word names first and splitting
+    /// unmatched hyphenated compound tokens (e.g. "Russia-Ukraine" or "Israel-Iran").
     static func regions(in text: String) -> Set<TensionMacroRegion> {
         let words = text.split { !$0.isLetter && $0 != "'" && $0 != "\u{2019}" && $0 != "." && $0 != "-" }
             .map(String.init)
@@ -562,19 +574,22 @@ enum BriefingRegion {
         while index < words.count {
             // Longest name first, and its words are consumed: "South Sudan" never also counts "Sudan".
             var consumed = 1
+            var matched = false
             for length in [3, 2, 1] where index + length <= words.count {
                 let candidate = words[index..<(index + length)].joined(separator: " ")
-                let normalized = EventFeatures.normalized(candidate)
-                if let direct = placeRegions[normalized] {
-                    found.insert(direct)
+                if let region = matchPlace(candidate) {
+                    found.insert(region)
                     consumed = length
+                    matched = true
                     break
                 }
-                let place = EventPlaces.canonical(candidate)
-                guard place.hasPrefix("@") else { continue }
-                if let region = region(code: String(place.dropFirst())) { found.insert(region) }
-                consumed = length
-                break
+            }
+            if !matched, words[index].contains("-") {
+                for part in words[index].split(separator: "-").map(String.init) where !part.isEmpty {
+                    if let region = matchPlace(part) {
+                        found.insert(region)
+                    }
+                }
             }
             index += consumed
         }
@@ -596,6 +611,7 @@ enum BriefingRegion {
         "002": .middleEastNorthAfrica, "150": .europe, "019": .latinAmerica, "419": .latinAmerica, "009": .southAsia,
     ]
 
+    /// Maps an ISO-3166 alpha-2 country code to its canonical Briefing macro-region.
     static func region(code: String) -> TensionMacroRegion? {
         let lower = code.lowercased()
         if ["us", "ca"].contains(lower) { return .northAmerica }

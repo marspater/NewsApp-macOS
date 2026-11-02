@@ -415,7 +415,9 @@ struct CardDateText: View {
     let article: FeedArticle
 
     var body: some View {
-        Text(article.cardDateText())
+        TimelineView(.everyMinute) { context in
+            Text(article.cardDateText(now: context.date))
+        }
     }
 }
 
@@ -425,6 +427,7 @@ struct CoverageRowLabel: View {
     let hasUpdate: Bool
     let isExpanded: Bool
     let isGrid: Bool
+    var now: Date = Date()
 
     @Environment(\.effectiveContrast) private var contrast
 
@@ -439,7 +442,7 @@ struct CoverageRowLabel: View {
                     .layoutPriority(1)
                 if let latestDate {
                     Text(
-                        "· updated \(FeedArticle.relativeUpdateText(for: latestDate, abbreviated: isGrid))"
+                        "· updated \(FeedArticle.relativeUpdateText(for: latestDate, now: now, abbreviated: isGrid))"
                     )
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.tertiaryText(for: contrast))

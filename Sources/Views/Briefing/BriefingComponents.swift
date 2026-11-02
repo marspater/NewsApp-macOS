@@ -313,6 +313,7 @@ struct BriefingTensionSparklineView: View {
     private static let areaBottomOpacity: Double = 0.02
     private static let baselineOpacity: Double = 0.55
 
+    /// Computes a focused Y-axis domain around the recent readings rather than pinning to 0...100, preserving trend visibility.
     static func yDomain(for readings: [WorldTensionReading], baseline: Int) -> ClosedRange<Int> {
         let scores = readings.map(\.assessment.score)
         guard let minScore = scores.min(), let maxScore = scores.max() else {
