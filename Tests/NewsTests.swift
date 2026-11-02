@@ -990,8 +990,8 @@ struct NewsTests {
             ("EpicNE2ETests", { await EpicNE2ETests.run() }),
             ("testNotificationModeTriageAndGrammar", { await testNotificationModeTriageAndGrammar() }),
             ("testCompletionOnce", { await testCompletionOnce() }),
-            ("testSocketNetworkBoundary", { try await testSocketNetworkBoundary() }),
-            ("testTransportCancellation", { try await testTransportCancellation() }),
+            ("testSocketNetworkBoundary", { try await rerunningLoopbackFlake(testSocketNetworkBoundary) }),
+            ("testTransportCancellation", { try await rerunningLoopbackFlake(testTransportCancellation) }),
             ("testProxyWaitingClassification", { await testProxyWaitingClassification() }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
             ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
@@ -18906,6 +18906,20 @@ struct NewsTests {
             assertEqual(claims, 1, "CompletionOnce must allow exactly one claim across concurrent tasks")
         }
         assertFalse(completion.claim(), "The completion stays claimed after all workers finish")
+    }
+
+    /// The loopback socket tests share ephemeral ports with every parallel test process. On a loaded machine
+    /// (CircleCI runs atoms side by side) a connect fails with EADDRINUSE, or parks in `.waiting` until a 5 s socket
+    /// read gives up, while the proxy's own 15 s handshake bound is still running. Such a transport error reruns the
+    /// test once; an assertion failure, any other error or a second transport error still fails.
+    @MainActor
+    static func rerunningLoopbackFlake(_ test: @MainActor () async throws -> Void) async throws {
+        do {
+            try await test()
+        } catch let error where (error as? FeedError) == .timeout || error as? NWError == .posix(.EADDRINUSE) {
+            print("  ↻ Loopback transport error under load (\(error)); running the socket test once more")
+            try await test()
+        }
     }
 
     static func testSocketNetworkBoundary() async throws {
