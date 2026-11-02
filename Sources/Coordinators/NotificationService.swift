@@ -309,6 +309,15 @@ final class NotificationService: Sendable {
         }
     }
 
+    /// Posts one story banner now, outside triage and its limits (Help > Show Sample Notification), so the banner can be
+    /// checked without waiting for a refresh. Nothing is recorded in the delivery log, and its own identifier keeps it
+    /// from replacing or clearing the story's real banner. `continues` is asked before the image download and the post,
+    /// as for a real banner, so a reader outside Full mode gets no headline and no image request.
+    func postSample(_ article: FeedArticle, continues: @Sendable () async -> Bool) async {
+        let banner = PlannedBanner(lane: .normal, grouped: false, article: article, thread: "news-sample", sound: false)
+        _ = await triggerFullNotification(banner, at: Date(), identifier: "news-sample", continues: continues)
+    }
+
     /// Stable across launches, so a story replaces its earlier banner; `hashValue` is reseeded per process.
     static func notificationIdentifier(for article: FeedArticle) -> String {
         "news-\(article.id)"
@@ -384,7 +393,8 @@ final class NotificationService: Sendable {
     }
 
     private func triggerFullNotification(
-        _ banner: PlannedBanner, at now: Date, continues: @Sendable () async -> Bool = { true }
+        _ banner: PlannedBanner, at now: Date, identifier sampleIdentifier: String? = nil,
+        continues: @Sendable () async -> Bool = { true }
     ) async -> PostOutcome {
         let content = UNMutableNotificationContent()
         content.sound = banner.sound ? .default : nil
@@ -404,8 +414,10 @@ final class NotificationService: Sendable {
                 let attachment = await downloadNotificationAttachment(from: imageUrl)
             {
                 content.attachments = [attachment]
+                // The app-drawn banner loads the photo again through the reader's image cache.
+                content.userInfo["imageURL"] = imageUrl.absoluteString
             }
-            identifier = Self.notificationIdentifier(for: article)
+            identifier = sampleIdentifier ?? Self.notificationIdentifier(for: article)
         } else {
             content.title = banner.title
             content.body = Self.groupedBody(banner)
@@ -475,16 +487,22 @@ final class NotificationService: Sendable {
     /// short side is under 300 px, when the square the system shows is the better choice.
     static func notificationImage(_ image: CGImage) -> CGImage? {
         guard min(image.width, image.height) >= notificationImageMinimumSide else { return nil }
+        return dissolvingCrop(image, aspect: 2.0 / 3.0, maxWidth: notificationImageWidth)
+    }
+
+    /// The centred crop of `image` at `aspect` (width over height), at most `maxWidth` px wide, sharp and opaque at its
+    /// trailing edge and dissolving toward its leading edge. The system thumbnail and the app-drawn banner share it.
+    static func dissolvingCrop(_ image: CGImage, aspect: Double, maxWidth: Int) -> CGImage? {
         let width = Double(image.width)
         let height = Double(image.height)
         var cropWidth = width
         var cropHeight = height
-        if cropWidth / cropHeight > 2.0 / 3.0 { cropWidth = cropHeight * 2 / 3 } else { cropHeight = cropWidth * 3 / 2 }
+        if cropWidth / cropHeight > aspect { cropWidth = cropHeight * aspect } else { cropHeight = cropWidth / aspect }
         let crop = CGRect(
             x: (width - cropWidth) / 2, y: (height - cropHeight) / 2, width: cropWidth, height: cropHeight
         ).integral
         guard let cropped = image.cropping(to: crop) else { return nil }
-        let scale = min(1, Double(notificationImageWidth) / Double(cropped.width))
+        let scale = min(1, Double(maxWidth) / Double(cropped.width))
         let source = CIImage(cgImage: cropped).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let extent = source.extent.integral
         // The trailing edge stays sharp and opaque, where the system pins the thumbnail to the banner's side. Toward

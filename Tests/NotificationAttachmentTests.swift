@@ -1,7 +1,9 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import SwiftUI
 import UniformTypeIdentifiers
+import UserNotifications
 
 enum NotificationAttachmentTests {
     static func run() {
@@ -26,29 +28,6 @@ enum NotificationAttachmentTests {
         // The tall fading crop (#589): a 1200 × 1200 source becomes a 600 × 900 portrait PNG with alpha,
         // transparent at the leading edge and opaque at the trailing edge; the same input renders the same bytes,
         // and a small source keeps its own size.
-        func png(width: Int, height: Int) -> Data {
-            let space = CGColorSpace(name: CGColorSpace.sRGB)!
-            let context = CGContext(
-                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
-                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-            context.setFillColor(CGColor(srgbRed: 0.2, green: 0.4, blue: 0.9, alpha: 1))
-            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-            context.setFillColor(CGColor(srgbRed: 0.9, green: 0.3, blue: 0.1, alpha: 1))
-            context.fill(CGRect(x: width / 4, y: height / 4, width: width / 2, height: height / 2))
-            let image = context.makeImage()!
-            let data = NSMutableData()
-            let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
-            CGImageDestinationAddImage(destination, image, nil)
-            precondition(CGImageDestinationFinalize(destination))
-            return data as Data
-        }
-        func alpha(_ image: CGImage, x: Int, y: Int) -> UInt8 {
-            let data = image.dataProvider!.data! as Data
-            let bytesPerPixel = image.bitsPerPixel / 8
-            let offset = y * image.bytesPerRow + x * bytesPerPixel
-            let alphaFirst = [.premultipliedFirst, .first].contains(image.alphaInfo)
-            return data[offset + (alphaFirst ? 0 : bytesPerPixel - 1)]
-        }
         do {
             let landscape = png(width: 1200, height: 1200)
             let tall = try NotificationService.makeImageAttachment(data: landscape)
@@ -75,5 +54,94 @@ enum NotificationAttachmentTests {
             precondition(smallImage.width == 200 && smallImage.height == 200, "Small sources keep their size")
         } catch { fatalError("Notification image crop failed: \(error)") }
         print("✅ Notification attachment format regressions passed")
+    }
+
+    /// The app-drawn story banner (DESIGN.md 8.7): only a story's request becomes one, its photo dissolves toward the
+    /// text, and the rendered banner shows the photo to its trailing edge inside the banner's own corners. Set
+    /// NEWS_BANNER_CAPTURES to a folder to keep the light and dark renders.
+    @MainActor static func runBanner() {
+        let content = UNMutableNotificationContent()
+        content.title = "Culture"
+        content.subtitle = "Romeo + Juliet at 30: how Baz Luhrmann's film still burns"
+        content.body =
+            "The maximalist, heart over head adaptation of the romantic tragedy made stars of its leads and became "
+            + "a defining film of its decade."
+        content.categoryIdentifier = NotificationActionIdentifier.category
+        content.userInfo = [
+            "articleID": "story-1", "articleLink": "https://example.com/a", "imageURL": "https://example.com/a.jpg",
+        ]
+        guard
+            let banner = StoryBanner(UNNotificationRequest(identifier: "news-story-1", content: content, trigger: nil))
+        else { fatalError("A story request becomes an app-drawn banner") }
+        precondition(banner.headline == content.subtitle && banner.title == "Culture", "Banner keeps the copy")
+        precondition(banner.imageURL?.absoluteString == "https://example.com/a.jpg", "Banner finds the photo")
+        precondition(banner.userInfo == ["articleID": "story-1", "articleLink": "https://example.com/a"])
+        content.categoryIdentifier = ""
+        precondition(
+            StoryBanner(UNNotificationRequest(identifier: "grouped", content: content, trigger: nil)) == nil,
+            "Grouped and summary banners stay with the system")
+
+        let data = png(width: 1200, height: 800)
+        let source = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(data as CFData, nil)!, 0, nil)!
+        guard let photo = StoryBannerPresenter.bannerPhoto(source, scale: 2) else {
+            fatalError("The banner photo must render")
+        }
+        precondition(
+            photo.width == 336 && photo.height == 256, "Banner photo is 336 × 256, got \(photo.width) × \(photo.height)"
+        )
+        precondition(alpha(photo, x: 1, y: 128) < 16, "Banner photo fades out toward the text")
+        precondition(alpha(photo, x: 334, y: 128) == 255, "Banner photo is opaque at the trailing edge")
+
+        let frame = StoryBannerPresenter.frame(
+            for: CGSize(width: 344, height: 104), in: CGRect(x: 0, y: 25, width: 1512, height: 919))
+        precondition(frame == CGRect(x: 1152, y: 824, width: 344, height: 104), "Banner sits top right, got \(frame)")
+
+        for scheme in [ColorScheme.light, .dark] {
+            let renderer = ImageRenderer(
+                content: StoryBannerView(banner: banner, photo: photo).environment(\.colorScheme, scheme))
+            renderer.scale = 2
+            guard let image = renderer.cgImage else { fatalError("The banner must render offscreen") }
+            if let folder = ProcessInfo.processInfo.environment["NEWS_BANNER_CAPTURES"] {
+                let url = URL(fileURLWithPath: folder).appendingPathComponent("story-banner-\(scheme).png")
+                let destination = CGImageDestinationCreateWithURL(
+                    url as CFURL, UTType.png.identifier as CFString, 1, nil)!
+                CGImageDestinationAddImage(destination, image, nil)
+                precondition(CGImageDestinationFinalize(destination), "Banner capture must write")
+            }
+            precondition(image.width == 688, "Banner is 344 pt wide, got \(image.width) px")
+            precondition(
+                alpha(image, x: image.width - 2, y: image.height / 2) == 255,
+                "Photo reaches the trailing edge, alpha \(alpha(image, x: image.width - 2, y: image.height / 2)) "
+                    + "of \(image.width) × \(image.height), \(image.alphaInfo.rawValue)")
+            precondition(
+                alpha(image, x: 0, y: 0) == 0 && alpha(image, x: image.width - 1, y: 0) == 0
+                    && alpha(image, x: image.width - 1, y: image.height - 1) == 0,
+                "Banner and photo share the rounded corners")
+        }
+        print("✅ Story banner regressions passed")
+    }
+
+    private static func png(width: Int, height: Int) -> Data {
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        let context = CGContext(
+            data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(CGColor(srgbRed: 0.2, green: 0.4, blue: 0.9, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(CGColor(srgbRed: 0.9, green: 0.3, blue: 0.1, alpha: 1))
+        context.fill(CGRect(x: width / 4, y: height / 4, width: width / 2, height: height / 2))
+        let image = context.makeImage()!
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, image, nil)
+        precondition(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+    private static func alpha(_ image: CGImage, x: Int, y: Int) -> UInt8 {
+        let data = image.dataProvider!.data! as Data
+        let bytesPerPixel = image.bitsPerPixel / 8
+        let offset = y * image.bytesPerRow + x * bytesPerPixel
+        let alphaFirst = [.premultipliedFirst, .first].contains(image.alphaInfo)
+        return data[offset + (alphaFirst ? 0 : bytesPerPixel - 1)]
     }
 }

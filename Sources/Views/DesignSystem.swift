@@ -240,6 +240,16 @@ enum AppLayout {
     /// The Briefing's most-covered story tile carries an accent border this wide.
     static let leadTileStroke: CGFloat = 2
     // Control and toolbar heights belong to the system (DESIGN.md 12).
+
+    // The app-drawn story banner (DESIGN.md 8.7), sized like the system banner it stands in for.
+    static let bannerWidth: CGFloat = 344
+    static let bannerIconSize: CGFloat = 32
+    /// The photo's share of the trailing side; the text runs over its dissolving half.
+    static let bannerPhotoWidth: CGFloat = 168
+    /// Taller than any banner, so filling the frame crops the photo top and bottom and never cuts the fade.
+    static let bannerPhotoHeight: CGFloat = 128
+    static let bannerTextTrailingInset: CGFloat = 52
+    static let bannerMargin: CGFloat = 16
 }
 
 // MARK: - App Spacing
@@ -265,6 +275,8 @@ enum AppRadius {
     static let control: CGFloat = 6.0
     static let card: CGFloat = 12.0
     static let container: CGFloat = 16.0
+    /// The story banner, matched to the system banner's corners.
+    static let banner: CGFloat = 20.0
 
     // Aliases for backward compatibility
 }
@@ -623,5 +635,19 @@ struct ReadingColumn: ViewModifier {
                 min(available, AppLayout.readingColumnMaxWidth(for: textScale))
             }
             .frame(maxWidth: .infinity, alignment: .center)
+    }
+}
+
+/// The floating story banner's surface (DESIGN.md 3.2): regular glass on macOS 26 and later, the regular material on
+/// macOS 15. The system adapts both to Reduce Transparency and Increase Contrast. The glass sits behind the content,
+/// not around it, so the photo and text also draw where no backdrop exists (offscreen renders).
+struct BannerSurface<S: Shape>: ViewModifier {
+    let shape: S
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.background { Color.clear.glassEffect(.regular, in: shape) }
+        } else {
+            content.background(.regularMaterial, in: shape)
+        }
     }
 }

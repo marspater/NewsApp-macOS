@@ -440,6 +440,19 @@ struct KeyboardShortcutsCommands: Commands {
             Button("Keyboard Shortcuts") {
                 openWindow(id: Self.windowID)
             }
+            Button("Show Sample Notification") {
+                // The newest story with a photo, posted through the real path: in front, the app draws its banner.
+                let stories = ArticleStore.shared.articles
+                guard let story = stories.first(where: { FeedArticle.bestCardImage(in: [$0]) != nil }) ?? stories.first
+                else { return }
+                Task {
+                    await NotificationService.shared.postSample(story) {
+                        await MainActor.run {
+                            AppSettings.shared.notificationsEnabled && AppSettings.shared.notificationMode == .full
+                        }
+                    }
+                }
+            }
             Button("Export Diagnostics…") {
                 DiagnosticsExport.run(
                     settings: AppSettings.shared, feedManager: AppContainer.shared.feedManager,
@@ -525,12 +538,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         _ = semaphore.wait(timeout: .now() + .seconds(2))
     }
 
-    // Force macOS to show alert even if app is focused
+    // While the app is in front a story banner is the app's own (DESIGN.md 8.7), filed in Notification Center without
+    // the system banner; every other banner, and every banner while the app is behind, is the system's.
     nonisolated func userNotificationCenter(
-        _ _: UNUserNotificationCenter, willPresent _: UNNotification,
-        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
-    ) {
-        completionHandler([.banner, .sound])
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        // A reader who set News's alert style to None gets no banner from the app either.
+        guard let banner = StoryBanner(notification.request) else { return [.banner, .list, .sound] }
+        let settings = await center.notificationSettings()
+        // Only the banner style is the app's: Alerts stay until dismissed and hidden previews redact, both as the system
+        // draws them. Focus has no public signal here, so a story arriving during Focus can still show this banner.
+        guard settings.alertSetting == .enabled, settings.alertStyle == .banner, settings.showPreviewsSetting != .never
+        else { return [.banner, .list, .sound] }
+        return await StoryBannerPresenter.shared.present(banner) ? [.list, .sound] : [.banner, .list, .sound]
     }
 
     // Handle notification actions and default click (#560)
