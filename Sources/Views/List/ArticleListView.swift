@@ -688,6 +688,13 @@ struct ArticleListView: View {
         isSearching ? "Search" : (selectedTopic ?? "Today")
     }
 
+    private var headerMaxWidth: CGFloat? {
+        if isBriefing {
+            return AppLayout.briefingMaxWidth
+        }
+        return gridLayout ? .infinity : AppLayout.listMaxWidth
+    }
+
     /// The location title and one status line, scrolling with the list under the toolbar (DESIGN.md 8.1).
     private var masthead: some View {
         VStack(alignment: .leading, spacing: AppSpacing.xxs) {
@@ -711,7 +718,7 @@ struct ArticleListView: View {
         }
         // Aligned with the content column: the centred list and Briefing measure, or the full-width grid.
         .frame(
-            maxWidth: isBriefing ? AppLayout.briefingMaxWidth : gridLayout ? .infinity : AppLayout.listMaxWidth,
+            maxWidth: headerMaxWidth,
             alignment: .leading
         )
         .frame(maxWidth: .infinity)
