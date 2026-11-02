@@ -230,6 +230,34 @@ enum AnalysisGenerationTests {
         let storedFirst = try await midBatch.eventRows("SELECT count(*) FROM article_features;")
         check(storedFirst.first?.first == "2", "The batch's features are stored although a later row failed")
         await midBatch.close()
+
+        // A cancelled rules-only pass still leaves the reports it deferred to a pass with energy (#952). Rows run newest
+        // first, so older reports keep the batch running after the flood reports commit; a pass that finishes before
+        // the cancel lands flushes them too.
+        let cancelled = DatabaseEngine(path: ":memory:")
+        try await cancelled.open()
+        let fillers = (1...90).map { index in
+            FeedArticle(
+                title: "Harbour museum opens exhibit \(index) on regional shipbuilding",
+                link: "https://filler.invalid/\(index)", guid: "filler-\(index)", description: "",
+                pubDate: start.addingTimeInterval(Double(-index) * 600), source: "Gazette \(index)")
+        }
+        try await cancelled.upsertArticles(floods + fillers)
+        let pass = Task {
+            try await EventClusterer.run(in: cancelled, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
+        }
+        await eventually("The pass commits its first report") {
+            let marked = try? await cancelled.eventRows("SELECT count(*) FROM event_match_state;")
+            return (marked?.first?.first ?? nil) != "0"
+        }
+        pass.cancel()
+        _ = await pass.result
+        // A flood report the cancel reached first has no marker and stays pending, which is fine; none stays current.
+        let currentFloods = try await cancelled.eventRows(
+            "SELECT count(*) FROM event_match_state WHERE article_id IN ('grey-0', 'grey-1') AND matcher_version = ?;",
+            [.integer(EventMatcher.version)])
+        check(currentFloods.first?.first == "0", "No flood report deferred before the cancel stays marked current")
+        await cancelled.close()
     }
 
     /// A job counts as completed only when its write succeeded (#820), a changed input or a clear makes the story
