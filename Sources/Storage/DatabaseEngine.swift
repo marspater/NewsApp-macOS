@@ -84,7 +84,7 @@ actor DatabaseEngine {
     }
 
     /// Analysis-only panel reports stay outside the reading feed; read/saved reports remain accessible.
-    private func collectionScope() -> (sql: String, params: [QueryParameter]) {
+    func collectionScope() -> (sql: String, params: [QueryParameter]) {
         guard !collectionOnlyFeedURLs.isEmpty else { return ("", []) }
         let placeholders = Array(repeating: "?", count: collectionOnlyFeedURLs.count).joined(separator: ",")
         return (
@@ -2599,12 +2599,12 @@ actor DatabaseEngine {
     static let visibleArticle =
         "NOT EXISTS (SELECT 1 FROM article_reconciliations r WHERE r.duplicate_id = a.id)"
     /// Binds `MuteRules.sourceParameter` and `MuteRules.topicParameter`, in that order.
-    private static let mutedArticle =
+    static let mutedArticle =
         "(news_muted_source(a.canonical_url, ?) OR news_muted_topic(a.title, a.description, ?))"
 
-    private typealias QueryParameter = (type: String, val: Any)
+    typealias QueryParameter = (type: String, val: Any)
 
-    private func bind(_ params: [QueryParameter], to statement: OpaquePointer?) {
+    func bind(_ params: [QueryParameter], to statement: OpaquePointer?) {
         for (idx, p) in params.enumerated() {
             let col = Int32(idx + 1)
             if p.type == "int", let v = p.val as? Int {
@@ -2613,11 +2613,16 @@ actor DatabaseEngine {
                 sqlite3_bind_double(statement, col, v)
             } else if p.type == "text", let v = p.val as? String {
                 sqlite3_bind_text(statement, col, v, -1, Self.sqliteTransient)
+            } else if p.type == "blobFloats", let floats = p.val as? [Float] {
+                let byteCount = floats.count * MemoryLayout<Float>.stride
+                _ = floats.withUnsafeBytes { raw in
+                    sqlite3_bind_blob(statement, col, raw.baseAddress, Int32(byteCount), Self.sqliteTransient)
+                }
             }
         }
     }
 
-    private static func mutingParameters(_ muting: MuteRules) -> [QueryParameter] {
+    static func mutingParameters(_ muting: MuteRules) -> [QueryParameter] {
         [("text", muting.sourceParameter), ("text", muting.topicParameter)]
     }
 
@@ -2649,8 +2654,7 @@ actor DatabaseEngine {
     }
 
     /// The full-text join and operator conditions shared by search pages and their muted counts.
-    private func searchConditions(_ parsed: ArticleFilterQuery) -> (join: String, sql: String, params: [QueryParameter])
-    {
+    func searchConditions(_ parsed: ArticleFilterQuery) -> (join: String, sql: String, params: [QueryParameter]) {
         var join = " WHERE 1=1"
         var sql = ""
         var params: [QueryParameter] = []
@@ -2822,7 +2826,7 @@ actor DatabaseEngine {
 
     // MARK: - Article Queries
 
-    private func executeQueryArticles(sql: String, params: [QueryParameter], prepareErrorMessage: String) throws
+    func executeQueryArticles(sql: String, params: [QueryParameter], prepareErrorMessage: String) throws
         -> [FeedArticle]
     {
         guard let db = db else {
@@ -2841,11 +2845,17 @@ actor DatabaseEngine {
         bind(params, to: stmt)
 
         var results: [FeedArticle] = []
+        let columnCount = sqlite3_column_count(stmt)
         var status = sqlite3_step(stmt)
         while status == SQLITE_ROW {
             try Task.checkCancellation()
             if var article = parseArticleRow(stmt) {
-                article.queryOrderValue = sqlite3_column_double(stmt, 18)
+                if columnCount > 18 {
+                    article.queryOrderValue = sqlite3_column_double(stmt, 18)
+                }
+                if columnCount > 19, let snip = sqlite3_column_text(stmt, 19) {
+                    article.searchSnippet = String(cString: snip)
+                }
                 results.append(article)
             }
             status = sqlite3_step(stmt)
@@ -2894,79 +2904,13 @@ actor DatabaseEngine {
         return includingOriginals ? results : try curateImages(in: results)
     }
 
-    // MARK: - Full Text Search (FTS5)
-
-    private func buildSearchQuery(parsed: ArticleFilterQuery, muting: MuteRules, after: ArticleQueryCursor?, limit: Int)
-        -> (sql: String, params: [QueryParameter])
-    {
-        let cleanTerms = parsed.terms
-        let hasFTS = !cleanTerms.isEmpty
-
-        var sql = """
-            SELECT a.id, a.guid, a.canonical_url, a.title, a.description, a.content,
-                   a.published_at, a.source, a.image_url, coalesce(ae.category, a.category),
-                   ae.summary, ae.content_fetched,
-                   s.is_read, s.is_saved,
-                   ae.key_points, ae.entities, ae.sentiment, a.reader_document
-            FROM articles a
-            JOIN article_state s ON s.article_id = a.id
-            LEFT JOIN article_enrichment ae ON ae.article_id = a.id
-            """
-
-        sql = sql.replacingOccurrences(
-            of: "a.reader_document\n",
-            with: "a.reader_document, " + (cleanTerms.isEmpty ? Self.articleDateOrder : "fts.rank") + "\n")
-        let conditions = searchConditions(parsed)
-        sql += conditions.join + " AND " + Self.visibleArticle + conditions.sql
-        var params = conditions.params
-        if !muting.isEmpty {
-            sql += " AND NOT " + Self.mutedArticle
-            params += Self.mutingParameters(muting)
-        }
-
-        if let after {
-            if hasFTS {
-                sql += " AND (fts.rank > ? OR (fts.rank = ? AND a.id > ?))"
-            } else {
-                sql += " AND (\(Self.articleDateOrder) < ? OR (\(Self.articleDateOrder) = ? AND a.id > ?))"
-            }
-            params += [("double", after.value), ("double", after.value), ("text", after.id)]
-        }
-        if hasFTS {
-            sql += " ORDER BY fts.rank, a.id LIMIT ?"
-        } else {
-            sql += " ORDER BY \(Self.articleDateOrder) DESC, a.id LIMIT ?"
-        }
-        params.append(("int", limit))
-
-        return (sql, params)
-    }
-
-    func searchArticles(
-        query: String,
-        limit: Int = 100,
-        after: ArticleQueryCursor? = nil,
-        muting: MuteRules = MuteRules()
-    ) throws -> [FeedArticle] {
-        guard db != nil else {
-            throw NSError(
-                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
-        }
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
-
-        let parsed = ArticleFilterQuery.parse(trimmed)
-        let (sql, params) = buildSearchQuery(parsed: parsed, muting: muting, after: after, limit: limit)
-        let results = try executeQueryArticles(
-            sql: sql, params: params, prepareErrorMessage: "Failed to prepare FTS search query")
-        return try curateImages(in: results)
-    }
+    // MARK: - Search Suggestion
 
     /// "Search for …" when a search finds nothing (#708): the query with misspelled words replaced by the closest
     /// words of stored headlines and feed summaries, offered only when that search finds stories.
-    func searchSuggestion(query: String, muting: MuteRules = MuteRules()) throws -> String? {
+    func searchSuggestion(query: String, muting: MuteRules = MuteRules()) async throws -> String? {
         guard let corrected = SearchSpelling.corrected(query, vocabulary: try spellingVocabulary()) else { return nil }
-        return try searchArticles(query: corrected, limit: 1, muting: muting).isEmpty ? nil : corrected
+        return try await searchArticles(query: corrected, limit: 1, muting: muting).isEmpty ? nil : corrected
     }
 
     /// Word counts of visible headlines and feed summaries, rebuilt only after stories are added, removed, re-worded
@@ -3358,7 +3302,7 @@ actor DatabaseEngine {
         return "Neutral"
     }
 
-    private func curateImages(in articles: [FeedArticle]) throws -> [FeedArticle] {
+    func curateImages(in articles: [FeedArticle]) throws -> [FeedArticle] {
         var repeatedBySource = [String: Set<String>]()
         let curated = try articles.map { original in
             try Task.checkCancellation()
@@ -4744,7 +4688,7 @@ actor DatabaseEngine {
         return true
     }
 
-    private func parseArticleRow(_ stmt: OpaquePointer?) -> FeedArticle? {
+    func parseArticleRow(_ stmt: OpaquePointer?) -> FeedArticle? {
         guard let stmt = stmt else { return nil }
 
         guard let idStr = sqlite3_column_text(stmt, 0),

@@ -28,6 +28,8 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var sentimentScore: Double?
     var sentimentLabel: String?
     var readerDocument: ReaderDocument?
+    /// Highlighted snippet for lexical search matches via FTS5 `snippet()`. Nil on semantic-only matches (#708).
+    var searchSnippet: String? = nil
 
     /// Publisher inputs only. Length prefixes prevent ambiguous field boundaries.
     var publisherInputHash: String {
