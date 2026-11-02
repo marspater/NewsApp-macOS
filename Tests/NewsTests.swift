@@ -5407,10 +5407,11 @@ struct NewsTests {
         assertTrue(sql.contains("coalesce(ae.category, a.category) LIKE ?"), "Categories use parameterised LIKE")
         assertTrue(sql.contains("a.source LIKE ?"), "Publishers use parameterised LIKE")
         assertTrue(
-            sql.contains("(a.title LIKE ? OR coalesce(a.description, '') LIKE ?)"), "Keywords use parameterised LIKE")
+            sql.contains("a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\'"),
+            "Keywords use parameterised LIKE with ESCAPE")
         assertTrue(
-            sql.contains("NOT (a.title LIKE ? OR coalesce(a.description, '') LIKE ?)"),
-            "Exclude keywords use parameterised NOT")
+            sql.contains("NOT (a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')"),
+            "Exclude keywords use parameterised NOT with ESCAPE")
 
         // Parameters match the expected formatted wildcards
         assertTrue(params.contains("%Tech%"), "Params contain category wildcard")
@@ -5431,6 +5432,16 @@ struct NewsTests {
         assertFalse(maliciousSQL.contains("DELETE FROM"), "Malicious input must never be interpolated into SQL")
         assertTrue(
             maliciousParams.contains("%' OR '1'='1'; DROP TABLE articles; --%"), "Literal string passed as parameter")
+
+        // Wildcard escaping: % and _ should be escaped with \ to prevent accidental wildcard expansion
+        let wildcardBinder = SmartBinder(
+            name: "Wildcard Test",
+            includeKeywords: ["100% genuine", "foo_bar"]
+        )
+        let (wcSQL, wcParams) = wildcardBinder.sqlCondition()
+        assertTrue(wcSQL.contains("ESCAPE '\\'"), "SQL LIKE clauses contain ESCAPE clause")
+        assertTrue(wcParams.contains("%100\\% genuine%"), "Wildcard % is escaped in parameter")
+        assertTrue(wcParams.contains("%foo\\_bar%"), "Wildcard _ is escaped in parameter")
 
         // 2. Compound include/exclude rules (in-memory matching)
         let artMatching = FeedArticle(
@@ -5569,6 +5580,36 @@ struct NewsTests {
         assertTrue(topicMutedArticles.isEmpty, "Topic muting eliminates remaining story with 'review'")
         let doubleMutedCount = try await db.mutedArticleCount(smartBinder: testBinder, muting: binderMuting)
         assertEqual(doubleMutedCount, 2, "Both stories now counted as muted under smart binder")
+
+        // Wildcard escaping in live database queries
+        let wcArticles = [
+            FeedArticle(
+                title: "100% Genuine Silicon",
+                link: "https://example.com/genuine",
+                guid: "wc-1",
+                description: "Authentic hardware",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_200),
+                source: "Example",
+                category: "Tech"
+            ),
+            FeedArticle(
+                title: "10000 Genuine Silicon",
+                link: "https://example.com/not-percent",
+                guid: "wc-2",
+                description: "Different number",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_190),
+                source: "Example",
+                category: "Tech"
+            ),
+        ]
+        try await db.upsertArticles(wcArticles)
+        let exactPercentBinder = SmartBinder(
+            name: "Percent Test",
+            includeKeywords: ["100%"]
+        )
+        let percentMatches = try await db.fetchArticles(smartBinder: exactPercentBinder)
+        assertEqual(percentMatches.map(\.id), ["wc-1"], "Escaped % matches only literal %, not arbitrary digits")
+
         await db.close()
 
         // 4. Persistence round trip and settings backup/restore
@@ -5600,6 +5641,9 @@ struct NewsTests {
             // Update binder
             var modifiedBinder = persistentBinder
             modifiedBinder.name = "Aerospace & Tech"
+            assertTrue(
+                modifiedBinder.hashValue != persistentBinder.hashValue,
+                "Modified binder produces distinct hash value for view cache invalidation")
             settings.updateSmartBinder(modifiedBinder)
             assertEqual(
                 settings.smartBinder(id: persistentBinder.id)?.name, "Aerospace & Tech", "Binder update persists")

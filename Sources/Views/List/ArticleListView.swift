@@ -149,8 +149,9 @@ struct ArticleListView: View {
 
     private var queryIdentity: String {
         let muting = listMuting
+        let binderHash = currentSmartBinder?.hashValue ?? 0
         return
-            "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
+            "\(selectedTopic ?? "Today"):\(binderHash):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
     }
 
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }

@@ -95,6 +95,14 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         return UUID(uuidString: String(tag.dropFirst(7)))
     }
 
+    /// Escapes SQL LIKE special wildcard characters (`%`, `_`, `\`) using `\` as the escape character.
+    public static func escapeLikeWildcards(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "%", with: "\\%")
+            .replacingOccurrences(of: "_", with: "\\_")
+    }
+
     // MARK: - Parameterized SQL Translation
 
     /// Translates compound rules into 100% parameterised SQL query filter conditions.
@@ -108,9 +116,9 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !cleanCategories.isEmpty {
-            let catClauses = cleanCategories.map { _ in "coalesce(ae.category, a.category) LIKE ?" }
+            let catClauses = cleanCategories.map { _ in "coalesce(ae.category, a.category) LIKE ? ESCAPE '\\'" }
             clauses.append("(" + catClauses.joined(separator: " OR ") + ")")
-            parameters.append(contentsOf: cleanCategories.map { "%\($0)%" })
+            parameters.append(contentsOf: cleanCategories.map { "%\(Self.escapeLikeWildcards($0))%" })
         }
 
         let cleanPublishers =
@@ -118,11 +126,14 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         if !cleanPublishers.isEmpty {
-            let pubClauses = cleanPublishers.map { _ in "(a.source LIKE ? OR a.canonical_url LIKE ?)" }
+            let pubClauses = cleanPublishers.map { _ in
+                "(a.source LIKE ? ESCAPE '\\' OR a.canonical_url LIKE ? ESCAPE '\\')"
+            }
             clauses.append("(" + pubClauses.joined(separator: " OR ") + ")")
             for pub in cleanPublishers {
-                parameters.append("%\(pub)%")
-                parameters.append("%\(pub)%")
+                let escaped = Self.escapeLikeWildcards(pub)
+                parameters.append("%\(escaped)%")
+                parameters.append("%\(escaped)%")
             }
         }
 
@@ -133,16 +144,20 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         if !cleanIncludes.isEmpty {
             if matchAllKeywords {
                 for kw in cleanIncludes {
-                    clauses.append("(a.title LIKE ? OR coalesce(a.description, '') LIKE ?)")
-                    parameters.append("%\(kw)%")
-                    parameters.append("%\(kw)%")
+                    clauses.append("(a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')")
+                    let escaped = Self.escapeLikeWildcards(kw)
+                    parameters.append("%\(escaped)%")
+                    parameters.append("%\(escaped)%")
                 }
             } else {
-                let incClauses = cleanIncludes.map { _ in "(a.title LIKE ? OR coalesce(a.description, '') LIKE ?)" }
+                let incClauses = cleanIncludes.map { _ in
+                    "(a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')"
+                }
                 clauses.append("(" + incClauses.joined(separator: " OR ") + ")")
                 for kw in cleanIncludes {
-                    parameters.append("%\(kw)%")
-                    parameters.append("%\(kw)%")
+                    let escaped = Self.escapeLikeWildcards(kw)
+                    parameters.append("%\(escaped)%")
+                    parameters.append("%\(escaped)%")
                 }
             }
         }
@@ -153,9 +168,10 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
             .filter { !$0.isEmpty }
         if !cleanExcludes.isEmpty {
             for kw in cleanExcludes {
-                clauses.append("NOT (a.title LIKE ? OR coalesce(a.description, '') LIKE ?)")
-                parameters.append("%\(kw)%")
-                parameters.append("%\(kw)%")
+                clauses.append("NOT (a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')")
+                let escaped = Self.escapeLikeWildcards(kw)
+                parameters.append("%\(escaped)%")
+                parameters.append("%\(escaped)%")
             }
         }
 

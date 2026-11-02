@@ -31,7 +31,7 @@ struct SmartBinderSheet: View {
 
     private static let availableIcons = [
         "folder", "tag", "bookmark", "tray", "cube", "flame",
-        "newspaper", "cpu", "globe", "bolt", "briefcase", "sparkles",
+        "newspaper", "cpu", "globe", "bolt", "briefcase", "archivebox",
     ]
 
     private static let standardCategories = [
@@ -138,6 +138,8 @@ struct SmartBinderSheet: View {
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Symbol \(icon)")
+                                .accessibilityAddTraits(selectedIcon == icon ? .isSelected : [])
+                                .accessibilityValue(selectedIcon == icon ? "Selected" : "Unselected")
                             }
                         }
                         .padding(.vertical, AppSpacing.xxs)
@@ -179,6 +181,8 @@ struct SmartBinderSheet: View {
                             .clipShape(RoundedRectangle(cornerRadius: AppRadius.control))
                         }
                         .buttonStyle(.plain)
+                        .accessibilityAddTraits(isSelected ? .isSelected : [])
+                        .accessibilityValue(isSelected ? "Selected" : "Unselected")
                     }
                 }
             }
