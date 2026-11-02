@@ -38,6 +38,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private var itemCategory = ""
     private var itemContentEncoded = ""
     private var isCollectingContentEncoded = false
+    private var activeTextField: (depth: Int, field: String)?
 
     private var currentNestingDepth = 0
     private let maxNestingDepth = 64
@@ -196,7 +197,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemContentEncoded += "<\(elementName)\(encodedAttrs)>"
         }
 
-        if elementName == "guid" {
+        if elementName == "guid", itemGuid.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             itemGuidIsPermalink = attributeDict["isPermaLink"]?.lowercased() != "false"
         }
 
@@ -209,11 +210,23 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
 
         if elementName == "link" {
-            let relation = attributeDict["rel"] ?? "alternate"
-            if let href = attributeDict["href"], relation == "alternate", itemLink.isEmpty {
-                itemLink =
-                    URL(string: href, relativeTo: baseURLs.last.flatMap { $0 })?.absoluteURL.absoluteString ?? href
+            if let href = attributeDict["href"] {
+                let relation = attributeDict["rel"] ?? "alternate"
+                if relation == "alternate", itemLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    itemLink = resolvedURL(href)
+                }
+            } else if activeTextField == nil, !isCollectingContentEncoded,
+                itemLink.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                itemLink = ""
+                activeTextField = (currentNestingDepth, "link")
             }
+        } else if activeTextField == nil, !isCollectingContentEncoded,
+            let current = itemFieldValue(for: elementName),
+            current.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            clearItemField(for: elementName)
+            activeTextField = (currentNestingDepth, elementName)
         }
     }
 
@@ -239,6 +252,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         itemContentIsXHTML = false
         itemCategory = ""
         itemContentEncoded = ""
+        activeTextField = nil
     }
 
     private func handleMediaElement(elementName: String, attributeDict: [String: String]) {
@@ -292,14 +306,37 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             itemImageCandidates[index].credit = String(((itemImageCandidates[index].credit ?? "") + string).prefix(500))
             return
         }
-        let field =
-            elementStack.last(where: {
-                [
-                    "title", "description", "summary", "link", "guid", "id", "pubDate", "published", "updated",
-                    "category", "dc:subject", "dc:date",
-                ].contains($0)
-            }) ?? currentElement
-        appendItemText(string, field: field)
+        if let active = activeTextField {
+            appendItemText(string, field: active.field)
+            return
+        }
+        if let field = elementStack.last(where: { ["category", "dc:subject"].contains($0) }) {
+            appendItemText(string, field: field)
+        }
+    }
+
+    private func itemFieldValue(for field: String) -> String? {
+        switch field {
+        case "title": return itemTitle
+        case "description", "summary": return itemDescription
+        case "guid", "id": return itemGuid
+        case "pubDate", "published": return itemPubDate
+        case "updated": return itemUpdated
+        case "dc:date": return itemDublinDate
+        default: return nil
+        }
+    }
+
+    private func clearItemField(for field: String) {
+        switch field {
+        case "title": itemTitle = ""
+        case "description", "summary": itemDescription = ""
+        case "guid", "id": itemGuid = ""
+        case "pubDate", "published": itemPubDate = ""
+        case "updated": itemUpdated = ""
+        case "dc:date": itemDublinDate = ""
+        default: break
+        }
     }
 
     private func appendItemText(_ string: String, field: String) {
@@ -335,7 +372,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             if ["category", "dc:subject"].contains(elementName), !isCollectingContentEncoded, !insideForeignBlock {
                 itemCategory += "\n"
             }
-            if elementName == "link", !isCollectingContentEncoded { itemLink = resolvedURL(itemLink) }
+            if let active = activeTextField, active.depth == currentNestingDepth {
+                if active.field == "link" { itemLink = resolvedURL(itemLink) }
+                activeTextField = nil
+            }
         }
         if contentDepth == currentNestingDepth {
             isCollectingContentEncoded = false

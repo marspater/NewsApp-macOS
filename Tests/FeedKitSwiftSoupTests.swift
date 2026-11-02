@@ -281,6 +281,30 @@ enum FeedKitSwiftSoupTests {
         check(
             vendorItem?.title == "Own title" && vendorItem?.category == "News",
             "Fields nested inside a foreign element do not fill the item's title or category")
+        let mixedAtomRSS = """
+            <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Feed</title><item>
+            <title>Mixed item</title><atom:title>Second title</atom:title>
+            <atom:link href="https://example.com/mixed"/><link>https://example.com/mixed</link>
+            <description>Primary summary</description><atom:summary>Second summary</atom:summary>
+            <guid isPermaLink="false">primary-guid</guid><atom:id>urn:uuid:second-guid</atom:id>
+            <pubDate>Fri, 30 Oct 2026 10:00:00 GMT</pubDate><atom:published>2026-10-30T10:00:00Z</atom:published>
+            </item></channel></rss>
+            """
+        let mixedItem = FeedXMLParser(data: Data(mixedAtomRSS.utf8), feedURL: base).parse().first
+        check(
+            mixedItem?.title == "Mixed item" && mixedItem?.link == "https://example.com/mixed"
+                && mixedItem?.description == "Primary summary" && mixedItem?.guid == "primary-guid"
+                && mixedItem?.pubDate != DateParser.unknownDate,
+            "Duplicate or mixed RSS and Atom item fields do not concatenate into corrupted values")
+        let atomLinkWithText = """
+            <feed xmlns="http://www.w3.org/2005/Atom"><title>Planet</title><entry><title>Atom link text</title>
+            <id>urn:atom-link</id><link href="https://example.com/atom-story">Read full story</link>
+            <summary>Summary</summary></entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(atomLinkWithText.utf8), feedURL: base).parse().first?.link
+                == "https://example.com/atom-story",
+            "Character content inside an href-bearing Atom link does not corrupt the entry URL")
 
         let malicious =
             "<!DOCTYPE rss [<!ENTITY payload 'expanded'>]><rss><channel><item><title>&payload;</title></item></channel></rss>"
