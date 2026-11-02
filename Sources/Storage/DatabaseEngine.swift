@@ -398,13 +398,12 @@ actor DatabaseEngine {
         let stamp = DateFormatter()
         stamp.locale = Locale(identifier: "en_US_POSIX")
         stamp.dateFormat = withTime ? "yyyy-MM-dd-HHmmss" : "yyyy-MM-dd"
-        let target = folder.appendingPathComponent(
-            "\(library.deletingPathExtension().lastPathComponent)-\(label)-\(stamp.string(from: Date())).sqlite3")
+        let name = "\(library.deletingPathExtension().lastPathComponent)-\(label)-\(stamp.string(from: Date()))"
+        var target = folder.appendingPathComponent("\(name).sqlite3")
         let partial = folder.appendingPathComponent(
             ".\(target.lastPathComponent).\(ProcessInfo.processInfo.processIdentifier).partial")
         let fileManager = FileManager.default
         let partialLog = URL(fileURLWithPath: partial.path + "-wal")
-        let targetLog = URL(fileURLWithPath: target.path + "-wal")
         do {
             try copyLibrary(to: partial)
         } catch  where fallingBackToFile {
@@ -412,6 +411,16 @@ actor DatabaseEngine {
             try? fileManager.removeItem(at: partialLog)
             try Self.copyLibraryFiles(of: dbPath, to: partial)
         }
+        // Two files can't be swapped as one unit, so a copy that has a log, or would replace one that has, takes a name of
+        // its own instead of replacing the existing pair (#946).
+        var suffix = 1
+        while fileManager.fileExists(atPath: target.path),
+            fileManager.fileExists(atPath: partialLog.path) || fileManager.fileExists(atPath: target.path + "-wal")
+        {
+            target = folder.appendingPathComponent("\(name)-\(suffix).sqlite3")
+            suffix += 1
+        }
+        let targetLog = URL(fileURLWithPath: target.path + "-wal")
         do {
             if fileManager.fileExists(atPath: target.path) {
                 _ = try fileManager.replaceItemAt(target, withItemAt: partial)
