@@ -413,17 +413,30 @@ actor DatabaseEngine {
             try Self.copyLibraryFiles(of: dbPath, to: partial)
         }
         do {
-            try? fileManager.removeItem(at: targetLog)
             if fileManager.fileExists(atPath: target.path) {
                 _ = try fileManager.replaceItemAt(target, withItemAt: partial)
             } else {
                 try fileManager.moveItem(at: partial, to: target)
             }
-            if fileManager.fileExists(atPath: partialLog.path) {
-                try fileManager.moveItem(at: partialLog, to: targetLog)
-            }
         } catch {
             try? fileManager.removeItem(at: partial)
+            try? fileManager.removeItem(at: partialLog)
+            throw error
+        }
+        // The copy is in place, so its log follows, or the stale log of a copy it replaced goes. A log that can't be put
+        // beside it takes the copy with it: a copy without its log would silently miss commits.
+        do {
+            if fileManager.fileExists(atPath: partialLog.path) {
+                if fileManager.fileExists(atPath: targetLog.path) {
+                    _ = try fileManager.replaceItemAt(targetLog, withItemAt: partialLog)
+                } else {
+                    try fileManager.moveItem(at: partialLog, to: targetLog)
+                }
+            } else if fileManager.fileExists(atPath: targetLog.path) {
+                try fileManager.removeItem(at: targetLog)
+            }
+        } catch {
+            try? fileManager.removeItem(at: target)
             try? fileManager.removeItem(at: partialLog)
             throw error
         }
@@ -456,6 +469,25 @@ actor DatabaseEngine {
         let fileManager = FileManager.default
         let log = library + "-wal"
         let partialLog = partial.path + "-wal"
+        // The write lock keeps every other connection from appending to the log or restarting it while the two files
+        // are copied. A concurrent passive checkpoint only writes pages the log still holds, which the copy replays.
+        // Without the lock the files could describe two states, so the fallback is refused (#946).
+        var lock: OpaquePointer?
+        defer {
+            sqlite3_exec(lock, "ROLLBACK;", nil, nil, nil)
+            sqlite3_close_v2(lock)
+        }
+        guard sqlite3_open_v2(library, &lock, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK, let lock else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Could not lock the library to copy it"])
+        }
+        sqlite3_busy_timeout(lock, busyTimeoutMilliseconds)
+        guard sqlite3_exec(lock, "BEGIN IMMEDIATE;", nil, nil, nil) == SQLITE_OK else {
+            throw NSError(
+                domain: "DatabaseEngine", code: Int(sqlite3_errcode(lock)),
+                userInfo: [NSLocalizedDescriptionKey: "Could not lock the library to copy it"])
+        }
         try fileManager.copyItem(atPath: library, toPath: partial.path)
         guard fileManager.fileExists(atPath: log) else { return }
         do {
