@@ -138,7 +138,12 @@ final class StoryBannerPresenter {
     private var panel: NSPanel?
     private var host: FirstClickHostingView<StoryBannerView>?
     /// The banner on screen, its photo once loaded, and whether the pointer is over it.
-    private var shown: (banner: StoryBanner, photo: CGImage?, hovering: Bool)?
+    private struct Shown {
+        var banner: StoryBanner
+        var photo: CGImage?
+        var hovering = false
+    }
+    private var shown: Shown?
     private var dismissal: Task<Void, Never>?
     private var visibility: AnyCancellable?
 
@@ -168,7 +173,7 @@ final class StoryBannerPresenter {
     /// notification without a system banner. The text shows at once and the photo joins when it loads.
     func present(_ banner: StoryBanner) -> Bool {
         guard let window = Self.openWindow(), let screen = window.screen ?? NSScreen.main else { return false }
-        shown = (banner, nil, false)
+        shown = Shown(banner: banner)
         show(banner, on: screen)
         Task { [weak self] in
             // A banner replaced or closed while its photo loaded keeps no photo.
