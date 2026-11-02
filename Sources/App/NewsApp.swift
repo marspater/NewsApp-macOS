@@ -27,7 +27,9 @@ import UserNotifications
                         let key = "\(entry.date.timeIntervalSince1970) \(entry.category) \(entry.composedMessage)"
                         guard sent.insert(key).inserted else { continue }
                         newest = max(newest, entry.date)
-                        let attributes = ["category": entry.category]
+                        let attributes: [String: Any] = [
+                            "category": entry.category, loggedAtKey: entry.date.timeIntervalSince1970,
+                        ]
                         if entry.level == .fault {
                             SentrySDK.logger.fatal(redacted(entry), attributes: attributes)
                         } else {
@@ -37,6 +39,17 @@ import UserNotifications
                     since = newest
                 }
             }
+        }
+
+        /// Seconds since 1970 when the entry was logged; `stamp` moves it onto the Sentry log, which is otherwise dated
+        /// when this forwarder sends it, up to 30 seconds later.
+        static let loggedAtKey = "os_log.timestamp"
+
+        static func stamp(_ log: SentryLog) -> SentryLog {
+            if let loggedAt = log.attributes[loggedAtKey]?.value as? Double {
+                log.timestamp = Date(timeIntervalSince1970: loggedAt)
+            }
+            return log
         }
 
         /// Read in-process, the unified log returns private values in clear (feed URLs can carry tokens), so they are
@@ -472,6 +485,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                         profiling.lifecycle = .trace
                     }
                     options.enableLogs = true
+                    options.beforeSendLog = SentryLogForwarder.stamp
                 }
                 SentryLogForwarder.start()
             }
