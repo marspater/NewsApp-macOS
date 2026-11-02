@@ -48,8 +48,12 @@ public struct OverviewComposer: Sendable {
         func isRepeat(_ candidate: Set<String>) -> Bool {
             chosen.contains { index in
                 let other = ranked[index].words
+                let common = candidate.intersection(other).count
                 let union = candidate.union(other).count
-                return union > 0 && Double(candidate.intersection(other).count) / Double(union) >= 0.6
+                guard union > 0 else { return false }
+                if Double(common) / Double(union) >= 0.5 { return true }
+                let minCount = min(candidate.count, other.count)
+                return minCount >= 5 && Double(common) / Double(minCount) >= 0.7
             }
         }
         var sources = Set<String>()
@@ -62,6 +66,29 @@ public struct OverviewComposer: Sendable {
             }
         }
         return chosen.sorted().map { ranked[$0].fact }
+    }
+
+    /// Ensures a highlight or overview sentence ends with terminal punctuation.
+    static func ensureTerminalPeriod(_ text: String) -> String {
+        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return text }
+        while let last = trimmed.last, ",;:".contains(last) {
+            trimmed.removeLast()
+            trimmed = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let last = trimmed.last else { return text }
+        if ".!?".contains(last) { return trimmed }
+        if "\"\u{201D}'\u{2019}".contains(last) {
+            let withoutQuote = trimmed.dropLast()
+            if let beforeQuote = withoutQuote.last, ".!?".contains(beforeQuote) {
+                return trimmed
+            }
+            if let beforeQuote = withoutQuote.last, ",;:".contains(beforeQuote) {
+                return String(withoutQuote.dropLast()) + String(last) + "."
+            }
+            return trimmed + "."
+        }
+        return trimmed + "."
     }
 
     public static func validateFactForOverview(
@@ -186,7 +213,7 @@ public struct OverviewComposer: Sendable {
 
             let overviewFact = OverviewFact(
                 id: "fact_\(index + 1)",
-                text: fact.statement,
+                text: ensureTerminalPeriod(fact.statement),
                 citationIDs: [citationID]
             )
             overviewFacts.append(overviewFact)
@@ -408,7 +435,8 @@ public struct OverviewComposer: Sendable {
         Summarize this news event using only the publisher passages below. Keep attribution,
         uncertainty, dates and numbers. Do not add background knowledge or fabricated quotations.
         Return plain text only: exactly 2 INTRO lines followed by 3 to 5 FACT lines (do not provide fewer than 3 facts).
-        Every line must contain exactly one complete sentence; never combine multiple sentences into one line.
+        Every line must contain exactly one complete sentence ending with a period; never combine multiple sentences into one line.
+        Each FACT line must cover a distinct development, angle, or concrete detail without repeating the INTRO lines or another FACT line.
         Preserve exact negation and polarity from the cited passage; never invert positive or negative claims.
         Retain speaker attribution: attribute assertions, allegations and disputed claims to their named speaker.
         Ground all numbers, quantities, dates and units strictly in the cited passage without modification.
@@ -557,11 +585,12 @@ public struct OverviewComposer: Sendable {
                 passageFingerprint: passage.fingerprint, quote: passage.text,
                 source: OverviewSourceMetadata(
                     title: article.title, name: article.source, url: article.link, publishedAt: article.pubDate))
-            guard let statement = firstCompleteSentence(parsed.statement) else {
+            guard let rawStatement = firstCompleteSentence(parsed.statement) else {
                 draft.deterministicRejections += 1
                 draft.rejectionReasons["notOneSentence", default: 0] += 1
                 continue
             }
+            let statement = ensureTerminalPeriod(rawStatement)
             let fact = OverviewFact(id: "model_claim_\(index)", text: statement, citationIDs: [citationID])
             let check = EventOverviewDocument(
                 eventID: fallback.eventID, version: fallback.version,

@@ -253,7 +253,42 @@ struct EventOverviewReaderView: View {
     }
 
     private var validPerspectives: [OverviewPerspective] {
-        Self.filterValidPerspectives(overview.perspectives)
+        Self.deduplicateDisplayPerspectives(Self.filterValidPerspectives(overview.perspectives))
+    }
+
+    /// Cleans up cached perspectives for display: filters out conversational fragments or leaked attribution tails
+    /// and collapses duplicate entries for the same canonical speaker (e.g. "Mr. Nawrocki" and "Nawrocki").
+    nonisolated static func deduplicateDisplayPerspectives(_ perspectives: [OverviewPerspective])
+        -> [OverviewPerspective]
+    {
+        var result: [OverviewPerspective] = []
+        var seenCanonical: [[String]] = []
+        for item in perspectives {
+            let pos = item.position.trimmingCharacters(in: .whitespacesAndNewlines)
+            if OverviewPerspectivesValidator.isConversationalFragment(pos) { continue }
+            // Drop fragments that leaked an unclosed quote + attribution tail (e.g. `what few people were willing to say," Trump said`).
+            let straightQuotes = pos.filter { $0 == "\"" }.count
+            if !straightQuotes.isMultiple(of: 2) { continue }
+            let tokens = OverviewPerspectivesExtractor.canonicalParticipantTokens(item.participant)
+            let isDup = seenCanonical.contains { existing in
+                OverviewPerspectivesExtractor.isSameCanonicalSpeaker(existing, tokens)
+            }
+            if !isDup {
+                seenCanonical.append(tokens)
+                result.append(item)
+            }
+        }
+        return result
+    }
+
+    /// Strips trailing commas left over from `"…," Speaker said` and ensures clean sentence punctuation for display.
+    nonisolated static func cleanDisplayPosition(_ text: String) -> String {
+        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = trimmed.last, ",;:".contains(last) {
+            trimmed.removeLast()
+            trimmed = trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
     }
 
     private var validIndustryImpact: [OverviewIndustryImpact] {
@@ -504,7 +539,7 @@ struct EventOverviewReaderView: View {
                 .textSelection(.enabled)
 
             HStack(spacing: AppSpacing.eyebrowGap) {
-                (Text("Updated ") + Text(overview.updatedAt, style: .relative) + Text(" ago"))
+                Text("Updated \(formattedUpdateTime)")
                     .font(AppTypography.overviewFont(.metadata, scale: textScale))
                     .foregroundStyle(currentSecondaryTextColor)
                     .monospacedDigit()
@@ -702,7 +737,7 @@ struct EventOverviewReaderView: View {
         citations: [OverviewCitation]
     ) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-            Text(fact.text)
+            Text(OverviewComposer.ensureTerminalPeriod(fact.text))
                 .font(bodyFont)
                 .lineSpacing(bodyLineSpacing)
                 .foregroundStyle(AppColor.primaryText)
@@ -714,7 +749,7 @@ struct EventOverviewReaderView: View {
 
             if hasPublisher || hasCitations {
                 ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
-                    if let publisher, !publisher.isEmpty {
+                    if !hasCitations, let publisher, !publisher.isEmpty {
                         Text(publisher)
                             .font(AppTypography.overviewFont(.annotation, scale: textScale))
                             .foregroundStyle(currentSecondaryTextColor)
@@ -1196,7 +1231,7 @@ struct EventOverviewReaderView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .textSelection(.enabled)
 
-            Text(perspective.position)
+            Text(Self.cleanDisplayPosition(perspective.position))
                 .font(bodyFont)
                 .lineSpacing(bodyLineSpacing)
                 .foregroundStyle(AppColor.primaryText)
@@ -1205,10 +1240,12 @@ struct EventOverviewReaderView: View {
 
             let hasSource = source != nil && !source!.isEmpty
             let hasCitations = !citations.isEmpty
+            let hasWireSyndicate =
+                !(perspective.originalWireSource?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
 
             if hasSource || hasCitations {
                 ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
-                    if let source, !source.isEmpty {
+                    if !hasCitations || hasWireSyndicate, let source, !source.isEmpty {
                         Text(source)
                             .font(AppTypography.overviewFont(.annotation, scale: textScale))
                             .foregroundStyle(currentSecondaryTextColor)
@@ -1253,7 +1290,7 @@ struct EventOverviewReaderView: View {
         .accessibilityLabel(
             Self.perspectiveAccessibilityLabel(
                 participant: perspective.participant,
-                position: perspective.position,
+                position: Self.cleanDisplayPosition(perspective.position),
                 source: source,
                 citations: citations
             )

@@ -22,8 +22,9 @@ struct EventCardView: View {
     let separate: (FeedArticle) -> Void
     /// "Same Event as…": the reader says a related event reports this one (#524).
     let combine: (RelatedStoryEvent) -> Void
+    /// Plain reference rather than `@EnvironmentObject` so store publications do not bypass `EventCardView.equatable()`.
+    var store: ArticleStore = .shared
 
-    @EnvironmentObject private var articleStore: ArticleStore
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var members: [FeedArticle] = []
     /// Loaded with the members, so the submenu is ready before a context menu opens on a row.
@@ -43,14 +44,14 @@ struct EventCardView: View {
             // none of them has an image and the event has members hidden from lists (World Tension panel feeds, #595).
             guard isExpanded || needsHiddenMemberImage else { return }
             do {
-                let loaded = try await articleStore.storyMemberArticles(eventID: summary.eventID)
+                let loaded = try await store.storyMemberArticles(eventID: summary.eventID)
                 try Task.checkCancellation()
                 members = loaded
                 hasLoaded = true
                 loadFailed = false
                 guard isExpanded else { return }
                 // Optional: a failed or slow lookup only leaves the submenu out.
-                let related = (try? await articleStore.relatedStoryEvents(eventID: summary.eventID)) ?? []
+                let related = (try? await store.relatedStoryEvents(eventID: summary.eventID)) ?? []
                 if !Task.isCancelled { relatedEvents = related }
             } catch {
                 if !Task.isCancelled { loadFailed = true }
@@ -69,9 +70,9 @@ struct EventCardView: View {
     @ViewBuilder
     private var coverage: some View {
         Divider()
-        // The row's "updated 5 minutes ago" and its spoken label age by the minute; the equatable card is not
-        // redrawn by a refresh (#839).
-        TimelineView(.everyMinute) { _ in coverageToggle }
+        TimelineView(.everyMinute) { context in
+            coverageToggle(now: context.date)
+        }
         if isExpanded {
             Divider()
             sourceList
@@ -79,31 +80,33 @@ struct EventCardView: View {
         }
     }
 
-    private var coverageToggle: some View {
+    private func coverageToggle(now: Date) -> some View {
         Button {
             withAnimation(reduceMotion ? nil : AppMotion.state) { setExpanded(!isExpanded) }
             if !isExpanded {
                 let eventID = summary.eventID
-                Task { await articleStore.markEventSeen(eventID) }
+                let store = self.store
+                Task { await store.markEventSeen(eventID) }
             }
         } label: {
             CoverageRowLabel(
                 coverageText: summary.coverageText, latestDate: summary.latestDate,
-                hasUpdate: summary.hasSubstantiveUpdate, isExpanded: isExpanded, isGrid: !compact && !isLead
+                hasUpdate: summary.hasSubstantiveUpdate, isExpanded: isExpanded, isGrid: !compact && !isLead,
+                now: now
             )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .help(isExpanded ? "Hide the sources covering this story (E)" : "Show every source covering this story (E)")
-        .accessibilityLabel(coverageDescription)
+        .accessibilityLabel(coverageDescription(now: now))
         .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
         .accessibilityHint("Lists every source covering this story")
     }
 
-    private var coverageDescription: String {
+    private func coverageDescription(now: Date) -> String {
         var parts = ["Event: \(summary.coverageText)"]
         if let latest = summary.latestDate {
-            parts.append("updated \(latest.formatted(.relative(presentation: .named)))")
+            parts.append("updated \(FeedArticle.relativeUpdateText(for: latest, now: now, abbreviated: false))")
         }
         if summary.hasSubstantiveUpdate { parts.append("new reporting since you last opened it") }
         return parts.joined(separator: ", ")

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import SwiftUI
 
 /// Briefing strategic impact (#850): region mapping and filter, industry grouping, drivers coverage wording and the
 /// escalation timeline. Drives production types only (#804).
@@ -35,6 +36,8 @@ enum BriefingImpactTests {
         industryGrouping()
         driversCoverage()
         timelineOrdering()
+        await dynamicIndicatorsAndOverviewQuality()
+        await comprehensiveCoverageVerification()
         print("Finished \(checks) Briefing strategic impact checks with \(failures) failures.")
         if failures > 0 { exit(1) }
     }
@@ -42,16 +45,23 @@ enum BriefingImpactTests {
     static let now = Date(timeIntervalSince1970: 1_793_372_400)
 
     static func regionMapping() {
-        check(BriefingRegion.region(code: "IR") == .middleEastNorthAfrica, "Iran is Middle East")
-        check(BriefingRegion.region(code: "IL") == .middleEastNorthAfrica, "Western Asia is Middle East")
-        check(BriefingRegion.region(code: "LY") == .middleEastNorthAfrica, "Libya is North Africa")
-        check(BriefingRegion.region(code: "NG") == .subSaharanAfrica, "Nigeria is Sub-Saharan Africa")
+        check(BriefingRegion.region(code: "IR") == .middleEastNorthAfrica, "Iran is Middle East and Africa")
+        check(BriefingRegion.region(code: "IL") == .middleEastNorthAfrica, "Western Asia is Middle East and Africa")
+        check(BriefingRegion.region(code: "LY") == .middleEastNorthAfrica, "Libya is Middle East and Africa")
+        check(BriefingRegion.region(code: "NG") == .middleEastNorthAfrica, "Nigeria is Middle East and Africa")
         check(BriefingRegion.region(code: "FR") == .europe, "France is Europe")
         check(BriefingRegion.region(code: "US") == .northAmerica, "US is North America")
-        check(BriefingRegion.region(code: "MX") == .latinAmerica, "Mexico is Latin America")
-        check(BriefingRegion.region(code: "KZ") == .southAsia, "Central Asia joins South Asia")
-        check(BriefingRegion.region(code: "VN") == .eastSoutheastAsia, "Vietnam is East & Southeast Asia")
-        check(BriefingRegion.region(code: "AU") == .oceania, "Australia is Oceania")
+        check(BriefingRegion.region(code: "CA") == .northAmerica, "Canada is North America")
+        check(BriefingRegion.region(code: "BM") == nil, "North America is restricted to US and Canada")
+        check(BriefingRegion.region(code: "MX") == .latinAmerica, "Mexico is LATAM")
+        check(BriefingRegion.region(code: "BR") == .latinAmerica, "Brazil is LATAM")
+        check(BriefingRegion.region(code: "KZ") == .southAsia, "Central Asia joins APAC")
+        check(BriefingRegion.region(code: "VN") == .southAsia, "Vietnam is APAC")
+        check(BriefingRegion.region(code: "AU") == .southAsia, "Australia is APAC")
+        check(BriefingRegion.region(code: "JP") == .southAsia, "Japan is APAC")
+        check(TensionMacroRegion.southAsia.briefingTitle == "APAC", "APAC title")
+        check(TensionMacroRegion.middleEastNorthAfrica.briefingTitle == "Middle East and Africa", "MEA title")
+        check(TensionMacroRegion.latinAmerica.briefingTitle == "LATAM", "LATAM title")
         let story = BriefingRegionsData.sampleEntry(
             id: "impact-text", title: "Ceasefire talks resume in Egypt as Ukrainian aid arrives", publishers: 1,
             date: now)
@@ -61,7 +71,25 @@ enum BriefingImpactTests {
         let nested = BriefingRegionsData.sampleEntry(
             id: "impact-nested", title: "Aid reaches South Sudan", publishers: 1, date: now)
         check(
-            BriefingRegion.regions(of: nested.representative) == [.subSaharanAfrica], "South Sudan never counts Sudan")
+            BriefingRegion.regions(of: nested.representative) == [.middleEastNorthAfrica],
+            "South Sudan maps to Middle East and Africa without double-counting Sudan")
+        let ukraineArticle = FeedArticle(
+            storedID: "ukraine-ceasefire",
+            title: "Ukraine: Six-day localized ceasefire in Oleshky comes to end",
+            link: "https://www.dw.com/en/ukraine-ceasefire",
+            guid: "ukraine-ceasefire",
+            description:
+                "A US-brokered ceasefire in Ukraine's southern Kherson region ended on Sunday night with no violations reported.",
+            pubDate: now,
+            source: "Deutsche Welle")
+        let ukraineEntry = FeedEntry.article(ukraineArticle)
+        let ukraineFeatures = EventFeatures(places: ["@UA", "@US"], date: now)
+        let resolvedUkraine = BriefingRegionsData.resolveRegions(
+            for: ukraineEntry, features: [ukraineArticle.id: ukraineFeatures])
+        check(
+            resolvedUkraine == Set([TensionMacroRegion.europe]),
+            "Ukraine story with US-brokered in description resolves strictly to Europe, not North America: \(resolvedUkraine)"
+        )
     }
 
     static func regionFilter() {
@@ -72,8 +100,8 @@ enum BriefingImpactTests {
         var filter = BriefingBoardFilter()
         check(filter.includes(cairo) && filter.includes(tokyo), "no region includes everything")
         filter.region = .middleEastNorthAfrica
-        check(filter.includes(cairo), "Egypt is in Middle East & North Africa")
-        check(!filter.includes(tokyo), "Japan is outside Middle East & North Africa")
+        check(filter.includes(cairo), "Egypt is in Middle East and Africa")
+        check(!filter.includes(tokyo), "Japan is outside Middle East and Africa")
         // The loader's resolved regions win over the headline.
         filter.regionsByEntry = [tokyo.id: [.middleEastNorthAfrica]]
         check(filter.includes(tokyo), "resolved regions are used when known")
@@ -82,7 +110,7 @@ enum BriefingImpactTests {
             entries: [tokyo, cairo],
             regionsByEntry: [cairo.id: [.middleEastNorthAfrica], tokyo.id: [.eastSoutheastAsia]],
             facts: [:], now: now)
-        check(data?.rows.map(\.region) == [.middleEastNorthAfrica, .eastSoutheastAsia], "ties keep canonical order")
+        check(data?.rows.map(\.region) == [.middleEastNorthAfrica, .southAsia], "ties keep canonical order")
         check(data?.rows.first?.countText == "Zen · 1 story", "count text says stories")
         check(
             BriefingRegionsData.make(entries: [tokyo], regionsByEntry: [:], facts: [:], now: now) == nil, "empty is nil"
@@ -198,5 +226,425 @@ enum BriefingImpactTests {
             BriefingTimelineData.captureFixture?.hasRows(under: BriefingBoardFilter(region: .oceania)) == false,
             "no thread outside the filter")
         check(BriefingTimelineData.items(many, now: now)?.map(\.id) == ["3", "4", "5", "6", "7"], "latest five")
+    }
+
+    static func dynamicIndicatorsAndOverviewQuality() async {
+        // 1. Priority Developments dynamic Impact rating (never nil / "Not rated")
+        let majorEntry = BriefingRegionsData.sampleEntry(
+            id: "imp-major", title: "Ukraine: Six-day localized ceasefire in Oleshky comes to end", publishers: 6,
+            date: now)
+        check(
+            BriefingPriorityData.assessImportance(
+                publisherCount: majorEntry.publisherCount, representative: majorEntry.representative, momentum: .fading)
+                == .major,
+            "High-coverage ceasefire story is rated Major")
+        let notableEntry = BriefingRegionsData.sampleEntry(
+            id: "imp-notable", title: "Parliament committee reviews trade tariff proposals", publishers: 3, date: now)
+        check(
+            BriefingPriorityData.assessImportance(
+                publisherCount: notableEntry.publisherCount, representative: notableEntry.representative,
+                momentum: .steady) == .notable,
+            "Multi-publisher story thread is rated Notable")
+
+        // 2. World Tension sparkline tight dynamic Y-axis domain
+        let domain = BriefingTensionSparklineView.yDomain(for: [], baseline: 38)
+        check(domain.upperBound - domain.lowerBound <= 20, "Sparkline domain zooms to week's range rather than 0...100")
+
+        // 3. Source Footprint clear footer copy
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 7, wireCopyCount: 0)
+                == "All 7 original reports are independent publisher reporting (no syndicated wire-agency reprints).",
+            "Clear human-readable footprint summary when wireCopyCount is 0")
+
+        // 4. Highlights terminal period normalization
+        check(
+            OverviewComposer.ensureTerminalPeriod(
+                "Trump invites Michigan Democrat Stevens to join the Republican Party")
+                == "Trump invites Michigan Democrat Stevens to join the Republican Party.",
+            "Highlight without period receives a terminal period")
+
+        // 5. Perspectives: nested quote attribution ("I don't know Haley...," Trump said)
+        let haleyQuoteText =
+            "\"I don't know Haley. I've never met Haley. But Haley said what few people were willing to say,\" Trump said."
+        let haleyPassage = EvidencePassage(id: "p_haley", articleID: "a_haley", text: haleyQuoteText)
+        let haleyArticle = FeedArticle(
+            storedID: "a_haley", title: "Michigan Senate Race", link: "https://bbc.com/haley",
+            guid: "g_haley", description: haleyQuoteText, pubDate: now, source: "BBC News")
+        let haleyCit = OverviewCitation(
+            id: "c_haley", articleID: "a_haley", passageID: "p_haley",
+            passageFingerprint: haleyPassage.fingerprint, quote: haleyQuoteText)
+        let haleyPerspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [haleyPassage], articles: [haleyArticle], existingCitations: ["c_haley": haleyCit])
+        check(
+            haleyPerspectives.map(\.participant) == ["Trump"],
+            "Nested speech inside Trump's quote is not attributed to Haley")
+        check(
+            EventOverviewReaderView.cleanDisplayPosition(haleyPerspectives.first?.position ?? "").hasSuffix(",")
+                == false,
+            "Display position strips trailing comma")
+
+        // 6. Perspectives: Mr. Nawrocki vs Nawrocki voice collapse, abbreviation period handling, and Tusk fragment rejection
+        let nawrockiText =
+            "\"Tonight, there was a breach of public order in the Republic of Poland and a forcible takeover of a constitutional body,\" Mr. Nawrocki said in a statement read out by an aide outside the court early on Saturday (October 31, 2026), after the President had turned back mid-flight from a trip to Africa to address the situation."
+        let tribunalText =
+            "The Constitutional Tribunal said its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Nawrocki."
+        let tuskText = "\"And everything is clear,\" Tusk wrote on X."
+        let pNawrocki = EvidencePassage(id: "p_naw", articleID: "a_hindu", text: nawrockiText)
+        let pTribunal = EvidencePassage(id: "p_trib", articleID: "a_hindu", text: tribunalText)
+        let pTusk = EvidencePassage(id: "p_tusk", articleID: "a_guardian", text: tuskText)
+        let artHindu = FeedArticle(
+            storedID: "a_hindu", title: "Poland court dispute", link: "https://thehindu.com/poland",
+            guid: "g_hindu", description: nawrockiText, pubDate: now, source: "The Hindu")
+        let artGuardian = FeedArticle(
+            storedID: "a_guardian", title: "Poland tribunal crisis", link: "https://theguardian.com/poland",
+            guid: "g_guardian", description: tuskText, pubDate: now, source: "The Guardian")
+        let cits: [String: OverviewCitation] = [
+            "c_naw": OverviewCitation(
+                id: "c_naw", articleID: "a_hindu", passageID: "p_naw",
+                passageFingerprint: pNawrocki.fingerprint, quote: nawrockiText),
+            "c_trib": OverviewCitation(
+                id: "c_trib", articleID: "a_hindu", passageID: "p_trib",
+                passageFingerprint: pTribunal.fingerprint, quote: tribunalText),
+            "c_tusk": OverviewCitation(
+                id: "c_tusk", articleID: "a_guardian", passageID: "p_tusk",
+                passageFingerprint: pTusk.fingerprint, quote: tuskText),
+        ]
+        let polandPerspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [pNawrocki, pTribunal, pTusk], articles: [artHindu, artGuardian], existingCitations: cits)
+        check(
+            polandPerspectives.map(\.participant) == ["Mr. Nawrocki"],
+            "Single article with direct quote emits only Mr. Nawrocki (no duplicate Nawrocki or unquoted paraphrase, and Tusk fragment rejected)"
+        )
+        let tribunalOnly = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [pTribunal], articles: [artHindu], existingCitations: ["c_trib": cits["c_trib"]!])
+        check(
+            tribunalOnly.first?.position.hasSuffix("appointee of Mr. Nawrocki") == true,
+            "Abbreviation 'Mr.' does not truncate statement at 'Mr'")
+
+        // 7. Hyphenated compound place names match both regions
+        let hyphenRegions = BriefingRegion.regions(in: "Russia-Ukraine ceasefire agreement signed")
+        check(hyphenRegions.contains(.europe), "Hyphenated country names match regions")
+        let meRegions = BriefingRegion.regions(in: "Israel-Iran tensions escalate")
+        check(meRegions.contains(.middleEastNorthAfrica), "Middle East hyphenated names match")
+
+        // 8. Canonical speaker equality and distinct institution preservation
+        let justice = OverviewPerspectivesExtractor.canonicalParticipantTokens("Justice Department")
+        let state = OverviewPerspectivesExtractor.canonicalParticipantTokens("State Department")
+        check(
+            OverviewPerspectivesExtractor.isSameCanonicalSpeaker(justice, state) == false,
+            "Justice Department and State Department are distinct canonical speakers")
+        let mrNawrocki = OverviewPerspectivesExtractor.canonicalParticipantTokens("Mr. Nawrocki")
+        let nawrocki = OverviewPerspectivesExtractor.canonicalParticipantTokens("Nawrocki")
+        check(
+            OverviewPerspectivesExtractor.isSameCanonicalSpeaker(mrNawrocki, nawrocki) == true,
+            "Mr. Nawrocki and Nawrocki collapse to same canonical speaker")
+
+        // 9. Card date and relative update text
+        let articleJustNow = FeedArticle(
+            storedID: "art-now", title: "Breaking", link: "https://example.com/now",
+            guid: "now", description: "Desc", pubDate: now.addingTimeInterval(-30), source: "Test")
+        await MainActor.run {
+            check(articleJustNow.cardDateText(now: now) == "Just now", "Under 60 seconds is Just now")
+            let updateAbbr = FeedArticle.relativeUpdateText(
+                for: now.addingTimeInterval(-120), now: now, abbreviated: true)
+            check(!updateAbbr.isEmpty, "Abbreviated relative update text generates non-empty string")
+            let updateFull = FeedArticle.relativeUpdateText(
+                for: now.addingTimeInterval(-120), now: now, abbreviated: false)
+            check(!updateFull.isEmpty, "Full relative update text generates non-empty string")
+        }
+
+        // 10. Footprint footer text variants
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 1, wireCopyCount: 0)
+                == "1 original publisher report (no syndicated wire-agency reprints).",
+            "Single original report without wire copy")
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 2, wireCopyCount: 0)
+                == "All 2 original reports are independent publisher reporting (no syndicated wire-agency reprints).",
+            "Multiple original reports without wire copy")
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 5, wireCopyCount: 1)
+                == "5 original reports from independent newsrooms · 1 outlet republished a wire-agency dispatch.",
+            "Footprint with 1 wire copy")
+        check(
+            BriefingFootprintModuleView.footerText(originalCount: 4, wireCopyCount: 3)
+                == "4 original reports from independent newsrooms · 3 outlets republished wire-agency dispatches.",
+            "Footprint with multiple wire copies")
+
+        // 11. Priority impact text helper coverage
+        check(BriefingPriorityData.impactText(.major) == "Major", "Major text")
+        check(BriefingPriorityData.impactText(.notable) == "Notable", "Notable text")
+        check(BriefingPriorityData.impactText(.minor) == "Minor", "Minor text")
+        check(BriefingPriorityData.impactText(nil) == "Notable", "Default text is Notable")
+    }
+
+    @MainActor
+    static func comprehensiveCoverageVerification() async {
+        // 1. BriefingHeroCarouselView evaluation
+        let sampleArticle = FeedArticle(
+            storedID: "hero-1", title: "Global climate summit opens with new emissions accord",
+            link: "https://example.com/hero-1", guid: "hero-1",
+            description:
+                "World leaders gathered for the annual climate plenary in Paris with full delegations present.",
+            pubDate: now, source: "Publisher"
+        )
+        let sampleEntry = FeedEntry.article(sampleArticle)
+        let heroCarousel = BriefingHeroCarouselView(
+            entries: [sampleEntry], clock: ContinuousCarouselClock(), onOpen: { _ in }
+        )
+        _ = heroCarousel.body
+
+        // 2. BriefingTensionSparklineView evaluation across reading counts
+        let r1 = WorldTensionReading(
+            evaluatedAt: now, inputHash: "h1", modelGeneration: "g1", headlines: [],
+            assessment: WorldTensionAssessment(score: 45, summary: "Tension steady", reasons: [])
+        )
+        let r2 = WorldTensionReading(
+            evaluatedAt: now.addingTimeInterval(86400), inputHash: "h2", modelGeneration: "g2", headlines: [],
+            assessment: WorldTensionAssessment(score: 55, summary: "Tension rising", reasons: [])
+        )
+        let sparklineMulti = BriefingTensionSparklineView(readings: [r1, r2], baseline: 38)
+        _ = sparklineMulti.body
+        let sparklineSingle = BriefingTensionSparklineView(readings: [r1], baseline: 38)
+        _ = sparklineSingle.body
+        let sparklineEmpty = BriefingTensionSparklineView(readings: [], baseline: 38)
+        _ = sparklineEmpty.body
+
+        let tightDomain = BriefingTensionSparklineView.yDomain(for: [r1, r1], baseline: 45)
+        check(tightDomain.count >= 8, "Tight span clamps to minimum padding")
+        let singleDomain = BriefingTensionSparklineView.yDomain(for: [r1], baseline: 45)
+        check(!singleDomain.isEmpty, "Single reading domain is valid range")
+
+        // 3. BriefingTileView evaluation (lead and non-lead)
+        let tileResting = BriefingTileView(
+            article: sampleArticle, eventSummary: nil, citedFact: nil,
+            state: BriefingTileState(isLead: false, isDeveloping: false),
+            onOpen: {}, onToggleRead: {}, onToggleSave: {}
+        )
+        _ = tileResting.body
+        let tileDeveloping = BriefingTileView(
+            article: sampleArticle, eventSummary: nil, citedFact: nil,
+            state: BriefingTileState(isLead: true, isDeveloping: true),
+            onOpen: {}, onToggleRead: {}, onToggleSave: {}
+        )
+        _ = tileDeveloping.body
+
+        // 4. BriefingRegionsModuleView & BriefingRegionTilesModuleView evaluation
+        if let regionsData = BriefingRegionsData.captureFixture {
+            var actions = BriefingActions(
+                onOpenArticle: { _ in }, onOpenEvent: { _ in }, onStartNewBriefing: {}, onBackToToday: {}
+            )
+            actions.onSelectRegion = { _ in }
+            let modView = BriefingRegionsModuleView(data: regionsData, filter: BriefingBoardFilter(), actions: actions)
+            _ = modView.body
+            let modFiltered = BriefingRegionsModuleView(
+                data: regionsData, filter: BriefingBoardFilter(region: .europe), actions: actions)
+            _ = modFiltered.body
+            let tilesView = BriefingRegionTilesModuleView(
+                data: regionsData, filter: BriefingBoardFilter(), actions: actions)
+            _ = tilesView.body
+            let tilesFiltered = BriefingRegionTilesModuleView(
+                data: regionsData, filter: BriefingBoardFilter(region: .europe), actions: actions)
+            _ = tilesFiltered.body
+        }
+
+        // 5. BriefingPriorityModuleView evaluation
+        if let priorityData = BriefingPriorityData.captureFixture {
+            let actions = BriefingActions(
+                onOpenArticle: { _ in }, onOpenEvent: { _ in }, onStartNewBriefing: {}, onBackToToday: {}
+            )
+            let priorityView = BriefingPriorityModuleView(
+                data: priorityData, filter: BriefingBoardFilter(), actions: actions)
+            _ = priorityView.body
+        }
+
+        // 6. BriefingFootprintModuleView evaluation
+        let footprintData = BriefingFootprintData.make([
+            ("Reuters", "Independent reporting by Reuters."),
+            ("The Guardian", "Associated Press dispatch republished."),
+            ("BBC News", "BBC original reporting."),
+        ])
+        let actions = BriefingActions(
+            onOpenArticle: { _ in }, onOpenEvent: { _ in }, onStartNewBriefing: {}, onBackToToday: {}
+        )
+        let footprintView = BriefingFootprintModuleView(
+            data: footprintData, filter: BriefingBoardFilter(), actions: actions)
+        _ = footprintView.body
+
+        // 7. CardDateText & CoverageRowLabel evaluation
+        let cardDate = CardDateText(article: sampleArticle)
+        _ = cardDate.body
+        let coverageLabel1 = CoverageRowLabel(
+            coverageText: "4 publishers", latestDate: now, hasUpdate: true,
+            isExpanded: false, isGrid: false, now: now
+        )
+        _ = coverageLabel1.body
+        let coverageLabel2 = CoverageRowLabel(
+            coverageText: "4 publishers", latestDate: nil, hasUpdate: false,
+            isExpanded: true, isGrid: true, now: now
+        )
+        _ = coverageLabel2.body
+
+        // 8. EventOverviewReaderView evaluation
+        let testOverview = EventOverviewDocument(
+            eventID: "ev-test",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "input"),
+            content: OverviewContent(
+                title: "Headline statement",
+                summary: "First summary sentence. Second summary sentence.",
+                facts: [
+                    OverviewFact(id: "f-1", text: "Important fact without period", citationIDs: ["cit-1"])
+                ],
+                citations: [
+                    OverviewCitation(
+                        id: "cit-1", articleID: sampleArticle.id, passageID: "pass-1",
+                        passageFingerprint: "fg-1", quote: "A direct quote.",
+                        source: OverviewSourceMetadata(
+                            title: sampleArticle.title, name: sampleArticle.source, url: sampleArticle.link,
+                            publishedAt: now
+                        )
+                    )
+                ],
+                evidenceSections: OverviewEvidenceSections(
+                    perspectives: [
+                        OverviewPerspective(
+                            id: "p-1", participant: "Minister of Energy",
+                            position: "Supply commitments will be met,", citationIDs: ["cit-1"],
+                            sourcePublisher: "The Guardian", originalWireSource: "Reuters"
+                        )
+                    ]
+                )
+            ),
+            provenance: OverviewProvenance(memberArticleIDs: [sampleArticle.id], kind: .synthesized)
+        )
+        let readerView = EventOverviewReaderView(
+            overview: testOverview, memberArticles: [sampleArticle],
+            onSelectArticle: { _ in }, onSelectCitation: { _, _ in }
+        )
+        _ = readerView.body
+
+        // 9. All TensionMacroRegion briefingRegion and briefingTitle cases
+        check(TensionMacroRegion.middleEastNorthAfrica.briefingRegion == .middleEastNorthAfrica, "MENA maps to MENA")
+        check(TensionMacroRegion.subSaharanAfrica.briefingRegion == .middleEastNorthAfrica, "Africa maps to MENA")
+        check(TensionMacroRegion.europe.briefingRegion == .europe, "Europe maps to Europe")
+        check(TensionMacroRegion.northAmerica.briefingRegion == .northAmerica, "NA maps to NA")
+        check(TensionMacroRegion.latinAmerica.briefingRegion == .latinAmerica, "LATAM maps to LATAM")
+        check(TensionMacroRegion.southAsia.briefingRegion == .southAsia, "South Asia maps to APAC")
+        check(TensionMacroRegion.eastSoutheastAsia.briefingRegion == .southAsia, "East Asia maps to APAC")
+        check(TensionMacroRegion.oceania.briefingRegion == .southAsia, "Oceania maps to APAC")
+
+        check(TensionMacroRegion.subSaharanAfrica.briefingTitle == "Middle East and Africa", "Africa title")
+        check(TensionMacroRegion.eastSoutheastAsia.briefingTitle == "APAC", "East Asia title")
+        check(TensionMacroRegion.oceania.briefingTitle == "APAC", "Oceania title")
+
+        // 10. BriefingPriorityData momentum velocity branches
+        let t0 = now
+        let burstDates = [t0.addingTimeInterval(-1800), t0.addingTimeInterval(-3600)]
+        check(BriefingPriorityData.momentum(dates: burstDates, now: t0) == .rising, "Burst with no prior is rising")
+        let priorDates = (7...10).map { t0.addingTimeInterval(-Double($0) * 3600) }
+        check(
+            BriefingPriorityData.momentum(dates: burstDates + priorDates, now: t0) == .steady,
+            "Burst with larger prior window is steady, not fading"
+        )
+        let fadingDates = [t0.addingTimeInterval(-4 * 3600)] + (7...9).map { t0.addingTimeInterval(-Double($0) * 3600) }
+        check(
+            BriefingPriorityData.momentum(dates: fadingDates, now: t0) == .fading,
+            "No burst and recent < before is fading")
+
+        // 11. BriefingPriorityData assessImportance without originalCount inflation
+        let routineArticle = FeedArticle(
+            storedID: "art-routine", title: "Routine bilateral trade talks open in Geneva",
+            link: "https://example.com/routine", guid: "routine",
+            description:
+                "Delegates began the second round of bilateral consultations on Thursday with plenary sessions.",
+            pubDate: now, source: "Publisher"
+        )
+        check(
+            BriefingPriorityData.assessImportance(
+                publisherCount: 8, originalCount: nil, representative: routineArticle) == .notable,
+            "Missing originalCount with 8 publishers yields Notable (score 3), not Major"
+        )
+        check(
+            BriefingPriorityData.assessImportance(
+                publisherCount: 8, originalCount: 5, representative: routineArticle) == .major,
+            "Confirmed 5 original reports with 8 publishers yields Major (score 4)"
+        )
+
+        // 12. Hyphenated compound place names with multi-word components
+        let nyFlights = BriefingRegion.regions(in: "New York-London flights resume after snow clearing")
+        check(nyFlights.contains(.northAmerica), "New York before hyphen is North America")
+        check(nyFlights.contains(.europe), "London after hyphen is Europe")
+
+        let londonNy = BriefingRegion.regions(in: "London-New York flights resume")
+        check(londonNy.contains(.europe), "London before hyphen is Europe")
+        check(londonNy.contains(.northAmerica), "New York after hyphen is North America")
+
+        // 13. OverviewComposer.ensureTerminalPeriod all punctuation branches
+        check(OverviewComposer.ensureTerminalPeriod("") == "", "Empty string unchanged")
+        check(
+            OverviewComposer.ensureTerminalPeriod("Ended with comma,") == "Ended with comma.",
+            "Trailing comma to period")
+        check(
+            OverviewComposer.ensureTerminalPeriod("Ended with semicolon;") == "Ended with semicolon.",
+            "Trailing semicolon to period")
+        check(
+            OverviewComposer.ensureTerminalPeriod("Ended with colon:") == "Ended with colon.",
+            "Trailing colon to period")
+        check(OverviewComposer.ensureTerminalPeriod("Question?") == "Question?", "Question mark preserved")
+        check(OverviewComposer.ensureTerminalPeriod("Exclamation!") == "Exclamation!", "Exclamation mark preserved")
+        check(
+            OverviewComposer.ensureTerminalPeriod("\"Quoted sentence.\"") == "\"Quoted sentence.\"",
+            "Quoted terminal preserved")
+        check(
+            OverviewComposer.ensureTerminalPeriod("\"Quoted sentence,\"") == "\"Quoted sentence\".",
+            "Quoted comma converted to period")
+        check(
+            OverviewComposer.ensureTerminalPeriod("\"Quoted sentence\"") == "\"Quoted sentence\".",
+            "Unpunctuated quote gets terminal")
+
+        // 14. EventOverviewReaderView display deduplication & cleanDisplayPosition
+        check(
+            EventOverviewReaderView.cleanDisplayPosition("Text with comma,") == "Text with comma",
+            "Trailing comma stripped")
+        check(
+            EventOverviewReaderView.cleanDisplayPosition("Text with colon:") == "Text with colon",
+            "Trailing colon stripped")
+        check(
+            EventOverviewReaderView.cleanDisplayPosition("Text with semicolon;") == "Text with semicolon",
+            "Trailing semicolon stripped")
+
+        let dupPerspectives = [
+            OverviewPerspective(
+                id: "1", participant: "Mr. Nawrocki", position: "First valid statement.", citationIDs: ["c1"]),
+            OverviewPerspective(
+                id: "2", participant: "Nawrocki", position: "Second valid statement.", citationIDs: ["c1"]),
+            OverviewPerspective(
+                id: "3", participant: "Speaker", position: "And everything is clear,", citationIDs: ["c1"]),
+            OverviewPerspective(
+                id: "4", participant: "Haley", position: "what few people were willing to say,\" Trump said",
+                citationIDs: ["c1"]),
+            OverviewPerspective(
+                id: "5", participant: "Justice Department", position: "Indictment unsealed.", citationIDs: ["c1"]),
+            OverviewPerspective(
+                id: "6", participant: "State Department", position: "Sanctions announced.", citationIDs: ["c1"]),
+        ]
+        let deduped = EventOverviewReaderView.deduplicateDisplayPerspectives(dupPerspectives)
+        check(deduped.contains { $0.participant == "Mr. Nawrocki" }, "Mr. Nawrocki kept")
+        check(!deduped.contains { $0.participant == "Nawrocki" }, "Duplicate Nawrocki dropped")
+        check(!deduped.contains { $0.position.contains("And everything is clear") }, "Conversational fragment dropped")
+        check(!deduped.contains { $0.participant == "Haley" }, "Leaked quotation tail dropped")
+        check(deduped.contains { $0.participant == "Justice Department" }, "Justice Department kept")
+        check(deduped.contains { $0.participant == "State Department" }, "State Department kept")
+
+        // 15. BriefingDriversData.Row.regionsText
+        let driversRow = BriefingDriversData.Row(
+            type: .armedConflict, severity: 1.0, publishers: 4, publisherRegions: [.europe, .middleEastNorthAfrica]
+        )
+        check(
+            driversRow.regionsText == "Publishers in Middle East and Africa, Europe", "Drivers regions text formatted")
+        let emptyDriversRow = BriefingDriversData.Row(
+            type: .armedConflict, severity: 1.0, publishers: 4, publisherRegions: []
+        )
+        check(emptyDriversRow.regionsText == nil, "Empty drivers regions text is nil")
     }
 }

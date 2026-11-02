@@ -39,7 +39,37 @@ struct BriefingRegionsData: Equatable, Sendable {
 
     /// The entry's regions: its reports' countries when known, else the countries its headline names.
     func regions(of entry: FeedEntry) -> Set<TensionMacroRegion> {
-        regionsByEntry[entry.id] ?? BriefingRegion.regions(of: entry.representative)
+        let raw = regionsByEntry[entry.id] ?? BriefingRegion.regions(of: entry.representative)
+        return Set(raw.map(\.briefingRegion))
+    }
+
+    /// Resolves an entry's Briefing regions by prioritizing headline country/region mentions over description mentions,
+    /// so secondary mentions in body text (e.g. "A US-brokered ceasefire in Ukraine...") never misclassify a story.
+    static func resolveRegions(
+        for entry: FeedEntry, features: [String: EventFeatures]
+    ) -> Set<TensionMacroRegion> {
+        let titleCodes = (features[entry.representative.id]?.titlePlaces ?? []).filter { $0.hasPrefix("@") }
+        let repHeadline = BriefingRegion.headlineRegions(of: entry.representative).union(
+            titleCodes.compactMap { BriefingRegion.region(code: String($0.dropFirst())) })
+        if !repHeadline.isEmpty {
+            return Set(repHeadline.map(\.briefingRegion))
+        }
+        var memberHeadline = Set<TensionMacroRegion>()
+        for article in entry.visibleArticles {
+            let codes = (features[article.id]?.titlePlaces ?? []).filter { $0.hasPrefix("@") }
+            memberHeadline.formUnion(BriefingRegion.headlineRegions(of: article))
+            memberHeadline.formUnion(codes.compactMap { BriefingRegion.region(code: String($0.dropFirst())) })
+        }
+        if !memberHeadline.isEmpty {
+            return Set(memberHeadline.map(\.briefingRegion))
+        }
+        let descRegions = BriefingRegion.regions(of: entry.representative)
+        if !descRegions.isEmpty {
+            return Set(descRegions.map(\.briefingRegion))
+        }
+        let bodyCodes = (features[entry.representative.id]?.countries ?? [])
+        let bodyRegions = Set(bodyCodes.compactMap { BriefingRegion.region(code: String($0.dropFirst())) })
+        return Set(bodyRegions.map(\.briefingRegion))
     }
 
     /// Groups the entries by region; nil when no entry names a region.
@@ -47,12 +77,20 @@ struct BriefingRegionsData: Equatable, Sendable {
         entries: [FeedEntry], regionsByEntry: [String: Set<TensionMacroRegion>],
         facts: [String: BriefingCitedFact], now: Date
     ) -> Self? {
-        var grouped: [TensionMacroRegion: [FeedEntry]] = [:]
-        for entry in entries {
-            for region in regionsByEntry[entry.id] ?? [] { grouped[region, default: []].append(entry) }
+        var normalizedMap: [String: Set<TensionMacroRegion>] = [:]
+        for (id, set) in regionsByEntry {
+            normalizedMap[id] = Set(set.map(\.briefingRegion))
         }
-        let rows = TensionMacroRegion.allCases.compactMap { region -> Row? in
-            guard let stories = grouped[region] else { return nil }
+        var grouped: [TensionMacroRegion: [FeedEntry]] = [:]
+        var seenInRegion: [TensionMacroRegion: Set<String>] = [:]
+        for entry in entries {
+            for region in normalizedMap[entry.id] ?? []
+            where seenInRegion[region, default: []].insert(entry.id).inserted {
+                grouped[region, default: []].append(entry)
+            }
+        }
+        let rows = TensionMacroRegion.briefingRegions.compactMap { region -> Row? in
+            guard let stories = grouped[region], !stories.isEmpty else { return nil }
             let ordered = stories.enumerated().sorted {
                 $0.element.publisherCount != $1.element.publisherCount
                     ? $0.element.publisherCount > $1.element.publisherCount : $0.offset < $1.offset
@@ -65,22 +103,66 @@ struct BriefingRegionsData: Equatable, Sendable {
         }
         .map(\.element)
         guard !rows.isEmpty else { return nil }
-        return Self(rows: rows, regionsByEntry: regionsByEntry, facts: facts, now: now)
+        return Self(rows: rows, regionsByEntry: normalizedMap, facts: facts, now: now)
     }
 
-    /// nil hides the module.
+    /// nil hides the module. Supplements the finite briefing edition with recent library stories so active regions
+    /// are well-populated rather than showing a single isolated article.
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
+        var candidateEntries = context.entries
+        var seenEntryIDs = Set(context.entries.map(\.id))
+        var seenArticleIDs = Set(context.entries.flatMap { $0.visibleArticles.map(\.id) })
+        let window = context.now.addingTimeInterval(-72 * 3600)...context.now
+        let unreadPool =
+            (try? await store.database.fetchArticles(
+                isRead: false, limit: 250, publicationWindow: window, muting: store.muting)) ?? []
+        let fallbackPool: [FeedArticle]
+        if unreadPool.count < 60 {
+            fallbackPool =
+                (try? await store.database.fetchArticles(
+                    limit: 250, publicationWindow: window, muting: store.muting)) ?? []
+        } else {
+            fallbackPool = []
+        }
+        var extraArticles: [FeedArticle] = []
+        for article in unreadPool + fallbackPool where seenArticleIDs.insert(article.id).inserted {
+            extraArticles.append(article)
+        }
+        if !extraArticles.isEmpty {
+            let extraEvents = (try? await store.eventFeedSummaries(for: extraArticles.map(\.id))) ?? []
+            let extraSnapshot = FeedSnapshot(articles: extraArticles, events: extraEvents)
+            for entry in extraSnapshot.entries(.events) where seenEntryIDs.insert(entry.id).inserted {
+                candidateEntries.append(entry)
+            }
+        }
+
         let features =
             (try? await store.database.fetchArticleFeatures(
-                articleIDs: context.entries.flatMap { $0.visibleArticles.map(\.id) },
+                articleIDs: candidateEntries.flatMap { $0.visibleArticles.map(\.id) },
                 version: EventFeatures.storageVersion)) ?? [:]
         var map: [String: Set<TensionMacroRegion>] = [:]
-        for entry in context.entries {
-            let codes = entry.visibleArticles.flatMap { features[$0.id]?.countries ?? [] }
-            let regions = Set(codes.compactMap { BriefingRegion.region(code: String($0.dropFirst())) })
-            map[entry.id] = regions.isEmpty ? BriefingRegion.regions(of: entry.representative) : regions
+        let editionIDs = Set(context.entries.map(\.id))
+        var regionCounts: [TensionMacroRegion: Int] = [:]
+        var selectedEntries: [FeedEntry] = []
+
+        for entry in candidateEntries {
+            let resolved = resolveRegions(for: entry, features: features)
+            guard !resolved.isEmpty else { continue }
+            let isEditionEntry = editionIDs.contains(entry.id)
+            let needsSupplement = resolved.contains { (regionCounts[$0] ?? 0) < Metrics.maxSupplementalPerRegion }
+            guard isEditionEntry || needsSupplement else { continue }
+            let filteredRegions =
+                isEditionEntry
+                ? resolved
+                : Set(resolved.filter { (regionCounts[$0] ?? 0) < Metrics.maxSupplementalPerRegion })
+            guard !filteredRegions.isEmpty else { continue }
+            map[entry.id] = filteredRegions
+            selectedEntries.append(entry)
+            for region in filteredRegions {
+                regionCounts[region, default: 0] += 1
+            }
         }
-        guard let grouped = make(entries: context.entries, regionsByEntry: map, facts: [:], now: context.now) else {
+        guard let grouped = make(entries: selectedEntries, regionsByEntry: map, facts: [:], now: context.now) else {
             return nil
         }
         var facts: [String: BriefingCitedFact] = [:]
@@ -89,7 +171,7 @@ struct BriefingRegionsData: Equatable, Sendable {
                 facts[entry.id] = await BriefingFactExtractor.extractFact(for: entry, store: store)
             }
         }
-        return Self(rows: grouped.rows, regionsByEntry: map, facts: facts, now: context.now)
+        return Self(rows: grouped.rows, regionsByEntry: grouped.regionsByEntry, facts: facts, now: context.now)
     }
 
     /// Sample data for `Tests/OverviewCaptures.swift`.
@@ -109,21 +191,45 @@ struct BriefingRegionsData: Equatable, Sendable {
                 fact: "Delegations met for four hours on Thursday.",
                 region: .middleEastNorthAfrica),
             SampleStory(
-                title: "Protest bans extended in two capitals", publishers: 5, hoursAgo: 3,
+                title: "Protest bans extended in two European capitals", publishers: 5, hoursAgo: 3,
                 fact: "The ban now runs until the end of the month.",
                 region: .europe),
             SampleStory(
-                title: "Containment perimeter widens in Uganda", publishers: 2, hoursAgo: 4,
-                fact: "Cases were confirmed in two more districts.",
-                region: .subSaharanAfrica),
+                title: "Grid operators reinforce Baltic power links in Poland", publishers: 4, hoursAgo: 3.5,
+                fact: "Reserve capacity was activated across three interconnectors.",
+                region: .europe),
             SampleStory(
-                title: "Export rules on critical minerals tighten in China", publishers: 2, hoursAgo: 5,
+                title: "Rail freight talks resume in Berlin", publishers: 3, hoursAgo: 4,
+                fact: "Operators agreed to a 48-hour cooling-off period.",
+                region: .europe),
+            SampleStory(
+                title: "Export rules on critical minerals tighten in China", publishers: 5, hoursAgo: 4.5,
                 fact: "Licences are now required for exports.",
-                region: .eastSoutheastAsia),
+                region: .southAsia),
             SampleStory(
-                title: "Cyber incident at a regional utility in Canada", publishers: 1, hoursAgo: 6,
-                fact: "Billing systems were taken offline.",
+                title: "Semiconductor investment package clears parliament in Japan", publishers: 4, hoursAgo: 5,
+                fact: "Subsidies target domestic foundry capacity.",
+                region: .southAsia),
+            SampleStory(
+                title: "Reserve Bank holds benchmark rate steady in Australia", publishers: 3, hoursAgo: 5.5,
+                fact: "Policymakers cited easing goods inflation.",
+                region: .southAsia),
+            SampleStory(
+                title: "Cross-border grid reliability compact signed in Ottawa", publishers: 4, hoursAgo: 6,
+                fact: "Utilities in the US and Canada will share reserve margins.",
                 region: .northAmerica),
+            SampleStory(
+                title: "Port automation agreement reached on US East Coast", publishers: 3, hoursAgo: 6.5,
+                fact: "Cargo terminals remained open across six ports.",
+                region: .northAmerica),
+            SampleStory(
+                title: "Central bank announces inflation target review in Brazil", publishers: 3, hoursAgo: 7,
+                fact: "Policy bands remain unchanged through year-end.",
+                region: .latinAmerica),
+            SampleStory(
+                title: "Nearshoring rail corridor expands in Mexico", publishers: 2, hoursAgo: 7.5,
+                fact: "Freight capacity rose 14% along the northern border.",
+                region: .latinAmerica),
         ]
         var entries: [FeedEntry] = []
         var map: [String: Set<TensionMacroRegion>] = [:]
@@ -159,17 +265,37 @@ struct BriefingRegionsData: Equatable, Sendable {
 }
 
 extension TensionMacroRegion {
+    /// Canonical five-region taxonomy displayed on the Briefing board:
+    /// Europe, North America (US & Canada), APAC, Middle East and Africa, and LATAM.
+    static let briefingRegions: [TensionMacroRegion] = [
+        .middleEastNorthAfrica, .europe, .northAmerica, .latinAmerica, .southAsia,
+    ]
+
+    /// Maps any legacy eight-region value onto the five canonical Briefing regions.
+    var briefingRegion: TensionMacroRegion {
+        switch self {
+        case .middleEastNorthAfrica, .subSaharanAfrica:
+            return .middleEastNorthAfrica
+        case .europe:
+            return .europe
+        case .northAmerica:
+            return .northAmerica
+        case .latinAmerica:
+            return .latinAmerica
+        case .southAsia, .eastSoutheastAsia, .oceania:
+            return .southAsia
+        }
+    }
+
     /// The region's name on the board.
     var briefingTitle: String {
-        switch self {
-        case .middleEastNorthAfrica: return "Middle East & North Africa"
+        switch briefingRegion {
+        case .middleEastNorthAfrica: return "Middle East and Africa"
         case .europe: return "Europe"
-        case .subSaharanAfrica: return "Sub-Saharan Africa"
-        case .southAsia: return "South Asia"
-        case .eastSoutheastAsia: return "East & Southeast Asia"
+        case .southAsia: return "APAC"
         case .northAmerica: return "North America"
-        case .latinAmerica: return "Latin America"
-        case .oceania: return "Oceania"
+        case .latinAmerica: return "LATAM"
+        default: return "World"
         }
     }
 }
@@ -186,7 +312,8 @@ private struct SampleStory {
 private enum Metrics {
     static let levelDot: CGFloat = 8
     static let tilesPerRegion = 3
-    static let regionsWithoutSelection = 3
+    static let regionsWithoutSelection = 5
+    static let maxSupplementalPerRegion = 6
 }
 
 struct BriefingRegionsModuleView: View {

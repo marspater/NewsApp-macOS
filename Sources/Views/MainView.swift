@@ -585,7 +585,7 @@ private struct ArchiveSearchToolbar<Suggestions: View>: ViewModifier {
                 Label(token.displayName, systemImage: token.systemImage)
             }
             .searchSuggestions { suggestions }
-            .focusedSceneValue(\.archiveSearch, presentSearch)
+            .focusedSceneValue(\.archiveSearch, FocusedCommandAction(perform: presentSearch))
             .background(
                 CompactArchiveSearch(expanded: searchPresented || !archiveQuery.isEmpty, animates: !reduceMotion)
                     .frame(width: 0, height: 0)
@@ -600,6 +600,7 @@ private struct CompactArchiveSearch: NSViewRepresentable {
     let animates: Bool
     func makeNSView(context _: Context) -> SearchSizer { SearchSizer() }
     func updateNSView(_ view: SearchSizer, context _: Context) {
+        guard view.expanded != expanded || view.animates != animates else { return }
         view.expanded = expanded
         view.animates = animates
         view.scheduleUpdate()
@@ -628,23 +629,32 @@ private struct CompactArchiveSearch: NSViewRepresentable {
                     lessThanOrEqualToConstant: AppLayout.archiveSearchCollapsedWidth)
                 width?.priority = .init(999)
             }
+            let shouldCollapse = !expanded
+            guard width?.isActive != shouldCollapse else { return }
             if window != nil, animates {
                 NSAnimationContext.runAnimationGroup { context in
                     context.duration = 0.22
                     context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
                     context.allowsImplicitAnimation = true
-                    width?.isActive = !expanded
+                    width?.isActive = shouldCollapse
                 }
             } else {
-                width?.isActive = !expanded
+                width?.isActive = shouldCollapse
             }
         }
     }
 }
 
-private struct ArchiveSearchKey: FocusedValueKey { typealias Value = () -> Void }
+/// A stateless focused command action: compares equal across renders so `.focusedSceneValue` does not trigger an
+/// infinite `App` -> `Window` re-evaluation loop when the window is key (#778).
+struct FocusedCommandAction: Equatable {
+    let perform: () -> Void
+    static func == (lhs: Self, rhs: Self) -> Bool { true }
+}
+
+private struct ArchiveSearchKey: FocusedValueKey { typealias Value = FocusedCommandAction }
 extension FocusedValues {
-    var archiveSearch: (() -> Void)? {
+    var archiveSearch: FocusedCommandAction? {
         get { self[ArchiveSearchKey.self] }
         set { self[ArchiveSearchKey.self] = newValue }
     }

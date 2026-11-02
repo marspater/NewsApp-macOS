@@ -90,6 +90,35 @@ struct OverviewPerspectivesValidator: Sendable {
         return dayNames.contains(first.trimmingCharacters(in: punctuation))
     }
 
+    private static let fragmentLeadConjunctions: Set<String> = [
+        "and", "but", "or", "so", "yet", "yes", "oh", "okay", "ok", "sure",
+    ]
+
+    private static let genericFragmentWords: Set<String> = [
+        "and", "but", "or", "so", "yet", "the", "this", "that", "these", "those", "everything", "nothing",
+        "something", "anything", "everyone", "anyone", "clear", "good", "fine", "true", "false", "right",
+        "wrong", "here", "there", "very", "much", "more", "most", "some", "many", "have", "been", "were",
+        "will", "would", "could", "should", "what", "when", "where", "which", "who",
+    ]
+
+    /// Rejects short conversational quips (e.g. "And everything is clear,") that carry no standalone position out of context.
+    static func isConversationalFragment(_ position: String) -> Bool {
+        let words = position.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        guard !words.isEmpty else { return true }
+        if words.count < 6, let first = words.first, fragmentLeadConjunctions.contains(first) {
+            return true
+        }
+        if words.count <= 5 {
+            let substantive = words.filter { $0.count >= 4 && !genericFragmentWords.contains($0) }
+            if substantive.isEmpty {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Evaluates whether a participant string represents a vague anonymous generality.
     static func isVagueParticipant(_ participant: String) -> Bool {
         let cleaned = participant.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -158,7 +187,7 @@ struct OverviewPerspectivesValidator: Sendable {
         }
 
         let positionCleaned = perspective.position.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard positionCleaned.count >= 5 else {
+        guard positionCleaned.count >= 5, !isConversationalFragment(positionCleaned) else {
             return OverviewPerspectiveValidationResult(
                 isValid: false,
                 rejectionReason: "Position statement is empty or too short"
@@ -229,6 +258,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         let articleID: String
         let originalWireSource: String?
         let sourcePublisher: String?
+        let isDirectQuote: Bool
     }
 
     /// Extracts validated attributed perspectives from event evidence passages.
@@ -315,7 +345,35 @@ struct OverviewPerspectivesExtractor: Sendable {
             }
             candidates.append(contentsOf: passageCandidates)
         }
-        return candidates
+        return filterCandidatesPerArticle(candidates)
+    }
+
+    /// Limits single-article extraction so one article cannot emit multiple unquoted paraphrases as separate perspectives.
+    /// Direct quotations of distinct speakers within an article are preserved; if an article has direct quotations,
+    /// unquoted paraphrases from that same article are dropped. If an article has no direct quotations, at most one
+    /// unquoted attribution is kept from it.
+    private static func filterCandidatesPerArticle(_ candidates: [ExtractedCandidate]) -> [ExtractedCandidate] {
+        var articlesWithDirectQuotes = Set<String>()
+        for cand in candidates
+        where cand.isDirectQuote && !OverviewPerspectivesValidator.isVagueParticipant(cand.participant) {
+            articlesWithDirectQuotes.insert(cand.articleID)
+        }
+        var unquotedArticleSeen = Set<String>()
+        var filtered: [ExtractedCandidate] = []
+        for cand in candidates {
+            if OverviewPerspectivesValidator.isVagueParticipant(cand.participant) {
+                filtered.append(cand)
+                continue
+            }
+            if cand.isDirectQuote {
+                filtered.append(cand)
+            } else if !articlesWithDirectQuotes.contains(cand.articleID) {
+                if unquotedArticleSeen.insert(cand.articleID).inserted {
+                    filtered.append(cand)
+                }
+            }
+        }
+        return filtered
     }
 
     /// Rule 3: reprints are not presented as independent voices. Vague speakers are dropped; statements from the same
@@ -339,17 +397,21 @@ struct OverviewPerspectivesExtractor: Sendable {
         return collapsed
     }
 
-    /// The voice's first statement, with the longer participant name and any wire or publisher credit.
+    /// The voice's chosen statement (preferring a direct quotation over an unquoted paraphrase), keeping the
+    /// chosen candidate's provenance along with the longer participant name and any wire or publisher credit.
     private static func merged(_ existing: ExtractedCandidate, with cand: ExtractedCandidate) -> ExtractedCandidate {
-        ExtractedCandidate(
+        let chosen = (!existing.isDirectQuote && cand.isDirectQuote) ? cand : existing
+        let other = (!existing.isDirectQuote && cand.isDirectQuote) ? existing : cand
+        return ExtractedCandidate(
             participant: existing.participant.count >= cand.participant.count ? existing.participant : cand.participant,
-            position: existing.position,
-            quote: existing.quote,
-            citationID: existing.citationID,
-            passageID: existing.passageID,
-            articleID: existing.articleID,
-            originalWireSource: existing.originalWireSource ?? cand.originalWireSource,
-            sourcePublisher: existing.sourcePublisher ?? cand.sourcePublisher
+            position: chosen.position,
+            quote: chosen.quote,
+            citationID: chosen.citationID,
+            passageID: chosen.passageID,
+            articleID: chosen.articleID,
+            originalWireSource: chosen.originalWireSource ?? other.originalWireSource,
+            sourcePublisher: chosen.sourcePublisher ?? other.sourcePublisher,
+            isDirectQuote: existing.isDirectQuote || cand.isDirectQuote
         )
     }
 
@@ -392,12 +454,44 @@ struct OverviewPerspectivesExtractor: Sendable {
         return speechVerbs?.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
+    private static let leadingTitlesToStrip: Set<String> = [
+        "mr", "mrs", "ms", "dr", "prof", "sir", "president", "prime", "minister", "chancellor",
+        "senator", "sen", "rep", "representative", "governor", "gov", "mayor", "judge", "justice",
+        "general", "gen", "colonel", "col", "spokesperson", "spokesman", "spokeswoman",
+    ]
+
+    /// Canonical lowercase name tokens with honorifics/titles stripped so "Mr. Nawrocki" and "Nawrocki" match.
+    static func canonicalParticipantTokens(_ participant: String) -> [String] {
+        let allTokens = participant.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        let stripped = allTokens.filter { !leadingTitlesToStrip.contains($0) }
+        return stripped.isEmpty ? allTokens : stripped
+    }
+
+    /// Evaluates whether two canonical token lists refer to the same speaker, avoiding collapsing distinct
+    /// institutions that only share a generic head noun (e.g. "Justice Department" vs "State Department").
+    static func isSameCanonicalSpeaker(_ lhs: [String], _ rhs: [String]) -> Bool {
+        guard !lhs.isEmpty, !rhs.isEmpty else { return false }
+        if lhs == rhs { return true }
+        guard let last = lhs.last, last == rhs.last, !institutionNouns.contains(last) else { return false }
+        return Set(lhs).isSubset(of: Set(rhs)) || Set(rhs).isSubset(of: Set(lhs))
+    }
+
     /// Evaluates whether two extracted candidates represent the same voice or syndicated reprint.
     private static func isSameVoice(existing: ExtractedCandidate, candidate: ExtractedCandidate) -> Bool {
         let p1 = existing.participant.lowercased()
         let p2 = candidate.participant.lowercased()
+        let t1 = canonicalParticipantTokens(existing.participant)
+        let t2 = canonicalParticipantTokens(candidate.participant)
+        let sameCanonical = isSameCanonicalSpeaker(t1, t2)
 
-        let sameParticipant = p1 == p2 || p1.contains(p2) || p2.contains(p1)
+        let sameParticipant = sameCanonical || p1 == p2 || p1.contains(p2) || p2.contains(p1)
+
+        // Same participant (e.g., "Mr. Nawrocki" and "Nawrocki") always collapses into one voice per overview.
+        if sameParticipant {
+            return true
+        }
 
         let pos1 = normalizedTokens(existing.position)
         let pos2 = normalizedTokens(candidate.position)
@@ -411,14 +505,9 @@ struct OverviewPerspectivesExtractor: Sendable {
             positionOverlap = false
         }
 
-        // Case 1: Same participant and overlapping position
-        if sameParticipant && positionOverlap {
-            return true
-        }
-
-        // Case 2: Identical or strongly overlapping position statement (syndicated quote)
+        // Identical or strongly overlapping position statement (syndicated quote)
         if positionOverlap && (pos1.count >= 4 || pos2.count >= 4) {
-            if existing.originalWireSource != nil || candidate.originalWireSource != nil || sameParticipant {
+            if existing.originalWireSource != nil || candidate.originalWireSource != nil {
                 return true
             }
         }
@@ -474,7 +563,9 @@ struct OverviewPerspectivesExtractor: Sendable {
         let participant = #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})"#
         // When and where the remark was made: "on Thursday night", "Tuesday", "in a statement", "at a news conference".
         let time =
-            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|this year|last year|earlier this year|earlier this month|earlier today|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+in\s+(?:19|20)\d\d)?(?:\s+(?:in a statement|in an interview|in a report|in a post|in a letter|in a video|in a speech|in a press release|at a news conference|during a news conference|on (?:X|Facebook|Telegram|social media))[^:,.]{0,30})?[:,]?"#
+            #"(?:\s+(?:(?:on|late on|earlier on|late|early)\s+)?(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|this week|last week|this month|last month|this year|last year|earlier this year|earlier this month|earlier today|earlier|later)(?:\s+(?:night|morning|evening|afternoon))?(?:\s+\([^)]{1,30}\))?)?(?:\s+in\s+(?:19|20)\d\d)?(?:\s+(?:in a statement|in an interview|in a report|in a post|in a letter|in a video|in a speech|in a press release|at a news conference|during a news conference|on (?:X|Facebook|Telegram|social media)))?[:,]?"#
+        let nonTerminalDot =
+            #"(?:\.(?=\d)|(?<=\b\p{Lu})\.|(?<=\b(?:Jan|Feb|Mar|Apr|Aug|Sep|Sept|Oct|Nov|Dec|Mr|Mrs|Ms|Dr|St|No|Prof|Gov|Sen|Rep|Gen|Col|Lt|vs))\.)"#
         var quoted: [Attribution?] = []
         for quote in [#"\"([^\"“”]{10,400})\""#, #"“([^\"“”]{10,400})”"#] {
             let verbFirst = quote + #",?\s*"# + verbs + #"\s+"# + participant
@@ -493,15 +584,15 @@ struct OverviewPerspectivesExtractor: Sendable {
         }
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         let patternSpeakerFirst =
-            #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+((?:[^.\n]|\.(?=\d)){15,200})"#
+            #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+((?:[^.\n]|\#(nonTerminalDot)){15,200})"#
         // Pattern 2b: reported speech without an adjacent "that" (#313): "Foreign Secretary Ed Miliband said his
         // country does not accept…", "Édouard Geffray told TF1 television on Thursday night that…". The speaker
-        // excludes full stops, so it cannot reach back into the previous sentence. The statement keeps decimals ("£8.9bn").
+        // excludes full stops, so it cannot reach back into the previous sentence. The statement keeps decimals ("£8.9bn") and abbreviations ("Mr.").
         let patternReported =
-            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says|say)\s+(?:at|during|in|on)\s+[^,.\n"“”]{1,40}?\s+that\s+|(?:said|says|say)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?|\p{Ll}+(?:\s+\p{Ll}+)?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can|late|early|earlier|later|and|but|a\s+day\s+after)\b|as\b(?!\s+(?:many|much|few|little|far|long|soon|well)\b)|\p{Ll}+ing\b)([\p{L}0-9“\"](?:[^.\n]|\.(?=\d)){15,200})"#
+            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says|say)\s+(?:at|during|in|on)\s+[^,.\n"“”]{1,40}?\s+that\s+|(?:said|says|say)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?|\p{Ll}+(?:\s+\p{Ll}+)?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can|late|early|earlier|later|and|but|a\s+day\s+after)\b|as\b(?!\s+(?:many|much|few|little|far|long|soon|well)\b)|\p{Ll}+ing\b)([\p{L}0-9“\"](?:[^.\n]|\#(nonTerminalDot)){15,200})"#
         // Pattern 3: According to [Participant], [Statement].
         let patternAccordingTo =
-            #"According to\s+((?:\p{Ll}[\p{L}\-]*\s+){0,3}\p{Lu}[\p{L}0-9\s,\.\-]{1,80}),\s+(?=[\p{Ll}\d])((?:[^.\n]|\.(?=\d)){15,200})"#
+            #"According to\s+((?:\p{Ll}[\p{L}\-]*\s+){0,3}\p{Lu}[\p{L}0-9\s,\.\-]{1,80}),\s+(?=[\p{Ll}\d])((?:[^.\n]|\#(nonTerminalDot)){15,200})"#
         // Pattern 4 (#547): a whole sentence closed by its attribution, without quotation marks: "Russia launched
         // 50 drones at Kyiv, the Ukrainian air force said.", "…, said Mayor Vitali Klitschko.", "…, according to
         // the Gaza health ministry.", "…, Peskov told reporters on Monday." The tag must end the sentence.
@@ -601,7 +692,8 @@ struct OverviewPerspectivesExtractor: Sendable {
                         passageID: passageID,
                         articleID: articleID,
                         originalWireSource: wireSource,
-                        sourcePublisher: publisher
+                        sourcePublisher: publisher,
+                        isDirectQuote: match.isDirectQuote
                     ))
             }
         }
@@ -669,6 +761,34 @@ struct OverviewPerspectivesExtractor: Sendable {
             in: precedingText, range: NSRange(location: 0, length: precedingText.utf16.count)) != nil
     }
 
+    /// Whether `location` falls inside an open quotation in `nsString` (e.g. a speech verb mentioned inside someone else's quote).
+    private static func isInsideOpenQuote(at location: Int, in nsString: NSString) -> Bool {
+        guard location > 0 else { return false }
+        let prefix = nsString.substring(to: location)
+        let straightCount = prefix.filter { $0 == "\"" }.count
+        if !straightCount.isMultiple(of: 2) { return true }
+        let openCurly = prefix.filter { $0 == "\u{201C}" }.count
+        let closeCurly = prefix.filter { $0 == "\u{201D}" }.count
+        return openCurly > closeCurly
+    }
+
+    /// Whether the speaker at `location` immediately follows a closing quote (e.g. `"…," Mr. Nawrocki said in a statement…`),
+    /// meaning the speaker's verb closes the preceding quote rather than introducing a new unquoted statement after it.
+    private static func precededByClosingQuote(at location: Int, in nsString: NSString) -> Bool {
+        guard location > 0 else { return false }
+        let prefix = nsString.substring(to: location).trimmingCharacters(
+            in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",")))
+        guard let last = prefix.last else { return false }
+        return last == "\"" || last == "\u{201D}"
+    }
+
+    /// Single match extracted by an attribution pattern.
+    private struct AttributedMatch {
+        let participant: String
+        let statement: String
+        let isDirectQuote: Bool
+    }
+
     /// Runs one attribution pattern and keeps matches that name a participant and carry a statement
     /// of at least `minimumStatementLength` characters.
     private static func attributedMatches(
@@ -677,11 +797,19 @@ struct OverviewPerspectivesExtractor: Sendable {
         participantGroup: Int,
         statementGroup: Int,
         minimumStatementLength: Int
-    ) -> [(participant: String, statement: String)] {
+    ) -> [AttributedMatch] {
         let matches = regex.matches(in: nsString as String, range: NSRange(location: 0, length: nsString.length))
-        return matches.compactMap { match -> (participant: String, statement: String)? in
+        return matches.compactMap { match -> AttributedMatch? in
             guard match.numberOfRanges >= 3 else { return nil }
+            if isInsideOpenQuote(at: match.range.location, in: nsString) {
+                return nil
+            }
             var participantRange = match.range(at: participantGroup)
+            if minimumStatementLength > 0, participantGroup < statementGroup,
+                precededByClosingQuote(at: participantRange.location, in: nsString)
+            {
+                return nil
+            }
             if precededByPreposition(participantRange.location, in: nsString) {
                 // "In Karak, Major General Abdallah al-Maaytah said": the place follows the preposition, the speaker
                 // follows the last comma.
@@ -720,6 +848,14 @@ struct OverviewPerspectivesExtractor: Sendable {
                 // the speaker's.
                 statement = String(statement[..<cut.lowerBound])
             }
+            if !quoted {
+                let straightQuotes = statement.filter { $0 == "\"" }.count
+                let openCurly = statement.filter { $0 == "\u{201C}" }.count
+                let closeCurly = statement.filter { $0 == "\u{201D}" }.count
+                if !straightQuotes.isMultiple(of: 2) || openCurly != closeCurly {
+                    return nil
+                }
+            }
             guard !participant.isEmpty, statement.count >= minimumStatementLength else { return nil }
             // A statement before its tag that itself reports speech ("Clayton said in a memo…, according to a U.S.
             // official") attributes a report, not a position.
@@ -735,7 +871,7 @@ struct OverviewPerspectivesExtractor: Sendable {
             {
                 return nil
             }
-            return (participant, statement)
+            return AttributedMatch(participant: participant, statement: statement, isDirectQuote: quoted)
         }
     }
 
@@ -888,7 +1024,7 @@ struct OverviewPerspectivesExtractor: Sendable {
     private static let institutionNouns: Set<String> = [
         "ministry", "military", "army", "police", "government", "prosecutors", "prosecutor", "court", "agency",
         "council", "commission", "committee", "spokesperson", "spokesman", "spokeswoman", "minister", "president",
-        "governor", "mayor", "embassy", "regulator", "director", "chief", "commander",
+        "governor", "mayor", "embassy", "regulator", "director", "chief", "commander", "department",
     ]
 
     private static let leadingAdverbials: Set<String> = [
