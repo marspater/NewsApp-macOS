@@ -450,13 +450,15 @@ enum EventClusterer {
                 }
             }
             // Match state is already committed per article; a later throw or cancellation keeps this batch's work.
-            try await store()
+            // Deferred rows are marked before the derived writes, so a failed write still leaves them to a pass with
+            // energy.
             if !deferred.isEmpty {
                 try await database.markEventMatchProcessed(
                     Array(deferred), matcherVersion: EventMatcher.version - 1, at: now)
                 report.deferred += deferred.count
                 deferred = []
             }
+            try await store()
         }
         /// Two thirds of the cross pairs between the earliest members of two events agree by the rules alone (#581): no
         /// conflict other than a different act, `storyLinkAnchors` shared specific names that are not common actors, and

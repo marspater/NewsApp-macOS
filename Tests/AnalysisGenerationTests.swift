@@ -156,6 +156,31 @@ enum AnalysisGenerationTests {
             }
             await db.close()
         }
+
+        // Rows the energy rule deferred (#534) are still read again by a pass with energy after a failed write.
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let floods = [
+            ("Floods kill dozens across Pakistan after monsoon rains", 0.0),
+            ("Pakistan flood death toll climbs as monsoon rains continue", 3.0),
+        ].enumerated().map { index, story in
+            FeedArticle(
+                title: story.0, link: "https://grey.invalid/\(index)", guid: "grey-\(index)", description: "",
+                pubDate: start.addingTimeInterval(story.1 * 3600), source: "Publisher \(index)")
+        }
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        try await db.upsertArticles(floods)
+        try await db.eventRows(
+            "CREATE TRIGGER fail_features BEFORE INSERT ON article_features BEGIN SELECT RAISE(ABORT, 'fixture'); END;")
+        do {
+            _ = try await EventClusterer.run(in: db, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false)
+            check(false, "The failed write ends the pass without energy")
+        } catch {}
+        try await db.eventRows("DROP TRIGGER fail_features;")
+        let withEnergy = try await EventClusterer.run(
+            in: db, now: start.addingTimeInterval(6 * 3600), allowsEnergy: true, pairProbability: { _, _ in 0.99 })
+        check(withEnergy.processed >= 2, "Rows deferred before a failed write are read again with energy")
+        await db.close()
     }
 
     /// A job counts as completed only when its write succeeded (#820), a changed input or a clear makes the story
