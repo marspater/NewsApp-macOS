@@ -398,9 +398,13 @@ final class ArticleStore: ObservableObject {
 
     /// Removes all saved stories from the database and clears the local Spotlight saved-stories domain (#559).
     func removeAllSavedStories() async {
-        let currentSaved = savedArticles
-        for article in currentSaved {
-            _ = try? await database.setSaved(articleId: article.id, isSaved: false)
+        // All or nothing: a failure leaves every story saved and Spotlight untouched (#946).
+        do {
+            try await database.removeAllSaved()
+        } catch {
+            operationError = "Could not remove Saved Stories. Please try again."
+            logger.error("Failed to remove all saved stories: \(error.localizedDescription)")
+            return
         }
         stateChanges &+= 1
         await serialSpotlight { await $0.removeAllSavedArticles() }
