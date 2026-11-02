@@ -1,0 +1,5 @@
+- Eliminate blocking semaphore during application termination in favor of asynchronous AppKit termination reply.
+- Dispatch Combine notification and publisher events to the main run loop before entering actor isolation.
+- Release notification permission subscription on completion to prevent memory retention.
+- Reset World Tension loading state on background assessment failure to prevent endless spinner.
+- Clean up code smells across briefing components, priority modules, perspectives extraction, and library backup relaunch.
