@@ -684,10 +684,13 @@ actor DatabaseEngine {
                 == SQLITE_OK
             {
                 try forEachRow(statement, on: copy, "Could not read the backup's settings") {
-                    guard let name = sqlite3_column_text(statement, 0).map({ String(cString: $0) }) else { return }
-                    let bytes = sqlite3_column_blob(statement, 1)
-                    extras[name] =
-                        bytes.map { Data(bytes: $0, count: Int(sqlite3_column_bytes(statement, 1))) } ?? Data()
+                    guard let text = sqlite3_column_text(statement, 0) else { return }
+                    let name = String(cString: text)
+                    if let bytes = sqlite3_column_blob(statement, 1) {
+                        extras[name] = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 1)))
+                    } else {
+                        extras[name] = Data()
+                    }
                 }
                 try exec(copy, "DROP TABLE \(Self.backupExtrasTable);")
             }
