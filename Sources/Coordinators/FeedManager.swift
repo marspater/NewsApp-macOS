@@ -142,18 +142,23 @@ class FeedManager: NSObject, ObservableObject {
 
     private func observeLifecycle(powerEvents: NotificationCenter?, schedulesRefresh: Bool) {
         terminationObserver = NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+            .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.stopBackgroundWork() }
             }
         // NSWorkspace posts sleep and wake on the main thread.
         if let center = powerEvents ?? (schedulesRefresh ? NSWorkspace.shared.notificationCenter : nil) {
             powerObservers = [
-                center.publisher(for: NSWorkspace.willSleepNotification).sink { [weak self] _ in
-                    MainActor.assumeIsolated { self?.systemWillSleep() }
-                },
-                center.publisher(for: NSWorkspace.didWakeNotification).sink { [weak self] _ in
-                    MainActor.assumeIsolated { self?.systemDidWake() }
-                },
+                center.publisher(for: NSWorkspace.willSleepNotification)
+                    .receive(on: RunLoop.main)
+                    .sink { [weak self] _ in
+                        MainActor.assumeIsolated { self?.systemWillSleep() }
+                    },
+                center.publisher(for: NSWorkspace.didWakeNotification)
+                    .receive(on: RunLoop.main)
+                    .sink { [weak self] _ in
+                        MainActor.assumeIsolated { self?.systemDidWake() }
+                    },
             ]
         }
     }
@@ -834,7 +839,10 @@ class FeedManager: NSObject, ObservableObject {
     func waitForEventClustering() async {
         while let task = clusteringTask {
             await task.value
-            if clusteringTask == task { return }
+            if clusteringTask == task {
+                clusteringTask = nil
+                return
+            }
         }
     }
 

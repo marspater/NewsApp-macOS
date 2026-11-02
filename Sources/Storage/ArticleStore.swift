@@ -57,13 +57,16 @@ final class ArticleStore: ObservableObject {
         if database == nil {
             muting = AppSettings.shared.muteRules
             // Applied synchronously, in the order the rules change; only the recount is a task.
-            muteObservation = AppSettings.shared.$muteRules.dropFirst().sink { [weak self] rules in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.applyMuting(rules)
-                    Task { await self.recountUnread() }
+            muteObservation = AppSettings.shared.$muteRules
+                .dropFirst()
+                .receive(on: RunLoop.main)
+                .sink { [weak self] rules in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        self.applyMuting(rules)
+                        Task { await self.recountUnread() }
+                    }
                 }
-            }
         }
 
         startup = Task {

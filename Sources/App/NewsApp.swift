@@ -529,13 +529,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
-    func applicationWillTerminate(_ _: Notification) {
-        let semaphore = DispatchSemaphore(value: 0)
-        Task.detached(priority: .userInitiated) {
-            await DatabaseEngine.shared.checkpointAndOptimize()
-            semaphore.signal()
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        Task { @MainActor in
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    await DatabaseEngine.shared.checkpointAndOptimize()
+                }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(2))
+                }
+                _ = await group.next()
+                group.cancelAll()
+            }
+            sender.reply(toApplicationShouldTerminate: true)
         }
-        _ = semaphore.wait(timeout: .now() + .seconds(2))
+        return .terminateLater
+    }
+
+    func applicationWillTerminate(_ _: Notification) {
+        // Asynchronous checkpoint and optimize completes in applicationShouldTerminate.
     }
 
     // While a News window is open on screen, active or not, a story banner is the app's own (DESIGN.md 8.7), filed in
