@@ -440,6 +440,13 @@ struct KeyboardShortcutsCommands: Commands {
             Button("Keyboard Shortcuts") {
                 openWindow(id: Self.windowID)
             }
+            Button("Show Sample Notification") {
+                // The newest story with a photo, posted through the real path: in front, the app draws its banner.
+                let stories = ArticleStore.shared.articles
+                guard let story = stories.first(where: { FeedArticle.bestCardImage(in: [$0]) != nil }) ?? stories.first
+                else { return }
+                Task { await NotificationService.shared.postSample(story) }
+            }
             Button("Export Diagnostics…") {
                 DiagnosticsExport.run(
                     settings: AppSettings.shared, feedManager: AppContainer.shared.feedManager,

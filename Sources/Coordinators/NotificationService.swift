@@ -309,6 +309,13 @@ final class NotificationService: Sendable {
         }
     }
 
+    /// Posts one story banner now, outside triage and its limits (Help > Show Sample Notification), so the banner can be
+    /// checked without waiting for a refresh. Nothing is recorded in the delivery log.
+    func postSample(_ article: FeedArticle) async {
+        let banner = PlannedBanner(lane: .normal, grouped: false, article: article, thread: "news-sample", sound: false)
+        _ = await triggerFullNotification(banner, at: Date())
+    }
+
     /// Stable across launches, so a story replaces its earlier banner; `hashValue` is reseeded per process.
     static func notificationIdentifier(for article: FeedArticle) -> String {
         "news-\(article.id)"
