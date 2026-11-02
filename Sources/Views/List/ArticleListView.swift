@@ -326,11 +326,18 @@ struct ArticleListView: View {
             }
             // A subscription's stories held while an article was open appear when the reader closes.
             .onChange(of: articlePath.isEmpty) { _, isClosed in
+                if !isClosed { StoryQuickLookCoordinator.shared.close() }
                 guard isClosed, buffer.holdsSubscription else { return }
                 showPendingUpdates()
                 buffer.holdsSubscription = false
                 appliesNextUpdate = true
                 refreshReloads += 1
+            }
+            .onChange(of: selectedTopic) { _, _ in
+                StoryQuickLookCoordinator.shared.close()
+            }
+            .onDisappear {
+                StoryQuickLookCoordinator.shared.close()
             }
             .focusable()
             .focused($listHasFocus)
@@ -370,6 +377,12 @@ struct ArticleListView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
                 handleOpenInBrowser()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .quickLookCommand)) { _ in
+                if articlePath.isEmpty { toggleQuickLook() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openFocusedStoryCommand)) { _ in
+                if articlePath.isEmpty { openFocusedArticle() }
             }
     }
 
@@ -1175,9 +1188,21 @@ struct ArticleListView: View {
         case .upArrow:
             navigateList(offset: -1, proxy: proxy)
             return .handled
-        case .return, .space:
+        case .return:
+            if StoryQuickLookCoordinator.shared.isOpen {
+                StoryQuickLookCoordinator.shared.close()
+            }
             openFocusedArticle()
             return .handled
+        case .space:
+            toggleQuickLook()
+            return .handled
+        case .escape:
+            if StoryQuickLookCoordinator.shared.isOpen {
+                StoryQuickLookCoordinator.shared.close()
+                return .handled
+            }
+            return .ignored
         default:
             if press.characters == "j" {
                 navigateList(offset: 1, proxy: proxy)
@@ -1236,6 +1261,20 @@ struct ArticleListView: View {
         withAnimation(reduceMotion ? nil : AppMotion.hover) {
             proxy.scrollTo(target.id, anchor: .center)
         }
+        if StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.present(article: target.representative)
+        }
+    }
+
+    private func toggleQuickLook() {
+        if StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.close()
+        } else {
+            let listed = entries
+            guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
+            focusedArticleID = entry.id
+            StoryQuickLookCoordinator.shared.present(article: entry.representative)
+        }
     }
 
     private func openFocusedArticle() {
@@ -1265,6 +1304,7 @@ struct ArticleListView: View {
         context: [FeedArticle]? = nil,
         initialExperienceMode: ReaderExperienceMode? = nil
     ) {
+        StoryQuickLookCoordinator.shared.close()
         let context = context ?? filteredArticles
         focusedArticleID = article.id
         if initialExperienceMode?.marksOpenedStoryRead ?? true { readManager.markAsRead(article.id) }
@@ -1400,7 +1440,8 @@ struct KeyboardShortcutsView: View {
             [
                 ("J or ↓", "Next story"),
                 ("K or ↑", "Previous story"),
-                ("Space or ↵", "Open focused story"),
+                ("Space", "Quick Look preview"),
+                ("↵", "Open focused story"),
                 ("Esc, ← or B", "Back to list"),
             ]
         ),

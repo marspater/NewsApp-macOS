@@ -1041,6 +1041,7 @@ struct NewsTests {
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
+            ("testStoryQuickLookNavigationAndPrivacy", { await testStoryQuickLookNavigationAndPrivacy() }),
         ]
         try await runSharded(tests)
 
@@ -26509,5 +26510,109 @@ struct NewsTests {
         await readManager.waitForPendingChanges()
         assertEqual(store.unreadCount, 1, "ArticleStore.unreadCount decrements to 1 when story is marked read")
         await db.close()
+    }
+
+    @MainActor
+    static func testStoryQuickLookNavigationAndPrivacy() async {
+        print("  - Testing Story Quick Look navigation mapping and strict privacy constraints...")
+
+        // 1. Pure navigation index mapping
+        assertEqual(
+            StoryQuickLookNavigation.targetIndex(currentIndex: nil, count: 0, offset: 1), nil, "Empty count returns nil"
+        )
+        assertEqual(
+            StoryQuickLookNavigation.targetIndex(currentIndex: nil, count: 5, offset: 1), 0,
+            "Initial downward navigation selects 0")
+        assertEqual(
+            StoryQuickLookNavigation.targetIndex(currentIndex: nil, count: 5, offset: -1), 4,
+            "Initial upward navigation selects last")
+        assertEqual(
+            StoryQuickLookNavigation.targetIndex(currentIndex: 0, count: 5, offset: 1), 1, "Next index from 0 is 1")
+        assertEqual(
+            StoryQuickLookNavigation.targetIndex(currentIndex: 4, count: 5, offset: 1), 4,
+            "Next index at end clamps to 4")
+        assertEqual(
+            StoryQuickLookNavigation.targetIndex(currentIndex: 0, count: 5, offset: -1), 0,
+            "Prev index at start clamps to 0")
+        assertEqual(
+            StoryQuickLookNavigation.targetIndex(currentIndex: 3, count: 5, offset: -1), 2, "Prev index from 3 is 2")
+
+        let ids = ["art-1", "art-2", "art-3"]
+        assertEqual(
+            StoryQuickLookNavigation.targetID(currentID: nil, itemIDs: ids, offset: 1), "art-1",
+            "Target ID without selection picks first")
+        assertEqual(
+            StoryQuickLookNavigation.targetID(currentID: "art-1", itemIDs: ids, offset: 1), "art-2",
+            "Target ID advances to next item")
+        assertEqual(
+            StoryQuickLookNavigation.targetID(currentID: "art-3", itemIDs: ids, offset: 1), "art-3",
+            "Target ID at end clamps")
+        assertEqual(
+            StoryQuickLookNavigation.targetID(currentID: "art-1", itemIDs: ids, offset: -1), "art-1",
+            "Target ID at start clamps")
+        assertEqual(
+            StoryQuickLookNavigation.targetID(currentID: "art-2", itemIDs: ids, offset: -1), "art-1",
+            "Target ID steps backwards")
+        assertEqual(
+            StoryQuickLookNavigation.targetID(currentID: nil, itemIDs: [], offset: 1), nil,
+            "Target ID with empty list is nil")
+
+        // 2. Local preview rendering and strict privacy constraint
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "com.marspater.news.quicklook.test", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let previewFile = tempDir.appendingPathComponent("test-preview-\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: previewFile) }
+
+        // Article containing remote URLs and HTML formatting in description and fullContent
+        let article = FeedArticle(
+            storedID: "test-ql-1",
+            title: "Autonomous Space Tug Successfully Completes Orbital Test",
+            link: "https://publisher.example.com/stories/space-tug-2026",
+            guid: "space-tug-12345",
+            description:
+                "<p>The orbital tug demonstrated automated rendezvous with a target satellite. <a href=\"https://tracking.adnetwork.com/click?id=99\">Read sponsor message</a></p>",
+            pubDate: Date(timeIntervalSince1970: 1_770_000_000),
+            source: "Aerospace Daily",
+            imageUrl: "https://images.example.com/satellite.jpg",
+            fullContent:
+                "Full story with tracker: <img src=\"https://tracker.analytics.com/pixel.gif\" /> and more content."
+        )
+
+        let renderData = StoryQuickLookRenderer.renderData(for: article)
+        assertEqual(renderData.title, article.title, "Render data captures article title")
+        assertEqual(renderData.publisher, "Aerospace Daily", "Render data uses publisher name")
+        assertFalse(renderData.excerpt.isEmpty, "Excerpt is extracted from local data")
+        assertFalse(renderData.excerpt.contains("<p>"), "HTML tags are stripped from excerpt")
+        assertFalse(renderData.excerpt.contains("<a href"), "HTML links are stripped from excerpt")
+
+        // Render PDF offline
+        let success = StoryQuickLookRenderer.renderPDF(data: renderData, to: previewFile, isDark: false)
+        assertTrue(success, "renderPDF succeeds offline")
+        assertTrue(FileManager.default.fileExists(atPath: previewFile.path), "Generated PDF file exists on disk")
+
+        let pdfData = try! Data(contentsOf: previewFile)
+        assertTrue(pdfData.count > 1000, "PDF data is populated (\(pdfData.count) bytes)")
+
+        // Verify PDF data contains zero network references or remote URLs
+        let pdfString = String(decoding: pdfData, as: UTF8.self)
+        assertFalse(pdfString.contains("http://"), "Generated PDF must contain zero 'http://' references")
+        assertFalse(pdfString.contains("https://"), "Generated PDF must contain zero 'https://' references")
+        assertFalse(pdfString.contains("/URI"), "Generated PDF must contain zero PDF /URI actions")
+        assertFalse(pdfString.contains("/Launch"), "Generated PDF must contain zero PDF /Launch actions")
+        assertFalse(pdfString.contains("adnetwork.com"), "Generated PDF must contain zero ad tracker links")
+        assertFalse(pdfString.contains("tracking"), "Generated PDF must contain zero tracking references")
+
+        // Verify dark appearance rendering
+        let darkPreviewFile = tempDir.appendingPathComponent("test-preview-dark-\(UUID().uuidString).pdf")
+        defer { try? FileManager.default.removeItem(at: darkPreviewFile) }
+        let darkSuccess = StoryQuickLookRenderer.renderPDF(data: renderData, to: darkPreviewFile, isDark: true)
+        assertTrue(darkSuccess, "renderPDF succeeds in dark appearance")
+        let darkData = try! Data(contentsOf: darkPreviewFile)
+        assertTrue(darkData.count > 1000, "Dark appearance PDF data is populated")
+
+        // Clean up
+        try? FileManager.default.removeItem(at: tempDir)
+        print("  ✓ Story Quick Look navigation and privacy checks passed")
     }
 }
