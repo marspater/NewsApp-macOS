@@ -78,14 +78,15 @@ enum NotificationActionRouter {
         activateApp: @MainActor () -> Void = { NSApp?.activate() }
     ) async {
         guard let target = resolveTarget(from: userInfo) else { return }
-
         switch actionIdentifier {
         case NotificationActionIdentifier.save:
+            await articleStore.waitForStartup()
             await handleSave(target: target, store: articleStore, savedStories: savedStories)
         case NotificationActionIdentifier.markRead:
+            await articleStore.waitForStartup()
             await handleMarkRead(target: target, store: articleStore, readManager: readManager)
         case NotificationActionIdentifier.open, UNNotificationDefaultActionIdentifier:
-            handleOpen(target: target, store: articleStore, activateApp: activateApp)
+            await handleOpen(target: target, store: articleStore, activateApp: activateApp)
         default:
             break
         }
@@ -112,29 +113,36 @@ enum NotificationActionRouter {
         store: ArticleStore,
         savedStories: SavedStoriesManager
     ) async {
+        // A link matches only when the banner carries no ID: stories can share a URL, and an ID outside the loaded
+        // list is resolved by `articleForNavigation`, not by another story's link.
         if let id = target.articleID, let article = store.articles.first(where: { $0.id == id }) {
             savedStories.save(article)
-        } else if let link = target.articleLink,
+        } else if target.articleID == nil, let link = target.articleLink,
             let article = store.articles.first(where: {
                 $0.link == link || $0.normalizedLink == ArticleIdentity.canonicalizeURL(link)
             })
         {
             savedStories.save(article)
-        } else if let resolved = try? await store.articleForNavigation(
-            .init(articleID: target.articleID, link: target.articleLink ?? "")
-        ) {
-            savedStories.save(resolved)
-        } else if let id = target.articleID {
-            let fallback = FeedArticle(
-                storedID: id,
-                title: "Saved Story",
-                link: target.articleLink ?? "",
-                guid: id,
-                description: "",
-                pubDate: Date(),
-                source: "Notification"
-            )
-            savedStories.save(fallback)
+        } else if let id = target.articleID, let article = savedStories.savedArticles.first(where: { $0.id == id }) {
+            savedStories.save(article)
+        } else if target.articleID == nil, let link = target.articleLink,
+            let article = savedStories.savedArticles.first(where: {
+                $0.link == link || $0.normalizedLink == ArticleIdentity.canonicalizeURL(link)
+            })
+        {
+            savedStories.save(article)
+        } else {
+            do {
+                // An ID never falls back to a link here, for the same reason as above.
+                let link = target.articleID == nil ? target.articleLink ?? "" : ""
+                if let resolved = try await store.articleForNavigation(.init(articleID: target.articleID, link: link)) {
+                    savedStories.save(resolved)
+                } else {
+                    store.operationError = "This story is no longer available in your archive."
+                }
+            } catch {
+                store.operationError = "The notification story could not be loaded. Please try again."
+            }
         }
     }
 
@@ -162,8 +170,10 @@ enum NotificationActionRouter {
         target: NotificationTarget,
         store: ArticleStore,
         activateApp: @MainActor () -> Void
-    ) {
+    ) async {
         activateApp()
+        // Set without waiting for startup: MainView opens it once the store is ready, and a link opened meanwhile
+        // replaces it instead of being overwritten when startup ends.
         store.pendingNavigation = .init(
             articleID: target.articleID,
             link: target.articleLink ?? ""

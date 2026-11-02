@@ -161,6 +161,11 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/App/NewsURLParser.swift \
     Sources/App/Intents.swift \
     Sources/App/NotificationActionRouter.swift \
+    Sources/App/LibraryBackup.swift \
+    Sources/Views/List/FeedHealthLine.swift \
+    Sources/Views/FeedCatalogView.swift \
+    Sources/Views/TensionIndexView.swift \
+    Sources/Views/SettingsView.swift \
     Tests/StoryCorpus.swift \
     Tests/ImportanceAudit.swift \
     Tests/OverviewQualityAudit.swift \

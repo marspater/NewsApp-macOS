@@ -1,0 +1,1 @@
+- Clear decoded media images when clearing all caches in settings.

@@ -1,0 +1,1 @@
+- Drop stale overview results when a lower membership version finishes after a newer version is cached.

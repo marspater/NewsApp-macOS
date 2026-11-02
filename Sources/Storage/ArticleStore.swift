@@ -42,6 +42,8 @@ final class ArticleStore: ObservableObject {
     @Published var overviewRevision: UInt64 = 0
     @Published var operationError: String?
     @Published private(set) var databaseHealthNotice: String?
+    /// Bumped when AI analysis or article caches are purged so views reload fresh state (#901).
+    @Published private(set) var analysisGeneration: Int = 0
 
     init(
         database: DatabaseEngine? = nil,
@@ -143,8 +145,8 @@ final class ArticleStore: ObservableObject {
     func refreshState() async -> Bool {
         do {
             // A read or save change that lands while this loads makes the loaded read and saved state stale: load again
-            // instead of overwriting it. ponytail: three tries, then it reports failure; a retry loop with backoff if
-            // changes ever arrive faster than a load.
+            // instead of overwriting it. After three tries a follow-up refresh is scheduled, so stories a caller just
+            // stored are never left unpublished.
             var published = false
             for _ in 1...3 {
                 let changesAtStart = stateChanges
@@ -154,8 +156,8 @@ final class ArticleStore: ObservableObject {
                 let saved = try await database.getSavedArticles()
                 let counts = try await database.counts(muting: muting)
                 await refreshLoadedHook?()
-                self.articles = fetched
                 guard changesAtStart == stateChanges else { continue }
+                self.articles = fetched
                 self.readArticleIDs = readIDs
                 self.savedArticles = saved
                 self.savedArticleIDs = Set(saved.map { $0.id })
@@ -167,11 +169,31 @@ final class ArticleStore: ObservableObject {
                 break
             }
             revision &+= 1
-            if !published { logger.error("Refresh kept being overtaken by read or save changes") }
+            let dbAnalysisGen = await database.analysisGeneration
+            // A clear in progress publishes the generation itself, once its reset handler has finished.
+            if analysisClearsInProgress == 0, self.analysisGeneration != dbAnalysisGen {
+                self.analysisGeneration = dbAnalysisGen
+            }
+            if !published {
+                logger.error("Refresh kept being overtaken by read or save changes; trying again shortly")
+                scheduleFollowUpRefresh()
+            }
             return published
         } catch {
             logger.error("Failed to refresh ArticleStore state: \(error.localizedDescription)")
             return false
+        }
+    }
+
+    private var followUpRefresh: Task<Void, Never>?
+
+    /// One coalesced retry for a refresh that kept being overtaken; it waits briefly so the changes can settle.
+    private func scheduleFollowUpRefresh() {
+        guard followUpRefresh == nil else { return }
+        followUpRefresh = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            self?.followUpRefresh = nil
+            await self?.refreshState()
         }
     }
 
@@ -527,6 +549,7 @@ final class ArticleStore: ObservableObject {
             }
         }
         guard revised else { return failed }
+        stateChanges &+= 1
         if listChanged { articles = listed }
         if savedChanged { savedArticles = saved }
         revision &+= 1
@@ -567,21 +590,34 @@ final class ArticleStore: ObservableObject {
     func clearAIAnalysis() async throws {
         try await database.clearArticleEnrichment()
         // Running work is refused at commit by the generation bump; its session state is reset here (#805).
-        await analysisClearedHandler?()
-        await refreshState()
+        await finishAnalysisClear()
     }
 
     /// Clears cached full article content while preserving subscriptions, saved stories, and read history.
     func clearArticleCache() async throws {
         try await database.clearArticleCache()
-        await refreshState()
+        // This clear removes enrichment for unsaved stories too, so running work and its session state are reset (#886).
+        await finishAnalysisClear()
     }
 
     /// Clears replaceable caches while preserving subscriptions, history and saved bodies.
     func clearAllDatabaseCache() async throws {
         try await database.clearAllDatabaseCache()
         // This clear removes enrichment too, so running work and its session state are reset the same way (#805).
+        await finishAnalysisClear()
+    }
+
+    /// Clears running at once; while any runs, `refreshState` leaves `analysisGeneration` alone.
+    private var analysisClearsInProgress = 0
+
+    /// Runs the reset handler, then publishes the new generation. Published first, it would start work (World Tension's
+    /// assessment) that the handler then cancels. With clears overlapping, only the last reset to finish publishes.
+    private func finishAnalysisClear() async {
+        analysisClearsInProgress += 1
         await analysisClearedHandler?()
+        analysisClearsInProgress -= 1
+        guard analysisClearsInProgress == 0 else { return }
+        analysisGeneration = await database.analysisGeneration
         await refreshState()
     }
 

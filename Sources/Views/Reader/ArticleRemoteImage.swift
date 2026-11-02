@@ -47,12 +47,14 @@ extension EnvironmentValues {
             return cancelledWaiters >= waiters
         }
     }
+    private static var generation: UInt64 = 0
     private static var pending: [URL: SharedLoad] = [:]
 
     /// The download currently shared for a URL, so tests can observe who has joined it.
     static func sharedLoad(for url: URL) -> SharedLoad? { pending[url] }
 
     static func clear() {
+        generation &+= 1
         for (_, load) in pending {
             load.task.cancel()
         }
@@ -70,12 +72,16 @@ extension EnvironmentValues {
         -> CGImage
     {
         if let image = images.object(forKey: url as NSURL) { return image }
+        let currentGeneration = generation
         // Shared loads survive one card disappearing; the last waiter to cancel stops the download.
-        let shared =
-            pending[url]
-            ?? SharedLoad(task: Task { try await loader(ReaderImageCandidate.preferredRendition(of: url)) })
+        let shared: SharedLoad
+        if let existing = pending[url], !existing.task.isCancelled {
+            shared = existing
+        } else {
+            shared = SharedLoad(task: Task { try await loader(ReaderImageCandidate.preferredRendition(of: url)) })
+            pending[url] = shared
+        }
         let task = shared.task
-        pending[url] = shared
         shared.join()
         // After clear() a newer load may own the key; only remove this load's own entry.
         defer { if pending[url] === shared { pending[url] = nil } }
@@ -89,7 +95,7 @@ extension EnvironmentValues {
                 }
             }
         }
-        if !task.isCancelled && !Task.isCancelled {
+        if !task.isCancelled && !Task.isCancelled && generation == currentGeneration {
             images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
         }
         return image
@@ -185,17 +191,25 @@ struct ArticleRemoteImage<Content: View>: View {
                     return
                 }
                 phase = .empty
-                do {
-                    let image = try await DecodedImageCache.load(url, using: loadImage)
-                    try Task.checkCancellation()
-                    phase = .success(Self.image(image))
-                    NotificationCenter.default.post(
-                        name: .readerImageFinished, object: url, userInfo: ["success": true])
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    phase = .failure(error)
-                    NotificationCenter.default.post(
-                        name: .readerImageFinished, object: url, userInfo: ["success": false])
+                for attempt in 0..<3 {
+                    do {
+                        let image = try await DecodedImageCache.load(url, using: loadImage)
+                        try Task.checkCancellation()
+                        phase = .success(Self.image(image))
+                        NotificationCenter.default.post(
+                            name: .readerImageFinished, object: url, userInfo: ["success": true])
+                        return
+                    } catch {
+                        // Our own cancellation exits silently. A shared load cancelled under us (a cache clear) is
+                        // retried, and reported as a failure once the retries run out, never left on the placeholder.
+                        guard !Task.isCancelled else { return }
+                        let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
+                        if cancelled, attempt < 2 { continue }
+                        phase = .failure(error)
+                        NotificationCenter.default.post(
+                            name: .readerImageFinished, object: url, userInfo: ["success": false])
+                        return
+                    }
                 }
             }
     }

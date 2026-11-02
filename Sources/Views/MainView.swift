@@ -354,15 +354,20 @@ struct MainView: View {
         tension.state.loadedAt = Date()
         tension.state.isLoading = aiEnabled && collectionEnabled
         // Only cancellation throws; the reload that cancelled this one replaces the state and keeps a pending Reassess.
-        guard
-            let loaded = try? await WorldTensionState.load(
+        do {
+            let loaded = try await WorldTensionState.load(
                 service: .shared, database: articleStore.database, now: Date(), aiEnabled: aiEnabled,
                 collectionEnabled: collectionEnabled, force: requested > handledTensionReassessments)
-        else { return }
-        // A reload cancelled while resuming on the main actor must not overwrite the newer one.
-        guard !Task.isCancelled else { return }
-        handledTensionReassessments = requested
-        tension.state = loaded
+            // A reload cancelled while resuming on the main actor must not overwrite the newer one.
+            guard !Task.isCancelled else { return }
+            handledTensionReassessments = requested
+            tension.state = loaded
+        } catch is CancellationError {
+            guard !Task.isCancelled else { return }
+            tension.state = WorldTensionState(aiEnabled: aiEnabled, collectionEnabled: collectionEnabled)
+        } catch {
+            return
+        }
     }
 
     private func scheduleTensionDayRollover() async {
@@ -443,7 +448,7 @@ struct MainView: View {
     /// World Tension is rescored when collection or AI is turned on, after each refresh, when a new UTC day begins and
     /// when the sheet asks to reassess.
     private var tensionReloadKey: String {
-        "\(appSettings.tensionCollectionOptIn):\(appSettings.aiEnabled):\(articleStore.isReady):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0):\(tensionDayStart.timeIntervalSince1970):\(tensionReassessments):\(libraryFailure ?? "")"
+        "\(appSettings.tensionCollectionOptIn):\(appSettings.aiEnabled):\(articleStore.isReady):\(articleStore.analysisGeneration):\(feedManager.lastRefreshCompletedAt?.timeIntervalSince1970 ?? 0):\(tensionDayStart.timeIntervalSince1970):\(tensionReassessments):\(libraryFailure ?? "")"
     }
 
     // MARK: - Search Operators

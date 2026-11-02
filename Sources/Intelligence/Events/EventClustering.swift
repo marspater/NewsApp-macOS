@@ -565,17 +565,62 @@ enum EventClusterer {
             let activeSince = now.addingTimeInterval(-candidatePolicy.activeEventLifetime)
             let active = try await database.activeEventMembers(since: activeSince)
             let events = active.filter { $0.members.count >= 2 }
-            let singles =
-                active.filter { $0.members.count == 1 }.flatMap(\.members)
-                + (try await database.unclusteredEventMatchRows(
-                    since: activeSince, matcherVersion: EventMatcher.version))
-            await prefetch(events.flatMap { $0.members } + singles)
-            let exclusions = try await database.eventExclusions(
-                for: events.flatMap { $0.members.map(\.id) } + singles.map(\.id))
+            guard !events.isEmpty else {
+                return try await database.assignStories([], attaching: [:], since: activeSince, at: now)
+            }
+            let eventMembers = events.flatMap { $0.members }
+            await prefetch(eventMembers)
             let allAnchors = Dictionary(
                 events.map { event in
                     (event.id, event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).specificAnchors) })
                 }, uniquingKeysWith: { a, _ in a })
+            let allAnchorTerms = Set(allAnchors.values.flatMap { $0 })
+            let anchorTokens = Set(
+                allAnchorTerms.flatMap {
+                    $0.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                        .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+                })
+            let checkingCountry = matchPolicy.storyCountryKeywords != nil && allowsEnergy
+            let activeCountries =
+                checkingCountry
+                ? Set(
+                    events.flatMap { event in
+                        event.members.reduce(into: Set<String>()) { $0.formUnion(features($1).countries) }
+                    })
+                : []
+
+            let rawSingles =
+                active.filter { $0.members.count == 1 }.flatMap(\.members)
+                + (try await database.unclusteredEventMatchRows(
+                    since: activeSince, matcherVersion: EventMatcher.version))
+            let singles: [EventMatchRow]
+            if anchorTokens.isEmpty && !checkingCountry {
+                singles = []
+            } else {
+                singles = rawSingles.filter { single in
+                    func tokens(in text: String) -> [String] {
+                        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                            .split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+                    }
+                    if !anchorTokens.isEmpty {
+                        let titleTokens = tokens(in: single.title)
+                        if titleTokens.contains(where: { anchorTokens.contains($0) }) { return true }
+                        if tokens(in: single.description).contains(where: { anchorTokens.contains($0) }) { return true }
+                    }
+                    if !allAnchorTerms.isEmpty && !features(single).specificAnchors.isDisjoint(with: allAnchorTerms) {
+                        return true
+                    }
+                    if checkingCountry && !activeCountries.isEmpty
+                        && !features(single).countries.isDisjoint(with: activeCountries)
+                    {
+                        return true
+                    }
+                    return false
+                }
+            }
+            await prefetch(singles)
+            let exclusions = try await database.eventExclusions(
+                for: eventMembers.map(\.id) + singles.map(\.id))
             // Only a name an event shares with another event or with a report alone can link anything, so only those
             // are checked for being common actors, each of them.
             var holders: [String: Int] = [:]

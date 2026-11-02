@@ -371,6 +371,15 @@ actor WorldTensionService {
         self.allowsEnergy = allowsEnergy
     }
 
+    /// Clear AI Analysis cancels any running assessment and forgets rejected inputs (#887).
+    func analysisCleared() {
+        for task in pending.values {
+            task.cancel()
+        }
+        pending.removeAll()
+        rejectedHashes.removeAll()
+    }
+
     /// Soft news that general world feeds also publish: royals, celebrities, sport, entertainment and lifestyle.
     /// Matched as whole words, so "Prince" alone (a place, a minister's name) does not count.
     static let softNewsCues = [
@@ -487,6 +496,7 @@ actor WorldTensionService {
         // Policy precedes every cache access, including after an AI-on assessment warmed it.
         guard aiEnabled, collectionEnabled else { throw WorldTensionError.disabled }
         guard allowsEnergy() else { throw WorldTensionError.deferred }
+        let expectedGeneration = await database.analysisGeneration
         try Task.checkCancellation()
         let urls = TensionMethodology.v1.panel.map(\.url)
         let start = now.addingTimeInterval(-86400)
@@ -508,7 +518,12 @@ actor WorldTensionService {
             title: "world-tension-v2:\(TensionMethodology.day(containing: now).start.timeIntervalSince1970)",
             description: NewsTextModel.generation, content: prompt)
         let history = try await database.worldTensionHistory()
-        if !force, history.last?.inputHash == hash { return WorldTensionSmoothing.displayed(history) }
+        if !force, history.last?.inputHash == hash {
+            guard await database.analysisGeneration == expectedGeneration else {
+                throw CancellationError()
+            }
+            return WorldTensionSmoothing.displayed(history)
+        }
         let today = TensionMethodology.day(containing: now).start
         /// A saved estimate is the day's stand-in, not an assessment: only a model reading blocks the fallback.
         func hasAssessment(_ readings: [WorldTensionReading]) -> Bool {
@@ -551,9 +566,17 @@ actor WorldTensionService {
                 evaluatedAt: now, inputHash: error == .rejected ? hash : hash + ":estimate",
                 modelGeneration: NewsTextModel.generation, headlines: current + previous, assessment: estimate)
             guard error == .rejected else {
+                guard await database.analysisGeneration == expectedGeneration else {
+                    throw CancellationError()
+                }
                 return WorldTensionSmoothing.displayed(latest.filter { $0.id != today } + [reading])
             }
-            if try await !database.saveWorldTensionReading(reading, keepingAssessment: true) {
+            if try await !database.saveWorldTensionReading(
+                reading, keepingAssessment: true, expectedGeneration: expectedGeneration)
+            {
+                if await database.analysisGeneration != expectedGeneration {
+                    throw CancellationError()
+                }
                 rejectedHashes.insert(hash)
                 throw error
             }
@@ -563,7 +586,9 @@ actor WorldTensionService {
         let reading = WorldTensionReading(
             evaluatedAt: now, inputHash: hash, modelGeneration: NewsTextModel.generation,
             headlines: current + previous, assessment: assessment)
-        try await database.saveWorldTensionReading(reading)
+        if try await !database.saveWorldTensionReading(reading, expectedGeneration: expectedGeneration) {
+            throw CancellationError()
+        }
         return WorldTensionSmoothing.displayed(try await database.worldTensionHistory())
     }
     private nonisolated static func generate(prompt: String, headlines: [WorldTensionHeadline], model: NewsTextModel)

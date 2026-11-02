@@ -168,13 +168,60 @@ enum AnalysisGenerationTests {
         check(await queue.state(for: stored.id) != .completed, "A changed input queues the story again")
 
         await eventually("The changed input settles") { await queue.retainsJob(for: stored.id) == false }
+        let initialGen = store.analysisGeneration
         // The clear returns only once the queue has reset, so an enqueue right after it is not skipped.
         try await store.clearAIAnalysis()
+        check(store.analysisGeneration > initialGen, "Clear AI Analysis bumps store.analysisGeneration (#901)")
+        check(
+            store.analysisGeneration == (await db.analysisGeneration),
+            "store.analysisGeneration matches db.analysisGeneration")
         check(await queue.state(for: stored.id) == nil, "Clear AI Analysis forgets what was classified")
         await queue.enqueue(article: stored, priority: .interactive)
         await eventually("The story is classified again after the clear") {
             await queue.state(for: stored.id) == .completed
         }
+
+        // Clear Story Text also resets the queue (#886)
+        let beforeTextGen = store.analysisGeneration
+        try await store.clearArticleCache()
+        check(store.analysisGeneration > beforeTextGen, "Clear Story Text bumps store.analysisGeneration (#901)")
+        check(
+            store.analysisGeneration == (await db.analysisGeneration),
+            "store.analysisGeneration matches db.analysisGeneration after text clear")
+        check(await queue.state(for: stored.id) == nil, "Clear Story Text forgets what was classified (#886)")
+
+        // Clear All Database Cache also bumps analysisGeneration, published only after the reset handler finishes,
+        // even when a refresh runs meanwhile; published earlier, it starts work the handler then cancels.
+        let beforeAllGen = store.analysisGeneration
+        var seenByHandler: Int?
+        store.analysisClearedHandler = {
+            _ = await store.refreshState()
+            seenByHandler = store.analysisGeneration
+            await queue.analysisCleared()
+        }
+        try await store.clearAllDatabaseCache()
+        check(seenByHandler == beforeAllGen, "The generation is published after the clear's reset handler")
+
+        // Overlapping clears: the one that finishes first while another reset runs publishes nothing.
+        let beforeOverlap = store.analysisGeneration
+        var publishedWhileOuterRan: Int?
+        var nested = false
+        store.analysisClearedHandler = {
+            if !nested {
+                nested = true
+                try? await store.clearArticleCache()
+                publishedWhileOuterRan = store.analysisGeneration
+            }
+            await queue.analysisCleared()
+        }
+        try await store.clearAllDatabaseCache()
+        check(publishedWhileOuterRan == beforeOverlap, "Only the last overlapping reset publishes the generation")
+        check(
+            store.analysisGeneration == (await db.analysisGeneration), "The last reset publishes the final generation")
+        check(store.analysisGeneration > beforeAllGen, "Clear All Database Cache bumps store.analysisGeneration (#901)")
+        check(
+            store.analysisGeneration == (await db.analysisGeneration),
+            "store.analysisGeneration matches db.analysisGeneration after all clear")
     }
 
     /// A background warm-up never cancels the generation running for the visible event (#792): the rule, then the

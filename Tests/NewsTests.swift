@@ -1191,6 +1191,42 @@ struct NewsTests {
         store.refreshLoadedHook = nil
         assertTrue(refreshed, "The refresh publishes after reloading")
         assertTrue(store.readArticleIDs.contains(stories[2].id), "A bulk read change made while loading survives")
+
+        // An article analysis publication that lands while refreshState loads must not be overwritten (#888).
+        let analysis = ArticleAnalysis(
+            summary: "Enriched summary", keyPoints: ["Point 1"], entities: [], category: "World",
+            modelIdentifier: "test", analysisVersion: 1)
+        landed = false
+        store.refreshLoadedHook = {
+            guard !landed else { return }
+            landed = true
+            _ = await store.saveArticleAnalysis(analysis, for: stories[0].id)
+        }
+        let categoryRefreshed = await store.refreshState()
+        store.refreshLoadedHook = nil
+        assertTrue(categoryRefreshed, "The refresh publishes after reloading on publication")
+        assertEqual(
+            store.articles.first { $0.id == stories[0].id }?.category, "World",
+            "Category publication that landed while loading survives (#888)")
+
+        // Overtaken on every try: the refresh reports failure and a follow-up publishes what was stored.
+        let late = FeedArticle(
+            title: "Late story", link: "https://example.org/late", guid: "late", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_100), source: "Publisher")
+        try await db.upsertArticles([late])
+        var overtakes = 0
+        store.refreshLoadedHook = {
+            guard overtakes < 3 else { return }
+            overtakes += 1
+            await store.markAsRead(id: stories[2].id, isRead: overtakes % 2 == 0)
+        }
+        let overtaken = await store.refreshState()
+        assertFalse(overtaken, "A refresh overtaken on every try reports failure")
+        for _ in 0..<40 where !store.articles.contains(where: { $0.id == late.id }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        store.refreshLoadedHook = nil
+        assertTrue(store.articles.contains { $0.id == late.id }, "A follow-up refresh publishes the stored story")
         await db.close()
     }
 
@@ -2055,9 +2091,12 @@ struct NewsTests {
             sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil),
             SQLITE_OK, "Mark the fixture as saved by a newer build")
         sqlite3_close(handle)
+        let liveSymlink = directory.appendingPathComponent("symlink-to-live.sqlite3")
+        try fileManager.createSymbolicLink(at: liveSymlink, withDestinationURL: library)
         for (name, file, message) in [
-            ("damaged", corrupt, "damaged"), ("damaged-page", damagedPages, "damaged"), ("foreign", foreign, "damaged"),
-            ("newer", newer, "newer version"),
+            ("damaged", corrupt, "damaged"), ("damaged-page", damagedPages, "damaged"),
+            ("foreign", foreign, "damaged"), ("newer", newer, "newer version"),
+            ("live", library, "News library itself"), ("live-symlink", liveSymlink, "News library itself"),
         ] {
             do {
                 _ = try await db.restoreBackup(from: file)
@@ -5717,14 +5756,28 @@ struct NewsTests {
         let reopened = DatabaseEngine(path: path)
         try await reopened.open()
         assertEqual(try await reopened.worldTensionHistory().count, 2, "Separate AI history survives relaunch")
+        let preClearGen = await reopened.analysisGeneration
         try await reopened.clearArticleEnrichment()
         assertEqual(try await reopened.worldTensionHistory().count, 0, "Clearing AI data clears World Tension history")
+        let staleSaved = try await reopened.saveWorldTensionReading(
+            replacement, expectedGeneration: preClearGen)
+        assertFalse(staleSaved, "A reading computed before clear is rejected (#887)")
+        assertEqual(
+            try await reopened.worldTensionHistory().count, 0,
+            "Rejected reading is not added to the cleared history (#887)")
+        let currentGen = await reopened.analysisGeneration
+        let freshSaved = try await reopened.saveWorldTensionReading(
+            replacement, expectedGeneration: currentGen)
+        assertTrue(freshSaved, "A reading matching the current generation is saved (#887)")
+        assertEqual(try await reopened.worldTensionHistory().count, 1, "Fresh reading is stored in history")
+        try await reopened.clearArticleEnrichment()
         assertEqual(
             try await reopened.tensionCorpus(
                 day: DateInterval(start: now.addingTimeInterval(-86400), end: now),
                 feedURLs: TensionMethodology.v1.panel.map(\.url)
             ).count, 13, "Clearing AI data preserves source articles, including the filtered soft story")
         await reopened.close()
+        await WorldTensionService.shared.analysisCleared()
     }
 
     static func testTensionMethodology() async throws {
@@ -6550,8 +6603,58 @@ struct NewsTests {
         if let item = xxeItems.first {
             assertTrue(!item.title.contains("root:"), "OPMLParser must not resolve external file entities")
         }
+
+        // OPML attribute order, category parsing, and case-insensitivity
+        let advancedOPML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="2.0">
+                <head>
+                    <title>Advanced Feeds</title>
+                </head>
+                <body>
+                    <outline Title="Capital Title Feed" xmlUrl="https://example.com/feed1.xml" url="https://example.com/home1"/>
+                    <outline Text="Capital Text Feed" type="rss" url="https://example.com/feed2.xml"/>
+                    <outline text="Atom Feed" type="atom" url="https://example.com/feed3.xml"/>
+                    <outline text="Category With Website" url="https://example.com/category">
+                        <outline title="Nested Tech" type="rss" xmlUrl="https://example.com/tech.xml" url="https://example.com/tech"/>
+                    </outline>
+                    <outline title="" text="Empty Title Folder">
+                        <outline title="   " text="Empty Title Feed" xmlUrl="https://example.com/feed4.xml"/>
+                    </outline>
+                    <outline text="Plain URL Feed" url="https://example.com/plain.xml"/>
+                    <outline text="Bookmark" type="link" url="https://example.com/page"/>
+                </body>
+            </opml>
+            """.data(using: .utf8)!
+
+        let advancedItems = OPMLParser.parse(data: advancedOPML)
+        assertEqual(advancedItems.count, 6, "Should parse 6 feeds, treating category with web url as folder")
+        assertEqual(advancedItems[0].title, "Capital Title Feed", "Case-insensitive Title attribute")
+        assertEqual(advancedItems[0].url, "https://example.com/feed1.xml", "Prioritizes xmlUrl over url")
+        assertEqual(advancedItems[0].folder, nil, "Root item has nil folder")
+
+        assertEqual(advancedItems[1].title, "Capital Text Feed", "Case-insensitive Text attribute")
+        assertEqual(advancedItems[1].url, "https://example.com/feed2.xml", "Accepts url when type is rss")
+        assertEqual(advancedItems[1].folder, nil, "Root item has nil folder")
+
+        assertEqual(advancedItems[2].title, "Atom Feed", "Extracts atom feed title")
+        assertEqual(advancedItems[2].url, "https://example.com/feed3.xml", "Accepts url when type is atom")
+
+        assertEqual(advancedItems[3].title, "Nested Tech", "Extracts nested feed title")
+        assertEqual(advancedItems[3].url, "https://example.com/tech.xml", "Prioritizes xmlUrl in nested feed")
+        assertEqual(advancedItems[3].folder, "Category With Website", "Nested inside Category With Website folder")
+
+        assertEqual(advancedItems[4].title, "Empty Title Feed", "Falls back to text when title is whitespace")
+        assertEqual(advancedItems[4].url, "https://example.com/feed4.xml", "Extracts feed url")
+        assertEqual(advancedItems[4].folder, "Empty Title Folder", "Folder falls back to text when title is empty")
+
+        // An untyped url outline without children was imported before #901 and still is; a typed web link is not.
+        assertEqual(advancedItems[5].title, "Plain URL Feed", "Untyped url outline without children stays a feed")
+        assertEqual(advancedItems[5].url, "https://example.com/plain.xml", "Its url is the feed url")
+        assertEqual(advancedItems[5].folder, nil, "Root url-only feed has nil folder")
     }
 
+    @MainActor
     static func testOfflineCacheAndResilience() async {
         print("  - Testing Offline Cache & Resilience...")
 
@@ -6562,6 +6665,32 @@ struct NewsTests {
         CacheManager.shared.clearWebCache()
         let sizeAfter = CacheManager.shared.calculateTotalCacheSize()
         assertTrue(sizeAfter >= 0, "Cache clear should succeed non-destructively")
+
+        // Test Clear All Caches clears DecodedImageCache as well as database and web caches (#media-cache-leak)
+        let dummyImageURL = URL(string: "https://example.com/clear_all_test_\(UUID().uuidString).jpg")!
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let ctx = CGContext(
+            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let dummyImage = ctx.makeImage()!
+        DecodedImageCache.images.setObject(dummyImage, forKey: dummyImageURL as NSURL)
+        assertTrue(
+            DecodedImageCache.images.object(forKey: dummyImageURL as NSURL) != nil,
+            "Precondition: dummy image is cached in DecodedImageCache"
+        )
+
+        let testDB = DatabaseEngine(path: ":memory:")
+        let testStore = ArticleStore(database: testDB, spotlightIndexer: MockSpotlightIndexer())
+        await testStore.initialize()
+        let settingsView = SettingsView()
+        let clearTask = settingsView.clearEverythingData(articleStore: testStore)
+        await clearTask.value
+
+        assertTrue(
+            DecodedImageCache.images.object(forKey: dummyImageURL as NSURL) == nil,
+            "Clear All Caches must clear DecodedImageCache"
+        )
+        await testDB.close()
     }
 
     /// One publisher, one headline, two GUIDs and two URLs within hours: one story (#583). A recurring headline a day
@@ -7226,22 +7355,24 @@ struct NewsTests {
         assertEqual(
             try await db.resolvedArticleID(for: unrelated), unrelated.id, "No known signal means no guessed merge")
 
-        // Use another known, unambiguous document rather than the historical conflict.
+        // When known ID and URL conflict, the conflicting item is skipped inside the batch rather than aborting the feed (#885).
         let separate = variant(
             "separate-guid", fixtureRoot.appendingPathComponent("aliases/separate").absoluteString, "Separate report")
         try await db.upsertArticles([separate])
         let contradictory = variant(first.id, separate.link, "Contradictory report")
-        do {
-            try await db.upsertArticles([contradictory])
-            assertTrue(false, "Contradictory known ID and URL must be reported")
-        } catch {
-            assertEqual(
-                try await db.fetchArticles(id: first.id).first?.title, "Original report",
-                "Conflicting signals must not overwrite the original")
-            assertEqual(
-                try await db.fetchArticles(id: separate.id).first?.title, separate.title,
-                "Conflicting signals must not overwrite the other document")
-        }
+        let batchItem = variant(
+            "batch-guid", fixtureRoot.appendingPathComponent("aliases/valid-batch-item").absoluteString,
+            "Valid batch report")
+        let inserted = try await db.upsertArticles([contradictory, batchItem])
+        assertTrue(
+            inserted.contains(batchItem.id),
+            "Valid batch items are stored when a conflicting item is in the batch (#885)")
+        assertEqual(
+            try await db.fetchArticles(id: first.id).first?.title, "Original report",
+            "Conflicting signals must not overwrite the original")
+        assertEqual(
+            try await db.fetchArticles(id: separate.id).first?.title, separate.title,
+            "Conflicting signals must not overwrite the other document")
 
         // An alias write failure must roll back the article update and its FTS trigger too.
         execute(
@@ -13841,6 +13972,80 @@ struct NewsTests {
             assertTrue(false, "The appointment is attached to the vote's story as an event of its own")
         }
         await attach.close()
+        // When there are no active multi-report events, the story pass skips story linking (#893).
+        let singleDb = DatabaseEngine(path: ":memory:")
+        try await singleDb.open()
+        let loneStories = (0..<10).map { index in
+            FeedArticle(
+                title: "Lone report \(index) on distinct topic",
+                link: "https://story.invalid/lone-\(index)",
+                guid: "lone-\(index)", description: "Unclustered article",
+                pubDate: now.addingTimeInterval(Double(index) * 60),
+                source: "Publisher \(index)")
+        }
+        try await singleDb.upsertArticles(loneStories)
+        let loneReport = try await EventClusterer.run(in: singleDb, now: now.addingTimeInterval(180))
+        assertEqual(loneReport.changedEvents.count, 0, "No stories changed when no multi-report events exist (#893)")
+
+        // When multi-report events exist alongside unclustered stories, candidate pruning only processes relevant stories (#893).
+        let eventStories = [
+            FeedArticle(
+                title: "SpaceX Falcon rocket launches from Cape Canaveral",
+                link: "https://story.invalid/spacex-1",
+                guid: "spacex-1", description: "SpaceX orbital spaceflight from Cape Canaveral",
+                pubDate: now.addingTimeInterval(0),
+                source: "Publisher 1"),
+            FeedArticle(
+                title: "Falcon rocket launches from Cape Canaveral in SpaceX mission",
+                link: "https://story.invalid/spacex-2",
+                guid: "spacex-2", description: "SpaceX orbital spaceflight from Cape Canaveral",
+                pubDate: now.addingTimeInterval(60),
+                source: "Publisher 2"),
+        ]
+        try await singleDb.upsertArticles(eventStories)
+        _ = try await EventClusterer.run(in: singleDb, now: now.addingTimeInterval(240))
+        let eventArtID = try await singleDb.resolvedArticleID(for: eventStories[0])
+        let createdEventID = try await singleDb.eventID(forArticle: eventArtID)
+        assertTrue(createdEventID != nil, "SpaceX stories form an active multi-report event")
+        // Canonical country features like @US match candidate reports mentioning demonyms or full country names
+        let countryFeature = EventFeatures(
+            title: "American diplomat arrives for summit", description: "Diplomatic mission", date: now)
+        assertTrue(countryFeature.countries.contains("@US"), "American resolves to canonical @US country feature")
+        assertFalse(
+            countryFeature.countries.isDisjoint(with: ["@US"]), "Canonical @US intersects active @US country set")
+
+        // Candidate prefilter retains reports whose specificAnchors overlap allAnchorTerms (#893, review fix).
+        let boosterStory = FeedArticle(
+            title: "Touchdown confirmed",
+            link: "https://story.invalid/booster-1",
+            guid: "booster-1", description: "First stage recovered safely.",
+            pubDate: now.addingTimeInterval(300),
+            source: "Publisher 3")
+        try await singleDb.upsertArticles([boosterStory])
+        let boosterID = try await singleDb.resolvedArticleID(for: boosterStory)
+        var boosterFeatures = EventFeatures(
+            title: boosterStory.title, description: boosterStory.description,
+            date: boosterStory.pubDate)
+        boosterFeatures.organizations.insert(EventFeatures.normalized("SpaceX"))
+        boosterFeatures.keywords.insert("rocket")
+        try await singleDb.upsertArticleFeatures([boosterID: boosterFeatures], version: EventFeatures.storageVersion)
+        var prefilterPolicy = EventMatchPolicy.standard
+        prefilterPolicy.storyModelThreshold = 0.8
+        prefilterPolicy.semanticVetoThreshold = 0.0
+        _ = try await EventClusterer.run(
+            in: singleDb, matchPolicy: prefilterPolicy, now: now.addingTimeInterval(360), allowsEnergy: true,
+            storyProbabilities: { @Sendable _, _ in (0.6, 0.35) })
+        if let boosterEvent = try await singleDb.eventID(forArticle: boosterID),
+            let targetEvent = createdEventID
+        {
+            let lead = try await singleDb.storyID(forEvent: targetEvent)
+            assertEqual(
+                try await singleDb.storyID(forEvent: boosterEvent), lead,
+                "Candidate prefilter retains reports whose specificAnchors overlap allAnchorTerms")
+        } else {
+            assertTrue(false, "Booster story should have an event and attach to the SpaceX story")
+        }
+        await singleDb.close()
         await db.close()
     }
 
@@ -20117,7 +20322,11 @@ struct NewsTests {
         assertEqual(articlesAfterEnrichmentClear.count, 2, "Articles must remain intact after enrichment purge")
 
         // 3. Test clearArticleCache(): clears non-saved article bodies, keeps saved stories intact
+        let genBeforeContentClear = await db.analysisGeneration
         try await db.clearArticleCache()
+        assertEqual(
+            await db.analysisGeneration, genBeforeContentClear + 1,
+            "Clearing article text bumps analysis generation (#886)")
         let articlesAfterContentClear = try await db.fetchArticles(limit: 10)
         let savedArticle = articlesAfterContentClear.first { $0.id == article1.id }
         assertEqual(savedArticle?.fullContent, "Content One", "Saved article content must NOT be cleared")
@@ -23582,6 +23791,14 @@ struct NewsTests {
         cancelledRequest.cancel()
         await cancelledRequestGate.open()
         assertTrue(await cancelledRequest.value == nil, "A cancelled request never returns a cached overview")
+
+        // A lower membership version finishing after a newer version is cached returns nil (#overview-staleness)
+        let lowerVersionResult = await coordinator.requestOverview(
+            eventID: "event-reopened", eventTitle: "Harbour bridge closed",
+            membershipVersion: 0, articles: editedArticles)
+        assertTrue(
+            lowerVersionResult == nil,
+            "Requesting lower membership version returns nil when newer version is cached")
         await db.close()
     }
 
@@ -26090,6 +26307,7 @@ struct NewsTests {
         assertTrue(readManager.isRead(article.id), "MARK_READ_ACTION routes to ReadManager (#560)")
 
         // 3. OPEN_ACTION activates app and sets pendingNavigation
+        var activatedBeforeNavigation = false
         var activated = false
         await NotificationActionRouter.route(
             actionIdentifier: NotificationActionIdentifier.open,
@@ -26097,9 +26315,15 @@ struct NewsTests {
             articleStore: store,
             readManager: readManager,
             savedStories: savedManager,
-            activateApp: { activated = true }
+            activateApp: {
+                activated = true
+                if store.pendingNavigation == nil {
+                    activatedBeforeNavigation = true
+                }
+            }
         )
         assertTrue(activated, "OPEN_ACTION activates the application (#560)")
+        assertTrue(activatedBeforeNavigation, "OPEN_ACTION activates app before pendingNavigation is set")
         assertEqual(store.pendingNavigation?.articleID, article.id, "OPEN_ACTION sets pendingNavigation articleID")
         assertEqual(store.pendingNavigation?.link, article.link, "OPEN_ACTION sets pendingNavigation link")
 
@@ -26126,6 +26350,43 @@ struct NewsTests {
             activateApp: {}
         )
         assertTrue(store.pendingNavigation == nil, "Empty userInfo is ignored safely")
+
+        // 6. Save action on a pruned story does not insert placeholder (#890)
+        let prunedID = "pruned-story-id"
+        let savedCountBefore = savedManager.savedArticles.count
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.save,
+            userInfo: ["articleID": prunedID, "articleLink": "https://example.com/pruned"],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        await savedManager.waitForPendingChanges()
+        assertEqual(
+            savedManager.savedArticles.count, savedCountBefore,
+            "Pruned story is not saved as a placeholder (#890)")
+        assertEqual(
+            store.operationError, "This story is no longer available in your archive.",
+            "Missing story reports clear error message (#890)")
+
+        // 7. Save action on storage failure reports load failure rather than pruned story
+        let errorDB = DatabaseEngine(path: ":memory:")
+        let errorStore = ArticleStore(database: errorDB, spotlightIndexer: MockSpotlightIndexer())
+        await errorStore.initialize()
+        await errorStore.waitForStartup()
+        await errorDB.close()
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.save,
+            userInfo: ["articleID": "error-id", "articleLink": "https://example.com/error"],
+            articleStore: errorStore,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        assertEqual(
+            errorStore.operationError, "The notification story could not be loaded. Please try again.",
+            "Storage lookup failure is distinguished from a pruned story")
         await db.close()
     }
 
