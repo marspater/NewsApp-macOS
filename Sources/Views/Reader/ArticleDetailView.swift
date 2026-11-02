@@ -468,17 +468,21 @@ struct ArticleDetailView: View {
         }
     }
 
+    /// The reader's lead figure: the image the story card shows (#925), unless a figure opens the body or the body
+    /// already shows the same image.
+    static func leadImage(for article: FeedArticle, blocks: [ReaderBlock]) -> String? {
+        guard !blocks.prefix(2).contains(where: { $0.kind == .figure }),
+            let image = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? article.imageUrl,
+            !blocks.contains(where: { $0.kind == .figure && $0.imageURL == image })
+        else { return nil }
+        return image
+    }
+
     @ViewBuilder
     private var heroImageHeader: some View {
         // Decided on the blocks the reader shows, so a dropped early figure does not hide the lead.
         let blocks = renderedBlocks
-        let hasEarlyFigure = blocks.prefix(2).contains { $0.kind == .figure }
-        if !hasEarlyFigure,
-            let imageUrl = currentArticle.readerDocument?.selectedImage(fallback: currentArticle.imageUrl)
-                ?? (currentArticle.readerDocument == nil ? currentArticle.imageUrl : nil),
-            let url = URL(string: imageUrl),
-            !blocks.contains(where: { $0.kind == .figure && $0.imageURL == imageUrl })
-        {
+        if let imageUrl = Self.leadImage(for: currentArticle, blocks: blocks), let url = URL(string: imageUrl) {
             let candidate = currentArticle.readerDocument?.images?.first { $0.url == imageUrl }
             ReaderFigureView(
                 block: ReaderBlock(
