@@ -1044,7 +1044,6 @@ struct NewsTests {
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
-            ("testHybridSearchRRFMathAndStability", { try await testHybridSearchRRFMathAndStability() }),
             (
                 "testHybridSearchSemanticRetrievalAndSnippets",
                 { try await testHybridSearchSemanticRetrievalAndSnippets() }
@@ -26933,57 +26932,6 @@ struct NewsTests {
 
     // MARK: - Hybrid Search & RRF Tests (#708)
 
-    static func testHybridSearchRRFMathAndStability() async throws {
-        print("  - Testing RRF math, score boundaries, and tie-breaking stability...")
-        let k = SearchRankingFusion.k
-        assertEqual(k, 60.0, "RRF dampening constant k must be 60")
-
-        // 1. Math verification
-        let r1 = SearchRankingFusion.rrfScore(rank: 1)
-        assertEqual(r1, 1.0 / 61.0, "Rank 1 RRF score must be 1/61")
-        let r60 = SearchRankingFusion.rrfScore(rank: 60)
-        assertEqual(r60, 1.0 / 120.0, "Rank 60 RRF score must be 1/120")
-        assertEqual(SearchRankingFusion.rrfScore(rank: 0), 0.0, "Invalid rank 0 scores 0.0")
-        assertEqual(SearchRankingFusion.rrfScore(rank: -5), 0.0, "Negative rank scores 0.0")
-
-        // 2. Score boundaries
-        for rank in 1...1000 {
-            let score = SearchRankingFusion.rrfScore(rank: rank)
-            assertTrue(score > 0.0, "Score must be positive")
-            assertTrue(score <= 1.0 / 61.0, "Score must not exceed 1/61")
-        }
-
-        // 3. Fusion combining both arms
-        let lex = [
-            SearchRankingFusion.RankedCandidate(id: "doc-A", rank: 1, snippet: "snippet-A"),
-            SearchRankingFusion.RankedCandidate(id: "doc-B", rank: 2, snippet: "snippet-B"),
-        ]
-        let sem = [
-            SearchRankingFusion.RankedCandidate(id: "doc-B", rank: 1),
-            SearchRankingFusion.RankedCandidate(id: "doc-C", rank: 2),
-        ]
-        let fused = SearchRankingFusion.fuseRankings(lexical: lex, semantic: sem)
-        assertEqual(fused.count, 3, "Fused results include union of candidates")
-
-        // doc-B has rank 2 in lex (1/62) and rank 1 in sem (1/61) -> total 1/62 + 1/61
-        assertEqual(fused[0].id, "doc-B", "doc-B present in both arms ranks first")
-        assertEqual(fused[0].score, (1.0 / 62.0) + (1.0 / 61.0), "Combined RRF score exact match")
-        assertEqual(fused[0].snippet, "snippet-B", "Lexical snippet preserved for dual hit")
-
-        // 4. Tie-breaking determinism and ranking stability
-        let tiedLex = [SearchRankingFusion.RankedCandidate(id: "zebra", rank: 1)]
-        let tiedSem = [SearchRankingFusion.RankedCandidate(id: "alpha", rank: 1)]
-        let tiedFused1 = SearchRankingFusion.fuseRankings(lexical: tiedLex, semantic: tiedSem)
-        assertEqual(tiedFused1.map(\.id), ["alpha", "zebra"], "Tied scores break ties by ID ascending")
-
-        // Stability across runs
-        let tiedFused2 = SearchRankingFusion.fuseRankings(lexical: tiedLex, semantic: tiedSem)
-        assertEqual(tiedFused1, tiedFused2, "Ranking output is strictly deterministic across runs")
-
-        // 5. Empty inputs
-        assertTrue(SearchRankingFusion.fuseRankings(lexical: [], semantic: []).isEmpty, "Empty lists fuse to empty")
-    }
-
     static func testHybridSearchSemanticRetrievalAndSnippets() async throws {
         print("  - Testing natural language semantic retrieval and snippet highlighting...")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -27067,6 +27015,16 @@ struct NewsTests {
         let lexicalHit = hybridResults.first { $0.id == "art-lexical" }
         assertTrue(lexicalHit != nil, "Lexical candidate surfaced")
         assertTrue(lexicalHit?.searchSnippet?.contains("<b>") == true, "Lexical hit retains FTS5 highlight snippet")
+        // Rank 1 in one arm scores 1/(k+1); equal fused scores break ties by id; the order is stable across runs.
+        let rankOne = 1.0 / Double(DatabaseEngine.rrfK + 1)
+        assertEqual(hybridResults.map(\.id), ["art-jwst", "art-lexical"], "Equal fused scores break ties by id")
+        assertEqual(hybridResults.map(\.queryOrderValue), [rankOne, rankOne], "Rank 1 in one arm scores 1/(k+1)")
+        let repeated = try await db.searchArticles(
+            query: "astronomy cosmic exploration", limit: 10, queryEmbedding: queryVec)
+        assertEqual(repeated.map(\.id), hybridResults.map(\.id), "The fused order is the same on every run")
+        assertEqual(
+            try await db.listTotals(search: "astronomy cosmic exploration").stories, 2,
+            "The masthead total counts the semantic match the list shows")
     }
 
     static func testHybridSearchMutingAndFilters() async throws {
@@ -27113,6 +27071,15 @@ struct NewsTests {
         assertTrue(
             unmutedResults.allSatisfy { $0.source != "Bloomberg" }, "Muted publisher filtered from hybrid results")
         assertEqual(unmutedResults.map(\.id), ["art-2"], "Only unmuted Reuters quantum article returned")
+        assertEqual(
+            unmutedResults.first?.queryOrderValue, 2 / Double(DatabaseEngine.rrfK + 1),
+            "Rank 1 in both arms scores 2/(k+1), the highest fused score")
+        // No story contains "superconductors", so only the vector can find the muted art-1.
+        _ = try await db.searchArticles(
+            query: "superconductors", limit: 10, muting: muteRules, queryEmbedding: quantumVec)
+        assertEqual(
+            try await db.mutedArticleCount(search: "superconductors", muting: muteRules), 1,
+            "The muted count includes a muted story the semantic arm would list")
 
         // 2. Mute topic crypto
         let topicMuting = MuteRules(topics: ["Crypto"])
@@ -27189,6 +27156,13 @@ struct NewsTests {
         assertEqual(page3.count, 2, "Page 3 returns remaining 2 articles")
 
         let allPages = page1 + page2 + page3
+        for article in allPages {
+            let number = String(Int(article.id.suffix(2)) ?? -1)
+            assertTrue(
+                article.searchSnippet?.contains("report \(number)") == true
+                    || article.searchSnippet?.contains("development \(number)") == true,
+                "Each snippet comes from its own story (\(article.id))")
+        }
         let allIDs = allPages.map(\.id)
         assertEqual(Set(allIDs).count, 12, "Keyset pagination retrieves all 12 articles with no duplicates")
     }
@@ -27213,9 +27187,16 @@ struct NewsTests {
             guid: "op-2", description: "Beta", pubDate: Date(timeIntervalSince1970: 1_700_000_200), source: "Source"
         )
         try await db.upsertArticles([a1, a2])
+        // A vector aligned with the older story would lift it above the newer one if the semantic arm ran.
+        let dim = SentenceEmbedder.vectorDimension
+        let vector: [Float] = (0..<dim).map { $0 % 2 == 0 ? Float(1.0 / sqrt(Double(dim / 2))) : 0.0 }
+        try await db.upsertArticleEmbeddings(["op-1": vector], modelVersion: SentenceEmbedder.modelVersion)
 
-        let results = try await db.searchArticles(query: "is:unread", limit: 10)
+        let results = try await db.searchArticles(query: "is:unread", limit: 10, queryEmbedding: vector)
         assertEqual(results.map(\.id), ["op-2", "op-1"], "Pure operator query orders by publication date descending")
+        assertTrue(results.allSatisfy { $0.searchSnippet == nil }, "Pure operator query produces no snippets")
+    }
+
     @MainActor
     static func testStoryQuickLookPreview() async {
         print("  - Testing the Quick Look preview: local content, upright page, no remote references (#707)...")

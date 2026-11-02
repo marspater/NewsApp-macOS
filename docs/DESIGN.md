@@ -103,9 +103,7 @@ Predefined categories are selected in Settings → General; Suggested rows are n
 
 - One primary search across the archive, declared once on the `NavigationSplitView` with `searchable`. Placement is the trailing end of the toolbar, where results appear in the detail column (HIG search fields, WWDC26 "Design intuitive search experiences").
 - Search rests as a compact native toolbar button in both list and reader, expanding on focus and collapsing when dismissed with an empty query. A narrow AppKit bridge bounds the native search item; SwiftUI retains search focus, tokens and system glass.
-- Hybrid Search (#708): Fuses SQLite FTS5 lexical matching (BM25 ranking) and on-device natural language semantic similarity (`news_cosine` over 384-dimensional `article_embeddings`) using Reciprocal Rank Fusion ($k = 60$). Pure operator queries (`is:unread`, `source:`, `category:`) bypass semantic embedding and remain purely lexical, ordered chronologically.
-- Snippet highlighting: Snippets with match tags (`<b>...</b>`) are produced only for lexical matches through FTS5 `snippet()`. Semantic-only hits never fabricate snippet highlights.
-- Both ranking arms strictly honor reader mute rules (`MuteRules`: muted sources and topics) and filter tokens before fusing candidates.
+- Free text ranks stories by meaning as well as by their words (#708), so a story can match without the exact words; a search of filter operators only stays newest first.
 - Filter operators (`is:unread`, `is:read`, `is:saved`, `source:`, `category:`) are offered as suggestions while typing and should become search tokens (`searchable(text:tokens:...)`), paired with the suggestions that teach them.
 - Predictive suggestions are few and visibly complete what was typed.
 - No results: `ContentUnavailableView.search(text:)` showing the query. Never a blank list and never a feed-refresh suggestion.

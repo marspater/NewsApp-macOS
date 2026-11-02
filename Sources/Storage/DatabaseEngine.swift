@@ -24,6 +24,8 @@ actor DatabaseEngine {
     private var countsCache:
         (changes: ChangeToken, scope: [String], muting: MuteRules, value: (unread: Int, saved: Int, total: Int))?
     private var mutedCountCache: (changes: ChangeToken?, counts: [MutedCountKey: Int]) = (nil, [:])
+    /// The last search's query vector, so its pages and counts rank and count the same stories (#708).
+    var searchEmbedding: (text: String, vector: [Float])?
     /// This connection's writes (`sqlite3_total_changes`) and other connections' commits (`PRAGMA data_version`).
     private struct ChangeToken: Equatable {
         let own: Int
@@ -2802,44 +2804,6 @@ actor DatabaseEngine {
         return (sql, params)
     }
 
-    /// The full-text join and operator conditions shared by search pages and their muted counts.
-    func searchConditions(_ parsed: ArticleFilterQuery) -> (join: String, sql: String, params: [QueryParameter]) {
-        var join = " WHERE 1=1"
-        var sql = ""
-        var params: [QueryParameter] = []
-        if !parsed.terms.isEmpty {
-            join =
-                " JOIN article_fts_rows f ON f.article_id = a.id JOIN articles_fts fts ON fts.rowid = f.fts_rowid WHERE articles_fts MATCH ?"
-            // Quote every term to prevent FTS syntax injection. Only unquoted searches use prefix matching.
-            let ftsTerms = parsed.terms.enumerated().map { index, term in
-                "\"\(term.replacingOccurrences(of: "\"", with: "\"\""))\""
-                    + (parsed.phraseTermIndices.contains(index) ? "" : "*")
-            }
-            params.append(("text", ftsTerms.joined(separator: " ")))
-        }
-        let scope = collectionScope()
-        sql += scope.sql
-        params += scope.params
-        if let sf = parsed.sourceFilter {
-            sql += " AND a.source LIKE ?"
-            params.append(("text", "%\(sf)%"))
-        }
-        if let cf = parsed.categoryFilter {
-            // Category tokens join words with hyphens (`category:health-&-wellness`).
-            sql += " AND replace(coalesce(ae.category, a.category), ' ', '-') LIKE ?"
-            params.append(("text", "%\(cf)%"))
-        }
-        if let rf = parsed.isReadFilter {
-            sql += " AND s.is_read = ?"
-            params.append(("int", rf ? 1 : 0))
-        }
-        if let sv = parsed.isSavedFilter {
-            sql += " AND s.is_saved = ?"
-            params.append(("int", sv ? 1 : 0))
-        }
-        return (join, sql, params)
-    }
-
     private struct FetchCriteria {
         var section: String?
         var isRead: Bool?
@@ -4195,7 +4159,7 @@ actor DatabaseEngine {
             params = conditions.params
         } else {
             let conditions = searchConditions(ArticleFilterQuery.parse(searchText))
-            sql += conditions.join + " AND " + Self.visibleArticle + conditions.sql
+            sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         }
         sql += filter
