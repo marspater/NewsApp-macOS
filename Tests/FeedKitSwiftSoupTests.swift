@@ -384,6 +384,14 @@ enum FeedKitSwiftSoupTests {
             parsedRelativeJSON?.link == "https://example.com/reports/bridge"
                 && parsedRelativeJSON?.imageUrl == "https://example.com/news/photos/lead.jpg",
             "JSON Feed resolves relative item and image URLs against feedURL")
+        let redirectedRelativeJSON = JSONFeedParser.parse(
+            data: try! JSONSerialization.data(withJSONObject: relativeAndEntityJSON),
+            feedURL: "https://example.com/feed",
+            baseURL: "https://example.com/news/feed.json"
+        )?.first
+        check(
+            redirectedRelativeJSON?.imageUrl == "https://example.com/news/photos/lead.jpg",
+            "JSON Feed resolves relative URLs against redirected response baseURL")
         check(
             parsedRelativeJSON?.description == "Summary with & and markup"
                 && parsedRelativeJSON?.category == "Sci&Tech"
