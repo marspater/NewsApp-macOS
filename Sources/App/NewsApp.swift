@@ -1,5 +1,6 @@
 import AppIntents
 import AppKit
+import QuickLookUI
 import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
@@ -486,6 +487,17 @@ struct KeyboardShortcutsCommands: Commands {
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var notificationPermission: NotificationPermissionRequest?
+
+    // The Quick Look panel looks up the responder chain for its controller; the app delegate ends that chain (#707).
+    nonisolated override func acceptsPreviewPanelControl(_: QLPreviewPanel!) -> Bool {
+        MainActor.assumeIsolated { StoryQuickLookCoordinator.shared.hasPreview }
+    }
+
+    nonisolated override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        MainActor.assumeIsolated { StoryQuickLookCoordinator.shared.control(panel) }
+    }
+
+    nonisolated override func endPreviewPanelControl(_: QLPreviewPanel!) {}
 
     func applicationDidFinishLaunching(_ _: Notification) {
         #if NEWS_SENTRY

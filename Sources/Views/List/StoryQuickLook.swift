@@ -202,6 +202,15 @@ final class StoryQuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelD
         QLPreviewPanel.sharedPreviewPanelExists() && (QLPreviewPanel.shared()?.isVisible ?? false)
     }
 
+    var hasPreview: Bool { currentItem != nil }
+
+    /// Called by the panel's controller (`AppDelegate`) when the panel asks for its data.
+    func control(_ panel: QLPreviewPanel) {
+        panel.dataSource = self
+        panel.delegate = self
+        panel.reloadData()
+    }
+
     override private init() {
         super.init()
         // Previews left behind by a quit or crash go before the first new one.
@@ -225,8 +234,6 @@ final class StoryQuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelD
 
         removeCurrentItem()
         currentItem = StoryQuickLookPreviewItem(url: url, title: article.title)
-        panel.dataSource = self
-        panel.delegate = self
         panel.reloadData()
         closeObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: panel, queue: .main
