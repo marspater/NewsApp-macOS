@@ -172,7 +172,7 @@ final class NotificationService: Sendable {
 
     /// Draws a story banner in the app and says whether it did; installed by the app delegate, which owns the
     /// presenter. Nil (tests, helper processes) leaves every banner to the system.
-    @MainActor static var presentAppBanner: ((UNNotificationRequest) -> Bool)?
+    @MainActor static var presentAppBanner: ((StoryBanner) -> Bool)?
 
     init(
         post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = bannerSpacing
@@ -194,9 +194,13 @@ final class NotificationService: Sendable {
                         return (settings.alertSetting, settings.alertStyle, settings.showPreviewsSetting)
                     },
                     present: { request in
-                        // A request is immutable once made (its content is copied in), so the main actor may read it.
-                        nonisolated(unsafe) let request = request
-                        return await MainActor.run { NotificationService.presentAppBanner?(request) ?? false }
+                        // The banner's fields are copied out here, so only a Sendable value crosses to the main actor.
+                        guard let banner = StoryBanner(request) else { return false }
+                        return await MainActor.run {
+                            // Became active meanwhile: add it, so willPresent files it in Notification Center.
+                            guard !NSApplication.shared.isActive else { return false }
+                            return NotificationService.presentAppBanner?(banner) ?? false
+                        }
                     },
                     add: { try await UNUserNotificationCenter.current().add($0) })
                 log.notice(
