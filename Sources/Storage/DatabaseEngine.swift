@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import SQLite3
 import os
@@ -4957,26 +4958,37 @@ func publisherInputFunction(
     sqlite3_result_text(context, hash, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
 }
 
-/// `news_cosine(a, b)`: similarity of two stored `article_embeddings` vectors through vDSP
-/// (`SentenceEmbedder.cosineSimilarity`; stored vectors are L2-normalized). NULL unless both are 384-float blobs.
+/// `news_cosine(a, b)`: similarity of two stored `article_embeddings` vectors, their vDSP dot product (stored vectors
+/// are L2-normalized, as in `SentenceEmbedder.cosineSimilarity`). NULL unless both are 384-float blobs.
+///
+/// A search scans every stored vector against one query vector (#708), so the second argument, a bound parameter, is
+/// copied once per statement and kept as SQLite auxiliary data, and each row's vector is copied into stack memory:
+/// no heap allocation per row.
 func cosineFunction(
     _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
 ) {
-    guard count == 2, let values else { return sqlite3_result_null(context) }
-    func vector(_ index: Int) -> [Float]? {
-        let value = values[index]
-        guard sqlite3_value_type(value) == SQLITE_BLOB, let blob = sqlite3_value_blob(value) else { return nil }
-        let dimension = SentenceEmbedder.vectorDimension
-        let byteCount = dimension * MemoryLayout<Float>.stride
-        guard Int(sqlite3_value_bytes(value)) == byteCount else { return nil }
-        // SQLite does not promise Float alignment for blob memory, so copy the bytes instead of rebinding them.
-        return [Float](unsafeUninitializedCapacity: dimension) { buffer, initialized in
-            memcpy(buffer.baseAddress!, blob, byteCount)
-            initialized = dimension
-        }
+    let dimension = SentenceEmbedder.vectorDimension
+    let byteCount = dimension * MemoryLayout<Float>.stride
+    func blob(_ index: Int) -> UnsafeRawPointer? {
+        guard let value = values?[index], sqlite3_value_type(value) == SQLITE_BLOB,
+            Int(sqlite3_value_bytes(value)) == byteCount
+        else { return nil }
+        return sqlite3_value_blob(value)
     }
-    guard let left = vector(0), let right = vector(1) else { return sqlite3_result_null(context) }
-    sqlite3_result_double(context, SentenceEmbedder.cosineSimilarity(left, right))
+    guard count == 2, let left = blob(0), let right = blob(1) else { return sqlite3_result_null(context) }
+    // SQLite does not promise Float alignment for blob memory, so both vectors are copied, never rebound in place.
+    let cached = sqlite3_get_auxdata(context, 1)?.assumingMemoryBound(to: Float.self)
+    let query = cached ?? UnsafeMutablePointer<Float>.allocate(capacity: dimension)
+    if cached == nil { memcpy(query, right, byteCount) }
+    let dot = withUnsafeTemporaryAllocation(of: Float.self, capacity: dimension) { row -> Float in
+        memcpy(row.baseAddress!, left, byteCount)
+        var dot: Float = 0
+        vDSP_dotpr(row.baseAddress!, 1, query, 1, &dot, vDSP_Length(dimension))
+        return dot
+    }
+    // SQLite owns the copy from here and frees it when the statement ends or the argument changes.
+    if cached == nil { sqlite3_set_auxdata(context, 1, query) { $0?.deallocate() } }
+    sqlite3_result_double(context, Double(dot))
 }
 
 /// Pure content classification for the one-time topic repair; never trusts an earlier generated label.
