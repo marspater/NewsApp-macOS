@@ -679,6 +679,10 @@ struct NewsTests {
             try await runPerformanceBaseline()
             return
         }
+        if CommandLine.arguments.contains("--search-memory") {
+            try await runSearchMemory()
+            return
+        }
         if CommandLine.arguments.contains("--transport-cancellation") {
             try await testTransportCancellation()
             return
@@ -1055,6 +1059,7 @@ struct NewsTests {
             ("testHybridSearchMutingAndFilters", { try await testHybridSearchMutingAndFilters() }),
             ("testHybridSearchCursorPagination", { try await testHybridSearchCursorPagination() }),
             ("testPureOperatorSearchRemainsLexical", { try await testPureOperatorSearchRemainsLexical() }),
+            ("testSearchExcerpts", { try await testSearchExcerpts() }),
             ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
         try await runSharded(tests)
@@ -2764,6 +2769,129 @@ struct NewsTests {
         print(String(decoding: data, as: UTF8.self))
         print("PERFORMANCE_BASELINE_JSON_END")
         await db.close()
+    }
+
+    /// Opt-in (#708): the process footprint over repeated searches of a 5,000-story seeded library, each through the
+    /// path a list's search takes (`ArticleListView.performQueryReload`): the text embedded by the on-device model,
+    /// the first page, the muted count and the masthead totals, the next page, and for every tenth a spelling
+    /// suggestion. Every search has new text, as typing does, so each one embeds and runs a new query vector.
+    /// Footprint is sampled after each block of searches; the check passes when the last sample is within
+    /// `NEWS_SEARCH_MEMORY_LIMIT_MB` (default 6) of the first one after the warm-up. Runs on 3 November 2026 showed
+    /// one-time steps of up to 3.8 MiB and no trend over 1,500 searches. Over the default 500 searches, 6 MiB fails
+    /// any steady growth above about 12.3 KiB a search (6 MiB / 500), far below one retained model output
+    /// (128 × 384 floats, 192 KiB); smaller or intermittent growth can stay under it.
+    @MainActor
+    static func runSearchMemory() async throws {
+        func footprint() -> UInt64 {
+            var info = task_vm_info_data_t()
+            var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+            let result = withUnsafeMutablePointer(to: &info) {
+                $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+                }
+            }
+            guard result == KERN_SUCCESS else { fatalError("Cannot read the process footprint") }
+            return info.phys_footprint
+        }
+        func mebibytes(_ bytes: UInt64) -> Double { (Double(bytes) / 1_048_576 * 10).rounded() / 10 }
+        guard await SentenceEmbedder.shared.isAvailable else {
+            fatalError("The search memory check needs the embedder")
+        }
+        let environment = ProcessInfo.processInfo.environment
+        let blocks = Int(environment["NEWS_SEARCH_MEMORY_BLOCKS"] ?? "") ?? 10
+        // Zero blocks would compare the warm-up sample with itself and pass without a measured search.
+        guard blocks >= 1 else { fatalError("NEWS_SEARCH_MEMORY_BLOCKS must be at least 1") }
+        let perBlock = 50
+        let limit = Double(environment["NEWS_SEARCH_MEMORY_LIMIT_MB"] ?? "") ?? 6
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-search-memory-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let db = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
+        try await db.open()
+        let topics = [
+            "central bank raises interest rates", "wildfire forces evacuations", "parliament passes budget",
+            "storm floods coastal towns", "court rules on election appeal", "chipmaker reports record revenue",
+            "vaccine trial shows results", "football club signs striker", "satellite launch succeeds",
+            "strike halts rail services",
+        ]
+        let prose = (1...20).map {
+            "Researchers in London compared observation \($0) with the published evidence and documented the results."
+        }.joined(separator: " ")
+        let archive = (0..<5_000).map { index in
+            FeedArticle(
+                title: "\(topics[index % topics.count].capitalized) in report \(index)",
+                link: "https://memory.invalid/article/\(index)", guid: "memory-\(index)",
+                description: "Research evidence on \(topics[(index / 10) % topics.count])",
+                pubDate: Date(timeIntervalSince1970: 1_800_000_000 + Double(index)),
+                source: "Publisher \(index % 20)", fullContent: prose)
+        }
+        try await db.upsertArticles(archive)
+        let vectors = await SentenceEmbedder.shared.embedBatch(
+            archive.map { EventFeatures.matchingText(title: $0.title, description: $0.description) })
+        var embeddings: [String: [Float]] = [:]
+        for (article, vector) in zip(archive, vectors) { embeddings[article.id] = vector }
+        guard embeddings.count == archive.count else { fatalError("Every seeded story embeds") }
+        try await db.upsertArticleEmbeddings(embeddings, modelVersion: SentenceEmbedder.modelVersion)
+        embeddings = [:]
+
+        let muting = MuteRules(topics: ["wildfire"])
+        var searches = 0
+        var listed = 0
+        var durations: [Double] = []
+        func search() async throws {
+            // New text every time, as typing gives: a topic, a number and a word that changes the embedding.
+            let words = ["latest", "update", "analysis", "reaction", "impact"]
+            let text = "\(topics[searches % topics.count]) \(words[(searches / 10) % words.count]) \(searches)"
+            searches += 1
+            let start = ProcessInfo.processInfo.systemUptime
+            let page = try await db.searchArticles(query: text, limit: 201, muting: muting)
+            _ = try await db.mutedArticleCount(search: text, muting: muting)
+            let totals = try await db.listTotals(search: text, muting: muting)
+            if let last = page.last {
+                _ = try await db.searchArticles(
+                    query: text, limit: 201, after: ArticleQueryCursor(last), muting: muting)
+            }
+            if searches.isMultiple(of: 10) {
+                _ = try await db.searchSuggestion(query: "wildfyre evacuashuns \(searches)", muting: muting)
+            }
+            durations.append((ProcessInfo.processInfo.systemUptime - start) * 1000)
+            listed += totals.stories
+        }
+        for _ in 0..<perBlock { try await search() }  // Warm-up: model, SQLite page cache, spelling vocabulary.
+        // Latency and listed counts cover the measured searches only, as the footprint samples do.
+        durations.removeAll()
+        listed = 0
+        var samples = [footprint()]
+        for _ in 0..<blocks {
+            for _ in 0..<perBlock { try await search() }
+            samples.append(footprint())
+        }
+        await db.close()
+        // Raw bytes are compared with the limit; only the reported value is rounded.
+        let rawGrowth = (Double(samples.last!) - Double(samples.first!)) / 1_048_576
+        let growth = (rawGrowth * 10).rounded() / 10
+        let sorted = durations.sorted()
+        let report: [String: Any] = [
+            "library_rows": archive.count, "embeddings": archive.count, "warm_up_searches": perBlock,
+            "measured_searches": blocks * perBlock, "searches_per_sample": perBlock,
+            "footprint_mb": samples.map(mebibytes), "growth_mb": growth, "limit_mb": limit,
+            "search_round_ms_median": sorted[sorted.count / 2], "search_round_ms_p95": sorted[sorted.count * 95 / 100],
+            "mean_listed_stories": listed / (blocks * perBlock),
+            "sqlite_version": String(cString: sqlite3_libversion()),
+            "os": ProcessInfo.processInfo.operatingSystemVersionString,
+            "optimization": "-O (test.sh search memory mode)",
+        ]
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        print("SEARCH_MEMORY_JSON_BEGIN")
+        print(String(decoding: data, as: UTF8.self))
+        print("SEARCH_MEMORY_JSON_END")
+        assertTrue(listed > 0, "Searches list stories")
+        assertTrue(
+            rawGrowth <= limit,
+            "Footprint stays within the limit over \(blocks * perBlock) searches: grew \(growth) MiB"
+                + " (limit \(limit) MiB)")
     }
 
     @MainActor
@@ -27935,7 +28063,8 @@ struct NewsTests {
         // Lexical hit on art-jwst for "primordial redshift"
         assertFalse(semanticOnlyResults.isEmpty, "Lexical query matches art-jwst")
         assertTrue(
-            semanticOnlyResults.first?.searchSnippet?.contains("<b>") == true, "Lexical hit includes FTS5 snippet")
+            semanticOnlyResults.first?.searchExcerpt?.runs.contains { $0.isMatch && $0.text == "redshift" } == true,
+            "Lexical hit includes an excerpt of its summary with the match marked")
 
         // Now natural language query with zero keyword overlap to art-jwst:
         // "astronomy cosmic exploration" has zero words in art-jwst (title or description)
@@ -27952,7 +28081,7 @@ struct NewsTests {
 
         let lexicalHit = hybridResults.first { $0.id == "art-lexical" }
         assertTrue(lexicalHit != nil, "Lexical candidate surfaced")
-        assertTrue(lexicalHit?.searchSnippet?.contains("<b>") == true, "Lexical hit retains FTS5 highlight snippet")
+        assertTrue(lexicalHit?.searchExcerpt != nil, "Lexical hit retains its highlighted excerpt")
         // Rank 1 in one arm scores 1/(k+1); equal fused scores break ties by id; the order is stable across runs.
         let rankOne = 1.0 / Double(DatabaseEngine.rrfK + 1)
         assertEqual(hybridResults.map(\.id), ["art-jwst", "art-lexical"], "Equal fused scores break ties by id")
@@ -28112,6 +28241,60 @@ struct NewsTests {
         }
         let allIDs = allPages.map(\.id)
         assertEqual(Set(allIDs).count, 12, "Keyset pagination retrieves all 12 articles with no duplicates")
+    }
+
+    /// The excerpt a search result shows in its dek (#708): from the feed summary, else the body, only where a word
+    /// matched; never from the headline (already on the card) or the publisher name; markup in publisher text stays
+    /// text; the markers parse into plain and matched runs.
+    static func testSearchExcerpts() async throws {
+        print("  - Testing search excerpts: summary or body only, marked matches, plain text kept (#708)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        defer { Task { await db.close() } }
+        func story(_ id: String, title: String, summary: String, body: String? = nil, source: String = "Desk")
+            -> FeedArticle
+        {
+            FeedArticle(
+                storedID: id, title: title, link: "https://excerpt.invalid/\(id)", guid: id, description: summary,
+                pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: source, fullContent: body)
+        }
+        try await db.upsertArticles([
+            story("in-summary", title: "Budget vote", summary: "Parliament approved the glacier fund on Tuesday"),
+            story(
+                "in-body", title: "Mountain towns", summary: "Residents prepare for winter",
+                body: "Engineers said the glacier retreat had \n\n doubled since 2010."),
+            story("in-title", title: "Glacier melt", summary: "Scientists report record losses"),
+            story("in-source", title: "Weather", summary: "Rain later", source: "Glacier Times"),
+            story("markup", title: "Markup", summary: "A <b>bold</b> claim about the glacier"),
+        ])
+        let results = try await db.searchArticles(query: "glacier", limit: 10)
+        func excerpt(_ id: String) -> SearchExcerpt? { results.first { $0.id == id }?.searchExcerpt }
+        assertEqual(results.count, 5, "Every story matching the word is listed")
+        assertEqual(
+            excerpt("in-summary")?.runs,
+            [
+                .init(text: "Parliament approved the ", isMatch: false), .init(text: "glacier", isMatch: true),
+                .init(text: " fund on Tuesday", isMatch: false),
+            ], "A summary match is the excerpt, the matched word marked")
+        assertEqual(
+            excerpt("in-body")?.plainText, "Engineers said the glacier retreat had doubled since 2010.",
+            "A body match is the excerpt when the summary has none, its line breaks one space")
+        assertTrue(excerpt("in-title") == nil, "A headline-only match keeps the feed summary")
+        assertTrue(excerpt("in-source") == nil, "A publisher-name match is no excerpt")
+        assertEqual(
+            excerpt("markup")?.plainText, "A <b>bold</b> claim about the glacier",
+            "Markup in publisher text stays text and marks nothing")
+        assertEqual(excerpt("markup")?.runs.filter(\.isMatch).map(\.text), ["glacier"], "Only the match is marked")
+
+        // Parsing: stray or unbalanced markers are dropped, and an excerpt without a match is none.
+        assertTrue(SearchExcerpt("no match here") == nil, "Text without a marked match is no excerpt")
+        assertTrue(SearchExcerpt("\u{3}stray\u{2}") == nil, "An unopened end marker and an unclosed start mark nothing")
+        assertEqual(
+            SearchExcerpt("  …the \u{2}rate\u{3} rose\u{3}  ")?.runs,
+            [
+                .init(text: "…the ", isMatch: false), .init(text: "rate", isMatch: true),
+                .init(text: " rose", isMatch: false),
+            ], "Ends are trimmed and a second end marker is dropped")
     }
 
     static func testPureOperatorSearchRemainsLexical() async throws {
