@@ -40,7 +40,8 @@ enum StoryQuickLookRenderer {
         if let blocks = article.readerDocument?.blocks, !blocks.isEmpty {
             let paragraphs = blocks.compactMap { block -> String? in
                 let stripped = FeedXMLParser.stripHTMLSimple(block.text).trimmingCharacters(in: .whitespacesAndNewlines)
-                return stripped.isEmpty ? nil : stripped
+                // A reader document often opens with the headline, which the page already shows.
+                return stripped.isEmpty || stripped == article.title ? nil : stripped
             }
             if !paragraphs.isEmpty {
                 return paragraphs.prefix(4).joined(separator: "\n\n")
@@ -196,10 +197,12 @@ final class StoryQuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelD
     private let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
         "com.marspater.news.quicklook", isDirectory: true)
     private var currentItem: StoryQuickLookPreviewItem?
-    private var closeObserver: (any NSObjectProtocol)?
 
+    private var isClosing = false
+
+    /// Visible and not already animating out.
     var isOpen: Bool {
-        QLPreviewPanel.sharedPreviewPanelExists() && (QLPreviewPanel.shared()?.isVisible ?? false)
+        !isClosing && QLPreviewPanel.sharedPreviewPanelExists() && (QLPreviewPanel.shared()?.isVisible ?? false)
     }
 
     var hasPreview: Bool { currentItem != nil }
@@ -235,21 +238,19 @@ final class StoryQuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelD
         removeCurrentItem()
         currentItem = StoryQuickLookPreviewItem(url: url, title: article.title)
         panel.reloadData()
-        closeObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.willCloseNotification, object: panel, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.removeCurrentItem() }
-        }
-        if !panel.isVisible {
+        if !panel.isVisible || isClosing {
             panel.makeKeyAndOrderFront(nil)
         }
+        isClosing = false
     }
 
+    /// Hides the panel. A second close while it animates out keeps it on screen, and opening a story from the panel
+    /// closes it twice (the Return key, then the reader appearing), so only the first one counts. The preview file
+    /// stays until the next preview replaces it, or the next launch.
     func close() {
-        if isOpen {
-            QLPreviewPanel.shared()?.orderOut(nil)
-        }
-        removeCurrentItem()
+        guard isOpen else { return }
+        isClosing = true
+        QLPreviewPanel.shared()?.close()
     }
 
     private func removeCurrentItem() {
@@ -257,10 +258,6 @@ final class StoryQuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelD
             try? FileManager.default.removeItem(at: url)
         }
         currentItem = nil
-        if let closeObserver {
-            NotificationCenter.default.removeObserver(closeObserver)
-        }
-        closeObserver = nil
     }
 
     // MARK: - QLPreviewPanelDataSource
