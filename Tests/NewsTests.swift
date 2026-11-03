@@ -847,6 +847,7 @@ struct NewsTests {
             ("testNavigationCommands", { await testNavigationCommands() }),
             ("testEscapeXML", { await testEscapeXML() }),
             ("testOPMLParsingAndExporting", { await testOPMLParsingAndExporting() }),
+            ("testOPMLHostileInput", { await testOPMLHostileInput() }),
             ("testStoryExport", { try await testStoryExport() }),
             ("testOfflineCacheAndResilience", { await testOfflineCacheAndResilience() }),
             ("testArticleIdentityDeep", { await testArticleIdentityDeep() }),
@@ -7238,10 +7239,7 @@ struct NewsTests {
                 </body>
             </opml>
             """.data(using: .utf8)!
-        let xxeItems = OPMLParser.parse(data: xxePayload)
-        if let item = xxeItems.first {
-            assertTrue(!item.title.contains("root:"), "OPMLParser must not resolve external file entities")
-        }
+        assertTrue(OPMLParser.parse(data: xxePayload).isEmpty, "An external file entity rejects the whole file (#928)")
 
         // OPML attribute order, category parsing, and case-insensitivity
         let advancedOPML = """
@@ -7291,6 +7289,176 @@ struct NewsTests {
         assertEqual(advancedItems[5].title, "Plain URL Feed", "Untyped url outline without children stays a feed")
         assertEqual(advancedItems[5].url, "https://example.com/plain.xml", "Its url is the feed url")
         assertEqual(advancedItems[5].folder, nil, "Root url-only feed has nil folder")
+    }
+
+    /// #928: OPML import has the feed parser's guards. Hostile files fail with a reason and change nothing; exports
+    /// from common readers still import.
+    @MainActor
+    static func testOPMLHostileInput() async {
+        print("  - Testing OPML import guards: entities, nesting, outline count, reader exports (#928)...")
+        func rejection(_ data: Data) -> String? {
+            do {
+                _ = try OPMLParser.parseValidated(data: data)
+                return nil
+            } catch {
+                return error.localizedDescription
+            }
+        }
+        let feed = "<outline text=\"Feed\" type=\"rss\" xmlUrl=\"https://example.com/feed.xml\"/>"
+        func opml(prolog: String = "", body: String) -> Data {
+            let declaration = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            return Data("\(declaration)\(prolog)<opml version=\"2.0\"><body>\(body)</body></opml>".utf8)
+        }
+
+        // Entity expansion: a billion-laughs prolog is refused before the XML parser sees it, in bounded time.
+        var laughs = "<!ENTITY lol0 \"lol\">"
+        for level in 1...9 {
+            laughs += "<!ENTITY lol\(level) \"" + String(repeating: "&lol\(level - 1);", count: 10) + "\">"
+        }
+        let bomb = opml(
+            prolog: "<!DOCTYPE opml [\(laughs)]>",
+            body: "<outline text=\"&lol9;\" type=\"rss\" xmlUrl=\"https://example.com/feed.xml\"/>")
+        let start = ProcessInfo.processInfo.systemUptime
+        let bombReason = rejection(bomb)
+        assertTrue(
+            ProcessInfo.processInfo.systemUptime - start < 1, "An entity bomb is rejected without being expanded")
+        assertEqual(bombReason, "It declares XML entities, which News does not import.", "Entity bombs name the reason")
+        // UTF-16 hides the declaration from a byte search unless the zero bytes are dropped first.
+        let utf16 = String(decoding: bomb, as: UTF8.self).replacingOccurrences(of: "UTF-8", with: "UTF-16")
+        assertTrue(rejection(utf16.data(using: .utf16)!) != nil, "A UTF-16 entity declaration is rejected")
+        // A declaration beyond the pre-scan's 64 KiB window still stops the parse at the declaration.
+        let padded = opml(
+            prolog: "<!--" + String(repeating: " ", count: 70_000) + "--><!DOCTYPE opml [<!ENTITY far \"x\">]>",
+            body: feed)
+        assertEqual(
+            rejection(padded), "It declares XML entities, which News does not import.",
+            "A late entity declaration aborts the parse")
+        let external = opml(prolog: "<!DOCTYPE opml [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>", body: feed)
+        assertTrue(OPMLParser.parse(data: external).isEmpty, "External entities import nothing")
+
+        // Nesting: 64 levels is the bound, as in the feed parser; one more is refused.
+        func nested(_ levels: Int) -> Data {
+            opml(
+                body: String(repeating: "<outline text=\"Folder\">", count: levels) + feed
+                    + String(repeating: "</outline>", count: levels))
+        }
+        // opml and body are two levels, the feed outline one more.
+        let deepest = OPMLParser.maximumDepth - 3
+        assertEqual(OPMLParser.parse(data: nested(deepest)).count, 1, "Nesting at the bound still imports")
+        assertEqual(
+            rejection(nested(deepest + 1)), "Its outlines nest more than 64 levels deep.",
+            "Nesting past the bound is refused")
+        assertEqual(rejection(nested(100_000)), "Its outlines nest more than 64 levels deep.", "Deep nesting bomb")
+
+        // Outline count: the bound is inclusive and counts folders too.
+        func outlines(_ count: Int) -> Data {
+            opml(
+                body: (0..<count).map { "<outline text=\"F\($0)\" type=\"rss\" xmlUrl=\"https://e.com/\($0).xml\"/>" }
+                    .joined())
+        }
+        assertEqual(
+            OPMLParser.parse(data: outlines(OPMLParser.maximumOutlines)).count, OPMLParser.maximumOutlines,
+            "The outline bound itself imports")
+        // The count is written in the reader's locale (20,000 or 20.000).
+        assertEqual(
+            rejection(outlines(OPMLParser.maximumOutlines + 1)),
+            "It lists more than \(OPMLParser.maximumOutlines.formatted()) outlines.",
+            "One outline past the bound is refused")
+
+        // Malformed files still fail without a guard reason.
+        for broken in ["", "<opml>", "<opml><body><outline></body></opml>", "not xml at all", "\u{FEFF}<<<>>>"] {
+            assertTrue(OPMLParser.parse(data: Data(broken.utf8)).isEmpty, "Malformed OPML imports nothing: \(broken)")
+        }
+
+        // The reader sees why, and nothing changes.
+        let suiteName = testDefaultsSuite("test.opml.guards")
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { removeTestDefaults(suiteName) }
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        let settings = AppSettings(defaults: defaults)
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false)
+        let feedsBefore = settings.feedURLs
+        let sectionsBefore = settings.userSections
+        assertEqual(manager.importFeeds(from: nested(deepest + 1)), 0, "A refused file adds no feed")
+        assertEqual(
+            store.operationError,
+            "The OPML file could not be imported. Its outlines nest more than 64 levels deep. "
+                + "No subscriptions were changed.", "The alert names the guard")
+        store.operationError = nil
+        assertEqual(manager.importFeeds(from: bomb), 0, "An entity bomb adds no feed")
+        assertTrue(store.operationError?.contains("declares XML entities") == true, "The alert names entities")
+        store.operationError = nil
+        assertEqual(manager.importFeeds(from: Data("<opml><body>".utf8)), 0, "A truncated file adds no feed")
+        assertTrue(store.operationError?.contains("incomplete or malformed") == true, "Malformed keeps its message")
+        assertEqual(settings.feedURLs, feedsBefore, "Refused files leave subscriptions unchanged")
+        assertEqual(settings.userSections, sectionsBefore, "Refused files leave sections unchanged")
+        manager.stopBackgroundWork()
+
+        // Exports in the shape common readers write them still import.
+        let netNewsWire = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!-- OPML generated by NetNewsWire -->
+            <opml version="1.1">
+            	<head>
+            		<title>Subscriptions-OnMyMac.opml</title>
+            	</head>
+            <body>
+            	<outline text="Daring Fireball" title="Daring Fireball" description="" type="rss" version="RSS" htmlUrl="https://daringfireball.net/" xmlUrl="https://daringfireball.net/feeds/main"/>
+            	<outline text="News" title="News">
+            		<outline text="BBC News - World" title="BBC News - World" description="" type="rss" version="RSS" htmlUrl="https://www.bbc.co.uk/news/world" xmlUrl="https://feeds.bbci.co.uk/news/world/rss.xml"/>
+            	</outline>
+            </body>
+            </opml>
+            """
+        let feedly = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="1.0">
+              <head>
+                <title>Reader subscriptions in feedly Cloud</title>
+              </head>
+              <body>
+                <outline text="Tech &amp; Science" title="Tech &amp; Science">
+                  <outline type="rss" text="Ars Technica" title="Ars Technica" xmlUrl="https://feeds.arstechnica.com/arstechnica/index" htmlUrl="https://arstechnica.com"/>
+                  <outline type="rss" text="Nature" title="Nature" xmlUrl="https://www.nature.com/nature.rss" htmlUrl="https://www.nature.com"/>
+                </outline>
+              </body>
+            </opml>
+            """
+        let inoreader = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="1.0">
+              <head><title>Subscriptions from Inoreader [https://www.inoreader.com]</title></head>
+              <body>
+                <outline text="World" title="World">
+                  <outline text="Reuters" title="Reuters" type="rss" xmlUrl="https://example.com/reuters/world?format=rss&amp;lang=en" htmlUrl="https://www.reuters.com"/>
+                </outline>
+                <outline text="The Guardian" title="The Guardian" type="rss" xmlUrl="https://www.theguardian.com/world/rss" htmlUrl="https://www.theguardian.com"/>
+              </body>
+            </opml>
+            """
+        for (reader, document, expected) in [
+            (
+                "NetNewsWire", netNewsWire,
+                ["https://daringfireball.net/feeds/main", "https://feeds.bbci.co.uk/news/world/rss.xml"]
+            ),
+            (
+                "Feedly", feedly,
+                ["https://feeds.arstechnica.com/arstechnica/index", "https://www.nature.com/nature.rss"]
+            ),
+            (
+                "Inoreader", inoreader,
+                ["https://example.com/reuters/world?format=rss&lang=en", "https://www.theguardian.com/world/rss"]
+            ),
+        ] {
+            assertTrue(rejection(Data(document.utf8)) == nil, "\(reader) export passes the guards")
+            assertEqual(OPMLParser.parse(data: Data(document.utf8)).map(\.url), expected, "\(reader) export imports")
+        }
+        assertEqual(
+            OPMLParser.parse(data: Data(feedly.utf8)).first?.folder, "Tech & Science", "Escaped folder names import")
+        assertEqual(
+            OPMLParser.parse(data: Data(OPMLExporter.generateOPML(feedURLs: ["https://example.com/a.xml"]).utf8)).count,
+            1, "News's own export passes the guards")
     }
 
     @MainActor

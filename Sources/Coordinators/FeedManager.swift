@@ -225,8 +225,12 @@ class FeedManager: NSObject, ObservableObject {
     @discardableResult
     func importFeeds(from opmlData: Data) -> Int {
         do { _ = try OPMLParser.parseValidated(data: opmlData) } catch {
+            // A guard names its reason (#928); anything else the XML parser rejected is malformed.
+            let error = error as NSError
             articleStore.operationError =
-                "The OPML file could not be imported because it is incomplete or malformed. No subscriptions were changed."
+                error.domain == "OPML" && error.code == 3
+                ? "The OPML file could not be imported. \(error.localizedDescription) No subscriptions were changed."
+                : "The OPML file could not be imported because it is incomplete or malformed. No subscriptions were changed."
             return 0
         }
         let count = appSettings.importFeeds(from: opmlData)
