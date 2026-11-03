@@ -136,7 +136,7 @@ enum GeneratedTextFidelity {
                 !honorifics.contains(lower), !sourceWords.contains(lower)
             else { continue }
             if word.allSatisfy(\.isUppercase), initials.contains(lower) { continue }
-            if sourceWords.contains(where: { $0.count >= 4 && (lower.hasPrefix($0) || $0.hasPrefix(lower)) }) {
+            if sourceWords.contains(where: { lower.commonPrefix(with: $0).count >= 4 }) {
                 continue
             }
             return word
