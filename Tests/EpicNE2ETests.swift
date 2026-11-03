@@ -333,7 +333,7 @@ enum EpicNE2ETests {
         passedCount += 1
 
         // 14. Execute MarkAllAsReadIntent marking articles as read
-        let store14 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store14 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let readMgr14 = ReadManager(articleStore: store14)
         let sampleArticles = [
             EpicNContracts.makeArticle(id: "art1", title: "Article 1", link: "https://example.com/1"),
@@ -425,7 +425,7 @@ enum EpicNE2ETests {
         passedCount += 1
 
         // 22. Verify Save action identifier and routing to SavedStoriesManager
-        let store22 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store22 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let saved22 = SavedStoriesManager(articleStore: store22)
         let readMgr22 = ReadManager(articleStore: store22)
         let notifArticle = EpicNContracts.makeArticle(
@@ -671,7 +671,7 @@ enum EpicNE2ETests {
         passedCount += 1
 
         // 43. MarkAllAsReadIntent when 0 unread stories exist: idempotent, unread remains 0
-        let store43 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store43 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let readMgr43 = ReadManager(articleStore: store43)
         readMgr43.markAsRead(ids: [])
         expectEqual(store43.unreadCount, 0, "MarkAllAsRead on empty library is idempotent and keeps unread count 0")
@@ -761,14 +761,14 @@ enum EpicNE2ETests {
         expectEqual(
             missingDest, EpicNContracts.URLDestination.story(id: "nonexistent-uuid-999"),
             "URL parser resolves destination for missing ID")
-        let store50 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store50 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let resolvedArticle = store50.articles.first(where: { $0.id == "nonexistent-uuid-999" })
         expectNil(resolvedArticle, "Store gracefully yields nil for deleted/missing story without crash")
         passedCount += 1
 
         // F5 Boundaries: Notification Actions (5 tests)
         // 51. Notification response for already saved story: remains saved idempotently
-        let store51 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store51 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let savedMgr51 = SavedStoriesManager(articleStore: store51)
         let readMgr51 = ReadManager(articleStore: store51)
         let article51 = EpicNContracts.makeArticle(
@@ -907,7 +907,7 @@ enum EpicNE2ETests {
         print("\n--- Running Tier 3: Cross-Feature Combinations (≥6 tests) ---")
 
         // 61. Spotlight + URL Scheme + Reader
-        let store61 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store61 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let saved61 = SavedStoriesManager(articleStore: store61)
         let read61 = ReadManager(articleStore: store61)
         let indexer61 = EpicNContracts.MockSpotlightIndexer()
@@ -937,7 +937,7 @@ enum EpicNE2ETests {
         passedCount += 1
 
         // 62. Notification Action + Menu Bar + Spotlight
-        let store62 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store62 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let saved62 = SavedStoriesManager(articleStore: store62)
         let read62 = ReadManager(articleStore: store62)
         let indexer62 = EpicNContracts.MockSpotlightIndexer()
@@ -1009,7 +1009,7 @@ enum EpicNE2ETests {
 
         // 65. Clear Cache + Spotlight + Notification Action
         let indexer65 = EpicNContracts.MockSpotlightIndexer()
-        let store65 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store65 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let saved65 = SavedStoriesManager(articleStore: store65)
         let read65 = ReadManager(articleStore: store65)
         let menuBar65 = EpicNContracts.MenuBarModel(defaults: UserDefaults(suiteName: testDefaultsSuite("mb65"))!)
@@ -1064,7 +1064,7 @@ enum EpicNE2ETests {
         print("\n--- Running Tier 4: Real-World Application Scenarios (≥5 tests) ---")
 
         // 67. Scenario 1: Daily Briefing Routine
-        let store67 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store67 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let saved67 = SavedStoriesManager(articleStore: store67)
         let read67 = ReadManager(articleStore: store67)
         let indexer67 = EpicNContracts.MockSpotlightIndexer()
@@ -1091,7 +1091,7 @@ enum EpicNE2ETests {
         passedCount += 1
 
         // 68. Scenario 2: Breaking News Notification Flow
-        let store68 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store68 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let saved68 = SavedStoriesManager(articleStore: store68)
         let read68 = ReadManager(articleStore: store68)
         let menuBar68 = EpicNContracts.MenuBarModel(defaults: UserDefaults(suiteName: testDefaultsSuite("mb68"))!)
@@ -1165,7 +1165,7 @@ enum EpicNE2ETests {
         passedCount += 1
 
         // 71. Scenario 5: Spotlight Desktop Search
-        let store71 = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store71 = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let saved71 = SavedStoriesManager(articleStore: store71)
         let read71 = ReadManager(articleStore: store71)
         let indexer71 = EpicNContracts.MockSpotlightIndexer()

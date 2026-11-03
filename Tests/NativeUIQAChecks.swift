@@ -213,7 +213,7 @@ struct NativeUIQAChecks {
         settings.aiEnabled = true
         settings.tensionCollectionOptIn = true
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let old = WorldTensionReading(
             evaluatedAt: Date().addingTimeInterval(-86400), inputHash: "old", modelGeneration: "fixture",
@@ -437,7 +437,7 @@ struct NativeUIQAChecks {
         let suite = testDefaultsSuite("native.card-overflow")
         defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: UserDefaults(suiteName: suite)!)
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let url = URL(string: "https://images.example/\(UUID().uuidString)/tall.jpg")!
         let tall = CGContext(
