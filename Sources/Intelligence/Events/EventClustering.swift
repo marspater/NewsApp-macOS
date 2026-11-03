@@ -551,10 +551,13 @@ enum EventClusterer {
         func storyCountryAgrees(
             _ a: [EventMatchRow], _ b: [EventMatchRow], keywords: Int, commonCountries: Set<String>
         ) async throws -> Bool {
-            try await storySampleAgrees(a, b) { _, _, pair, l, r in
+            try await storySampleAgrees(a, b) { left, right, pair, l, r in
                 let countriesMatch = !l.countries.subtracting(commonCountries).isDisjoint(with: r.countries)
+                // A place the series prefix shares is no evidence, but one the report names again outside it is.
                 let placeVetoPasses =
-                    !matchPolicy.storyCountryPlaceVeto || !EventMatcher.namesDifferentLocalPlaces(l, r)
+                    !matchPolicy.storyCountryPlaceVeto
+                    || !EventMatcher.namesDifferentLocalPlaces(
+                        l.keepingStoryPlaces(of: features(left)), r.keepingStoryPlaces(of: features(right)))
                 let cosineOk = (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
                 return pair.conflict == nil && countriesMatch && placeVetoPasses && pair.sharedKeywords >= keywords
                     && cosineOk

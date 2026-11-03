@@ -41,6 +41,9 @@ struct EventFeatures: Hashable, Sendable, Codable {
     var series: String?
     /// Terms the series prefix alone yields; between two items of one publisher's series they are not evidence.
     var seriesTerms: Set<String> = []
+    /// Local places named only in the series prefix (#737): \"Delhi\" of \"Delhi Dispatch: Polls close in Lucknow\", but
+    /// not of \"Delhi Dispatch: Polls close in Delhi\", which names the story's place again outside the prefix.
+    var seriesOnlyPlaces: Set<String> = []
     /// Edition slots named in the headline ("Morning", "Evening"): two items of one series in different slots differ.
     var editions: Set<String> = []
     /// Named storms in the headline ("Storm Arlo", "Hurricane Milton"), lowercased names: two headlines naming different
@@ -81,6 +84,14 @@ struct EventFeatures: Hashable, Sendable, Codable {
         copy.titleSpecificAnchors.subtract(terms)
         copy.titlePlaces.subtract(terms)
         copy.titlePeople.subtract(terms)
+        return copy
+    }
+
+    /// These features with the local places `original` names outside its series prefix put back (#737): after
+    /// `without(_:)` a series report about the place its series is named for still names that place.
+    func keepingStoryPlaces(of original: EventFeatures) -> EventFeatures {
+        var copy = self
+        copy.places.formUnion(original.localPlaces.subtracting(original.seriesOnlyPlaces))
         return copy
     }
 }
@@ -551,6 +562,15 @@ extension EventFeatures {
             let terms = EventFeatures(title: prefix, description: "", date: date)
             collector.features.series = Self.normalized(prefix)
             collector.features.seriesTerms = terms.anchors.union(terms.keywords).union(terms.titleNumbers)
+            let prefixWords = Set(
+                prefix.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { Self.normalized(String($0)) })
+            let outside = String(title[title.index(after: cut)...]) + " " + rawDescription
+            let outsideWords = Set(
+                outside.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { Self.normalized(String($0)) })
+            collector.features.seriesOnlyPlaces = collector.features.localPlaces.filter { place in
+                place.split(separator: " ").allSatisfy { prefixWords.contains(String($0)) }
+                    && !place.split(separator: " ").allSatisfy { outsideWords.contains(String($0)) }
+            }
         }
         // "Three dead after mall shooting": a primary clause that only counts consequences names no act of its own,
         // so it cannot separate the report from coverage that leads with the shooting itself.
