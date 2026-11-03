@@ -50,7 +50,7 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
         settings.notificationsEnabled = false
         settings.feedURLs = ["https://baseline.example/feed"]
         let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
-        let store = ArticleStore(database: database)
+        let store = ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         guard store.isReady else { throw Failure.storage }
         let now = Date()
