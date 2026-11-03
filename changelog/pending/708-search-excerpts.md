@@ -1,0 +1,1 @@
+- Search results show the words around your search in each story's summary or text, with the matching words in bold.
