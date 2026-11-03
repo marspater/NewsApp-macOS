@@ -1008,6 +1008,7 @@ public final class ArticleClassifier: Sendable {
 /// Fully cancellable when the user navigates away.
 public final class ArticleAnalyzer: Sendable {
     public static let shared = ArticleAnalyzer()
+    private static let logger = Logger(subsystem: "com.marspater.news", category: "ArticleAnalyzer")
 
     private let fallbackSummarizer: ExtractiveArticleSummarizer
     private let fallbackExtractor: NaturalLanguageEntityExtractor
@@ -1112,6 +1113,15 @@ public final class ArticleAnalyzer: Sendable {
             """
         let response = try await textModel.respond(prompt, 800)
         guard let parsed = ArticleTextAnswer.analysis(response) else { throw URLError(.cannotParseResponse) }
+        // A summary that changes a figure, name, negation, hedge, speaker or action of the article falls back to the
+        // extractive summary, as a malformed answer does (#951). Only the rule names are logged, never the text.
+        let violations = GeneratedTextFidelity.violations(
+            in: [parsed.summary] + parsed.keyPoints, source: title + ".\n" + content)
+        guard violations.isEmpty else {
+            Self.logger.notice(
+                "Model summary rejected: \(violations.map(\.rawValue).joined(separator: ","), privacy: .public)")
+            throw URLError(.cannotParseResponse)
+        }
         try Task.checkCancellation()
         // Entity names and sentiment retain their native, source-based extractors.
         let entities = await fallbackExtractor.extractEntities(from: content)

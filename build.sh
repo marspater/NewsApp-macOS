@@ -68,6 +68,7 @@ SWIFT_SOURCES=(
     Sources/Intelligence/Overview/OverviewComposer.swift \
     Sources/Intelligence/Overview/OverviewTimelineBuilder.swift \
     Sources/Intelligence/Overview/OverviewQualityAuditor.swift \
+    Sources/Intelligence/Overview/GeneratedTextFidelity.swift \
     Sources/Intelligence/Overview/OverviewClaimVerifier.swift \
     Sources/Intelligence/Overview/OverviewTimelineExtractor.swift \
     Sources/Intelligence/Overview/OverviewPerspectivesExtractor.swift \

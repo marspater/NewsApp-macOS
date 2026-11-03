@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "about": "#951: each case is a source, a faithful rewrite every surface must accept and a wrong rewrite every surface must reject. Surfaces: reader (article summary), sitrep (Briefing line over highlights, each source sentence a highlight), overview (one fact citing the whole source as its passage), worldTension (summary over headlines, each source sentence a headline). knownGaps names the surfaces whose current checks accept the wrong rewrite; the test asserts them as they are, so a fix flips them on purpose.",
+  "cases": [
+    {
+      "id": "negation-reversal",
+      "source": "The ministry said the dam was not damaged in the strike on Tuesday.",
+      "faithful": "The ministry said the dam was not damaged in Tuesday's strike.",
+      "wrong": "The ministry said the dam was damaged in the strike on Tuesday.",
+      "readerRule": "negation",
+      "knownGaps": ["worldTension"]
+    },
+    {
+      "id": "allegation-as-fact",
+      "source": "Police said the man allegedly set fire to the warehouse.",
+      "faithful": "Police said the man allegedly set fire to a warehouse.",
+      "wrong": "Police said the man set fire to the warehouse.",
+      "readerRule": "qualifier",
+      "knownGaps": ["worldTension"]
+    },
+    {
+      "id": "wrong-casualty-figure",
+      "source": "At least 12 people were killed in the flooding, the regional governor said.",
+      "faithful": "The regional governor said at least 12 people were killed in the flooding.",
+      "wrong": "The regional governor said at least 21 people were killed in the flooding.",
+      "readerRule": "figure",
+      "knownGaps": []
+    },
+    {
+      "id": "wrong-attribution",
+      "source": "Health Minister Anna Berg said the hospital would close in March. The union said the closure was illegal.",
+      "faithful": "Health Minister Anna Berg said the hospital would close in March.",
+      "wrong": "The union said the hospital would close in March.",
+      "readerRule": "speaker",
+      "knownGaps": ["worldTension"]
+    },
+    {
+      "id": "conflicting-accounts",
+      "source": "Police said 3,000 people joined the march. Organisers said 20,000 people took part.",
+      "faithful": "Police said 3,000 people joined the march, while organisers said 20,000 took part.",
+      "wrong": "About 20,000 people joined the march.",
+      "readerRule": "attribution",
+      "knownGaps": ["worldTension"]
+    },
+    {
+      "id": "conditional-made-definite",
+      "source": "The central bank could raise interest rates in June if inflation stays above 4%.",
+      "faithful": "The central bank could raise interest rates in June if inflation stays above 4 percent.",
+      "wrong": "The central bank raised interest rates in June as inflation stayed above 4%.",
+      "readerRule": "qualifier",
+      "knownGaps": ["worldTension"]
+    },
+    {
+      "id": "changed-name",
+      "source": "Senator Maria Lopez introduced the bill on Monday, her office said.",
+      "faithful": "Senator Maria Lopez introduced the bill on Monday.",
+      "wrong": "Senator Maria Ortiz introduced the bill on Monday.",
+      "readerRule": "name",
+      "knownGaps": ["worldTension"]
+    },
+    {
+      "id": "arrest-for-summons",
+      "source": "Prosecutors summoned the former minister for questioning on Tuesday.",
+      "faithful": "Prosecutors summoned the former minister on Tuesday.",
+      "wrong": "Prosecutors arrested the former minister on Tuesday.",
+      "readerRule": "action",
+      "knownGaps": ["worldTension"]
+    }
+  ],
+  "faithfulOnly": [
+    { "id": "backshifted-would", "source": "The minister said he would resign at the end of the month.", "rewrite": "The minister said he will resign at the end of the month." },
+    { "id": "would-take-effect", "source": "The new law would take effect in March, the ministry said.", "rewrite": "The new law takes effect in March, the ministry said." },
+    { "id": "claims-noun", "source": "Insurance claims rose 12 percent last year, the regulator said.", "rewrite": "Payouts requested from insurers rose 12 percent last year, the regulator said." },
+    { "id": "plans-noun", "source": "The council said housing plans were approved on Tuesday.", "rewrite": "The council said a housing scheme was approved on Tuesday." },
+    { "id": "the-accused", "source": "The accused appeared in court on Monday.", "rewrite": "The defendant appeared in court on Monday." },
+    { "id": "than-expected", "source": "The economy grew faster than expected in the third quarter.", "rewrite": "The economy grew faster than forecast in the third quarter." },
+    { "id": "hedge-in-other-clause", "source": "The bridge reopened on Friday, and engineers said repairs to the road could take weeks.", "rewrite": "The bridge reopened on Friday." },
+    { "id": "month-may", "source": "May saw record sales for the carmaker.", "rewrite": "The carmaker had record sales in May." },
+    { "id": "us-periods", "source": "The U.S. imposed tariffs on steel imports.", "rewrite": "The US imposed tariffs on steel imports." },
+    { "id": "uk-initials", "source": "The United Kingdom will host the summit next year.", "rewrite": "The UK will host the summit next year." },
+    { "id": "honorific", "source": "John Smith, the finance minister, presented the budget.", "rewrite": "Finance minister Mr Smith presented the budget." },
+    { "id": "number-word", "source": "Three people were injured in the crash.", "rewrite": "3 people were injured in the crash." },
+    { "id": "digits-to-word", "source": "2 people were injured in the crash.", "rewrite": "Two people were injured in the crash." },
+    { "id": "unrelated-second-figure", "source": "Police said 12 people were killed in the flooding. The mayor said 3 schools were closed in the town.", "rewrite": "12 people were killed in the flooding." },
+    { "id": "contested-with-both-speakers", "source": "Police said 3,000 people joined the march. Organisers said 20,000 people took part.", "rewrite": "Police said 3,000 people marched, while organisers put the figure at 20,000." },
+    { "id": "speaker-kept", "source": "Police said 12 people died in the flooding.", "rewrite": "Police reported that 12 people died in the flooding." },
+    { "id": "alleged-kept-as-reportedly", "source": "Police said the man allegedly set fire to the warehouse.", "rewrite": "Police said the man reportedly set fire to the warehouse." },
+    { "id": "inflection-stem", "source": "Officials in Ukraine said new energy measures took effect on Monday.", "rewrite": "Ukrainian officials said new energy measures took effect on Monday." },
+    { "id": "pronoun-one", "source": "Officials said each of the injured was treated in hospital.", "rewrite": "Officials said each one of the injured was treated in hospital." }
+  ],
+  "wrongOnly": [
+    { "id": "possibility-for-allegation", "source": "Police said the man allegedly set fire to the warehouse.", "rewrite": "Police said the man could have set fire to the warehouse.", "readerRule": "qualifier" },
+    { "id": "short-name-stem", "source": "Officials announced new measures on Monday.", "rewrite": "Minister Ann announced new measures on Monday.", "readerRule": "name" },
+    { "id": "number-word-changed", "source": "Two people were injured in the fire on Sunday.", "rewrite": "Three people were injured in the fire on Sunday.", "readerRule": "figure" }
+  ]
+}

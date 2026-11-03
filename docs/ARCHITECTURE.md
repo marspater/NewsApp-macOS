@@ -322,6 +322,13 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Timelines (`OverviewTimelineBuilder`): a verified quote with exactly one explicit date, shown at its stated precision; relative dates are not resolved; fewer than two dates means no timeline.
 
+- Generated-text checks (#951) are deterministic comparisons with the source; no model verifies a model. Each surface's level:
+    - Event overview: `OverviewClaimVerifier` per cited passage (citation and passage, quote grounding, figures, units, currencies, years, negation, attribution, speaker, quotation, actions), plus the shared hedge, contested-figure and name rules.
+    - Reader summary: the model's summary and key points pass every `GeneratedTextFidelity` rule against the article (figures, names, negation against the closest sentence, hedges such as alleged, could and if, speaker, actions, the speaker of a contested figure); a summary that fails falls back to the final extractive summary, as a malformed answer does, and the log names the rules only.
+    - Briefing sitrep: length, no link, names and figures in the inputs (`isValid`), a negation or uncertainty cue kept (`keepsQualifiers`), and the same `GeneratedTextFidelity` rules against the highlights, publishers as known speakers; a failing sentence gives way to the first highlight.
+    - World Tension: every figure and about three in four names in the headlines (`isGrounded`); reasoning is abstract and not compared sentence by sentence, so negation, hedges and speakers are not checked (#235 calibrates it).
+    - `Tests/Fixtures/generated-text/fidelity-corpus-v1.json` holds a source, a faithful and a wrong rewrite per failure kind (negation reversal, allegation as fact, wrong casualty figure, wrong attribution, conflicting accounts, conditional made definite, changed name); `./test.sh` runs it on all four surfaces without Foundation Models, and World Tension's accepted wrong rewrites are listed as known gaps.
+
 - "Earlier in This Story" (`EventStoryRelation`): English, earlier event within 7 days, a shared uncommon typed actor (not in >5% and ≥10 of last week's events), a shared place, two shared topic terms, ⅔ member support. ≤80 FTS rows, ≤40 candidates, ≤3 links. Writes nothing. [Audit](audits/2026-10-20-developing-story-links.md): 1 wrong of 45 after the common-actor rule.
 
 </details>

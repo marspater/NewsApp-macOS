@@ -19,6 +19,12 @@ public enum ClaimVerificationFailureReason: Sendable, Equatable {
     case misquotedReport(quote: String, passageID: String)
     case actionMismatch(claimAction: String, passageID: String)
     case quotationAsFact(passageID: String)
+    /// The passage hedges (alleged, could, if) and the claim states it as fact (#951).
+    case qualifierDropped(claimText: String, passageID: String)
+    /// A figure the passage gives only on one speaker's word, against another speaker's figure, without a speaker.
+    case contestedFigure(claimText: String, passageID: String)
+    /// A proper name the cited passage never mentions (#951).
+    case unsupportedName(name: String, passageID: String)
     case emptyClaim
 }
 
@@ -124,6 +130,21 @@ public struct OverviewClaimVerifier: Sendable {
         for citationID in fact.citationIDs {
             failures.append(
                 contentsOf: verifyCitation(citationID, fact: fact, overview: overview, passagesByID: passagesByID))
+        }
+        // The #951 rules read every passage the fact cites together: a fact citing two passages may name someone from
+        // either, and hedge or count what either says.
+        let cited = fact.citationIDs.compactMap { overview.citations[$0].flatMap { passagesByID[$0.passageID] } }
+        if let first = cited.first {
+            let text = cited.map(\.text).joined(separator: "\n")
+            if dropsQualifier(statement: fact.text, passageText: text) {
+                failures.append(.qualifierDropped(claimText: fact.text, passageID: first.id))
+            }
+            if dropsContestedFigureSpeaker(statement: fact.text, sourceSentences: sentences(text)) {
+                failures.append(.contestedFigure(claimText: fact.text, passageID: first.id))
+            }
+            if let name = unsupportedName(statement: fact.text, source: text) {
+                failures.append(.unsupportedName(name: name, passageID: first.id))
+            }
         }
 
         return ClaimVerificationResult(
@@ -242,22 +263,26 @@ public struct OverviewClaimVerifier: Sendable {
         statement: String,
         passage: EvidencePassage
     ) -> ClaimVerificationFailureReason? {
+        flipsNegation(statement: statement, passageText: passage.text)
+            ? .negationFlipped(claimText: statement, passageID: passage.id) : nil
+    }
+
+    /// Shared with `GeneratedTextFidelity`: the claim negates where the passage sentence it most resembles does not,
+    /// or the other way round.
+    static func flipsNegation(statement: String, passageText: String) -> Bool {
         let claimTokens = negationTokens(statement)
         let tokenizer = NLTokenizer(unit: .sentence)
-        tokenizer.string = passage.text
-        let sentences = tokenizer.tokens(for: passage.text.startIndex..<passage.text.endIndex).map {
-            negationTokens(String(passage.text[$0]))
+        tokenizer.string = passageText
+        let sentences = tokenizer.tokens(for: passageText.startIndex..<passageText.endIndex).map {
+            negationTokens(String(passageText[$0]))
         }
         let claimWords = Set(claimTokens)
         guard
             let reference = sentences.max(by: {
                 Set($0).intersection(claimWords).count < Set($1).intersection(claimWords).count
             })
-        else { return nil }
-        if negationWords.isDisjoint(with: claimTokens) != negationWords.isDisjoint(with: reference) {
-            return .negationFlipped(claimText: statement, passageID: passage.id)
-        }
-        return nil
+        else { return false }
+        return negationWords.isDisjoint(with: claimTokens) != negationWords.isDisjoint(with: reference)
     }
 
     /// Word tokens with "n't" contractions read as "not", so "didn't" counts as a negation.
@@ -320,10 +345,12 @@ public struct OverviewClaimVerifier: Sendable {
         "spokesperson", "spokesman", "spokeswoman", "minister", "ministry", "president", "official", "officials",
         "office", "police", "prosecutor", "prosecutors", "army", "military", "government", "commander", "governor",
         "mayor", "chief", "director", "agency", "court", "judge", "authorities", "department", "council",
+        // Bodies that speak for their members: "the union said" names a speaker (#951).
+        "union", "unions", "organisers", "organizers",
     ]
 
     /// Capitalized at the start of a sentence without naming anyone.
-    private static let capitalizedFunctionWords: Set<String> = [
+    static let capitalizedFunctionWords: Set<String> = [
         "the", "a", "an", "he", "she", "they", "it", "we", "i", "you", "this", "that", "these", "those", "his",
         "her", "their", "its", "our", "my", "your", "in", "on", "at", "but", "and", "after", "before", "when",
         "while", "as", "for", "with", "by", "from", "of", "to", "if", "there", "some", "many", "monday", "tuesday",
@@ -347,7 +374,7 @@ public struct OverviewClaimVerifier: Sendable {
     )
 
     /// Case-preserving words, so proper names stay recognisable.
-    private static func words(_ text: String) -> [String] {
+    static func words(_ text: String) -> [String] {
         text.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
     }
 
@@ -445,7 +472,7 @@ public struct OverviewClaimVerifier: Sendable {
 
     /// The passage sentence sharing the most words with the claim; attribution elsewhere in a long
     /// passage says nothing about this claim.
-    private static func closestSentence(to statement: String, in passage: String) -> String {
+    static func closestSentence(to statement: String, in passage: String) -> String {
         let claim = Set(tokenize(statement))
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = passage
@@ -457,7 +484,7 @@ public struct OverviewClaimVerifier: Sendable {
 
     /// Speakers named within four words of each reporting verb: before it ("the Israeli military said"), else after it
     /// ("said Ford", "according to the health ministry"). Lowercased; "he said" names no one.
-    private static func reportedSpeakers(_ words: [String]) -> Set<String> {
+    static func reportedSpeakers(_ words: [String]) -> Set<String> {
         var speakers = Set<String>()
         for (index, word) in words.enumerated() where reportingVerbs.contains(word.lowercased()) {
             let before = speakerWords(words[max(0, index - 4)..<index])
@@ -575,7 +602,7 @@ public struct OverviewClaimVerifier: Sendable {
     private static let datesYearRegex =
         (try? NSRegularExpression(pattern: #"\b(19\d\d|20\d\d)\b"#)) ?? NSRegularExpression()
 
-    private static func extractNumbers(from text: String) -> [String] {
+    static func extractNumbers(from text: String) -> [String] {
         let regex = numbersRegex
         let nsString = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsString.length))
@@ -602,33 +629,29 @@ public struct OverviewClaimVerifier: Sendable {
         return results
     }
 
+    private static let currencyEquivalents: [String: [String]] = [
+        "$": ["$", "USD"],
+        "USD": ["$", "USD"],
+        "€": ["€", "EUR"],
+        "EUR": ["€", "EUR"],
+        "£": ["£", "GBP"],
+        "GBP": ["£", "GBP"],
+        "₴": ["₴", "UAH", "грн"],
+        "UAH": ["₴", "UAH", "грн"],
+        "грн": ["₴", "UAH", "грн"],
+    ]
+
     private static func containsCurrency(_ currency: String, in text: String) -> Bool {
-        switch currency {
-        case "$":
-            return text.contains("$") || containsWholeWord("USD", in: text)
-        case "USD":
-            return containsWholeWord("USD", in: text) || text.contains("$")
-        case "€":
-            return text.contains("€") || containsWholeWord("EUR", in: text)
-        case "EUR":
-            return containsWholeWord("EUR", in: text) || text.contains("€")
-        case "£":
-            return text.contains("£") || containsWholeWord("GBP", in: text)
-        case "GBP":
-            return containsWholeWord("GBP", in: text) || text.contains("£")
-        case "₴":
-            return text.contains("₴") || containsWholeWord("UAH", in: text) || containsWholeWord("грн", in: text)
-        case "UAH":
-            return containsWholeWord("UAH", in: text) || text.contains("₴") || containsWholeWord("грн", in: text)
-        case "грн":
-            return containsWholeWord("грн", in: text) || text.contains("₴") || containsWholeWord("UAH", in: text)
-        default:
+        guard let equivalents = currencyEquivalents[currency] else {
             return text.contains(currency)
+        }
+        return equivalents.contains { code in
+            code.count == 1 ? text.contains(code) : containsWholeWord(code, in: text)
         }
     }
 
     /// A number not part of a longer one: "14" is not in "140", "2014" or "1.14", but is in "$14m".
-    private static func containsNumber(_ number: String, in text: String) -> Bool {
+    static func containsNumber(_ number: String, in text: String) -> Bool {
         text.range(
             of: #"(?<![\d.,])"# + NSRegularExpression.escapedPattern(for: number) + #"(?![\d]|[.,]\d)"#,
             options: .regularExpression) != nil
@@ -665,7 +688,7 @@ public struct OverviewClaimVerifier: Sendable {
         return lower.contains(unitLower)
     }
 
-    private static func extractDates(from text: String) -> [String] {
+    static func extractDates(from text: String) -> [String] {
         var results: [String] = []
         // Extract 4-digit years
         let yearRegex = datesYearRegex
@@ -677,7 +700,7 @@ public struct OverviewClaimVerifier: Sendable {
         return results
     }
 
-    private static func normalizeText(_ text: String) -> String {
+    static func normalizeText(_ text: String) -> String {
         return text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .components(separatedBy: .whitespacesAndNewlines)
             .filter { !$0.isEmpty }
@@ -685,7 +708,49 @@ public struct OverviewClaimVerifier: Sendable {
     }
 
     /// Folded words, so a claim matches its passage across case and accents. `words` above keeps case on purpose.
-    private static func tokenize(_ text: String) -> [String] {
+    static func tokenize(_ text: String) -> [String] {
         MuteRules.foldedWords(text)
+    }
+
+    // MARK: - Generated Text Fidelity (#951)
+
+    static func sentences(_ text: String) -> [String] {
+        GeneratedTextFidelity.sentences(text)
+    }
+
+    static func fidelityViolations(
+        _ sentence: String, source: String, sourceSentences: [String], knownNames: Set<String>
+    ) -> [GeneratedTextFidelity.Violation] {
+        GeneratedTextFidelity.fidelityViolations(
+            sentence, source: source, sourceSentences: sourceSentences, knownNames: knownNames)
+    }
+
+    static func digitized(_ text: String) -> String {
+        GeneratedTextFidelity.digitized(text)
+    }
+
+    static func unsupportedFigure(statement: String, source: String) -> String? {
+        GeneratedTextFidelity.unsupportedFigure(statement: statement, source: source)
+    }
+
+    static func unsupportedName(statement: String, source: String, knownNames: Set<String> = []) -> String? {
+        GeneratedTextFidelity.unsupportedName(statement: statement, source: source, knownNames: knownNames)
+    }
+
+    static func hedgeKinds(_ text: String) -> Set<String> {
+        GeneratedTextFidelity.hedgeKinds(text)
+    }
+
+    static func dropsQualifier(statement: String, passageText: String) -> Bool {
+        GeneratedTextFidelity.dropsQualifier(statement: statement, passageText: passageText)
+    }
+
+    static func misattributesSpeaker(statement: String, sourceSentences: [String], knownNames: Set<String>) -> Bool {
+        GeneratedTextFidelity.misattributesSpeaker(
+            statement: statement, sourceSentences: sourceSentences, knownNames: knownNames)
+    }
+
+    static func dropsContestedFigureSpeaker(statement: String, sourceSentences: [String]) -> Bool {
+        GeneratedTextFidelity.dropsContestedFigureSpeaker(statement: statement, sourceSentences: sourceSentences)
     }
 }

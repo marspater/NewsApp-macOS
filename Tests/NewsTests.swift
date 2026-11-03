@@ -1021,6 +1021,7 @@ struct NewsTests {
                 "testArticleAnalyzerStructuredOutputAndFallbacks",
                 { try await testArticleAnalyzerStructuredOutputAndFallbacks() }
             ),
+            ("testGeneratedTextFidelityCorpus", { try await testGeneratedTextFidelityCorpus() }),
             ("testInteractiveAnalysisCancellation", { await testInteractiveAnalysisCancellation() }),
             ("testGranularCacheClearingAndRetention", { try await testGranularCacheClearingAndRetention() }),
             ("testNotificationServiceErrorLogging", { await testNotificationServiceErrorLogging() }),
@@ -7511,6 +7512,21 @@ struct NewsTests {
             "A late unused external entity is rejected before parsing")
         let external = opml(prolog: "<!DOCTYPE opml [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>", body: feed)
         assertTrue(OPMLParser.parse(data: external).isEmpty, "External entities import nothing")
+        // An attribute default would give every bare outline a feed address; any DTD declaration is refused.
+        let defaulted = opml(
+            prolog: "<!DOCTYPE opml [<!ATTLIST outline xmlUrl CDATA \"https://attacker.invalid/feed\">]>",
+            body: "<outline text=\"Looks empty\"/>")
+        assertEqual(
+            rejection(defaulted), "It declares XML attribute lists, which News does not import.",
+            "An attribute default in a DTD is refused")
+        assertTrue(OPMLParser.parse(data: defaulted).isEmpty, "A defaulted feed address is never imported")
+        let declared = opml(prolog: "<!DOCTYPE opml [<!ELEMENT outline ANY>]>", body: feed)
+        assertEqual(
+            rejection(declared), "It contains document type definitions, which News does not import.",
+            "An element declaration is refused")
+        assertEqual(
+            OPMLParser.parse(data: opml(prolog: "<!DOCTYPE opml>", body: feed)).count, 1,
+            "A bare doctype without definitions still imports")
 
         // Nesting: 64 levels is the bound, as in the feed parser; one more is refused.
         func nested(_ levels: Int) -> Data {
@@ -7550,7 +7566,7 @@ struct NewsTests {
         let suiteName = testDefaultsSuite("test.opml.guards")
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { removeTestDefaults(suiteName) }
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let settings = AppSettings(defaults: defaults)
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false)
@@ -7564,6 +7580,14 @@ struct NewsTests {
         store.operationError = nil
         assertEqual(manager.importFeeds(from: bomb), 0, "An entity bomb adds no feed")
         assertTrue(store.operationError?.contains("declares XML entities") == true, "The alert names entities")
+        store.operationError = nil
+        assertEqual(
+            manager.importFeeds(from: Data(repeating: 32, count: OPMLFileReader.maximumBytes + 1)), 0,
+            "An oversized file adds no feed")
+        assertEqual(
+            store.operationError,
+            "The OPML file could not be imported. OPML files must be no larger than 5 MB. No subscriptions were changed.",
+            "The alert names the size limit")
         store.operationError = nil
         assertEqual(manager.importFeeds(from: Data("<opml><body>".utf8)), 0, "A truncated file adds no feed")
         assertTrue(store.operationError?.contains("incomplete or malformed") == true, "Malformed keeps its message")
@@ -21514,6 +21538,141 @@ struct NewsTests {
         assertTrue(
             punctuated.text.contains("Westfield gunman"),
             "The sentence repeating the headline's punctuated nouns is selected over earlier unrelated ones")
+    }
+
+    /// #951: one corpus of sources with a faithful and a wrong rewrite, run through every generated-text surface's
+    /// checks on fixed strings (no Foundation Models). Every surface rejects every wrong rewrite except the named
+    /// known gaps, and accepts every faithful one.
+    static func testGeneratedTextFidelityCorpus() async throws {
+        print("  - Testing the generated-text fidelity corpus on every surface (#951)...")
+        struct Case: Decodable {
+            let id: String
+            let source: String
+            let faithful: String
+            let wrong: String
+            let readerRule: String
+            let knownGaps: [String]
+        }
+        struct Rewrite: Decodable {
+            let id: String
+            let source: String
+            let rewrite: String
+            var readerRule: String? = nil
+        }
+        struct Corpus: Decodable {
+            let cases: [Case]
+            let faithfulOnly: [Rewrite]
+            let wrongOnly: [Rewrite]
+        }
+        let corpus = try JSONDecoder().decode(
+            Corpus.self,
+            from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/generated-text/fidelity-corpus-v1.json")))
+        let expectedRules: Set<String> = [
+            GeneratedTextFidelity.Violation.action.rawValue,
+            GeneratedTextFidelity.Violation.attribution.rawValue,
+            GeneratedTextFidelity.Violation.figure.rawValue,
+            GeneratedTextFidelity.Violation.name.rawValue,
+            GeneratedTextFidelity.Violation.negation.rawValue,
+            GeneratedTextFidelity.Violation.qualifier.rawValue,
+            GeneratedTextFidelity.Violation.speaker.rawValue,
+        ]
+        let coveredRules = Set(corpus.cases.map(\.readerRule))
+        assertEqual(coveredRules, expectedRules, "The corpus covers all 7 GeneratedTextFidelity rules")
+
+        func readerAccepts(_ text: String, _ item: Case) -> [GeneratedTextFidelity.Violation] {
+            GeneratedTextFidelity.violations(in: [text], source: "Report.\n" + item.source)
+        }
+        func sitrepAccepts(_ text: String, _ item: Case) -> Bool {
+            let highlights = OverviewClaimVerifier.sentences(item.source).map {
+                BriefingSitrepComposer.Highlight(text: $0, publisher: "Example Wire")
+            }
+            return BriefingSitrepComposer.accepts(text, title: "Report", highlights: highlights)
+        }
+        func overviewAccepts(_ text: String, _ item: Case) -> Bool {
+            let passage = EvidencePassage(id: "p-\(item.id)", articleID: "a-\(item.id)", text: item.source)
+            let citation = OverviewCitation(
+                id: "c-\(item.id)", articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: item.source)
+            let document = EventOverviewDocument(
+                id: "d-\(item.id)", eventID: "e-\(item.id)",
+                version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "corpus"),
+                content: OverviewContent(
+                    title: "Report", summary: "",
+                    facts: [OverviewFact(id: "f", text: text, citationIDs: [citation.id])], citations: [citation]))
+            return OverviewClaimVerifier.verifyOverview(document, passages: [passage], articles: []).isFullyVerified
+        }
+        func worldTensionAccepts(_ text: String, _ item: Case) -> Bool {
+            let headlines = OverviewClaimVerifier.sentences(item.source).enumerated().map {
+                WorldTensionHeadline(id: "C\($0.offset + 1)", title: $0.element, publisher: "Panel")
+            }
+            let assessment = WorldTensionAssessment(
+                score: 40, summary: text,
+                reasons: WorldTensionFactor.allCases.map {
+                    WorldTensionAssessment.Reason(factor: $0, explanation: "Assessed from the panel headlines.")
+                })
+            return assessment.isGrounded(in: headlines)
+        }
+
+        for item in corpus.cases {
+            let faithful = readerAccepts(item.faithful, item)
+            assertTrue(faithful.isEmpty, "\(item.id): the reader accepts the faithful rewrite, got \(faithful)")
+            let wrong = readerAccepts(item.wrong, item)
+            assertTrue(
+                wrong.map(\.rawValue).contains(item.readerRule),
+                "\(item.id): the reader rejects the wrong rewrite by \(item.readerRule), got \(wrong)")
+            let surfaces: [(String, (String, Case) -> Bool)] = [
+                ("sitrep", sitrepAccepts), ("overview", overviewAccepts), ("worldTension", worldTensionAccepts),
+            ]
+            for (surface, accepts) in surfaces {
+                assertTrue(accepts(item.faithful, item), "\(item.id): \(surface) accepts the faithful rewrite")
+                let gap = item.knownGaps.contains(surface)
+                assertEqual(
+                    accepts(item.wrong, item), gap,
+                    gap
+                        ? "\(item.id): \(surface) still accepts the wrong rewrite (known gap; update the corpus if fixed)"
+                        : "\(item.id): \(surface) rejects the wrong rewrite")
+            }
+        }
+
+        // Paraphrases a faithful summary writes (review of 3 November: 13 of these 17 were rejected before): backshifted
+        // "would", hedge words used as nouns, a hedge in another clause, the month May, "US" for "U.S.", initials,
+        // titles, numbers in words, an unrelated second figure. The reader must accept every one.
+        for rewrite in corpus.faithfulOnly {
+            let got = GeneratedTextFidelity.violations(in: [rewrite.rewrite], source: "Report.\n" + rewrite.source)
+            assertTrue(got.isEmpty, "\(rewrite.id): the reader accepts a faithful paraphrase, got \(got)")
+        }
+        for rewrite in corpus.wrongOnly {
+            let got = GeneratedTextFidelity.violations(in: [rewrite.rewrite], source: "Report.\n" + rewrite.source)
+            assertTrue(
+                got.map(\.rawValue).contains(rewrite.readerRule ?? ""),
+                "\(rewrite.id): the reader rejects it by \(rewrite.readerRule ?? "?"), got \(got)")
+        }
+
+        // The reader's whole path: a summary that breaks a rule falls back to the final extractive summary, as a
+        // malformed answer does; a faithful one is kept.
+        let item = corpus.cases.first { $0.id == "wrong-casualty-figure" }!
+        let content = item.source + " Rescue teams searched the valley through the night. Roads remain closed."
+        func analyzer(_ summary: String) -> ArticleAnalyzer {
+            ArticleAnalyzer(
+                textModel: NewsTextModel { _, _ in
+                    "SUMMARY|\(summary)\nPOINT|Rescue teams searched the valley through the night.\nPOINT|Roads remain closed."
+                })
+        }
+        let rejected = try await analyzer(item.wrong).analyze(title: "Flooding", content: content)
+        assertEqual(
+            rejected.modelIdentifier, "apple.natural-language.fallback", "A summary with a wrong figure falls back")
+        assertEqual(rejected.analysisVersion, 3, "The fallback after a rejected summary is final")
+        let kept = try await analyzer(item.faithful).analyze(title: "Flooding", content: content)
+        assertEqual(kept.modelIdentifier, "apple.foundation-model", "A faithful summary is kept")
+        assertEqual(kept.summary, item.faithful, "The faithful summary is shown as written")
+        // A wrong key point counts like a wrong summary.
+        let point = try await ArticleAnalyzer(
+            textModel: NewsTextModel { _, _ in
+                "SUMMARY|\(item.faithful)\nPOINT|Rescue teams searched the valley.\nPOINT|Roads did not remain closed."
+            }
+        ).analyze(title: "Flooding", content: content)
+        assertEqual(
+            point.modelIdentifier, "apple.natural-language.fallback", "A key point that flips a fact falls back")
     }
 
     static func testInteractiveAnalysisCancellation() async {

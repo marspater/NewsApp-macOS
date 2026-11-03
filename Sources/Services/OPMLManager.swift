@@ -83,6 +83,34 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         stop(parser, "It declares XML entities, which News does not import.")
     }
 
+    // Attribute defaults could add a feed address to every outline, and no reader exports a DTD: any other
+    // declaration stops the parse too. Callbacks see decoded text, so a declared encoding cannot hide one.
+    public func parser(
+        _ parser: XMLParser, foundAttributeDeclarationWithName _: String, forElement _: String, type _: String?,
+        defaultValue _: String?
+    ) {
+        stop(parser, Self.definitionsReason)
+    }
+
+    public func parser(_ parser: XMLParser, foundElementDeclarationWithName _: String, model _: String) {
+        stop(parser, Self.definitionsReason)
+    }
+
+    public func parser(
+        _ parser: XMLParser, foundNotationDeclarationWithName _: String, publicID _: String?, systemID _: String?
+    ) {
+        stop(parser, Self.definitionsReason)
+    }
+
+    public func parser(
+        _ parser: XMLParser, foundUnparsedEntityDeclarationWithName _: String, publicID _: String?,
+        systemID _: String?, notationName _: String?
+    ) {
+        stop(parser, "It declares XML entities, which News does not import.")
+    }
+
+    private static let definitionsReason = "It contains document type definitions, which News does not import."
+
     public func parser(
         _ parser: XMLParser, didStartElement elementName: String, namespaceURI _: String?, qualifiedName _: String?,
         attributes attributeDict: [String: String] = [:]
