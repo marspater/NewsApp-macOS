@@ -9,6 +9,12 @@ enum XMLInputGuard {
         let scanLimit = scanEntireInput ? data.count : 65_536
         return Data(data.prefix(scanLimit).filter { $0 != 0 }).range(of: Data("<!ENTITY".utf8)) != nil
     }
+
+    /// Detects DTD attribute-list declarations before Foundation can supply their defaults to parsed elements.
+    static func declaresAttributeLists(_ data: Data, scanEntireInput: Bool = false) -> Bool {
+        let scanLimit = scanEntireInput ? data.count : 65_536
+        return Data(data.prefix(scanLimit).filter { $0 != 0 }).range(of: Data("<!ATTLIST".utf8)) != nil
+    }
 }
 
 /// Standalone XML / RSS 2.0 / Atom parser with security guards against

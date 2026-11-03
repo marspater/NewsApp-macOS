@@ -45,6 +45,10 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         guard !XMLInputGuard.declaresEntities(data, scanEntireInput: true) else {
             throw rejection("It declares XML entities, which News does not import.")
         }
+        // DTD defaults can be copied into every outline and retained by AppSettings during import.
+        guard !XMLInputGuard.declaresAttributeLists(data, scanEntireInput: true) else {
+            throw rejection("It declares XML attribute lists, which News does not import.")
+        }
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
         xmlParser.shouldResolveExternalEntities = false

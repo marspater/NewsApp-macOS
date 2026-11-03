@@ -238,7 +238,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Feed XML: depth 64, 500 items, entity declarations rejected (64 KiB prolog scan + callbacks), FeedKit gets reserialized DTD-free items ≤512 KiB and never fetches URLs. JSON feeds ≤10 MiB, trimmed to 500 items.
 
-- OPML import (#928): ≤5 MB, a full-input `XMLInputGuard` entity scan (including UTF-16/32) plus parser callbacks, depth 64 and ≤20,000 outlines. A refused file names the guard in the alert and changes no subscription or section.
+- OPML import (#928): ≤5 MB, full-input entity and DTD attribute-list scans (including UTF-16/32), parser callbacks, depth 64 and ≤20,000 outlines. Entity and attribute-list declarations are rejected before Foundation can expand or supply DTD defaults. A refused file names the guard in the alert and changes no subscription or section.
 
 - Image requests honor HTTP freshness/no-store after destination validation; decoded images live in a session-only `NSCache`.
 
