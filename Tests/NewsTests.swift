@@ -26958,7 +26958,7 @@ struct NewsTests {
                 StoryQuickLookRenderer.renderPDF(data: renderData, to: previewFile, isDark: isDark),
                 "renderPDF succeeds offline (dark: \(isDark))")
             let pdfData = (try? Data(contentsOf: previewFile)) ?? Data()
-            let pdfString = String(decoding: pdfData, as: UTF8.self)
+            let pdfString = String(bytes: pdfData, encoding: .isoLatin1) ?? ""
             for marker in ["http://", "https://", "/URI", "/Launch", "adnetwork", "tracker"] {
                 assertFalse(pdfString.contains(marker), "Generated PDF contains no \(marker) (dark: \(isDark))")
             }
@@ -26968,6 +26968,11 @@ struct NewsTests {
                 assertTrue(false, "The preview PDF has a readable page (dark: \(isDark))")
                 continue
             }
+            // The page's extracted text and its annotations carry no link either.
+            for marker in ["http://", "https://", "www.", "adnetwork", "tracker"] {
+                assertFalse((text as String).contains(marker), "Page text contains no \(marker) (dark: \(isDark))")
+            }
+            assertTrue(page.annotations.isEmpty, "The preview page has no annotations or link actions")
             let height = page.bounds(for: .mediaBox).height
             let titleBounds = page.selection(for: text.range(of: "Autonomous Space Tug"))?.bounds(for: page) ?? .zero
             let footerBounds = page.selection(for: text.range(of: "Open in Reader"))?.bounds(for: page) ?? .zero
