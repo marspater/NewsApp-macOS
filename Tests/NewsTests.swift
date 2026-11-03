@@ -1044,6 +1044,13 @@ struct NewsTests {
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
+            (
+                "testHybridSearchSemanticRetrievalAndSnippets",
+                { try await testHybridSearchSemanticRetrievalAndSnippets() }
+            ),
+            ("testHybridSearchMutingAndFilters", { try await testHybridSearchMutingAndFilters() }),
+            ("testHybridSearchCursorPagination", { try await testHybridSearchCursorPagination() }),
+            ("testPureOperatorSearchRemainsLexical", { try await testPureOperatorSearchRemainsLexical() }),
             ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
         try await runSharded(tests)
@@ -2591,6 +2598,34 @@ struct NewsTests {
             let rows = try await db.searchArticles(query: "Research", limit: 100)
             record("fts_first_100_ms", from: start)
             assertEqual(rows.count, 100, "FTS benchmark returns expected rows")
+        }
+
+        // Hybrid Search (FTS5 + Vector RRF) synthetic 5,000-story benchmark (#708)
+        let vectorDimension = SentenceEmbedder.vectorDimension
+        var syntheticEmbeddings: [String: [Float]] = [:]
+        syntheticEmbeddings.reserveCapacity(5_000)
+        let benchmarkQueryVector: [Float] = (0..<vectorDimension).map { i in
+            i % 2 == 0 ? Float(1.0 / sqrt(Double(vectorDimension / 2))) : 0.0
+        }
+        for (idx, art) in archive.prefix(5_000).enumerated() {
+            let alignFactor: Double = idx < 150 ? 0.9 : 0.1
+            let vec: [Float] = (0..<vectorDimension).map { i in
+                if i % 2 == 0 {
+                    return Float(alignFactor / sqrt(Double(vectorDimension / 2)))
+                } else {
+                    return Float(sqrt(max(0.0, 1.0 - alignFactor * alignFactor)) / sqrt(Double(vectorDimension / 2)))
+                }
+            }
+            syntheticEmbeddings[art.id] = vec
+        }
+        try await db.upsertArticleEmbeddings(syntheticEmbeddings, modelVersion: SentenceEmbedder.modelVersion)
+
+        for _ in 0..<10 {
+            let start = ProcessInfo.processInfo.systemUptime
+            let rows = try await db.searchArticles(
+                query: "Research", limit: 100, queryEmbedding: benchmarkQueryVector)
+            record("hybrid_search_5000_stories_ms", from: start)
+            assertEqual(rows.count, 100, "Hybrid search benchmark returns expected rows")
         }
         let html =
             "<article><h2>Evidence</h2><p>\(prose)</p><figure><img src='/photo.jpg' width='1200' height='800'></figure><p>\(prose)</p></article>"
@@ -26920,6 +26955,292 @@ struct NewsTests {
         await readManager.waitForPendingChanges()
         assertEqual(store.unreadCount, 1, "ArticleStore.unreadCount decrements to 1 when story is marked read")
         await db.close()
+    }
+
+    // MARK: - Hybrid Search & RRF Tests (#708)
+
+    static func testHybridSearchSemanticRetrievalAndSnippets() async throws {
+        print("  - Testing natural language semantic retrieval and snippet highlighting...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-hybrid-search-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let db = DatabaseEngine(path: directory.appendingPathComponent("hybrid.sqlite3").path)
+        try await db.open()
+        defer { Task { await db.close() } }
+
+        // Article A: purely semantic match (zero headline/description token overlap with "astronomy cosmic exploration")
+        let artA = FeedArticle(
+            storedID: "art-jwst",
+            title: "Primordial Deep Field Survey Published",
+            link: "https://example.com/jwst",
+            guid: "jwst-1",
+            description: "Orbital observatory observes redshift objects from thirteen billion years ago",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_000),
+            source: "Science Daily"
+        )
+        // Article B: lexical match (contains exact tokens "astronomy cosmic exploration")
+        let artB = FeedArticle(
+            storedID: "art-lexical",
+            title: "Astronomy cosmic exploration update",
+            link: "https://example.com/lexical",
+            guid: "lex-1",
+            description: "Recent developments in astronomy cosmic exploration and deep observation",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_100),
+            source: "Space Digest"
+        )
+        try await db.upsertArticles([artA, artB])
+
+        // Query vector and synthetic embeddings
+        let dim = SentenceEmbedder.vectorDimension
+        let queryVec: [Float] = (0..<dim).map { i in
+            i % 2 == 0 ? Float(1.0 / sqrt(Double(dim / 2))) : 0.0
+        }
+        // Art A vector aligned with query vector (cosine = 0.85)
+        let artAVec: [Float] = (0..<dim).map { i in
+            if i % 2 == 0 {
+                return Float(0.85 / sqrt(Double(dim / 2)))
+            } else {
+                return Float(sqrt(1.0 - 0.85 * 0.85) / sqrt(Double(dim / 2)))
+            }
+        }
+        // Art B vector divergent (cosine = 0.10, below 0.25 threshold)
+        let artBVec: [Float] = (0..<dim).map { i in
+            if i % 2 == 0 {
+                return Float(0.10 / sqrt(Double(dim / 2)))
+            } else {
+                return Float(sqrt(1.0 - 0.10 * 0.10) / sqrt(Double(dim / 2)))
+            }
+        }
+        // Below the threshold: as close as the typos measured on a real library, so never a semantic match.
+        let artC = FeedArticle(
+            storedID: "art-weather", title: "Weekend weather outlook", link: "https://example.com/weather",
+            guid: "weather-1", description: "Showers clearing by Sunday",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_200),
+            source: "Met Desk")
+        try await db.upsertArticles([artC])
+        let artCVec: [Float] = (0..<dim).map { i in
+            Float((i % 2 == 0 ? 0.30 : sqrt(1.0 - 0.30 * 0.30)) / sqrt(Double(dim / 2)))
+        }
+        try await db.upsertArticleEmbeddings(
+            ["art-jwst": artAVec, "art-lexical": artBVec, "art-weather": artCVec],
+            modelVersion: SentenceEmbedder.modelVersion
+        )
+
+        // Semantic-only search for Art A (zero keyword overlap)
+        let semanticOnlyResults = try await db.searchArticles(
+            query: "primordial redshift", queryEmbedding: nil)
+        // Lexical hit on art-jwst for "primordial redshift"
+        assertFalse(semanticOnlyResults.isEmpty, "Lexical query matches art-jwst")
+        assertTrue(
+            semanticOnlyResults.first?.searchSnippet?.contains("<b>") == true, "Lexical hit includes FTS5 snippet")
+
+        // Now natural language query with zero keyword overlap to art-jwst:
+        // "astronomy cosmic exploration" has zero words in art-jwst (title or description)
+        let hybridResults = try await db.searchArticles(
+            query: "astronomy cosmic exploration",
+            limit: 10,
+            queryEmbedding: queryVec
+        )
+        assertEqual(hybridResults.count, 2, "Both lexical and semantic candidates surfaced")
+
+        let jwstHit = hybridResults.first { $0.id == "art-jwst" }
+        assertTrue(jwstHit != nil, "Semantic candidate surfaced despite zero keyword overlap")
+        assertTrue(jwstHit?.searchSnippet == nil, "Never fabricate snippets for semantic-only match")
+
+        let lexicalHit = hybridResults.first { $0.id == "art-lexical" }
+        assertTrue(lexicalHit != nil, "Lexical candidate surfaced")
+        assertTrue(lexicalHit?.searchSnippet?.contains("<b>") == true, "Lexical hit retains FTS5 highlight snippet")
+        // Rank 1 in one arm scores 1/(k+1); equal fused scores break ties by id; the order is stable across runs.
+        let rankOne = 1.0 / Double(DatabaseEngine.rrfK + 1)
+        assertEqual(hybridResults.map(\.id), ["art-jwst", "art-lexical"], "Equal fused scores break ties by id")
+        assertEqual(hybridResults.map(\.queryOrderValue), [rankOne, rankOne], "Rank 1 in one arm scores 1/(k+1)")
+        let repeated = try await db.searchArticles(
+            query: "astronomy cosmic exploration", limit: 10, queryEmbedding: queryVec)
+        assertEqual(repeated.map(\.id), hybridResults.map(\.id), "The fused order is the same on every run")
+        assertEqual(
+            try await db.listTotals(search: "astronomy cosmic exploration").stories, 2,
+            "The masthead total counts the semantic match the list shows")
+
+        // A quoted phrase (an entity tag) asks for those exact words: no semantic matches, in the list or the count.
+        let phrase = try await db.searchArticles(
+            query: "\"astronomy cosmic exploration\"", limit: 10, queryEmbedding: queryVec)
+        assertEqual(phrase.map(\.id), ["art-lexical"], "A quoted phrase stays lexical")
+        assertEqual(
+            try await db.listTotals(search: "\"astronomy cosmic exploration\"").stories, 1,
+            "A quoted phrase's total counts lexical matches only")
+    }
+
+    static func testHybridSearchMutingAndFilters() async throws {
+        print("  - Testing hybrid search mute rules and filter tokens...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-hybrid-filters-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let db = DatabaseEngine(path: directory.appendingPathComponent("filters.sqlite3").path)
+        try await db.open()
+        defer { Task { await db.close() } }
+
+        let a1 = FeedArticle(
+            storedID: "art-1", title: "Quantum physics breakthrough", link: "https://bloomberg.example/1",
+            guid: "a-1", description: "Computing hardware advances", pubDate: Date(), source: "Bloomberg",
+            category: "Technology"
+        )
+        let a2 = FeedArticle(
+            storedID: "art-2", title: "Quantum semiconductor research", link: "https://reuters.example/2",
+            guid: "a-2", description: "Computing chips developments", pubDate: Date(), source: "Reuters",
+            category: "Technology"
+        )
+        let a3 = FeedArticle(
+            storedID: "art-3", title: "Crypto token speculation", link: "https://reuters.example/3",
+            guid: "a-3", description: "Bitcoin digital assets surge", pubDate: Date(), source: "Reuters",
+            category: "Finance"
+        )
+        try await db.upsertArticles([a1, a2, a3])
+        try await db.markRead(articleId: "art-2", isRead: true)
+
+        let dim = SentenceEmbedder.vectorDimension
+        let quantumVec: [Float] = (0..<dim).map { i in i % 2 == 0 ? Float(1.0 / sqrt(Double(dim / 2))) : 0.0 }
+        let cryptoVec: [Float] = (0..<dim).map { i in i % 2 != 0 ? Float(1.0 / sqrt(Double(dim / 2))) : 0.0 }
+        try await db.upsertArticleEmbeddings(
+            ["art-1": quantumVec, "art-2": quantumVec, "art-3": cryptoVec],
+            modelVersion: SentenceEmbedder.modelVersion
+        )
+
+        // 1. Mute publisher Bloomberg
+        let muteRules = MuteRules(sources: ["bloomberg.example"])
+        let unmutedResults = try await db.searchArticles(
+            query: "quantum", limit: 10, muting: muteRules, queryEmbedding: quantumVec)
+        assertTrue(
+            unmutedResults.allSatisfy { $0.source != "Bloomberg" }, "Muted publisher filtered from hybrid results")
+        assertEqual(unmutedResults.map(\.id), ["art-2"], "Only unmuted Reuters quantum article returned")
+        assertEqual(
+            unmutedResults.first?.queryOrderValue, 2 / Double(DatabaseEngine.rrfK + 1),
+            "Rank 1 in both arms scores 2/(k+1), the highest fused score")
+        // No story contains "superconductors", so only the vector can find the muted art-1.
+        _ = try await db.searchArticles(
+            query: "superconductors", limit: 10, muting: muteRules, queryEmbedding: quantumVec)
+        assertEqual(
+            try await db.mutedArticleCount(search: "superconductors", muting: muteRules), 1,
+            "The muted count includes a muted story the semantic arm would list")
+
+        // 2. Mute topic crypto
+        let topicMuting = MuteRules(topics: ["Crypto"])
+        let topicResults = try await db.searchArticles(
+            query: "token", limit: 10, muting: topicMuting, queryEmbedding: cryptoVec)
+        assertTrue(topicResults.isEmpty, "Muted topic filtered from hybrid results")
+
+        // 3. Filter is:unread
+        let unreadResults = try await db.searchArticles(
+            query: "quantum is:unread", limit: 10, queryEmbedding: quantumVec)
+        assertEqual(unreadResults.map(\.id), ["art-1"], "is:unread filters out read story art-2")
+
+        // 4. Filter source:Reuters
+        let reutersResults = try await db.searchArticles(
+            query: "quantum source:reuters", limit: 10, queryEmbedding: quantumVec)
+        assertEqual(reutersResults.map(\.id), ["art-2"], "source:reuters filters to Reuters stories")
+    }
+
+    static func testHybridSearchCursorPagination() async throws {
+        print("  - Testing hybrid search cursor pagination stability...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-hybrid-page-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let db = DatabaseEngine(path: directory.appendingPathComponent("paging.sqlite3").path)
+        try await db.open()
+        defer { Task { await db.close() } }
+
+        var articles: [FeedArticle] = []
+        let dim = SentenceEmbedder.vectorDimension
+        var embeddings: [String: [Float]] = [:]
+        let queryVec: [Float] = (0..<dim).map { i in i % 2 == 0 ? Float(1.0 / sqrt(Double(dim / 2))) : 0.0 }
+
+        for i in 0..<12 {
+            let id = String(format: "page-art-%02d", i)
+            articles.append(
+                FeedArticle(
+                    storedID: id,
+                    title: "Energy research report \(i)",
+                    link: "https://example.com/energy/\(i)",
+                    guid: "energy-\(i)",
+                    description: "Clean energy battery development \(i)",
+                    pubDate: Date(timeIntervalSince1970: 1_700_000_000 + Double(i * 100)),
+                    source: "Energy Digest"
+                ))
+            let sim = 0.30 + Double(i) * 0.04
+            embeddings[id] = (0..<dim).map { idx in
+                if idx % 2 == 0 {
+                    return Float(sim / sqrt(Double(dim / 2)))
+                } else {
+                    return Float(sqrt(max(0.0, 1.0 - sim * sim)) / sqrt(Double(dim / 2)))
+                }
+            }
+        }
+        try await db.upsertArticles(articles)
+        try await db.upsertArticleEmbeddings(embeddings, modelVersion: SentenceEmbedder.modelVersion)
+
+        // Page 1
+        let page1 = try await db.searchArticles(
+            query: "energy research", limit: 5, queryEmbedding: queryVec)
+        assertEqual(page1.count, 5, "Page 1 returns 5 articles")
+
+        // Page 2 using cursor from page 1 last item
+        let cursor1 = ArticleQueryCursor(page1.last!)
+        let page2 = try await db.searchArticles(
+            query: "energy research", limit: 5, after: cursor1, queryEmbedding: queryVec)
+        assertEqual(page2.count, 5, "Page 2 returns 5 articles")
+
+        // Page 3
+        let cursor2 = ArticleQueryCursor(page2.last!)
+        let page3 = try await db.searchArticles(
+            query: "energy research", limit: 5, after: cursor2, queryEmbedding: queryVec)
+        assertEqual(page3.count, 2, "Page 3 returns remaining 2 articles")
+
+        let allPages = page1 + page2 + page3
+        for article in allPages {
+            let number = String(Int(article.id.suffix(2)) ?? -1)
+            // A whole number: "report 1" must not accept a snippet of report 10 or 11.
+            assertTrue(
+                article.searchSnippet?.range(of: "(report|development) \(number)\\b", options: .regularExpression)
+                    != nil,
+                "Each snippet comes from its own story (\(article.id))")
+        }
+        let allIDs = allPages.map(\.id)
+        assertEqual(Set(allIDs).count, 12, "Keyset pagination retrieves all 12 articles with no duplicates")
+    }
+
+    static func testPureOperatorSearchRemainsLexical() async throws {
+        print("  - Testing pure operator search remains purely lexical and date-ordered...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-pure-op-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let db = DatabaseEngine(path: directory.appendingPathComponent("pureop.sqlite3").path)
+        try await db.open()
+        defer { Task { await db.close() } }
+
+        let a1 = FeedArticle(
+            storedID: "op-1", title: "Alpha story", link: "https://example.com/op1",
+            guid: "op-1", description: "Alpha", pubDate: Date(timeIntervalSince1970: 1_700_000_100), source: "Source"
+        )
+        let a2 = FeedArticle(
+            storedID: "op-2", title: "Beta story", link: "https://example.com/op2",
+            guid: "op-2", description: "Beta", pubDate: Date(timeIntervalSince1970: 1_700_000_200), source: "Source"
+        )
+        try await db.upsertArticles([a1, a2])
+        // A vector aligned with the older story would lift it above the newer one if the semantic arm ran.
+        let dim = SentenceEmbedder.vectorDimension
+        let vector: [Float] = (0..<dim).map { $0 % 2 == 0 ? Float(1.0 / sqrt(Double(dim / 2))) : 0.0 }
+        try await db.upsertArticleEmbeddings(["op-1": vector], modelVersion: SentenceEmbedder.modelVersion)
+
+        let results = try await db.searchArticles(query: "is:unread", limit: 10, queryEmbedding: vector)
+        assertEqual(results.map(\.id), ["op-2", "op-1"], "Pure operator query orders by publication date descending")
+        assertTrue(results.allSatisfy { $0.searchSnippet == nil }, "Pure operator query produces no snippets")
     }
 
     @MainActor

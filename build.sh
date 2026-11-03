@@ -53,6 +53,7 @@ SWIFT_SOURCES=(
     Sources/Models/OnboardingStep.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
+    Sources/Storage/DatabaseEngine+Search.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/SpotlightIndexer.swift \
     Sources/Storage/ArticleStore.swift \

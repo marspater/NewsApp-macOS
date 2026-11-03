@@ -103,6 +103,7 @@ Predefined categories are selected in Settings → General; Suggested rows are n
 
 - One primary search across the archive, declared once on the `NavigationSplitView` with `searchable`. Placement is the trailing end of the toolbar, where results appear in the detail column (HIG search fields, WWDC26 "Design intuitive search experiences").
 - Search rests as a compact native toolbar button in both list and reader, expanding on focus and collapsing when dismissed with an empty query. A narrow AppKit bridge bounds the native search item; SwiftUI retains search focus, tokens and system glass.
+- Free text ranks stories by meaning as well as by their words when the on-device embedder is available (#708), so a story can match without the exact words; without it, and for a quoted phrase, search ranks by words alone. A search of filter operators only stays newest first.
 - Filter operators (`is:unread`, `is:read`, `is:saved`, `source:`, `category:`) are offered as suggestions while typing and should become search tokens (`searchable(text:tokens:...)`), paired with the suggestions that teach them.
 - Predictive suggestions are few and visibly complete what was typed.
 - No results: `ContentUnavailableView.search(text:)` showing the query. Never a blank list and never a feed-refresh suggestion.

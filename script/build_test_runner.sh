@@ -89,6 +89,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Sources/Models/ArticleSearchState.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
+    Sources/Storage/DatabaseEngine+Search.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/SpotlightIndexer.swift \
     Sources/Storage/ArticleStore.swift \
