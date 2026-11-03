@@ -77,7 +77,7 @@ private final class ReadingDelegate: NSObject, NSApplicationDelegate {
         }
         settings.feedURLs = feeds
         let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
-        let store = ArticleStore(database: database)
+        let store = ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         guard store.isReady else { throw Failure.storage }
         // Exactly 20 distinct stories, four per feed where possible, so every run is the same workload.

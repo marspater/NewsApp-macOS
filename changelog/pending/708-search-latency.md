@@ -1,0 +1,1 @@
+- Searches list their first stories faster: highlighted excerpts are built in one pass and each story's similarity to the search is computed once.

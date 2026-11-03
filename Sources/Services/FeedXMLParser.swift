@@ -1,6 +1,22 @@
 import FeedKit
 import Foundation
 
+/// Checks shared by every XML document the app reads from outside: feeds and OPML imports (#928).
+enum XMLInputGuard {
+    /// Rejects declarations before Foundation or FeedKit can expand them, including UTF-16/32 documents.
+    /// Feed parsing keeps its bounded prolog scan; OPML opts into the complete, separately size-bounded input.
+    static func declaresEntities(_ data: Data, scanEntireInput: Bool = false) -> Bool {
+        let scanLimit = scanEntireInput ? data.count : 65_536
+        return Data(data.prefix(scanLimit).filter { $0 != 0 }).range(of: Data("<!ENTITY".utf8)) != nil
+    }
+
+    /// Detects DTD attribute-list declarations before Foundation can supply their defaults to parsed elements.
+    static func declaresAttributeLists(_ data: Data, scanEntireInput: Bool = false) -> Bool {
+        let scanLimit = scanEntireInput ? data.count : 65_536
+        return Data(data.prefix(scanLimit).filter { $0 != 0 }).range(of: Data("<!ATTLIST".utf8)) != nil
+    }
+}
+
 /// Standalone XML / RSS 2.0 / Atom parser with security guards against
 /// recursion bombs, entity expansions, and oversized element nesting.
 final class FeedXMLParser: NSObject, XMLParserDelegate {
@@ -64,9 +80,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             parseError = "Feed exceeds parsing limit or was cancelled"
             return false
         }
-        // Reject declarations before Foundation or FeedKit can expand them, including UTF-16/32 prologs.
-        let prolog = Data(data.prefix(65_536).filter { $0 != 0 })
-        guard prolog.range(of: Data("<!ENTITY".utf8)) == nil else {
+        guard !XMLInputGuard.declaresEntities(data) else {
             parseError = "XML entity declarations are not allowed"
             return false
         }

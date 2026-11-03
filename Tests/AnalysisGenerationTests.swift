@@ -266,7 +266,7 @@ enum AnalysisGenerationTests {
     static func queueForgetsRefusedAndClearedWork() async throws {
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let queue = EnrichmentQueue(store: store)
         store.analysisClearedHandler = { await queue.analysisCleared() }
 
@@ -376,7 +376,7 @@ enum AnalysisGenerationTests {
                 pubDate: Date(timeIntervalSince1970: 1_793_188_800 + Double(index)), source: "Outlet \(index)")
         }
         try await db.upsertArticles(reports)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let queue = EnrichmentQueue(store: store)
         let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
         // Fill the bounded queue so the visible request stays in flight until the gate opens.

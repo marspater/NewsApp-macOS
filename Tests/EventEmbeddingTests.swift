@@ -128,6 +128,53 @@ extension NewsTests {
         assertTrue(abs((cosine(x, unit([0: 1, 1: 1])) ?? 0) - 0.5.squareRoot()) < 1e-6, "45° apart has cosine √½")
         assertTrue(abs(cosine(x, unit([1: 1])) ?? 1) < 1e-6, "Orthogonal vectors have cosine 0")
         assertTrue(cosine(x, [1, 0, 0]) == nil, "A vector of another dimension is NULL, not a wrong score")
+
+        // A search scans many rows against one bound query vector, which the function caches per statement (#708):
+        // every row is scored against the bound vector, a rebound vector replaces it, and a column (a different
+        // vector on each row) is never mistaken for a cached one.
+        let rows = [unit([0: 1]), unit([1: 1]), unit([0: 1, 1: 1])]
+        assertEqual(
+            sqlite3_exec(handle, "CREATE TABLE v(i INTEGER PRIMARY KEY, a BLOB, b BLOB);", nil, nil, nil), SQLITE_OK,
+            "Create vector table")
+        for (index, vector) in rows.enumerated() {
+            var insert: OpaquePointer?
+            sqlite3_prepare_v2(handle, "INSERT INTO v VALUES (?, ?, ?);", -1, &insert, nil)
+            sqlite3_bind_int(insert, 1, Int32(index))
+            for (column, value) in [vector, rows[(index + 1) % rows.count]].enumerated() {
+                _ = value.withUnsafeBytes { raw in
+                    sqlite3_bind_blob(
+                        insert, Int32(column + 2), raw.baseAddress, Int32(raw.count), DatabaseEngine.sqliteTransient)
+                }
+            }
+            assertEqual(sqlite3_step(insert), SQLITE_DONE, "Insert vector row")
+            sqlite3_finalize(insert)
+        }
+        /// One statement, scanned once per query (rebound after each reset), or twice with no binding.
+        func scan(_ sql: String, queries: [[Float]?]) -> [Double] {
+            var statement: OpaquePointer?
+            sqlite3_prepare_v2(handle, sql, -1, &statement, nil)
+            defer { sqlite3_finalize(statement) }
+            var results: [Double] = []
+            for query in queries {
+                if let query {
+                    _ = query.withUnsafeBytes { raw in
+                        sqlite3_bind_blob(
+                            statement, 1, raw.baseAddress, Int32(raw.count), DatabaseEngine.sqliteTransient)
+                    }
+                }
+                while sqlite3_step(statement) == SQLITE_ROW { results.append(sqlite3_column_double(statement, 0)) }
+                sqlite3_reset(statement)
+            }
+            return results.map { ($0 * 1e6).rounded() / 1e6 }
+        }
+        let half = (0.5.squareRoot() * 1e6).rounded() / 1e6
+        let bound = "SELECT news_cosine(a, ?) FROM v ORDER BY i;"
+        assertEqual(
+            scan(bound, queries: [unit([0: 1]), unit([1: 1])]), [1, 0, half, 0, 1, half],
+            "Every row scores against the bound query, and a rebound query replaces the cached one")
+        assertEqual(
+            scan("SELECT news_cosine(a, b) FROM v ORDER BY i;", queries: [nil, nil]), [0, half, half, 0, half, half],
+            "A column argument is read on every row")
     }
 
     // MARK: - BertWordPieceTokenizer (#127)

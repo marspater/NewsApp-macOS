@@ -539,6 +539,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         CacheManager.shared.configureOfflineCache()
         NotificationActionIdentifier.registerCategories()
         UNUserNotificationCenter.current().delegate = self
+        // Behind another app macOS never asks `willPresent`; the post itself offers a story banner to the app (#926).
+        NotificationService.presentAppBanner = { request in
+            guard let banner = StoryBanner(request), StoryBannerPresenter.shared.present(banner) else { return false }
+            // Nothing is added, so the system plays no sound. A requested sound is not permission to play one:
+            // honor the reader's current notification sound setting before using the reader's alert sound.
+            if request.content.sound != nil {
+                Task { @MainActor in
+                    let settings = await UNUserNotificationCenter.current().notificationSettings()
+                    guard settings.soundSetting == .enabled else { return }
+                    NSSound.beep()
+                }
+            }
+            return true
+        }
         // Permission is asked once stories have arrived, not at launch (#562).
         notificationPermission = NotificationPermissionRequest(
             feedManager: AppContainer.shared.feedManager, settings: AppSettings.shared
@@ -588,10 +602,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // Asynchronous checkpoint and optimize completes in applicationShouldTerminate.
     }
 
-    // While a News window is open on screen, active or not, a story banner is the app's own (DESIGN.md 8.7), filed in
-    // Notification Center without the system banner; every other banner, and every banner while News is hidden or
-    // only in the Dock, is the system's. Where macOS does not ask this delegate (an inactive app on some releases), the
-    // system banner shows, never both.
+    // While a News window is open on screen, active or not, a story banner is the app's own (DESIGN.md 8.7); every other
+    // banner, and every banner while News is hidden or only in the Dock, is the system's. macOS asks this delegate only
+    // while News is active: the story is then filed in Notification Center without the system banner. Behind another
+    // app the post decides instead (`StoryBannerRoute.deliver`, #926), never both.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
@@ -608,7 +622,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         )
         // Only the banner style is the app's: Alerts stay until dismissed and hidden previews redact, both as the system
         // draws them. Focus has no public signal here, so a story arriving during Focus can still show this banner.
-        guard settings.alertSetting == .enabled, settings.alertStyle == .banner, settings.showPreviewsSetting != .never
+        guard
+            StoryBannerRoute.allowsAppBanner(
+                alert: settings.alertSetting, style: settings.alertStyle, previews: settings.showPreviewsSetting)
         else { return [.banner, .list, .sound] }
         let drawn = await StoryBannerPresenter.shared.present(banner)
         log.notice(
