@@ -8833,6 +8833,33 @@ struct NewsTests {
             assertEqual(
                 try await phraseDB.searchArticles(query: wellnessTag).map(\.id), [wellness.id],
                 "A multiword category tag finds its story")
+            // The reader shows a feed's "medical" as Health; the Health tag must still find that story.
+            let medical = FeedArticle(
+                title: "Clinic hours", link: "https://example.com/medical", guid: "medical",
+                description: "Longer opening.", pubDate: Date(), source: "Clinic", category: "medical")
+            try await phraseDB.upsertArticles([medical])
+            let healthTag = ArticleSearchState.categoryToken(for: "Health").expression
+            assertTrue(
+                ArticleFilterQuery.parse(healthTag).matches(article: medical, isRead: false, isSaved: false),
+                "A reader category tag matches the stored label it shows in memory")
+            assertEqual(
+                Set(try await phraseDB.searchArticles(query: healthTag).map(\.id)), [medical.id, wellness.id],
+                "A reader category tag finds the story filed under a synonym")
+            assertEqual(
+                try await phraseDB.searchArticles(query: "category:medical").map(\.id), [medical.id],
+                "A raw label still matches as typed")
+            let longerWord = FeedArticle(
+                title: "Cold Fusionary art", link: "https://example.com/fusionary", guid: "fusionary",
+                description: "A gallery.", pubDate: Date(), source: "Arts")
+            let hyphenated = FeedArticle(
+                title: "Cold-fusion claims", link: "https://example.com/hyphen", guid: "hyphen",
+                description: "A lab.", pubDate: Date(), source: "Science")
+            assertFalse(
+                phrase.matches(article: longerWord, isRead: false, isSaved: false),
+                "A phrase matches whole words only, as FTS5 does")
+            assertTrue(
+                phrase.matches(article: hyphenated, isRead: false, isSaved: false),
+                "A phrase spans punctuation between its words, as FTS5 does")
             await phraseDB.close()
 
             // Operator searches
@@ -27251,7 +27278,7 @@ struct NewsTests {
                 StoryQuickLookRenderer.renderPDF(data: renderData, to: previewFile, isDark: isDark),
                 "renderPDF succeeds offline (dark: \(isDark))")
             let pdfData = (try? Data(contentsOf: previewFile)) ?? Data()
-            let pdfString = String(decoding: pdfData, as: UTF8.self)
+            let pdfString = String(bytes: pdfData, encoding: .isoLatin1) ?? ""
             for marker in ["http://", "https://", "/URI", "/Launch", "adnetwork", "tracker"] {
                 assertFalse(pdfString.contains(marker), "Generated PDF contains no \(marker) (dark: \(isDark))")
             }
@@ -27261,6 +27288,11 @@ struct NewsTests {
                 assertTrue(false, "The preview PDF has a readable page (dark: \(isDark))")
                 continue
             }
+            // The page's extracted text and its annotations carry no link either.
+            for marker in ["http://", "https://", "www.", "adnetwork", "tracker"] {
+                assertFalse((text as String).contains(marker), "Page text contains no \(marker) (dark: \(isDark))")
+            }
+            assertTrue(page.annotations.isEmpty, "The preview page has no annotations or link actions")
             let height = page.bounds(for: .mediaBox).height
             let titleBounds = page.selection(for: text.range(of: "Autonomous Space Tug"))?.bounds(for: page) ?? .zero
             let footerBounds = page.selection(for: text.range(of: "Open in Reader"))?.bounds(for: page) ?? .zero

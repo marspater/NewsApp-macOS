@@ -61,13 +61,15 @@ enum StoryQuickLookRenderer {
     }
 
     static func renderData(for article: FeedArticle) -> RenderData {
-        let imageURL = FeedArticle.bestCardImage(in: [article]) ?? article.imageUrl.flatMap { URL(string: $0) }
+        // The card's image first, then the feed's own, whichever is already decoded.
+        let imageURLs = [FeedArticle.bestCardImage(in: [article]), article.imageUrl.flatMap { URL(string: $0) }]
         return RenderData(
             title: article.title,
             publisher: article.publisherName,
             dateText: article.publicationDateText,
             excerpt: makeExcerpt(for: article),
-            image: imageURL.flatMap { DecodedImageCache.images.object(forKey: $0 as NSURL) }
+            image: imageURLs.lazy.compactMap { $0 }.compactMap { DecodedImageCache.images.object(forKey: $0 as NSURL) }
+                .first
         )
     }
 

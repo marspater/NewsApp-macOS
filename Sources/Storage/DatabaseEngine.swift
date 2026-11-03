@@ -1800,6 +1800,8 @@ actor DatabaseEngine {
         guard
             sqlite3_create_function_v2(db, "news_topic", 3, flags, nil, topicFunction, nil, nil, nil) == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_section", 4, flags, nil, sectionFunction, nil, nil, nil) == SQLITE_OK,
+            sqlite3_create_function_v2(db, "news_category", 1, flags, nil, categoryFunction, nil, nil, nil)
+                == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_publisher_name", 2, flags, nil, publisherNameFunction, nil, nil, nil)
                 == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_publisher_input", 3, flags, nil, publisherInputFunction, nil, nil, nil)
@@ -4959,6 +4961,16 @@ func cosineFunction(
 }
 
 /// Pure content classification for the one-time topic repair; never trusts an earlier generated label.
+/// `news_category(label)`: the reader's lowercased category name for a stored label (`ArticleFilterQuery.canonicalCategory`).
+private func categoryFunction(
+    _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
+) {
+    guard count == 1, let values, let label = sqlite3_value_text(values[0]).map({ String(cString: $0) }),
+        let category = ArticleFilterQuery.canonicalCategory(label)
+    else { return sqlite3_result_null(context) }
+    sqlite3_result_text(context, category, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+}
+
 private func topicFunction(
     _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
 ) {

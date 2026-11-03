@@ -115,9 +115,15 @@ extension DatabaseEngine {
             params.append(("text", "%\(sf)%"))
         }
         if let cf = parsed.categoryFilter {
-            // Category tokens join words with hyphens (`category:health-&-wellness`).
-            sql += " AND replace(coalesce(ae.category, a.category), ' ', '-') LIKE ?"
+            // Category tokens join words with hyphens (`category:health-&-wellness`). A reader category name also
+            // matches the stored label shown under it, so the Health tag finds a story filed as "medical".
+            sql += " AND (replace(coalesce(ae.category, a.category), ' ', '-') LIKE ?"
             params.append(("text", "%\(cf)%"))
+            if NewsCategory.allCases.contains(where: { $0.rawValue.lowercased() == cf }) {
+                sql += " OR news_category(coalesce(ae.category, a.category)) = ?"
+                params.append(("text", cf))
+            }
+            sql += ")"
         }
         if let rf = parsed.isReadFilter {
             sql += " AND s.is_read = ?"

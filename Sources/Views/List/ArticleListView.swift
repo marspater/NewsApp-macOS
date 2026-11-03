@@ -353,7 +353,8 @@ struct ArticleListView: View {
                 appliesNextUpdate = true
                 refreshReloads += 1
             }
-            .onChange(of: selectedTopic) { _, _ in
+            // A new section, search or filter can replace the previewed story, and Return would open another.
+            .onChange(of: queryIdentity) { _, _ in
                 StoryQuickLookCoordinator.shared.close()
             }
             .onDisappear {
