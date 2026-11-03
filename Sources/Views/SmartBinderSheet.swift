@@ -43,6 +43,15 @@ struct SmartBinderSheet: View {
 
     init(binder: SmartBinder? = nil) {
         self.binder = binder
+        if let binder {
+            _name = State(initialValue: binder.name)
+            _selectedIcon = State(initialValue: binder.icon)
+            _selectedCategories = State(initialValue: Set(binder.categories))
+            _includeKeywordsText = State(initialValue: binder.includeKeywords.joined(separator: ", "))
+            _matchAllKeywords = State(initialValue: binder.matchAllKeywords)
+            _excludeKeywordsText = State(initialValue: binder.excludeKeywords.joined(separator: ", "))
+            _publishersText = State(initialValue: binder.publishers.joined(separator: ", "))
+        }
     }
 
     var body: some View {
@@ -265,39 +274,69 @@ struct SmartBinderSheet: View {
         publishersText = binder.publishers.joined(separator: ", ")
     }
 
-    private func parseCommaSeparated(_ text: String) -> [String] {
+    struct Draft {
+        var existing: SmartBinder?
+        var name: String = ""
+        var icon: String = "folder"
+        var categories: Set<String> = []
+        var includeKeywordsText: String = ""
+        var excludeKeywordsText: String = ""
+        var publishersText: String = ""
+        var matchAllKeywords: Bool = false
+    }
+
+    static func parseCommaSeparated(_ text: String) -> [String] {
         text.components(separatedBy: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
 
-    private func saveBinder() {
-        let includes = parseCommaSeparated(includeKeywordsText)
-        let excludes = parseCommaSeparated(excludeKeywordsText)
-        let pubs = parseCommaSeparated(publishersText)
-        let cats = Array(selectedCategories).sorted()
+    static func buildBinder(from draft: Draft) -> SmartBinder {
+        let includes = parseCommaSeparated(draft.includeKeywordsText)
+        let excludes = parseCommaSeparated(draft.excludeKeywordsText)
+        let pubs = parseCommaSeparated(draft.publishersText)
+        let cats = Array(draft.categories).sorted()
+        let trimmed = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if let existing = binder {
+        if let existing = draft.existing {
             var updated = existing
-            updated.name = trimmedName
-            updated.icon = selectedIcon
+            updated.name = trimmed
+            updated.icon = draft.icon
             updated.categories = cats
             updated.includeKeywords = includes
             updated.excludeKeywords = excludes
             updated.publishers = pubs
-            updated.matchAllKeywords = matchAllKeywords
-            appSettings.updateSmartBinder(updated)
+            updated.matchAllKeywords = draft.matchAllKeywords
+            return updated
         } else {
-            let newBinder = SmartBinder(
-                name: trimmedName,
-                icon: selectedIcon,
+            return SmartBinder(
+                name: trimmed,
+                icon: draft.icon,
                 categories: cats,
                 includeKeywords: includes,
                 excludeKeywords: excludes,
                 publishers: pubs,
-                matchAllKeywords: matchAllKeywords
+                matchAllKeywords: draft.matchAllKeywords
             )
-            appSettings.addSmartBinder(newBinder)
+        }
+    }
+
+    private func saveBinder() {
+        let draft = Draft(
+            existing: binder,
+            name: name,
+            icon: selectedIcon,
+            categories: selectedCategories,
+            includeKeywordsText: includeKeywordsText,
+            excludeKeywordsText: excludeKeywordsText,
+            publishersText: publishersText,
+            matchAllKeywords: matchAllKeywords
+        )
+        let binderToSave = Self.buildBinder(from: draft)
+        if binder != nil {
+            appSettings.updateSmartBinder(binderToSave)
+        } else {
+            appSettings.addSmartBinder(binderToSave)
         }
         dismiss()
     }

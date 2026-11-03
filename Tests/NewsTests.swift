@@ -5747,6 +5747,79 @@ struct NewsTests {
             // Remove binder
             restoredSettings.removeSmartBinder(persistentBinder)
             assertEqual(restoredSettings.smartBinders.count, 0, "Binder removal persists cleanly")
+
+            // SmartBinder tags and ID extraction
+            assertTrue(SmartBinder.isBinderTag(persistentBinder.sidebarTag), "isBinderTag recognizes valid tag")
+            assertFalse(SmartBinder.isBinderTag("category:all"), "isBinderTag rejects other tags")
+            assertEqual(
+                SmartBinder.binderID(fromTag: persistentBinder.sidebarTag), persistentBinder.id,
+                "binderID parses valid tag")
+            assertEqual(
+                SmartBinder.binderID(fromTag: "category:all"), nil, "binderID returns nil for non-binder tag")
+
+            // SmartBinderSheet helpers and draft builder
+            assertEqual(
+                SmartBinderSheet.parseCommaSeparated("apple, silicon, m4"), ["apple", "silicon", "m4"],
+                "Comma-separated parsing trims and filters")
+            assertEqual(
+                SmartBinderSheet.parseCommaSeparated("   "), [], "Blank comma-separated string yields empty list")
+
+            let newDraft = SmartBinderSheet.Draft(
+                name: "  Apple Silicon  ",
+                icon: "cpu",
+                categories: ["Tech", "Science"],
+                includeKeywordsText: "m4, pro",
+                excludeKeywordsText: "rumor",
+                publishersText: "The Verge",
+                matchAllKeywords: true
+            )
+            let createdBinder = SmartBinderSheet.buildBinder(from: newDraft)
+            assertEqual(createdBinder.name, "Apple Silicon", "buildBinder trims name")
+            assertEqual(createdBinder.icon, "cpu", "buildBinder sets icon")
+            assertEqual(createdBinder.categories, ["Science", "Tech"], "buildBinder sorts categories")
+            assertEqual(createdBinder.includeKeywords, ["m4", "pro"], "buildBinder parses includes")
+            assertEqual(createdBinder.excludeKeywords, ["rumor"], "buildBinder parses excludes")
+            assertEqual(createdBinder.publishers, ["The Verge"], "buildBinder parses publishers")
+            assertTrue(createdBinder.matchAllKeywords, "buildBinder sets matchAllKeywords")
+
+            let editDraft = SmartBinderSheet.Draft(
+                existing: createdBinder,
+                name: "Updated Silicon",
+                icon: "folder",
+                categories: ["Tech"],
+                includeKeywordsText: "",
+                excludeKeywordsText: "",
+                publishersText: "",
+                matchAllKeywords: false
+            )
+            let updatedBinder = SmartBinderSheet.buildBinder(from: editDraft)
+            assertEqual(updatedBinder.id, createdBinder.id, "Updating preserves binder ID")
+            assertEqual(updatedBinder.name, "Updated Silicon", "Updating sets new name")
+            assertEqual(updatedBinder.icon, "folder", "Updating sets new icon")
+            assertFalse(updatedBinder.matchAllKeywords, "Updating clears matchAllKeywords")
+
+            // Exercise SmartBinderSheet view body in creation and edit modes
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 480, height: 520),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            defer { window.close() }
+
+            let sheetNew = SmartBinderSheet()
+            let hostNew = NSHostingView(rootView: sheetNew.environmentObject(settings))
+            window.contentView = hostNew
+            window.makeKeyAndOrderFront(nil)
+            hostNew.layoutSubtreeIfNeeded()
+            _ = hostNew.fittingSize
+
+            let sheetEdit = SmartBinderSheet(binder: createdBinder)
+            let hostEdit = NSHostingView(rootView: sheetEdit.environmentObject(settings))
+            window.contentView = hostEdit
+            hostEdit.layoutSubtreeIfNeeded()
+            _ = hostEdit.fittingSize
         }
     }
 
