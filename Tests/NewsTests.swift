@@ -2604,33 +2604,48 @@ struct NewsTests {
             assertEqual(rows.count, 100, "FTS benchmark returns expected rows")
         }
 
-        // Hybrid Search (FTS5 + Vector RRF) synthetic 5,000-story benchmark (#708)
+        // Hybrid search (FTS5 BM25 + embedding cosine, RRF; #708). A query every story matches, so both arms rank the
+        // whole library: the worst case of the lexical arm. Synthetic unit vectors: the first 150 stories align with the
+        // query (cosine 0.9), the rest do not (0.1).
         let vectorDimension = SentenceEmbedder.vectorDimension
-        var syntheticEmbeddings: [String: [Float]] = [:]
-        syntheticEmbeddings.reserveCapacity(5_000)
-        let benchmarkQueryVector: [Float] = (0..<vectorDimension).map { i in
-            i % 2 == 0 ? Float(1.0 / sqrt(Double(vectorDimension / 2))) : 0.0
-        }
-        for (idx, art) in archive.prefix(5_000).enumerated() {
-            let alignFactor: Double = idx < 150 ? 0.9 : 0.1
-            let vec: [Float] = (0..<vectorDimension).map { i in
-                if i % 2 == 0 {
-                    return Float(alignFactor / sqrt(Double(vectorDimension / 2)))
-                } else {
-                    return Float(sqrt(max(0.0, 1.0 - alignFactor * alignFactor)) / sqrt(Double(vectorDimension / 2)))
-                }
+        let halfDimension = sqrt(Double(vectorDimension / 2))
+        let benchmarkQueryVector: [Float] = (0..<vectorDimension).map { $0 % 2 == 0 ? Float(1 / halfDimension) : 0 }
+        func syntheticEmbeddings(_ articles: ArraySlice<FeedArticle>) -> [String: [Float]] {
+            var vectors: [String: [Float]] = [:]
+            vectors.reserveCapacity(articles.count)
+            for (index, article) in articles.enumerated() {
+                let align = index < 150 ? 0.9 : 0.1
+                let even = Float(align / halfDimension)
+                let odd = Float(sqrt(max(0, 1 - align * align)) / halfDimension)
+                vectors[article.id] = (0..<vectorDimension).map { $0 % 2 == 0 ? even : odd }
             }
-            syntheticEmbeddings[art.id] = vec
+            return vectors
         }
-        try await db.upsertArticleEmbeddings(syntheticEmbeddings, modelVersion: SentenceEmbedder.modelVersion)
-
-        for _ in 0..<10 {
-            let start = ProcessInfo.processInfo.systemUptime
-            let rows = try await db.searchArticles(
-                query: "Research", limit: 100, queryEmbedding: benchmarkQueryVector)
-            record("hybrid_search_5000_stories_ms", from: start)
-            assertEqual(rows.count, 100, "Hybrid search benchmark returns expected rows")
+        // #708's acceptance: a 5,000-story seeded library, every story embedded.
+        let searchLibrary = DatabaseEngine(path: directory.appendingPathComponent("search-5000.sqlite3").path)
+        try await searchLibrary.open()
+        try await searchLibrary.upsertArticles(Array(archive.prefix(5_000)))
+        try await searchLibrary.upsertArticleEmbeddings(
+            syntheticEmbeddings(archive.prefix(5_000)), modelVersion: SentenceEmbedder.modelVersion)
+        // The 10,000-story archive above with 5,000 of its stories embedded: the number #953 first reported.
+        try await db.upsertArticleEmbeddings(
+            syntheticEmbeddings(archive.prefix(5_000)), modelVersion: SentenceEmbedder.modelVersion)
+        let searchRuns = [
+            (searchLibrary, "hybrid_search_5000_stories_ms", 5_000),
+            (db, "hybrid_search_10000_archive_ms", 10_250),
+        ]
+        // Alternate the order of the two libraries so neither always runs on a warmer cache.
+        for iteration in 0..<10 {
+            for (library, name, total) in iteration.isMultiple(of: 2) ? searchRuns : searchRuns.reversed() {
+                let start = ProcessInfo.processInfo.systemUptime
+                let rows = try await library.searchArticles(
+                    query: "Research", limit: 100, queryEmbedding: benchmarkQueryVector)
+                record(name, from: start)
+                assertEqual(rows.count, 100, "Hybrid search benchmark returns a full page (\(total) matches)")
+                assertTrue(rows.allSatisfy { $0.searchSnippet != nil }, "Every lexical hit of the page has a snippet")
+            }
         }
+        await searchLibrary.close()
         let html =
             "<article><h2>Evidence</h2><p>\(prose)</p><figure><img src='/photo.jpg' width='1200' height='800'></figure><p>\(prose)</p></article>"
         for _ in 0..<10 {
@@ -2733,6 +2748,7 @@ struct NewsTests {
         guard getrusage(RUSAGE_SELF, &usage) == 0 else { fatalError("Cannot obtain process memory high-water mark") }
         let report: [String: Any] = [
             "library_rows": 10_250, "publishers": 20, "snapshot_rows": 500,
+            "search_library_rows": 5_000, "search_library_embeddings": 5_000, "archive_embeddings": 5_000,
             "feed_count": 5, "fresh_rows_per_feed": 50, "prose_characters": prose.count, "html_characters": html.count,
             "dense_clustering_processed_rows": processedRows,
             "candidate_comparison_rows": expectedCandidates.count,
@@ -21423,7 +21439,17 @@ struct NewsTests {
         let corpus = try JSONDecoder().decode(
             Corpus.self,
             from: Data(contentsOf: URL(fileURLWithPath: "Tests/Fixtures/generated-text/fidelity-corpus-v1.json")))
-        assertTrue(corpus.cases.count >= 6, "The corpus covers the six failure kinds of #951 and changed names")
+        let expectedRules: Set<String> = [
+            GeneratedTextFidelity.Violation.action.rawValue,
+            GeneratedTextFidelity.Violation.attribution.rawValue,
+            GeneratedTextFidelity.Violation.figure.rawValue,
+            GeneratedTextFidelity.Violation.name.rawValue,
+            GeneratedTextFidelity.Violation.negation.rawValue,
+            GeneratedTextFidelity.Violation.qualifier.rawValue,
+            GeneratedTextFidelity.Violation.speaker.rawValue,
+        ]
+        let coveredRules = Set(corpus.cases.map(\.readerRule))
+        assertEqual(coveredRules, expectedRules, "The corpus covers all 7 GeneratedTextFidelity rules")
 
         func readerAccepts(_ text: String, _ item: Case) -> [GeneratedTextFidelity.Violation] {
             GeneratedTextFidelity.violations(in: [text], source: "Report.\n" + item.source)

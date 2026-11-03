@@ -173,7 +173,9 @@ extension DatabaseEngine {
             params += [("double", after.value), ("double", after.value), ("text", after.id)]
         }
         params += [("int", limit), ("text", match)]
-        // The snippet is built for the page only, and only for lexical hits.
+        // The snippet is built for the page only, and only for lexical hits. `+rowid` keeps the page's rows out of the
+        // FTS5 index lookup: a rowid constraint beside MATCH re-reads the whole doclist of a prefix term for every row
+        // (16 ms for a 100-story page of a 10,000-story archive), while one MATCH scan filtered here takes about 1 ms.
         let sql = """
             WITH lexical AS (
                 SELECT id, ROW_NUMBER() OVER (ORDER BY bm25, id) AS rank FROM (
@@ -183,38 +185,52 @@ extension DatabaseEngine {
                     WHERE articles_fts MATCH ? AND \(arm.sql)
                 )
             ),
-            semantic AS (\(semantic.sql)),
+            \(semantic.sql),
             fused AS (
                 SELECT id, SUM(1.0 / (\(Self.rrfK) + rank)) AS score, MAX(lexical) AS lexical FROM (
                     SELECT id, rank, 1 AS lexical FROM lexical UNION ALL SELECT id, rank, 0 FROM semantic
                 ) GROUP BY id
             ),
-            page AS (SELECT id, score, lexical FROM fused \(page) ORDER BY score DESC, id LIMIT ?)
-            SELECT \(Self.articleColumns), page.score,
-                CASE WHEN page.lexical THEN snippet(articles_fts, -1, '<b>', '</b>', '…', 15) END
+            page AS MATERIALIZED (SELECT id, score, lexical FROM fused \(page) ORDER BY score DESC, id LIMIT ?),
+            snippets AS MATERIALIZED (
+                SELECT rowid AS fts_rowid, snippet(articles_fts, -1, '<b>', '</b>', '…', 15) AS snippet
+                FROM articles_fts WHERE articles_fts MATCH ? AND +rowid IN (
+                    SELECT f.fts_rowid FROM page JOIN article_fts_rows f ON f.article_id = page.id WHERE page.lexical
+                )
+            )
+            SELECT \(Self.articleColumns), page.score, sn.snippet
             FROM page JOIN articles a ON a.id = page.id \(Self.storyJoins)
             LEFT JOIN article_fts_rows f ON page.lexical AND f.article_id = a.id
-            LEFT JOIN articles_fts fts ON page.lexical AND fts.rowid = f.fts_rowid AND articles_fts MATCH ?
+            LEFT JOIN snippets sn ON sn.fts_rowid = f.fts_rowid
             ORDER BY page.score DESC, a.id
             """
         return (sql, params)
     }
 
-    /// Every story at or above the similarity threshold, closest first; empty without a query vector, so the order is
-    /// lexical alone. Uncapped, so the counts (`searchConditions`) and the pages cover the same stories.
+    /// The `semantic` CTE: every story at or above the similarity threshold, closest first; empty without a query
+    /// vector, so the order is lexical alone. Uncapped, so the counts (`searchConditions`) and the pages cover the same
+    /// stories. The similarities are materialized first: with the threshold and the window order on one expression,
+    /// SQLite computed every cosine twice.
     private func semanticArm(embedding: [Float]?, conditions arm: (sql: String, params: [QueryParameter])) -> (
         sql: String, params: [QueryParameter]
     ) {
-        guard let embedding else { return ("SELECT NULL AS id, NULL AS rank WHERE 0", []) }
+        guard let embedding else { return ("semantic AS (SELECT NULL AS id, NULL AS rank WHERE 0)", []) }
         let sql = """
-            SELECT id, ROW_NUMBER() OVER (ORDER BY sim DESC, id) AS rank FROM (
-                SELECT a.id, news_cosine(e.vector, ?) AS sim FROM article_embeddings e
-                JOIN articles a ON a.id = e.article_id \(Self.storyJoins)
-                WHERE e.model_version = ? AND \(arm.sql)
-            ) WHERE sim >= ?
+            similarity AS MATERIALIZED (
+                SELECT article_id, news_cosine(vector, ?) AS sim FROM article_embeddings WHERE model_version = ?
+            ),
+            semantic AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY sim DESC, id) AS rank FROM (
+                    SELECT a.id, m.sim FROM similarity m JOIN articles a ON a.id = m.article_id \(Self.storyJoins)
+                    WHERE m.sim >= ? AND \(arm.sql)
+                )
+            )
             """
-        let params: [QueryParameter] = [("blobFloats", embedding), ("int", SentenceEmbedder.modelVersion)] + arm.params
-        return (sql, params + [("double", Self.semanticSimilarityThreshold)])
+        let params: [QueryParameter] = [
+            ("blobFloats", embedding), ("int", SentenceEmbedder.modelVersion),
+            ("double", Self.semanticSimilarityThreshold),
+        ]
+        return (sql, params + arm.params)
     }
 
     private func operatorSearchQuery(

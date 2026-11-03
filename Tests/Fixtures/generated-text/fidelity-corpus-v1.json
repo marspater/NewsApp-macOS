@@ -57,6 +57,14 @@
       "wrong": "Senator Maria Ortiz introduced the bill on Monday.",
       "readerRule": "name",
       "knownGaps": ["worldTension"]
+    },
+    {
+      "id": "arrest-for-summons",
+      "source": "Prosecutors summoned the former minister for questioning on Tuesday.",
+      "faithful": "Prosecutors summoned the former minister on Tuesday.",
+      "wrong": "Prosecutors arrested the former minister on Tuesday.",
+      "readerRule": "action",
+      "knownGaps": ["worldTension"]
     }
   ],
   "faithfulOnly": [
@@ -65,7 +73,7 @@
     { "id": "claims-noun", "source": "Insurance claims rose 12 percent last year, the regulator said.", "rewrite": "Payouts requested from insurers rose 12 percent last year, the regulator said." },
     { "id": "plans-noun", "source": "The council said housing plans were approved on Tuesday.", "rewrite": "The council said a housing scheme was approved on Tuesday." },
     { "id": "the-accused", "source": "The accused appeared in court on Monday.", "rewrite": "The defendant appeared in court on Monday." },
-    { "id": "than-expected", "source": "The economy grew faster than expected in the third quarter.", "rewrite": "The economy grew strongly in the third quarter." },
+    { "id": "than-expected", "source": "The economy grew faster than expected in the third quarter.", "rewrite": "The economy grew faster than forecast in the third quarter." },
     { "id": "hedge-in-other-clause", "source": "The bridge reopened on Friday, and engineers said repairs to the road could take weeks.", "rewrite": "The bridge reopened on Friday." },
     { "id": "month-may", "source": "May saw record sales for the carmaker.", "rewrite": "The carmaker had record sales in May." },
     { "id": "us-periods", "source": "The U.S. imposed tariffs on steel imports.", "rewrite": "The US imposed tariffs on steel imports." },
