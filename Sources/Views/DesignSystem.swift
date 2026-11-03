@@ -295,6 +295,9 @@ enum AppTypography {
     static let headline = Font.headline
     static let leadStoryHeadline = Font.system(size: 28, weight: .semibold, design: .serif)
     static let body = Font.body
+    /// Words a search matched inside a card's excerpt (#708): body text in semibold, so the match does not rely on
+    /// color (DESIGN.md 8.2).
+    static let bodyMatch = Font.body.weight(.semibold)
     static let label = Font.callout.weight(.medium)
     static let caption = Font.subheadline
 

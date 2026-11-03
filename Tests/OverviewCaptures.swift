@@ -21,7 +21,8 @@ import SwiftUI
 /// dark, with each card's height. Run with `NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift
 /// script/native_performance_baseline.sh DIR`; `NEWS_CAPTURES=overview` or `NEWS_CAPTURES=grid` runs one set,
 /// `NEWS_CAPTURE_SET=tension` renders the World Tension sheet, sidebar foot and Briefing strip instead (#781), and
-/// `NEWS_CAPTURE_SET=briefing` the Briefing situation board (#780).
+/// `NEWS_CAPTURE_SET=briefing` the Briefing situation board (#780), and `NEWS_CAPTURE_SET=search` story cards of a
+/// search with highlighted excerpts, list and grid (#708).
 @main
 struct OverviewCaptures {
     static func main() async {
@@ -33,6 +34,7 @@ struct OverviewCaptures {
         switch set {
         case "tension": failures = await MainActor.run { captureTension(into: output) }
         case "briefing": failures = await MainActor.run { captureBriefing(into: output) }
+        case "search": failures = await SearchCardCaptures.capture(into: output)
         default:
             if only != "grid" { failures = await MainActor.run { capture(into: output) } }
             if only != "overview" { failures += await GridRowCaptures.capture(into: output) }
@@ -550,6 +552,128 @@ extension OverviewCaptures {
             context.fillEllipse(in: CGRect(x: x, y: CGFloat(200 + shape * 60), width: size, height: size))
         }
         return context.makeImage()!
+    }
+}
+
+/// Story cards as a search lists them (#708): the results of a real search of a temporary library, so the excerpts
+/// come from the production SQL, in the list and grid card, light, dark and Increase Contrast, each also in gray. One
+/// result matches in its summary, one in its body, one in its headline only (it keeps the summary), and one is read.
+@MainActor
+enum SearchCardCaptures {
+    static func capture(into output: URL) async -> Int {
+        do {
+            return try await render(into: output)
+        } catch {
+            print("  search captures failed: \(error)")
+            return 1
+        }
+    }
+
+    static func render(into output: URL) async throws -> Int {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-search-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let suite = testDefaultsSuite("test.captures.search")
+        defer {
+            removeTestDefaults(suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let settings = AppSettings(defaults: UserDefaults(suiteName: suite)!)
+        let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
+        let store = ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let published = Date().addingTimeInterval(-3 * 3600)
+        func story(_ id: String, _ title: String, _ summary: String, body: String? = nil, minutes: Double)
+            -> FeedArticle
+        {
+            FeedArticle(
+                storedID: id, title: title, link: "https://harbor.example/\(id)", guid: id, description: summary,
+                pubDate: published.addingTimeInterval(-minutes * 60), source: "Harbor Times", fullContent: body)
+        }
+        try await database.upsertArticles([
+            story(
+                "search-a", "Talks collapse at east coast ports",
+                "Dockworkers at 14 ports walked off the job after employers rejected a wage offer, stopping most "
+                    + "container traffic.", minutes: 0),
+            story(
+                "search-b", "Retailers brace for delays", "Shipping costs are expected to rise before the holidays.",
+                body: "Importers said the walkout of dockworkers could leave shelves thin within two weeks.",
+                minutes: 10),
+            story("search-c", "Dockworkers vote on new contract", "Results are due on Friday.", minutes: 20),
+            story(
+                "search-d", "Union leaders meet mediators",
+                "A federal mediator met dockworkers and employers overnight.", minutes: 30),
+        ])
+        let results = try await database.searchArticles(query: "dockworkers", limit: 10)
+        let excerpts = results.filter { $0.searchExcerpt != nil }.count
+        guard results.count == 4, excerpts == 3 else {
+            print("  search fixture: \(results.count) results, \(excerpts) excerpts")
+            return 1
+        }
+        let readManager = ReadManager(articleStore: store)
+        readManager.markAsRead(ids: ["search-d"])
+        await readManager.waitForPendingChanges()
+
+        let variants:
+            [(name: String, appearance: NSAppearance.Name, scheme: ColorScheme, contrast: ColorSchemeContrast)] = [
+                ("light", .aqua, .light, .standard), ("dark", .darkAqua, .dark, .standard),
+                ("light-ic", .accessibilityHighContrastAqua, .light, .increased),
+                ("dark-ic", .accessibilityHighContrastDarkAqua, .dark, .increased),
+            ]
+        var failures = 0
+        for grid in [false, true] {
+            for variant in variants {
+                let width: CGFloat = grid ? AppLayout.gridColumnMinimum : 900
+                let cards = VStack(spacing: AppLayout.cardGap) {
+                    ForEach(results) { article in
+                        ArticleCardView(
+                            article: article, compact: !grid, reservesCoverageRow: grid, action: {},
+                            footer: EmptyView())
+                    }
+                }
+                .frame(width: width)
+                .padding(AppLayout.pageInset)
+                .background(AppColor.background)
+                let view = NSHostingView(
+                    rootView:
+                        cards
+                        .environmentObject(settings)
+                        .environmentObject(store)
+                        .environmentObject(readManager)
+                        .environmentObject(SavedStoriesManager(articleStore: store))
+                        .environment(\.colorScheme, variant.scheme)
+                        .environment(\.overrideContrast, variant.contrast)
+                        .environment(\.overrideReduceMotion, true))
+                let appearance = NSAppearance(named: variant.appearance) ?? NSAppearance.currentDrawing()
+                view.appearance = appearance
+                view.frame = NSRect(x: 0, y: 0, width: grid ? 400 : 960, height: 2000)
+                var rendered: NSBitmapImageRep?
+                appearance.performAsCurrentDrawingAppearance {
+                    view.layoutSubtreeIfNeeded()
+                    guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                    view.cacheDisplay(in: view.bounds, to: bitmap)
+                    rendered = bitmap
+                }
+                let name = "search-\(grid ? "grid" : "list")-\(variant.name)"
+                guard let full = rendered, let bitmap = OverviewCaptures.trimmed(full),
+                    OverviewCaptures.distinctColors(bitmap) > 8, let cgImage = bitmap.cgImage,
+                    let gray = OverviewCaptures.grayscale(cgImage)
+                else {
+                    print("  blank or failed: \(name)")
+                    failures += 1
+                    continue
+                }
+                for (image, file) in [(bitmap, name), (NSBitmapImageRep(cgImage: gray), "\(name)-gray")] {
+                    do {
+                        try OverviewCaptures.write(image, to: output.appendingPathComponent("\(file).png"))
+                    } catch {
+                        print("  write failed: \(file): \(error.localizedDescription)")
+                        failures += 1
+                    }
+                }
+            }
+        }
+        return failures
     }
 }
 

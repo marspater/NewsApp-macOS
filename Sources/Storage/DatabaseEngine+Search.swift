@@ -176,6 +176,9 @@ extension DatabaseEngine {
         // The snippet is built for the page only, and only for lexical hits. `+rowid` keeps the page's rows out of the
         // FTS5 index lookup: a rowid constraint beside MATCH re-reads the whole doclist of a prefix term for every row
         // (16 ms for a 100-story page of a 10,000-story archive), while one MATCH scan filtered here takes about 1 ms.
+        // It comes from the feed summary, else the body, whichever holds a match: a match in the headline is already
+        // on the card, and one in the publisher or category name is no excerpt. Matches are wrapped in U+0002 and
+        // U+0003 (`SearchExcerpt`), which publisher text cannot use as markup the way it could `<b>`.
         let sql = """
             WITH lexical AS (
                 SELECT id, ROW_NUMBER() OVER (ORDER BY bm25, id) AS rank FROM (
@@ -193,12 +196,15 @@ extension DatabaseEngine {
             ),
             page AS MATERIALIZED (SELECT id, score, lexical FROM fused \(page) ORDER BY score DESC, id LIMIT ?),
             snippets AS MATERIALIZED (
-                SELECT rowid AS fts_rowid, snippet(articles_fts, -1, '<b>', '</b>', '…', 15) AS snippet
+                SELECT rowid AS fts_rowid,
+                    snippet(articles_fts, 2, char(2), char(3), '…', 15) AS summary,
+                    snippet(articles_fts, 3, char(2), char(3), '…', 15) AS body
                 FROM articles_fts WHERE articles_fts MATCH ? AND +rowid IN (
                     SELECT f.fts_rowid FROM page JOIN article_fts_rows f ON f.article_id = page.id WHERE page.lexical
                 )
             )
-            SELECT \(Self.articleColumns), page.score, sn.snippet
+            SELECT \(Self.articleColumns), page.score,
+                CASE WHEN instr(sn.summary, char(2)) > 0 THEN sn.summary WHEN instr(sn.body, char(2)) > 0 THEN sn.body END
             FROM page JOIN articles a ON a.id = page.id \(Self.storyJoins)
             LEFT JOIN article_fts_rows f ON page.lexical AND f.article_id = a.id
             LEFT JOIN snippets sn ON sn.fts_rowid = f.fts_rowid

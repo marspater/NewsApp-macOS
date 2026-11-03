@@ -266,7 +266,9 @@ struct ArticleCardView<Footer: View>: View {
 
     @ViewBuilder
     private var regularDescription: some View {
-        if !article.description.isEmpty {
+        if let excerpt = article.searchExcerpt {
+            SearchExcerptText(excerpt: excerpt, color: AppColor.secondaryText, matchColor: AppColor.primaryText)
+        } else if !article.description.isEmpty {
             let cleanDesc = CardText.cleaned(article.description)
             if !cleanDesc.isEmpty {
                 Text(cleanDesc)
@@ -360,7 +362,10 @@ struct ArticleCardView<Footer: View>: View {
                 .layoutPriority(1)
 
             let cleanDescription = CardText.cleaned(article.description)
-            if !cleanDescription.isEmpty {
+            if let excerpt = article.searchExcerpt {
+                SearchExcerptText(
+                    excerpt: excerpt, color: AppColor.leadSecondaryText, matchColor: AppColor.leadText)
+            } else if !cleanDescription.isEmpty {
                 Text(cleanDescription)
                     .font(AppTypography.body)
                     .foregroundStyle(AppColor.leadSecondaryText)
@@ -402,7 +407,37 @@ struct ArticleCardView<Footer: View>: View {
         let readState = isRead ? "Read" : "Unread"
         let savedState = isSaved ? ", saved in your library" : ""
         let dateFormatted = article.publicationDateText
-        return "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState)."
+        let excerpt = article.searchExcerpt.map { " Matching text: \($0.plainText)" } ?? ""
+        return
+            "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState).\(excerpt)"
+    }
+}
+
+/// A search result's excerpt in the dek's place (DESIGN.md 8.2, #708): the publisher's words around the match, two
+/// lines, with the matched words in semibold and the stronger text color. Weight carries the match, so it reads in
+/// grayscale and Increase Contrast; the card's accessibility label speaks the excerpt as plain text.
+struct SearchExcerptText: View {
+    let excerpt: SearchExcerpt
+    let color: Color
+    let matchColor: Color
+
+    var body: some View {
+        Text(attributed)
+            .font(AppTypography.body)
+            .foregroundStyle(color)
+            .lineLimit(2)
+            .multilineTextAlignment(.leading)
+    }
+
+    private var attributed: AttributedString {
+        excerpt.runs.reduce(into: AttributedString()) { text, run in
+            var part = AttributedString(run.text)
+            if run.isMatch {
+                part.font = AppTypography.bodyMatch
+                part.foregroundColor = matchColor
+            }
+            text += part
+        }
     }
 }
 
