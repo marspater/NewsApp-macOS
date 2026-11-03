@@ -23,11 +23,11 @@ News is a native, local-first RSS, Atom, and JSON Feed reader built with SwiftUI
 
 ## 2. Xcode Project Setup & Build Settings
 
-News can be built directly using the included shell pipeline (`build.sh`, `build_release.sh`) or opened as a native Xcode Project / Swift Package workspace.
+Today News builds only through the shell pipeline: `build.sh` and `build_release.sh` compile `Sources/` with `swiftc` from hand-kept source lists, link the SwiftPM dependency archive (`script/swiftpm_dependencies.sh`) and sign the bundle ad hoc; `./test.sh` builds the test runner the same way. There is no `.xcodeproj` and no Xcode scheme in the repository. `Package.swift` lets Xcode open the sources as a Swift package for editing and `swift build --target News` checks that they compile, but it produces no app bundle. An Xcode project over a SwiftPM core is planned in #931; sections 2.1, 2.2 and 5.1–5.3 describe that target setup and do not work until it lands.
 
 ### 2.1 Workspace & Scheme Architecture
 
-When opening in Xcode or generating an `.xcodeproj`:
+Planned (#931); none of these schemes exist yet. When the Xcode project is added:
 
 1. **`News` (App Scheme)**:
    - Primary executable target compiling `Sources/`.
@@ -235,7 +235,7 @@ Prepare 5 screenshots matching Apple's macOS App Store resolution standards:
 
 ### 5.1 Producing the Release Archive via Command Line
 
-To create a clean release build and archive using `xcodebuild`:
+Today's release artifact is the ad-hoc signed bundle from `./build_release.sh` (zipped with its SHA-256 by `.github/workflows/release.yml` for a `vX.Y.Z` tag). The `xcodebuild archive` step below needs the `News` scheme of the planned Xcode project (#931) and fails on the current repository; the export step (5.3) needs the archive it produces and an export options plist:
 
 ```bash
 # 1. Clean build artifacts
