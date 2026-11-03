@@ -320,6 +320,22 @@ struct ArticleFilterQuery: Equatable, Sendable {
         self.terms = terms
     }
 
+    /// The reader's name for a stored category ("medical" shows as Health), lowercased; nil when it names none.
+    static func canonicalCategory(_ raw: String) -> String? {
+        NewsCategory.match(from: raw)?.rawValue.lowercased()
+    }
+
+    /// A phrase as FTS5 matches it: its words in order as whole tokens, separated by anything but letters and digits,
+    /// so "cold fusion" matches "Cold-Fusion" but not "Cold Fusionary".
+    static func containsPhrase(_ phrase: String, in text: String) -> Bool {
+        let words = phrase.split { !$0.isLetter && !$0.isNumber }.map {
+            NSRegularExpression.escapedPattern(for: String($0))
+        }
+        guard !words.isEmpty else { return false }
+        let pattern = "(?<![\\p{L}\\p{N}])" + words.joined(separator: "[^\\p{L}\\p{N}]+") + "(?![\\p{L}\\p{N}])"
+        return text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
     /// Split free text at whitespace and quotes, retaining ranges for spelling suggestions.
     static func lexemes(in text: String) -> [(range: Range<String.Index>, quoted: Bool)] {
         var result: [(range: Range<String.Index>, quoted: Bool)] = []
@@ -387,7 +403,9 @@ struct ArticleFilterQuery: Equatable, Sendable {
         }
 
         if let c = categoryFilter, !c.isEmpty {
-            guard let cat = article.category?.lowercased().replacingOccurrences(of: " ", with: "-"), cat.contains(c)
+            guard let raw = article.category,
+                raw.lowercased().replacingOccurrences(of: " ", with: "-").contains(c)
+                    || Self.canonicalCategory(raw) == c
             else { return false }
         }
 
@@ -404,7 +422,7 @@ struct ArticleFilterQuery: Equatable, Sendable {
             for (index, term) in terms.enumerated() {
                 let found =
                     phraseTermIndices.contains(index)
-                    ? fields.contains { $0.contains(term) } : combined.contains(term)
+                    ? fields.contains { Self.containsPhrase(term, in: $0) } : combined.contains(term)
                 if !found { return false }
             }
         }
