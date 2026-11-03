@@ -926,6 +926,7 @@ struct NewsTests {
             ("testRelatedStoryEvents", { try await testRelatedStoryEvents(fixtureRoot: fixtureRoot) }),
             ("testEventMatcherRules", { try await testEventMatcherRules() }),
             ("testActClassTable", { testActClassTable() }),
+            ("testStoryCountryPlaceVeto", { testStoryCountryPlaceVeto() }),
             ("testEventClustering", { try await testEventClustering(fixtureRoot: fixtureRoot) }),
             ("testArticleSignalsRoundTrip", { try await testArticleSignalsRoundTrip() }),
             ("testPairAssessmentsRecorded", { try await testPairAssessmentsRecorded() }),
@@ -14477,6 +14478,32 @@ struct NewsTests {
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
+    }
+
+    /// #737: the country signal does not join two reports that name different places below country level; a shared
+    /// place word, or a side naming none, leaves the signal to its other rules. On by default, off only to measure.
+    static func testStoryCountryPlaceVeto() {
+        print("  - Testing the country signal's sub-national place veto (#737)...")
+        func features(_ places: Set<String>) -> EventFeatures {
+            var value = EventFeatures(language: "en", date: Date(timeIntervalSince1970: 1_790_000_000))
+            value.places = places
+            return value
+        }
+        let lucknow = features(["@IN", "uttar pradesh", "lucknow"])
+        let bengaluru = features(["@IN", "karnataka", "bengaluru"])
+        let pradesh = features(["@IN", "pradesh"])
+        let countryOnly = features(["@IN"])
+        assertTrue(
+            EventMatcher.namesDifferentLocalPlaces(lucknow, bengaluru), "Two states of one country are two stories")
+        assertFalse(
+            EventMatcher.namesDifferentLocalPlaces(lucknow, pradesh), "A shared place word keeps the signal")
+        assertFalse(
+            EventMatcher.namesDifferentLocalPlaces(lucknow, countryOnly),
+            "A report naming only the country is not vetoed")
+        assertFalse(
+            EventMatcher.namesDifferentLocalPlaces(countryOnly, countryOnly), "Country-only reports are not vetoed")
+        assertTrue(EventMatchPolicy.standard.storyCountryPlaceVeto, "The veto is on whenever the signal is")
+        assertTrue(EventMatchPolicy.standard.storyCountryKeywords == nil, "The country signal itself stays off")
     }
 
     /// The act class reads the headline's primary clause (#522): one cue → that act, two acts → unknown, a

@@ -666,6 +666,10 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// one story when two thirds of their cross pairs share a country, have no conflict (so no different act), share at
     /// least this many keywords and reach the semantic veto's cosine. Nil turns it off; off by default (evaluation).
     var storyCountryKeywords: Int?
+    /// Sub-national place veto for the country signal (#737): two reports whose texts name places below country level,
+    /// none shared word by word, are two stories in one country (state elections in Uttar Pradesh and in Karnataka), not
+    /// one story by the country alone. Only read while `storyCountryKeywords` is set; off only to measure without it.
+    var storyCountryPlaceVeto = true
     /// The pair model's story signal (#627): two events, or a report alone and an event, are one story when two thirds
     /// of their cross pairs score p_same + p_related at or above this with p_different at most 0.15, share one specific
     /// name that is not a common actor, and share a keyword or reach the semantic veto's cosine. Infinity turns it off;
@@ -825,6 +829,14 @@ enum EventMatcher {
         // Last, so a different act is only reported when nothing else contradicts: it is a related-act candidate.
         if a.actClass.conflicts(with: b.actClass) { return .differentAct }
         return nil
+    }
+
+    /// Both reports name places below country level and no word of one's places is among the other's (#737): the
+    /// country they share is not what links them. Words, so "Westfield" and "Westfield Bondi Junction" share a place.
+    static func namesDifferentLocalPlaces(_ a: EventFeatures, _ b: EventFeatures) -> Bool {
+        let words = { (f: EventFeatures) in Set(f.localPlaces.flatMap { $0.split(separator: " ").map(String.init) }) }
+        let (left, right) = (words(a), words(b))
+        return !left.isEmpty && !right.isEmpty && left.isDisjoint(with: right)
     }
 
     private static func sameUTCDay(_ a: Date, _ b: Date) -> Bool {

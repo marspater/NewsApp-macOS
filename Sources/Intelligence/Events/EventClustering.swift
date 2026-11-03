@@ -550,7 +550,8 @@ enum EventClusterer {
             return total > 0 && agreeing * 3 >= total * 2
         }
         /// The country signal (#737, `storyCountryKeywords`): two thirds of the cross pairs between the earliest members
-        /// share a country, have no conflict, share `keywords` keywords and reach the semantic veto's cosine.
+        /// share a country, name no different sub-national places (`storyCountryPlaceVeto`), have no conflict, share
+        /// `keywords` keywords and reach the semantic veto's cosine.
         func storyCountryAgrees(
             _ a: [EventMatchRow], _ b: [EventMatchRow], keywords: Int, commonCountries: Set<String>
         ) async throws -> Bool {
@@ -563,6 +564,8 @@ enum EventClusterer {
                     if pair.conflict == nil,
                         !features(left).countries.subtracting(commonCountries)
                             .isDisjoint(with: features(right).countries),
+                        !matchPolicy.storyCountryPlaceVeto
+                            || !EventMatcher.namesDifferentLocalPlaces(features(left), features(right)),
                         pair.sharedKeywords >= keywords,
                         (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
                     {
