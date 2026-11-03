@@ -123,7 +123,7 @@ One card component for list, grid, Briefing, search, Saved Stories and History.
 | Lead image | The story's publisher image or, on an event card, the image of any report in the event (hidden panel-feed reports included); otherwise the editorial placeholder. Fixed aspect per layout, clipped to its frame and never a click target outside it; fetched before the card scrolls into view where possible, and the placeholder fades into the image with `AppMotion.state` (`nil` under Reduce Motion); decorative for accessibility |
 | Eyebrow | Publisher name, `AppTypography.eyebrow`, uppercase by `.textCase(.uppercase)`, secondary color |
 | Headline | `AppTypography.cardHeadline` for the layout; at most two lines; keeps priority over the dek |
-| Dek | Feed summary, two lines, secondary color |
+| Dek | Feed summary, two lines, secondary color. In search results with a word match in the feed summary or the body, the publisher's words around it instead (`SearchExcerptText`): matched words in `AppTypography.bodyMatch` (semibold) and the primary color, so weight carries the match without color; a match in the headline only, or a story found by meaning, keeps the summary. The card's accessibility label adds "Matching text:" and the excerpt |
 | Footer | Relative or short date in `caption`; state glyphs (saved; the small intelligence tag when a summary exists, the only `sparkles` a list shows) |
 | Unread | Accent dot plus primary-color headline; read stories use the secondary color, never opacity alone |
 | Hover | Accent border at 40 % and the hover shadow token |
@@ -251,6 +251,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 | `sectionTitle` | Headings inside content (overview sections, groups) | `.title3.weight(.semibold)` (15 pt) |
 | `headline` | Row titles and emphasized labels | `.headline` (13 pt bold) |
 | `body` | Chrome body text | `.body` (13 pt) |
+| `bodyMatch` | Words a search matched in a card's excerpt | `.body.weight(.semibold)` |
 | `callout` | Secondary descriptions | `.callout` (12 pt) |
 | `label` | Disclosure rows, tags, inline controls | `.callout.weight(.medium)` |
 | `caption` | Dates, counts, status lines | `.subheadline` (11 pt) |

@@ -1058,6 +1058,7 @@ struct NewsTests {
             ("testHybridSearchMutingAndFilters", { try await testHybridSearchMutingAndFilters() }),
             ("testHybridSearchCursorPagination", { try await testHybridSearchCursorPagination() }),
             ("testPureOperatorSearchRemainsLexical", { try await testPureOperatorSearchRemainsLexical() }),
+            ("testSearchExcerpts", { try await testSearchExcerpts() }),
             ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
         try await runSharded(tests)
@@ -27903,7 +27904,8 @@ struct NewsTests {
         // Lexical hit on art-jwst for "primordial redshift"
         assertFalse(semanticOnlyResults.isEmpty, "Lexical query matches art-jwst")
         assertTrue(
-            semanticOnlyResults.first?.searchSnippet?.contains("<b>") == true, "Lexical hit includes FTS5 snippet")
+            semanticOnlyResults.first?.searchExcerpt?.runs.contains { $0.isMatch && $0.text == "redshift" } == true,
+            "Lexical hit includes an excerpt of its summary with the match marked")
 
         // Now natural language query with zero keyword overlap to art-jwst:
         // "astronomy cosmic exploration" has zero words in art-jwst (title or description)
@@ -27920,7 +27922,7 @@ struct NewsTests {
 
         let lexicalHit = hybridResults.first { $0.id == "art-lexical" }
         assertTrue(lexicalHit != nil, "Lexical candidate surfaced")
-        assertTrue(lexicalHit?.searchSnippet?.contains("<b>") == true, "Lexical hit retains FTS5 highlight snippet")
+        assertTrue(lexicalHit?.searchExcerpt != nil, "Lexical hit retains its highlighted excerpt")
         // Rank 1 in one arm scores 1/(k+1); equal fused scores break ties by id; the order is stable across runs.
         let rankOne = 1.0 / Double(DatabaseEngine.rrfK + 1)
         assertEqual(hybridResults.map(\.id), ["art-jwst", "art-lexical"], "Equal fused scores break ties by id")
@@ -28080,6 +28082,60 @@ struct NewsTests {
         }
         let allIDs = allPages.map(\.id)
         assertEqual(Set(allIDs).count, 12, "Keyset pagination retrieves all 12 articles with no duplicates")
+    }
+
+    /// The excerpt a search result shows in its dek (#708): from the feed summary, else the body, only where a word
+    /// matched; never from the headline (already on the card) or the publisher name; markup in publisher text stays
+    /// text; the markers parse into plain and matched runs.
+    static func testSearchExcerpts() async throws {
+        print("  - Testing search excerpts: summary or body only, marked matches, plain text kept (#708)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        defer { Task { await db.close() } }
+        func story(_ id: String, title: String, summary: String, body: String? = nil, source: String = "Desk")
+            -> FeedArticle
+        {
+            FeedArticle(
+                storedID: id, title: title, link: "https://excerpt.invalid/\(id)", guid: id, description: summary,
+                pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: source, fullContent: body)
+        }
+        try await db.upsertArticles([
+            story("in-summary", title: "Budget vote", summary: "Parliament approved the glacier fund on Tuesday"),
+            story(
+                "in-body", title: "Mountain towns", summary: "Residents prepare for winter",
+                body: "Engineers said the glacier retreat had \n\n doubled since 2010."),
+            story("in-title", title: "Glacier melt", summary: "Scientists report record losses"),
+            story("in-source", title: "Weather", summary: "Rain later", source: "Glacier Times"),
+            story("markup", title: "Markup", summary: "A <b>bold</b> claim about the glacier"),
+        ])
+        let results = try await db.searchArticles(query: "glacier", limit: 10)
+        func excerpt(_ id: String) -> SearchExcerpt? { results.first { $0.id == id }?.searchExcerpt }
+        assertEqual(results.count, 5, "Every story matching the word is listed")
+        assertEqual(
+            excerpt("in-summary")?.runs,
+            [
+                .init(text: "Parliament approved the ", isMatch: false), .init(text: "glacier", isMatch: true),
+                .init(text: " fund on Tuesday", isMatch: false),
+            ], "A summary match is the excerpt, the matched word marked")
+        assertEqual(
+            excerpt("in-body")?.plainText, "Engineers said the glacier retreat had doubled since 2010.",
+            "A body match is the excerpt when the summary has none, its line breaks one space")
+        assertTrue(excerpt("in-title") == nil, "A headline-only match keeps the feed summary")
+        assertTrue(excerpt("in-source") == nil, "A publisher-name match is no excerpt")
+        assertEqual(
+            excerpt("markup")?.plainText, "A <b>bold</b> claim about the glacier",
+            "Markup in publisher text stays text and marks nothing")
+        assertEqual(excerpt("markup")?.runs.filter(\.isMatch).map(\.text), ["glacier"], "Only the match is marked")
+
+        // Parsing: stray or unbalanced markers are dropped, and an excerpt without a match is none.
+        assertTrue(SearchExcerpt("no match here") == nil, "Text without a marked match is no excerpt")
+        assertTrue(SearchExcerpt("\u{3}stray\u{2}") == nil, "An unopened end marker and an unclosed start mark nothing")
+        assertEqual(
+            SearchExcerpt("  …the \u{2}rate\u{3} rose\u{3}  ")?.runs,
+            [
+                .init(text: "…the ", isMatch: false), .init(text: "rate", isMatch: true),
+                .init(text: " rose", isMatch: false),
+            ], "Ends are trimmed and a second end marker is dropped")
     }
 
     static func testPureOperatorSearchRemainsLexical() async throws {
