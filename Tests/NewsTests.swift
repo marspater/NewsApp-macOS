@@ -851,6 +851,7 @@ struct NewsTests {
             ("testNavigationCommands", { await testNavigationCommands() }),
             ("testEscapeXML", { await testEscapeXML() }),
             ("testOPMLParsingAndExporting", { await testOPMLParsingAndExporting() }),
+            ("testOPMLHostileInput", { await testOPMLHostileInput() }),
             ("testStoryExport", { try await testStoryExport() }),
             ("testOfflineCacheAndResilience", { await testOfflineCacheAndResilience() }),
             ("testArticleIdentityDeep", { await testArticleIdentityDeep() }),
@@ -1023,6 +1024,7 @@ struct NewsTests {
             ("testInteractiveAnalysisCancellation", { await testInteractiveAnalysisCancellation() }),
             ("testGranularCacheClearingAndRetention", { try await testGranularCacheClearingAndRetention() }),
             ("testNotificationServiceErrorLogging", { await testNotificationServiceErrorLogging() }),
+            ("testStoryBannerRoute", { try await testStoryBannerRoute() }),
             (
                 "testNotificationDedupeAcrossRefreshes",
                 { try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot) }
@@ -7372,10 +7374,7 @@ struct NewsTests {
                 </body>
             </opml>
             """.data(using: .utf8)!
-        let xxeItems = OPMLParser.parse(data: xxePayload)
-        if let item = xxeItems.first {
-            assertTrue(!item.title.contains("root:"), "OPMLParser must not resolve external file entities")
-        }
+        assertTrue(OPMLParser.parse(data: xxePayload).isEmpty, "An external file entity rejects the whole file (#928)")
 
         // OPML attribute order, category parsing, and case-insensitivity
         let advancedOPML = """
@@ -7425,6 +7424,207 @@ struct NewsTests {
         assertEqual(advancedItems[5].title, "Plain URL Feed", "Untyped url outline without children stays a feed")
         assertEqual(advancedItems[5].url, "https://example.com/plain.xml", "Its url is the feed url")
         assertEqual(advancedItems[5].folder, nil, "Root url-only feed has nil folder")
+    }
+
+    /// #928: OPML import has the feed parser's guards. Hostile files fail with a reason and change nothing; exports
+    /// from common readers still import.
+    @MainActor
+    static func testOPMLHostileInput() async {
+        print("  - Testing OPML import guards: entities, nesting, outline count, reader exports (#928)...")
+        func rejectionError(_ data: Data) -> NSError? {
+            do {
+                _ = try OPMLParser.parseValidated(data: data)
+                return nil
+            } catch {
+                return error as NSError
+            }
+        }
+        func rejection(_ data: Data) -> String? {
+            rejectionError(data)?.localizedDescription
+        }
+        let feed = "<outline text=\"Feed\" type=\"rss\" xmlUrl=\"https://example.com/feed.xml\"/>"
+        func opml(prolog: String = "", body: String) -> Data {
+            let declaration = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+            return Data("\(declaration)\(prolog)<opml version=\"2.0\"><body>\(body)</body></opml>".utf8)
+        }
+
+        // Entity expansion: a billion-laughs prolog is refused before the XML parser sees it, in bounded time.
+        var laughs = "<!ENTITY lol0 \"lol\">"
+        for level in 1...9 {
+            laughs += "<!ENTITY lol\(level) \"" + String(repeating: "&lol\(level - 1);", count: 10) + "\">"
+        }
+        let bomb = opml(
+            prolog: "<!DOCTYPE opml [\(laughs)]>",
+            body: "<outline text=\"&lol9;\" type=\"rss\" xmlUrl=\"https://example.com/feed.xml\"/>")
+        let start = ProcessInfo.processInfo.systemUptime
+        let bombReason = rejection(bomb)
+        assertTrue(
+            ProcessInfo.processInfo.systemUptime - start < 1, "An entity bomb is rejected without being expanded")
+        assertEqual(bombReason, "It declares XML entities, which News does not import.", "Entity bombs name the reason")
+        // UTF-16 hides the declaration from an ASCII byte search unless the zero bytes are dropped first.
+        let utf16 = String(decoding: bomb, as: UTF8.self).replacingOccurrences(of: "UTF-8", with: "UTF-16")
+        let utf16Error = rejectionError(utf16.data(using: .utf16)!)
+        assertEqual(utf16Error?.domain, "OPML", "A UTF-16 entity declaration uses the OPML error domain")
+        assertEqual(utf16Error?.code, 3, "A UTF-16 entity declaration uses the guard error code")
+        assertEqual(
+            utf16Error?.localizedDescription,
+            "It declares XML entities, which News does not import.",
+            "A UTF-16 entity declaration names the entity guard")
+
+        // DTD defaults are copied into every matching outline by Foundation and retained by the import.
+        let attributeDefaults = opml(
+            prolog: "<!DOCTYPE opml [<!ATTLIST outline title CDATA \"default title\">]>",
+            body: feed + feed.replacingOccurrences(of: "Feed", with: "Second feed"))
+        let attributeError = rejectionError(attributeDefaults)
+        assertEqual(attributeError?.domain, "OPML", "ATTLIST declarations use the OPML error domain")
+        assertEqual(attributeError?.code, 3, "ATTLIST declarations use the guard error code")
+        assertEqual(
+            attributeError?.localizedDescription,
+            "It declares XML attribute lists, which News does not import.",
+            "ATTLIST declarations are rejected before XMLParser supplies default attributes")
+        let utf16AttributeDefaults = String(decoding: attributeDefaults, as: UTF8.self)
+            .replacingOccurrences(of: "UTF-8", with: "UTF-16")
+        let utf16AttributeError = rejectionError(utf16AttributeDefaults.data(using: .utf16)!)
+        assertEqual(
+            utf16AttributeError?.localizedDescription,
+            "It declares XML attribute lists, which News does not import.",
+            "UTF-16 ATTLIST declarations are rejected by the full-input scan")
+
+        // An unused external-entity declaration beyond 64 KiB must be caught by the full-input scan,
+        // without relying on XMLParser's declaration callback.
+        let padded = opml(
+            prolog: "<!--" + String(repeating: " ", count: 70_000)
+                + "--><!DOCTYPE opml [<!ENTITY far SYSTEM \"file:///etc/passwd\">]>",
+            body: feed)
+        assertEqual(
+            rejection(padded), "It declares XML entities, which News does not import.",
+            "A late unused external entity is rejected before parsing")
+        let external = opml(prolog: "<!DOCTYPE opml [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>", body: feed)
+        assertTrue(OPMLParser.parse(data: external).isEmpty, "External entities import nothing")
+
+        // Nesting: 64 levels is the bound, as in the feed parser; one more is refused.
+        func nested(_ levels: Int) -> Data {
+            opml(
+                body: String(repeating: "<outline text=\"Folder\">", count: levels) + feed
+                    + String(repeating: "</outline>", count: levels))
+        }
+        // opml and body are two levels, the feed outline one more.
+        let deepest = OPMLParser.maximumDepth - 3
+        assertEqual(OPMLParser.parse(data: nested(deepest)).count, 1, "Nesting at the bound still imports")
+        assertEqual(
+            rejection(nested(deepest + 1)), "Its outlines nest more than 64 levels deep.",
+            "Nesting past the bound is refused")
+        assertEqual(rejection(nested(100_000)), "Its outlines nest more than 64 levels deep.", "Deep nesting bomb")
+
+        // Outline count: the bound is inclusive and counts folders too.
+        func outlines(_ count: Int) -> Data {
+            opml(
+                body: (0..<count).map { "<outline text=\"F\($0)\" type=\"rss\" xmlUrl=\"https://e.com/\($0).xml\"/>" }
+                    .joined())
+        }
+        assertEqual(
+            OPMLParser.parse(data: outlines(OPMLParser.maximumOutlines)).count, OPMLParser.maximumOutlines,
+            "The outline bound itself imports")
+        // The count is written in the reader's locale (20,000 or 20.000).
+        assertEqual(
+            rejection(outlines(OPMLParser.maximumOutlines + 1)),
+            "It lists more than \(OPMLParser.maximumOutlines.formatted()) outlines.",
+            "One outline past the bound is refused")
+
+        // Malformed files still fail without a guard reason.
+        for broken in ["", "<opml>", "<opml><body><outline></body></opml>", "not xml at all", "\u{FEFF}<<<>>>"] {
+            assertTrue(OPMLParser.parse(data: Data(broken.utf8)).isEmpty, "Malformed OPML imports nothing: \(broken)")
+        }
+
+        // The reader sees why, and nothing changes.
+        let suiteName = testDefaultsSuite("test.opml.guards")
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { removeTestDefaults(suiteName) }
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        await store.initialize()
+        let settings = AppSettings(defaults: defaults)
+        let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false)
+        let feedsBefore = settings.feedURLs
+        let sectionsBefore = settings.userSections
+        assertEqual(manager.importFeeds(from: nested(deepest + 1)), 0, "A refused file adds no feed")
+        assertEqual(
+            store.operationError,
+            "The OPML file could not be imported. Its outlines nest more than 64 levels deep. "
+                + "No subscriptions were changed.", "The alert names the guard")
+        store.operationError = nil
+        assertEqual(manager.importFeeds(from: bomb), 0, "An entity bomb adds no feed")
+        assertTrue(store.operationError?.contains("declares XML entities") == true, "The alert names entities")
+        store.operationError = nil
+        assertEqual(manager.importFeeds(from: Data("<opml><body>".utf8)), 0, "A truncated file adds no feed")
+        assertTrue(store.operationError?.contains("incomplete or malformed") == true, "Malformed keeps its message")
+        assertEqual(settings.feedURLs, feedsBefore, "Refused files leave subscriptions unchanged")
+        assertEqual(settings.userSections, sectionsBefore, "Refused files leave sections unchanged")
+        manager.stopBackgroundWork()
+
+        // Exports in the shape common readers write them still import.
+        let netNewsWire = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <!-- OPML generated by NetNewsWire -->
+            <opml version="1.1">
+            	<head>
+            		<title>Subscriptions-OnMyMac.opml</title>
+            	</head>
+            <body>
+            	<outline text="Daring Fireball" title="Daring Fireball" description="" type="rss" version="RSS" htmlUrl="https://daringfireball.net/" xmlUrl="https://daringfireball.net/feeds/main"/>
+            	<outline text="News" title="News">
+            		<outline text="BBC News - World" title="BBC News - World" description="" type="rss" version="RSS" htmlUrl="https://www.bbc.co.uk/news/world" xmlUrl="https://feeds.bbci.co.uk/news/world/rss.xml"/>
+            	</outline>
+            </body>
+            </opml>
+            """
+        let feedly = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="1.0">
+              <head>
+                <title>Reader subscriptions in feedly Cloud</title>
+              </head>
+              <body>
+                <outline text="Tech &amp; Science" title="Tech &amp; Science">
+                  <outline type="rss" text="Ars Technica" title="Ars Technica" xmlUrl="https://feeds.arstechnica.com/arstechnica/index" htmlUrl="https://arstechnica.com"/>
+                  <outline type="rss" text="Nature" title="Nature" xmlUrl="https://www.nature.com/nature.rss" htmlUrl="https://www.nature.com"/>
+                </outline>
+              </body>
+            </opml>
+            """
+        let inoreader = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <opml version="1.0">
+              <head><title>Subscriptions from Inoreader [https://www.inoreader.com]</title></head>
+              <body>
+                <outline text="World" title="World">
+                  <outline text="Reuters" title="Reuters" type="rss" xmlUrl="https://example.com/reuters/world?format=rss&amp;lang=en" htmlUrl="https://www.reuters.com"/>
+                </outline>
+                <outline text="The Guardian" title="The Guardian" type="rss" xmlUrl="https://www.theguardian.com/world/rss" htmlUrl="https://www.theguardian.com"/>
+              </body>
+            </opml>
+            """
+        for (reader, document, expected) in [
+            (
+                "NetNewsWire", netNewsWire,
+                ["https://daringfireball.net/feeds/main", "https://feeds.bbci.co.uk/news/world/rss.xml"]
+            ),
+            (
+                "Feedly", feedly,
+                ["https://feeds.arstechnica.com/arstechnica/index", "https://www.nature.com/nature.rss"]
+            ),
+            (
+                "Inoreader", inoreader,
+                ["https://example.com/reuters/world?format=rss&lang=en", "https://www.theguardian.com/world/rss"]
+            ),
+        ] {
+            assertTrue(rejection(Data(document.utf8)) == nil, "\(reader) export passes the guards")
+            assertEqual(OPMLParser.parse(data: Data(document.utf8)).map(\.url), expected, "\(reader) export imports")
+        }
+        assertEqual(
+            OPMLParser.parse(data: Data(feedly.utf8)).first?.folder, "Tech & Science", "Escaped folder names import")
+        assertEqual(
+            OPMLParser.parse(data: Data(OPMLExporter.generateOPML(feedURLs: ["https://example.com/a.xml"]).utf8)).count,
+            1, "News's own export passes the guards")
     }
 
     @MainActor
@@ -21457,6 +21657,102 @@ struct NewsTests {
 
         // 5. Test CacheManager methods
         // Do not clear the user's WebKit cache from a unit test.
+    }
+
+    /// #926: macOS asks `willPresent` only while News is active, so a story posted while News is behind another app
+    /// is offered to the app's banner at post time. Exactly one banner either way: drawn means not added.
+    static func testStoryBannerRoute() async throws {
+        print("  - Testing the story banner route: app banner behind another app, never both (#926)...")
+        assertTrue(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .always),
+            "Banners with previews are the app's")
+        assertTrue(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .whenAuthenticated),
+            "Previews when unlocked still allow the app banner")
+        assertFalse(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .alert, previews: .always),
+            "The Alerts style stays with the system")
+        assertFalse(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .none, previews: .always),
+            "Alert style None draws nothing from the app")
+        assertFalse(
+            StoryBannerRoute.allowsAppBanner(alert: .disabled, style: .banner, previews: .always),
+            "Banners off draw nothing from the app")
+        assertFalse(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .never),
+            "Hidden previews stay with the system, which redacts them")
+
+        func request(story: Bool) -> UNNotificationRequest {
+            let content = UNMutableNotificationContent()
+            content.title = "Publisher"
+            content.subtitle = "Headline"
+            if story { content.categoryIdentifier = NotificationActionIdentifier.category }
+            return UNNotificationRequest(identifier: "news-route", content: content, trigger: nil)
+        }
+        final class Calls: @unchecked Sendable {
+            var presented = 0
+            var added = 0
+            var settingsRead = 0
+        }
+        func route(
+            story: Bool = true, active: Bool, drawn: Bool = true,
+            settings: (UNNotificationSetting, UNAlertStyle, UNShowPreviewsSetting) = (.enabled, .banner, .always)
+        ) async throws -> (StoryBannerRoute, Calls) {
+            let calls = Calls()
+            let result = try await StoryBannerRoute.deliver(
+                request(story: story), active: active,
+                settings: {
+                    calls.settingsRead += 1
+                    return settings
+                },
+                present: { _ in
+                    calls.presented += 1
+                    return drawn
+                },
+                add: { _ in calls.added += 1 })
+            return (result, calls)
+        }
+
+        // Behind another app with a window on screen: the app draws it and nothing is added (log of 3 November).
+        var (result, calls) = try await route(active: false)
+        assertEqual(result, .appBanner, "Inactive story banners are drawn by the app")
+        assertEqual(calls.presented, 1, "The presenter is asked once")
+        assertEqual(calls.added, 0, "A drawn banner is not also added: never both banners")
+        // No window on screen (hidden, in the Dock): the presenter declines and the system banner shows.
+        (result, calls) = try await route(active: false, drawn: false)
+        assertEqual(result, .notificationCenter, "A declined banner goes to the system")
+        assertEqual(calls.added, 1, "A declined banner is added exactly once")
+        // Active: the post adds it and `willPresent` draws it, as before.
+        (result, calls) = try await route(active: true)
+        assertEqual(result, .notificationCenter, "Active posts are added for willPresent")
+        assertEqual(calls.presented + calls.settingsRead, 0, "An active post neither presents nor reads settings")
+        assertEqual(calls.added, 1, "An active post is added once")
+        // Grouped and summary banners always stay with the system.
+        (result, calls) = try await route(story: false, active: false)
+        assertEqual(result, .notificationCenter, "Grouped banners stay with the system")
+        assertEqual(calls.presented, 0, "A grouped banner is never offered to the app")
+        // Alerts style or hidden previews: the system draws it, the app does not.
+        for settings: (UNNotificationSetting, UNAlertStyle, UNShowPreviewsSetting) in [
+            (.enabled, .alert, .always), (.enabled, .banner, .never), (.disabled, .banner, .always),
+        ] {
+            (result, calls) = try await route(active: false, settings: settings)
+            assertEqual(result, .notificationCenter, "Settings the app does not draw under go to the system")
+            assertEqual(calls.presented, 0, "The presenter is not asked under those settings")
+            assertEqual(calls.added, 1, "Those posts are added once")
+        }
+        // A refused add still throws to the caller, which logs it and does not record the banner.
+        struct Refused: Error {}
+        var threw = false
+        do {
+            _ = try await StoryBannerRoute.deliver(
+                request(story: true), active: true, settings: { (.enabled, .banner, .always) },
+                present: { _ in true }, add: { _ in throw Refused() })
+        } catch is Refused {
+            threw = true
+        }
+        assertTrue(threw, "A refused add surfaces as a failed post")
+        // Without an app (tests, helpers) no presenter is installed, so nothing is drawn.
+        assertTrue(await MainActor.run { NotificationService.presentAppBanner == nil }, "No presenter outside the app")
     }
 
     static func testNotificationServiceErrorLogging() async {
