@@ -28,8 +28,13 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var sentimentScore: Double?
     var sentimentLabel: String?
     var readerDocument: ReaderDocument?
-    /// Highlighted snippet for lexical search matches via FTS5 `snippet()`. Nil on semantic-only matches (#708).
+    /// The FTS5 `snippet()` of a lexical search match, from the feed summary or the body, matched words between
+    /// `SearchExcerpt.matchStart` and `matchEnd`. Nil on semantic-only matches and on matches in the headline only
+    /// (#708).
     var searchSnippet: String? = nil
+
+    /// `searchSnippet` as text runs, or nil when there is none or it marks no match.
+    var searchExcerpt: SearchExcerpt? { searchSnippet.flatMap(SearchExcerpt.init) }
 
     /// Publisher inputs only. Length prefixes prevent ambiguous field boundaries.
     var publisherInputHash: String {
@@ -140,6 +145,64 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         }
         .filter { seen.insert($0.url).inserted }
         .map { ($0.url, $0.article) }
+    }
+}
+
+/// A search excerpt split into plain and matched runs (#708). The database marks matches with U+0002 and U+0003; an
+/// unmatched or stray marker is dropped, and whitespace runs, line breaks included, become one space.
+struct SearchExcerpt: Equatable, Sendable {
+    static let matchStart: Character = "\u{2}"
+    static let matchEnd: Character = "\u{3}"
+
+    struct Run: Equatable, Sendable {
+        let text: String
+        let isMatch: Bool
+    }
+
+    let runs: [Run]
+
+    /// The excerpt as it reads, without markers.
+    var plainText: String { runs.map(\.text).joined() }
+
+    init?(_ snippet: String) {
+        var runs: [Run] = []
+        var text = ""
+        var inMatch = false
+        var previousSpace = false
+        func close() {
+            if !text.isEmpty { runs.append(Run(text: text, isMatch: inMatch)) }
+            text = ""
+        }
+        for character in snippet {
+            switch character {
+            case Self.matchStart where !inMatch:
+                close()
+                inMatch = true
+            case Self.matchEnd where inMatch:
+                close()
+                inMatch = false
+            case Self.matchStart, Self.matchEnd:
+                continue
+            case _ where character.isWhitespace:
+                if !previousSpace { text.append(" ") }
+                previousSpace = true
+            default:
+                text.append(character)
+                previousSpace = false
+            }
+        }
+        close()
+        // Trimmed at both ends so the card's two lines start with text.
+        if let first = runs.first, !first.isMatch {
+            runs[0] = Run(text: String(first.text.drop { $0 == " " }), isMatch: false)
+        }
+        if let last = runs.last, !last.isMatch {
+            let trimmed = String(last.text.reversed().drop { $0 == " " }.reversed())
+            runs[runs.count - 1] = Run(text: trimmed, isMatch: false)
+        }
+        runs.removeAll { $0.text.isEmpty }
+        guard runs.contains(where: \.isMatch) else { return nil }
+        self.runs = runs
     }
 }
 
