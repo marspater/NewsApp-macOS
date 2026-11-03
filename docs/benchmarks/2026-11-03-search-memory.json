@@ -1,0 +1,146 @@
+{
+  "issue": 708,
+  "machine": "Apple M5, 24 GiB, macOS 27.2 (26B123)",
+  "runs": [
+    {
+      "base": "aa2d0f8 (#958)",
+      "note": "500 searches",
+      "report": {
+        "embeddings": 5000,
+        "footprint_mb": [
+          51.1,
+          51.4,
+          51.5,
+          51.5,
+          51.5,
+          52.5,
+          52.5,
+          52.5,
+          52.5,
+          52.5,
+          52.5
+        ],
+        "growth_mb": 1.3999999999999986,
+        "library_rows": 5000,
+        "limit_mb": 4,
+        "mean_listed_stories": 760,
+        "measured_searches": 500,
+        "optimization": "-O (test.sh search memory mode)",
+        "os": "Version 27.2 (Build 26B123)",
+        "search_round_ms_median": 67.05237500136718,
+        "search_round_ms_p95": 114.03558333404362,
+        "searches_per_sample": 50,
+        "sqlite_version": "3.54.0",
+        "warm_up_searches": 50
+      }
+    },
+    {
+      "base": "aa2d0f8 (#958)",
+      "note": "1,500 searches, NEWS_SEARCH_MEMORY_BLOCKS=30, limit raised to 100 to record the whole run",
+      "report": {
+        "embeddings": 5000,
+        "footprint_mb": [
+          49.9,
+          49.5,
+          49.5,
+          49.5,
+          49.5,
+          49.5,
+          49.5,
+          49.5,
+          49.5,
+          49.6,
+          49.6,
+          49.6,
+          49.6,
+          49.6,
+          49.6,
+          49.6,
+          49.6,
+          49.6,
+          52.5,
+          52.6,
+          52.6,
+          52.6,
+          52.6,
+          52.6,
+          52.6,
+          52.6,
+          52.6,
+          52.6,
+          52.6,
+          52.6,
+          52.6
+        ],
+        "growth_mb": 2.700000000000003,
+        "library_rows": 5000,
+        "limit_mb": 100,
+        "mean_listed_stories": 759,
+        "measured_searches": 1500,
+        "optimization": "-O (test.sh search memory mode)",
+        "os": "Version 27.2 (Build 26B123)",
+        "search_round_ms_median": 58.126999996602535,
+        "search_round_ms_p95": 90.72545828530565,
+        "searches_per_sample": 50,
+        "sqlite_version": "3.54.0",
+        "warm_up_searches": 50
+      }
+    },
+    {
+      "base": "92c5468 (origin/main) with the harness",
+      "note": "500 searches",
+      "report": {
+        "embeddings": 5000,
+        "footprint_mb": [
+          49,
+          49.1,
+          49.1,
+          49.1,
+          49.1,
+          49.1,
+          49.1,
+          49,
+          50,
+          52.8,
+          52.8
+        ],
+        "growth_mb": 3.799999999999997,
+        "library_rows": 5000,
+        "limit_mb": 4,
+        "mean_listed_stories": 760,
+        "measured_searches": 500,
+        "optimization": "-O (test.sh search memory mode)",
+        "os": "Version 27.2 (Build 26B123)",
+        "search_round_ms_median": 118.94675000803545,
+        "search_round_ms_p95": 247.31195834465325,
+        "searches_per_sample": 50,
+        "sqlite_version": "3.54.0",
+        "warm_up_searches": 50
+      }
+    },
+    {
+      "base": "aa2d0f8 (#958)",
+      "note": "smoke, 100 searches",
+      "report": {
+        "embeddings": 5000,
+        "footprint_mb": [
+          51.8,
+          51.9,
+          52
+        ],
+        "growth_mb": 0.20000000000000284,
+        "library_rows": 5000,
+        "limit_mb": 4,
+        "mean_listed_stories": 758,
+        "measured_searches": 100,
+        "optimization": "-O (test.sh search memory mode)",
+        "os": "Version 27.2 (Build 26B123)",
+        "search_round_ms_median": 91.4524583495222,
+        "search_round_ms_p95": 214.60529166506603,
+        "searches_per_sample": 50,
+        "sqlite_version": "3.54.0",
+        "warm_up_searches": 50
+      }
+    }
+  ]
+}
