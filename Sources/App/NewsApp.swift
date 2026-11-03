@@ -542,8 +542,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // Behind another app macOS never asks `willPresent`; the post itself offers a story banner to the app (#926).
         NotificationService.presentAppBanner = { request in
             guard let banner = StoryBanner(request), StoryBannerPresenter.shared.present(banner) else { return false }
-            // Nothing is added, so the system plays no sound: a story that sounds plays the reader's alert sound.
-            if request.content.sound != nil { NSSound.beep() }
+            // Nothing is added, so the system plays no sound. A requested sound is not permission to play one:
+            // honor the reader's current notification sound setting before using the reader's alert sound.
+            if request.content.sound != nil {
+                Task { @MainActor in
+                    let settings = await UNUserNotificationCenter.current().notificationSettings()
+                    guard settings.soundSetting == .enabled else { return }
+                    NSSound.beep()
+                }
+            }
             return true
         }
         // Permission is asked once stories have arrived, not at launch (#562).
