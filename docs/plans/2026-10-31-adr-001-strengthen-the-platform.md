@@ -1,6 +1,6 @@
 # ADR-001: Strengthen the platform before expanding it
 
-**Status:** Proposed
+**Status:** Accepted (Phase 0 closed; checked 3 November 2026, #569)
 **Date:** 31 October 2026
 **Deciders:** Mars Pater
 
@@ -96,15 +96,15 @@ Option B fixes the root cause shared by #805, #792 and #820 at the commit point,
 
 ## Action Items
 
-1. [ ] Trust boundaries:
+1. [x] Trust boundaries:
    - #808: key redirect state per task object, not by `taskIdentifier` (`SecureHTTPClient` keys `states[task.taskIdentifier]`).
    - #793: pass untrusted text as structured input, not by escaping delimiters in strings.
    - #810: align update checks with the documented egress.
-2. [ ] Add the write-validity helper. Adopt it in enrichment (#805, #820), overviews (#792) and notification bookkeeping (#814, inside one transaction). Make Clear All Caches and Clear AI Analysis share one list of derived tables (#811).
-3. [ ] #786 and #787 with #785 (one PR, as noted on #785). #812: rebuild the Spotlight index after a restore.
-4. [ ] Verification: #804, #840, #801. Re-measure #839 against the #828 baseline harness.
-5. [ ] #835: rework to the agreed widget-row design, or close it and restart from #780.
-6. [ ] Release acceptance gate, written down and run before tagging:
+2. [ ] Add the write-validity helper. Adopt it in enrichment (#805, #820), overviews (#792) and notification bookkeeping (#814, inside one transaction). Make Clear All Caches and Clear AI Analysis share one list of derived tables (#811). (3 November: all five issues are closed, but no shared write-validity helper exists in `Sources/` under that name; how each site now guards its writes was not re-checked here. Left open until someone decides whether the shared helper is still wanted.)
+3. [x] #786 and #787 with #785 (one PR, as noted on #785). #812: rebuild the Spotlight index after a restore.
+4. [x] Verification: #804, #840, #801. Re-measure #839 against the #828 baseline harness.
+5. [x] #835: rework to the agreed widget-row design, or close it and restart from #780.
+6. [x] Release acceptance gate, written down and run before tagging ([RELEASE_CHECKLIST.md](../RELEASE_CHECKLIST.md)):
    - migration and restore on a library copy;
    - parser and network security tests;
    - the matcher holdout with no precision regression;
@@ -113,7 +113,7 @@ Option B fixes the root cause shared by #805, #792 and #820 at the commit point,
    - accessibility and visual captures;
    - performance budgets;
    - privacy manifest and docs consistency.
-7. [ ] Docs truth (#569):
+7. [x] Docs truth (#569; README and ARCHITECTURE were corrected earlier, the roadmap on 3 November):
    - README still says EventMatcher v11 and World Tension v2;
    - `docs/ARCHITECTURE.md` says matcher v15 but still has a stale "matcher v12" at line 284;
    - the 28 October roadmap still uses the J–T v2 boundary and says V1 annotations take schema v28, which now means v29.
