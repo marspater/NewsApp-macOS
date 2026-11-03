@@ -43,6 +43,7 @@ actor DatabaseEngine {
     }
     private struct MutedCountKey: Hashable {
         let section: String?
+        let smartBinder: SmartBinder?
         let isRead: Bool?
         let isSaved: Bool?
         let search: String?
@@ -2780,7 +2781,10 @@ actor DatabaseEngine {
     }
 
     /// Read, saved and section conditions shared by list pages and their muted counts.
-    private func listConditions(section: String?, isRead: Bool?, isSaved: Bool?, includeCollection: Bool = false) -> (
+    private func listConditions(
+        section: String?, smartBinder: SmartBinder? = nil, isRead: Bool?, isSaved: Bool?,
+        includeCollection: Bool = false
+    ) -> (
         sql: String, params: [QueryParameter]
     ) {
         var sql = ""
@@ -2799,7 +2803,13 @@ actor DatabaseEngine {
             sql += " AND s.is_saved = ?"
             params.append(("int", saved ? 1 : 0))
         }
-        if let sec = section, !["Today", "Unread", "Saved Stories", "History"].contains(sec) {
+        if let binder = smartBinder {
+            let cond = binder.sqlCondition()
+            if !cond.sql.isEmpty {
+                sql += cond.sql
+                params += cond.parameters.map { ("text", $0) }
+            }
+        } else if let sec = section, !["Today", "Unread", "Saved Stories", "History"].contains(sec) {
             sql += " AND news_section(a.title, coalesce(a.description, ''), coalesce(ae.category, a.category), ?) = 1"
             params.append(("text", sec))
         }
@@ -2808,6 +2818,7 @@ actor DatabaseEngine {
 
     private struct FetchCriteria {
         var section: String?
+        var smartBinder: SmartBinder?
         var isRead: Bool?
         var isSaved: Bool?
         var limit: Int?
@@ -2918,7 +2929,8 @@ actor DatabaseEngine {
             params += filter.params
         }
         let list = listConditions(
-            section: criteria.section, isRead: criteria.isRead, isSaved: criteria.isSaved,
+            section: criteria.section, smartBinder: criteria.smartBinder, isRead: criteria.isRead,
+            isSaved: criteria.isSaved,
             includeCollection: criteria.id != nil || criteria.canonicalURL != nil || criteria.eventID != nil)
         query += list.sql
         params += list.params
@@ -2989,6 +3001,7 @@ actor DatabaseEngine {
 
     func fetchArticles(
         section: String? = nil,
+        smartBinder: SmartBinder? = nil,
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         limit: Int? = 500,
@@ -3004,6 +3017,7 @@ actor DatabaseEngine {
     ) throws -> [FeedArticle] {
         let criteria = FetchCriteria(
             section: section,
+            smartBinder: smartBinder,
             isRead: isRead,
             isSaved: isSaved,
             limit: limit,
@@ -4093,6 +4107,7 @@ actor DatabaseEngine {
     /// How many stories muting removes from a list or search, across every page, under the list's own filters.
     func mutedArticleCount(
         section: String? = nil,
+        smartBinder: SmartBinder? = nil,
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         search: String? = nil,
@@ -4104,11 +4119,12 @@ actor DatabaseEngine {
         let changes = changeToken()
         if changes == nil || mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
         let key = MutedCountKey(
-            section: section, isRead: isRead, isSaved: isSaved, search: search, muting: muting,
+            section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
+            muting: muting,
             scope: collectionOnlyFeedURLs)
         if let known = mutedCountCache.counts[key] { return known }
         let count = try listAggregates(
-            "count(*)", section: section, isRead: isRead, isSaved: isSaved, search: search,
+            "count(*)", section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
             filter: " AND " + Self.mutedArticle, filterParameters: Self.mutingParameters(muting))[0]
         guard changes != nil else { return count }
         if mutedCountCache.counts.count >= 32 { mutedCountCache.counts = [:] }
@@ -4121,6 +4137,7 @@ actor DatabaseEngine {
     /// event's size, as they do on its card; muted stories are left out, as they are from the list.
     func listTotals(
         section: String? = nil,
+        smartBinder: SmartBinder? = nil,
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         search: String? = nil,
@@ -4134,7 +4151,7 @@ actor DatabaseEngine {
                      JOIN events ge ON ge.id = gm.event_id JOIN articles a ON a.id = gm.article_id
                      WHERE \(Self.visibleArticle) GROUP BY 1) g ON g.story = coalesce(e.story_id, e.id)
                 """,
-            section: section, isRead: isRead, isSaved: isSaved, search: search,
+            section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
             filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
             filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))
         return (totals[0], totals[1])
@@ -4143,7 +4160,8 @@ actor DatabaseEngine {
     /// One row of integer aggregates over the stories of a list or search, under the list's own filters plus
     /// `filter`.
     private func listAggregates(
-        _ columns: String, joins: String = "", section: String?, isRead: Bool?, isSaved: Bool?, search: String?,
+        _ columns: String, joins: String = "", section: String?, smartBinder: SmartBinder? = nil, isRead: Bool?,
+        isSaved: Bool?, search: String?,
         filter: String, filterParameters: [QueryParameter]
     ) throws -> [Int] {
         guard let db = db else {
@@ -4156,7 +4174,8 @@ actor DatabaseEngine {
         var params: [QueryParameter]
         let searchText = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if searchText.isEmpty {
-            let conditions = listConditions(section: section, isRead: isRead, isSaved: isSaved)
+            let conditions = listConditions(
+                section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved)
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         } else {

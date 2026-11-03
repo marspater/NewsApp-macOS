@@ -31,6 +31,7 @@ final class AppSettings: ObservableObject {
     /// Epoch seconds of the last Reset Reading Interests; 0 means never reset.
     static let readingInterestsResetAtKey = "readingInterestsResetAt"
     static let briefingModuleOrderKey = "briefing_module_order"
+    static let smartBindersKey = "smart_binders"
 
     /// Everything this class persists; a library backup carries these values (#563).
     static let backedUpKeys = [
@@ -38,7 +39,7 @@ final class AppSettings: ObservableObject {
         showsDockBadgeKey, showsMenuBarExtraKey, aiEnabledKey, privateNotificationsEnabledKey, notificationModeKey,
         allowInsecureHTTPKey, mutedSourcesKey, mutedTopicsKey, mutedTopicSetsKey, starredFeedURLsKey,
         starredFeedTimesKey, tensionCollectionOptInKey, retiredFeedsVersionKey, dismissedAdvisoriesKey,
-        readingInterestsResetAtKey, briefingModuleOrderKey,
+        readingInterestsResetAtKey, briefingModuleOrderKey, smartBindersKey,
     ]
 
     /// The backed-up keys' stored values as a binary property list.
@@ -117,6 +118,7 @@ final class AppSettings: ObservableObject {
 
     @Published var feedURLs: [String]
     @Published var userSections: [String]
+    @Published var smartBinders: [SmartBinder]
     @Published var fetchIntervalMinutes: Double
     /// Days a read, unsaved story stays before retention deletes it; 0 keeps every story.
     @Published private(set) var articleRetentionDays: Int
@@ -181,6 +183,14 @@ final class AppSettings: ObservableObject {
             self.userSections = savedSections
         } else {
             self.userSections = Self.defaultSections
+        }
+
+        if let data = defaults.data(forKey: Self.smartBindersKey),
+            let binders = try? JSONDecoder().decode([SmartBinder].self, from: data)
+        {
+            self.smartBinders = binders
+        } else {
+            self.smartBinders = []
         }
 
         if defaults.object(forKey: Self.fetchIntervalKey) != nil {
@@ -640,6 +650,42 @@ final class AppSettings: ObservableObject {
 
     private func saveSections() {
         defaults.set(userSections, forKey: Self.userSectionsKey)
+    }
+
+    func addSmartBinder(_ binder: SmartBinder) {
+        smartBinders.append(binder)
+        saveSmartBinders()
+    }
+
+    func updateSmartBinder(_ binder: SmartBinder) {
+        if let index = smartBinders.firstIndex(where: { $0.id == binder.id }) {
+            smartBinders[index] = binder
+            saveSmartBinders()
+        }
+    }
+
+    func removeSmartBinder(id: UUID) {
+        smartBinders.removeAll { $0.id == id }
+        saveSmartBinders()
+    }
+
+    func removeSmartBinder(_ binder: SmartBinder) {
+        removeSmartBinder(id: binder.id)
+    }
+
+    func smartBinder(id: UUID) -> SmartBinder? {
+        smartBinders.first { $0.id == id }
+    }
+
+    func smartBinder(forTag tag: String) -> SmartBinder? {
+        guard let id = SmartBinder.binderID(fromTag: tag) else { return nil }
+        return smartBinder(id: id)
+    }
+
+    private func saveSmartBinders() {
+        if let data = try? JSONEncoder().encode(smartBinders) {
+            defaults.set(data, forKey: Self.smartBindersKey)
+        }
     }
 
     /// Saves the Briefing's module order; nil returns it to the default.

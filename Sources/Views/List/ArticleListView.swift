@@ -151,8 +151,9 @@ struct ArticleListView: View {
 
     private var queryIdentity: String {
         let muting = listMuting
+        let binderHash = currentSmartBinder?.hashValue ?? 0
         return
-            "\(selectedTopic ?? "Today"):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
+            "\(selectedTopic ?? "Today"):\(binderHash):\(searchText):\(themeManager.autoHideRead):\(muting.sourceParameter)|\(muting.topicParameter):\(showsMuted)"
     }
 
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }
@@ -626,12 +627,22 @@ struct ArticleListView: View {
         return (topic, read, topic == "Saved Stories" ? true : nil)
     }
 
+    private var currentSmartBinder: SmartBinder? {
+        guard let topic = selectedTopic else { return nil }
+        return appSettings.smartBinder(forTag: topic)
+    }
+
     private func fetchPage(after pageCursor: ArticleQueryCursor?, muting: MuteRules) async throws -> [FeedArticle] {
         if isSearching {
             return try await articleStore.database.searchArticles(
                 query: searchText, limit: 201, after: pageCursor, muting: muting)
         }
         let filters = listFilters
+        if let binder = currentSmartBinder {
+            return try await articleStore.database.fetchArticles(
+                smartBinder: binder, isRead: filters.read, isSaved: filters.saved,
+                limit: 201, after: pageCursor, muting: muting)
+        }
         return try await articleStore.database.fetchArticles(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved,
             limit: 201, after: pageCursor, muting: muting)
@@ -642,6 +653,10 @@ struct ArticleListView: View {
             return try await articleStore.database.mutedArticleCount(search: searchText, muting: muting)
         }
         let filters = listFilters
+        if let binder = currentSmartBinder {
+            return try await articleStore.database.mutedArticleCount(
+                smartBinder: binder, isRead: filters.read, isSaved: filters.saved, muting: muting)
+        }
         return try await articleStore.database.mutedArticleCount(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
     }
@@ -652,6 +667,10 @@ struct ArticleListView: View {
             return try await articleStore.database.listTotals(search: searchText, muting: muting)
         }
         let filters = listFilters
+        if let binder = currentSmartBinder {
+            return try await articleStore.database.listTotals(
+                smartBinder: binder, isRead: filters.read, isSaved: filters.saved, muting: muting)
+        }
         return try await articleStore.database.listTotals(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved, muting: muting)
     }
@@ -724,7 +743,9 @@ struct ArticleListView: View {
     // MARK: - Masthead
 
     private var locationTitle: String {
-        isSearching ? "Search" : (selectedTopic ?? "Today")
+        if isSearching { return "Search" }
+        if let binder = currentSmartBinder { return binder.name }
+        return selectedTopic ?? "Today"
     }
 
     static func headerMaxWidth(isBriefing: Bool, gridLayout: Bool) -> CGFloat? {
@@ -1177,6 +1198,7 @@ struct ArticleListView: View {
     }
 
     private var emptyStateIcon: String {
+        if let binder = currentSmartBinder { return binder.icon.isEmpty ? "folder" : binder.icon }
         switch selectedTopic {
         case "Briefing": return "text.book.closed"
         case "Today", "Unread": return "newspaper"
@@ -1187,6 +1209,7 @@ struct ArticleListView: View {
     }
 
     private var emptyStateTitle: String {
+        if let binder = currentSmartBinder { return "Nothing in \(binder.name)" }
         switch selectedTopic {
         case "Briefing": return "No Stories for This Briefing"
         case "Today": return "No Stories Yet"
@@ -1198,6 +1221,9 @@ struct ArticleListView: View {
     }
 
     private var emptyStateText: String {
+        if let binder = currentSmartBinder {
+            return "New stories matching “\(binder.name)” will appear here once your feeds refresh."
+        }
         switch selectedTopic {
         case "Briefing":
             return

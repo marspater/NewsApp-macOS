@@ -183,6 +183,9 @@ enum AppLayout {
     static let progressBarHeight: CGFloat = 2
     static let catalogSheetWidth: CGFloat = 720
     static let catalogSheetMinHeight: CGFloat = 560
+    static let smartBinderSheetWidth: CGFloat = 520
+    static let smartBinderSheetHeight: CGFloat = 600
+    static let iconButtonSize: CGFloat = 28
     /// Overview timeline rail: dot, rail column and the connecting line.
     static let timelineDotSize: CGFloat = 8
     static let timelineRailWidth: CGFloat = 12

@@ -830,6 +830,7 @@ struct NewsTests {
             ("testCatalogReviewAndAlternatives", { try await testCatalogReviewAndAlternatives() }),
             ("testFeedHealth", { try await testFeedHealth() }),
             ("testUserMuting", { try await testUserMuting() }),
+            ("testSmartBinders", { try await testSmartBinders() }),
             ("testTensionMethodology", { try await testTensionMethodology() }),
             ("testWorldTension", { try await testWorldTension() }),
             ("testWorldTensionSmoothing", { testWorldTensionSmoothing() }),
@@ -5440,6 +5441,429 @@ struct NewsTests {
         assertEqual(notified, [stories[3].title], "Only unmuted new stories notify")
         assertEqual(manager.articles.count, 2, "Muted stories are still stored")
         manager.stopBackgroundWork()
+    }
+
+    static func testSmartBinders() async throws {
+        print("  - Testing Dynamic Smart Binders (Compound Topic Rules #709)...")
+
+        // 1. Pure rule-to-SQL translation with 100% parameterised queries (no string concatenation of user input)
+        let complexBinder = SmartBinder(
+            name: "Apple Silicon Watch",
+            icon: "cpu",
+            categories: ["Tech", "Business"],
+            includeKeywords: ["apple", "silicon"],
+            excludeKeywords: ["rumor", "leak"],
+            publishers: ["Ars Technica", "The Verge"],
+            matchAllKeywords: false
+        )
+        let (sql, params) = complexBinder.sqlCondition()
+
+        // 100% Parameterized verification: SQL string must contain '?' and never raw user text
+        for forbidden in ["apple", "silicon", "rumor", "leak", "Ars Technica", "The Verge", "Tech", "Business"] {
+            assertFalse(
+                sql.lowercased().contains(forbidden.lowercased()),
+                "SQL must not concatenate user text '\(forbidden)'; found in: \(sql)"
+            )
+        }
+        assertTrue(sql.contains("coalesce(ae.category, a.category) LIKE ?"), "Categories use parameterised LIKE")
+        assertTrue(sql.contains("a.source LIKE ?"), "Publishers use parameterised LIKE")
+        assertTrue(
+            sql.contains("a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\'"),
+            "Keywords use parameterised LIKE with ESCAPE")
+        assertTrue(
+            sql.contains("NOT (a.title LIKE ? ESCAPE '\\' OR coalesce(a.description, '') LIKE ? ESCAPE '\\')"),
+            "Exclude keywords use parameterised NOT with ESCAPE")
+
+        // Parameters match the expected formatted wildcards
+        assertTrue(params.contains("%Tech%"), "Params contain category wildcard")
+        assertTrue(params.contains("%Business%"), "Params contain category wildcard")
+        assertTrue(params.contains("%apple%"), "Params contain include keyword wildcard")
+        assertTrue(params.contains("%silicon%"), "Params contain include keyword wildcard")
+        assertTrue(params.contains("%rumor%"), "Params contain exclude keyword wildcard")
+        assertTrue(params.contains("%leak%"), "Params contain exclude keyword wildcard")
+
+        // SQL Injection Attempt
+        let maliciousBinder = SmartBinder(
+            name: "Injection Test",
+            includeKeywords: ["' OR '1'='1'; DROP TABLE articles; --"],
+            excludeKeywords: ["'; DELETE FROM article_state; --"]
+        )
+        let (maliciousSQL, maliciousParams) = maliciousBinder.sqlCondition()
+        assertFalse(maliciousSQL.contains("DROP TABLE"), "Malicious input must never be interpolated into SQL")
+        assertFalse(maliciousSQL.contains("DELETE FROM"), "Malicious input must never be interpolated into SQL")
+        assertTrue(
+            maliciousParams.contains("%' OR '1'='1'; DROP TABLE articles; --%"), "Literal string passed as parameter")
+
+        // Wildcard escaping: % and _ should be escaped with \ to prevent accidental wildcard expansion
+        let wildcardBinder = SmartBinder(
+            name: "Wildcard Test",
+            includeKeywords: ["100% genuine", "foo_bar"]
+        )
+        let (wcSQL, wcParams) = wildcardBinder.sqlCondition()
+        assertTrue(wcSQL.contains("ESCAPE '\\'"), "SQL LIKE clauses contain ESCAPE clause")
+        assertTrue(wcParams.contains("%100\\% genuine%"), "Wildcard % is escaped in parameter")
+        assertTrue(wcParams.contains("%foo\\_bar%"), "Wildcard _ is escaped in parameter")
+
+        // 2. Compound include/exclude rules (in-memory matching)
+        let artMatching = FeedArticle(
+            title: "Apple introduces M4 Max Silicon",
+            link: "https://arstechnica.com/apple-m4",
+            guid: "sb-1",
+            description: "New chip delivers record performance across all tasks",
+            pubDate: Date(),
+            source: "Ars Technica",
+            category: "Tech"
+        )
+        let artExcluded = FeedArticle(
+            title: "Apple announces M4 chip amid new leak",
+            link: "https://arstechnica.com/apple-leak",
+            guid: "sb-2",
+            description: "New rumor claims supply issues in Taiwan",
+            pubDate: Date(),
+            source: "Ars Technica",
+            category: "Tech"
+        )
+        let artWrongPublisher = FeedArticle(
+            title: "Apple Silicon review",
+            link: "https://wsj.com/apple-silicon",
+            guid: "sb-3",
+            description: "A fast Mac processor tested",
+            pubDate: Date(),
+            source: "Wall Street Journal",
+            category: "Tech"
+        )
+        let artWrongCategory = FeedArticle(
+            title: "Apple Silicon in restaurants",
+            link: "https://arstechnica.com/apple-cooking",
+            guid: "sb-4",
+            description: "Kitchen management systems powered by silicon",
+            pubDate: Date(),
+            source: "Ars Technica",
+            category: "Food"
+        )
+
+        assertTrue(complexBinder.matches(article: artMatching), "Article matching all compound rules must pass")
+        assertFalse(
+            complexBinder.matches(article: artExcluded),
+            "Article matching include but containing exclude keyword must fail")
+        assertFalse(complexBinder.matches(article: artWrongPublisher), "Article with non-matching publisher must fail")
+        assertFalse(complexBinder.matches(article: artWrongCategory), "Article with non-matching category must fail")
+
+        // Match all keywords mode
+        let allKeywordsBinder = SmartBinder(
+            name: "Strict Apple Silicon",
+            includeKeywords: ["apple", "silicon"],
+            matchAllKeywords: true
+        )
+        let artOnlyApple = FeedArticle(
+            title: "Apple releases quarterly earnings report",
+            link: "https://example.com/apple-earnings",
+            guid: "sb-5",
+            description: "Services revenue hit record high",
+            pubDate: Date(),
+            source: "Example",
+            category: "Business"
+        )
+        assertTrue(
+            allKeywordsBinder.matches(article: artMatching),
+            "Article with both keywords matches under matchAllKeywords=true")
+        assertFalse(
+            allKeywordsBinder.matches(article: artOnlyApple),
+            "Article with only one keyword fails under matchAllKeywords=true")
+
+        // 3. Database query and Mute Rules honoured in Smart Binders
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+
+        let dbStories = [
+            FeedArticle(
+                title: "Apple M4 Silicon review",
+                link: "https://arstechnica.com/apple-m4-review",
+                guid: "db-1",
+                description: "Deep dive into performance",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_100),
+                source: "Ars Technica",
+                category: "Tech"
+            ),
+            FeedArticle(
+                title: "Apple chip supply chain rumor",
+                link: "https://arstechnica.com/apple-supply-rumor",
+                guid: "db-2",
+                description: "Unconfirmed reports from suppliers",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_090),
+                source: "Ars Technica",
+                category: "Tech"
+            ),
+            FeedArticle(
+                title: "Apple Silicon developer tooling",
+                link: "https://theverge.com/apple-tooling",
+                guid: "db-3",
+                description: "Xcode optimizations for M4",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_080),
+                source: "The Verge",
+                category: "Tech"
+            ),
+            FeedArticle(
+                title: "Global monetary policy update",
+                link: "https://bbc.com/economy",
+                guid: "db-4",
+                description: "Interest rate discussion",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_070),
+                source: "BBC",
+                category: "Business"
+            ),
+        ]
+        try await db.upsertArticles(dbStories)
+
+        let testBinder = SmartBinder(
+            name: "Apple Silicon",
+            categories: ["Tech"],
+            includeKeywords: ["apple"],
+            excludeKeywords: ["rumor"]
+        )
+
+        // Query without muting: db-1 and db-3 match, db-2 is excluded by rumor, db-4 is not Tech/no Apple
+        let binderArticles = try await db.fetchArticles(smartBinder: testBinder)
+        assertEqual(binderArticles.map(\.id), ["db-1", "db-3"], "Smart binder query returns matching articles")
+        let binderTotals = try await db.listTotals(smartBinder: testBinder)
+        assertEqual(binderTotals.stories, 2, "List totals reflects binder matching count")
+
+        // SQL and in-memory matching must agree when every keyword is required.
+        let strictBinder = SmartBinder(
+            name: "Strict", includeKeywords: ["apple", "developer"], matchAllKeywords: true)
+        let strictArticles = try await db.fetchArticles(smartBinder: strictBinder)
+        assertEqual(strictArticles.map(\.id), ["db-3"], "matchAllKeywords requires every keyword in SQL")
+        assertTrue(strictBinder.matches(article: dbStories[2]), "In-memory matching agrees for db-3")
+        assertFalse(strictBinder.matches(article: dbStories[0]), "In-memory matching agrees for db-1")
+
+        // U.S. Politics category uses ArticleSection matching semantics in SQL and in-memory
+        let polStory = FeedArticle(
+            title: "White House press briefing on new legislation",
+            link: "https://example.com/us-politics-1",
+            guid: "pol-1",
+            description: "Administration officials discussed the bill",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_150),
+            source: "Example News",
+            category: "Politics"
+        )
+        let nonPolStory = FeedArticle(
+            title: "Global Astronomy Conference Opens in Tokyo",
+            link: "https://example.com/science-1",
+            guid: "sci-1",
+            description: "Researchers discuss deep space telescope discoveries",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_140),
+            source: "Example News",
+            category: "Science"
+        )
+        try await db.upsertArticles([polStory, nonPolStory])
+        let usPolBinder = SmartBinder(name: "US Pol", categories: ["U.S. Politics"])
+        let usPolArticles = try await db.fetchArticles(smartBinder: usPolBinder)
+        assertTrue(
+            usPolArticles.contains { $0.id == "pol-1" },
+            "U.S. Politics binder matches classified Politics story in SQL")
+        assertFalse(
+            usPolArticles.contains { $0.id == "sci-1" },
+            "U.S. Politics binder excludes non-politics story in SQL")
+        assertTrue(
+            usPolBinder.matches(article: polStory),
+            "U.S. Politics matches in-memory for classified Politics story")
+        assertFalse(
+            usPolBinder.matches(article: nonPolStory),
+            "U.S. Politics excludes non-politics story in-memory")
+
+        // Case-insensitivity: "u.s. politics" also uses ArticleSection matching
+        let lowerUsPolBinder = SmartBinder(name: "US Pol Lower", categories: ["u.s. politics"])
+        let lowerUsPolArticles = try await db.fetchArticles(smartBinder: lowerUsPolBinder)
+        assertTrue(
+            lowerUsPolArticles.contains { $0.id == "pol-1" },
+            "Case-insensitive u.s. politics binder matches in SQL")
+        assertTrue(
+            lowerUsPolBinder.matches(article: polStory),
+            "Case-insensitive u.s. politics binder matches in-memory")
+
+        // Mute rules strictly honoured: mute theverge.com
+        var binderMuting = MuteRules(sources: ["theverge.com"])
+        let mutedArticles = try await db.fetchArticles(smartBinder: testBinder, muting: binderMuting)
+        assertEqual(mutedArticles.map(\.id), ["db-1"], "Muted publisher theverge.com is excluded from smart binder")
+        let mutedCount = try await db.mutedArticleCount(smartBinder: testBinder, muting: binderMuting)
+        assertEqual(mutedCount, 1, "Muted count reports exactly 1 story hidden by muting")
+
+        // Rule edits produce distinct cache entries without requiring database writes
+        var editedBinder = testBinder
+        editedBinder.includeKeywords = ["nonexistent"]
+        let editedMutedCount = try await db.mutedArticleCount(smartBinder: editedBinder, muting: binderMuting)
+        assertEqual(editedMutedCount, 0, "Edited binder rules use a distinct cache entry")
+
+        // Mute by topic: mute "review"
+        binderMuting.addTopic("review")
+        let topicMutedArticles = try await db.fetchArticles(smartBinder: testBinder, muting: binderMuting)
+        assertTrue(topicMutedArticles.isEmpty, "Topic muting eliminates remaining story with 'review'")
+        let doubleMutedCount = try await db.mutedArticleCount(smartBinder: testBinder, muting: binderMuting)
+        assertEqual(doubleMutedCount, 2, "Both stories now counted as muted under smart binder")
+
+        // Wildcard escaping in live database queries
+        let wcArticles = [
+            FeedArticle(
+                title: "100% Genuine Silicon",
+                link: "https://example.com/genuine",
+                guid: "wc-1",
+                description: "Authentic hardware",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_200),
+                source: "Example",
+                category: "Tech"
+            ),
+            FeedArticle(
+                title: "10000 Genuine Silicon",
+                link: "https://example.com/not-percent",
+                guid: "wc-2",
+                description: "Different number",
+                pubDate: Date(timeIntervalSince1970: 1_700_000_190),
+                source: "Example",
+                category: "Tech"
+            ),
+        ]
+        try await db.upsertArticles(wcArticles)
+        let exactPercentBinder = SmartBinder(
+            name: "Percent Test",
+            includeKeywords: ["100%"]
+        )
+        let percentMatches = try await db.fetchArticles(smartBinder: exactPercentBinder)
+        assertEqual(percentMatches.map(\.id), ["wc-1"], "Escaped % matches only literal %, not arbitrary digits")
+
+        await db.close()
+
+        // 4. Persistence round trip and settings backup/restore
+        let suite = testDefaultsSuite("test.smartbinders")
+        let testDefaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+
+        try await MainActor.run {
+            let settings = AppSettings(defaults: testDefaults)
+            assertEqual(settings.smartBinders.count, 0, "Initially zero smart binders")
+
+            let persistentBinder = SmartBinder(
+                id: UUID(),
+                name: "Custom Defense & Tech",
+                icon: "cube",
+                categories: ["Tech", "World"],
+                includeKeywords: ["radar", "satellite"],
+                excludeKeywords: ["speculation"],
+                publishers: ["Defense News"]
+            )
+            settings.addSmartBinder(persistentBinder)
+            assertEqual(settings.smartBinders.count, 1, "Binder added to settings")
+            assertEqual(
+                settings.smartBinder(id: persistentBinder.id)?.name, "Custom Defense & Tech",
+                "Binder lookup by ID works")
+            assertEqual(
+                settings.smartBinder(forTag: persistentBinder.sidebarTag)?.icon, "cube", "Binder lookup by tag works")
+
+            // Update binder
+            var modifiedBinder = persistentBinder
+            modifiedBinder.name = "Aerospace & Tech"
+            assertTrue(
+                modifiedBinder.hashValue != persistentBinder.hashValue,
+                "Modified binder produces distinct hash value for view cache invalidation")
+            settings.updateSmartBinder(modifiedBinder)
+            assertEqual(
+                settings.smartBinder(id: persistentBinder.id)?.name, "Aerospace & Tech", "Binder update persists")
+
+            // Backup settings
+            let backupData = try AppSettings.backupSettings(from: testDefaults)
+
+            // Clear defaults suite and verify restoration
+            testDefaults.removePersistentDomain(forName: suite)
+            try AppSettings.restoreSettings(backupData, to: testDefaults)
+
+            let restoredSettings = AppSettings(defaults: testDefaults)
+            assertEqual(restoredSettings.smartBinders.count, 1, "Smart binders cleanly restored from backup")
+            let restoredBinder = restoredSettings.smartBinders.first
+            assertEqual(restoredBinder?.id, persistentBinder.id, "Restored binder preserves ID")
+            assertEqual(restoredBinder?.name, "Aerospace & Tech", "Restored binder preserves updated name")
+            assertEqual(restoredBinder?.icon, "cube", "Restored binder preserves icon")
+            assertEqual(restoredBinder?.categories, ["Tech", "World"], "Restored binder preserves categories")
+            assertEqual(
+                restoredBinder?.includeKeywords, ["radar", "satellite"], "Restored binder preserves includeKeywords")
+            assertEqual(restoredBinder?.excludeKeywords, ["speculation"], "Restored binder preserves excludeKeywords")
+            assertEqual(restoredBinder?.publishers, ["Defense News"], "Restored binder preserves publishers")
+
+            // Remove binder
+            restoredSettings.removeSmartBinder(persistentBinder)
+            assertEqual(restoredSettings.smartBinders.count, 0, "Binder removal persists cleanly")
+
+            // SmartBinder tags and ID extraction
+            assertTrue(SmartBinder.isBinderTag(persistentBinder.sidebarTag), "isBinderTag recognizes valid tag")
+            assertFalse(SmartBinder.isBinderTag("category:all"), "isBinderTag rejects other tags")
+            assertEqual(
+                SmartBinder.binderID(fromTag: persistentBinder.sidebarTag), persistentBinder.id,
+                "binderID parses valid tag")
+            assertEqual(
+                SmartBinder.binderID(fromTag: "category:all"), nil, "binderID returns nil for non-binder tag")
+
+            // SmartBinderSheet helpers and draft builder
+            assertEqual(
+                SmartBinderSheet.parseCommaSeparated("apple, silicon, m4"), ["apple", "silicon", "m4"],
+                "Comma-separated parsing trims and filters")
+            assertEqual(
+                SmartBinderSheet.parseCommaSeparated("   "), [], "Blank comma-separated string yields empty list")
+
+            let newDraft = SmartBinderSheet.Draft(
+                name: "  Apple Silicon  ",
+                icon: "cpu",
+                categories: ["Tech", "Science"],
+                includeKeywordsText: "m4, pro",
+                excludeKeywordsText: "rumor",
+                publishersText: "The Verge",
+                matchAllKeywords: true
+            )
+            let createdBinder = SmartBinderSheet.buildBinder(from: newDraft)
+            assertEqual(createdBinder.name, "Apple Silicon", "buildBinder trims name")
+            assertEqual(createdBinder.icon, "cpu", "buildBinder sets icon")
+            assertEqual(createdBinder.categories, ["Science", "Tech"], "buildBinder sorts categories")
+            assertEqual(createdBinder.includeKeywords, ["m4", "pro"], "buildBinder parses includes")
+            assertEqual(createdBinder.excludeKeywords, ["rumor"], "buildBinder parses excludes")
+            assertEqual(createdBinder.publishers, ["The Verge"], "buildBinder parses publishers")
+            assertTrue(createdBinder.matchAllKeywords, "buildBinder sets matchAllKeywords")
+
+            let editDraft = SmartBinderSheet.Draft(
+                existing: createdBinder,
+                name: "Updated Silicon",
+                icon: "folder",
+                categories: ["Tech"],
+                includeKeywordsText: "",
+                excludeKeywordsText: "",
+                publishersText: "",
+                matchAllKeywords: false
+            )
+            let updatedBinder = SmartBinderSheet.buildBinder(from: editDraft)
+            assertEqual(updatedBinder.id, createdBinder.id, "Updating preserves binder ID")
+            assertEqual(updatedBinder.name, "Updated Silicon", "Updating sets new name")
+            assertEqual(updatedBinder.icon, "folder", "Updating sets new icon")
+            assertFalse(updatedBinder.matchAllKeywords, "Updating clears matchAllKeywords")
+
+            // Exercise SmartBinderSheet view body in creation and edit modes
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 480, height: 520),
+                styleMask: [.titled],
+                backing: .buffered,
+                defer: false
+            )
+            window.isReleasedWhenClosed = false
+            defer { window.close() }
+
+            let sheetNew = SmartBinderSheet()
+            let hostNew = NSHostingView(rootView: sheetNew.environmentObject(settings))
+            window.contentView = hostNew
+            window.makeKeyAndOrderFront(nil)
+            hostNew.layoutSubtreeIfNeeded()
+            _ = hostNew.fittingSize
+
+            let sheetEdit = SmartBinderSheet(binder: createdBinder)
+            let hostEdit = NSHostingView(rootView: sheetEdit.environmentObject(settings))
+            window.contentView = hostEdit
+            hostEdit.layoutSubtreeIfNeeded()
+            _ = hostEdit.fittingSize
+        }
     }
 
     /// Methodology v3 (#585): the shown reading is the 7-day weighted average of accepted assessments plus momentum;
