@@ -29,14 +29,16 @@ The roadmap is structured into four distinct program epics (U, V, W, X), with st
 
 ```mermaid
 flowchart TD
-    subgraph v2Foundation["Active v2 Development (Milestones J–T)"]
+    subgraph v2Foundation["Active v2 Development (J, L, M, N, O, Q, R, T, Y)"]
         v2_J["Epic J (#571)<br/>Robustness & SQLite v26"]
-        v2_K["Epic K (#572)<br/>Embedding Throughput"]
         v2_L["Epic L (#573)<br/>World Tension v3 & Muting"]
         v2_M["Epic M (#574)<br/>Story Layer & News Bi-Encoder"]
+        v2_N["Epic N (#575)<br/>System Integration"]
         v2_O["Epic O (#576)<br/>First Run, Backup & Export"]
         v2_Q["Epic Q (#607)<br/>Interaction Polish & Reader"]
+        v2_R["Epic R (#608)<br/>Briefing Situation Board"]
         v2_T["Epic T (#669)<br/>Story Overview & Editorial UX"]
+        v2_Y["Epic Y (#744)<br/>Improvements & Bug Fixing"]
     end
 
     subgraph EpicU["Epic U: Advanced Discovery & Search (Milestone 21)"]

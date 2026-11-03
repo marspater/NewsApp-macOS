@@ -235,7 +235,7 @@ Prepare 5 screenshots matching Apple's macOS App Store resolution standards:
 
 ### 5.1 Producing the Release Archive via Command Line
 
-Today's release artifact is the ad-hoc signed bundle from `./build_release.sh` (zipped with its SHA-256 by `.github/workflows/release.yml` for a `vX.Y.Z` tag). The `xcodebuild archive` and export steps below need the `News` scheme of the planned Xcode project (#931) and fail on the current repository:
+Today's release artifact is the ad-hoc signed bundle from `./build_release.sh` (zipped with its SHA-256 by `.github/workflows/release.yml` for a `vX.Y.Z` tag). The `xcodebuild archive` step below needs the `News` scheme of the planned Xcode project (#931) and fails on the current repository; the export step (5.3) needs the archive it produces and an export options plist:
 
 ```bash
 # 1. Clean build artifacts

@@ -1,6 +1,6 @@
 # ADR-001: Strengthen the platform before expanding it
 
-**Status:** Accepted (Phase 0 closed; checked 3 November 2026, #569)
+**Status:** Accepted (checked 3 November 2026, #569). Phase 0 stays open on action item 2: its issues are closed, but the shared write-validity helper is not in place or confirmed.
 **Date:** 31 October 2026
 **Deciders:** Mars Pater
 
@@ -97,7 +97,7 @@ Option B fixes the root cause shared by #805, #792 and #820 at the commit point,
 ## Action Items
 
 1. [x] Trust boundaries:
-   - #808: key redirect state per task object, not by `taskIdentifier` (`SecureHTTPClient` keys `states[task.taskIdentifier]`).
+   - #808: key redirect state per task object, not by `taskIdentifier` (`SecureHTTPClient` keyed `states[task.taskIdentifier]`; it now keys `states[ObjectIdentifier(task)]` and drops the entry when the task completes).
    - #793: pass untrusted text as structured input, not by escaping delimiters in strings.
    - #810: align update checks with the documented egress.
 2. [ ] Add the write-validity helper. Adopt it in enrichment (#805, #820), overviews (#792) and notification bookkeeping (#814, inside one transaction). Make Clear All Caches and Clear AI Analysis share one list of derived tables (#811). (3 November: all five issues are closed, but no shared write-validity helper exists in `Sources/` under that name; how each site now guards its writes was not re-checked here. Left open until someone decides whether the shared helper is still wanted.)
