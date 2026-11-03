@@ -41,6 +41,9 @@ struct EventFeatures: Hashable, Sendable, Codable {
     var series: String?
     /// Terms the series prefix alone yields; between two items of one publisher's series they are not evidence.
     var seriesTerms: Set<String> = []
+    /// Local places named only in the series prefix (#737): \"Delhi\" of \"Delhi Dispatch: Polls close in Lucknow\", but
+    /// not of \"Delhi Dispatch: Polls close in Delhi\", which names the story's place again outside the prefix.
+    var seriesOnlyPlaces: Set<String> = []
     /// Edition slots named in the headline ("Morning", "Evening"): two items of one series in different slots differ.
     var editions: Set<String> = []
     /// Named storms in the headline ("Storm Arlo", "Hurricane Milton"), lowercased names: two headlines naming different
@@ -81,6 +84,14 @@ struct EventFeatures: Hashable, Sendable, Codable {
         copy.titleSpecificAnchors.subtract(terms)
         copy.titlePlaces.subtract(terms)
         copy.titlePeople.subtract(terms)
+        return copy
+    }
+
+    /// These features with the local places `original` names outside its series prefix put back (#737): after
+    /// `without(_:)` a series report about the place its series is named for still names that place.
+    func keepingStoryPlaces(of original: EventFeatures) -> EventFeatures {
+        var copy = self
+        copy.places.formUnion(original.localPlaces.subtracting(original.seriesOnlyPlaces))
         return copy
     }
 }
@@ -551,6 +562,15 @@ extension EventFeatures {
             let terms = EventFeatures(title: prefix, description: "", date: date)
             collector.features.series = Self.normalized(prefix)
             collector.features.seriesTerms = terms.anchors.union(terms.keywords).union(terms.titleNumbers)
+            let prefixWords = Set(
+                prefix.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { Self.normalized(String($0)) })
+            let outside = String(title[title.index(after: cut)...]) + " " + rawDescription
+            let outsideWords = Set(
+                outside.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { Self.normalized(String($0)) })
+            collector.features.seriesOnlyPlaces = collector.features.localPlaces.filter { place in
+                place.split(separator: " ").allSatisfy { prefixWords.contains(String($0)) }
+                    && !place.split(separator: " ").allSatisfy { outsideWords.contains(String($0)) }
+            }
         }
         // "Three dead after mall shooting": a primary clause that only counts consequences names no act of its own,
         // so it cannot separate the report from coverage that leads with the shooting itself.
@@ -666,6 +686,10 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// one story when two thirds of their cross pairs share a country, have no conflict (so no different act), share at
     /// least this many keywords and reach the semantic veto's cosine. Nil turns it off; off by default (evaluation).
     var storyCountryKeywords: Int?
+    /// Sub-national place veto for the country signal (#737): two reports whose texts name places below country level,
+    /// none shared word by word, are two stories in one country (state elections in Uttar Pradesh and in Karnataka), not
+    /// one story by the country alone. Only read while `storyCountryKeywords` is set; off only to measure without it.
+    var storyCountryPlaceVeto = true
     /// The pair model's story signal (#627): two events, or a report alone and an event, are one story when two thirds
     /// of their cross pairs score p_same + p_related at or above this with p_different at most 0.15, share one specific
     /// name that is not a common actor, and share a keyword or reach the semantic veto's cosine. Infinity turns it off;
@@ -825,6 +849,14 @@ enum EventMatcher {
         // Last, so a different act is only reported when nothing else contradicts: it is a related-act candidate.
         if a.actClass.conflicts(with: b.actClass) { return .differentAct }
         return nil
+    }
+
+    /// Both reports name places below country level and no word of one's places is among the other's (#737): the
+    /// country they share is not what links them. Words, so "Westfield" and "Westfield Bondi Junction" share a place.
+    static func namesDifferentLocalPlaces(_ a: EventFeatures, _ b: EventFeatures) -> Bool {
+        let words = { (f: EventFeatures) in Set(f.localPlaces.flatMap { $0.split(separator: " ").map(String.init) }) }
+        let (left, right) = (words(a), words(b))
+        return !left.isEmpty && !right.isEmpty && left.isDisjoint(with: right)
     }
 
     private static func sameUTCDay(_ a: Date, _ b: Date) -> Bool {

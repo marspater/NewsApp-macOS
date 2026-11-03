@@ -480,6 +480,31 @@ enum EventClusterer {
         }
         // A spent budget (`break matching`) leaves the loop before the batch's flush.
         try await flushBatch()
+        /// Two thirds of the cross pairs between the earliest members of two events agree by a predicate.
+        func storySampleAgrees(
+            _ a: [EventMatchRow], _ b: [EventMatchRow],
+            predicate: (EventMatchRow, EventMatchRow, EventPairAssessment, EventFeatures, EventFeatures) async throws ->
+                Bool
+        ) async throws -> Bool {
+            var agreeing = 0
+            var total = 0
+            for left in a.prefix(Self.storySampleSize) {
+                for right in b.prefix(Self.storySampleSize) {
+                    total += 1
+                    let pair = try await ruled(left, right)
+                    // A series name one publisher repeats is no shared name or place here either (#688).
+                    let template =
+                        EventFeatures.sharedSeriesTerms(
+                            features(left), features(right),
+                            samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
+                    let (l, r) = (features(left).without(template), features(right).without(template))
+                    if try await predicate(left, right, pair, l, r) {
+                        agreeing += 1
+                    }
+                }
+            }
+            return total > 0 && agreeing * 3 >= total * 2
+        }
         /// Two thirds of the cross pairs between the earliest members of two events agree by the rules alone (#581): no
         /// conflict other than a different act, `storyLinkAnchors` shared specific names that are not common actors, and
         /// a shared keyword. A report alone (`single`) may instead share one such name, a headline figure ("70,000
@@ -487,32 +512,18 @@ enum EventClusterer {
         func storyPairsAgree(
             _ a: [EventMatchRow], _ b: [EventMatchRow], common: Set<String>, single: Bool = false
         ) async throws -> Bool {
-            var agreeing = 0
-            var total = 0
-            for left in a.prefix(Self.storySampleSize) {
-                for right in b.prefix(Self.storySampleSize) {
-                    total += 1
-                    let pair = try await ruled(left, right)
-                    // A series name one publisher repeats is no shared name here either (#688).
-                    let template =
-                        EventFeatures.sharedSeriesTerms(
-                            features(left), features(right),
-                            samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
-                    let (l, r) = (features(left).without(template), features(right).without(template))
-                    let names = l.specificAnchors.intersection(r.specificAnchors).subtracting(common).count
-                    let sharesFigure = !l.titleNumbers.isDisjoint(with: r.titleNumbers)
-                    let figure = single && names >= 1 && pair.sharedKeywords >= 2 && sharesFigure
-                    // A story may span places (Ebola cases in two countries), so different headline places do not
-                    // veto a story link the way they veto one event (#737).
-                    if (pair.conflict == nil || pair.conflict == .differentAct || pair.conflict == .headlinePlaces)
-                        && (names >= matchPolicy.storyLinkAnchors || figure) && pair.sharedKeywords >= 1
-                        && (!single || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold)
-                    {
-                        agreeing += 1
-                    }
-                }
+            try await storySampleAgrees(a, b) { _, _, pair, l, r in
+                let names = l.specificAnchors.intersection(r.specificAnchors).subtracting(common).count
+                let sharesFigure = !l.titleNumbers.isDisjoint(with: r.titleNumbers)
+                let figure = single && names >= 1 && pair.sharedKeywords >= 2 && sharesFigure
+                // A story may span places (Ebola cases in two countries), so different headline places do not
+                // veto a story link the way they veto one event (#737).
+                let conflictOk =
+                    pair.conflict == nil || pair.conflict == .differentAct || pair.conflict == .headlinePlaces
+                let anchorsOk = names >= matchPolicy.storyLinkAnchors || figure
+                let cosineOk = !single || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
+                return conflictOk && anchorsOk && pair.sharedKeywords >= 1 && cosineOk
             }
-            return total > 0 && agreeing * 3 >= total * 2
         }
         /// The pair model's story signal (#627, `storyModelThreshold`): two thirds of the cross pairs between the earliest
         /// members score p_same + p_related at or above the threshold with p_different at most 0.15, have no conflict
@@ -520,57 +531,37 @@ enum EventClusterer {
         /// the semantic veto's cosine. Not asked under the energy rule.
         func storyModelAgrees(_ a: [EventMatchRow], _ b: [EventMatchRow], common: Set<String>) async throws -> Bool {
             guard allowsEnergy, matchPolicy.storyModelThreshold.isFinite else { return false }
-            var agreeing = 0
-            var total = 0
-            for left in a.prefix(Self.storySampleSize) {
-                for right in b.prefix(Self.storySampleSize) {
-                    total += 1
-                    let pair = try await ruled(left, right)
-                    // A shared series title of one publisher is no shared name, as in `storyPairsAgree`.
-                    let template =
-                        EventFeatures.sharedSeriesTerms(
-                            features(left), features(right),
-                            samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
-                    let names = features(left).without(template).specificAnchors
-                        .intersection(features(right).without(template).specificAnchors).subtracting(common).count
-                    guard pair.neuralEligible,
-                        pair.conflict == nil || pair.conflict == .differentAct || pair.conflict == .headlinePlaces,
-                        names >= 1,
-                        pair.sharedKeywords >= 1 || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
-                    else { continue }
-                    let text = { (row: EventMatchRow) in
-                        EventFeatures.matchingText(title: row.title, description: row.description)
-                    }
-                    guard let p = await pairProbabilities(text(left), text(right)) else { continue }
-                    if p.same + p.related >= matchPolicy.storyModelThreshold, 1 - p.same - p.related <= 0.15 {
-                        agreeing += 1
-                    }
+            return try await storySampleAgrees(a, b) { left, right, pair, l, r in
+                let names = l.specificAnchors.intersection(r.specificAnchors).subtracting(common).count
+                guard pair.neuralEligible,
+                    pair.conflict == nil || pair.conflict == .differentAct || pair.conflict == .headlinePlaces,
+                    names >= 1,
+                    pair.sharedKeywords >= 1 || (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
+                else { return false }
+                let text = { (row: EventMatchRow) in
+                    EventFeatures.matchingText(title: row.title, description: row.description)
                 }
+                guard let p = await pairProbabilities(text(left), text(right)) else { return false }
+                return p.same + p.related >= matchPolicy.storyModelThreshold && 1 - p.same - p.related <= 0.15
             }
-            return total > 0 && agreeing * 3 >= total * 2
         }
         /// The country signal (#737, `storyCountryKeywords`): two thirds of the cross pairs between the earliest members
-        /// share a country, have no conflict, share `keywords` keywords and reach the semantic veto's cosine.
+        /// share a country, name no different sub-national places (`storyCountryPlaceVeto`), have no conflict, share
+        /// `keywords` keywords and reach the semantic veto's cosine.
         func storyCountryAgrees(
             _ a: [EventMatchRow], _ b: [EventMatchRow], keywords: Int, commonCountries: Set<String>
         ) async throws -> Bool {
-            var agreeing = 0
-            var total = 0
-            for left in a.prefix(Self.storySampleSize) {
-                for right in b.prefix(Self.storySampleSize) {
-                    total += 1
-                    let pair = try await ruled(left, right)
-                    if pair.conflict == nil,
-                        !features(left).countries.subtracting(commonCountries)
-                            .isDisjoint(with: features(right).countries),
-                        pair.sharedKeywords >= keywords,
-                        (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
-                    {
-                        agreeing += 1
-                    }
-                }
+            try await storySampleAgrees(a, b) { left, right, pair, l, r in
+                let countriesMatch = !l.countries.subtracting(commonCountries).isDisjoint(with: r.countries)
+                // A place the series prefix shares is no evidence, but one the report names again outside it is.
+                let placeVetoPasses =
+                    !matchPolicy.storyCountryPlaceVeto
+                    || !EventMatcher.namesDifferentLocalPlaces(
+                        l.keepingStoryPlaces(of: features(left)), r.keepingStoryPlaces(of: features(right)))
+                let cosineOk = (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
+                return pair.conflict == nil && countriesMatch && placeVetoPasses && pair.sharedKeywords >= keywords
+                    && cosineOk
             }
-            return total > 0 && agreeing * 3 >= total * 2
         }
         /// The story pass (#581): two active events sharing at least `storyLinkAnchors` specific names that are not
         /// common actors of the week (`EventStoryRelation.commonActorShare`, the "Earlier in This Story" guard) are one

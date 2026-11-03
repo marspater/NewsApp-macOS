@@ -242,6 +242,7 @@ enum StoryCorpus {
         if let value = environment["NEWS_STORY_COUNTRY"].flatMap(Int.init), value >= 1 {
             policy.storyCountryKeywords = value
         }
+        if environment["NEWS_STORY_COUNTRY_PLACES"] == "0" { policy.storyCountryPlaceVeto = false }
         if let value = environment["NEWS_STORY_MODEL"].flatMap(Double.init), value.isFinite, (0...1).contains(value) {
             policy.storyModelThreshold = value
         }

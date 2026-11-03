@@ -926,6 +926,7 @@ struct NewsTests {
             ("testRelatedStoryEvents", { try await testRelatedStoryEvents(fixtureRoot: fixtureRoot) }),
             ("testEventMatcherRules", { try await testEventMatcherRules() }),
             ("testActClassTable", { testActClassTable() }),
+            ("testStoryCountryPlaceVeto", { testStoryCountryPlaceVeto() }),
             ("testEventClustering", { try await testEventClustering(fixtureRoot: fixtureRoot) }),
             ("testArticleSignalsRoundTrip", { try await testArticleSignalsRoundTrip() }),
             ("testPairAssessmentsRecorded", { try await testPairAssessmentsRecorded() }),
@@ -14477,6 +14478,72 @@ struct NewsTests {
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
+    }
+
+    /// #737: the country signal does not join two reports that name different places below country level; a shared
+    /// place word, or a side naming none, leaves the signal to its other rules. On by default, off only to measure.
+    static func testStoryCountryPlaceVeto() {
+        print("  - Testing the country signal's sub-national place veto (#737)...")
+        func features(
+            _ places: Set<String>, series: String? = nil, seriesTerms: Set<String> = [],
+            seriesOnlyPlaces: Set<String> = []
+        ) -> EventFeatures {
+            var value = EventFeatures(language: "en", date: Date(timeIntervalSince1970: 1_790_000_000))
+            value.places = places
+            value.series = series
+            value.seriesTerms = seriesTerms
+            value.seriesOnlyPlaces = seriesOnlyPlaces
+            return value
+        }
+        let lucknow = features(["@IN", "uttar pradesh", "lucknow"])
+        let bengaluru = features(["@IN", "karnataka", "bengaluru"])
+        let pradesh = features(["@IN", "pradesh"])
+        let countryOnly = features(["@IN"])
+        assertTrue(
+            EventMatcher.namesDifferentLocalPlaces(lucknow, bengaluru), "Two states of one country are two stories")
+        assertFalse(
+            EventMatcher.namesDifferentLocalPlaces(lucknow, pradesh), "A shared place word keeps the signal")
+        assertFalse(
+            EventMatcher.namesDifferentLocalPlaces(lucknow, countryOnly),
+            "A report naming only the country is not vetoed")
+        assertFalse(
+            EventMatcher.namesDifferentLocalPlaces(countryOnly, countryOnly), "Country-only reports are not vetoed")
+        let seriesA = features(
+            ["@IN", "lucknow", "delhi"], series: "Delhi Dispatch", seriesTerms: ["delhi", "dispatch"],
+            seriesOnlyPlaces: ["delhi"])
+        let seriesB = features(
+            ["@IN", "bengaluru", "delhi"], series: "Delhi Dispatch", seriesTerms: ["delhi", "dispatch"],
+            seriesOnlyPlaces: ["delhi"])
+        let template = EventFeatures.sharedSeriesTerms(seriesA, seriesB, samePublisher: true) ?? []
+        assertTrue(
+            EventMatcher.namesDifferentLocalPlaces(
+                seriesA.without(template).keepingStoryPlaces(of: seriesA),
+                seriesB.without(template).keepingStoryPlaces(of: seriesB)),
+            "Shared series terms are stripped so disjoint story places still veto")
+        let seriesDelhi = features(
+            ["@IN", "delhi"], series: "Delhi Dispatch", seriesTerms: ["delhi", "dispatch"],
+            seriesOnlyPlaces: [])
+        assertTrue(
+            EventMatcher.namesDifferentLocalPlaces(
+                seriesDelhi.without(template).keepingStoryPlaces(of: seriesDelhi),
+                seriesB.without(template).keepingStoryPlaces(of: seriesB)),
+            "A story naming the series place outside the prefix keeps it so disjoint places still veto")
+        let extractedDelhi = EventFeatures(
+            title: "Delhi: Severe air pollution returns to Delhi",
+            description: "Air quality index crossed dangerous levels.",
+            date: Date(timeIntervalSince1970: 1_790_000_000))
+        assertEqual(
+            extractedDelhi.seriesOnlyPlaces, [],
+            "A place named in the series prefix and in the headline is not a series-only place")
+        let extractedLucknow = EventFeatures(
+            title: "Delhi: Voter turnout in Lucknow",
+            description: "Polling opened early on Monday morning.",
+            date: Date(timeIntervalSince1970: 1_790_000_000))
+        assertTrue(
+            extractedLucknow.seriesOnlyPlaces.contains("delhi"),
+            "A place named only in the series prefix is recorded as a series-only place")
+        assertTrue(EventMatchPolicy.standard.storyCountryPlaceVeto, "The veto is on whenever the signal is")
+        assertTrue(EventMatchPolicy.standard.storyCountryKeywords == nil, "The country signal itself stays off")
     }
 
     /// The act class reads the headline's primary clause (#522): one cue → that act, two acts → unknown, a
