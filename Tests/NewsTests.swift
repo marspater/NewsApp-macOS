@@ -1328,7 +1328,7 @@ struct NewsTests {
         let unreadList = try await db.fetchArticles(isRead: false, limit: nil, muting: muting)
         assertEqual(unreadList.count, 600, "The Unread list agrees with the count")
 
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         // The store's own launch task also refreshes; the latest refresh publishes, so wait for it to settle.
         for _ in 0..<100 where store.unreadCount != 601 { try await Task.sleep(for: .milliseconds(50)) }
@@ -1750,7 +1750,7 @@ struct NewsTests {
         try Data("not a valid sqlite3 header at all - corrupted payload bytes".utf8).write(
             to: URL(fileURLWithPath: corruptPath))
         let corruptDB = DatabaseEngine(path: corruptPath)
-        let corruptStore = ArticleStore(database: corruptDB)
+        let corruptStore = ArticleStore(database: corruptDB, spotlightIndexer: MockSpotlightIndexer())
         await corruptStore.initialize()
         assertTrue(
             corruptStore.databaseHealthNotice != nil,
@@ -1776,7 +1776,7 @@ struct NewsTests {
         sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil)
         sqlite3_close(handle)
         let engine = DatabaseEngine(path: path)
-        let store = ArticleStore(database: engine)
+        let store = ArticleStore(database: engine, spotlightIndexer: MockSpotlightIndexer())
         await store.waitForStartup()
         assertTrue(store.databaseHealthNotice != nil, "The newer library opens read-only with a notice")
 
@@ -2480,7 +2480,7 @@ struct NewsTests {
         settings.notificationsEnabled = false
         settings.feedURLs = (0..<5).map { "https://baseline.example/feed-\($0)" }
         let db = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let prose = (1...20).map {
             "Researchers in London compared observation \($0) with the published evidence and documented the results."
@@ -2754,7 +2754,7 @@ struct NewsTests {
         let suiteName = testDefaultsSuite("test.reader")
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { removeTestDefaults(suiteName) }
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let manager = FeedManager(settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false)
         let article = FeedArticle(
@@ -2914,7 +2914,7 @@ struct NewsTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("regression.sqlite").path
         let db = DatabaseEngine(path: path)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         assertTrue(store.migrationCoordinator == nil, "Injected stores must not migrate real user defaults or caches")
         let article = FeedArticle(
@@ -4207,7 +4207,8 @@ struct NewsTests {
     static func testAuditPersistenceAndRoutingRegressions(fixtureRoot: URL) async throws {
         print("  - Testing corrected metadata, alias saves and startup notification requests...")
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        // Saves and unsaves queue Spotlight updates; the test checks persistence, not the host's Spotlight service.
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let original = FeedArticle(
             title: "Story", link: fixtureRoot.appendingPathComponent("old").absoluteString, guid: "stable-guid",
             description: "Preview", pubDate: Date(timeIntervalSince1970: 100), source: "Publisher")
@@ -4325,7 +4326,7 @@ struct NewsTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("audit.sqlite").path
         let db = DatabaseEngine(path: path)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let archived = FeedArticle(
             title: "Archive", link: fixtureRoot.appendingPathComponent("archive").absoluteString, guid: "archive",
@@ -4435,7 +4436,7 @@ struct NewsTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("conditional.sqlite").path
         let db = DatabaseEngine(path: path)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let suite = testDefaultsSuite("test.conditional")
         let defaults = UserDefaults(suiteName: suite)!
@@ -4615,7 +4616,7 @@ struct NewsTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("backoff.sqlite").path
         let db = DatabaseEngine(path: path)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let t0 = Date(timeIntervalSince1970: 1_800_000_000)
         let feed = "https://8.8.8.8/persist.xml"
@@ -4859,7 +4860,7 @@ struct NewsTests {
         settings.aiEnabled = false
         settings.notificationsEnabled = true
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
 
         // Notification triage is follow-up work: it must not hold the spinner, the published articles or the next refresh.
@@ -5040,7 +5041,7 @@ struct NewsTests {
 
         // One refresh covers a whole batch, and an already-subscribed feed does not refresh anything.
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         settings.feedURLs = []
         settings.aiEnabled = false
@@ -5431,7 +5432,7 @@ struct NewsTests {
         settings.aiEnabled = false
         settings.notificationsEnabled = true
         settings.muteSource("example.com")
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         var notified: [String] = []
         let manager = FeedManager(
@@ -6843,7 +6844,7 @@ struct NewsTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let db = DatabaseEngine(path: directory.appendingPathComponent("health.sqlite").path)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let feed = "https://8.8.8.8/health.xml"
         let before = Date()
@@ -7296,13 +7297,16 @@ struct NewsTests {
     @MainActor
     static func testOPMLHostileInput() async {
         print("  - Testing OPML import guards: entities, nesting, outline count, reader exports (#928)...")
-        func rejection(_ data: Data) -> String? {
+        func rejectionError(_ data: Data) -> NSError? {
             do {
                 _ = try OPMLParser.parseValidated(data: data)
                 return nil
             } catch {
-                return error.localizedDescription
+                return error as NSError
             }
+        }
+        func rejection(_ data: Data) -> String? {
+            rejectionError(data)?.localizedDescription
         }
         let feed = "<outline text=\"Feed\" type=\"rss\" xmlUrl=\"https://example.com/feed.xml\"/>"
         func opml(prolog: String = "", body: String) -> Data {
@@ -7323,18 +7327,61 @@ struct NewsTests {
         assertTrue(
             ProcessInfo.processInfo.systemUptime - start < 1, "An entity bomb is rejected without being expanded")
         assertEqual(bombReason, "It declares XML entities, which News does not import.", "Entity bombs name the reason")
-        // UTF-16 hides the declaration from a byte search unless the zero bytes are dropped first.
+        // UTF-16 hides the declaration from an ASCII byte search unless the zero bytes are dropped first.
         let utf16 = String(decoding: bomb, as: UTF8.self).replacingOccurrences(of: "UTF-8", with: "UTF-16")
-        assertTrue(rejection(utf16.data(using: .utf16)!) != nil, "A UTF-16 entity declaration is rejected")
-        // A declaration beyond the pre-scan's 64 KiB window still stops the parse at the declaration.
+        let utf16Error = rejectionError(utf16.data(using: .utf16)!)
+        assertEqual(utf16Error?.domain, "OPML", "A UTF-16 entity declaration uses the OPML error domain")
+        assertEqual(utf16Error?.code, 3, "A UTF-16 entity declaration uses the guard error code")
+        assertEqual(
+            utf16Error?.localizedDescription,
+            "It declares XML entities, which News does not import.",
+            "A UTF-16 entity declaration names the entity guard")
+
+        // DTD defaults are copied into every matching outline by Foundation and retained by the import.
+        let attributeDefaults = opml(
+            prolog: "<!DOCTYPE opml [<!ATTLIST outline title CDATA \"default title\">]>",
+            body: feed + feed.replacingOccurrences(of: "Feed", with: "Second feed"))
+        let attributeError = rejectionError(attributeDefaults)
+        assertEqual(attributeError?.domain, "OPML", "ATTLIST declarations use the OPML error domain")
+        assertEqual(attributeError?.code, 3, "ATTLIST declarations use the guard error code")
+        assertEqual(
+            attributeError?.localizedDescription,
+            "It declares XML attribute lists, which News does not import.",
+            "ATTLIST declarations are rejected before XMLParser supplies default attributes")
+        let utf16AttributeDefaults = String(decoding: attributeDefaults, as: UTF8.self)
+            .replacingOccurrences(of: "UTF-8", with: "UTF-16")
+        let utf16AttributeError = rejectionError(utf16AttributeDefaults.data(using: .utf16)!)
+        assertEqual(
+            utf16AttributeError?.localizedDescription,
+            "It declares XML attribute lists, which News does not import.",
+            "UTF-16 ATTLIST declarations are rejected by the full-input scan")
+
+        // An unused external-entity declaration beyond 64 KiB must be caught by the full-input scan,
+        // without relying on XMLParser's declaration callback.
         let padded = opml(
-            prolog: "<!--" + String(repeating: " ", count: 70_000) + "--><!DOCTYPE opml [<!ENTITY far \"x\">]>",
+            prolog: "<!--" + String(repeating: " ", count: 70_000)
+                + "--><!DOCTYPE opml [<!ENTITY far SYSTEM \"file:///etc/passwd\">]>",
             body: feed)
         assertEqual(
             rejection(padded), "It declares XML entities, which News does not import.",
-            "A late entity declaration aborts the parse")
+            "A late unused external entity is rejected before parsing")
         let external = opml(prolog: "<!DOCTYPE opml [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>", body: feed)
         assertTrue(OPMLParser.parse(data: external).isEmpty, "External entities import nothing")
+        // An attribute default would give every bare outline a feed address; any DTD declaration is refused.
+        let defaulted = opml(
+            prolog: "<!DOCTYPE opml [<!ATTLIST outline xmlUrl CDATA \"https://attacker.invalid/feed\">]>",
+            body: "<outline text=\"Looks empty\"/>")
+        assertEqual(
+            rejection(defaulted), "It declares XML attribute lists, which News does not import.",
+            "An attribute default in a DTD is refused")
+        assertTrue(OPMLParser.parse(data: defaulted).isEmpty, "A defaulted feed address is never imported")
+        let declared = opml(prolog: "<!DOCTYPE opml [<!ELEMENT outline ANY>]>", body: feed)
+        assertEqual(
+            rejection(declared), "It contains document type definitions, which News does not import.",
+            "An element declaration is refused")
+        assertEqual(
+            OPMLParser.parse(data: opml(prolog: "<!DOCTYPE opml>", body: feed)).count, 1,
+            "A bare doctype without definitions still imports")
 
         // Nesting: 64 levels is the bound, as in the feed parser; one more is refused.
         func nested(_ levels: Int) -> Data {
@@ -7374,7 +7421,7 @@ struct NewsTests {
         let suiteName = testDefaultsSuite("test.opml.guards")
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { removeTestDefaults(suiteName) }
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let settings = AppSettings(defaults: defaults)
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false)
@@ -7388,6 +7435,14 @@ struct NewsTests {
         store.operationError = nil
         assertEqual(manager.importFeeds(from: bomb), 0, "An entity bomb adds no feed")
         assertTrue(store.operationError?.contains("declares XML entities") == true, "The alert names entities")
+        store.operationError = nil
+        assertEqual(
+            manager.importFeeds(from: Data(repeating: 32, count: OPMLFileReader.maximumBytes + 1)), 0,
+            "An oversized file adds no feed")
+        assertEqual(
+            store.operationError,
+            "The OPML file could not be imported. OPML files must be no larger than 5 MB. No subscriptions were changed.",
+            "The alert names the size limit")
         store.operationError = nil
         assertEqual(manager.importFeeds(from: Data("<opml><body>".utf8)), 0, "A truncated file adds no feed")
         assertTrue(store.operationError?.contains("incomplete or malformed") == true, "Malformed keeps its message")
@@ -7827,7 +7882,7 @@ struct NewsTests {
     static func testCanonicalArticleIngestion(fixtureRoot: URL) async throws {
         print("  - Testing canonical URL ingestion across changing GUIDs...")
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let first = FeedArticle(
             title: "Original report", link: fixtureRoot.appendingPathComponent("identity/story").absoluteString,
@@ -8112,7 +8167,7 @@ struct NewsTests {
         assertEqual(
             try await db.fetchArticles(limit: 1, canonicalURL: first.normalizedLink).first?.id, first.id,
             "Previous URL survives replacement and reopen")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let navigation = ArticleStore.NavigationRequest(articleID: second.id, link: "")
         assertEqual(
@@ -8579,7 +8634,7 @@ struct NewsTests {
             "Relative images resolve from the final response URL")
 
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         var original = FeedArticle(
             title: "Publisher story", link: requested.absoluteString, guid: "original", description: "Teaser",
@@ -8930,7 +8985,7 @@ struct NewsTests {
         settings.feedURLs = ["https://publisher.example/feed"]
         settings.aiEnabled = false
         settings.notificationsEnabled = true
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         var notifications = [String]()
         let manager = FeedManager(
@@ -9116,7 +9171,7 @@ struct NewsTests {
         settings.feedURLs = feeds
         settings.aiEnabled = false
         settings.notificationsEnabled = true
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         var notified = [String]()
         let manager = FeedManager(
@@ -11663,7 +11718,7 @@ struct NewsTests {
         // `NEWS_OVERVIEWS_EXTRACT=1` (#308 step 2): before each measured event, the production coordinator stores
         // publisher text for its representatives, with its deadline and fetch limit, and the run records the step.
         let fetches = EvidenceFetchTally()
-        let evidenceStore = ArticleStore(database: db)
+        let evidenceStore = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let evidenceCoordinator: OverviewGenerationCoordinator? =
             environment["NEWS_OVERVIEWS_EXTRACT"] == "1"
             ? OverviewGenerationCoordinator(
@@ -11962,7 +12017,7 @@ struct NewsTests {
         settings.feedURLs = [fixtureRoot.appendingPathComponent("feed.xml").absoluteString]
         settings.aiEnabled = true
         settings.notificationsEnabled = true
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let reports = [
             FeedArticle(
@@ -13527,7 +13582,7 @@ struct NewsTests {
         settings.aiEnabled = false
         settings.notificationsEnabled = false
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let control = EventControlSet.articles(now: Date(), root: fixtureRoot).filter {
             $0.article.id.hasPrefix("quake")
@@ -14157,7 +14212,7 @@ struct NewsTests {
             "Current input is analyzable again")
         assertTrue(try await db.isRead(articleId: article.id), "Revisions preserve read state")
         assertTrue(try await db.isSaved(articleId: article.id), "Revisions preserve saved state")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         assertTrue(
             await store.setSaved(article: extracted, isSaved: true), "Saving an older reader snapshot still works")
@@ -14730,7 +14785,7 @@ struct NewsTests {
             "The newest event's overview reaches the story's earlier event")
         // "Earlier in This Story" (#671): the story's own earlier events come first and are never capped away by other
         // links; other links fill up to the cap.
-        let store = await ArticleStore(database: db)
+        let store = await ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         assertEqual(
             try await store.relatedStoryEvents(eventID: protest).map(\.eventID), [vote],
             "The overview lists the story's earlier event")
@@ -17214,7 +17269,7 @@ struct NewsTests {
         // Opened here, so the setup write below cannot race the store's own initialisation.
         let database = DatabaseEngine(path: ":memory:")
         do { try await database.open() } catch { return assertTrue(false, "The queue test database opens") }
-        let store = await ArticleStore(database: database)
+        let store = await ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
         let queue = EnrichmentQueue(store: store)
 
         let articleA = FeedArticle(
@@ -18689,7 +18744,8 @@ struct NewsTests {
         let refreshDefaults = UserDefaults(suiteName: refreshSuite)!
         defer { removeTestDefaults(refreshSuite) }
         let refreshSettings = AppSettings(defaults: refreshDefaults)
-        let refreshStore = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let refreshStore = ArticleStore(
+            database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await refreshStore.initialize()
         let refreshFeedManager = FeedManager(settings: refreshSettings, store: refreshStore, schedulesRefresh: false)
 
@@ -18728,7 +18784,8 @@ struct NewsTests {
         let addSettings = AppSettings(defaults: addDefaults)
         // Adding goes through FeedManager (#798), so the feed is fetched at once; the stub records the fetch.
         let addFetches = TestRecorder()
-        let addStore = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let addStore = ArticleStore(
+            database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await addStore.initialize()
         let addManager = FeedManager(
             settings: addSettings, store: addStore, schedulesRefresh: false,
@@ -18900,7 +18957,8 @@ struct NewsTests {
         assertEqual(MarkAllAsReadIntent.title, "Mark All as Read", "MarkAllAsReadIntent title is 'Mark All as Read'")
         assertFalse(MarkAllAsReadIntent.openAppWhenRun, "MarkAllAsReadIntent does not open app")
 
-        let markStore = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let markStore = ArticleStore(
+            database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await markStore.initialize()
         let sample1 = FeedArticle(
             title: "Story 1", link: "https://example.com/1", guid: "g1", description: "D1", pubDate: Date(),
@@ -19185,7 +19243,7 @@ struct NewsTests {
         settings.aiEnabled = false
         settings.notificationsEnabled = false
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let article = FeedArticle(
             title: "Late delivery", link: "https://example.com/late", guid: "late", description: "Report",
@@ -19272,7 +19330,7 @@ struct NewsTests {
         settings.notificationsEnabled = false
         settings.fetchIntervalMinutes = 30
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let article = FeedArticle(
             title: "Overnight report", link: "https://example.com/overnight", guid: "overnight",
@@ -19343,7 +19401,7 @@ struct NewsTests {
         settings.aiEnabled = false
         settings.notificationsEnabled = false
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         // Pruning compares against the wall clock; the injected clock only drives the once-a-day throttle.
         var clock = Date()
@@ -19405,7 +19463,7 @@ struct NewsTests {
         settings.aiEnabled = false
         settings.notificationsEnabled = true
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let stories = [
             "https://example.com/one": "first", "https://example.com/two": "second",
@@ -19691,7 +19749,7 @@ struct NewsTests {
         for phase in ["headers", "body"] {
             for index in 0..<5 {
                 let db = DatabaseEngine(path: ":memory:")
-                let store = ArticleStore(database: db)
+                let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
                 await store.initialize()
                 let suite = testDefaultsSuite("test.transport-cancellation")
                 defer { removeTestDefaults(suite) }
@@ -19765,7 +19823,7 @@ struct NewsTests {
         func run(_ label: String, cancelAfter offset: Duration?) async throws -> [String: Any] {
             let path = directory.appendingPathComponent("\(label).sqlite3").path
             let db = DatabaseEngine(path: path)
-            let store = ArticleStore(database: db)
+            let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
             await store.initialize()
             let suite = testDefaultsSuite("test.publisher-cancellation")
             let defaults = UserDefaults(suiteName: suite)!
@@ -20273,7 +20331,8 @@ struct NewsTests {
         // Refreshes deliver nothing until `delivering` is incremented; then each feed brings one story.
         func manager(_ settings: AppSettings, delivering: TestCounter) async -> FeedManager {
             settings.aiEnabled = false
-            let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+            let store = ArticleStore(
+                database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
             await store.initialize()
             return FeedManager(
                 settings: settings, store: store, schedulesRefresh: false,
@@ -20739,7 +20798,7 @@ struct NewsTests {
 
         let database = DatabaseEngine(path: ":memory:")
         try await database.open()
-        let store = ArticleStore(database: database)
+        let store = ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
         let log = ExtractionLog()
         let pages = TestPages()
         let extractor: @Sendable (String) async -> ExtractionOutcome = { link in
@@ -21161,7 +21220,7 @@ struct NewsTests {
         let database = DatabaseEngine(path: ":memory:")
         try await database.open()
         _ = try await database.upsertArticles([article1, article2])
-        let store = ArticleStore(database: database)
+        let store = ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
         let coordinator = OverviewGenerationCoordinator(
             store: store, queue: EnrichmentQueue(store: store))
         let coordinated = await coordinator.requestOverview(
@@ -22189,7 +22248,7 @@ struct NewsTests {
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("lanes-\(UUID().uuidString).sqlite3")
             .path
         defer { removeTemporaryLibrary(atPath: path) }
-        var store = ArticleStore(database: DatabaseEngine(path: path))
+        var store = ArticleStore(database: DatabaseEngine(path: path), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         // A refresh without a clock reads the real one at the pass, as the app does, after its stories are stored. It
         // returns the titles of the stories its banners covered (#584).
@@ -22216,7 +22275,7 @@ struct NewsTests {
         assertEqual(firstNotified.count, 5, "The five posted stories count as notified, the sixth does not")
         assertTrue(firstNotified.isSubset(of: Set(headlines.prefix(6))), "Only this refresh's stories are notified")
         await store.database.close()
-        store = ArticleStore(database: DatabaseEngine(path: path))
+        store = ArticleStore(database: DatabaseEngine(path: path), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         await refresh(plain: Array(loud[6...7]), at: start.addingTimeInterval(30 * 60))
         assertEqual(await recorder.posted.count, 5, "Thirty minutes later, after a relaunch, the hour is still full")
@@ -22295,7 +22354,7 @@ struct NewsTests {
         settings.aiEnabled = false
         settings.notificationsEnabled = true
         settings.notificationMode = .full
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         actor Recorder {
             var threads: [String] = []
@@ -22388,7 +22447,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: ":memory:")
         try? await db.open()
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
 
         let article = FeedArticle(
@@ -22423,7 +22482,7 @@ struct NewsTests {
         defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
         let db = DatabaseEngine(path: ":memory:")
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
@@ -22468,7 +22527,7 @@ struct NewsTests {
 
         // 4. OverviewGenerationCoordinator graceful error handling when database closed
         let failingDb = DatabaseEngine(path: ":memory:")
-        let failingStore = ArticleStore(database: failingDb)
+        let failingStore = ArticleStore(database: failingDb, spotlightIndexer: MockSpotlightIndexer())
         let coordinator = OverviewGenerationCoordinator(
             store: failingStore, queue: EnrichmentQueue(store: failingStore))
         await failingDb.close()
@@ -23509,7 +23568,7 @@ struct NewsTests {
         let defaults = UserDefaults(suiteName: suite)!
         defer { removeTestDefaults(suite) }
         let settings = AppSettings(defaults: defaults)
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         let feeds = FeedManager(settings: settings, store: store, schedulesRefresh: false)
         let reads = ReadManager(articleStore: store)
         let saved = SavedStoriesManager(articleStore: store)
@@ -23524,7 +23583,8 @@ struct NewsTests {
     @MainActor
     static func testReadManagerReconciliationCache() async throws {
         print("  - Testing ReadManager Reconciliation Cache...")
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        // Saves and unsaves queue Spotlight updates; the test checks persistence, not the host's Spotlight service.
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let rm = ReadManager(articleStore: store)
         let rawId = "http://example.com/test-article-perf?utm_source=news&utm_medium=rss"
@@ -23613,7 +23673,7 @@ struct NewsTests {
         assertEqual(before?.membershipVersion, 3, "The story sums its three events")
         assertEqual(before?.eventVersion, 1, "The overview version is the opened event's own")
         // The warm-up path stores the overview under the event's version, not the story's sum.
-        let warmStore = ArticleStore(database: db)
+        let warmStore = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let warmer = OverviewGenerationCoordinator(
             store: warmStore, queue: EnrichmentQueue(store: warmStore), allowsEnergy: { true })
         await warmer.warmVisibleOverviews(store: warmStore, muting: MuteRules())
@@ -24723,7 +24783,7 @@ struct NewsTests {
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         _ = try await db.upsertArticles(articles)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let queue = EnrichmentQueue(store: store)
         let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 
@@ -24832,7 +24892,7 @@ struct NewsTests {
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
         _ = try await db.upsertArticles(articles)
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let queue = EnrichmentQueue(store: store)
         let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 
@@ -26064,7 +26124,7 @@ struct NewsTests {
         let articles = [art1, art2]
         _ = try await db.upsertArticles(articles)
 
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let queue = EnrichmentQueue(store: store)
         let coordinator = OverviewGenerationCoordinator(store: store, queue: queue)
 

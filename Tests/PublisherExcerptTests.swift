@@ -342,7 +342,7 @@ struct PublisherExcerptTests {
             assertTrue(false, "Failed to initialize and open in-memory database: \(error)")
             return
         }
-        let store = ArticleStore(database: db)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         let queue = EnrichmentQueue(store: store)
 
         // The coordinator never calls a model: publisher excerpts are its only overview.

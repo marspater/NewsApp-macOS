@@ -50,7 +50,7 @@ private final class NotificationQADelegate: NSObject, NSApplicationDelegate, UNU
         settings.notificationsEnabled = true
         settings.notificationMode = .full
         settings.aiEnabled = false
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let token = UUID().uuidString
         let reports = [
