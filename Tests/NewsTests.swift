@@ -1020,6 +1020,7 @@ struct NewsTests {
             ("testInteractiveAnalysisCancellation", { await testInteractiveAnalysisCancellation() }),
             ("testGranularCacheClearingAndRetention", { try await testGranularCacheClearingAndRetention() }),
             ("testNotificationServiceErrorLogging", { await testNotificationServiceErrorLogging() }),
+            ("testStoryBannerRoute", { try await testStoryBannerRoute() }),
             (
                 "testNotificationDedupeAcrossRefreshes",
                 { try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot) }
@@ -21522,6 +21523,102 @@ struct NewsTests {
 
         // 5. Test CacheManager methods
         // Do not clear the user's WebKit cache from a unit test.
+    }
+
+    /// #926: macOS asks `willPresent` only while News is active, so a story posted while News is behind another app
+    /// is offered to the app's banner at post time. Exactly one banner either way: drawn means not added.
+    static func testStoryBannerRoute() async throws {
+        print("  - Testing the story banner route: app banner behind another app, never both (#926)...")
+        assertTrue(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .always),
+            "Banners with previews are the app's")
+        assertTrue(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .whenAuthenticated),
+            "Previews when unlocked still allow the app banner")
+        assertFalse(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .alert, previews: .always),
+            "The Alerts style stays with the system")
+        assertFalse(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .none, previews: .always),
+            "Alert style None draws nothing from the app")
+        assertFalse(
+            StoryBannerRoute.allowsAppBanner(alert: .disabled, style: .banner, previews: .always),
+            "Banners off draw nothing from the app")
+        assertFalse(
+            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .never),
+            "Hidden previews stay with the system, which redacts them")
+
+        func request(story: Bool) -> UNNotificationRequest {
+            let content = UNMutableNotificationContent()
+            content.title = "Publisher"
+            content.subtitle = "Headline"
+            if story { content.categoryIdentifier = NotificationActionIdentifier.category }
+            return UNNotificationRequest(identifier: "news-route", content: content, trigger: nil)
+        }
+        final class Calls: @unchecked Sendable {
+            var presented = 0
+            var added = 0
+            var settingsRead = 0
+        }
+        func route(
+            story: Bool = true, active: Bool, drawn: Bool = true,
+            settings: (UNNotificationSetting, UNAlertStyle, UNShowPreviewsSetting) = (.enabled, .banner, .always)
+        ) async throws -> (StoryBannerRoute, Calls) {
+            let calls = Calls()
+            let result = try await StoryBannerRoute.deliver(
+                request(story: story), active: active,
+                settings: {
+                    calls.settingsRead += 1
+                    return settings
+                },
+                present: { _ in
+                    calls.presented += 1
+                    return drawn
+                },
+                add: { _ in calls.added += 1 })
+            return (result, calls)
+        }
+
+        // Behind another app with a window on screen: the app draws it and nothing is added (log of 3 November).
+        var (result, calls) = try await route(active: false)
+        assertEqual(result, .appBanner, "Inactive story banners are drawn by the app")
+        assertEqual(calls.presented, 1, "The presenter is asked once")
+        assertEqual(calls.added, 0, "A drawn banner is not also added: never both banners")
+        // No window on screen (hidden, in the Dock): the presenter declines and the system banner shows.
+        (result, calls) = try await route(active: false, drawn: false)
+        assertEqual(result, .notificationCenter, "A declined banner goes to the system")
+        assertEqual(calls.added, 1, "A declined banner is added exactly once")
+        // Active: the post adds it and `willPresent` draws it, as before.
+        (result, calls) = try await route(active: true)
+        assertEqual(result, .notificationCenter, "Active posts are added for willPresent")
+        assertEqual(calls.presented + calls.settingsRead, 0, "An active post neither presents nor reads settings")
+        assertEqual(calls.added, 1, "An active post is added once")
+        // Grouped and summary banners always stay with the system.
+        (result, calls) = try await route(story: false, active: false)
+        assertEqual(result, .notificationCenter, "Grouped banners stay with the system")
+        assertEqual(calls.presented, 0, "A grouped banner is never offered to the app")
+        // Alerts style or hidden previews: the system draws it, the app does not.
+        for settings: (UNNotificationSetting, UNAlertStyle, UNShowPreviewsSetting) in [
+            (.enabled, .alert, .always), (.enabled, .banner, .never), (.disabled, .banner, .always),
+        ] {
+            (result, calls) = try await route(active: false, settings: settings)
+            assertEqual(result, .notificationCenter, "Settings the app does not draw under go to the system")
+            assertEqual(calls.presented, 0, "The presenter is not asked under those settings")
+            assertEqual(calls.added, 1, "Those posts are added once")
+        }
+        // A refused add still throws to the caller, which logs it and does not record the banner.
+        struct Refused: Error {}
+        var threw = false
+        do {
+            _ = try await StoryBannerRoute.deliver(
+                request(story: true), active: true, settings: { (.enabled, .banner, .always) },
+                present: { _ in true }, add: { _ in throw Refused() })
+        } catch is Refused {
+            threw = true
+        }
+        assertTrue(threw, "A refused add surfaces as a failed post")
+        // Without an app (tests, helpers) no presenter is installed, so nothing is drawn.
+        assertTrue(await MainActor.run { NotificationService.presentAppBanner == nil }, "No presenter outside the app")
     }
 
     static func testNotificationServiceErrorLogging() async {

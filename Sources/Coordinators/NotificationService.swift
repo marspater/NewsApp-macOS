@@ -106,6 +106,44 @@ struct PlannedBanner: Sendable {
     var stories: [String] { article.map { [$0.id] } ?? members }
 }
 
+/// Where a story banner is drawn (#926, DESIGN.md 8.7). macOS asks `willPresent` only while News is the active app, so
+/// with a News window on screen behind another app the decision is made here, when the notification is posted.
+enum StoryBannerRoute: Equatable, Sendable {
+    /// The app drew the banner and nothing was added: macOS has no API to file a notification in Notification Center
+    /// without its banner outside `willPresent`. The story stays in Today and Unread.
+    case appBanner
+    /// Added to the notification center: the system draws the banner, or `willPresent` hands it to the app while
+    /// News is active.
+    case notificationCenter
+
+    /// The reader's settings under which the app may draw a story banner: banners on, in the Banners style (an Alert
+    /// stays until dismissed, as the system draws it) and with previews shown (hidden previews redact).
+    static func allowsAppBanner(
+        alert: UNNotificationSetting, style: UNAlertStyle, previews: UNShowPreviewsSetting
+    ) -> Bool {
+        alert == .enabled && style == .banner && previews != .never
+    }
+
+    /// Delivers one request. Only a story's own banner (the one carrying Save, Mark as Read and Open), posted while
+    /// News is not active, is offered to `present`, which draws it when a News window is open on screen; anything it
+    /// declines is added, so there is always exactly one banner.
+    static func deliver(
+        _ request: UNNotificationRequest, active: Bool,
+        settings: @Sendable () async -> (UNNotificationSetting, UNAlertStyle, UNShowPreviewsSetting),
+        present: @Sendable (UNNotificationRequest) async -> Bool,
+        add: @Sendable (UNNotificationRequest) async throws -> Void
+    ) async throws -> StoryBannerRoute {
+        if !active, request.content.categoryIdentifier == NotificationActionIdentifier.category {
+            let (alert, style, previews) = await settings()
+            if allowsAppBanner(alert: alert, style: style, previews: previews), await present(request) {
+                return .appBanner
+            }
+        }
+        try await add(request)
+        return .notificationCenter
+    }
+}
+
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
 final class NotificationService: Sendable {
     static let shared = NotificationService()
@@ -132,18 +170,38 @@ final class NotificationService: Sendable {
     /// A starred feed gets at most one banner per window.
     static let starredWindow: TimeInterval = 20 * 60
 
+    /// Draws a story banner in the app and says whether it did; installed by the app delegate, which owns the
+    /// presenter. Nil (tests, helper processes) leaves every banner to the system.
+    @MainActor static var presentAppBanner: ((UNNotificationRequest) -> Bool)?
+
     init(
         post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = bannerSpacing
     ) {
         self.post =
             post ?? { request in
                 guard Bundle.main.bundleIdentifier != nil else { return }
-                // Whether News was active when it posted tells, next to the delegate's log, if macOS asked it (#926).
+                let log = Logger(subsystem: "com.marspater.news", category: "StoryBanner")
                 let active = await MainActor.run { NSApplication.shared.isActive }
-                Logger(subsystem: "com.marspater.news", category: "StoryBanner").notice(
+                log.notice(
                     "post \(request.identifier, privacy: .private(mask: .hash)) active=\(active, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
                 )
-                try await UNUserNotificationCenter.current().add(request)
+                // macOS skipped `willPresent` for a post made while News was behind another app (#926, log of
+                // 3 November), so the app decides here.
+                let route = try await StoryBannerRoute.deliver(
+                    request, active: active,
+                    settings: {
+                        let settings = await UNUserNotificationCenter.current().notificationSettings()
+                        return (settings.alertSetting, settings.alertStyle, settings.showPreviewsSetting)
+                    },
+                    present: { request in
+                        // A request is immutable once made (its content is copied in), so the main actor may read it.
+                        nonisolated(unsafe) let request = request
+                        return await MainActor.run { NotificationService.presentAppBanner?(request) ?? false }
+                    },
+                    add: { try await UNUserNotificationCenter.current().add($0) })
+                log.notice(
+                    "posted \(request.identifier, privacy: .private(mask: .hash)) route=\(String(describing: route), privacy: .public)"
+                )
             }
         self.spacing = spacing
     }
@@ -438,7 +496,11 @@ final class NotificationService: Sendable {
                 "Successfully scheduled full notification: \(identifier); attachments=\(content.attachments.count)")
             return .posted
         } catch {
-            logger.error("Failed to schedule full notification '\(identifier)': \(error.localizedDescription)")
+            // The domain and code are public, so `log show` says why macOS refused it (#926); the identifier is not.
+            let error = error as NSError
+            logger.error(
+                "Failed to schedule full notification '\(identifier)': domain=\(error.domain, privacy: .public) code=\(error.code, privacy: .public) \(error.localizedDescription)"
+            )
             return .failed
         }
     }
