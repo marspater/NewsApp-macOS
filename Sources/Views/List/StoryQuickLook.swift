@@ -222,11 +222,11 @@ final class StoryQuickLookCoordinator: NSObject, @preconcurrency QLPreviewPanelD
         try? FileManager.default.removeItem(at: directory)
     }
 
-    func present(article: FeedArticle) {
+    /// `isDark` is the list window's appearance: the app's theme sets it on the window, not on `NSApp`.
+    func present(article: FeedArticle, isDark: Bool) {
         guard let panel = QLPreviewPanel.shared() else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = directory.appendingPathComponent("\(UUID().uuidString).pdf")
-        let isDark = NSApp?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         guard
             StoryQuickLookRenderer.renderPDF(
                 data: StoryQuickLookRenderer.renderData(for: article), to: url, isDark: isDark)
