@@ -7371,7 +7371,7 @@ struct NewsTests {
             prolog: "<!DOCTYPE opml [<!ATTLIST outline xmlUrl CDATA \"https://attacker.invalid/feed\">]>",
             body: "<outline text=\"Looks empty\"/>")
         assertEqual(
-            rejection(defaulted), "It contains document type definitions, which News does not import.",
+            rejection(defaulted), "It declares XML attribute lists, which News does not import.",
             "An attribute default in a DTD is refused")
         assertTrue(OPMLParser.parse(data: defaulted).isEmpty, "A defaulted feed address is never imported")
         let declared = opml(prolog: "<!DOCTYPE opml [<!ELEMENT outline ANY>]>", body: feed)
