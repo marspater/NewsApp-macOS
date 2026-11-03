@@ -15,7 +15,16 @@ public struct OPMLItem: Equatable, Sendable {
 }
 
 public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable {
+    /// The feed parser's nesting bound (`FeedXMLParser.maxNestingDepth`); real exports nest two or three levels.
+    static let maximumDepth = 64
+    /// Well above any reader's subscription list, low enough that a hostile file cannot grow the stacks unbounded.
+    static let maximumOutlines = 20_000
+
     private var items: [OPMLItem] = []
+    private var depth = 0
+    private var outlineCount = 0
+    /// Why the parse was stopped by a guard, as the reader is told it.
+    private var guardFailure: String?
     private var folderStack: [String] = []
     private var outlineStack: [Bool] = []
     /// Per open outline: an untyped `url` outline, imported as a feed when it ends without children. With children it
@@ -32,11 +41,17 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
                 domain: "OPML", code: 2,
                 userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
         }
+        // The feed parser's guards (#928): no entity declarations, bounded nesting and outline count.
+        guard !XMLInputGuard.declaresEntities(data) else {
+            throw rejection("It declares XML entities, which News does not import.")
+        }
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
         xmlParser.shouldResolveExternalEntities = false
         xmlParser.delegate = parser
-        guard xmlParser.parse() else {
+        let parsed = xmlParser.parse()
+        if let failure = parser.guardFailure { throw rejection(failure) }
+        guard parsed else {
             throw xmlParser.parserError
                 ?? NSError(
                     domain: "OPML", code: 1,
@@ -45,11 +60,41 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
         return parser.items
     }
 
+    private static func rejection(_ reason: String) -> NSError {
+        NSError(domain: "OPML", code: 3, userInfo: [NSLocalizedDescriptionKey: reason])
+    }
+
+    private func stop(_ parser: XMLParser, _ reason: String) {
+        if guardFailure == nil { guardFailure = reason }
+        parser.abortParsing()
+    }
+
+    public func parser(_ parser: XMLParser, foundInternalEntityDeclarationWithName _: String, value _: String?) {
+        stop(parser, "It declares XML entities, which News does not import.")
+    }
+
     public func parser(
-        _ _: XMLParser, didStartElement elementName: String, namespaceURI _: String?, qualifiedName _: String?,
+        _ parser: XMLParser, foundExternalEntityDeclarationWithName _: String, publicID _: String?, systemID _: String?
+    ) {
+        stop(parser, "It declares XML entities, which News does not import.")
+    }
+
+    public func parser(
+        _ parser: XMLParser, didStartElement elementName: String, namespaceURI _: String?, qualifiedName _: String?,
         attributes attributeDict: [String: String] = [:]
     ) {
+        guard guardFailure == nil else { return }
+        depth += 1
+        guard depth <= Self.maximumDepth else {
+            return stop(parser, "Its outlines nest more than \(Self.maximumDepth) levels deep.")
+        }
         guard elementName.lowercased() == "outline" else { return }
+        outlineCount += 1
+        guard outlineCount <= Self.maximumOutlines else {
+            return stop(
+                parser,
+                "It lists more than \(Self.maximumOutlines.formatted()) outlines.")
+        }
 
         var attrs: [String: String] = [:]
         for (key, val) in attributeDict {
@@ -101,7 +146,8 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     public func parser(
         _ _: XMLParser, didEndElement elementName: String, namespaceURI _: String?, qualifiedName _: String?
     ) {
-        guard elementName.lowercased() == "outline" else { return }
+        depth -= 1
+        guard guardFailure == nil, elementName.lowercased() == "outline" else { return }
         if let isFolder = outlineStack.popLast(), isFolder {
             _ = folderStack.popLast()
         }
