@@ -577,7 +577,7 @@ enum GridRowCaptures {
         }
         let settings = AppSettings(defaults: UserDefaults(suiteName: suite)!)
         let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
-        let store = ArticleStore(database: database)
+        let store = ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let published = Date().addingTimeInterval(-3 * 3600)
         func story(_ id: String, _ title: String, _ summary: String, _ source: String, minutes: Double) -> FeedArticle {
