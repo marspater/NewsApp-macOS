@@ -7295,13 +7295,16 @@ struct NewsTests {
     @MainActor
     static func testOPMLHostileInput() async {
         print("  - Testing OPML import guards: entities, nesting, outline count, reader exports (#928)...")
-        func rejection(_ data: Data) -> String? {
+        func rejectionError(_ data: Data) -> NSError? {
             do {
                 _ = try OPMLParser.parseValidated(data: data)
                 return nil
             } catch {
-                return error.localizedDescription
+                return error as NSError
             }
+        }
+        func rejection(_ data: Data) -> String? {
+            rejectionError(data)?.localizedDescription
         }
         let feed = "<outline text=\"Feed\" type=\"rss\" xmlUrl=\"https://example.com/feed.xml\"/>"
         func opml(prolog: String = "", body: String) -> Data {
@@ -7322,16 +7325,24 @@ struct NewsTests {
         assertTrue(
             ProcessInfo.processInfo.systemUptime - start < 1, "An entity bomb is rejected without being expanded")
         assertEqual(bombReason, "It declares XML entities, which News does not import.", "Entity bombs name the reason")
-        // UTF-16 hides the declaration from a byte search unless the zero bytes are dropped first.
+        // UTF-16 hides the declaration from an ASCII byte search unless the zero bytes are dropped first.
         let utf16 = String(decoding: bomb, as: UTF8.self).replacingOccurrences(of: "UTF-8", with: "UTF-16")
-        assertTrue(rejection(utf16.data(using: .utf16)!) != nil, "A UTF-16 entity declaration is rejected")
-        // A declaration beyond the pre-scan's 64 KiB window still stops the parse at the declaration.
+        let utf16Error = rejectionError(utf16.data(using: .utf16)!)
+        assertEqual(utf16Error?.domain, "OPML", "A UTF-16 entity declaration uses the OPML error domain")
+        assertEqual(utf16Error?.code, 3, "A UTF-16 entity declaration uses the guard error code")
+        assertEqual(
+            utf16Error?.localizedDescription,
+            "It declares XML entities, which News does not import.",
+            "A UTF-16 entity declaration names the entity guard")
+        // An unused external-entity declaration beyond 64 KiB must be caught by the full-input scan,
+        // without relying on XMLParser's declaration callback.
         let padded = opml(
-            prolog: "<!--" + String(repeating: " ", count: 70_000) + "--><!DOCTYPE opml [<!ENTITY far \"x\">]>",
+            prolog: "<!--" + String(repeating: " ", count: 70_000)
+                + "--><!DOCTYPE opml [<!ENTITY far SYSTEM \"file:///etc/passwd\">]>",
             body: feed)
         assertEqual(
             rejection(padded), "It declares XML entities, which News does not import.",
-            "A late entity declaration aborts the parse")
+            "A late unused external entity is rejected before parsing")
         let external = opml(prolog: "<!DOCTYPE opml [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>", body: feed)
         assertTrue(OPMLParser.parse(data: external).isEmpty, "External entities import nothing")
 
