@@ -20,6 +20,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Models/EventFeed.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
+    Sources/Storage/DatabaseEngine+Search.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \
     Sources/Storage/ArticleStore+Spotlight.swift \
@@ -64,6 +65,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/App/ThemeManager.swift \
     Sources/Models/FeedArticle.swift \
     Sources/Models/SmartBinder.swift \
+    Sources/Models/ArchiveSearchToken.swift \
+    Sources/Models/ArticleSearchState.swift \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \

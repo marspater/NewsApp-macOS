@@ -20,6 +20,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Models/EventFeed.swift \
     Sources/Storage/DatabaseEngine.swift \
     Sources/Storage/DatabaseEngine+Events.swift \
+    Sources/Storage/DatabaseEngine+Search.swift \
     Sources/Storage/MigrationCoordinator.swift \
     Sources/Storage/ArticleStore.swift \
     Sources/Storage/ArticleStore+Spotlight.swift \
@@ -65,6 +66,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Models/FeedArticle.swift \
     Sources/Models/ArchiveSearchToken.swift \
     Sources/Models/SmartBinder.swift \
+    Sources/Models/ArticleSearchState.swift \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \
@@ -73,6 +75,7 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Views/List/ArticleCardView.swift \
     Sources/Views/List/EventCardView.swift \
     Sources/Views/List/ArticleListView.swift \
+    Sources/Views/List/StoryQuickLook.swift \
     Sources/Views/Briefing/BriefingComponents.swift \
     Sources/Views/Briefing/BriefingView.swift \
     Sources/Views/Briefing/BriefingHeroCarouselView.swift \

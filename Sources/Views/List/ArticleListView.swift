@@ -71,9 +71,11 @@ struct ArticleListView: View {
     @EnvironmentObject private var themeManager: ThemeManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
+    @EnvironmentObject private var searchState: ArticleSearchState
 
     @AppStorage("articleGridLayout") private var gridLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @FocusState private var listHasFocus: Bool
@@ -251,9 +253,27 @@ struct ArticleListView: View {
 
     private var listCommandActions: ListCommandActions? {
         guard articlePath.isEmpty else { return nil }
+        let backAction: (() -> Void)? = {
+            if searchState.returnStory != nil {
+                return { searchState.returnToStory(path: &articlePath) }
+            } else if isBriefing {
+                return { leaveBriefing() }
+            } else {
+                return nil
+            }
+        }()
+        let backDest: String? = {
+            if let returnStory = searchState.returnStory {
+                return returnStory.article.title
+            } else if isBriefing {
+                return previousTopic
+            } else {
+                return nil
+            }
+        }()
         return ListCommandActions(
             canGroupStories: true, newBriefing: isBriefing ? { startNewBriefing() } : nil,
-            back: isBriefing ? { leaveBriefing() } : nil, backDestination: isBriefing ? previousTopic : nil,
+            back: backAction, backDestination: backDest,
             customizeBriefing: isBriefing ? { showsCustomizeBriefing = true } : nil)
     }
 
@@ -327,11 +347,24 @@ struct ArticleListView: View {
             }
             // A subscription's stories held while an article was open appear when the reader closes.
             .onChange(of: articlePath.isEmpty) { _, isClosed in
+                // Opening a story, from any path, closes the preview.
+                if !isClosed { StoryQuickLookCoordinator.shared.close() }
                 guard isClosed, buffer.holdsSubscription else { return }
                 showPendingUpdates()
                 buffer.holdsSubscription = false
                 appliesNextUpdate = true
                 refreshReloads += 1
+            }
+            // A new section, search or filter can replace the previewed story, and Return would open another.
+            .onChange(of: queryIdentity) { _, _ in
+                StoryQuickLookCoordinator.shared.close()
+            }
+            // Grouping changes the entries too: the previewed report may no longer be one, and Return would open another.
+            .onChange(of: groupsEvents) { _, _ in
+                StoryQuickLookCoordinator.shared.close()
+            }
+            .onDisappear {
+                StoryQuickLookCoordinator.shared.close()
             }
             .focusable()
             .focused($listHasFocus)
@@ -371,6 +404,12 @@ struct ArticleListView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
                 handleOpenInBrowser()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .quickLookCommand)) { _ in
+                if articlePath.isEmpty { toggleQuickLook() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openFocusedStoryCommand)) { _ in
+                if articlePath.isEmpty { openFocusedArticle() }
             }
     }
 
@@ -791,7 +830,18 @@ struct ArticleListView: View {
     @ToolbarContentBuilder
     private func listToolbar(proxy: ScrollViewProxy) -> some ToolbarContent {
         // The reader's Back, in the same place (DESIGN.md 5, #780).
-        if isBriefing {
+        if let returnStory = searchState.returnStory {
+            let storyTitle = returnStory.article.title
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    searchState.returnToStory(path: &articlePath)
+                } label: {
+                    Label("Back to Story", systemImage: "chevron.left")
+                }
+                .help("Back to \(storyTitle) (Esc)")
+                .accessibilityLabel("Back to \(storyTitle)")
+            }
+        } else if isBriefing {
             ToolbarItem(placement: .navigation) {
                 Button(action: leaveBriefing) {
                     Label("Back to \(previousTopic)", systemImage: "chevron.left")
@@ -1194,6 +1244,24 @@ struct ArticleListView: View {
             press.modifiers.intersection([.command, .control, .option]).isEmpty
         else { return .ignored }
 
+        // An open preview takes Esc before Back or clearing the search.
+        if press.key == .escape, StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.close()
+            return .handled
+        }
+        if press.key == .escape || press.key == .leftArrow || press.characters == "b" || press.characters == "h" {
+            if searchState.returnStory != nil {
+                searchState.returnToStory(path: &articlePath)
+                return .handled
+            } else if isBriefing {
+                leaveBriefing()
+                return .handled
+            } else if isSearching && press.key == .escape {
+                searchState.clear()
+                return .handled
+            }
+        }
+
         switch press.key {
         case .downArrow:
             navigateList(offset: 1, proxy: proxy)
@@ -1201,8 +1269,11 @@ struct ArticleListView: View {
         case .upArrow:
             navigateList(offset: -1, proxy: proxy)
             return .handled
-        case .return, .space:
+        case .return:
             openFocusedArticle()
+            return .handled
+        case .space:
+            toggleQuickLook()
             return .handled
         default:
             if press.characters == "j" {
@@ -1261,6 +1332,20 @@ struct ArticleListView: View {
         focusedArticleID = target.id
         withAnimation(reduceMotion ? nil : AppMotion.hover) {
             proxy.scrollTo(target.id, anchor: .center)
+        }
+        if StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.present(article: target.representative, isDark: colorScheme == .dark)
+        }
+    }
+
+    private func toggleQuickLook() {
+        if StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.close()
+        } else {
+            let listed = entries
+            guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
+            focusedArticleID = entry.id
+            StoryQuickLookCoordinator.shared.present(article: entry.representative, isDark: colorScheme == .dark)
         }
     }
 
@@ -1426,7 +1511,8 @@ struct KeyboardShortcutsView: View {
             [
                 ("J or ↓", "Next story"),
                 ("K or ↑", "Previous story"),
-                ("Space or ↵", "Open focused story"),
+                ("Space or ⌘Y", "Quick Look preview"),
+                ("↵", "Open focused story"),
                 ("Esc, ← or B", "Back to list"),
             ]
         ),
