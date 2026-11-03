@@ -106,6 +106,7 @@ SWIFT_SOURCES=(
     Sources/Views/List/ArticleCardView.swift \
     Sources/Views/List/EventCardView.swift \
     Sources/Views/List/ArticleListView.swift \
+    Sources/Views/List/StoryQuickLook.swift \
     Sources/Views/Briefing/BriefingComponents.swift \
     Sources/Views/Briefing/BriefingView.swift \
     Sources/Views/Briefing/BriefingHeroCarouselView.swift \

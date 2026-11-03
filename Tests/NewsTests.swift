@@ -6,6 +6,7 @@ import Foundation
 import ImageIO
 import NaturalLanguage
 import Network
+import PDFKit
 import SQLite3
 import SwiftUI
 import UniformTypeIdentifiers
@@ -1043,6 +1044,7 @@ struct NewsTests {
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
+            ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
         try await runSharded(tests)
 
@@ -26918,5 +26920,65 @@ struct NewsTests {
         await readManager.waitForPendingChanges()
         assertEqual(store.unreadCount, 1, "ArticleStore.unreadCount decrements to 1 when story is marked read")
         await db.close()
+    }
+
+    @MainActor
+    static func testStoryQuickLookPreview() async {
+        print("  - Testing the Quick Look preview: local content, upright page, no remote references (#707)...")
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "com.marspater.news.quicklook.test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // Remote links and a tracking pixel in the feed text must never reach the preview.
+        let article = FeedArticle(
+            storedID: "test-ql-1",
+            title: "Autonomous Space Tug Successfully Completes Orbital Test",
+            link: "https://publisher.example.com/stories/space-tug-2026",
+            guid: "space-tug-12345",
+            description:
+                "<p>The orbital tug demonstrated automated rendezvous with a target satellite. <a href=\"https://tracking.adnetwork.com/click?id=99\">Read sponsor message</a></p>",
+            pubDate: Date(timeIntervalSince1970: 1_770_000_000),
+            source: "Aerospace Daily",
+            imageUrl: "https://images.example.com/satellite.jpg",
+            fullContent:
+                "Full story with tracker: <img src=\"https://tracker.analytics.com/pixel.gif\" /> and more content."
+        )
+
+        let renderData = StoryQuickLookRenderer.renderData(for: article)
+        assertEqual(renderData.title, article.title, "Render data captures article title")
+        assertEqual(renderData.publisher, "Aerospace Daily", "Render data uses publisher name")
+        assertTrue(renderData.image == nil, "An image that is not decoded yet is never fetched for the preview")
+        assertFalse(renderData.excerpt.isEmpty, "Excerpt is extracted from local data")
+        assertFalse(renderData.excerpt.contains("<"), "HTML is stripped from the excerpt")
+
+        for isDark in [false, true] {
+            let previewFile = tempDir.appendingPathComponent("preview-\(isDark).pdf")
+            assertTrue(
+                StoryQuickLookRenderer.renderPDF(data: renderData, to: previewFile, isDark: isDark),
+                "renderPDF succeeds offline (dark: \(isDark))")
+            let pdfData = (try? Data(contentsOf: previewFile)) ?? Data()
+            let pdfString = String(bytes: pdfData, encoding: .isoLatin1) ?? ""
+            for marker in ["http://", "https://", "/URI", "/Launch", "adnetwork", "tracker"] {
+                assertFalse(pdfString.contains(marker), "Generated PDF contains no \(marker) (dark: \(isDark))")
+            }
+
+            // PDF space has its origin at the bottom left, so text near the top of the page has a large y.
+            guard let page = PDFDocument(url: previewFile)?.page(at: 0), let text = page.string as NSString? else {
+                assertTrue(false, "The preview PDF has a readable page (dark: \(isDark))")
+                continue
+            }
+            // The page's extracted text and its annotations carry no link either.
+            for marker in ["http://", "https://", "www.", "adnetwork", "tracker"] {
+                assertFalse((text as String).contains(marker), "Page text contains no \(marker) (dark: \(isDark))")
+            }
+            assertTrue(page.annotations.isEmpty, "The preview page has no annotations or link actions")
+            let height = page.bounds(for: .mediaBox).height
+            let titleBounds = page.selection(for: text.range(of: "Autonomous Space Tug"))?.bounds(for: page) ?? .zero
+            let footerBounds = page.selection(for: text.range(of: "Open in Reader"))?.bounds(for: page) ?? .zero
+            assertTrue(titleBounds.minY > height * 0.7, "The headline sits at the top of an upright page")
+            assertTrue(
+                footerBounds.maxY > 0 && footerBounds.maxY < height * 0.15, "The footer sits at the bottom of the page")
+        }
     }
 }

@@ -1,5 +1,6 @@
 import AppIntents
 import AppKit
+import QuickLookUI
 import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
@@ -280,6 +281,13 @@ struct NewsApp: App {
                 .keyboardShortcut("o", modifiers: .command)
                 .disabled(selectedStory == nil)
 
+                // Finder's Quick Look shortcut; Space does the same while the list has focus.
+                Button("Quick Look") {
+                    NotificationCenter.default.post(name: .quickLookCommand, object: nil)
+                }
+                .keyboardShortcut("y", modifiers: .command)
+                .disabled(listActions == nil)
+
                 if let story = selectedStory, let url = URL(string: story.link) {
                     ShareLink(item: url, subject: Text(story.title)) { Text("Share Story") }
                 }
@@ -479,6 +487,17 @@ struct KeyboardShortcutsCommands: Commands {
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var notificationPermission: NotificationPermissionRequest?
+
+    // The Quick Look panel looks up the responder chain for its controller; the app delegate ends that chain (#707).
+    nonisolated override func acceptsPreviewPanelControl(_: QLPreviewPanel!) -> Bool {
+        MainActor.assumeIsolated { StoryQuickLookCoordinator.shared.hasPreview }
+    }
+
+    nonisolated override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        MainActor.assumeIsolated { StoryQuickLookCoordinator.shared.control(panel) }
+    }
+
+    nonisolated override func endPreviewPanelControl(_: QLPreviewPanel!) {}
 
     func applicationDidFinishLaunching(_ _: Notification) {
         #if NEWS_SENTRY

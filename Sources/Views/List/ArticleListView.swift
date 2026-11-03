@@ -75,6 +75,7 @@ struct ArticleListView: View {
 
     @AppStorage("articleGridLayout") private var gridLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @FocusState private var listHasFocus: Bool
@@ -345,11 +346,24 @@ struct ArticleListView: View {
             }
             // A subscription's stories held while an article was open appear when the reader closes.
             .onChange(of: articlePath.isEmpty) { _, isClosed in
+                // Opening a story, from any path, closes the preview.
+                if !isClosed { StoryQuickLookCoordinator.shared.close() }
                 guard isClosed, buffer.holdsSubscription else { return }
                 showPendingUpdates()
                 buffer.holdsSubscription = false
                 appliesNextUpdate = true
                 refreshReloads += 1
+            }
+            // A new section, search or filter can replace the previewed story, and Return would open another.
+            .onChange(of: queryIdentity) { _, _ in
+                StoryQuickLookCoordinator.shared.close()
+            }
+            // Grouping changes the entries too: the previewed report may no longer be one, and Return would open another.
+            .onChange(of: groupsEvents) { _, _ in
+                StoryQuickLookCoordinator.shared.close()
+            }
+            .onDisappear {
+                StoryQuickLookCoordinator.shared.close()
             }
             .focusable()
             .focused($listHasFocus)
@@ -389,6 +403,12 @@ struct ArticleListView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .openInBrowserCommand)) { _ in
                 handleOpenInBrowser()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .quickLookCommand)) { _ in
+                if articlePath.isEmpty { toggleQuickLook() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openFocusedStoryCommand)) { _ in
+                if articlePath.isEmpty { openFocusedArticle() }
             }
     }
 
@@ -1198,6 +1218,11 @@ struct ArticleListView: View {
             press.modifiers.intersection([.command, .control, .option]).isEmpty
         else { return .ignored }
 
+        // An open preview takes Esc before Back or clearing the search.
+        if press.key == .escape, StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.close()
+            return .handled
+        }
         if press.key == .escape || press.key == .leftArrow || press.characters == "b" || press.characters == "h" {
             if searchState.returnStory != nil {
                 searchState.returnToStory(path: &articlePath)
@@ -1218,8 +1243,11 @@ struct ArticleListView: View {
         case .upArrow:
             navigateList(offset: -1, proxy: proxy)
             return .handled
-        case .return, .space:
+        case .return:
             openFocusedArticle()
+            return .handled
+        case .space:
+            toggleQuickLook()
             return .handled
         default:
             if press.characters == "j" {
@@ -1278,6 +1306,20 @@ struct ArticleListView: View {
         focusedArticleID = target.id
         withAnimation(reduceMotion ? nil : AppMotion.hover) {
             proxy.scrollTo(target.id, anchor: .center)
+        }
+        if StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.present(article: target.representative, isDark: colorScheme == .dark)
+        }
+    }
+
+    private func toggleQuickLook() {
+        if StoryQuickLookCoordinator.shared.isOpen {
+            StoryQuickLookCoordinator.shared.close()
+        } else {
+            let listed = entries
+            guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
+            focusedArticleID = entry.id
+            StoryQuickLookCoordinator.shared.present(article: entry.representative, isDark: colorScheme == .dark)
         }
     }
 
@@ -1443,7 +1485,8 @@ struct KeyboardShortcutsView: View {
             [
                 ("J or ↓", "Next story"),
                 ("K or ↑", "Previous story"),
-                ("Space or ↵", "Open focused story"),
+                ("Space or ⌘Y", "Quick Look preview"),
+                ("↵", "Open focused story"),
                 ("Esc, ← or B", "Back to list"),
             ]
         ),
