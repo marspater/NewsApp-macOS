@@ -116,10 +116,10 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         var clauses: [String] = []
         var parameters: [String] = []
         for cat in clean {
-            if cat == "U.S. Politics" {
+            if cat.localizedCaseInsensitiveCompare("U.S. Politics") == .orderedSame {
                 clauses.append(
                     "news_section(a.title, coalesce(a.description, ''), coalesce(ae.category, a.category), ?) = 1")
-                parameters.append(cat)
+                parameters.append("U.S. Politics")
             } else {
                 clauses.append("coalesce(ae.category, a.category) LIKE ? ESCAPE '\\'")
                 parameters.append("%\(Self.escapeLikeWildcards(cat))%")
@@ -218,9 +218,9 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         guard !clean.isEmpty else { return true }
         let cat = article.category?.lowercased() ?? ""
         return clean.contains { category in
-            if category == "U.S. Politics" {
+            if category.localizedCaseInsensitiveCompare("U.S. Politics") == .orderedSame {
                 return ArticleSection.matches(
-                    category,
+                    "U.S. Politics",
                     title: article.title,
                     description: article.description,
                     category: article.category

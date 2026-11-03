@@ -5628,6 +5628,16 @@ struct NewsTests {
             usPolBinder.matches(article: nonPolStory),
             "U.S. Politics excludes non-politics story in-memory")
 
+        // Case-insensitivity: "u.s. politics" also uses ArticleSection matching
+        let lowerUsPolBinder = SmartBinder(name: "US Pol Lower", categories: ["u.s. politics"])
+        let lowerUsPolArticles = try await db.fetchArticles(smartBinder: lowerUsPolBinder)
+        assertTrue(
+            lowerUsPolArticles.contains { $0.id == "pol-1" },
+            "Case-insensitive u.s. politics binder matches in SQL")
+        assertTrue(
+            lowerUsPolBinder.matches(article: polStory),
+            "Case-insensitive u.s. politics binder matches in-memory")
+
         // Mute rules strictly honoured: mute theverge.com
         var binderMuting = MuteRules(sources: ["theverge.com"])
         let mutedArticles = try await db.fetchArticles(smartBinder: testBinder, muting: binderMuting)
