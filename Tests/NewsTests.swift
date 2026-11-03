@@ -27203,9 +27203,10 @@ struct NewsTests {
         let allPages = page1 + page2 + page3
         for article in allPages {
             let number = String(Int(article.id.suffix(2)) ?? -1)
+            // A whole number: "report 1" must not accept a snippet of report 10 or 11.
             assertTrue(
-                article.searchSnippet?.contains("report \(number)") == true
-                    || article.searchSnippet?.contains("development \(number)") == true,
+                article.searchSnippet?.range(of: "(report|development) \(number)\\b", options: .regularExpression)
+                    != nil,
                 "Each snippet comes from its own story (\(article.id))")
         }
         let allIDs = allPages.map(\.id)
