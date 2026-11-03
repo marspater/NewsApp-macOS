@@ -27,7 +27,7 @@ Matcher v15, pair cutoff 0.90, pair-model prefix off, clock pinned, each run re-
 - Without the veto it also forms a US–Pakistan–Afghanistan group (a statement on terrorism from Afghanistan and Pakistan's rebuke of the Taliban), which links one labelled related pair. The veto blocks it because the two reports name different places below country level.
 - Story groups were labelled one by one by the same independent agent (9 distinct groups across the three runs, `story-group-labels.txt`): all right, none wrong or unsure. The group only the run without the veto forms was a close call, labelled right, as its pair 81 is labelled related.
 - No setting joins stories across countries (`cross_country`: 0 groups in each).
-- The story-level wrong links (3) are the same in every row; they come from the event and story passes, not from the country signal.
+- The story-level wrong links (3) are the same in every row; they come from the event and story passes, not from the country signal. The observed 0 % wrong-group rate in these 7–8-group runs shows no regressions here, but such small samples do not establish whether the population rate meets the ≤ 2 % gate.
 
 ## Decision
 

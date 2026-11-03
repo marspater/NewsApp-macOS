@@ -561,11 +561,17 @@ enum EventClusterer {
                 for right in b.prefix(Self.storySampleSize) {
                     total += 1
                     let pair = try await ruled(left, right)
+                    // A shared series title of one publisher is no shared name or place, as in `storyPairsAgree`.
+                    let template =
+                        EventFeatures.sharedSeriesTerms(
+                            features(left), features(right),
+                            samePublisher: !left.source.isEmpty && left.source == right.source) ?? []
+                    let (l, r) = (features(left).without(template), features(right).without(template))
                     if pair.conflict == nil,
-                        !features(left).countries.subtracting(commonCountries)
-                            .isDisjoint(with: features(right).countries),
+                        !l.countries.subtracting(commonCountries)
+                            .isDisjoint(with: r.countries),
                         !matchPolicy.storyCountryPlaceVeto
-                            || !EventMatcher.namesDifferentLocalPlaces(features(left), features(right)),
+                            || !EventMatcher.namesDifferentLocalPlaces(l, r),
                         pair.sharedKeywords >= keywords,
                         (pair.embeddingCosine ?? 0) >= matchPolicy.semanticVetoThreshold
                     {

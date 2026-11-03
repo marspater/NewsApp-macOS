@@ -14484,9 +14484,11 @@ struct NewsTests {
     /// place word, or a side naming none, leaves the signal to its other rules. On by default, off only to measure.
     static func testStoryCountryPlaceVeto() {
         print("  - Testing the country signal's sub-national place veto (#737)...")
-        func features(_ places: Set<String>) -> EventFeatures {
+        func features(_ places: Set<String>, series: String? = nil, seriesTerms: Set<String> = []) -> EventFeatures {
             var value = EventFeatures(language: "en", date: Date(timeIntervalSince1970: 1_790_000_000))
             value.places = places
+            value.series = series
+            value.seriesTerms = seriesTerms
             return value
         }
         let lucknow = features(["@IN", "uttar pradesh", "lucknow"])
@@ -14502,6 +14504,14 @@ struct NewsTests {
             "A report naming only the country is not vetoed")
         assertFalse(
             EventMatcher.namesDifferentLocalPlaces(countryOnly, countryOnly), "Country-only reports are not vetoed")
+        let seriesA = features(
+            ["@IN", "lucknow", "delhi"], series: "Delhi Dispatch", seriesTerms: ["delhi", "dispatch"])
+        let seriesB = features(
+            ["@IN", "bengaluru", "delhi"], series: "Delhi Dispatch", seriesTerms: ["delhi", "dispatch"])
+        let template = EventFeatures.sharedSeriesTerms(seriesA, seriesB, samePublisher: true) ?? []
+        assertTrue(
+            EventMatcher.namesDifferentLocalPlaces(seriesA.without(template), seriesB.without(template)),
+            "Shared series terms are stripped so disjoint story places still veto")
         assertTrue(EventMatchPolicy.standard.storyCountryPlaceVeto, "The veto is on whenever the signal is")
         assertTrue(EventMatchPolicy.standard.storyCountryKeywords == nil, "The country signal itself stays off")
     }
