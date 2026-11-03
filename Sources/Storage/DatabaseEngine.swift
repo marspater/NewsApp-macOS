@@ -4962,8 +4962,8 @@ func publisherInputFunction(
 /// are L2-normalized, as in `SentenceEmbedder.cosineSimilarity`). NULL unless both are 384-float blobs.
 ///
 /// A search scans every stored vector against one query vector (#708), so the second argument, a bound parameter, is
-/// copied once per statement and kept as SQLite auxiliary data, and each row's vector is copied into stack memory:
-/// no heap allocation per row.
+/// copied once per statement and kept as SQLite auxiliary data. Each row's vector is copied into temporary storage
+/// for the dot product rather than materialized as an intermediate Swift [Float] array.
 func cosineFunction(
     _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
 ) {
