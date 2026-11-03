@@ -3,9 +3,17 @@ import Foundation
 
 /// Checks shared by every XML document the app reads from outside: feeds and OPML imports (#928).
 enum XMLInputGuard {
-    /// Rejects declarations before Foundation or FeedKit can expand them, including UTF-16/32 prologs.
-    static func declaresEntities(_ data: Data) -> Bool {
-        Data(data.prefix(65_536).filter { $0 != 0 }).range(of: Data("<!ENTITY".utf8)) != nil
+    /// Rejects declarations before Foundation or FeedKit can expand them, including UTF-16/32 documents.
+    /// Feed parsing keeps its bounded prolog scan; OPML opts into the complete, separately size-bounded input.
+    static func declaresEntities(_ data: Data, scanEntireInput: Bool = false) -> Bool {
+        let scanLimit = scanEntireInput ? data.count : 65_536
+        return Data(data.prefix(scanLimit).filter { $0 != 0 }).range(of: Data("<!ENTITY".utf8)) != nil
+    }
+
+    /// Detects DTD attribute-list declarations before Foundation can supply their defaults to parsed elements.
+    static func declaresAttributeLists(_ data: Data, scanEntireInput: Bool = false) -> Bool {
+        let scanLimit = scanEntireInput ? data.count : 65_536
+        return Data(data.prefix(scanLimit).filter { $0 != 0 }).range(of: Data("<!ATTLIST".utf8)) != nil
     }
 }
 

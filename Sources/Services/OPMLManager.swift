@@ -42,8 +42,12 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
                 userInfo: [NSLocalizedDescriptionKey: "OPML files must be no larger than 5 MB."])
         }
         // The feed parser's guards (#928): no entity declarations, bounded nesting and outline count.
-        guard !XMLInputGuard.declaresEntities(data) else {
+        guard !XMLInputGuard.declaresEntities(data, scanEntireInput: true) else {
             throw rejection("It declares XML entities, which News does not import.")
+        }
+        // DTD defaults can be copied into every outline and retained by AppSettings during import.
+        guard !XMLInputGuard.declaresAttributeLists(data, scanEntireInput: true) else {
+            throw rejection("It declares XML attribute lists, which News does not import.")
         }
         let parser = OPMLParser()
         let xmlParser = XMLParser(data: data)
@@ -123,52 +127,68 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
                 parser,
                 "It lists more than \(Self.maximumOutlines.formatted()) outlines.")
         }
+        appendOutline(attributes: attributeDict)
+    }
 
-        var attrs: [String: String] = [:]
-        for (key, val) in attributeDict {
-            attrs[key.lowercased()] = val
+    private func appendOutline(attributes attributeDict: [String: String]) {
+        var attributes: [String: String] = [:]
+        for (key, value) in attributeDict {
+            attributes[key.lowercased()] = value
         }
 
-        let feedUrl: String?
-        if let xml = attrs["xmlurl"]?.trimmingCharacters(in: .whitespacesAndNewlines), !xml.isEmpty {
-            feedUrl = xml
-        } else if let type = attrs["type"]?.lowercased().trimmingCharacters(in: .whitespacesAndNewlines),
-            type == "rss" || type == "atom",
-            let url = attrs["url"]?.trimmingCharacters(in: .whitespacesAndNewlines), !url.isEmpty
-        {
-            feedUrl = url
-        } else {
-            feedUrl = nil
-        }
-
-        let rawTitle = attrs["title"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let rawText = attrs["text"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let title: String
-        if let rawTitle, !rawTitle.isEmpty {
-            title = rawTitle
-        } else if let rawText, !rawText.isEmpty {
-            title = rawText
-        } else {
-            title = ""
-        }
-
+        let title = outlineTitle(in: attributes)
         if !urlOnlyLeaves.isEmpty { urlOnlyLeaves[urlOnlyLeaves.count - 1] = nil }
-        let untyped = attrs["type"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true
-        let urlOnlyLeaf = attrs["url"].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .flatMap { untyped && !$0.isEmpty ? OPMLItem(title: title, url: $0, folder: folderStack.last) : nil }
+        let leaf = urlOnlyLeaf(in: attributes, title: title)
+        guard let feedURL = feedURL(in: attributes) else {
+            appendFolderOrUntypedOutline(title: title, leaf: leaf)
+            return
+        }
 
-        if let feedUrl, !feedUrl.isEmpty {
-            items.append(OPMLItem(title: title, url: feedUrl, folder: folderStack.last))
-            outlineStack.append(false)
-            urlOnlyLeaves.append(nil)
-        } else if !title.isEmpty {
+        items.append(OPMLItem(title: title, url: feedURL, folder: folderStack.last))
+        outlineStack.append(false)
+        urlOnlyLeaves.append(nil)
+    }
+
+    private func appendFolderOrUntypedOutline(title: String, leaf: OPMLItem?) {
+        if !title.isEmpty {
             folderStack.append(title)
             outlineStack.append(true)
-            urlOnlyLeaves.append(urlOnlyLeaf)
         } else {
             outlineStack.append(false)
-            urlOnlyLeaves.append(urlOnlyLeaf)
         }
+        urlOnlyLeaves.append(leaf)
+    }
+
+    private func feedURL(in attributes: [String: String]) -> String? {
+        if let xmlURL = nonemptyTrimmed(attributes["xmlurl"]) { return xmlURL }
+        guard
+            let type = nonemptyTrimmed(attributes["type"])?.lowercased(),
+            type == "rss" || type == "atom"
+        else { return nil }
+        return nonemptyTrimmed(attributes["url"])
+    }
+
+    private func outlineTitle(in attributes: [String: String]) -> String {
+        nonemptyTrimmed(attributes["title"]) ?? nonemptyTrimmed(attributes["text"]) ?? ""
+    }
+
+    private func urlOnlyLeaf(in attributes: [String: String], title: String) -> OPMLItem? {
+        guard
+            nonemptyTrimmed(attributes["type"]) == nil,
+            let url = nonemptyTrimmed(attributes["url"])
+        else { return nil }
+        return OPMLItem(title: title, url: url, folder: folderStack.last)
+    }
+
+    private func nonemptyTrimmed(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func finishOutline() {
+        if outlineStack.popLast() == true { _ = folderStack.popLast() }
+        if let leaf = urlOnlyLeaves.popLast() ?? nil { items.append(leaf) }
     }
 
     public func parser(
@@ -176,10 +196,7 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
     ) {
         depth -= 1
         guard guardFailure == nil, elementName.lowercased() == "outline" else { return }
-        if let isFolder = outlineStack.popLast(), isFolder {
-            _ = folderStack.popLast()
-        }
-        if let leaf = urlOnlyLeaves.popLast() ?? nil { items.append(leaf) }
+        finishOutline()
     }
 }
 
