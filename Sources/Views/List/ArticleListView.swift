@@ -75,6 +75,7 @@ struct ArticleListView: View {
 
     @AppStorage("articleGridLayout") private var gridLayout = false
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @FocusState private var listHasFocus: Bool
@@ -355,6 +356,10 @@ struct ArticleListView: View {
             }
             // A new section, search or filter can replace the previewed story, and Return would open another.
             .onChange(of: queryIdentity) { _, _ in
+                StoryQuickLookCoordinator.shared.close()
+            }
+            // Grouping changes the entries too: the previewed report may no longer be one, and Return would open another.
+            .onChange(of: groupsEvents) { _, _ in
                 StoryQuickLookCoordinator.shared.close()
             }
             .onDisappear {
@@ -1303,7 +1308,7 @@ struct ArticleListView: View {
             proxy.scrollTo(target.id, anchor: .center)
         }
         if StoryQuickLookCoordinator.shared.isOpen {
-            StoryQuickLookCoordinator.shared.present(article: target.representative)
+            StoryQuickLookCoordinator.shared.present(article: target.representative, isDark: colorScheme == .dark)
         }
     }
 
@@ -1314,7 +1319,7 @@ struct ArticleListView: View {
             let listed = entries
             guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
             focusedArticleID = entry.id
-            StoryQuickLookCoordinator.shared.present(article: entry.representative)
+            StoryQuickLookCoordinator.shared.present(article: entry.representative, isDark: colorScheme == .dark)
         }
     }
 
