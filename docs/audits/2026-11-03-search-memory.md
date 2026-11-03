@@ -19,11 +19,11 @@ Footprint in MiB after the warm-up and after each block of 50 searches ([raw rep
 | `origin/main`, 500 searches | 49.0, 49.1 (×6), 49.0, 50.0, 52.8, 52.8 | 3.8 |
 | smoke, 100 searches (#958) | 51.8, 51.9, 52.0 | 0.2 |
 
-Footprint does not grow with the number of searches. Each run shows one or two steps (about 1 MiB and about 3 MiB) at a varying point, after which it stays level: over 1,500 searches the footprint was flat for 850 searches, stepped once by 2.9 MiB, and was flat for the next 600. That is a one-time allocation reaching its working size (an allocator region or SQLite's page cache), not a leak; a leak would add the same amount every block. No fix was needed.
+The measured footprint stayed within the limit in every run, with no steady growth from block to block. Each run shows one or two steps (about 1 MiB and about 3 MiB) at a varying point, after which it stays level: over 1,500 searches the footprint was flat for 850 searches, stepped once by 2.9 MiB, and was flat for the next 600. These samples do not identify what made the steps (an allocator region or SQLite's page cache reaching its working size are plausible, not confirmed), and they cannot rule out a leak below the check's sensitivity or one that grows only now and then. No fix was made.
 
-A full search round (embed, two pages and two counts) took a median of 67 ms (p95 114 ms) on #958 and 119 ms (p95 247 ms) on `origin/main` in back-to-back runs under similar load; the 1,500-search run took 58 ms (p95 91 ms).
+A full search round (embed, two pages and two counts) took a median of 67 ms (p95 114 ms) on #958 and 119 ms (p95 247 ms) on `origin/main` in back-to-back runs under similar load; the 1,500-search run took 58 ms (p95 91 ms). These latency figures include the 50 warm-up searches; the harness now reports measured searches only.
 
-The 6 MiB limit sits above the largest one-time step seen (3.8 MiB) and still detects a leak of 12 KiB a search over 500 searches, far less than one retained model output (128 × 384 floats, 192 KiB) or one page of 201 stories.
+The 6 MiB limit sits above the largest one-time step seen (3.8 MiB). Over the default 500 searches it fails any steady growth above about 12.3 KiB a search (6 MiB / 500), far less than one retained model output (128 × 384 floats, 192 KiB) or one page of 201 stories; slower or intermittent growth can stay under it. The check compares the raw byte difference with the limit and rounds only the reported value.
 
 ## Not measured
 

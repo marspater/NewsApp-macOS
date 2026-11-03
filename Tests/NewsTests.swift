@@ -2773,10 +2773,11 @@ struct NewsTests {
     /// path a list's search takes (`ArticleListView.performQueryReload`): the text embedded by the on-device model,
     /// the first page, the muted count and the masthead totals, the next page, and for every tenth a spelling
     /// suggestion. Every search has new text, as typing does, so each one embeds and runs a new query vector.
-    /// Footprint is sampled after each block of searches; flat means the last sample is within
+    /// Footprint is sampled after each block of searches; the check passes when the last sample is within
     /// `NEWS_SEARCH_MEMORY_LIMIT_MB` (default 6) of the first one after the warm-up. Runs on 3 November 2026 showed
-    /// one-time steps of up to 3.8 MB and no trend over 1,500 searches; 6 MB over 500 searches still catches a leak
-    /// of 12 KB a search, far below one retained model output (128 × 384 floats, 192 KB).
+    /// one-time steps of up to 3.8 MiB and no trend over 1,500 searches. Over the default 500 searches, 6 MiB fails
+    /// any steady growth above about 12.3 KiB a search (6 MiB / 500), far below one retained model output
+    /// (128 × 384 floats, 192 KiB); smaller or intermittent growth can stay under it.
     @MainActor
     static func runSearchMemory() async throws {
         func footprint() -> UInt64 {
@@ -2796,6 +2797,8 @@ struct NewsTests {
         }
         let environment = ProcessInfo.processInfo.environment
         let blocks = Int(environment["NEWS_SEARCH_MEMORY_BLOCKS"] ?? "") ?? 10
+        // Zero blocks would compare the warm-up sample with itself and pass without a measured search.
+        guard blocks >= 1 else { fatalError("NEWS_SEARCH_MEMORY_BLOCKS must be at least 1") }
         let perBlock = 50
         let limit = Double(environment["NEWS_SEARCH_MEMORY_LIMIT_MB"] ?? "") ?? 6
 
@@ -2855,20 +2858,25 @@ struct NewsTests {
             listed += totals.stories
         }
         for _ in 0..<perBlock { try await search() }  // Warm-up: model, SQLite page cache, spelling vocabulary.
+        // Latency and listed counts cover the measured searches only, as the footprint samples do.
+        durations.removeAll()
+        listed = 0
         var samples = [footprint()]
         for _ in 0..<blocks {
             for _ in 0..<perBlock { try await search() }
             samples.append(footprint())
         }
         await db.close()
-        let growth = mebibytes(samples.last!) - mebibytes(samples.first!)
+        // Raw bytes are compared with the limit; only the reported value is rounded.
+        let rawGrowth = (Double(samples.last!) - Double(samples.first!)) / 1_048_576
+        let growth = (rawGrowth * 10).rounded() / 10
         let sorted = durations.sorted()
         let report: [String: Any] = [
             "library_rows": archive.count, "embeddings": archive.count, "warm_up_searches": perBlock,
             "measured_searches": blocks * perBlock, "searches_per_sample": perBlock,
             "footprint_mb": samples.map(mebibytes), "growth_mb": growth, "limit_mb": limit,
             "search_round_ms_median": sorted[sorted.count / 2], "search_round_ms_p95": sorted[sorted.count * 95 / 100],
-            "mean_listed_stories": listed / searches,
+            "mean_listed_stories": listed / (blocks * perBlock),
             "sqlite_version": String(cString: sqlite3_libversion()),
             "os": ProcessInfo.processInfo.operatingSystemVersionString,
             "optimization": "-O (test.sh search memory mode)",
@@ -2879,8 +2887,9 @@ struct NewsTests {
         print("SEARCH_MEMORY_JSON_END")
         assertTrue(listed > 0, "Searches list stories")
         assertTrue(
-            growth <= limit,
-            "Footprint stays flat over \(blocks * perBlock) searches: grew \(growth) MB (limit \(limit) MB)")
+            rawGrowth <= limit,
+            "Footprint stays within the limit over \(blocks * perBlock) searches: grew \(growth) MiB"
+                + " (limit \(limit) MiB)")
     }
 
     @MainActor
