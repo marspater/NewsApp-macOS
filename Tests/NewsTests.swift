@@ -7335,6 +7335,21 @@ struct NewsTests {
             "A late entity declaration aborts the parse")
         let external = opml(prolog: "<!DOCTYPE opml [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>", body: feed)
         assertTrue(OPMLParser.parse(data: external).isEmpty, "External entities import nothing")
+        // An attribute default would give every bare outline a feed address; any DTD declaration is refused.
+        let defaulted = opml(
+            prolog: "<!DOCTYPE opml [<!ATTLIST outline xmlUrl CDATA \"https://attacker.invalid/feed\">]>",
+            body: "<outline text=\"Looks empty\"/>")
+        assertEqual(
+            rejection(defaulted), "It contains document type definitions, which News does not import.",
+            "An attribute default in a DTD is refused")
+        assertTrue(OPMLParser.parse(data: defaulted).isEmpty, "A defaulted feed address is never imported")
+        let declared = opml(prolog: "<!DOCTYPE opml [<!ELEMENT outline ANY>]>", body: feed)
+        assertEqual(
+            rejection(declared), "It contains document type definitions, which News does not import.",
+            "An element declaration is refused")
+        assertEqual(
+            OPMLParser.parse(data: opml(prolog: "<!DOCTYPE opml>", body: feed)).count, 1,
+            "A bare doctype without definitions still imports")
 
         // Nesting: 64 levels is the bound, as in the feed parser; one more is refused.
         func nested(_ levels: Int) -> Data {
@@ -7374,7 +7389,7 @@ struct NewsTests {
         let suiteName = testDefaultsSuite("test.opml.guards")
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { removeTestDefaults(suiteName) }
-        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"))
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
         let settings = AppSettings(defaults: defaults)
         let manager = FeedManager(settings: settings, store: store, schedulesRefresh: false)
@@ -7388,6 +7403,14 @@ struct NewsTests {
         store.operationError = nil
         assertEqual(manager.importFeeds(from: bomb), 0, "An entity bomb adds no feed")
         assertTrue(store.operationError?.contains("declares XML entities") == true, "The alert names entities")
+        store.operationError = nil
+        assertEqual(
+            manager.importFeeds(from: Data(repeating: 32, count: OPMLFileReader.maximumBytes + 1)), 0,
+            "An oversized file adds no feed")
+        assertEqual(
+            store.operationError,
+            "The OPML file could not be imported. OPML files must be no larger than 5 MB. No subscriptions were changed.",
+            "The alert names the size limit")
         store.operationError = nil
         assertEqual(manager.importFeeds(from: Data("<opml><body>".utf8)), 0, "A truncated file adds no feed")
         assertTrue(store.operationError?.contains("incomplete or malformed") == true, "Malformed keeps its message")
