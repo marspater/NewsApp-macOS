@@ -68,23 +68,27 @@ enum GeneratedTextFidelity {
         "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18", "nineteen": "19", "twenty": "20",
     ]
 
-    /// Numbers written as words up to twenty, as digits: "Three people" states the 3 of "3 people".
-    static func digitized(_ text: String) -> String {
+    /// Numbers written as words up to twenty, as digits: "Three people" states the 3 of "3 people". `keepingOne`
+    /// leaves "one" as written, for text where it is mostly a pronoun ("each one", "no one").
+    static func digitized(_ text: String, keepingOne: Bool = false) -> String {
         guard let numberWordPattern else { return text }
         let nsText = text as NSString
         var result = text
         let matches = numberWordPattern.matches(in: text, range: NSRange(location: 0, length: nsText.length))
         for match in matches.reversed() {
             let word = nsText.substring(with: match.range).lowercased()
+            if keepingOne, word == "one" { continue }
             guard let digits = numberWordValues[word], let range = Range(match.range, in: result) else { continue }
             result.replaceSubrange(range, with: digits)
         }
         return result
     }
 
-    /// A number or year the source never states, in digits or (up to twenty) in words.
+    /// A number or year the source never states, in digits or (up to twenty) in words. A number word of the statement
+    /// counts too ("Three" for the source's "two"), except "one", which a rewrite mostly uses as a pronoun.
     static func unsupportedFigure(statement: String, source: String) -> String? {
         let normalizedSource = OverviewClaimVerifier.normalizeText(digitized(source))
+        let statement = digitized(statement, keepingOne: true)
         return
             (OverviewClaimVerifier.extractNumbers(from: statement)
             + OverviewClaimVerifier.extractDates(from: statement)).first {

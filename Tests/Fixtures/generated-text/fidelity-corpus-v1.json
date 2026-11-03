@@ -85,10 +85,12 @@
     { "id": "contested-with-both-speakers", "source": "Police said 3,000 people joined the march. Organisers said 20,000 people took part.", "rewrite": "Police said 3,000 people marched, while organisers put the figure at 20,000." },
     { "id": "speaker-kept", "source": "Police said 12 people died in the flooding.", "rewrite": "Police reported that 12 people died in the flooding." },
     { "id": "alleged-kept-as-reportedly", "source": "Police said the man allegedly set fire to the warehouse.", "rewrite": "Police said the man reportedly set fire to the warehouse." },
-    { "id": "inflection-stem", "source": "Officials in Ukraine said new energy measures took effect on Monday.", "rewrite": "Energy officials in Ukrainian regions said measures took effect on Monday." }
+    { "id": "inflection-stem", "source": "Officials in Ukraine said new energy measures took effect on Monday.", "rewrite": "Ukrainian officials said new energy measures took effect on Monday." },
+    { "id": "pronoun-one", "source": "Officials said each of the injured was treated in hospital.", "rewrite": "Officials said each one of the injured was treated in hospital." }
   ],
   "wrongOnly": [
     { "id": "possibility-for-allegation", "source": "Police said the man allegedly set fire to the warehouse.", "rewrite": "Police said the man could have set fire to the warehouse.", "readerRule": "qualifier" },
-    { "id": "short-name-stem", "source": "Officials announced new measures on Monday.", "rewrite": "Minister Ann announced new measures on Monday.", "readerRule": "name" }
+    { "id": "short-name-stem", "source": "Officials announced new measures on Monday.", "rewrite": "Minister Ann announced new measures on Monday.", "readerRule": "name" },
+    { "id": "number-word-changed", "source": "Two people were injured in the fire on Sunday.", "rewrite": "Three people were injured in the fire on Sunday.", "readerRule": "figure" }
   ]
 }
