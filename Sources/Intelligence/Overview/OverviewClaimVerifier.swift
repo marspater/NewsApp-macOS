@@ -19,6 +19,12 @@ public enum ClaimVerificationFailureReason: Sendable, Equatable {
     case misquotedReport(quote: String, passageID: String)
     case actionMismatch(claimAction: String, passageID: String)
     case quotationAsFact(passageID: String)
+    /// The passage hedges (alleged, could, if) and the claim states it as fact (#951).
+    case qualifierDropped(claimText: String, passageID: String)
+    /// A figure the passage gives only on one speaker's word, against another speaker's figure, without a speaker.
+    case contestedFigure(claimText: String, passageID: String)
+    /// A proper name the cited passage never mentions (#951).
+    case unsupportedName(name: String, passageID: String)
     case emptyClaim
 }
 
@@ -124,6 +130,21 @@ public struct OverviewClaimVerifier: Sendable {
         for citationID in fact.citationIDs {
             failures.append(
                 contentsOf: verifyCitation(citationID, fact: fact, overview: overview, passagesByID: passagesByID))
+        }
+        // The #951 rules read every passage the fact cites together: a fact citing two passages may name someone from
+        // either, and hedge or count what either says.
+        let cited = fact.citationIDs.compactMap { overview.citations[$0].flatMap { passagesByID[$0.passageID] } }
+        if let first = cited.first {
+            let text = cited.map(\.text).joined(separator: "\n")
+            if dropsQualifier(statement: fact.text, passageText: text) {
+                failures.append(.qualifierDropped(claimText: fact.text, passageID: first.id))
+            }
+            if dropsContestedFigureSpeaker(statement: fact.text, sourceSentences: sentences(text)) {
+                failures.append(.contestedFigure(claimText: fact.text, passageID: first.id))
+            }
+            if let name = unsupportedName(statement: fact.text, source: text) {
+                failures.append(.unsupportedName(name: name, passageID: first.id))
+            }
         }
 
         return ClaimVerificationResult(
@@ -242,22 +263,26 @@ public struct OverviewClaimVerifier: Sendable {
         statement: String,
         passage: EvidencePassage
     ) -> ClaimVerificationFailureReason? {
+        flipsNegation(statement: statement, passageText: passage.text)
+            ? .negationFlipped(claimText: statement, passageID: passage.id) : nil
+    }
+
+    /// Shared with `GeneratedTextFidelity`: the claim negates where the passage sentence it most resembles does not,
+    /// or the other way round.
+    static func flipsNegation(statement: String, passageText: String) -> Bool {
         let claimTokens = negationTokens(statement)
         let tokenizer = NLTokenizer(unit: .sentence)
-        tokenizer.string = passage.text
-        let sentences = tokenizer.tokens(for: passage.text.startIndex..<passage.text.endIndex).map {
-            negationTokens(String(passage.text[$0]))
+        tokenizer.string = passageText
+        let sentences = tokenizer.tokens(for: passageText.startIndex..<passageText.endIndex).map {
+            negationTokens(String(passageText[$0]))
         }
         let claimWords = Set(claimTokens)
         guard
             let reference = sentences.max(by: {
                 Set($0).intersection(claimWords).count < Set($1).intersection(claimWords).count
             })
-        else { return nil }
-        if negationWords.isDisjoint(with: claimTokens) != negationWords.isDisjoint(with: reference) {
-            return .negationFlipped(claimText: statement, passageID: passage.id)
-        }
-        return nil
+        else { return false }
+        return negationWords.isDisjoint(with: claimTokens) != negationWords.isDisjoint(with: reference)
     }
 
     /// Word tokens with "n't" contractions read as "not", so "didn't" counts as a negation.
@@ -320,6 +345,8 @@ public struct OverviewClaimVerifier: Sendable {
         "spokesperson", "spokesman", "spokeswoman", "minister", "ministry", "president", "official", "officials",
         "office", "police", "prosecutor", "prosecutors", "army", "military", "government", "commander", "governor",
         "mayor", "chief", "director", "agency", "court", "judge", "authorities", "department", "council",
+        // Bodies that speak for their members: "the union said" names a speaker (#951).
+        "union", "unions", "organisers", "organizers",
     ]
 
     /// Capitalized at the start of a sentence without naming anyone.
@@ -687,5 +714,264 @@ public struct OverviewClaimVerifier: Sendable {
     /// Folded words, so a claim matches its passage across case and accents. `words` above keeps case on purpose.
     private static func tokenize(_ text: String) -> [String] {
         MuteRules.foldedWords(text)
+    }
+}
+
+// MARK: - Generated Text Fidelity (#951)
+
+/// Deterministic comparison of generated text with the text it restates, sentence by sentence; no model is asked.
+/// The reader summary and the Briefing sitrep run every rule; the overview verifier runs the qualifier, contested
+/// figure and name rules per cited passage beside its own. A rewrite that flips a negation, states an allegation or a
+/// condition as fact, changes a figure or a name, moves a statement to another speaker, upgrades an action or drops the
+/// speaker of a contested figure fails.
+enum GeneratedTextFidelity {
+    enum Violation: String, Sendable, Equatable {
+        case figure, name, negation, qualifier, speaker, action, attribution
+    }
+
+    /// The rules each generated sentence broke against `source`, in order of first occurrence. `knownNames` (such as
+    /// publishers named beside the source) may be named and quoted as speakers.
+    static func violations(in generated: [String], source: String, knownNames: [String] = []) -> [Violation] {
+        let sourceSentences = OverviewClaimVerifier.sentences(source)
+        let known = Set(knownNames.flatMap { MuteRules.foldedWords($0) })
+        var found: [Violation] = []
+        for sentence in generated.flatMap(OverviewClaimVerifier.sentences) {
+            let broken = OverviewClaimVerifier.fidelityViolations(
+                sentence, source: source, sourceSentences: sourceSentences, knownNames: known)
+            for violation in broken where !found.contains(violation) { found.append(violation) }
+        }
+        return found
+    }
+}
+
+extension OverviewClaimVerifier {
+    static func sentences(_ text: String) -> [String] {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        return tokenizer.tokens(for: text.startIndex..<text.endIndex)
+            .map { String(text[$0]).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    static func fidelityViolations(
+        _ sentence: String, source: String, sourceSentences: [String], knownNames: Set<String>
+    ) -> [GeneratedTextFidelity.Violation] {
+        var found: [GeneratedTextFidelity.Violation] = []
+        if unsupportedFigure(statement: sentence, source: source) != nil { found.append(.figure) }
+        if unsupportedName(statement: sentence, source: source, knownNames: knownNames) != nil { found.append(.name) }
+        if flipsNegation(statement: sentence, passageText: source) { found.append(.negation) }
+        if dropsQualifier(statement: sentence, passageText: source) { found.append(.qualifier) }
+        if misattributesSpeaker(statement: sentence, sourceSentences: sourceSentences, knownNames: knownNames) {
+            found.append(.speaker)
+        }
+        if unsupportedAction(statement: sentence, passageText: source) != nil { found.append(.action) }
+        if dropsContestedFigureSpeaker(statement: sentence, sourceSentences: sourceSentences)
+            || droppedAttributionSpeaker(statement: sentence, passageText: source) != nil
+        {
+            found.append(.attribution)
+        }
+        return found
+    }
+
+    private static let numberWordPattern = try? NSRegularExpression(
+        pattern:
+            #"\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b"#,
+        options: [.caseInsensitive])
+    private static let numberWordValues = [
+        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+        "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+        "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18", "nineteen": "19", "twenty": "20",
+    ]
+
+    /// Numbers written as words up to twenty, as digits: "Three people" states the 3 of "3 people".
+    static func digitized(_ text: String) -> String {
+        guard let numberWordPattern else { return text }
+        let ns = text as NSString
+        var result = text
+        for match in numberWordPattern.matches(in: text, range: NSRange(location: 0, length: ns.length)).reversed() {
+            let word = ns.substring(with: match.range).lowercased()
+            guard let digits = numberWordValues[word], let range = Range(match.range, in: result) else { continue }
+            result.replaceSubrange(range, with: digits)
+        }
+        return result
+    }
+
+    /// A number or year the source never states, in digits or (up to twenty) in words.
+    static func unsupportedFigure(statement: String, source: String) -> String? {
+        let normalizedSource = normalizeText(digitized(source))
+        return (extractNumbers(from: statement) + extractDates(from: statement)).first {
+            !containsNumber(normalizeText($0), in: normalizedSource)
+        }
+    }
+
+    /// Titles before a name; "Mr Smith" names Smith.
+    private static let honorifics: Set<String> = ["mr", "mrs", "ms", "dr", "sir", "dame", "prof"]
+
+    /// Initials of runs of capitalized source words, so "UK" stands for "United Kingdom" and "USA" for "United
+    /// States of America" (lowercase "of", "and", "the" inside a run are skipped).
+    private static func acronyms(in text: String) -> Set<String> {
+        var found = Set<String>()
+        var run = ""
+        func close() {
+            let letters = Array(run)
+            for start in letters.indices where start + 2 <= letters.count {
+                for end in (start + 2)...min(letters.count, start + 5) {
+                    found.insert(String(letters[start..<end]))
+                }
+            }
+            run = ""
+        }
+        for word in words(text) {
+            if let initial = word.first, initial.isUppercase {
+                run.append(Character(initial.lowercased()))
+            } else if !["of", "and", "the"].contains(word) {
+                close()
+            }
+        }
+        close()
+        return found
+    }
+
+    /// A capitalized word after the sentence start that the source never uses: an invented or changed name. A word
+    /// sharing a stem of four or more letters with a source word passes ("Ukrainian" for "Ukraine"), periods are
+    /// ignored ("US" for "U.S."), an all-capital word may be the initials of a source name ("UK"), and titles
+    /// ("Mr") are no names.
+    static func unsupportedName(statement: String, source: String, knownNames: Set<String> = []) -> String? {
+        let sourceWords = Set(tokenize(source)).union(tokenize(source.replacingOccurrences(of: ".", with: "")))
+            .union(knownNames)
+        let initials = acronyms(in: source)
+        for (index, word) in words(statement.replacingOccurrences(of: ".", with: "")).enumerated()
+        where index > 0 && word.count > 1 && word.first?.isUppercase == true {
+            guard let lower = tokenize(word).first, !capitalizedFunctionWords.contains(lower),
+                !honorifics.contains(lower), !sourceWords.contains(lower)
+            else { continue }
+            if word.allSatisfy(\.isUppercase), initials.contains(lower) { continue }
+            if sourceWords.contains(where: { $0.count >= 4 && (lower.hasPrefix($0) || $0.hasPrefix(lower)) }) {
+                continue
+            }
+            return word
+        }
+        return nil
+    }
+
+    /// Hedges a restatement must keep, by kind: a claim or report, a possibility, a condition, an intention. A rewrite
+    /// keeps the kind ("could" does not stand for "alleged"). "Would" is left out: in reporting it is mostly
+    /// backshifted speech ("said he would resign"), and conditionals already carry "if" or "could".
+    private static let hedgeKindOfWord: [String: String] = [
+        "alleged": "claim", "allegedly": "claim", "allege": "claim", "alleges": "claim", "reportedly": "claim",
+        "suspected": "claim", "accused": "claim", "unconfirmed": "claim", "claimed": "claim", "claims": "claim",
+        "apparently": "claim",
+        "may": "possibility", "might": "possibility", "could": "possibility", "possible": "possibility",
+        "possibly": "possibility", "likely": "possibility", "expected": "possibility",
+        "if": "condition", "unless": "condition",
+        "plans": "intention", "planned": "intention", "proposed": "intention", "considering": "intention",
+        "threatened": "intention", "threatens": "intention",
+    ]
+    /// Hedges only as verbs: "insurance claims", "housing plans", "threatened species".
+    private static let verbOnlyHedges: Set<String> = [
+        "claims", "claimed", "plans", "planned", "accused", "expected", "threatened", "threatens", "considering",
+    ]
+
+    /// The hedge kinds `text` expresses. A word that is a hedge only as a verb counts only where the tagger reads it
+    /// as one; "than expected" and "the accused" never count.
+    static func hedgeKinds(_ text: String) -> Set<String> {
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+        var kinds = Set<String>()
+        var previous = ""
+        tagger.enumerateTags(
+            in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
+            options: [.omitWhitespace, .omitPunctuation]
+        ) { tag, range in
+            let lower = text[range].lowercased()
+            defer { previous = lower }
+            guard let kind = hedgeKindOfWord[lower] else { return true }
+            // A capitalized "May" is the month, also at a sentence start ("May saw record sales").
+            if lower == "may", text[range].first?.isUppercase == true { return true }
+            if verbOnlyHedges.contains(lower), tag != .verb { return true }
+            if (lower == "expected" && previous == "than") || (lower == "accused" && ["the", "an"].contains(previous)) {
+                return true
+            }
+            kinds.insert(kind)
+            return true
+        }
+        return kinds
+    }
+
+    /// The clause of the closest passage sentence that the claim restates: a hedge in another clause ("The bridge
+    /// reopened, and engineers said repairs could take weeks") says nothing about this claim.
+    private static func closestClause(to statement: String, in passageText: String) -> String {
+        let sentence = closestSentence(to: statement, in: passageText)
+        let claim = Set(tokenize(statement))
+        let clauses = sentence.components(separatedBy: CharacterSet(charactersIn: ",;:"))
+            .flatMap { $0.components(separatedBy: " and ") }
+            .flatMap { $0.components(separatedBy: " but ") }
+            .flatMap { $0.components(separatedBy: " while ") }
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return clauses.max { claim.intersection(tokenize($0)).count < claim.intersection(tokenize($1)).count }
+            ?? sentence
+    }
+
+    /// The clause the claim restates hedges and the claim drops that kind of hedge: an allegation stated as fact, a
+    /// condition made definite.
+    static func dropsQualifier(statement: String, passageText: String) -> Bool {
+        let source = hedgeKinds(closestClause(to: statement, in: passageText))
+        return !source.isEmpty && !source.isSubset(of: hedgeKinds(statement))
+    }
+
+    /// The claim names a speaker the source does not give for what it says: the speakers of the sentences carrying
+    /// its figures, else of its closest sentence, else of any sentence. Known names (publishers) may always speak.
+    static func misattributesSpeaker(statement: String, sourceSentences: [String], knownNames: Set<String>) -> Bool {
+        let claim = reportedSpeakers(words(statement)).subtracting(knownNames)
+        guard !claim.isEmpty else { return false }
+        let numbers = extractNumbers(from: statement).map(normalizeText)
+        var reference = Set<String>()
+        for sentence in sourceSentences
+        where numbers.contains(where: { containsNumber($0, in: normalizeText(sentence)) }) {
+            reference.formUnion(reportedSpeakers(words(sentence)))
+        }
+        if reference.isEmpty {
+            let closest = closestSentence(to: statement, in: sourceSentences.joined(separator: " "))
+            reference = reportedSpeakers(words(closest))
+        }
+        if reference.isEmpty {
+            reference = sourceSentences.reduce(into: Set<String>()) { $0.formUnion(reportedSpeakers(words($1))) }
+        }
+        // A source that names no speaker leaves invented ones to the name rule.
+        return !reference.isEmpty && claim.isDisjoint(with: reference)
+    }
+
+    /// The word a figure counts: "people" in "20,000 people".
+    private static func countedNoun(after number: String, in text: String) -> String? {
+        let pattern = #"(?<![\d.,])"# + NSRegularExpression.escapedPattern(for: number) + #"\s+(\p{L}+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+            let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+            let range = Range(match.range(at: 1), in: text)
+        else { return nil }
+        return tokenize(String(text[range])).first
+    }
+
+    /// Police say 3,000 marched, organisers 20,000: a claim giving one of those figures for the same thing must say
+    /// whose it is. The same thing means the same counted noun ("people"), not any shared word.
+    static func dropsContestedFigureSpeaker(statement: String, sourceSentences: [String]) -> Bool {
+        let numbers = extractNumbers(from: statement)
+        guard !numbers.isEmpty, reportedSpeakers(words(statement)).isEmpty else { return false }
+        let attributed = sourceSentences.compactMap { sentence -> (text: String, speakers: Set<String>)? in
+            let speakers = reportedSpeakers(words(sentence))
+            return speakers.isEmpty ? nil : (sentence, speakers)
+        }
+        for number in numbers {
+            guard let noun = countedNoun(after: number, in: statement) else { continue }
+            let carrying = attributed.filter { containsNumber(normalizeText(number), in: normalizeText($0.text)) }
+            guard !carrying.isEmpty else { continue }
+            let speakers = carrying.reduce(into: Set<String>()) { $0.formUnion($1.speakers) }
+            let rival = attributed.contains { other in
+                !containsNumber(normalizeText(number), in: normalizeText(other.text))
+                    && other.speakers.isDisjoint(with: speakers)
+                    && extractNumbers(from: other.text).contains { countedNoun(after: $0, in: other.text) == noun }
+            }
+            if rival { return true }
+        }
+        return false
     }
 }

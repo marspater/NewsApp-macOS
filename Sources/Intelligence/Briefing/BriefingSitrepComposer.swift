@@ -52,8 +52,7 @@ enum BriefingSitrepComposer {
             let answer = try await model.respond(prompt(title: title, highlights: highlights), 120)
             let trimmed = answer.trimmingCharacters(in: .whitespacesAndNewlines)
             guard let sentence = OverviewComposer.firstCompleteSentence(trimmed),
-                isValid(sentence, inputs: [title] + highlights.map(\.text) + highlights.compactMap(\.publisher)),
-                keepsQualifiers(sentence, facts: highlights.map(\.text))
+                accepts(sentence, title: title, highlights: highlights)
             else { return fallback }
             return Line(text: sentence, isGenerated: true, isFinal: true)
         } catch is NewsTextModel.Rejected {
@@ -61,6 +60,18 @@ enum BriefingSitrepComposer {
         } catch {
             return Line(text: first.text, isGenerated: false, isFinal: false)
         }
+    }
+
+    /// Whether a model sentence may stand for the highlights: length, link, names and figures (`isValid`), the facts'
+    /// qualifiers, and the shared fidelity rules (#951) against the title and highlights, publishers as known names.
+    static func accepts(_ sentence: String, title: String, highlights: [Highlight]) -> Bool {
+        let publishers = highlights.compactMap(\.publisher)
+        return isValid(sentence, inputs: [title] + highlights.map(\.text) + publishers)
+            && keepsQualifiers(sentence, facts: highlights.map(\.text))
+            && GeneratedTextFidelity.violations(
+                in: [sentence], source: ([title] + highlights.map(\.text)).joined(separator: ".\n"),
+                knownNames: publishers
+            ).isEmpty
     }
 
     /// At most `maximumLength` characters, no link, every capitalized word after the first and every number appear in
