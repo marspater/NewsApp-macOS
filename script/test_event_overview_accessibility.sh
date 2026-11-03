@@ -63,6 +63,8 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -targ
     Sources/Storage/ReadManager.swift \
     Sources/App/ThemeManager.swift \
     Sources/Models/FeedArticle.swift \
+    Sources/Models/ArchiveSearchToken.swift \
+    Sources/Models/ArticleSearchState.swift \
     Sources/Storage/CacheManager.swift \
     Sources/Coordinators/FeedManager.swift \
     Sources/App/AppContainer.swift \
