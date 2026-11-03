@@ -7335,6 +7335,26 @@ struct NewsTests {
             utf16Error?.localizedDescription,
             "It declares XML entities, which News does not import.",
             "A UTF-16 entity declaration names the entity guard")
+
+        // DTD defaults are copied into every matching outline by Foundation and retained by the import.
+        let attributeDefaults = opml(
+            prolog: "<!DOCTYPE opml [<!ATTLIST outline title CDATA \"default title\">]>",
+            body: feed + feed.replacingOccurrences(of: "Feed", with: "Second feed"))
+        let attributeError = rejectionError(attributeDefaults)
+        assertEqual(attributeError?.domain, "OPML", "ATTLIST declarations use the OPML error domain")
+        assertEqual(attributeError?.code, 3, "ATTLIST declarations use the guard error code")
+        assertEqual(
+            attributeError?.localizedDescription,
+            "It declares XML attribute lists, which News does not import.",
+            "ATTLIST declarations are rejected before XMLParser supplies default attributes")
+        let utf16AttributeDefaults = String(decoding: attributeDefaults, as: UTF8.self)
+            .replacingOccurrences(of: "UTF-8", with: "UTF-16")
+        let utf16AttributeError = rejectionError(utf16AttributeDefaults.data(using: .utf16)!)
+        assertEqual(
+            utf16AttributeError?.localizedDescription,
+            "It declares XML attribute lists, which News does not import.",
+            "UTF-16 ATTLIST declarations are rejected by the full-input scan")
+
         // An unused external-entity declaration beyond 64 KiB must be caught by the full-input scan,
         // without relying on XMLParser's declaration callback.
         let padded = opml(
