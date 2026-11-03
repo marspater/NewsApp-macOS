@@ -113,8 +113,19 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
     private func categoryCondition() -> (clause: String?, parameters: [String]) {
         let clean = Self.cleanTerms(categories)
         guard !clean.isEmpty else { return (nil, []) }
-        let clauses = clean.map { _ in "coalesce(ae.category, a.category) LIKE ? ESCAPE '\\'" }
-        return ("(" + clauses.joined(separator: " OR ") + ")", clean.map { "%\(Self.escapeLikeWildcards($0))%" })
+        var clauses: [String] = []
+        var parameters: [String] = []
+        for cat in clean {
+            if cat == "U.S. Politics" {
+                clauses.append(
+                    "news_section(a.title, coalesce(a.description, ''), coalesce(ae.category, a.category), ?) = 1")
+                parameters.append(cat)
+            } else {
+                clauses.append("coalesce(ae.category, a.category) LIKE ? ESCAPE '\\'")
+                parameters.append("%\(Self.escapeLikeWildcards(cat))%")
+            }
+        }
+        return ("(" + clauses.joined(separator: " OR ") + ")", parameters)
     }
 
     private func publisherCondition() -> (clause: String?, parameters: [String]) {
@@ -206,7 +217,17 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         let clean = Self.cleanTerms(categories)
         guard !clean.isEmpty else { return true }
         let cat = article.category?.lowercased() ?? ""
-        return clean.contains { cat.contains($0.lowercased()) }
+        return clean.contains { category in
+            if category == "U.S. Politics" {
+                return ArticleSection.matches(
+                    category,
+                    title: article.title,
+                    description: article.description,
+                    category: article.category
+                )
+            }
+            return cat.contains(category.lowercased())
+        }
     }
 
     private func matchesPublishers(article: FeedArticle) -> Bool {

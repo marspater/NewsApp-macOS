@@ -5593,6 +5593,41 @@ struct NewsTests {
         assertTrue(strictBinder.matches(article: dbStories[2]), "In-memory matching agrees for db-3")
         assertFalse(strictBinder.matches(article: dbStories[0]), "In-memory matching agrees for db-1")
 
+        // U.S. Politics category uses ArticleSection matching semantics in SQL and in-memory
+        let polStory = FeedArticle(
+            title: "White House press briefing on new legislation",
+            link: "https://example.com/us-politics-1",
+            guid: "pol-1",
+            description: "Administration officials discussed the bill",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_150),
+            source: "Example News",
+            category: "Politics"
+        )
+        let nonPolStory = FeedArticle(
+            title: "Global Astronomy Conference Opens in Tokyo",
+            link: "https://example.com/science-1",
+            guid: "sci-1",
+            description: "Researchers discuss deep space telescope discoveries",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_140),
+            source: "Example News",
+            category: "Science"
+        )
+        try await db.upsertArticles([polStory, nonPolStory])
+        let usPolBinder = SmartBinder(name: "US Pol", categories: ["U.S. Politics"])
+        let usPolArticles = try await db.fetchArticles(smartBinder: usPolBinder)
+        assertTrue(
+            usPolArticles.contains { $0.id == "pol-1" },
+            "U.S. Politics binder matches classified Politics story in SQL")
+        assertFalse(
+            usPolArticles.contains { $0.id == "sci-1" },
+            "U.S. Politics binder excludes non-politics story in SQL")
+        assertTrue(
+            usPolBinder.matches(article: polStory),
+            "U.S. Politics matches in-memory for classified Politics story")
+        assertFalse(
+            usPolBinder.matches(article: nonPolStory),
+            "U.S. Politics excludes non-politics story in-memory")
+
         // Mute rules strictly honoured: mute theverge.com
         var binderMuting = MuteRules(sources: ["theverge.com"])
         let mutedArticles = try await db.fetchArticles(smartBinder: testBinder, muting: binderMuting)
