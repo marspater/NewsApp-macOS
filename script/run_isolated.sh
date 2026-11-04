@@ -25,7 +25,9 @@ LIBRARY_DIR="$CONTAINER/Library/Application Support/com.marspater.news"
 # A run cannot delete its own stage (the app keeps running from it), so drop earlier
 # stages whose app has quit. Resolve with pwd -P: the app runs from /private/var, not /var.
 for old in "${TMPDIR:-/tmp}"/news-isolated-build.*; do
-    [[ -d "$old" ]] || continue # bash 3.2 keeps an unmatched glob as a literal
+    # Only real directories this user owns: bash 3.2 keeps an unmatched glob as a literal,
+    # and in a shared /tmp a symlink or another user's folder is not ours to delete.
+    [[ -d "$old" && ! -L "$old" && -O "$old" ]] || continue
     old=$(cd "$old" && pwd -P) || continue
     pgrep -qf "^$old/src/News.app/Contents/MacOS/News" && continue
     # Drop the Launch Services record first; a stale one makes macOS call News damaged.
