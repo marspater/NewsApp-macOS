@@ -4,6 +4,22 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Every Swift file starts with the Apache-2.0 header (copy it from any Swift file; in Package.swift it follows the
+# swift-tools-version line). Checked before swift-format is needed: --check runs in CI, --staged in the pre-commit hook.
+case "${1:-}" in
+    --check|--lint-all) HEADER_FILES=$(git ls-files '*.swift') ;;
+    --staged|--lint-staged) HEADER_FILES=$(git diff --cached --name-only --diff-filter=d | grep '\.swift$' || true) ;;
+    *) HEADER_FILES="" ;;
+esac
+if [[ -n "$HEADER_FILES" ]]; then
+    MISSING=$(tr '\n' '\0' <<< "$HEADER_FILES" | xargs -0 grep -L 'Licensed under the Apache License, Version 2.0' || true)
+    if [[ -n "$MISSING" ]]; then
+        echo "❌ These Swift files lack the Apache-2.0 license header (copy it from any Swift file):" >&2
+        echo "$MISSING" >&2
+        exit 1
+    fi
+fi
+
 # Resolve swift-format executable
 SWIFT_FORMAT=""
 if command -v swift-format >/dev/null 2>&1; then
