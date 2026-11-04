@@ -20,10 +20,10 @@ LICENSE_HEADER='// Copyright 2026 Mars Pater
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.'
-HEADER_SOURCE=""
 case "${1:-}" in
     --check|--lint-all) HEADER_SOURCE=tree ;;
     --staged|--lint-staged) HEADER_SOURCE=index ;;
+    *) HEADER_SOURCE="" ;;
 esac
 if [[ -n "$HEADER_SOURCE" ]]; then
     MISSING=""
