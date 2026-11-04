@@ -22,6 +22,13 @@ ROOT=$(pwd)
 BUNDLE_ID="com.marspater.news.isolatedqa"
 CONTAINER="$HOME/Library/Containers/$BUNDLE_ID/Data"
 LIBRARY_DIR="$CONTAINER/Library/Application Support/com.marspater.news"
+# A run cannot delete its own stage (the app keeps running from it), so drop earlier
+# stages whose app has quit. Resolve with pwd -P: the app runs from /private/var, not /var.
+for old in "${TMPDIR:-/tmp}"/news-isolated-build.*; do
+    [[ -d "$old" ]] || continue # bash 3.2 keeps an unmatched glob as a literal
+    old=$(cd "$old" && pwd -P) || continue
+    pgrep -qf "^$old/src/News.app/Contents/MacOS/News" || rm -rf "$old"
+done
 STAGE=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/news-isolated-build.XXXXXX")" && pwd -P)
 
 SEED=0
