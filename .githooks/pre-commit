@@ -1,8 +1,10 @@
 #!/bin/bash
 set -e
 
-# Docs-only commits (Markdown anywhere, or anything under docs/) need no build or tests.
-if [ -z "$(git diff --cached --name-only | grep -vE '(\.md$|^docs/)')" ]; then
+# Docs-only commits (Markdown anywhere, or anything under docs/) need no build or tests. A staged Swift file, even
+# under docs/, still goes through format.sh's license header check.
+if [ -z "$(git diff --cached --name-only | grep -vE '(\.md$|^docs/)')" ] &&
+    git diff --cached --quiet --diff-filter=d -- '*.swift'; then
     echo "📝 Docs-only commit; skipping format and tests."
     exit 0
 fi
