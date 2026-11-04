@@ -57,17 +57,26 @@ prune_runner_state() {
 }
 export -f prune_runner_state
 
-script/build_test_runner.sh test_runner "${TEST_OPT_FLAGS[@]}"
+# Every run builds into its own directory and names its runners after it, so concurrent runs (another worktree's
+# suite, or the pre-commit hook beside a background run) never share a runner binary or its Library state, and an
+# interrupted run leaves no runner copies behind.
+LOGS=$(mktemp -d "${TMPDIR:-/tmp}/news-test-jobs.XXXXXX")
+RUN_TAG="${LOGS##*.}"
+export LOGS RUN_TAG
+trap 'rm -rf "$LOGS"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+RUNNER="$LOGS/test_runner.$RUN_TAG"
+script/build_test_runner.sh "$RUNNER" "${TEST_OPT_FLAGS[@]}"
 
 if [[ $# -gt 0 ]]; then
     # A run with arguments is a single targeted mode.
     echo "Running unit tests..."
     set +e
-    ./test_runner "$@"
+    "$RUNNER" "$@"
     RUNNER_STATUS=$?
     set -e
-    rm -f test_runner
-    prune_runner_state test_runner
+    prune_runner_state "$(basename "$RUNNER")"
     if [[ "$RUNNER_STATUS" -ne 0 ]]; then exit "$RUNNER_STATUS"; fi
 else
     # The plain run is one job pool over the one runner binary: every test file is its own process,
@@ -85,7 +94,6 @@ else
             exit 2
         fi
     done
-    LOGS=$(mktemp -d "${TMPDIR:-/tmp}/news-test-jobs.XXXXXX")
     JOB_LIST="$LOGS/jobs"
     : > "$JOB_LIST"
     # A job is a name and the environment its copy of the runner gets.
@@ -100,19 +108,20 @@ else
     done
     JOB_COUNT=$(wc -l < "$JOB_LIST" | tr -d ' ')
     echo "Running $JOB_COUNT test jobs, $JOBS at a time..."
-    export LOGS
     set +e
     # Core ML compiles a model into a cache named after the executable, and two processes compiling the same model
-    # under one name race on the bundle rename (seen on CI), so every job runs its own copy of the runner.
+    # under one name race on the bundle rename (seen on CI), so every job runs its own copy of the runner, named
+    # after the job and this run.
     # shellcheck disable=SC2016 # the pool script expands its variables inside the worker, by design
     xargs -P "$JOBS" -L 1 bash -c '
         name="$0"
         start=$(date +%s)
-        cp test_runner "$LOGS/$name.runner"
-        env "$@" "$LOGS/$name.runner" > "$LOGS/$name.log" 2>&1
+        copy="$LOGS/$name.$RUN_TAG.runner"
+        cp "$LOGS/test_runner.$RUN_TAG" "$copy"
+        env "$@" "$copy" > "$LOGS/$name.log" 2>&1
         status=$?
         # Cleanup that fails marks the job failed, so a run never passes while runner state is left behind.
-        if ! rm -f "$LOGS/$name.runner" || ! prune_runner_state "$name.runner"; then
+        if ! rm -f "$copy" || ! prune_runner_state "$(basename "$copy")"; then
             echo "❌ $name: could not remove the runner copy or its Library state" >> "$LOGS/$name.log"
             [[ "$status" -eq 0 ]] && status=1
         fi
@@ -127,7 +136,6 @@ else
     ' < "$JOB_LIST"
     POOL_STATUS=$?
     set -e
-    rm -f test_runner
     STATUS_COUNT=$(ls "$LOGS"/*.status 2>/dev/null | wc -l | tr -d ' ')
     FAILED=$(grep -L '^0$' "$LOGS"/*.status 2>/dev/null || true)
     if [[ -n "$FAILED" ]]; then
@@ -139,10 +147,8 @@ else
     fi
     if [[ -n "$FAILED" || "$STATUS_COUNT" -ne "$JOB_COUNT" || "$POOL_STATUS" -ne 0 ]]; then
         echo "❌ $STATUS_COUNT of $JOB_COUNT test jobs finished; the pool exited $POOL_STATUS." >&2
-        rm -rf "$LOGS"
         exit 1
     fi
-    rm -rf "$LOGS"
 fi
 
 if [ -n "$PASS_STAMP" ]; then
