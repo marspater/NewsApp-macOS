@@ -5,17 +5,46 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Every Swift file starts with the Apache-2.0 header (copy it from any Swift file; in Package.swift it follows the
-# swift-tools-version line). Checked before swift-format is needed: --check runs in CI, --staged in the pre-commit hook.
+# swift-tools-version line). Checked before swift-format is needed: --check runs in CI on the working tree, --staged
+# in the pre-commit hook on the staged content. Paths stay NUL-delimited, so no name is quoted or split.
+LICENSE_HEADER='// Copyright 2026 Mars Pater
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.'
+HEADER_SOURCE=""
 case "${1:-}" in
-    --check|--lint-all) HEADER_FILES=$(git ls-files '*.swift') ;;
-    --staged|--lint-staged) HEADER_FILES=$(git diff --cached --name-only --diff-filter=d | grep '\.swift$' || true) ;;
-    *) HEADER_FILES="" ;;
+    --check|--lint-all) HEADER_SOURCE=tree ;;
+    --staged|--lint-staged) HEADER_SOURCE=index ;;
 esac
-if [[ -n "$HEADER_FILES" ]]; then
-    MISSING=$(tr '\n' '\0' <<< "$HEADER_FILES" | xargs -0 grep -L 'Licensed under the Apache License, Version 2.0' || true)
+if [[ -n "$HEADER_SOURCE" ]]; then
+    MISSING=""
+    while IFS= read -r -d '' file; do
+        if [[ "$HEADER_SOURCE" == index ]]; then
+            content=$(git show ":$file")
+        elif [[ -f "$file" ]]; then
+            content=$(<"$file")
+        else
+            continue
+        fi
+        [[ "$file" == Package.swift && "$content" == "// swift-tools-version"* ]] && content=${content#*$'\n'}
+        [[ "$content" == "$LICENSE_HEADER"$'\n'* ]] || MISSING+="$file"$'\n'
+    done < <(if [[ "$HEADER_SOURCE" == index ]]; then
+        git diff --cached --name-only -z --diff-filter=d -- '*.swift'
+    else
+        git ls-files -z -- '*.swift'
+    fi)
     if [[ -n "$MISSING" ]]; then
-        echo "❌ These Swift files lack the Apache-2.0 license header (copy it from any Swift file):" >&2
-        echo "$MISSING" >&2
+        echo "❌ These Swift files do not start with the Apache-2.0 license header (copy it from any Swift file):" >&2
+        printf '%s' "$MISSING" >&2
         exit 1
     fi
 fi
