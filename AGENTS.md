@@ -23,7 +23,7 @@ These instructions govern agent workflow, not the project specification.
 
 - Follow the user's current scope and preserve real settings, saved stories, read history and logs during verification.
 - v2.0.0 shipped on 31 October 2026; v3 stays English-only while #264 is parked. Issues labelled `parked` are deprioritized by Mars: do not work on them or add them to release gates unless Mars reopens them, and keep their parked code intact.
-- Development verification stays arm64 and ad-hoc signed. Never push a `v*` tag: the push publishes a GitHub release through `release.yml`, and only Mars tags. Do not run the notarization helpers in `script/distribution/`.
+- Development verification stays arm64 and ad-hoc signed. Push a `v*` tag only when Mars explicitly asks: the push publishes a GitHub release through `release.yml`. Run the notarization helpers in `script/distribution/` only on Mars's request.
 - A fix that touches files owned by another open epic (its "Does not touch" lines) gets no PR for that part: post the diff and progress on the issue instead. When a fix substantially relates to an open issue linked to an epic, document it in that issue and explain how the two relate.
 - After a PR merges, delete its local worktree and branch; the remote branch can stay.
 - Do not merge stale PRs wholesale. Review against current code, incorporate useful changes selectively and explain duplicate or superseded proposals.
