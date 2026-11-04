@@ -22,6 +22,19 @@ ROOT=$(pwd)
 BUNDLE_ID="com.marspater.news.isolatedqa"
 CONTAINER="$HOME/Library/Containers/$BUNDLE_ID/Data"
 LIBRARY_DIR="$CONTAINER/Library/Application Support/com.marspater.news"
+# A run cannot delete its own stage (the app keeps running from it), so drop earlier
+# stages whose app has quit. Resolve with pwd -P: the app runs from /private/var, not /var.
+for old in "${TMPDIR:-/tmp}"/news-isolated-build.*; do
+    # Only real directories this user owns: bash 3.2 keeps an unmatched glob as a literal,
+    # and in a shared /tmp a symlink or another user's folder is not ours to delete.
+    [[ -d "$old" && ! -L "$old" && -O "$old" ]] || continue
+    old=$(cd "$old" && pwd -P) || continue
+    re=$(printf '%s' "$old" | sed 's/[]\.*^$+?(){}|[]/\\&/g') # pgrep -f takes a regex
+    pgrep -qf "^$re/src/News.app/Contents/MacOS/News" && continue
+    # Drop the Launch Services record first; a stale one makes macOS call News damaged.
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$old/src/News.app" 2>/dev/null || true
+    rm -rf "$old"
+done
 STAGE=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/news-isolated-build.XXXXXX")" && pwd -P)
 
 SEED=0
