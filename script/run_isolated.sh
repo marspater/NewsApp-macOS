@@ -29,7 +29,8 @@ for old in "${TMPDIR:-/tmp}"/news-isolated-build.*; do
     # and in a shared /tmp a symlink or another user's folder is not ours to delete.
     [[ -d "$old" && ! -L "$old" && -O "$old" ]] || continue
     old=$(cd "$old" && pwd -P) || continue
-    pgrep -qf "^$old/src/News.app/Contents/MacOS/News" && continue
+    re=$(printf '%s' "$old" | sed 's/[]\.*^$+?(){}|[]/\\&/g') # pgrep -f takes a regex
+    pgrep -qf "^$re/src/News.app/Contents/MacOS/News" && continue
     # Drop the Launch Services record first; a stale one makes macOS call News damaged.
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$old/src/News.app" 2>/dev/null || true
     rm -rf "$old"
