@@ -27,7 +27,10 @@ LIBRARY_DIR="$CONTAINER/Library/Application Support/com.marspater.news"
 for old in "${TMPDIR:-/tmp}"/news-isolated-build.*; do
     [[ -d "$old" ]] || continue # bash 3.2 keeps an unmatched glob as a literal
     old=$(cd "$old" && pwd -P) || continue
-    pgrep -qf "^$old/src/News.app/Contents/MacOS/News" || rm -rf "$old"
+    pgrep -qf "^$old/src/News.app/Contents/MacOS/News" && continue
+    # Drop the Launch Services record first; a stale one makes macOS call News damaged.
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$old/src/News.app" 2>/dev/null || true
+    rm -rf "$old"
 done
 STAGE=$(cd "$(mktemp -d "${TMPDIR:-/tmp}/news-isolated-build.XXXXXX")" && pwd -P)
 
