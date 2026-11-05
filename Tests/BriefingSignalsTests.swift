@@ -345,6 +345,11 @@ enum BriefingSignalsTests {
             publishedAt: now.addingTimeInterval(-30 * 60), observedAt: now)
         let delayed = EventMomentumMACD.assess([delayedPoll], now: now)
         check(delayed.recentIndependentReports == 1, "polling delay preserves the publisher's publication time")
+
+        var accumulator = EventMomentumMACDAccumulator()
+        let first = accumulator.append(reportsPerHour: 24)
+        let second = accumulator.append(reportsPerHour: 0)
+        check(first.velocity > 0 && second.velocity > 0, "MACD accumulator updates its EMA state one bucket at a time")
     }
 
     static func diversityMMR() {
@@ -384,6 +389,14 @@ enum BriefingSignalsTests {
         let database = DatabaseEngine(path: root.appendingPathComponent("library.sqlite3").path)
         do {
             try await database.open()
+            let processInfo = ProcessInfo.processInfo
+            guard IntelligencePolicy.allowsEnergy(processInfo) else {
+                throw NSError(
+                    domain: "EditorialEvaluation", code: 5,
+                    userInfo: [NSLocalizedDescriptionKey: "Benchmark paused: Low Power Mode or serious thermal state is active"])
+            }
+            let thermalStateAtStart = processInfo.thermalState.rawValue
+            let lowPowerModeAtStart = processInfo.isLowPowerModeEnabled
             let now = Date()
             let topics = [
                 "Grid battery storage projects connect renewable electricity to regional power networks.",
@@ -429,6 +442,9 @@ enum BriefingSignalsTests {
                     userInfo: [NSLocalizedDescriptionKey: "The bundled sentence embedding model is unavailable"])
             }
             let texts = articles.map { "\($0.title). \($0.description)" }
+            let warmupStart = ProcessInfo.processInfo.systemUptime
+            _ = await embedder.embedBatch(Array(texts.prefix(16)))
+            let embeddingWarmupMilliseconds = (ProcessInfo.processInfo.systemUptime - warmupStart) * 1000
             let embeddingStart = ProcessInfo.processInfo.systemUptime
             let embedded = await embedder.embedBatch(texts)
             let embeddingMilliseconds = (ProcessInfo.processInfo.systemUptime - embeddingStart) * 1000
@@ -576,7 +592,11 @@ enum BriefingSignalsTests {
                 "embeddedRows": payload.count,
                 "storedRowsReadBack": stored.count,
                 "seedSQLiteMilliseconds": seedMilliseconds,
+                "coreMLEmbeddingWarmupMilliseconds": embeddingWarmupMilliseconds,
                 "coreMLEmbeddingMilliseconds": embeddingMilliseconds,
+                "thermalStateAtStart": thermalStateAtStart,
+                "thermalStateAtEnd": ProcessInfo.processInfo.thermalState.rawValue,
+                "lowPowerModeAtStart": lowPowerModeAtStart,
                 "sqliteVectorPersistenceMilliseconds": persistenceMilliseconds,
                 "sqliteVectorReadMilliseconds": vectorReadMilliseconds,
                 "hybridSearchMedianMilliseconds": semanticSearchSamples.sorted()[semanticSearchSamples.count / 2],
