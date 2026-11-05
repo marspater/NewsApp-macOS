@@ -342,6 +342,18 @@ struct NewsApp: App {
         }
         .windowResizability(.contentSize)
 
+        // Development builds only (#1005): Help › Show Log opens it; it has no Window menu item and is not restored.
+        Window("Log", id: LogWindowModel.windowID) {
+            if LogWindowModel.isAvailable {
+                LogWindowView()
+                    .preferredColorScheme(themeManager.appearance.colorScheme)
+                    .modifier(SystemSettingsOverrideModifier())
+            }
+        }
+        .defaultSize(width: 900, height: 560)
+        .commandsRemoved()
+        .restorationBehavior(.disabled)
+
         Settings {
             SettingsView()
                 .environmentObject(appSettings)
@@ -496,6 +508,10 @@ struct KeyboardShortcutsCommands: Commands {
                 DiagnosticsExport.run(
                     settings: AppSettings.shared, feedManager: AppContainer.shared.feedManager,
                     articleStore: ArticleStore.shared)
+            }
+            if LogWindowModel.isAvailable {
+                Button("Show Log") { openWindow(id: LogWindowModel.windowID) }
+                    .keyboardShortcut("l", modifiers: [.command, .option])
             }
             if updateChecker.updateAvailable {
                 Divider()

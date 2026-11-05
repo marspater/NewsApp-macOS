@@ -149,6 +149,7 @@ SWIFT_SOURCES=(
     Sources/App/Intents.swift \
     Sources/App/NotificationActionRouter.swift \
     Sources/Views/StoryBanner.swift \
+    Sources/Views/LogWindowView.swift \
     Sources/App/LibraryBackup.swift \
     Sources/App/NewsApp.swift \
 )
