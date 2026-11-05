@@ -27690,6 +27690,8 @@ struct NewsTests {
         }
         let honorsCancellation: Bool
         private(set) var requests: [URL] = []
+        /// The pixel bound each request asked for, in request order.
+        private(set) var pixelBounds: [Int] = []
         private var queue: [Waiting] = []
         private let image: CGImage = {
             CGContext(
@@ -27701,10 +27703,13 @@ struct NewsTests {
 
         init(honorsCancellation: Bool = true) { self.honorsCancellation = honorsCancellation }
 
-        var loader: @Sendable (URL, Int) async throws -> CGImage { { url, _ in try await self.enqueue(url) } }
+        var loader: @Sendable (URL, Int) async throws -> CGImage {
+            { url, maxPixels in try await self.enqueue(url, maxPixels: maxPixels) }
+        }
 
-        private func enqueue(_ url: URL) async throws -> CGImage {
+        private func enqueue(_ url: URL, maxPixels: Int) async throws -> CGImage {
             requests.append(url)
+            pixelBounds.append(maxPixels)
             let id = UUID()
             return try await withTaskCancellationHandler {
                 try await withCheckedThrowingContinuation { continuation in
@@ -27824,6 +27829,10 @@ struct NewsTests {
             Double(counts.placeholders) <= 0.05 * 180, "At most 5% of cards show a placeholder at first paint")
         let others = Set(probe.requests).subtracting(cardURLs)
         assertTrue(others.isEmpty, "Only the images cards show are fetched (\(others.count) others)")
+        assertTrue(
+            !probe.pixelBounds.isEmpty && probe.pixelBounds.allSatisfy { $0 == DecodedImageCache.Size.card.maxPixels },
+            "Without a lead, every card prefetch decodes at card size, never at the reader's bound")
+        assertEqual(stubborn.pixelBounds, [DecodedImageCache.Size.full.maxPixels], "A plain load decodes at full size")
         prefetch.reset()
         initial.cancel()
         while probe.queued > 0 {
