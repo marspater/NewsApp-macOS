@@ -1,0 +1,71 @@
+name: Temporary Review Diagnostics
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    name: Inspect Codacy and SonarCloud findings
+    runs-on: ubuntu-latest
+    steps:
+      - name: Allow static analyzers to finish
+        run: sleep 75
+
+      - name: Fetch issue collections
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          fetch_json() {
+            local label="$1"
+            local url="$2"
+            local destination="$RUNNER_TEMP/$label.json"
+            local http_status
+            http_status=$(curl --location --silent --show-error --max-time 30 \
+              --output "$destination" --write-out "%{http_code}" "$url" || true)
+            echo "$label HTTP status: $http_status"
+          }
+
+          codacy_base="https://api.codacy.com/api/v3/analysis/organizations/gh/marspater/repositories/NewsApp-macOS/pull-requests/$PR_NUMBER"
+          fetch_json codacy_pr "$codacy_base"
+          fetch_json codacy_issues_all "$codacy_base/issues?status=all&limit=100"
+          fetch_json codacy_issues_new "$codacy_base/issues?status=new&limit=100"
+          fetch_json codacy_files "$codacy_base/files?limit=100"
+          fetch_json sonar_issues "https://sonarcloud.io/api/issues/search?componentKeys=marspater_NewsApp-macOS&pullRequest=$PR_NUMBER&resolved=false&ps=100"
+          fetch_json sonar_gate "https://sonarcloud.io/api/qualitygates/project_status?projectKey=marspater_NewsApp-macOS&pullRequest=$PR_NUMBER"
+
+          python3 - "$RUNNER_TEMP" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          root = pathlib.Path(sys.argv[1])
+          for name in (
+              "codacy_pr", "codacy_issues_all", "codacy_issues_new",
+              "codacy_files", "sonar_issues", "sonar_gate",
+          ):
+              path = root / f"{name}.json"
+              print(f"--- {name} ---")
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+              except (OSError, json.JSONDecodeError) as error:
+                  print(f"Could not decode response: {error}")
+                  continue
+              if isinstance(payload, dict):
+                  print("metadata:", json.dumps(
+                      {key: value for key, value in payload.items() if key not in ("data", "issues")},
+                      sort_keys=True,
+                  ))
+                  records = payload.get("data", payload.get("issues", []))
+                  if isinstance(records, list):
+                      print("record count:", len(records))
+                      for item in records:
+                          print(json.dumps(item, sort_keys=True))
+                  else:
+                      print(json.dumps(records, sort_keys=True))
+              else:
+                  print(json.dumps(payload, sort_keys=True))
+          PY
