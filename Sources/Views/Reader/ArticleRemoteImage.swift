@@ -54,24 +54,45 @@ extension EnvironmentValues {
         }
     }
 
+    /// Card decodes hold about three prefetch windows (behind, visible, ahead); full-size decodes about three stories'
+    /// figures plus the lead and the hero. Together they keep the 192 MB ceiling of the single cache before #591.
+    static let cardCostLimit = 128 * 1024 * 1024
+    static let cardCountLimit = 90
+    static let fullCostLimit = 64 * 1024 * 1024
+    static let fullCountLimit = 24
+
     /// Full-size decodes, which also serve a card asking for the same URL.
     static let images: NSCache<NSURL, CGImage> = {
         let cache = NSCache<NSURL, CGImage>()
-        cache.totalCostLimit = 192 * 1024 * 1024
-        cache.countLimit = 500
+        cache.totalCostLimit = fullCostLimit
+        cache.countLimit = fullCountLimit
         return cache
     }()
     /// Card-size decodes.
     static let cardImages: NSCache<NSURL, CGImage> = {
         let cache = NSCache<NSURL, CGImage>()
-        cache.totalCostLimit = 96 * 1024 * 1024
-        cache.countLimit = 500
+        cache.totalCostLimit = cardCostLimit
+        cache.countLimit = cardCountLimit
         return cache
     }()
 
     /// A decoded image at least as large as `size` asks for: a card takes a full-size decode too.
     static func cached(_ url: URL, size: Size = .full) -> CGImage? {
         (size == .card ? cardImages.object(forKey: url as NSURL) : nil) ?? images.object(forKey: url as NSURL)
+    }
+
+    /// Card first paints that showed the placeholder and the image; nil (not counted) unless a test turns it on (#591).
+    static var cardFirstPaints: (placeholders: Int, images: Int)?
+
+    /// The image a newly shown view starts with, counted for cards when `cardFirstPaints` is on.
+    static func firstPaint(_ url: URL, size: Size) -> CGImage? {
+        let image = cached(url, size: size)
+        if size == .card, let counts = cardFirstPaints {
+            cardFirstPaints =
+                image == nil
+                ? (counts.placeholders + 1, counts.images) : (counts.placeholders, counts.images + 1)
+        }
+        return image
     }
 
     private static func store(_ image: CGImage, for url: URL, size: Size) {
@@ -132,15 +153,21 @@ extension EnvironmentValues {
             shared = existing
         } else {
             let maxPixels = size.maxPixels
+            // The task stores its own decode, so finished work is kept when every waiter has gone (#591); only a
+            // clear() since it started discards it. Data downloaded but not yet decoded is still dropped on cancellation.
             shared = SharedLoad(
-                task: Task { try await loader(ReaderImageCandidate.preferredRendition(of: url), maxPixels) })
+                task: Task {
+                    let image = try await loader(ReaderImageCandidate.preferredRendition(of: url), maxPixels)
+                    if generation == currentGeneration { store(image, for: url, size: size) }
+                    return image
+                })
             pending[key] = shared
         }
         let task = shared.task
         shared.join()
         // After clear() a newer load may own the key; only remove this load's own entry.
         defer { if pending[key] === shared { pending[key] = nil } }
-        let image = try await withTaskCancellationHandler {
+        return try await withTaskCancellationHandler {
             try await task.value
         } onCancel: {
             Task { @MainActor in
@@ -150,10 +177,6 @@ extension EnvironmentValues {
                 }
             }
         }
-        if !task.isCancelled && !Task.isCancelled && generation == currentGeneration {
-            store(image, for: url, size: size)
-        }
-        return image
     }
 
     static func prefetch(
@@ -173,6 +196,62 @@ extension EnvironmentValues {
                 if let url = iterator.next() { group.addTask { _ = try? await load(url, size: size, using: loader) } }
             }
         }
+    }
+}
+
+extension FeedEntry {
+    /// The image the entry's card shows from its listed reports, as `ArticleCardView` and `EventCardView` choose it.
+    var cardImageURL: URL? {
+        FeedArticle.bestCardImage(in: [representative] + visibleArticles.filter { $0.id != representative.id })
+    }
+}
+
+/// Decodes each listed card's own image before it scrolls into view (#591): the first cards when a list appears, and a
+/// window of 30 cards around the scroll position as cards appear. Hidden event members' images, which need a library
+/// read, are not prefetched.
+@MainActor final class CardImagePrefetch {
+    private var start = 0
+    private var task: Task<Void, Never>?
+
+    /// The first card of the prefetch window: it moves once the visible card leaves its first 18 cards, to 6 before it.
+    static func windowStart(visibleIndex: Int, currentStart: Int) -> Int {
+        if visibleIndex < currentStart || visibleIndex >= currentStart + 18 { return max(0, visibleIndex - 6) }
+        return currentStart
+    }
+
+    /// The images of the first 30 listed cards, each as its card shows it.
+    static func initialURLs(_ entries: [FeedEntry]) -> [URL] {
+        entries.prefix(30).compactMap(\.cardImageURL)
+    }
+
+    /// Decodes the first cards' images at the size they show them: with a lead story, the first image (the lead's) at
+    /// full size; every other at card size.
+    static func first(
+        _ urls: [URL], leadAtFullSize: Bool, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
+    ) async {
+        let lead = leadAtFullSize ? Array(urls.prefix(1)) : []
+        async let leadImage: Void = DecodedImageCache.prefetch(lead, using: loader)
+        await DecodedImageCache.prefetch(Array(urls.dropFirst(lead.count)), size: .card, using: loader)
+        await leadImage
+    }
+
+    func reset() {
+        start = 0
+        task?.cancel()
+        task = nil
+    }
+
+    /// Card `index` of `entries` appeared: moves the window when needed and decodes its cards' images at card size.
+    func ahead(
+        of index: Int, in entries: [FeedEntry], using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
+    ) {
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        let next = Self.windowStart(visibleIndex: index, currentStart: start)
+        guard next != start else { return }
+        start = next
+        let urls = entries.dropFirst(next).prefix(30).compactMap(\.cardImageURL)
+        task?.cancel()
+        task = Task { await DecodedImageCache.prefetch(urls, size: .card, using: loader) }
     }
 }
 
@@ -227,7 +306,7 @@ struct ArticleRemoteImage<Content: View>: View {
         self.size = size
         self.content = content
         _phase = State(
-            initialValue: DecodedImageCache.cached(url, size: size).map { .success(Self.image($0)) } ?? .empty)
+            initialValue: DecodedImageCache.firstPaint(url, size: size).map { .success(Self.image($0)) } ?? .empty)
         _phaseURL = State(initialValue: url)
     }
 

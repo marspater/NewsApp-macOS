@@ -87,14 +87,14 @@ struct NativeUIQAChecks {
         testSecondaryWindowAndSheetChrome()
         await testReadingColumnBounds()
         await testUnscoredTensionWithHistory()
-        let forwardStart = ArticleListView.prefetchStart(visibleIndex: 100, currentStart: 0)
+        let forwardStart = CardImagePrefetch.windowStart(visibleIndex: 100, currentStart: 0)
         assertTrue(
             forwardStart > 0 && forwardStart <= 100 && forwardStart + 30 > 100,
             "Prefetch drops distant earlier cards and covers the visible card")
-        let backwardStart = ArticleListView.prefetchStart(visibleIndex: 10, currentStart: forwardStart)
+        let backwardStart = CardImagePrefetch.windowStart(visibleIndex: 10, currentStart: forwardStart)
         assertTrue(backwardStart <= 10 && backwardStart + 30 > 10, "Scrolling backward warms nearby images again")
         assertEqual(
-            ArticleListView.prefetchStart(visibleIndex: 12, currentStart: backwardStart), backwardStart,
+            CardImagePrefetch.windowStart(visibleIndex: 12, currentStart: backwardStart), backwardStart,
             "Cards already inside the window do not restart prefetch")
         assertEqual(
             ArticleListView.headerMaxWidth(isBriefing: true, gridLayout: false), AppLayout.briefingMaxWidth,
