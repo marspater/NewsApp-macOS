@@ -169,9 +169,10 @@ enum PassageNoveltyScorer {
         let disposition: PassageNoveltyDisposition
         if results.contains(where: { $0.disposition == .potentiallyNew }) {
             disposition = .potentiallyNew
-        } else if results.contains(where: { $0.disposition == .repetition }) {
+        } else if !results.isEmpty && results.allSatisfy({ $0.disposition == .repetition }) {
             disposition = .repetition
         } else {
+            // A mix of repetition and unresolved passages is not enough to label the whole report as repetition.
             disposition = .unmatched
         }
         return PassageNoveltyResult(disposition: disposition, score: weightedScore, passages: results)
