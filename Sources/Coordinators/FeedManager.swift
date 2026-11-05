@@ -42,6 +42,14 @@ class FeedManager: NSObject, ObservableObject {
     @Published var isAnyFeedLoading: Bool = false
     /// Operational health per subscription, refreshed after every refresh and when a view asks.
     @Published private(set) var feedHealth: [String: FeedHealth] = [:]
+    /// The last finished clustering pass and image lookup of this launch, for the diagnostics export (#1006).
+    struct ClusteringPass: Sendable {
+        let report: EventClusteringReport
+        let seconds: Double
+        let finishedAt: Date
+    }
+    private(set) var lastClusteringPass: ClusteringPass?
+    private(set) var lastImageLookup: StoryCurator.Report?
 
     let appSettings: AppSettings
     let articleStore: ArticleStore
@@ -49,7 +57,7 @@ class FeedManager: NSObject, ObservableObject {
     typealias FeedBatch = [FeedFetchResult]
     private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
     private let notifyBatch: @MainActor ([FeedArticle], NotificationDelivery) async -> Void
-    private let enrichmentQueue: EnrichmentQueue
+    let enrichmentQueue: EnrichmentQueue
     private let allowsBackgroundWork: @MainActor () -> Bool
     private let imageFinder: StoryImageFinder
     private var isStopped = false
@@ -809,9 +817,11 @@ class FeedManager: NSObject, ObservableObject {
             repeat {
                 self?.needsClusteringPass = false
                 let allowsEnergy = self?.allowsBackgroundWork() ?? true
-                let work = Task.detached(priority: .utility) { () throws -> Bool in
-                    let clustering = try await EventClusterer.run(in: database, allowsEnergy: allowsEnergy)
-                    return !clustering.changedEvents.isEmpty
+                let work = Task.detached(priority: .utility) { () throws -> ClusteringPass in
+                    let started = ProcessInfo.processInfo.systemUptime
+                    let report = try await EventClusterer.run(in: database, allowsEnergy: allowsEnergy)
+                    return ClusteringPass(
+                        report: report, seconds: ProcessInfo.processInfo.systemUptime - started, finishedAt: Date())
                 }
                 let result = await withTaskCancellationHandler {
                     await work.result
@@ -820,8 +830,9 @@ class FeedManager: NSObject, ObservableObject {
                 }
                 guard let self, self.clusteringRunID == runID, !Task.isCancelled else { return }
                 switch result {
-                case .success(let changed):
-                    if changed { self.articleStore.noteEventsChanged() }
+                case .success(let pass):
+                    self.lastClusteringPass = pass
+                    if !pass.report.changedEvents.isEmpty { self.articleStore.noteEventsChanged() }
                 case .failure(let error):
                     if !(error is CancellationError) {
                         self.logger.error("Event clustering failed: \(error.localizedDescription)")
@@ -871,6 +882,7 @@ class FeedManager: NSObject, ObservableObject {
             guard let self, !Task.isCancelled else { return }
             switch result {
             case .success(let report):
+                self.lastImageLookup = report
                 if report.changed { self.articleStore.noteEventsChanged() }
             case .failure(let error):
                 if !(error is CancellationError) {

@@ -1067,6 +1067,17 @@ struct NewsTests {
             ("testCanonicalClassificationDisambiguation", { await testCanonicalClassificationDisambiguation() }),
             ("testDiagnosticsExport", { try await testDiagnosticsExport() }),
             ("testLogWindowModel", { await testLogWindowModel() }),
+            ("testDiagnosticsLibrary", { try await testDiagnosticsLibrary() }),
+            ("testDiagnosticsFeeds", { await testDiagnosticsFeeds() }),
+            ("testDiagnosticsClustering", { try await testDiagnosticsClustering() }),
+            ("testDiagnosticsIntelligence", { try await testDiagnosticsIntelligence() }),
+            ("testDiagnosticsNotifications", { try await testDiagnosticsNotifications() }),
+            ("testDiagnosticsImages", { try await testDiagnosticsImages() }),
+            ("testDiagnosticsNetwork", { await testDiagnosticsNetwork() }),
+            ("testDiagnosticsProcess", { await testDiagnosticsProcess() }),
+            ("testDiagnosticsLogFiles", { await testDiagnosticsLogFiles() }),
+            ("testDiagnosticsSpotlightAndCaches", { await testDiagnosticsSpotlightAndCaches() }),
+            ("testDiagnosticsSections", { try await testDiagnosticsSections() }),
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
@@ -2531,6 +2542,15 @@ struct NewsTests {
         func record(_ name: String, from start: Double) {
             measurements[name, default: []].append((ProcessInfo.processInfo.systemUptime - start) * 1000)
         }
+        // Diagnostics export (#1006) on the 10,000-story library: every state writer plus the log and the redaction.
+        let exportStart = ProcessInfo.processInfo.systemUptime
+        let exportLog = try DiagnosticsExport.logLines(since: .distantPast)
+        let exportSections = await DiagnosticsExport.sectionFiles(
+            db, app: DiagnosticsExport.AppSnapshot(feedURLs: settings.feedURLs), log: exportLog, now: clusterNow)
+        let exportFiles = DiagnosticsExport.files(
+            summary: "News diagnostics\n", sections: exportSections, log: exportLog, titles: archive.map(\.title))
+        record("diagnosticsExport", from: exportStart)
+        print("Diagnostics export: \(exportFiles.count) files in \(measurements["diagnosticsExport"]?.last ?? 0) ms")
         let coldStart = ProcessInfo.processInfo.systemUptime
         assertTrue(await store.refreshState(), "Baseline snapshot hydrates")
         record("snapshot_first_500_ms", from: coldStart)
@@ -24056,6 +24076,220 @@ struct NewsTests {
         assertTrue(model.visible.isEmpty, "Clear hides what was shown")
         model.append([line(1, "Feeds", "Info", "Old"), line(4, "Feeds", "Info", "After clear")])
         assertEqual(model.visible.map(\.line.message), ["After clear"], "Lines shown before Clear stay hidden")
+    }
+
+    /// A seeded in-memory library for the diagnostics writers (#1006): two stories, one matched by an older matcher.
+    static func diagnosticsLibrary() async throws -> DatabaseEngine {
+        let database = DatabaseEngine(path: ":memory:")
+        try await database.open()
+        let stories = (0..<2).map { index in
+            FeedArticle(
+                title: "Minister resigns over leaked budget memo \(index)",
+                link: "https://news.example.com/world/memo-\(index)", guid: "memo-\(index)", description: "Memo",
+                pubDate: Date(timeIntervalSince1970: 1_790_000_000 + Double(index)), source: "Example")
+        }
+        try await database.upsertArticles(stories)
+        try await database.markEventMatchProcessed([stories[0].id], matcherVersion: EventMatcher.version)
+        try await database.markEventMatchProcessed([stories[1].id], matcherVersion: EventMatcher.version - 1)
+        return database
+    }
+
+    static func testDiagnosticsLibrary() async throws {
+        print("  - Testing the diagnostics library writer (#1006)...")
+        let text = try await DiagnosticsExport.library(try await diagnosticsLibrary())
+        assertTrue(
+            text.contains("Schema version: \(DatabaseEngine.schemaVersion)"), "Library names its schema: \(text)")
+        assertTrue(text.contains("Integrity check: ok"), "Library runs the integrity check")
+        assertTrue(text.contains("\narticles: 2\n"), "Library counts rows per table")
+        assertTrue(text.contains("Oldest story: 2026-09-21T14:13:20Z"), "Library names the oldest story's date")
+        assertTrue(!text.contains("Minister"), "Library carries no story text")
+    }
+
+    static func testDiagnosticsFeeds() async {
+        print("  - Testing the diagnostics feeds writer (#1006)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let url = "https://feeds.example.org/private/world.xml?token=1"
+        var state = FeedFetchState(failures: 2)
+        state.validators = FeedValidators(etag: "\"abc\"", lastModified: nil)
+        state.retryAt = now.addingTimeInterval(600)
+        state.itemCount = 12
+        state.fullTextItems = 3
+        let text = DiagnosticsExport.feeds(
+            feedURLs: [url, "https://other.example/rss"], states: [url: state],
+            statuses: [url: DiagnosticsExport.failureKind(.httpStatus(503))], now: now)
+        assertTrue(
+            text.contains("1. feeds.example.org: status httpStatus 503, last fetch never, failures 2"),
+            "Feeds list status and failures by host: \(text)")
+        assertTrue(text.contains("validators ETag, items 12, full text 3 of 12"), "Feeds list validators and items")
+        assertTrue(text.contains("2. other.example: status idle"), "Every subscription is listed")
+        assertTrue(!text.contains("/private/") && !text.contains("token"), "Feeds keep only the host")
+        assertEqual(
+            DiagnosticsExport.failureKind(.network("https://x.example/a failed")), "network",
+            "A failure kind carries no payload")
+    }
+
+    static func testDiagnosticsClustering() async throws {
+        print("  - Testing the diagnostics clustering writer (#1006)...")
+        var report = EventClusteringReport()
+        report.processed = 4
+        report.deferred = 1
+        let pass = FeedManager.ClusteringPass(
+            report: report, seconds: 0.25, finishedAt: Date(timeIntervalSince1970: 1_790_000_000))
+        let text = try await DiagnosticsExport.clustering(
+            try await diagnosticsLibrary(), lastPass: pass, embedderAvailable: true, pairModelAvailable: false)
+        assertTrue(text.contains("Matcher version: \(EventMatcher.version)"), "Clustering names the matcher: \(text)")
+        assertTrue(text.contains("older matcher): 1"), "Clustering counts stories pending a match")
+        assertTrue(text.contains("version \(SentenceEmbedder.modelVersion), available"), "Embedder state")
+        assertTrue(
+            text.contains("Pair model: matcher version \(EventMatcher.version), unavailable"), "Pair model state")
+        assertTrue(text.contains("0.25 s, processed 4") && text.contains("deferred 1"), "The last pass and deferrals")
+    }
+
+    static func testDiagnosticsIntelligence() async throws {
+        print("  - Testing the diagnostics intelligence writer (#1006)...")
+        let overviews = OverviewGenerationCoordinator.Counts(
+            inFlight: 1, extractions: 2, failedExtractions: 3, cached: 4)
+        let text = try await DiagnosticsExport.intelligence(
+            try await diagnosticsLibrary(), foundationModels: "available", queue: ["queued": 5, "running": 1],
+            overviews: overviews)
+        assertTrue(text.contains("Foundation Models: available"), "Intelligence names model availability: \(text)")
+        assertTrue(text.contains("Enrichment queue: queued 5, running 1"), "The queue by state")
+        assertTrue(
+            text.contains(#/Enrichment rows: 2, enriched \d+, with a summary \d+/#), "Stored enrichment counts: \(text)"
+        )
+        assertTrue(
+            text.contains("in flight: 1, page fetches running 2, failed this launch 3, held in memory 4"),
+            "Overview work in flight")
+        let counts = await EnrichmentQueue().stateCounts()
+        assertTrue(counts.isEmpty, "A new queue holds nothing")
+    }
+
+    static func testDiagnosticsNotifications() async throws {
+        print("  - Testing the diagnostics notifications writer (#1006)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let database = try await diagnosticsLibrary()
+        let clock = now.timeIntervalSince1970
+        try await database.eventRows(
+            "INSERT INTO notification_deliveries(lane, grouped, feed_url, story_count, delivered_at) VALUES (0, 0, NULL, 1, ?), (2, 1, NULL, 3, ?), (0, 0, NULL, 1, ?);",
+            [.real(clock - 60), .real(clock - 120), .real(clock - 2 * 86400)])
+        let log = [
+            DiagnosticsExport.LogLine(
+                date: now, category: "StoryBanner", level: "Notice", message: "posted <private> route=appBanner"),
+            DiagnosticsExport.LogLine(
+                date: now, category: "StoryBanner", level: "Notice",
+                message: "posted <private> route=notificationCenter"),
+            DiagnosticsExport.LogLine(
+                date: now, category: "NotificationService", level: "Error",
+                message: "Failed to schedule full notification '<private>': domain=UNErrorDomain code=1 Not allowed"),
+        ]
+        let text = try await DiagnosticsExport.notifications(
+            database, settings: ["Authorization: authorized"], log: log, now: now)
+        assertTrue(text.contains("Authorization: authorized"), "Notifications list the settings: \(text)")
+        assertTrue(text.contains("normal: 1, 1") && text.contains("priority, grouped: 1, 3"), "The last 24 h by lane")
+        assertTrue(
+            text.contains("appBanner: 1") && text.contains("notificationCenter: 1")
+                && text.contains("refused UNErrorDomain 1: 1"), "Routes and refusals")
+    }
+
+    static func testDiagnosticsImages() async throws {
+        print("  - Testing the diagnostics images writer (#1006)...")
+        let now = Date()
+        let database = try await diagnosticsLibrary()
+        let ids = try await database.eventRows("SELECT id FROM articles ORDER BY id;").compactMap { $0[0] }
+        try await database.recordStoryImage(ids[0], imageURL: "https://img.example/a.jpg", at: now)
+        try await database.recordStoryImage(ids[1], imageURL: nil, at: now)
+        var lookup = StoryCurator.Report()
+        lookup.imagesFound = 1
+        lookup.imagesChecked = 2
+        let text = try await DiagnosticsExport.images(database, lastLookup: lookup, now: now)
+        assertTrue(
+            text.contains("Lookup rows: 2, with an image 1, refused or without one 1, checked in the last 24 hours 2"),
+            "Images count the lookup table: \(text)")
+        assertTrue(text.contains("found 1, checked 2 of a budget of \(StoryCurator.imageBudget)"), "The last pass")
+        assertTrue(text.contains("at most \(DecodedImageCache.countLimit) images"), "The decoded cache's limits")
+    }
+
+    static func testDiagnosticsNetwork() async {
+        print("  - Testing the diagnostics network writer (#1006)...")
+        let log = [
+            DiagnosticsExport.LogLine(
+                date: Date(), category: "NetworkBoundaryProxy", level: "Error",
+                message: "Upstream connect to port 443 refused: posix ECONNREFUSED"),
+            DiagnosticsExport.LogLine(
+                date: Date(), category: "NetworkBoundaryProxy", level: "Error",
+                message: "Upstream connect to port 443 refused: posix ECONNREFUSED"),
+        ]
+        let text = DiagnosticsExport.network(
+            gatewayPort: 50_123, resolverCancellations: 2,
+            feedStatuses: ["https://a.example/rss": "timeout", "https://b.example/rss": "timeout", "c": "idle"],
+            proxy: DiagnosticsExport.proxyLines(["HTTPSEnable": 1, "__SCOPED__": ["utun3": [:], "en0": [:]]]), log: log)
+        assertTrue(text.contains("listening on 127.0.0.1:50123"), "Network names the gateway: \(text)")
+        assertTrue(text.contains("cancelled before they ran 2"), "Resolver cancellations")
+        assertTrue(text.contains("timeout: 2"), "Feed failures by kind")
+        assertTrue(text.contains("refused posix ECONNREFUSED: 2"), "Upstream outcomes from the log")
+        assertTrue(text.contains("HTTPS proxy: on") && text.contains("VPN interfaces: utun3"), "Proxy and VPN state")
+        assertTrue(!text.contains("en0"), "Only tunnel interfaces are listed")
+    }
+
+    static func testDiagnosticsProcess() async {
+        print("  - Testing the diagnostics process writer (#1006)...")
+        let snapshot = DiagnosticsExport.processSnapshot(
+            displayScale: 2, reduceMotion: true, increaseContrast: false, voiceOver: false)
+        assertTrue(snapshot.footprintBytes ?? 0 > 0, "The process reads its memory footprint")
+        assertTrue(snapshot.launchedAt != nil, "The process reads its start time")
+        let text = DiagnosticsExport.process(snapshot, now: Date())
+        assertTrue(text.contains("Display scale: 2.0"), "Process names the display scale: \(text)")
+        assertTrue(text.contains("Reduce Motion: on, Increase Contrast: off, VoiceOver: off"), "Accessibility")
+        assertTrue(text.contains("Thermal state: ") && text.contains("Locale: "), "Energy and locale")
+    }
+
+    static func testDiagnosticsLogFiles() async {
+        print("  - Testing the diagnostics log files (#1006)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let log = [
+            DiagnosticsExport.LogLine(date: now, category: "Feeds", level: "Info", message: "one"),
+            DiagnosticsExport.LogLine(date: now, category: "Database", level: "Error", message: "two"),
+            DiagnosticsExport.LogLine(date: now, category: "Feeds", level: "Info", message: "three"),
+        ]
+        let files = DiagnosticsExport.logFiles(log)
+        assertEqual(files.keys.sorted(), ["log-Database.txt", "log-Feeds.txt", "log.txt"], "One file per category")
+        assertEqual(files["log-Feeds.txt"]?.components(separatedBy: "\n").count, 3, "A category file holds its lines")
+        assertEqual(files["log.txt"]?.components(separatedBy: "\n").count, 4, "The combined file holds every line")
+    }
+
+    static func testDiagnosticsSpotlightAndCaches() async {
+        print("  - Testing the diagnostics Spotlight and caches writer (#1006)...")
+        var app = DiagnosticsExport.AppSnapshot()
+        app.savedStories = 3
+        app.spotlightAvailable = true
+        app.urlCache = (memory: 1024, disk: 2048, memoryCapacity: 4096, diskCapacity: 8192)
+        let log = [
+            DiagnosticsExport.LogLine(
+                date: Date(timeIntervalSince1970: 1_790_000_000), category: "CacheManager", level: "Info",
+                message: "Cleared HTTP network cache.")
+        ]
+        let text = DiagnosticsExport.spotlightAndCaches(app, log: log)
+        assertTrue(text.contains("indexing available, saved stories indexed 3"), "Spotlight state: \(text)")
+        assertTrue(text.contains("URL cache: memory 1 KB of 4 KB"), "URL cache use")
+        assertTrue(text.contains("2026-09-21T14:13:20Z Cleared HTTP network cache."), "Clear commands run")
+    }
+
+    static func testDiagnosticsSections() async throws {
+        print("  - Testing the diagnostics archive's file list (#1006)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let sections = await DiagnosticsExport.sectionFiles(
+            try await diagnosticsLibrary(), app: DiagnosticsExport.AppSnapshot(), log: [], now: now)
+        let files = DiagnosticsExport.files(summary: "News diagnostics\n", sections: sections, log: [], titles: [])
+        let summary = files["summary.txt"] ?? ""
+        for name in files.keys {
+            assertTrue(summary.contains("\n\(name)\n") || summary.hasSuffix("\n\(name)\n"), "summary.txt lists \(name)")
+        }
+        for name in [
+            "library.txt", "feeds.txt", "clustering.txt", "intelligence.txt", "notifications.txt", "images.txt",
+            "network.txt", "process.txt", "spotlight-and-caches.txt", "log.txt",
+        ] {
+            assertTrue(files[name] != nil, "The archive holds \(name)")
+        }
     }
 
     @MainActor

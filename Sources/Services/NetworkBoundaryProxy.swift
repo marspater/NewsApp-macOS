@@ -90,6 +90,12 @@ actor NetworkBoundaryProxy {
         return configuration
     }
 
+    /// The running gateway's port, or nil before the first request and after it stopped; never starts one (#1006).
+    func runningPort() async -> UInt16? {
+        guard let startup else { return nil }
+        return try? await startup.value.runningPort
+    }
+
     /// The next `port()` call starts a new listener.
     func stop() async {
         let task = startup
@@ -109,6 +115,8 @@ final class ProxyResolver: @unchecked Sendable {
         queue.qualityOfService = .utility
         return queue
     }()
+    /// Lookups cancelled before they ran, for the diagnostics export (#1006).
+    static let cancellations = OSAllocatedUnfairLock(initialState: 0)
     init(body: @escaping NetworkBoundaryProxy.Resolver) { self.body = body }
     func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
         let pending = CompletionOnce()
@@ -119,7 +127,7 @@ final class ProxyResolver: @unchecked Sendable {
                 }
             }
         } onCancel: {
-            _ = pending.claim()
+            if pending.claim() { Self.cancellations.withLock { $0 += 1 } }
         }
     }
 }

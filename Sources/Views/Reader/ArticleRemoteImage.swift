@@ -40,10 +40,12 @@ extension EnvironmentValues {
 /// Decoded images by source URL, so a card scrolled back into view shows its image at once instead of fetching and
 /// decoding it again. NSCache evicts under memory pressure.
 @MainActor enum DecodedImageCache {
+    nonisolated static let countLimit = 500
+    nonisolated static let costLimit = 192 * 1024 * 1024
     static let images: NSCache<NSURL, CGImage> = {
         let cache = NSCache<NSURL, CGImage>()
-        cache.totalCostLimit = 192 * 1024 * 1024
-        cache.countLimit = 500
+        cache.totalCostLimit = costLimit
+        cache.countLimit = countLimit
         return cache
     }()
     /// One download shared by every waiter on a URL. It is cancelled once all waiters that joined have cancelled.

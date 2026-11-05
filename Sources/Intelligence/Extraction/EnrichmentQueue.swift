@@ -261,6 +261,24 @@ actor EnrichmentQueue {
 
     // MARK: - Queue State Queries
 
+    /// Jobs by state, plus the stories classified this session, for the diagnostics export (#1006).
+    func stateCounts() -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for job in jobs.values {
+            let name: String
+            switch job.state {
+            case .queued: name = "queued"
+            case .running: name = "running"
+            case .completed: name = "completed"
+            case .cancelled(let reason): name = "cancelled (\(reason.rawValue))"
+            case .failed: name = "failed"
+            }
+            counts[name, default: 0] += 1
+        }
+        if !completedInputs.isEmpty { counts["classified this session"] = completedInputs.count }
+        return counts
+    }
+
     func state(for articleId: String) -> EnrichmentJobState? {
         if let state = jobs[articleId]?.state { return state }
         return completedInputs[articleId] == nil ? nil : .completed
