@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
+import os
 import json
 import math
-import random
+import typing
 import sqlite3
 import statistics
 import tempfile
@@ -19,6 +21,55 @@ TOPICS = ["energy", "semiconductors", "monetary-policy", "rail", "shipping",
           "public-health", "space", "cybersecurity", "agriculture", "climate"]
 SCENARIOS = [("breaking", 20), ("slow_weekend", 15), ("syndication", 15)]
 PUBLISHERS = [f"Publisher {i:02d}" for i in range(20)]
+
+
+T = typing.TypeVar("T")
+
+
+class DeterministicFixtureRNG:
+    """Generate reproducible pseudo-random values for synthetic evaluation fixtures."""
+
+    def __init__(self, seed: int) -> None:
+        """Initialize the fixture stream from a caller-selected integer seed."""
+        self._seed = str(seed).encode("utf-8")
+        self._counter = 0
+
+    def _next_u64(self) -> int:
+        """Return the next 64 bits from the deterministic SHA-256 counter stream."""
+        digest = hashlib.sha256(self._seed + self._counter.to_bytes(8, "big")).digest()
+        self._counter += 1
+        return int.from_bytes(digest[:8], "big")
+
+    def randint(self, start: int, stop: int) -> int:
+        """Return a reproducible integer in the inclusive range [start, stop]."""
+        if start > stop:
+            raise ValueError("start must not exceed stop")
+        span = stop - start + 1
+        ceiling = 1 << 64
+        limit = ceiling - ceiling % span
+        while True:
+            value = self._next_u64()
+            if value < limit:
+                return start + value % span
+
+    def random(self) -> float:
+        """Return a deterministic floating-point value in the half-open range [0, 1)."""
+        return self._next_u64() / float(1 << 64)
+
+    def shuffle(self, values: list[T]) -> None:
+        """Shuffle a list in place using the seeded fixture stream."""
+        for index in range(len(values) - 1, 0, -1):
+            other = self.randint(0, index)
+            values[index], values[other] = values[other], values[index]
+
+
+def create_empty_file_exclusive(path: Path) -> None:
+    """Create a new private file atomically without replacing an existing path."""
+    try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    except FileExistsError as error:
+        raise SystemExit(f"Refusing to overwrite an existing file: {path}") from error
+    os.close(descriptor)
 
 
 def ts(value: dt.datetime) -> float:
@@ -84,10 +135,80 @@ def schema(db: sqlite3.Connection) -> None:
     """)
 
 
-def seed_articles(db: sqlite3.Connection, rng: random.Random):
+def article_timing(
+    scenario: str,
+    index: int,
+    anchor: dt.datetime,
+    rng: DeterministicFixtureRNG,
+) -> tuple[dt.datetime, dt.datetime, int]:
+    """Generate publication/fetch times and a relevance grade for one scenario."""
+    if scenario == "breaking":
+        published = (
+            anchor + dt.timedelta(seconds=index * 20)
+            if index < 80
+            else anchor - dt.timedelta(hours=23) + dt.timedelta(minutes=(index - 80) * 60)
+        )
+        fetched = published + dt.timedelta(minutes=rng.randint(0, 15))
+        grade = 3 if index % 5 == 0 else 2
+    elif scenario == "slow_weekend":
+        published = anchor + dt.timedelta(minutes=index * 43)
+        fetched = published + dt.timedelta(minutes=rng.randint(0, 90))
+        grade = 2 if index % 4 == 0 else 1
+    else:
+        wire_index = index // 20
+        published = anchor + dt.timedelta(hours=wire_index * 3)
+        fetched = published + dt.timedelta(hours=(index % 20) * 2 + rng.randint(0, 20))
+        grade = 1
+    return published, fetched, grade
+
+
+def passage_fixture(
+    scenario: str,
+    bucket: int,
+    query: str,
+    topic: str,
+    article_id: str,
+    wire_id: str,
+    index: int,
+) -> tuple[str, str, int, int, str]:
+    """Build the labelled passage and candidate anchor sentence for one article."""
+    if scenario == "syndication":
+        kind = "repetition"
+        passage = f"{query}. Authorities confirmed syndicated status and timeline."
+        new_fact, anchored = 0, 1
+    elif bucket < 4:
+        kind = "repetition"
+        passage = f"{query}. Authorities confirmed previously reported status and timeline."
+        new_fact = 0
+        anchored = 0 if index % 5 == 0 else 1
+    elif bucket < 8:
+        kind = "potentially_new"
+        passage = f"{query}. Agency identified a newly affected facility and revised the casualty figure."
+        new_fact = 1
+        anchored = 0 if index % 5 == 0 else 1
+    else:
+        kind = "semantic_fallback"
+        passage = f"Officials described the {topic} situation and issued fallbacktoken{article_id.split('-')[-1]} statement."
+        new_fact, anchored = 0, 0 if index % 5 == 0 else 1
+
+    if scenario == "syndication":
+        sentence = f"The {topic} authority confirmed syndicated story {wire_id} status and timeline."
+    elif kind == "potentially_new":
+        sentence = f"The {topic} authority identified newly affected facility {article_id} and revised the count."
+    elif kind == "semantic_fallback":
+        sentence = f"Officials described the {topic} situation for {article_id} and issued an updated statement."
+    else:
+        sentence = f"The {topic} authority confirmed previously reported status for {article_id} and timeline."
+    return kind, passage, new_fact, anchored, sentence
+
+
+def seed_articles(
+    db: sqlite3.Connection,
+    rng: DeterministicFixtureRNG,
+) -> tuple[dict[str, dict[str, str]], dict[str, list[str]], dict[str, float]]:
     """Seed the deterministic breaking, weekend, and syndication article corpus."""
-    event_meta = {}
-    event_articles = {}
+    event_meta: dict[str, dict[str, str]] = {}
+    event_articles: dict[str, list[str]] = {}
     article_rows = []
     passage_rows = []
     fts_rows = []
@@ -109,72 +230,54 @@ def seed_articles(db: sqlite3.Connection, rng: random.Random):
             for index in range(100):
                 article_number += 1
                 article_id = f"article-{article_number:05d}"
-                if scenario == "breaking":
-                    published = (anchor + dt.timedelta(seconds=index * 20) if index < 80
-                                 else anchor - dt.timedelta(hours=23) + dt.timedelta(minutes=(index - 80) * 60))
-                    wire_id = article_id
-                    fetched = published + dt.timedelta(minutes=rng.randint(0, 15))
-                    grade = 3 if index % 5 == 0 else 2
-                elif scenario == "slow_weekend":
-                    published = anchor + dt.timedelta(minutes=index * 43)
-                    wire_id = article_id
-                    fetched = published + dt.timedelta(minutes=rng.randint(0, 90))
-                    grade = 2 if index % 4 == 0 else 1
-                else:
-                    wire_index = index // 20
-                    wire_id = f"{event_id}-wire-{wire_index:02d}"
-                    published = anchor + dt.timedelta(hours=wire_index * 3)
-                    fetched = published + dt.timedelta(hours=(index % 20) * 2 + rng.randint(0, 20))
-                    grade = 1
-
+                wire_id = (
+                    f"{event_id}-wire-{index // 20:02d}"
+                    if scenario == "syndication"
+                    else article_id
+                )
+                published, fetched, grade = article_timing(scenario, index, anchor, rng)
                 publisher = PUBLISHERS[index % len(PUBLISHERS)]
-                independent_publisher = (f"Wire Service {int(wire_id.split('-')[-1]):02d}" if scenario == "syndication" else publisher)
+                independent_publisher = (
+                    f"Wire Service {wire_id.split('-')[-1]}"
+                    if scenario == "syndication"
+                    else publisher
+                )
                 title = f"{topic.replace('-', ' ').title()} event {event_number} report {index:03d}"
                 body = f"{query}. {scenario.replace('_', ' ')} coverage for {event_id}. Wire {wire_id}."
                 elo = 900.0 + ((index * 37 + event_number * 19) % 250)
-                article_rows.append((article_id,event_id,scenario,topic,publisher,independent_publisher,wire_id,title,body,
-                                     ts(published),ts(fetched),elo,grade))
+                article_rows.append((
+                    article_id, event_id, scenario, topic, publisher, independent_publisher,
+                    wire_id, title, body, ts(published), ts(fetched), elo, grade
+                ))
                 ids.append(article_id)
 
-                bucket = index % 10
-                if scenario == "syndication":
-                    kind, passage, new_fact = "repetition", f"{query}. Authorities confirmed syndicated status and timeline.", 0
-                    anchored = 1
-                elif bucket < 4:
-                    kind, passage, new_fact = "repetition", f"{query}. Authorities confirmed previously reported status and timeline.", 0
-                    anchored = 0 if index % 5 == 0 else 1
-                elif bucket < 8:
-                    kind, passage, new_fact = "potentially_new", f"{query}. Agency identified a newly affected facility and revised the casualty figure.", 1
-                    anchored = 0 if index % 5 == 0 else 1
-                else:
-                    kind = "semantic_fallback"
-                    passage = f"Officials described the {topic} situation and issued fallbacktoken{article_number:05d} statement."
-                    new_fact, anchored = 0, 0 if index % 5 == 0 else 1
-
+                kind, passage, new_fact, anchored, sentence = passage_fixture(
+                    scenario, index % 10, query, topic, article_id, wire_id, index
+                )
                 passage_id = f"passage-{article_id}"
-                passage_rows.append((passage_id,article_id,event_id,passage,kind,anchored,new_fact))
-                fts_rows.append((passage_id,event_id,passage))
-                if scenario == "syndication":
-                    sentence = f"The {topic} authority confirmed syndicated story {wire_id} status and timeline."
-                elif kind == "potentially_new":
-                    sentence = f"The {topic} authority identified newly affected facility {article_id} and revised the count."
-                elif kind == "semantic_fallback":
-                    sentence = f"Officials described the {topic} situation for {article_id} and issued an updated statement."
-                else:
-                    sentence = f"The {topic} authority confirmed previously reported status for {article_id} and timeline."
-                sentence_rows.append((f"sentence-{article_id}-0",passage_id,sentence,anchored,new_fact,
-                                      f"entity:{topic}" if anchored else None))
-                sentence_rows.append((f"sentence-{article_id}-1",passage_id,
-                                      "The company declined to comment.",0,0,None))
+                passage_rows.append((
+                    passage_id, article_id, event_id, passage, kind, anchored, new_fact
+                ))
+                fts_rows.append((passage_id, event_id, passage))
+                sentence_rows.append((
+                    f"sentence-{article_id}-0", passage_id, sentence, anchored, new_fact,
+                    f"entity:{topic}" if anchored else None
+                ))
+                sentence_rows.append((
+                    f"sentence-{article_id}-1", passage_id,
+                    "The company declined to comment.", 0, 0, None
+                ))
 
             event_articles[event_id] = ids
-            event_windows.append((event_id,scenario,ts(anchor-dt.timedelta(hours=3)),
-                                  ts(anchor+dt.timedelta(hours=3)),1 if scenario == "breaking" else 0))
+            event_windows.append((
+                event_id, scenario, ts(anchor - dt.timedelta(hours=3)),
+                ts(anchor + dt.timedelta(hours=3)), 1 if scenario == "breaking" else 0
+            ))
 
     started = time.perf_counter()
     db.executemany("INSERT INTO articles VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", article_rows)
     db.commit()
-    article_insert_ms = (time.perf_counter()-started)*1000
+    article_insert_ms = (time.perf_counter() - started) * 1000
 
     started = time.perf_counter()
     db.executemany("INSERT INTO passages VALUES(?,?,?,?,?,?,?)", passage_rows)
@@ -182,7 +285,7 @@ def seed_articles(db: sqlite3.Connection, rng: random.Random):
     db.executemany("INSERT INTO passage_sentences VALUES(?,?,?,?,?,?)", sentence_rows)
     db.executemany("INSERT INTO event_windows VALUES(?,?,?,?,?)", event_windows)
     db.commit()
-    passage_insert_ms = (time.perf_counter()-started)*1000
+    passage_insert_ms = (time.perf_counter() - started) * 1000
     return event_meta, event_articles, {
         "article_insert_ms": article_insert_ms,
         "passage_and_fts_insert_ms": passage_insert_ms,
@@ -247,6 +350,35 @@ def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
     }
 
 
+def volume_floor_sweep(rows: list[tuple]) -> list[dict]:
+    """Calculate classification metrics for each independent-report/publisher floor."""
+    sweep = []
+    for floor in (2, 3, 5, 10, 20):
+        for publisher_floor in (1, 2, 3):
+            tp = fp = tn = fn = 0
+            for _, _, expected, _, independent, publishers in rows:
+                predicted = independent >= floor and publishers >= publisher_floor
+                if predicted and expected:
+                    tp += 1
+                elif predicted:
+                    fp += 1
+                elif expected:
+                    fn += 1
+                else:
+                    tn += 1
+            sweep.append({
+                "independent_report_floor": floor,
+                "independent_publisher_floor": publisher_floor,
+                "true_positive": tp, "false_positive": fp,
+                "true_negative": tn, "false_negative": fn,
+                "accuracy": (tp + tn) / len(rows) if rows else None,
+                "false_positive_rate": fp / (fp + tn) if fp + tn else 0.0,
+                "recall": tp / (tp + fn) if tp + fn else 0.0,
+                "status": "volume_floor_only_not_MACD",
+            })
+    return sweep
+
+
 def eval_momentum(db: sqlite3.Connection) -> dict:
     """Evaluate labelled event windows and independent-wire volume-floor controls."""
     rows = db.execute("""
@@ -255,36 +387,26 @@ def eval_momentum(db: sqlite3.Connection) -> dict:
         ON a.event_id=w.event_id AND a.published_at BETWEEN w.window_start AND w.window_end
       GROUP BY w.event_id ORDER BY w.event_id
     """).fetchall()
-    sweep = []
-    for floor in (2,3,5,10,20):
-        for publisher_floor in (1,2,3):
-            tp=fp=tn=fn=0
-            for _,_,expected,_,independent,publishers in rows:
-                predicted = independent >= floor and publishers >= publisher_floor
-                if predicted and expected: tp += 1
-                elif predicted: fp += 1
-                elif expected: fn += 1
-                else: tn += 1
-            sweep.append({
-                "independent_report_floor": floor,
-                "independent_publisher_floor": publisher_floor,
-                "true_positive": tp, "false_positive": fp, "true_negative": tn, "false_negative": fn,
-                "accuracy": (tp+tn)/len(rows) if rows else None,
-                "false_positive_rate": fp/(fp+tn) if fp+tn else 0.0,
-                "recall": tp/(tp+fn) if tp+fn else 0.0,
-                "status": "volume_floor_only_not_MACD",
-            })
     raw = sum(row[3] for row in rows)
     independent = sum(row[4] for row in rows)
     independent_publishers = sum(row[5] for row in rows)
-    sample_wire = db.execute("SELECT event_id,wire_group_id FROM articles WHERE scenario='syndication' ORDER BY event_id,wire_group_id LIMIT 1").fetchone()
+    sample_wire = db.execute(
+        "SELECT event_id,wire_group_id FROM articles WHERE scenario='syndication' "
+        "ORDER BY event_id,wire_group_id LIMIT 1"
+    ).fetchone()
+    if sample_wire is None:
+        raise RuntimeError("The syndication control row is missing")
     sample_counts = db.execute(
-        "SELECT count(*),count(DISTINCT publisher),count(DISTINCT independent_publisher) FROM articles WHERE event_id=? AND wire_group_id=?",
-        sample_wire).fetchone()
+        "SELECT count(*),count(DISTINCT publisher),count(DISTINCT independent_publisher) "
+        "FROM articles WHERE event_id=? AND wire_group_id=?",
+        sample_wire
+    ).fetchone()
     return {
         "labelled_event_windows": len(rows),
-        "windows_by_scenario": {kind: sum(row[1] == kind for row in rows)
-                                for kind in ("breaking","slow_weekend","syndication")},
+        "windows_by_scenario": {
+            kind: sum(row[1] == kind for row in rows)
+            for kind in ("breaking", "slow_weekend", "syndication")
+        },
         "raw_article_count_in_windows": raw,
         "independent_report_count_in_windows": independent,
         "independent_publisher_count_in_windows": independent_publishers,
@@ -292,10 +414,11 @@ def eval_momentum(db: sqlite3.Connection) -> dict:
             "outlet_rows": sample_counts[0], "local_publishers": sample_counts[1],
             "independent_publishers": sample_counts[2], "independent_reports": 1,
         },
-        "syndication_copy_inflation_ratio": raw/max(1,independent),
+        "syndication_copy_inflation_ratio": raw / max(1, independent),
         "delayed_fetch_over_six_hours_count": db.execute(
-            "SELECT count(*) FROM articles WHERE fetched_at-published_at>21600").fetchone()[0],
-        "volume_floor_sweep": sweep,
+            "SELECT count(*) FROM articles WHERE fetched_at-published_at>21600"
+        ).fetchone()[0],
+        "volume_floor_sweep": volume_floor_sweep(rows),
         "MACD_burst_accuracy": None,
         "MACD_false_positive_rate": None,
         "MACD_status": "not_measured_phase_0_MACD_not_implemented",
@@ -303,7 +426,7 @@ def eval_momentum(db: sqlite3.Connection) -> dict:
     }
 
 
-def seed_ranking(db: sqlite3.Connection, rng: random.Random) -> float:
+def seed_ranking(db: sqlite3.Connection, rng: DeterministicFixtureRNG) -> float:
     """Create reproducible 500-candidate ranking judgement sets."""
     articles = db.execute("SELECT id,topic_id,source_elo FROM articles ORDER BY id").fetchall()
     rows=[]
@@ -343,44 +466,76 @@ def eval_ranking(db: sqlite3.Connection) -> dict:
     }
 
 
-def seed_personalization(db: sqlite3.Connection, rng: random.Random) -> tuple[float,float]:
-    """Seed synthetic impression rewards and the fixed core/discovery fixture."""
-    articles=db.execute("SELECT id,topic_id FROM articles ORDER BY id").fetchall()
-    rendered=ts(BASE+dt.timedelta(days=3))
-    impressions=[]
+def build_impression_rows(
+    articles: list[tuple[str, str]],
+    rendered: float,
+    rng: DeterministicFixtureRNG,
+) -> list[tuple]:
+    """Create rendered impressions with deterministic skip and engagement rewards."""
+    impressions = []
     for user_index in range(10):
-        user=f"user-{user_index:02d}"
-        for article_index,(article_id,topic) in enumerate(articles):
-            choice=rng.random()
-            action,reward=("none",0.0)
-            if choice<0.58: action,reward=("scrolled_past",-1.0)
-            elif choice<0.68: action,reward=("click",1.0)
-            elif choice<0.73: action,reward=("save",2.0)
-            impressions.append((None,user,article_id,rendered+article_index,None,action,reward,topic))
-    start=time.perf_counter()
-    db.executemany("INSERT INTO impressions VALUES(?,?,?,?,?,?,?,?)",impressions)
-    db.commit()
-    insert_ms=(time.perf_counter()-start)*1000
-    start=time.perf_counter()
-    db.execute("UPDATE impressions SET scrolled_past_at=rendered_at+30 WHERE action='scrolled_past' AND scrolled_past_at IS NULL")
-    db.commit()
-    update_ms=(time.perf_counter()-start)*1000
+        user = f"user-{user_index:02d}"
+        for article_index, (article_id, topic) in enumerate(articles):
+            choice = rng.random()
+            action, reward = "none", 0.0
+            if choice < 0.58:
+                action, reward = "scrolled_past", -1.0
+            elif choice < 0.68:
+                action, reward = "click", 1.0
+            elif choice < 0.73:
+                action, reward = "save", 2.0
+            impressions.append((
+                None, user, article_id, rendered + article_index, None, action, reward, topic
+            ))
+    return impressions
 
-    by_topic={}
-    for article_id,topic in articles: by_topic.setdefault(topic,[]).append(article_id)
-    recommendations=[]
-    for index,preferred in enumerate(TOPICS):
-        user=f"user-{index:02d}"
-        core=by_topic[preferred][:85]
-        adjacent=by_topic[TOPICS[(index+1)%10]][:15]
-        for slot,article_id in enumerate(core+adjacent):
-            topic=preferred if slot<85 else TOPICS[(index+1)%10]
-            action="click" if slot%9==0 else ("save" if slot%17==0 else "none")
-            recommendations.append((user,article_id,slot,"core" if slot<85 else "discovery",
-                                    1 if slot<85 else 0,action,topic))
-    db.executemany("INSERT INTO recommendation_judgements VALUES(?,?,?,?,?,?,?)",recommendations)
+
+def build_recommendation_rows(articles: list[tuple[str, str]]) -> list[tuple]:
+    """Create the deterministic 85/15 core and adjacent-topic discovery fixture."""
+    by_topic: dict[str, list[str]] = {}
+    for article_id, topic in articles:
+        by_topic.setdefault(topic, []).append(article_id)
+    recommendations = []
+    for index, preferred in enumerate(TOPICS):
+        adjacent_topic = TOPICS[(index + 1) % len(TOPICS)]
+        core = by_topic[preferred][:85]
+        adjacent = by_topic[adjacent_topic][:15]
+        for slot, article_id in enumerate(core + adjacent):
+            topic = preferred if slot < 85 else adjacent_topic
+            action = "click" if slot % 9 == 0 else ("save" if slot % 17 == 0 else "none")
+            recommendations.append((
+                f"user-{index:02d}", article_id, slot,
+                "core" if slot < 85 else "discovery",
+                1 if slot < 85 else 0, action, topic
+            ))
+    return recommendations
+
+
+def seed_personalization(
+    db: sqlite3.Connection,
+    rng: DeterministicFixtureRNG,
+) -> tuple[float, float]:
+    """Seed synthetic impression rewards and the fixed core/discovery fixture."""
+    articles = db.execute("SELECT id,topic_id FROM articles ORDER BY id").fetchall()
+    rendered = ts(BASE + dt.timedelta(days=3))
+    impressions = build_impression_rows(articles, rendered, rng)
+    start = time.perf_counter()
+    db.executemany("INSERT INTO impressions VALUES(?,?,?,?,?,?,?,?)", impressions)
     db.commit()
-    return insert_ms,update_ms
+    insert_ms = (time.perf_counter() - start) * 1000
+
+    start = time.perf_counter()
+    db.execute(
+        "UPDATE impressions SET scrolled_past_at=rendered_at+30 "
+        "WHERE action='scrolled_past' AND scrolled_past_at IS NULL"
+    )
+    db.commit()
+    update_ms = (time.perf_counter() - start) * 1000
+
+    recommendations = build_recommendation_rows(articles)
+    db.executemany("INSERT INTO recommendation_judgements VALUES(?,?,?,?,?,?,?)", recommendations)
+    db.commit()
+    return insert_ms, update_ms
 
 
 def eval_personalization(db: sqlite3.Connection) -> dict:
@@ -426,7 +581,7 @@ def main() -> int:
     parser.add_argument("--seed",type=int,default=20261105)
     args=parser.parse_args()
     # Seeded PRNG is intentional: this produces reproducible synthetic test data only.
-    rng=random.Random(args.seed)
+    rng=DeterministicFixtureRNG(args.seed)
     temporary=None
     if args.database:
         db_path=args.database.resolve()
@@ -444,6 +599,7 @@ def main() -> int:
     if args.database and output_path in {db_path, *sidecars}:
         raise SystemExit("The report path must be different from the SQLite database and its sidecars")
 
+    create_empty_file_exclusive(db_path)
     db=sqlite3.connect(db_path)
     db.execute("PRAGMA busy_timeout=5000")
     try:
@@ -512,7 +668,9 @@ def main() -> int:
             ],
         }
         output_path.parent.mkdir(parents=True,exist_ok=True)
-        output_path.write_text(json.dumps(matrix,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+        with output_path.open("x", encoding="utf-8") as report_file:
+            json.dump(matrix, report_file, indent=2, sort_keys=True)
+            report_file.write("\n")
         print(f"Phase 0 matrix: {count} articles, {len(event_meta)} events, {matrix['database']['passage_count']} passages")
         print(f"Scenario counts: {scenarios}")
         print(f"Report: {output_path}")
