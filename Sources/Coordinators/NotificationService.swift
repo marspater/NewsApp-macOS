@@ -157,6 +157,18 @@ enum StoryBannerRoute: Equatable, Sendable {
         return .notificationCenter
     }
 
+    /// Offers a story request to the app's presenter. The banner's fields are copied out first, so only a Sendable
+    /// value crosses to the main actor, where the installed presenter and the app's activity decide.
+    static func offer(_ request: UNNotificationRequest) async -> Bool {
+        guard let banner = StoryBanner(request) else { return false }
+        let sounds = request.content.sound != nil
+        return await MainActor.run {
+            offer(
+                banner, sounds: sounds, active: NSApplication.shared.isActive,
+                presenter: NotificationService.presentAppBanner)
+        }
+    }
+
     /// Offers a story banner to the app's presenter on the main actor. News became active between the post and this
     /// hop: it is declined, so the add files the notification and `willPresent` draws it, never both banners.
     @MainActor static func offer(
@@ -217,16 +229,7 @@ final class NotificationService: Sendable {
                         let settings = await UNUserNotificationCenter.current().notificationSettings()
                         return (settings.alertSetting, settings.alertStyle, settings.showPreviewsSetting)
                     },
-                    present: { request in
-                        // The banner's fields are copied out here, so only a Sendable value crosses to the main actor.
-                        guard let banner = StoryBanner(request) else { return false }
-                        let sounds = request.content.sound != nil
-                        return await MainActor.run {
-                            StoryBannerRoute.offer(
-                                banner, sounds: sounds, active: NSApplication.shared.isActive,
-                                presenter: NotificationService.presentAppBanner)
-                        }
-                    },
+                    present: { request in await StoryBannerRoute.offer(request) },
                     add: { try await UNUserNotificationCenter.current().add($0) })
                 log.notice(
                     "posted \(request.identifier, privacy: .private(mask: .hash)) route=\(String(describing: route), privacy: .public)"

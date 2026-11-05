@@ -22023,6 +22023,9 @@ struct NewsTests {
         assertEqual(offered.3?.1, true, "The presenter is told the banner asks for a sound")
         assertFalse(offered.1, "Became active meanwhile: declined, so the add files it for willPresent")
         assertFalse(offered.2, "No presenter installed: nothing is drawn")
+        // The request form copies the banner out and hops to the main actor; without a presenter it declines.
+        assertFalse(await StoryBannerRoute.offer(request(story: true)), "No presenter: a story request is declined")
+        assertFalse(await StoryBannerRoute.offer(request(story: false)), "A grouped request makes no banner")
     }
 
     static func testNotificationServiceErrorLogging() async {
