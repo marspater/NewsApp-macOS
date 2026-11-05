@@ -4,11 +4,11 @@ Status: first engineering/performance slice for W8 (#1000), not an editorial-qua
 
 ## Run
 
-\`\`\`sh
+```sh
 bash script/test_editorial_evaluation.sh
-\`\`\`
+```
 
-An optional first argument selects the JSON output path. The default is a date-stamped file under \`docs/benchmarks/\`. The command builds the existing headless test runner in optimized mode and runs only \`Tests/BriefingSignalsTests.swift\` with the opt-in evaluation flag.
+An optional first argument selects the JSON output path. The default is a date-stamped file under `docs/benchmarks/`. The command builds the existing headless test runner in optimized mode and runs only `Tests/BriefingSignalsTests.swift` with the opt-in evaluation flag.
 
 The workload creates a temporary SQLite database. It does not open the user's library, change preferences, make network requests, or write story content to logs. It refuses to start while Low Power Mode or serious thermal state is active.
 
@@ -16,8 +16,8 @@ The workload creates a temporary SQLite database. It does not open the user's li
 
 - 5,000 synthetic articles across 20 synthetic publishers inserted into SQLite.
 - The bundled 384-dimensional MiniLM sentence encoder, including a short warm-up and the measured 5,000-item batch.
-- Embedding persistence and read-back through the existing \`article_embeddings\` table.
-- Seven hybrid searches through the shipped FTS5 + SQLite \`news_cosine\` path, reporting median wall time.
+- Embedding persistence and read-back through the existing `article_embeddings` table.
+- Seven hybrid searches through the shipped FTS5 + SQLite `news_cosine` path, reporting median wall time.
 - A lexical-only FTS5 query followed by 1,000 bounded MaxSim passage comparisons. Each passage compares against at most 32 lexical candidates; only lexical misses use the 24-vector semantic fallback. Similarity uses the existing vDSP cosine helper.
 - MMR selection from 5,000 candidates down to ten, with NDCG@10, mean intra-list similarity, distinct-topic count and distinct-publisher count.
 - 100 replays of a synthetic MACD event stream, including the velocity, MACD line and histogram.
