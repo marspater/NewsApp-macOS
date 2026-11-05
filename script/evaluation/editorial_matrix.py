@@ -101,6 +101,52 @@ def validate_fixture(
         "impression_count": impression_count,
     }
 
+def validate_novelty_gate(
+    db: sqlite3.Connection,
+    novelty: dict,
+) -> dict[str, object]:
+    """Fail the Phase 0 gate when lexical retrieval or fallback persistence regresses."""
+    expected_lexical = db.execute(
+        "SELECT count(*) FROM passages WHERE expected_class!='semantic_fallback'"
+    ).fetchone()[0]
+    expected_fallback = db.execute(
+        "SELECT count(*) FROM passages WHERE expected_class='semantic_fallback'"
+    ).fetchone()[0]
+    actual = {
+        "labelled_passages": novelty["labelled_passages"],
+        "lexical_recall": novelty["lexical_candidate_recall_on_controlled_corpus"],
+        "fallback_expected": novelty["semantic_fallback_expected_count"],
+        "fallback_queued": novelty["semantic_fallback_queue_count"],
+        "fallback_persisted": novelty["persisted_low_priority_queue_rows"],
+        "fallback_route_rate": novelty["semantic_fallback_route_rate_on_controlled_corpus"],
+    }
+    expected = {
+        "labelled_passages": 5000,
+        "lexical_recall": 1.0,
+        "fallback_expected": expected_fallback,
+        "fallback_queued": expected_fallback,
+        "fallback_persisted": expected_fallback,
+        "fallback_route_rate": 1.0,
+    }
+    if expected_lexical + expected_fallback != 5000:
+        raise RuntimeError("The labelled lexical/fallback passage controls are incomplete")
+    failures = {
+        key: {"expected": expected[key], "actual": actual[key]}
+        for key in expected
+        if actual[key] != expected[key]
+    }
+    if failures:
+        raise RuntimeError(f"Phase 0 novelty routing gate failed: {failures}")
+    return {
+        "passed": True,
+        "lexical_passages": expected_lexical,
+        "lexical_recall": actual["lexical_recall"],
+        "fallback_passages": expected_fallback,
+        "fallback_queued": actual["fallback_queued"],
+        "fallback_persisted": actual["fallback_persisted"],
+    }
+
+
 def database_summary(
     db: sqlite3.Connection,
     args: argparse.Namespace,
@@ -137,14 +183,17 @@ def build_matrix(
     fixture: dict[str, object],
 ) -> dict:
     """Assemble the reproducible quality and performance matrix for Phase 0."""
+    novelty = editorial_metrics.eval_novelty(db, event_meta)
+    gate_validation = validate_novelty_gate(db, novelty)
     return {
         "schema_version": 1,
         "generated_at": dt.datetime.now(editorial_fixtures.UTC).isoformat(timespec="seconds"),
         "seed": args.seed,
         "phase": 0,
         "phase_zero_gate": "PASS",
+        "phase_zero_gate_validation": gate_validation,
         "database": database_summary(db, args, db_path, timings, fixture),
-        "novelty_extraction": editorial_metrics.eval_novelty(db, event_meta),
+        "novelty_extraction": novelty,
         "momentum": editorial_metrics.eval_momentum(db),
         "ranking": editorial_metrics.eval_ranking(db),
         "personalization": editorial_metrics.eval_personalization(db, editorial_fixtures.TOPICS),
