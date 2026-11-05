@@ -396,6 +396,9 @@ def main() -> int:
         db_path=args.database.resolve()
         db_path.parent.mkdir(parents=True,exist_ok=True)
         if db_path.exists(): db_path.unlink()
+        for suffix in ("-wal", "-shm"):
+            sidecar = Path(str(db_path) + suffix)
+            if sidecar.exists(): sidecar.unlink()
     else:
         temporary=tempfile.TemporaryDirectory(prefix="news-editorial-phase0-")
         db_path=Path(temporary.name)/"editorial-phase0.sqlite3"
@@ -413,6 +416,14 @@ def main() -> int:
         count=db.execute("SELECT count(*) FROM articles").fetchone()[0]
         assert count>=5000, f"Expected at least 5,000 articles; got {count}"
         scenarios=dict(db.execute("SELECT scenario,count(*) FROM articles GROUP BY scenario"))
+        expected_scenarios={"breaking":2000,"slow_weekend":1500,"syndication":1500}
+        assert scenarios == expected_scenarios, f"Unexpected scenario distribution: {scenarios}"
+        event_count=len(event_meta)
+        passage_count=db.execute("SELECT count(*) FROM passages").fetchone()[0]
+        ranking_count=db.execute("SELECT count(*) FROM ranking_judgements").fetchone()[0]
+        impression_count=db.execute("SELECT count(*) FROM impressions").fetchone()[0]
+        assert event_count == 50 and passage_count == 5000, "The labelled event/passage fixture is incomplete"
+        assert ranking_count == 5000 and impression_count == 50000, "The ranking/impression fixture is incomplete"
         matrix={
             "schema_version":1,
             "generated_at":dt.datetime.now(UTC).isoformat(timespec="seconds"),
@@ -423,12 +434,13 @@ def main() -> int:
                 "retained_path":str(db_path) if args.database else None,
                 "article_count":count,
                 "scenario_counts":scenarios,
-                "event_count":len(event_meta),
+                "event_count":event_count,
                 "independent_story_count":db.execute("SELECT count(DISTINCT wire_group_id) FROM articles").fetchone()[0],
-                "passage_count":db.execute("SELECT count(*) FROM passages").fetchone()[0],
+                "passage_count":passage_count,
                 "sentence_count":db.execute("SELECT count(*) FROM passage_sentences").fetchone()[0],
                 "entity_anchored_sentence_count":db.execute("SELECT count(*) FROM passage_sentences WHERE has_core_entity=1").fetchone()[0],
-                "ranking_judgement_count":db.execute("SELECT count(*) FROM ranking_judgements").fetchone()[0],
+                "ranking_judgement_count":ranking_count,
+                "impression_count":impression_count,
                 "timings_ms":timings,
                 "sqlite_file_bytes":db_path.stat().st_size,
             },
