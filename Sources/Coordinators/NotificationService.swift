@@ -156,6 +156,15 @@ enum StoryBannerRoute: Equatable, Sendable {
         try await add(request)
         return .notificationCenter
     }
+
+    /// Offers a story banner to the app's presenter on the main actor. News became active between the post and this
+    /// hop: it is declined, so the add files the notification and `willPresent` draws it, never both banners.
+    @MainActor static func offer(
+        _ banner: StoryBanner, sounds: Bool, active: Bool, presenter: ((StoryBanner, Bool) -> Bool)?
+    ) -> Bool {
+        guard !active else { return false }
+        return presenter?(banner, sounds) ?? false
+    }
 }
 
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
@@ -186,7 +195,8 @@ final class NotificationService: Sendable {
 
     /// Draws a story banner in the app and says whether it did; installed by the app delegate, which owns the
     /// presenter. Nil (tests, helper processes) leaves every banner to the system.
-    @MainActor static var presentAppBanner: ((UNNotificationRequest) -> Bool)?
+    /// The second argument says whether the story's banner asks for a sound.
+    @MainActor static var presentAppBanner: ((StoryBanner, Bool) -> Bool)?
 
     init(
         post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = bannerSpacing
@@ -208,9 +218,14 @@ final class NotificationService: Sendable {
                         return (settings.alertSetting, settings.alertStyle, settings.showPreviewsSetting)
                     },
                     present: { request in
-                        // A request is immutable once made (its content is copied in), so the main actor may read it.
-                        nonisolated(unsafe) let request = request
-                        return await MainActor.run { NotificationService.presentAppBanner?(request) ?? false }
+                        // The banner's fields are copied out here, so only a Sendable value crosses to the main actor.
+                        guard let banner = StoryBanner(request) else { return false }
+                        let sounds = request.content.sound != nil
+                        return await MainActor.run {
+                            StoryBannerRoute.offer(
+                                banner, sounds: sounds, active: NSApplication.shared.isActive,
+                                presenter: NotificationService.presentAppBanner)
+                        }
                     },
                     add: { try await UNUserNotificationCenter.current().add($0) })
                 log.notice(
