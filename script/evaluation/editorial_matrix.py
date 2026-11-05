@@ -120,7 +120,7 @@ def seed_articles(db: sqlite3.Connection, rng: random.Random):
                     grade = 1
 
                 publisher = PUBLISHERS[index % len(PUBLISHERS)]
-                independent_publisher = (f"Wire Service {int(wire_group.split('-')[-1]) % 2}" if scenario == "syndication" else publisher)
+                independent_publisher = (f"Wire Service {int(wire_id.split('-')[-1]) % 2}" if scenario == "syndication" else publisher)
                 title = f"{topic.replace('-', ' ').title()} event {event_number} report {index:03d}"
                 body = f"{query}. {scenario.replace('_', ' ')} coverage for {event_id}. Wire {wire_id}."
                 elo = 900.0 + ((index * 37 + event_number * 19) % 250)
@@ -242,7 +242,7 @@ def eval_momentum(db: sqlite3.Connection) -> dict:
     for floor in (2,3,5,10,20):
         for publisher_floor in (1,2,3):
             tp=fp=tn=fn=0
-            for _,_,expected,_,_,independent,publishers in rows:
+            for _,_,expected,_,independent,publishers in rows:
                 predicted = independent >= floor and publishers >= publisher_floor
                 if predicted and expected: tp += 1
                 elif predicted: fp += 1
@@ -257,9 +257,9 @@ def eval_momentum(db: sqlite3.Connection) -> dict:
                 "recall": tp/(tp+fn) if tp+fn else 0.0,
                 "status": "volume_floor_only_not_MACD",
             })
-    raw = sum(row[4] for row in rows)
-    independent = sum(row[5] for row in rows)
-    independent_publishers = sum(row[6] for row in rows)
+    raw = sum(row[3] for row in rows)
+    independent = sum(row[4] for row in rows)
+    independent_publishers = sum(row[5] for row in rows)
     sample_wire = db.execute("SELECT event_id,wire_group_id FROM articles WHERE scenario='syndication' ORDER BY event_id,wire_group_id LIMIT 1").fetchone()
     sample_counts = db.execute(
         "SELECT count(*),count(DISTINCT publisher),count(DISTINCT independent_publisher) FROM articles WHERE event_id=? AND wire_group_id=?",
