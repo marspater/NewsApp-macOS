@@ -120,7 +120,7 @@ jobs:
           http_status=$(curl --location --silent --show-error --max-time 30 \
             --output "$RUNNER_TEMP/codacy-pr-issues.json" \
             --write-out "%{http_code}" \
-            "https://api.codacy.com/api/v3/analysis/organizations/gh/marspater/repositories/NewsApp-macOS/pull-requests/$PR_NUMBER/issues?status=new&limit=100")
+            "https://api.codacy.com/api/v3/analysis/organizations/gh/marspater/repositories/NewsApp-macOS/pull-requests/$PR_NUMBER/issues?limit=100")
           curl_status=$?
           set -e
           echo "Codacy API HTTP status: $http_status (curl exit: $curl_status)"
