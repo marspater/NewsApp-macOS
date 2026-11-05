@@ -271,9 +271,8 @@ def eval_personalization(db: sqlite3.Connection, topic_catalog: list[str]) -> di
     }
 
 
-def validate_evaluation(db: sqlite3.Connection, evaluations: dict) -> list[str]:
-    """Fail on incorrect deterministic controls; acceptance of real editorial quality is separate."""
-    checked = []
+def validate_retrieval(db: sqlite3.Connection, evaluations: dict) -> str:
+    """Check historical retrieval routes and the persisted fallback queue."""
     novelty = evaluations["novelty_extraction"]
     if novelty["routing_mismatch_count"] or novelty["lexical_candidate_expected_count"] == 0:
         raise RuntimeError("Content-derived FTS routing failed authored historical controls")
@@ -281,19 +280,31 @@ def validate_evaluation(db: sqlite3.Connection, evaluations: dict) -> list[str]:
     queued = {row[0] for row in db.execute("SELECT passage_id FROM semantic_fallback_queue WHERE priority='low'")}
     if not expected or expected != queued:
         raise RuntimeError("Persisted low-priority fallback queue differs from expected routes")
-    checked.append("content_derived_historical_fts_routes_and_exact_fallback_queue")
+    return "content_derived_historical_fts_routes_and_exact_fallback_queue"
+
+
+def validate_momentum(db: sqlite3.Connection, evaluations: dict) -> str:
+    """Check publication replay invariance and wire independence."""
     momentum = evaluations["momentum"]
     if not momentum["publication_replay_invariant_to_fetch_order"] or not momentum["publication_replay_invariant_to_duplicate_ingestion"]:
         raise RuntimeError("Publication-time replay changed with polling order or repeated ingestion")
     wire = momentum["single_syndicated_wire_control"]
     if wire != {"outlet_rows": 20, "local_publishers": 20, "independent_publishers": 1, "independent_reports": 1}:
         raise RuntimeError("Syndication control must count twenty copies as one originating report")
-    checked.append("publication_time_wire_deduplication_and_replay_invariance")
+    return "publication_time_wire_deduplication_and_replay_invariance"
+
+
+def validate_ranking(db: sqlite3.Connection, evaluations: dict) -> str:
+    """Check every ranking candidate-set size."""
     if len(evaluations["ranking"]["candidate_count_per_query"]) != 10 or any(
         count != 500 for count in evaluations["ranking"]["candidate_count_per_query"].values()
     ):
         raise RuntimeError("Each of ten ranking queries must have 500 candidates")
-    checked.append("ten_individual_500_candidate_ranking_sets")
+    return "ten_individual_500_candidate_ranking_sets"
+
+
+def validate_impressions(db: sqlite3.Connection, evaluations: dict) -> str:
+    """Check rendered-impression chronology and action reward controls."""
     invalid_rewards = db.execute(
         "SELECT count(*) FROM impressions WHERE "
         "(action='none' AND (reward!=0 OR scrolled_past_at IS NOT NULL OR clicked_at IS NOT NULL OR saved_at IS NOT NULL)) OR "
@@ -316,7 +327,11 @@ def validate_evaluation(db: sqlite3.Connection, evaluations: dict) -> list[str]:
         "SELECT 1 FROM impressions GROUP BY user_id,article_id HAVING count(*)>1 LIMIT 1"
     ).fetchone():
         raise RuntimeError("Repeated qualifying impressions are missing")
-    checked.append("render_scroll_action_chronology_rewards_neutral_and_repeated_impressions")
+    return "render_scroll_action_chronology_rewards_neutral_and_repeated_impressions"
+
+
+def validate_discovery(db: sqlite3.Connection, evaluations: dict) -> str:
+    """Check each reader's adjacent, underexposed discovery share."""
     per_user = db.execute(
         "SELECT user_id,count(*),sum(slot_type='discovery') FROM recommendation_judgements GROUP BY user_id"
     ).fetchall()
@@ -330,5 +345,15 @@ def validate_evaluation(db: sqlite3.Connection, evaluations: dict) -> list[str]:
     ).fetchone()[0]
     if invalid_discovery:
         raise RuntimeError("Discovery includes topics without adjacent, underexposed evidence")
-    checked.append("per_reader_fifteen_percent_adjacent_underexposed_discovery")
-    return checked
+    return "per_reader_fifteen_percent_adjacent_underexposed_discovery"
+
+
+def validate_evaluation(db: sqlite3.Connection, evaluations: dict) -> list[str]:
+    """Fail on incorrect deterministic controls; acceptance of real editorial quality is separate."""
+    return [
+        validate_retrieval(db, evaluations),
+        validate_momentum(db, evaluations),
+        validate_ranking(db, evaluations),
+        validate_impressions(db, evaluations),
+        validate_discovery(db, evaluations),
+    ]

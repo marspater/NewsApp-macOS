@@ -7,8 +7,8 @@ import hashlib
 import json
 import os
 import platform
+import re
 import sqlite3
-import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -148,17 +148,66 @@ def database_summary(
         "sqlite_file_bytes": db_path.stat().st_size,
     }
 
+def git_revision(root: Path | None = None) -> str:
+    """Read this checkout's HEAD, including linked worktrees and packed references."""
+    marker = (root or Path(__file__).resolve().parents[2]) / ".git"
+    if marker.is_file():
+        pointer = marker.read_text(encoding="utf-8").strip()
+        if not pointer.startswith("gitdir: "):
+            raise RuntimeError("Invalid Git worktree marker")
+        git_dir = (marker.parent / pointer.removeprefix("gitdir: ")).resolve()
+    else:
+        git_dir = marker
+    head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+    if head.startswith("ref: "):
+        reference = head.removeprefix("ref: ")
+        if not reference.startswith("refs/") or ".." in Path(reference).parts:
+            raise RuntimeError("Invalid Git HEAD reference")
+        common_marker = git_dir / "commondir"
+        common = (
+            (git_dir / common_marker.read_text(encoding="utf-8").strip()).resolve()
+            if common_marker.exists() else git_dir
+        )
+        loose = common / reference
+        if loose.is_file():
+            head = loose.read_text(encoding="utf-8").strip()
+        else:
+            packed = common / "packed-refs"
+            matches = [
+                line.split(" ", 1)[0] for line in packed.read_text(encoding="utf-8").splitlines()
+                if line.endswith(" " + reference)
+            ] if packed.exists() else []
+            if len(matches) != 1:
+                raise RuntimeError("Cannot resolve Git HEAD")
+            head = matches[0]
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+        raise RuntimeError("Invalid Git revision")
+    return head
+
+
+def logical_fixture(db: sqlite3.Connection) -> dict:
+    """Read allowlisted fixture tables using literal statements for stable hashing."""
+    queries = {
+        "articles": "SELECT * FROM articles",
+        "passages": "SELECT * FROM passages",
+        "passage_sentences": "SELECT * FROM passage_sentences",
+        "event_windows": "SELECT * FROM event_windows",
+        "ranking_judgements": "SELECT * FROM ranking_judgements",
+        "impressions": "SELECT * FROM impressions",
+        "recommendation_judgements": "SELECT * FROM recommendation_judgements",
+        "topic_adjacency": "SELECT * FROM topic_adjacency",
+        "reader_topic_exposure": "SELECT * FROM reader_topic_exposure",
+    }
+    payload = {}
+    for table, query in queries.items():
+        rows = db.execute(query).fetchall()
+        payload[table] = sorted(rows, key=lambda row: json.dumps(row, ensure_ascii=True))
+    return payload
+
+
 def provenance(db: sqlite3.Connection) -> dict:
     """Fingerprint logical inputs and source code without timing or file-layout noise."""
-    tables = (
-        "articles", "passages", "passage_sentences", "event_windows",
-        "ranking_judgements", "impressions", "recommendation_judgements",
-        "topic_adjacency", "reader_topic_exposure",
-    )
-    payload = {}
-    for table in tables:
-        rows = db.execute(f'SELECT * FROM "{table}"').fetchall()
-        payload[table] = sorted(rows, key=lambda row: json.dumps(row, ensure_ascii=True))
+    payload = logical_fixture(db)
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     labels = {
         "passages": db.execute(
@@ -182,12 +231,8 @@ def provenance(db: sqlite3.Connection) -> dict:
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(Path(__file__).parent.glob("editorial_*.py"))
     }
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[2],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
     return {
-        "commit": revision,
+        "commit": git_revision(),
         "source_sha256": source_hashes,
         "python_version": platform.python_version(),
         "sqlite_version": sqlite3.sqlite_version,

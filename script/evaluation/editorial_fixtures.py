@@ -58,8 +58,8 @@ def ts(value: dt.datetime) -> float:
     """Convert a timezone-aware datetime to a Unix timestamp."""
     return value.timestamp()
 
-def schema(db: sqlite3.Connection) -> None:
-    """Create the isolated Phase 0 SQLite and FTS5 evaluation schema."""
+def article_schema(db: sqlite3.Connection) -> None:
+    """Create articles and indexes with the fixture connection settings."""
     db.executescript(
         """
         PRAGMA journal_mode=WAL;
@@ -74,6 +74,13 @@ def schema(db: sqlite3.Connection) -> None:
         CREATE INDEX articles_event_date ON articles(event_id,published_at);
         CREATE INDEX articles_wire_group ON articles(wire_group_id);
 
+        """
+    )
+
+def passage_schema(db: sqlite3.Connection) -> None:
+    """Create passages, retrieval controls and event windows."""
+    db.executescript(
+        """
         CREATE TABLE passages(
           id TEXT PRIMARY KEY,article_id TEXT NOT NULL REFERENCES articles(id),event_id TEXT NOT NULL,
           text TEXT NOT NULL,expected_class TEXT NOT NULL,has_core_entity INTEGER NOT NULL,expected_new_fact INTEGER NOT NULL,
@@ -92,12 +99,26 @@ def schema(db: sqlite3.Connection) -> None:
           event_id TEXT PRIMARY KEY,scenario TEXT NOT NULL,window_start REAL NOT NULL,window_end REAL NOT NULL,
           expected_burst INTEGER NOT NULL
         );
+        """
+    )
+
+def ranking_schema(db: sqlite3.Connection) -> None:
+    """Create source-ranking judgement storage."""
+    db.executescript(
+        """
         CREATE TABLE ranking_judgements(
           query_id TEXT NOT NULL,article_id TEXT NOT NULL REFERENCES articles(id),relevance_grade INTEGER NOT NULL,
           topic_id TEXT NOT NULL,source_elo REAL NOT NULL,PRIMARY KEY(query_id,article_id)
         );
         CREATE INDEX ranking_query_elo ON ranking_judgements(query_id,source_elo DESC);
 
+        """
+    )
+
+def impression_schema(db: sqlite3.Connection) -> None:
+    """Create impressions and reader discovery controls."""
+    db.executescript(
+        """
         CREATE TABLE impressions(
           id INTEGER PRIMARY KEY,user_id TEXT NOT NULL,article_id TEXT NOT NULL REFERENCES articles(id),
           rendered_at REAL NOT NULL,scrolled_past_at REAL,action TEXT NOT NULL,reward REAL NOT NULL,topic_id TEXT NOT NULL,
@@ -117,8 +138,15 @@ def schema(db: sqlite3.Connection) -> None:
           slot_type TEXT NOT NULL,expected_relevant INTEGER NOT NULL,action TEXT NOT NULL,topic_id TEXT NOT NULL,
           PRIMARY KEY(user_id,article_id)
         );
-        """
+                """
     )
+
+def schema(db: sqlite3.Connection) -> None:
+    """Create the isolated Phase 0 SQLite and FTS5 evaluation schema."""
+    article_schema(db)
+    passage_schema(db)
+    ranking_schema(db)
+    impression_schema(db)
 
 
 def article_timing(
@@ -338,6 +366,16 @@ def seed_ranking(db: sqlite3.Connection, rng: DeterministicFixtureRNG) -> float:
     db.commit()
     return (time.perf_counter() - started) * 1000
 
+def impression_action(choice: float) -> tuple[str, float]:
+    """Map one deterministic random draw to an impression action and reward."""
+    if choice < 0.58:
+        return "scrolled_past", -1.0
+    if choice < 0.68:
+        return "click", 1.0
+    if choice < 0.73:
+        return "save", 2.0
+    return "none", 0.0
+
 def build_impression_rows(
     articles: list[tuple[str, str, float]],
     rendered: float,
@@ -348,14 +386,7 @@ def build_impression_rows(
     for user_index in range(10):
         user = f"user-{user_index:02d}"
         for article_index, (article_id, topic, fetched_at) in enumerate(articles):
-            choice = rng.random()
-            action, reward = "none", 0.0
-            if choice < 0.58:
-                action, reward = "scrolled_past", -1.0
-            elif choice < 0.68:
-                action, reward = "click", 1.0
-            elif choice < 0.73:
-                action, reward = "save", 2.0
+            action, reward = impression_action(rng.random())
             rendered_at = max(rendered, fetched_at) + article_index + user_index * 0.01
             impressions.append((
                 None, user, article_id, rendered_at, None, action, reward, topic,

@@ -88,8 +88,50 @@ class OutputProtectionTests(unittest.TestCase):
         """The database and report must have distinct paths."""
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "fixture"
+            args = argparse.Namespace(database=path, output=path)
             with self.assertRaises(SystemExit):
-                editorial_matrix.prepare_paths(argparse.Namespace(database=path, output=path))
+                editorial_matrix.prepare_paths(args)
+
+
+class GitRevisionTests(unittest.TestCase):
+    """Provenance resolves normal, detached and linked-worktree Git metadata."""
+
+    def test_detached_and_loose_reference(self) -> None:
+        """Read both forms without spawning a subprocess."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            git_dir = root / ".git"
+            (git_dir / "refs/heads").mkdir(parents=True)
+            revision = "a" * 40
+            (git_dir / "HEAD").write_text(revision + "\n")
+            self.assertEqual(editorial_matrix.git_revision(root), revision)
+            (git_dir / "HEAD").write_text("ref: refs/heads/main\n")
+            (git_dir / "refs/heads/main").write_text(revision + "\n")
+            self.assertEqual(editorial_matrix.git_revision(root), revision)
+
+    def test_linked_worktree_packed_reference(self) -> None:
+        """A linked worktree resolves references in its common Git directory."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "checkout").mkdir()
+            common = root / "common"
+            administrative = common / "worktrees/check"
+            administrative.mkdir(parents=True)
+            (root / "checkout/.git").write_text("gitdir: ../common/worktrees/check\n")
+            (administrative / "commondir").write_text("../..\n")
+            (administrative / "HEAD").write_text("ref: refs/heads/topic\n")
+            revision = "b" * 40
+            (common / "packed-refs").write_text("# pack-refs\n" + revision + " refs/heads/topic\n")
+            self.assertEqual(editorial_matrix.git_revision(root / "checkout"), revision)
+
+    def test_invalid_reference_is_rejected(self) -> None:
+        """A malformed reference cannot escape the Git metadata directory."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".git").mkdir()
+            (root / ".git/HEAD").write_text("ref: refs/../../secret\n")
+            with self.assertRaisesRegex(RuntimeError, "Invalid Git HEAD"):
+                editorial_matrix.git_revision(root)
 
 
 if __name__ == "__main__":

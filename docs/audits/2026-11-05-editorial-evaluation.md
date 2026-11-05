@@ -79,3 +79,4 @@ No Phase 1–4 production algorithm is part of this Phase 0 change.
 - Neutral-source NDCG@10: `0.14379946271267668`. This is a synthetic metadata baseline, not recommendation quality or MMR accuracy.
 - The availability-index defect found by the failing end-to-end gate was corrected before acceptance. The report retains source hashes alongside the base commit for uncommitted verification.
 - Local runs used Python 3.15.2 and SQLite 3.54.1. Hosted CI, hardware energy measurements and production editorial quality are not established by these results.
+- Follow-up review cleanup split schema and validation helpers and replaced process-based revision lookup with direct Git metadata reads. All 22 Python regressions pass, including loose, detached and packed linked-worktree revision controls; logical fixture and label hashes remain unchanged.
