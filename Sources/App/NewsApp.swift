@@ -46,10 +46,11 @@ import UserNotifications
                         let attributes: [String: Any] = [
                             "category": entry.category, loggedAtKey: entry.date.timeIntervalSince1970,
                         ]
+                        let message = DiagnosticsExport.redacted(entry)
                         if entry.level == .fault {
-                            SentrySDK.logger.fatal(redacted(entry), attributes: attributes)
+                            SentrySDK.logger.fatal(message, attributes: attributes)
                         } else {
-                            SentrySDK.logger.error(redacted(entry), attributes: attributes)
+                            SentrySDK.logger.error(message, attributes: attributes)
                         }
                     }
                     since = newest
@@ -66,20 +67,6 @@ import UserNotifications
                 log.timestamp = Date(timeIntervalSince1970: loggedAt)
             }
             return log
-        }
-
-        /// Read in-process, the unified log returns private values in clear (feed URLs can carry tokens), so they are
-        /// redacted here as the system log would: only `.public` values and unannotated numbers are sent.
-        static func redacted(_ entry: OSLogEntryLog) -> String {
-            entry.components.map { component in
-                guard !component.placeholder.isEmpty else { return component.formatSubstring }
-                let numbers: [OSLogMessageComponent.ArgumentCategory] = [.double, .int64, .uInt64]
-                let number = numbers.contains(component.argumentCategory)
-                let shown =
-                    component.placeholder.contains("public") || (number && !component.placeholder.contains("private"))
-                let value = number ? component.argumentNumberValue?.stringValue : component.argumentStringValue
-                return component.formatSubstring + (shown ? value ?? "" : "<private>")
-            }.joined()
         }
     }
 #endif

@@ -24010,15 +24010,16 @@ struct NewsTests {
             names.contains("News Diagnostics/summary.txt") && names.contains("News Diagnostics/log.txt"),
             "The zip holds the summary and the log: \(names)")
 
-        // This process's own entries are readable from the unified log, as the app's are.
+        // This process's own entries are readable from the unified log, as the app's are; private values stay redacted.
         let marker = "diagnostics-check-\(UUID().uuidString)"
-        NewsSignposts.launchLog.notice("\(marker, privacy: .public)")
+        let secret = "https://feeds.example/private?token=\(UUID().uuidString)"
+        NewsSignposts.launchLog.notice("\(marker, privacy: .public) \(secret)")
         // The unified log may store the entry a moment later; poll briefly instead of reading once.
         let deadline = ContinuousClock.now + .seconds(5)
         var found = false
         while !found && ContinuousClock.now < deadline {
             let own = try DiagnosticsExport.currentLaunchLog()
-            found = own.contains { $0.message == marker && $0.category == "Launch" }
+            found = own.contains { $0.message == "\(marker) <private>" && $0.category == "Launch" }
             if !found { try await Task.sleep(for: .milliseconds(100)) }
         }
         assertTrue(found, "The export reads this launch's log")
