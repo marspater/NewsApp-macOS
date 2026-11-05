@@ -20,6 +20,8 @@ All are off by default and read only by the test runner (`Tests/StoryCorpus.swif
 
 ## Results
 
+Measured at 361a7b7. A later review fix keeps a `headlinePlaces` or `differentAct` conflict behind a `places` veto absolute under the veto threshold, as the knob description says; runs b, c, f and g were measured before it and need a re-run, which can only lower what they admit.
+
 | Run | Strict same / related / different | Strict P / R | Story s+r / different | Story P / R | Multi-publisher share (of 1,436) | Groups (wrong) |
 | --- | --- | --- | --- | --- | --- | --- |
 | a baseline | 4 / 5 / 3 | 0.333 / 0.105 | 12 / 3 | 0.800 / 0.148 | 442 | 7 (0) |
@@ -48,7 +50,7 @@ Baseline strict: same 5, 43, 70, 83; wrong related 20, 63, 72, 93, 99; wrong dif
 - The one extra wrong link under b, c and f is pair 24 (a borderline different pair, The Guardian and BBC News): confirmed under c by diagnose; under b and f inferred from the count, the other off-card `different` candidates (15, 144) being unlinked under c and g. It is linked at the event level, so it also counts at story level. Its pair-model score is 0.08 with two shared specific names, so the floor in g removes it.
 - The floor also costs g one same pair, 71 (pair-model score 0.16, one shared name), which c and f had linked.
 - Raising the cutoff to 0.85 (e, f, g) separates the two events behind related pair 3 at story level while it adds same pairs 6 and 75 and related pair 21 (f, g).
-- The floor changes nothing alone (d): of the 8 baseline strict wrong pairs, 6 score at least 0.5 on the pair model (0.49–0.83), one below it shares 3 names (exempt), and one (0.10, one name) stays linked through a larger event.
+- The floor changes nothing alone (d): of the 8 baseline strict wrong pairs, 6 score at least 0.5 on the pair model (0.50–0.83), one below it (0.49) shares 3 names (exempt), and one (0.10, one name) stays linked through a larger event.
 - Groups: g forms 6 story groups, 4 in the labelled set and 2 outside it; the 2 are the same groups the first g run formed, grown variants of two groups labelled right (checked by the coordinating agent, not independently labelled).
 
 ## Why the pair model misses (feature dump)

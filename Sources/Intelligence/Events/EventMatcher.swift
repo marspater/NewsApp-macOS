@@ -856,6 +856,15 @@ enum EventMatcher {
         {
             return .places
         }
+        return headlineOrActConflict(a, b)
+    }
+
+    /// The checks after `places`: under the veto threshold (#737) a `places` conflict may be outvoted, these may not,
+    /// so `assess` reads them for a `places` pair too.
+    private static func headlineOrActConflict(_ a: EventFeatures, _ b: EventFeatures) -> EventConflict? {
+        func disjoint(_ lhs: Set<String>, _ rhs: Set<String>) -> Bool {
+            !lhs.isEmpty && !rhs.isEmpty && lhs.isDisjoint(with: rhs)
+        }
         // Headlines that place the reports in different countries or cities, with no place, person or two specific
         // names in common, report different events however much the descriptions mention each other's places (#737:
         // firefighters in Kyiv and in Kramatorsk; Saudi air defence and Yemeni strikes).
@@ -922,6 +931,7 @@ enum EventMatcher {
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
         var conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap, sameSeries: sameSeries)
+        if conflict == .places, policy.vetoThreshold, let absolute = headlineOrActConflict(a, b) { conflict = absolute }
         let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).union(crossSpecific).count
         let sharedEvidence =
             sharedKeywords
