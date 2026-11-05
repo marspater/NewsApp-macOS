@@ -24,7 +24,7 @@ The controlled corpus contains exactly 5,000 articles across 50 event clusters:
 |---|---:|---|
 | Breaking spikes | 2,000 | 20 events with 80 independent reports concentrated into a 27-minute spike and an earlier baseline |
 | Slow weekend | 1,500 | 15 events with independent reports spaced across 72 hours |
-| Syndication | 1,500 | 15 events with five wire stories each republished by twenty outlets |
+| Syndication | 1,500 | 15 events with five wire stories each republished by twenty outlets; each wire story keeps one originating publisher identity |
 
 It also seeds 5,000 event passages, 10,000 candidate sentences, event burst windows, 10 ranking queries with 500 candidates each, 50,000 impression rows, and a fixed 85/15 core/discovery recommendation fixture.
 
@@ -43,7 +43,7 @@ Metrics that need the future model/vector implementations are explicitly emitted
 
 ## Reading the results
 
-- The momentum volume-floor sweep counts distinct wire groups in the labeled window. It is only a pre-MACD gate study; it does not select a production threshold.
+- The momentum volume-floor sweep counts distinct wire groups and originating publishers in the labeled window. The single-wire control has 20 local outlet rows but one independent report and one originating publisher. This is only a pre-MACD gate study; it does not select a production threshold.
 - The ranking NDCG baseline is source-Elo-only. It is not an MMR result.
 - The recommendation relevance and discovery rates are evaluated against synthetic topic labels and a fixed exposure split. They are not evidence of a learned user profile.
 - ANE spin-up, ANE/CPU power draw, vector-cache hit rate, MMR semantic diversity and EWMA vector update cost require later Apple-silicon runs after this Phase 0 gate is accepted.
