@@ -495,8 +495,8 @@ def main() -> int:
                 "ANE spin-up and ANE/CPU power telemetry require a separate Apple-silicon hardware run after Phase 0 is accepted.",
             ],
         }
-        args.output.parent.mkdir(parents=True,exist_ok=True)
-        args.output.write_text(json.dumps(matrix,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+        output_path.parent.mkdir(parents=True,exist_ok=True)
+        output_path.write_text(json.dumps(matrix,indent=2,sort_keys=True)+"\\n",encoding="utf-8")
         print(f"Phase 0 matrix: {count} articles, {len(event_meta)} events, {matrix['database']['passage_count']} passages")
         print(f"Scenario counts: {scenarios}")
         print(f"Report: {output_path}")
