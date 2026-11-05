@@ -9,20 +9,8 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-from editorial_fixtures import (
-    DeterministicFixtureRNG,
-    UTC,
-    schema,
-    seed_articles,
-    seed_personalization,
-    seed_ranking,
-)
-from editorial_metrics import (
-    eval_momentum,
-    eval_novelty,
-    eval_personalization,
-    eval_ranking,
-)
+import editorial_fixtures
+import editorial_metrics
 
 def create_empty_file_exclusive(path: Path) -> None:
     """Create a new private file atomically without replacing an existing path."""
@@ -38,7 +26,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("docs/benchmarks") / f"{dt.datetime.now(UTC):%Y-%m-%d}-editorial-matrix.json",
+        default=Path("docs/benchmarks") / f"{dt.datetime.now(editorial_fixtures.UTC):%Y-%m-%d}-editorial-matrix.json",
     )
     parser.add_argument(
         "--database",
@@ -73,13 +61,13 @@ def prepare_paths(
 
 def seed_phase_zero(
     db: sqlite3.Connection,
-    rng: DeterministicFixtureRNG,
+    rng: editorial_fixtures.DeterministicFixtureRNG,
 ) -> tuple[dict[str, dict[str, str]], dict[str, float]]:
     """Create the schema and seed all controlled Phase 0 datasets."""
-    schema(db)
-    event_meta, timings = seed_articles(db, rng)
-    timings["ranking_judgement_insert_ms"] = seed_ranking(db, rng)
-    insert_ms, update_ms = seed_personalization(db, rng)
+    editorial_fixtures.schema(db)
+    event_meta, timings = editorial_fixtures.seed_articles(db, rng)
+    timings["ranking_judgement_insert_ms"] = editorial_fixtures.seed_ranking(db, rng)
+    insert_ms, update_ms = editorial_fixtures.seed_personalization(db, rng)
     timings["impression_insert_ms"] = insert_ms
     timings["impression_scroll_update_ms"] = update_ms
     return event_meta, timings
@@ -148,15 +136,15 @@ def build_matrix(
     """Assemble the reproducible quality and performance matrix for Phase 0."""
     return {
         "schema_version": 1,
-        "generated_at": dt.datetime.now(UTC).isoformat(timespec="seconds"),
+        "generated_at": dt.datetime.now(editorial_fixtures.UTC).isoformat(timespec="seconds"),
         "seed": args.seed,
         "phase": 0,
         "phase_zero_gate": "PASS",
         "database": database_summary(db, args, db_path, timings, fixture),
-        "novelty_extraction": eval_novelty(db, event_meta),
-        "momentum": eval_momentum(db),
-        "ranking": eval_ranking(db),
-        "personalization": eval_personalization(db),
+        "novelty_extraction": editorial_metrics.eval_novelty(db, event_meta),
+        "momentum": editorial_metrics.eval_momentum(db),
+        "ranking": editorial_metrics.eval_ranking(db),
+        "personalization": editorial_metrics.eval_personalization(db),
         "hardware": {
             "ane_spin_up_ms": None,
             "ane_cpu_power_draw": None,
@@ -204,7 +192,7 @@ def write_report(
 
 def run_phase_zero(args: argparse.Namespace, db_path: Path, output_path: Path) -> None:
     """Run the SQLite seed, integrity gates, evaluations, and JSON export."""
-    rng = DeterministicFixtureRNG(args.seed)
+    rng = editorial_fixtures.DeterministicFixtureRNG(args.seed)
     create_empty_file_exclusive(db_path)
     db = sqlite3.connect(db_path)
     try:

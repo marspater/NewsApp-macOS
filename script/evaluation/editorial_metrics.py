@@ -6,7 +6,7 @@ import sqlite3
 import statistics
 import time
 
-from editorial_fixtures import TOPICS
+import editorial_fixtures
 
 def ndcg10(rows: list[tuple[float, int]]) -> float:
     """Calculate normalized discounted cumulative gain at rank ten."""
@@ -236,7 +236,7 @@ def eval_personalization(db: sqlite3.Connection) -> dict:
         "recommendation_metric_basis": "synthetic topic-label control, not a user-preference model",
         "discovery_engagement_rate": engaged/max(1,discovery),
         "distinct_discovery_topics_reached": topics,
-        "topic_discovery_rate": topics/max(1,len(TOPICS)),
+        "topic_discovery_rate": topics/max(1,len(editorial_fixtures.TOPICS)),
         "ewma_vector_update_cost_ms": None,
         "ewma_status": "not_measured_phase_0_no_embedding_vectors",
     }
