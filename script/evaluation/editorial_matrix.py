@@ -22,19 +22,23 @@ PUBLISHERS = [f"Publisher {i:02d}" for i in range(20)]
 
 
 def ts(value: dt.datetime) -> float:
+    """Convert a timezone-aware datetime to a Unix timestamp."""
     return value.timestamp()
 
 
 def ndcg10(rows: list[tuple[float, int]]) -> float:
+    """Calculate normalized discounted cumulative gain at rank ten."""
     ranked = sorted(rows, key=lambda row: (-row[0], -row[1]))[:10]
     ideal = sorted((grade for _, grade in rows), reverse=True)[:10]
     def dcg(grades: list[int]) -> float:
+        """Calculate discounted cumulative gain for ordered relevance grades."""
         return sum((2 ** grade - 1) / math.log2(i + 2) for i, grade in enumerate(grades))
     denominator = dcg(ideal)
     return dcg([grade for _, grade in ranked]) / denominator if denominator else 0.0
 
 
 def schema(db: sqlite3.Connection) -> None:
+    """Create the isolated Phase 0 SQLite and FTS5 evaluation schema."""
     db.executescript("""
     PRAGMA journal_mode=WAL;
     PRAGMA synchronous=NORMAL;
@@ -81,6 +85,7 @@ def schema(db: sqlite3.Connection) -> None:
 
 
 def seed_articles(db: sqlite3.Connection, rng: random.Random):
+    """Seed the deterministic breaking, weekend, and syndication article corpus."""
     event_meta = {}
     event_articles = {}
     article_rows = []
@@ -185,6 +190,7 @@ def seed_articles(db: sqlite3.Connection, rng: random.Random):
 
 
 def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
+    """Measure FTS5 event-local retrieval and semantic-fallback queue routing."""
     rows = db.execute("SELECT id,article_id,event_id,expected_class FROM passages ORDER BY id").fetchall()
     lexical_expected = lexical_found = fallback_expected = fallback_queued = 0
     elapsed = []
@@ -242,6 +248,7 @@ def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
 
 
 def eval_momentum(db: sqlite3.Connection) -> dict:
+    """Evaluate labelled event windows and independent-wire volume-floor controls."""
     rows = db.execute("""
       SELECT w.event_id,w.scenario,w.expected_burst,count(a.id),count(DISTINCT a.wire_group_id),count(DISTINCT a.independent_publisher)
       FROM event_windows w LEFT JOIN articles a
@@ -297,6 +304,7 @@ def eval_momentum(db: sqlite3.Connection) -> dict:
 
 
 def seed_ranking(db: sqlite3.Connection, rng: random.Random) -> float:
+    """Create reproducible 500-candidate ranking judgement sets."""
     articles = db.execute("SELECT id,topic_id,source_elo FROM articles ORDER BY id").fetchall()
     rows=[]
     for index, topic in enumerate(TOPICS):
@@ -314,6 +322,7 @@ def seed_ranking(db: sqlite3.Connection, rng: random.Random) -> float:
 
 
 def eval_ranking(db: sqlite3.Connection) -> dict:
+    """Measure the source-Elo NDCG baseline and metadata-sort latency."""
     ndcgs=[]
     latencies=[]
     for (query,) in db.execute("SELECT DISTINCT query_id FROM ranking_judgements ORDER BY query_id"):
@@ -335,6 +344,7 @@ def eval_ranking(db: sqlite3.Connection) -> dict:
 
 
 def seed_personalization(db: sqlite3.Connection, rng: random.Random) -> tuple[float,float]:
+    """Seed synthetic impression rewards and the fixed core/discovery fixture."""
     articles=db.execute("SELECT id,topic_id FROM articles ORDER BY id").fetchall()
     rendered=ts(BASE+dt.timedelta(days=3))
     impressions=[]
@@ -374,6 +384,7 @@ def seed_personalization(db: sqlite3.Connection, rng: random.Random) -> tuple[fl
 
 
 def eval_personalization(db: sqlite3.Connection) -> dict:
+    """Measure impression storage, reward counts, and synthetic discovery exposure."""
     total,skipped,positive=db.execute(
         "SELECT count(*),sum(action='scrolled_past'),sum(action IN ('click','save')) FROM impressions").fetchone()
     discovery,engaged,topics=db.execute(
@@ -407,12 +418,14 @@ def eval_personalization(db: sqlite3.Connection) -> dict:
 
 
 def main() -> int:
+    """Build the Phase 0 corpus, run its evaluation matrix, and write JSON output."""
     parser=argparse.ArgumentParser(description="Build and evaluate the Phase 0 editorial evaluation matrix.")
     parser.add_argument("--output",type=Path,default=Path("docs/benchmarks") /
                         f"{dt.datetime.now(UTC):%Y-%m-%d}-editorial-matrix.json")
     parser.add_argument("--database",type=Path,help="Optional retained SQLite database path; temporary by default.")
     parser.add_argument("--seed",type=int,default=20261105)
     args=parser.parse_args()
+    # Seeded PRNG is intentional: this produces reproducible synthetic test data only.
     rng=random.Random(args.seed)
     temporary=None
     if args.database:

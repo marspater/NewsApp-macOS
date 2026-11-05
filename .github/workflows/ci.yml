@@ -96,8 +96,8 @@ jobs:
         with:
           name: editorial-phase0-matrix
           path: |
-            \${{ runner.temp }}/editorial-matrix.json
-            \${{ runner.temp }}/editorial-phase0.sqlite3
+            ${{ runner.temp }}/editorial-matrix.json
+            ${{ runner.temp }}/editorial-phase0.sqlite3
           if-no-files-found: error
           retention-days: 14
 
