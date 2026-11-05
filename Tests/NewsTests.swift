@@ -27762,9 +27762,12 @@ struct NewsTests {
         await eventually("The stubborn load is queued before its waiter cancels") { @MainActor in
             stubborn.requests.count == 1 && stubborn.queued == 1
         }
+        let shared = DecodedImageCache.sharedLoad(for: keptURL)
+        assertTrue(shared != nil, "The stubborn load is shared under its URL")
         waiter.cancel()
-        await eventually("The cancelled load is still queued before it is released") { @MainActor in
-            stubborn.requests.count == 1 && stubborn.queued == 1
+        // The last waiter's cancellation cancels the shared task on the main actor; release only after it has.
+        await eventually("The shared load is cancelled while its decode is still queued") { @MainActor in
+            shared?.task.isCancelled == true && stubborn.queued == 1
         }
         stubborn.release(1)
         _ = await waiter.value
