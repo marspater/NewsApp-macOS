@@ -1018,6 +1018,7 @@ struct NewsTests {
             ("testTransportCancellation", { try await rerunningLoopbackFlake(testTransportCancellation) }),
             ("testProxyWaitingClassification", { await testProxyWaitingClassification() }),
             ("testResolverLifecycle", { await testResolverLifecycle() }),
+            ("testRedirectDelegateDoesNoDNS", { await testRedirectDelegateDoesNoDNS() }),
             ("testGatewayAddressFallback", { try await rerunningLoopbackFlake(testGatewayAddressFallback) }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
             ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
@@ -19981,6 +19982,60 @@ struct NewsTests {
             "The first answer's family leads")
     }
 
+    /// A redirect does no DNS on the session's serial delegate queue (#945): with a resolver that hangs, redirects
+    /// for two tasks still complete at once, and the resolver is never consulted.
+    static func testRedirectDelegateDoesNoDNS() async {
+        print("  - Testing that redirects never wait on a slow resolver on the delegate queue (#945)...")
+        let lookups = SocketObservation()
+        let client = SecureHTTPClient(
+            configuration: .ephemeral,
+            resolver: { host in
+                lookups.recordText(host)
+                _ = DispatchSemaphore(value: 0).wait(timeout: .now() + 600)
+                return .unresolvable(reason: "Timed out")
+            })
+        let coordinator = client.delegateCoordinator
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let first = session.dataTask(with: URL(string: "https://example.com/first")!)
+        let started = ContinuousClock.now
+        let followed = await redirect(coordinator, session, first, to: "https://slow.invalid/next")
+        assertEqual(followed?.url?.absoluteString, "https://slow.invalid/next", "The redirect is followed")
+        assertTrue(ContinuousClock.now - started < .seconds(1), "The redirect completes without waiting on DNS")
+        let tasks = ["a", "b"].map { session.dataTask(with: URL(string: "https://example.com/\($0)")!) }
+        let concurrentStart = ContinuousClock.now
+        let results = await withTaskGroup(of: String?.self) { group in
+            for (index, task) in tasks.enumerated() {
+                group.addTask {
+                    await redirect(coordinator, session, task, to: "https://slow.invalid/\(index)")?.url?.absoluteString
+                }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
+        assertEqual(
+            Set(results.compactMap { $0 }), ["https://slow.invalid/0", "https://slow.invalid/1"],
+            "Both tasks' redirects are followed")
+        assertTrue(
+            ContinuousClock.now - concurrentStart < .seconds(1), "Neither task's callback waits behind the other's")
+        assertEqual(lookups.count, 0, "The redirect path never reaches the resolver")
+        for task in [first] + tasks { task.cancel() }
+    }
+
+    static func redirect(
+        _ coordinator: SecureSessionDelegateCoordinator, _ session: URLSession, _ task: URLSessionTask,
+        to target: String
+    ) async -> URLRequest? {
+        let response = HTTPURLResponse(
+            url: task.originalRequest!.url!, statusCode: 302, httpVersion: "HTTP/1.1",
+            headerFields: ["Location": target])!
+        return await withCheckedContinuation { continuation in
+            coordinator.urlSession(
+                session, task: task, willPerformHTTPRedirection: response,
+                newRequest: URLRequest(url: URL(string: target)!)
+            ) { continuation.resume(returning: $0) }
+        }
+    }
+
     /// A first address that never connects (a broken IPv6 route) falls back to the second well inside the
     /// handshake timeout (#945).
     @MainActor
@@ -19991,9 +20046,11 @@ struct NewsTests {
         let silent = try NWListener(using: .tcp, on: .any)
         let silentQueue = DispatchQueue(label: "test.fallback.silent")
         let held = SocketObservation()
+        let heldClosed = SocketObservation()
         silent.newConnectionHandler = { connection in
             held.recordText("held")
             connection.start(queue: silentQueue)
+            recordClose(connection, closed: heldClosed)
         }
         let upstream = try NWListener(using: .tcp, on: .any)
         let upstreamQueue = DispatchQueue(label: "test.fallback.upstream")
@@ -20046,7 +20103,20 @@ struct NewsTests {
         try await socketSend(client, Data("fallback".utf8))
         assertEqual(try await socketRead(client, count: 8), Data("fallback".utf8), "The tunnel relays over the winner")
         client.cancel()
+        await eventually("The losing attempt is cancelled once the winner connects") { heldClosed.count == 1 }
         await proxy.stop()
+    }
+
+    /// Reads until the peer closes, then records the close: EOF or an error both mean the attempt was torn down.
+    static func recordClose(_ connection: NWConnection, closed: SocketObservation) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { _, _, eof, error in
+            if eof || error != nil {
+                closed.recordText("closed")
+                connection.cancel()
+            } else {
+                recordClose(connection, closed: closed)
+            }
+        }
     }
 
     @MainActor

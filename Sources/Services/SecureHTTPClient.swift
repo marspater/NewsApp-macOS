@@ -30,7 +30,8 @@ actor SecureHTTPClient {
 
     private var session: URLSession?
     private var sessionPort: UInt16?
-    private let delegateCoordinator: SecureSessionDelegateCoordinator
+    /// Internal so a test can drive the redirect callback directly (#945).
+    let delegateCoordinator: SecureSessionDelegateCoordinator
     private let resolver: ProxyResolver
     /// Nil when a test supplies a fixed session configuration.
     private let gateway: NetworkBoundaryProxy?
