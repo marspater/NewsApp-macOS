@@ -110,6 +110,8 @@ struct EventMomentumMACDPoint: Equatable, Sendable {
     let momentum: Double
     let signalLine: Double
     let acceleration: Double
+    /// True only on the bucket where the histogram crosses from nonnegative to negative.
+    let crossedBelowSignal: Bool
 }
 
 struct EventMomentumMACDAccumulator: Sendable {
@@ -138,16 +140,19 @@ struct EventMomentumMACDAccumulator: Sendable {
 
     /// reportsPerHour is the count of independent reports in the just-completed bucket, scaled to an hourly rate.
     mutating func append(reportsPerHour: Double) -> EventMomentumMACDPoint {
+        let previousHistogram = (shortEMA - longEMA) - signalEMA
         let rate = reportsPerHour.isFinite ? max(0, reportsPerHour) : 0
         shortEMA += shortAlpha * (rate - shortEMA)
         longEMA += longAlpha * (rate - longEMA)
         let macd = shortEMA - longEMA
         signalEMA += signalAlpha * (macd - signalEMA)
+        let histogram = macd - signalEMA
         return EventMomentumMACDPoint(
             velocity: shortEMA,
             momentum: macd,
             signalLine: signalEMA,
-            acceleration: macd - signalEMA)
+            acceleration: histogram,
+            crossedBelowSignal: previousHistogram >= 0 && histogram < 0)
     }
 }
 
@@ -213,7 +218,8 @@ enum EventMomentumMACD {
             shortHalfLife: shortHalfLife,
             longHalfLife: longHalfLife,
             signalHalfLife: signalHalfLife)
-        var point = EventMomentumMACDPoint(velocity: 0, momentum: 0, signalLine: 0, acceleration: 0)
+        var point = EventMomentumMACDPoint(
+            velocity: 0, momentum: 0, signalLine: 0, acceleration: 0, crossedBelowSignal: false)
         for count in buckets {
             point = accumulator.append(reportsPerHour: count * 3600 / actualBucket)
         }
@@ -232,7 +238,7 @@ enum EventMomentumMACD {
             recentPublishers: recentPublishers,
             hasVolumeFloor: hasVolumeFloor,
             isRising: hasVolumeFloor && point.momentum > 0 && point.acceleration > 0,
-            isDecelerating: hasVolumeFloor && point.momentum > 0 && point.acceleration < 0,
+            isDecelerating: hasVolumeFloor && point.momentum > 0 && point.crossedBelowSignal,
             isReversing: hasVolumeFloor && point.momentum < 0)
     }
 }
