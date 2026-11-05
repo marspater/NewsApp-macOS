@@ -1017,6 +1017,8 @@ struct NewsTests {
             ("testSocketNetworkBoundary", { try await rerunningLoopbackFlake(testSocketNetworkBoundary) }),
             ("testTransportCancellation", { try await rerunningLoopbackFlake(testTransportCancellation) }),
             ("testProxyWaitingClassification", { await testProxyWaitingClassification() }),
+            ("testResolverLifecycle", { await testResolverLifecycle() }),
+            ("testGatewayAddressFallback", { try await rerunningLoopbackFlake(testGatewayAddressFallback) }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
             ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
             ("testRetentionPruneAfterRefresh", { try await testRetentionPruneAfterRefresh() }),
@@ -2985,8 +2987,8 @@ struct NewsTests {
         task.cancel()
 
         // Redirect safety state is keyed per task object, not by task identifier across sessions (#808). The
-        // injected resolver keeps the allowed redirect off the network.
-        let keyed = SecureSessionDelegateCoordinator(resolver: { _ in .allowed(ips: ["93.184.216.34"]) })
+        // delegate resolves nothing (#945), so the allowed redirect stays off the network.
+        let keyed = SecureSessionDelegateCoordinator()
         let sessionConfig = URLSessionConfiguration.ephemeral
         let sessionA = URLSession(configuration: sessionConfig)
         let sessionB = URLSession(configuration: sessionConfig)
@@ -19913,6 +19915,132 @@ struct NewsTests {
         assertFalse(
             NetworkBoundaryProxy.waitingFailsAtOnce(.dns(DNSServiceErrorType(kDNSServiceErr_Timeout))),
             "A non-POSIX waiting error is waited out")
+    }
+
+    static func testResolverLifecycle() async {
+        print("  - Testing the resolver: bounded lookups, prompt cancellation, no worker to exhaust (#945)...")
+        let hang: ProxyResolver.Lookup = { _ in
+            try? await Task.sleep(for: .seconds(600))
+            return .unresolvable(reason: "Cancelled")
+        }
+        // A resolver that never answers ends inside the deadline.
+        let started = ContinuousClock.now
+        let timedOut = await ProxyResolver(lookup: hang, deadline: .milliseconds(200)).resolve("slow.invalid")
+        assertEqual(timedOut, .unresolvable(reason: "Timed out"), "An unanswered lookup ends at the deadline")
+        assertTrue(ContinuousClock.now - started < .seconds(5), "The deadline is the bound, not the system's")
+        // Cancelling the caller resumes it at once and leaves no pending work behind.
+        let resolver = ProxyResolver(lookup: hang, deadline: .seconds(600))
+        let cancelled = Task { await resolver.resolve("slow.invalid") }
+        try? await Task.sleep(for: .milliseconds(50))
+        let cancelledAt = ContinuousClock.now
+        cancelled.cancel()
+        assertEqual(await cancelled.value, .unresolvable(reason: "Cancelled"), "A cancelled lookup says so")
+        assertTrue(ContinuousClock.now - cancelledAt < .seconds(5), "Cancellation resumes the caller at once")
+        // Hung lookups do not occupy anything other lookups wait for.
+        let mixed = ProxyResolver(
+            lookup: { host in
+                if host.hasPrefix("hang") { return await hang(host) }
+                return .allowed(ips: ["93.184.216.34"])
+            }, deadline: .seconds(600))
+        let hung = (0..<12).map { index in Task { await mixed.resolve("hang-\(index).invalid") } }
+        let quick = await mixed.resolve("quick.invalid")
+        assertEqual(quick, .allowed(ips: ["93.184.216.34"]), "A lookup behind twelve hung ones still resolves")
+        for task in hung { task.cancel() }
+        for task in hung { _ = await task.value }
+        // The production path answers names and literals the hostname guard decides without any DNS.
+        let production = ProxyResolver(deadline: .seconds(600))
+        for host in ["localhost", "127.0.0.1", "printer.local", "intranet", "[::1]"] {
+            if case .blocked = await production.resolve(host) { continue }
+            assertTrue(false, "\(host) is refused by the hostname guard before DNS")
+        }
+        assertEqual(
+            await production.resolve("93.184.216.34"), .allowed(ips: ["93.184.216.34"]),
+            "A public literal is its own answer")
+        if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
+            if case .allowed(let ips) = await production.resolve("example.com") {
+                assertTrue(!ips.isEmpty, "The system lookup answers a public name with its addresses")
+            } else {
+                assertTrue(false, "The system lookup resolves a public name")
+            }
+            if case .blocked = await production.resolve("localtest.me") {
+            } else {
+                assertTrue(false, "A name answering with a private address is refused by the system lookup")
+            }
+        }
+        assertEqual(
+            NetworkBoundaryProxy.interleaved(["2606:4700::1111", "2606:4700::1001", "1.1.1.1", "1.0.0.1"]),
+            ["2606:4700::1111", "1.1.1.1", "2606:4700::1001", "1.0.0.1"], "Address families take turns")
+        assertEqual(
+            NetworkBoundaryProxy.interleaved(["1.1.1.1", "2606:4700::1111"]), ["1.1.1.1", "2606:4700::1111"],
+            "The first answer's family leads")
+    }
+
+    /// A first address that never connects (a broken IPv6 route) falls back to the second well inside the
+    /// handshake timeout (#945).
+    @MainActor
+    static func testGatewayAddressFallback() async throws {
+        print("  - Testing the gateway's address fallback: a dead first address yields to the second (#945)...")
+        // The dead address connects through a SOCKS proxy that accepts and never answers, so the attempt stays
+        // in preparation the way an unanswered SYN does.
+        let silent = try NWListener(using: .tcp, on: .any)
+        let silentQueue = DispatchQueue(label: "test.fallback.silent")
+        let held = SocketObservation()
+        silent.newConnectionHandler = { connection in
+            held.recordText("held")
+            connection.start(queue: silentQueue)
+        }
+        let upstream = try NWListener(using: .tcp, on: .any)
+        let upstreamQueue = DispatchQueue(label: "test.fallback.upstream")
+        upstream.newConnectionHandler = { connection in
+            connection.start(queue: upstreamQueue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { data, _, _, _ in
+                connection.send(content: data, completion: .contentProcessed { _ in })
+            }
+        }
+        for listener in [silent, upstream] {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let once = SocketObservation()
+                listener.stateUpdateHandler = { state in
+                    if case .ready = state, once.claim() { continuation.resume() }
+                    if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
+                }
+                listener.start(queue: listener === silent ? silentQueue : upstreamQueue)
+            }
+        }
+        defer {
+            silent.cancel()
+            upstream.cancel()
+        }
+        let observed = SocketObservation()
+        let silentPort = silent.port!
+        let upstreamPort = upstream.port!
+        let proxy = NetworkBoundaryProxy(
+            resolver: { _ in .allowed(ips: ["2606:4700::1111", "93.184.216.34"]) },
+            connector: { host, port in
+                observed.record(host)
+                if case .ipv6 = host {
+                    let parameters = NWParameters.tcp
+                    let context = NWParameters.PrivacyContext(description: "test.fallback.silent")
+                    context.proxyConfigurations = [
+                        ProxyConfiguration(socksv5Proxy: .hostPort(host: "127.0.0.1", port: silentPort))
+                    ]
+                    parameters.setPrivacyContext(context)
+                    return NWConnection(host: host, port: port, using: parameters)
+                }
+                return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
+            })
+        let started = ContinuousClock.now
+        let (client, reply) = try await socksConnect(proxy, host: "dual.invalid")
+        let elapsed = ContinuousClock.now - started
+        assertEqual(reply[1], 0, "The second address connects while the first is still waiting")
+        assertTrue(elapsed < .seconds(5), "The fallback takes about a quarter second, not the handshake timeout")
+        assertEqual(
+            observed.hosts, ["2606:4700::1111", "93.184.216.34"], "IPv6 was tried first, IPv4 after the delay")
+        assertEqual(held.count, 1, "The dead attempt reached the silent proxy exactly once")
+        try await socketSend(client, Data("fallback".utf8))
+        assertEqual(try await socketRead(client, count: 8), Data("fallback".utf8), "The tunnel relays over the winner")
+        client.cancel()
+        await proxy.stop()
     }
 
     @MainActor

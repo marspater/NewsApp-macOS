@@ -38,26 +38,21 @@ actor SecureHTTPClient {
     private init() {
         let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
-        self.resolver = ProxyResolver(body: { IPAddressValidator.validateHost($0) })
+        self.resolver = ProxyResolver()
         self.gateway = .shared
     }
 
-    internal init(
-        configuration: URLSessionConfiguration,
-        resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }
-    ) {
-        let coordinator = SecureSessionDelegateCoordinator(resolver: resolver)
+    /// `resolver` keeps a test's synchronous DNS answers; nil resolves through the system.
+    internal init(configuration: URLSessionConfiguration, resolver: NetworkBoundaryProxy.Resolver? = nil) {
+        let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
         self.resolver = ProxyResolver(body: resolver)
         self.gateway = nil
         self.session = URLSession(configuration: configuration, delegate: coordinator, delegateQueue: nil)
     }
 
-    internal init(
-        gateway: NetworkBoundaryProxy,
-        resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }
-    ) {
-        self.delegateCoordinator = SecureSessionDelegateCoordinator(resolver: resolver)
+    internal init(gateway: NetworkBoundaryProxy, resolver: NetworkBoundaryProxy.Resolver? = nil) {
+        self.delegateCoordinator = SecureSessionDelegateCoordinator()
         self.resolver = ProxyResolver(body: resolver)
         self.gateway = gateway
     }
@@ -149,7 +144,7 @@ actor SecureHTTPClient {
 
     static let allowedPorts: Set<Int> = [80, 443, 8080, 8443]
 
-    /// Shared navigation/ingestion preflight. Blocking DNS work runs off this actor and off the UI actor.
+    /// Shared navigation/ingestion preflight. The DNS lookup is asynchronous, cancellable and bounded (#945).
     func validateDestination(_ url: URL, allowHTTP: Bool = false) async throws {
         // 1. Scheme & Port Validation
         guard let scheme = url.scheme?.lowercased() else {
@@ -265,13 +260,10 @@ actor SecureHTTPClient {
 
 // MARK: - Delegate Coordinator for Redirects and DNS Rebinding Detection
 
+/// Bounds redirects and refuses downgrades and non-web targets on the session's one serial delegate queue. It never
+/// resolves a name there (#945): the gateway resolves, validates and pins every connection, so a redirect to a
+/// private host still fails closed, and a slow lookup cannot stall every other request's callbacks.
 final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    private let resolver: NetworkBoundaryProxy.Resolver
-
-    init(resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }) {
-        self.resolver = resolver
-        super.init()
-    }
     private struct TaskSecurityState {
         var redirectCount: Int = 0
         var initialScheme: String
@@ -324,13 +316,12 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
             return
         }
 
-        // 4. Validate redirect target host and IP resolution
-        switch resolver(targetHost) {
-        case .allowed:
-            completionHandler(request)
-        case .blocked, .unresolvable:
+        // 4. Refuse names and literals the hostname guard refuses without DNS; the gateway validates the addresses.
+        if case .blocked = IPAddressValidator.hostnameGuard(targetHost).result {
             completionHandler(nil)
+            return
         }
+        completionHandler(request)
     }
 
     func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError _: Error?) {

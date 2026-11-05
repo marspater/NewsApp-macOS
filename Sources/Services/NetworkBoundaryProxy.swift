@@ -14,12 +14,29 @@
 
 import Foundation
 import Network
+import dnssd
 import os
 
 /// The only socket gateway used by in-app HTTP clients. TLS stays end-to-end with the client.
 actor NetworkBoundaryProxy {
     static let shared = NetworkBoundaryProxy()
     typealias Connector = @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection
+    /// Alternates address families, starting with the family of the first answer.
+    nonisolated static func interleaved(_ addresses: [String]) -> [String] {
+        var first = [String]()
+        var second = [String]()
+        let leadsIPv6 = addresses.first.map { IPv6Address($0) != nil } ?? false
+        for address in addresses {
+            if (IPv6Address(address) != nil) == leadsIPv6 { first.append(address) } else { second.append(address) }
+        }
+        var result = [String]()
+        for index in 0..<max(first.count, second.count) {
+            if index < first.count { result.append(first[index]) }
+            if index < second.count { result.append(second[index]) }
+        }
+        return result
+    }
+
     static let logger = Logger(subsystem: "com.marspater.news", category: "NetworkBoundaryProxy")
 
     /// Whether a connection that reports `.waiting` with this error is refused for good, so the next address (or a
@@ -39,13 +56,14 @@ actor NetworkBoundaryProxy {
         guard case .posix(let code) = error else { return false }
         return [.ECONNREFUSED, .ENETUNREACH, .EHOSTUNREACH, .ENETDOWN, .EACCES, .EPERM].contains(code)
     }
+    /// A test's synchronous answers; nil resolves through the system (`DNSLookup`).
     typealias Resolver = @Sendable (String) -> IPAddressValidator.ValidationResult
-    private let resolver: Resolver
+    private let resolver: Resolver?
     private let connector: Connector
     private var startup: Task<SOCKSListener, Error>?
 
     init(
-        resolver: @escaping Resolver = { IPAddressValidator.validateHost($0) },
+        resolver: Resolver? = nil,
         connector: @escaping Connector = { NWConnection(host: $0, port: $1, using: .tcp) }
     ) {
         self.resolver = resolver
@@ -98,29 +116,164 @@ actor NetworkBoundaryProxy {
     }
 }
 
-/// Runs blocking native DNS work off the cooperative pool and off callers' actors, a few lookups at a time,
-/// so one hung lookup cannot stall the others. Lookups cancelled while queued are skipped.
-final class ProxyResolver: @unchecked Sendable {
-    let body: NetworkBoundaryProxy.Resolver
-    // ponytail: fixed width matching feed refresh concurrency; raise it if image-heavy screens queue on DNS.
-    private let queue: OperationQueue = {
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 6
-        queue.qualityOfService = .utility
-        return queue
-    }()
-    init(body: @escaping NetworkBoundaryProxy.Resolver) { self.body = body }
+/// Resolves and validates one host for the gateway and the preflight (#945). The system lookup is asynchronous and
+/// cancellable, so no thread or worker is held, and every lookup ends inside `deadline`: cancelling the caller
+/// resumes it at once and cancels the native query.
+final class ProxyResolver: Sendable {
+    typealias Lookup = @Sendable (String) async -> IPAddressValidator.ValidationResult
+    /// Longer than a healthy answer by far, shorter than the request timeout that would otherwise absorb a hang.
+    static let defaultDeadline: Duration = .seconds(5)
+    private let lookup: Lookup
+    private let deadline: Duration
+
+    /// `body` keeps a test's synchronous answers; production resolves through `DNSLookup`.
+    init(body: NetworkBoundaryProxy.Resolver? = nil, deadline: Duration = defaultDeadline) {
+        if let body {
+            self.lookup = { body($0) }
+        } else {
+            self.lookup = { host in
+                let (name, guarded) = IPAddressValidator.hostnameGuard(host)
+                if let guarded { return guarded }
+                return await DNSLookup.resolve(name)
+            }
+        }
+        self.deadline = deadline
+    }
+
+    init(lookup: @escaping Lookup, deadline: Duration = defaultDeadline) {
+        self.lookup = lookup
+        self.deadline = deadline
+    }
+
     func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
-        let pending = CompletionOnce()
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                queue.addOperation { [body] in
-                    continuation.resume(returning: pending.claim() ? body(host) : .unresolvable(reason: "Cancelled"))
+        guard !Task.isCancelled else { return .unresolvable(reason: "Cancelled") }
+        let lookup = lookup
+        let deadline = deadline
+        return await withTaskGroup(of: IPAddressValidator.ValidationResult.self) { group in
+            group.addTask { await lookup(host) }
+            group.addTask {
+                do {
+                    try await Task.sleep(for: deadline)
+                    return .unresolvable(reason: "Timed out")
+                } catch {
+                    return .unresolvable(reason: "Cancelled")
                 }
             }
-        } onCancel: {
-            _ = pending.claim()
+            let first = await group.next() ?? .unresolvable(reason: "Cancelled")
+            group.cancelAll()
+            return first
         }
+    }
+}
+
+/// One system DNS lookup through dns_sd, answered address by address on a serial queue and validated as it arrives:
+/// one blocked address fails the host closed. The configured address families are queried; each ends with its last address or
+/// with no record, and once one has ended, the other gets `familyGrace` to follow before the lookup answers with
+/// what it has (a filter that drops AAAA queries answers nothing for that family). Cancellation deallocates the query.
+final class DNSLookup: @unchecked Sendable {
+    private static let queue = DispatchQueue(label: "com.marspater.news.dns")
+    /// RFC 8305 names 50 ms for the first family to wait for the second; a little more absorbs a slower upstream.
+    static let familyGrace: DispatchTimeInterval = .milliseconds(100)
+    private var service: DNSServiceRef?
+    private var continuation: CheckedContinuation<IPAddressValidator.ValidationResult, Never>?
+    private var addresses: [String] = []
+    /// Families with an address so far, and families that ended: the batch that carried their addresses is complete,
+    /// or they have no record. -1 stands for an answer that names no family.
+    private var seen: Set<Int32> = []
+    private var ended: Set<Int32> = []
+    private var grace: DispatchWorkItem?
+    /// Cancelled before the query started: a task already cancelled runs its cancellation handler first.
+    private var cancelledBeforeStart = false
+
+    static func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
+        let lookup = DNSLookup()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                queue.async { lookup.start(host, continuation) }
+            }
+        } onCancel: {
+            queue.async { lookup.complete(.unresolvable(reason: "Cancelled")) }
+        }
+    }
+
+    private func start(_ host: String, _ continuation: CheckedContinuation<IPAddressValidator.ValidationResult, Never>)
+    {
+        self.continuation = continuation
+        if cancelledBeforeStart { return complete(.unresolvable(reason: "Cancelled")) }
+        let reply: DNSServiceGetAddrInfoReply = { _, flags, _, error, _, address, _, context in
+            guard let context else { return }
+            Unmanaged<DNSLookup>.fromOpaque(context).takeUnretainedValue()
+                .received(flags: flags, error: error, address: address)
+        }
+        // Protocol 0 queries the families this Mac has a routable address for, as AI_ADDRCONFIG did: a Mac with a
+        // broken IPv6 route still has the address, so both are asked and the gateway falls back to IPv4. Intermediates
+        // report a family without records (or a name that does not exist) at once instead of staying silent; the
+        // timeout flag ends an unanswered query with kDNSServiceErr_Timeout.
+        var ref: DNSServiceRef?
+        let error = DNSServiceGetAddrInfo(
+            &ref, DNSServiceFlags(kDNSServiceFlagsTimeout | kDNSServiceFlagsReturnIntermediates), 0, 0, host, reply,
+            Unmanaged.passRetained(self).toOpaque())
+        guard error == kDNSServiceErr_NoError, let ref else {
+            Unmanaged.passUnretained(self).release()
+            return complete(.unresolvable(reason: "dns \(error)"))
+        }
+        service = ref
+        guard DNSServiceSetDispatchQueue(ref, Self.queue) == kDNSServiceErr_NoError else {
+            return complete(.unresolvable(reason: "dns queue"))
+        }
+    }
+
+    private func received(flags: DNSServiceFlags, error: DNSServiceErrorType, address: UnsafePointer<sockaddr>?) {
+        guard continuation != nil else { return }
+        let family = address.map { Int32($0.pointee.sa_family) } ?? -1
+        switch Int(error) {
+        case kDNSServiceErr_NoError:
+            guard let address else { return }
+            if let reason = IPAddressValidator.validateSocketAddress(address) {
+                return complete(.blocked(reason: reason))
+            }
+            if let text = IPAddressValidator.addressString(address) { addresses.append(text) }
+            seen.insert(family)
+            // The flag clears at the end of a batch, which may carry both families' addresses.
+            if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0 { familiesEnded(seen) }
+        case kDNSServiceErr_NoSuchRecord:
+            familiesEnded([family])
+        default:
+            complete(.unresolvable(reason: "dns \(error)"))
+        }
+    }
+
+    private func familiesEnded(_ families: Set<Int32>) {
+        ended.formUnion(families)
+        if ended.count >= 2 { return complete(answer) }
+        guard !addresses.isEmpty, grace == nil else { return }
+        let item = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.complete(self.answer)
+        }
+        grace = item
+        Self.queue.asyncAfter(deadline: .now() + Self.familyGrace, execute: item)
+    }
+
+    private var answer: IPAddressValidator.ValidationResult {
+        addresses.isEmpty ? .unresolvable(reason: "No valid addresses resolved") : .allowed(ips: addresses)
+    }
+
+    /// Exactly once: deallocating the service cancels the query and stops its callbacks.
+    private func complete(_ result: IPAddressValidator.ValidationResult) {
+        guard let continuation else {
+            cancelledBeforeStart = true
+            return
+        }
+        self.continuation = nil
+        grace?.cancel()
+        grace = nil
+        if let service {
+            DNSServiceRefDeallocate(service)
+            self.service = nil
+            Unmanaged.passUnretained(self).release()
+        }
+        continuation.resume(returning: result)
     }
 }
 
@@ -217,6 +370,15 @@ final class CompletionOnce: @unchecked Sendable {
 private final class SOCKSTunnel: @unchecked Sendable {
     private let client: NWConnection
     private var upstream: NWConnection?
+    /// Connections still trying, newest last; the first to become ready is the upstream and cancels the rest.
+    private var attempts: [NWConnection] = []
+    private var addresses: ArraySlice<String> = []
+    private var port: UInt16 = 0
+    private var nextAttempt: DispatchWorkItem?
+    /// RFC 8305: the next address starts when the one before has not connected within this delay.
+    static let attemptDelay: DispatchTimeInterval = .milliseconds(250)
+    /// Attempts in flight per tunnel.
+    static let maxAttempts = 3
     private let queue: DispatchQueue
     private let resolver: ProxyResolver
     private let connector: NetworkBoundaryProxy.Connector
@@ -365,14 +527,26 @@ private final class SOCKSTunnel: @unchecked Sendable {
                     self.reject()
                     return
                 }
-                self.connect(addresses: addresses[...], port: port)
+                self.connect(addresses: addresses, port: port)
             }
         }
     }
 
-    private func connect(addresses: ArraySlice<String>, port: UInt16) {
-        guard !finished, let address = addresses.first else {
-            reject()
+    /// Happy Eyeballs (RFC 8305, #945): the families take turns, a further address starts after `attemptDelay`
+    /// while none is ready, the first ready connection wins and every other attempt is cancelled. A dead first
+    /// address (an IPv6 route that never answers) costs a quarter second, not the handshake timeout.
+    private func connect(addresses: [String], port: UInt16) {
+        self.addresses = NetworkBoundaryProxy.interleaved(addresses)[...]
+        self.port = port
+        startNextAttempt()
+    }
+
+    private func startNextAttempt() {
+        nextAttempt?.cancel()
+        nextAttempt = nil
+        guard !finished, upstream == nil else { return }
+        guard let address = addresses.popFirst() else {
+            if attempts.isEmpty { reject() }
             return
         }
         let host: NWEndpoint.Host
@@ -381,51 +555,74 @@ private final class SOCKSTunnel: @unchecked Sendable {
         } else if let ipv6 = IPv6Address(address) {
             host = .ipv6(ipv6)
         } else {
-            reject()
+            startNextAttempt()
             return
         }
         let connection = connector(host, NWEndpoint.Port(rawValue: port)!)
-        upstream = connection
+        attempts.append(connection)
         connection.stateUpdateHandler = { [weak self, weak connection] state in
-            guard let self, let connection, !self.finished, self.upstream === connection else { return }
-            switch state {
-            case .ready:
-                connection.stateUpdateHandler = nil
-                self.client.send(
-                    content: Data([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]),
-                    completion: .contentProcessed { [weak self] error in
-                        guard let self, error == nil else {
-                            self?.finish()
-                            return
-                        }
-                        self.touch()
-                        self.relay(from: self.client, to: connection)
-                        self.relay(from: connection, to: self.client)
-                    })
-            case .failed(let error):
-                let reason = NetworkBoundaryProxy.logDescription(error)
-                NetworkBoundaryProxy.logger.error(
-                    "Upstream connect to port \(port, privacy: .public) failed: \(reason, privacy: .public)")
-                connection.stateUpdateHandler = nil
-                connection.cancel()
-                self.connect(addresses: addresses.dropFirst(), port: port)
-            case .waiting(let error):
-                let reason = NetworkBoundaryProxy.logDescription(error)
-                guard NetworkBoundaryProxy.waitingFailsAtOnce(error) else {
-                    // May resolve to .ready or .failed; the handshake timeout ends a connect that never does.
-                    NetworkBoundaryProxy.logger.notice(
-                        "Upstream connect to port \(port, privacy: .public) is waiting: \(reason, privacy: .public)")
-                    return
-                }
-                NetworkBoundaryProxy.logger.error(
-                    "Upstream connect to port \(port, privacy: .public) refused: \(reason, privacy: .public)")
-                connection.stateUpdateHandler = nil
-                connection.cancel()
-                self.connect(addresses: addresses.dropFirst(), port: port)
-            default: break
-            }
+            guard let self, let connection else { return }
+            self.attempt(connection, changed: state)
         }
         connection.start(queue: queue)
+        guard !addresses.isEmpty, attempts.count < Self.maxAttempts else { return }
+        let item = DispatchWorkItem { [weak self] in self?.startNextAttempt() }
+        nextAttempt = item
+        queue.asyncAfter(deadline: .now() + Self.attemptDelay, execute: item)
+    }
+
+    private func attempt(_ connection: NWConnection, changed state: NWConnection.State) {
+        guard !finished, upstream == nil, attempts.contains(where: { $0 === connection }) else { return }
+        let port = port
+        switch state {
+        case .ready:
+            upstream = connection
+            nextAttempt?.cancel()
+            nextAttempt = nil
+            for other in attempts where other !== connection {
+                other.stateUpdateHandler = nil
+                other.cancel()
+            }
+            attempts = []
+            addresses = []
+            connection.stateUpdateHandler = nil
+            client.send(
+                content: Data([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]),
+                completion: .contentProcessed { [weak self] error in
+                    guard let self, error == nil else {
+                        self?.finish()
+                        return
+                    }
+                    self.touch()
+                    self.relay(from: self.client, to: connection)
+                    self.relay(from: connection, to: self.client)
+                })
+        case .failed(let error):
+            let reason = NetworkBoundaryProxy.logDescription(error)
+            NetworkBoundaryProxy.logger.error(
+                "Upstream connect to port \(port, privacy: .public) failed: \(reason, privacy: .public)")
+            drop(connection)
+        case .waiting(let error):
+            let reason = NetworkBoundaryProxy.logDescription(error)
+            guard NetworkBoundaryProxy.waitingFailsAtOnce(error) else {
+                // May resolve to .ready or .failed; the next address starts meanwhile and the handshake timeout
+                // ends a connect that never does.
+                NetworkBoundaryProxy.logger.notice(
+                    "Upstream connect to port \(port, privacy: .public) is waiting: \(reason, privacy: .public)")
+                return
+            }
+            NetworkBoundaryProxy.logger.error(
+                "Upstream connect to port \(port, privacy: .public) refused: \(reason, privacy: .public)")
+            drop(connection)
+        default: break
+        }
+    }
+
+    private func drop(_ connection: NWConnection) {
+        connection.stateUpdateHandler = nil
+        connection.cancel()
+        attempts.removeAll { $0 === connection }
+        startNextAttempt()
     }
 
     private func touch() { timeout?.schedule(deadline: .now() + 90) }
@@ -489,7 +686,14 @@ private final class SOCKSTunnel: @unchecked Sendable {
         timeout = nil
         resolving?.cancel()
         resolving = nil
+        nextAttempt?.cancel()
+        nextAttempt = nil
         client.cancel()
+        for attempt in attempts {
+            attempt.stateUpdateHandler = nil
+            attempt.cancel()
+        }
+        attempts = []
         upstream?.cancel()
         upstream = nil
         onFinish()
