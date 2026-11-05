@@ -1067,6 +1067,7 @@ struct NewsTests {
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
+            ("testOverviewSourcesFollowTheSentence", { testOverviewSourcesFollowTheSentence() }),
             (
                 "testHybridSearchSemanticRetrievalAndSnippets",
                 { try await testHybridSearchSemanticRetrievalAndSnippets() }
@@ -26774,6 +26775,27 @@ struct NewsTests {
             let lastItem = timelineItems.last!
             assertTrue(lastItem.isFuturePlan, "Future plans are positioned at the end of the timeline")
         }
+    }
+
+    /// #993: the sources of a highlight or perspective follow its sentence as linked runs inside one text.
+    static func testOverviewSourcesFollowTheSentence() {
+        print("  - Testing that overview sources follow the sentence as inline links (#993)...")
+        let text = EventOverviewReaderView.sourcedAttributedString(
+            "Routes are open.", sources: [(id: "c_1", label: "The Hindu"), (id: "c_2", label: "The Guardian")],
+            scale: 1, contrast: .standard)
+        let plain = String(text.characters)
+        assertTrue(plain.hasPrefix("Routes are open. "), "The sentence comes first, unchanged")
+        assertTrue(plain.contains("\u{00A0}The Hindu\u{00A0}"), "Each source is a padded run after the sentence")
+        assertTrue(
+            plain.range(of: "The Hindu")!.lowerBound < plain.range(of: "The Guardian")!.lowerBound,
+            "Sources keep citation order")
+        let links = text.runs.compactMap(\.link)
+        assertEqual(
+            links.map(\.absoluteString), ["news-citation://cite/c_1", "news-citation://cite/c_2"],
+            "Each source run links to its citation; the sentence itself is not a link")
+        assertTrue(text.runs.first?.link == nil, "The sentence run carries no link")
+        let bare = EventOverviewReaderView.sourcedAttributedString("Alone.", sources: [], scale: 1, contrast: .standard)
+        assertEqual(String(bare.characters), "Alone.", "No source, no run")
     }
 
     static func testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: String = "example.com") async throws

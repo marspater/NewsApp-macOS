@@ -751,32 +751,65 @@ struct EventOverviewReaderView: View {
         citations: [OverviewCitation]
     ) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xxs) {
-            Text(OverviewComposer.ensureTerminalPeriod(fact.text))
-                .font(bodyFont)
-                .lineSpacing(bodyLineSpacing)
-                .foregroundStyle(AppColor.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            // The sources follow the sentence and wrap with it (#993).
+            sourcedSentence(OverviewComposer.ensureTerminalPeriod(fact.text), citations: citations)
 
-            let hasPublisher = publisher != nil && !publisher!.isEmpty
-            let hasCitations = !citations.isEmpty
-
-            if hasPublisher || hasCitations {
-                ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
-                    if !hasCitations, let publisher, !publisher.isEmpty {
-                        Text(publisher)
-                            .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                            .foregroundStyle(currentSecondaryTextColor)
-                    }
-
-                    ForEach(fact.citationIDs, id: \.self) { id in
-                        if let citation = overview.citations[id] {
-                            citationPill(citation)
-                        }
-                    }
-                }
+            if citations.isEmpty, let publisher, !publisher.isEmpty {
+                Text(publisher)
+                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                    .foregroundStyle(currentSecondaryTextColor)
             }
         }
+    }
+
+    /// A sentence with its cited publishers as linked runs at its end, so a source never sits on a line of its own
+    /// (#993). Each run links to `news-citation://cite/<id>`; VoiceOver reads the sentence, then the sources, and the
+    /// enclosing row's actions open them.
+    private func sourcedSentence(_ text: String, citations: [OverviewCitation]) -> some View {
+        let sources = citations.map { citation in
+            (
+                id: citation.id,
+                label: Self.citationLabel(sourceName: citation.sourceName, match: matchingArticle(for: citation))
+            )
+        }
+        return Text(Self.sourcedAttributedString(text, sources: sources, scale: textScale, contrast: contrast))
+            .font(bodyFont)
+            .lineSpacing(bodyLineSpacing)
+            .foregroundStyle(AppColor.primaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .environment(\.openURL, citationOpenURLAction(citations))
+    }
+
+    /// Opens the citation a `news-citation://cite/<id>` link names; every other link keeps the system behaviour.
+    private func citationOpenURLAction(_ citations: [OverviewCitation]) -> OpenURLAction {
+        OpenURLAction { url in
+            guard url.scheme == Self.citationScheme, url.host == "cite",
+                let citation = citations.first(where: {
+                    $0.id == url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                })
+            else { return .systemAction }
+            onSelectCitation(citation, matchingArticle(for: citation))
+            return .handled
+        }
+    }
+
+    /// The sentence, then each source's name as a linked run in the citation pill's colours (`TagView`'s accent
+    /// text on its wash), separated by a space, so they wrap with the sentence.
+    nonisolated static func sourcedAttributedString(
+        _ text: String, sources: [(id: String, label: String)], scale: CGFloat, contrast: ColorSchemeContrast
+    ) -> AttributedString {
+        var result = AttributedString(text)
+        for source in sources {
+            var run = AttributedString("\u{00A0}\(source.label)\u{00A0}")
+            run.link = URL(string: "\(citationScheme)://cite/\(source.id)")
+            run.font = AppTypography.overviewFont(.eyebrow, scale: scale).weight(.semibold)
+            run.foregroundColor = TagView.textColor(tint: AppColor.accent, contrast: contrast)
+            run.backgroundColor = TagView.fill(tint: AppColor.accent, contrast: contrast)
+            result.append(AttributedString(" "))
+            result.append(run)
+        }
+        return result
     }
 
     /// Displays a bulleted takeaway as one accessibility element with actions to open its cited sources.
@@ -1245,34 +1278,17 @@ struct EventOverviewReaderView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .textSelection(.enabled)
 
-            Text(
-                OverviewComposer.displayStatement(participant: perspective.participant, position: perspective.position)
-            )
-            .font(bodyFont)
-            .lineSpacing(bodyLineSpacing)
-            .foregroundStyle(AppColor.primaryText)
-            .fixedSize(horizontal: false, vertical: true)
-            .textSelection(.enabled)
+            // The sources follow the statement and wrap with it (#993).
+            sourcedSentence(
+                OverviewComposer.displayStatement(participant: perspective.participant, position: perspective.position),
+                citations: citations)
 
-            let hasSource = source != nil && !source!.isEmpty
-            let hasCitations = !citations.isEmpty
             let hasWireSyndicate =
                 !(perspective.originalWireSource?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-
-            if hasSource || hasCitations {
-                ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
-                    if !hasCitations || hasWireSyndicate, let source, !source.isEmpty {
-                        Text(source)
-                            .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                            .foregroundStyle(currentSecondaryTextColor)
-                    }
-
-                    ForEach(perspective.citationIDs, id: \.self) { id in
-                        if let citation = overview.citations[id] {
-                            citationPill(citation)
-                        }
-                    }
-                }
+            if citations.isEmpty || hasWireSyndicate, let source, !source.isEmpty {
+                Text(source)
+                    .font(AppTypography.overviewFont(.annotation, scale: textScale))
+                    .foregroundStyle(currentSecondaryTextColor)
             }
         }
     }
