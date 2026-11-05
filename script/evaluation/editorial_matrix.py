@@ -611,16 +611,20 @@ def main() -> int:
         timings["impression_scroll_update_ms"]=impression_update
         db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         count=db.execute("SELECT count(*) FROM articles").fetchone()[0]
-        assert count>=5000, f"Expected at least 5,000 articles; got {count}"
+        if count < 5000:
+            raise RuntimeError(f"Expected at least 5,000 articles; got {count}")
         scenarios=dict(db.execute("SELECT scenario,count(*) FROM articles GROUP BY scenario"))
         expected_scenarios={"breaking":2000,"slow_weekend":1500,"syndication":1500}
-        assert scenarios == expected_scenarios, f"Unexpected scenario distribution: {scenarios}"
+        if scenarios != expected_scenarios:
+            raise RuntimeError(f"Unexpected scenario distribution: {scenarios}")
         event_count=len(event_meta)
         passage_count=db.execute("SELECT count(*) FROM passages").fetchone()[0]
         ranking_count=db.execute("SELECT count(*) FROM ranking_judgements").fetchone()[0]
         impression_count=db.execute("SELECT count(*) FROM impressions").fetchone()[0]
-        assert event_count == 50 and passage_count == 5000, "The labelled event/passage fixture is incomplete"
-        assert ranking_count == 5000 and impression_count == 50000, "The ranking/impression fixture is incomplete"
+        if event_count != 50 or passage_count != 5000:
+            raise RuntimeError("The labelled event/passage fixture is incomplete")
+        if ranking_count != 5000 or impression_count != 50000:
+            raise RuntimeError("The ranking/impression fixture is incomplete")
         matrix={
             "schema_version":1,
             "generated_at":dt.datetime.now(UTC).isoformat(timespec="seconds"),
