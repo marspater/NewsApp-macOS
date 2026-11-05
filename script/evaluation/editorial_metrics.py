@@ -219,7 +219,7 @@ def eval_ranking(db: sqlite3.Connection) -> dict:
         "vector_metrics_status": "not_measured_phase_0_no_vDSP_or_embedding_invocations",
     }
 
-def eval_personalization(db: sqlite3.Connection, topics: list[str]) -> dict:
+def eval_personalization(db: sqlite3.Connection, topic_catalog: list[str]) -> dict:
     """Measure impression storage, reward counts, and synthetic discovery exposure."""
     total,skipped,positive=db.execute(
         "SELECT count(*),sum(action='scrolled_past'),sum(action IN ('click','save')) FROM impressions").fetchone()
@@ -247,7 +247,7 @@ def eval_personalization(db: sqlite3.Connection, topics: list[str]) -> dict:
         "recommendation_metric_basis": "synthetic topic-label control, not a user-preference model",
         "discovery_engagement_rate": engaged/max(1,discovery),
         "distinct_discovery_topics_reached": topics,
-        "topic_discovery_rate": topics/max(1,len(topics)),
+        "topic_discovery_rate": topics/max(1,len(topic_catalog)),
         "ewma_vector_update_cost_ms": None,
         "ewma_status": "not_measured_phase_0_no_embedding_vectors",
     }
