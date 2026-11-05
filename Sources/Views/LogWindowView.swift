@@ -149,9 +149,13 @@ struct LogWindowView: View {
                 Button("Copy", systemImage: "doc.on.doc") { model.copyVisible() }
                     .help("Copy the visible lines")
                     .disabled(visible.isEmpty)
-                Button("Clear", systemImage: "eraser") { model.clear() }
-                    .help("Hide the lines shown so far")
-                    .disabled(model.entries.isEmpty)
+                Button("Clear", systemImage: "eraser") {
+                    model.clear()
+                    // An empty view has nothing to scroll back from; the lines that follow are followed again.
+                    follows = true
+                }
+                .help("Hide the lines shown so far")
+                .disabled(model.entries.isEmpty)
             }
         }
         .task {

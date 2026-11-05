@@ -1846,6 +1846,14 @@ struct NewsTests {
             store.operationError?.contains("read-only") == true
                 && store.operationError?.contains(store.databaseHealthNotice ?? "?") == true,
             "A manual refresh says why, with the library's own notice")
+        // Check for Updates (#992) refuses the same way and downloads nothing.
+        let check = await manager.checkForUpdates(storyOf: "readonly-story")
+        if case .refused(let reason) = check {
+            assertTrue(reason.contains(store.databaseHealthNotice ?? "?"), "Check for Updates names the library notice")
+        } else {
+            assertTrue(false, "Check for Updates is refused while read-only, got \(check)")
+        }
+        assertEqual(await fetches.batches.count, 0, "Check for Updates downloads nothing while read-only")
         await engine.close()
     }
 
@@ -13851,7 +13859,8 @@ struct NewsTests {
             "A feed that failed is named, never hidden")
         assertEqual(
             FeedManager.StoryUpdateResult.checked(newReports: 0, failedFeeds: 0, deferredMatching: true).statusText,
-            "No new reports yet. Low Power Mode delays some story matching", "Low Power Mode claims nothing")
+            "No new reports yet. Some story matching waits while the Mac saves energy or cools down",
+            "Deferred matching claims nothing and names no single cause")
         assertEqual(
             FeedManager.StoryUpdateResult.checked(newReports: 3, failedFeeds: 2, deferredMatching: true).statusText,
             "3 new reports joined this story · 2 feeds could not be checked", "Counts are plural")
@@ -24021,15 +24030,16 @@ struct NewsTests {
             names.contains("News Diagnostics/summary.txt") && names.contains("News Diagnostics/log.txt"),
             "The zip holds the summary and the log: \(names)")
 
-        // This process's own entries are readable from the unified log, as the app's are.
+        // This process's own entries are readable from the unified log, as the app's are; private values stay redacted.
         let marker = "diagnostics-check-\(UUID().uuidString)"
-        NewsSignposts.launchLog.notice("\(marker, privacy: .public)")
+        let secret = "https://feeds.example/private?token=\(UUID().uuidString)"
+        NewsSignposts.launchLog.notice("\(marker, privacy: .public) \(secret)")
         // The unified log may store the entry a moment later; poll briefly instead of reading once.
         let deadline = ContinuousClock.now + .seconds(5)
         var found = false
         while !found && ContinuousClock.now < deadline {
             let own = try DiagnosticsExport.currentLaunchLog()
-            found = own.contains { $0.message == marker && $0.category == "Launch" }
+            found = own.contains { $0.message == "\(marker) <private>" && $0.category == "Launch" }
             if !found { try await Task.sleep(for: .milliseconds(100)) }
         }
         assertTrue(found, "The export reads this launch's log")
@@ -27257,6 +27267,25 @@ struct NewsTests {
             tribunalPerspectives.first?.position,
             "its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court",
             "The statement runs past 200 characters to the end of its sentence, through the honorific")
+        // An exclamation or question mark ends an unquoted statement too; one inside a quoted phrase does not.
+        func statements(_ text: String) -> [String] {
+            let passage = EvidencePassage(id: "pass_994b", articleID: "art_persp_1", text: text, ordinal: 4)
+            let citation = OverviewCitation(
+                id: "c_994b", articleID: "art_persp_1", passageID: "pass_994b",
+                passageFingerprint: passage.fingerprint, quote: text)
+            return OverviewPerspectivesExtractor.extractPerspectives(
+                passages: [passage], articles: [article1], existingCitations: ["c_994b": citation]
+            ).map(\.position)
+        }
+        assertEqual(
+            statements("Mayor Elena Rostova said that the evacuation routes are open again! Officials disputed it."),
+            ["the evacuation routes are open again"], "An exclamation mark ends the statement")
+        assertEqual(
+            statements("Mayor Elena Rostova said that residents asked if the routes were open? Officials disputed it."),
+            ["residents asked if the routes were open"], "A question mark ends the statement")
+        assertEqual(
+            statements("Mayor Elena Rostova said that the council answered “Never!” and closed the session."),
+            ["the council answered “Never!” and closed the session"], "A quoted exclamation stays inside the statement")
         assertEqual(
             OverviewComposer.displayStatement(
                 participant: "Constitutional Tribunal", position: tribunalPerspectives.first?.position ?? ""),
