@@ -493,12 +493,14 @@ enum BriefingSignalsTests {
             let noveltyUnmatched = novelty.passages.filter { $0.disposition == .unmatched }.count
 
             let relevanceByTopic = (0..<20).map { 0.98 - Double($0) * 0.03 }
-            let relevance = Dictionary(uniqueKeysWithValues: articles.enumerated().map { index, article in
-                let topic = index / 250
-                let withinTopic = index % 250
-                return (article.id, max(0.05, relevanceByTopic[topic] - Double(withinTopic) * 0.00005))
+            let relevance = Dictionary(uniqueKeysWithValues: articles.enumerated().map { item in
+                let topic = item.offset / 250
+                let withinTopic = item.offset % 250
+                return (item.element.id, max(0.05, relevanceByTopic[topic] - Double(withinTopic) * 0.00005))
             })
-            let mmrCandidates = articles.enumerated().compactMap { index, article -> EditorialMMRCandidate? in
+            let mmrCandidates = articles.enumerated().compactMap { item -> EditorialMMRCandidate? in
+                let index = item.offset
+                let article = item.element
                 guard let vector = stored[article.id] else { return nil }
                 return EditorialMMRCandidate(
                     id: article.id, relevance: relevance[article.id] ?? 0,
@@ -538,7 +540,7 @@ enum BriefingSignalsTests {
                 return pairs > 0 ? total / Double(pairs) : 0
             }
             func topicCount(_ selected: [EditorialMMRCandidate]) -> Int {
-                let indexes = Dictionary(uniqueKeysWithValues: articles.enumerated().map { ($1.id, $0 / 250) })
+                let indexes = Dictionary(uniqueKeysWithValues: articles.enumerated().map { item in (item.element.id, item.offset / 250) })
                 return Set(selected.compactMap { indexes[$0.id] }).count
             }
             func publisherCount(_ selected: [EditorialMMRCandidate]) -> Int {
@@ -585,7 +587,7 @@ enum BriefingSignalsTests {
                     "vDSPComparisons": noveltyComparisons,
                     "unmatched": noveltyUnmatched,
                     "elapsedMilliseconds": noveltyMilliseconds,
-                    "meanNoveltyScore": novelty.score ?? NSNull(),
+                    "meanNoveltyScore": novelty.score.map { $0 as Any } ?? NSNull(),
                 ],
                 "mmr": [
                     "candidates": mmrCandidates.count,
