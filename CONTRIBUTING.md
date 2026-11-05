@@ -57,7 +57,7 @@ make run                             # Build and launch "News Dev.app" as com.ma
 ./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
 ./test.sh --search-memory         # Opt-in: process footprint over 500 searches of a 5,000-story library through the embedder, pages and counts; fails above 6 MiB growth (#708; NEWS_SEARCH_MEMORY_BLOCKS, NEWS_SEARCH_MEMORY_LIMIT_MB)
-bash script/test_editorial_evaluation.sh # Opt-in W8 performance workload: isolated 5,000-row SQLite archive, Core ML embeddings, FTS5/vDSP MaxSim, MACD replay and MMR metrics; output defaults to docs/benchmarks/ (synthetic, not an editorial-quality holdout)
+bash script/test_editorial_evaluation.sh # Phase 0 prerequisite: seeded 5,000-article SQLite corpus, FTS5 routing, labelled burst windows, 500-candidate ranking judgements and impression-log/storage measurements; deliberately no Core ML or vDSP invocations
 ./test.sh --transport-cancellation # Optimized refresh shutdown over controlled HTTP/SOCKS sockets
 ./test.sh --publisher-cancellation # Opt-in, live: refresh and stop the twelve panel feeds over real HTTPS
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
