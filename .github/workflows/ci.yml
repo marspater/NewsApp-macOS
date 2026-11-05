@@ -107,6 +107,40 @@ jobs:
       - name: Verify Swift Package Manager Build
         run: swift build --force-resolved-versions --target News
 
+  codacy-diagnostics:
+    name: Codacy PR diagnostics (temporary)
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Codacy PR issue details
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          http_status=$(curl --location --silent --show-error --max-time 30 \
+            --output "$RUNNER_TEMP/codacy-pr-issues.json" \
+            --write-out "%{http_code}" \
+            "https://api.codacy.com/api/v3/analysis/organizations/gh/marspater/repositories/NewsApp-macOS/pull-requests/$PR_NUMBER/issues?status=new&limit=100")
+          curl_status=$?
+          set -e
+          echo "Codacy API HTTP status: $http_status (curl exit: $curl_status)"
+          if [[ "$curl_status" -ne 0 || "$http_status" != "200" ]]; then
+            cat "$RUNNER_TEMP/codacy-pr-issues.json" 2>/dev/null || true
+            exit 0
+          fi
+          python3 - "$RUNNER_TEMP/codacy-pr-issues.json" <<'PY'
+          import json
+          import sys
+          with open(sys.argv[1], encoding="utf-8") as source:
+              payload = json.load(source)
+          print("Top-level keys:", sorted(payload) if isinstance(payload, dict) else type(payload).__name__)
+          issues = payload.get("data", []) if isinstance(payload, dict) else payload
+          print("Issue count:", len(issues))
+          for index, issue in enumerate(issues, 1):
+              print(f"--- Codacy issue {index} ---")
+              print(json.dumps(issue, indent=2, sort_keys=True))
+          PY
+
   build-arm64:
     name: Build Verification (Apple Silicon)
     if: github.event.action != 'closed'
