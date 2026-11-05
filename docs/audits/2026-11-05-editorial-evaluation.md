@@ -4,17 +4,17 @@ Status: prerequisite fixture and measurement harness. This must be completed and
 
 ## Run
 
-\`\`\`sh
+```sh
 bash script/test_editorial_evaluation.sh
-\`\`\`
+```
 
 Options:
 
-- \`--output PATH\` writes the JSON matrix to a chosen path.
-- \`--database PATH\` retains the seeded SQLite database for inspection; without it, the database is temporary and removed after the run.
-- \`--seed INTEGER\` changes the deterministic fixture seed (default \`20261105\`).
+- `--output PATH` writes the JSON matrix to a chosen path.
+- `--database PATH` retains the seeded SQLite database for inspection; without it, the database is temporary and removed after the run.
+- `--seed INTEGER` changes the deterministic fixture seed (default `20261105`).
 
-The default JSON output is date-stamped under \`docs/benchmarks/\`. The script uses Python's standard library and SQLite FTS5 only. It does not open the user's library, make network requests, run Core ML, call Accelerate/vDSP, alter production schema, or change production consumers.
+The default JSON output is date-stamped under `docs/benchmarks/`. The script uses Python's standard library and SQLite FTS5 only. It does not open the user's library, make network requests, run Core ML, call Accelerate/vDSP, alter production schema, or change production consumers.
 
 ## Seeded corpus
 
