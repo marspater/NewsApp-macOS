@@ -9,8 +9,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
-import script.evaluation.editorial_fixtures as editorial_fixtures
-import script.evaluation.editorial_metrics as editorial_metrics
+from script.evaluation import editorial_fixtures, editorial_metrics
 
 def create_empty_file_exclusive(path: Path) -> None:
     """Create a new private file atomically without replacing an existing path."""
