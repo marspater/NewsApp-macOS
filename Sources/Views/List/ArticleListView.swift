@@ -54,11 +54,14 @@ enum LeadStoryPresentation {
     static func firstEligibleID(in entries: [FeedEntry], selectedTopic: String?, isSearching: Bool) -> String? {
         let location = selectedTopic ?? "Today"
         guard !isSearching, location == "Today" || location == "Briefing" else { return nil }
-        for entry in entries {
-            let articles = [entry.representative] + entry.visibleArticles.filter { $0.id != entry.representative.id }
-            if FeedArticle.bestCardImage(in: articles) != nil { return entry.id }
-        }
-        return nil
+        return entries.first { $0.cardImageURL != nil }?.id
+    }
+}
+
+extension FeedEntry {
+    /// The image the entry's card shows from its listed reports, as `ArticleCardView` and `EventCardView` choose it.
+    var cardImageURL: URL? {
+        FeedArticle.bestCardImage(in: [representative] + visibleArticles.filter { $0.id != representative.id })
     }
 }
 
@@ -112,9 +115,25 @@ struct ArticleListView: View {
     @State private var isSettled = ArticleListView.hasSettledLaunch
 
     private var initialPrefetchURLs: [URL] {
-        buffer.displayed.articles.prefix(30).compactMap {
-            $0.imageUrl.flatMap(URL.init(string:))
-        }
+        entries.prefix(30).compactMap(\.cardImageURL)
+    }
+
+    /// Whether the first card with an image is the full-size lead story (macOS 26).
+    private var showsLeadImage: Bool {
+        guard #available(macOS 26, *) else { return false }
+        return LeadStoryPresentation.firstEligibleID(
+            in: entries, selectedTopic: selectedTopic, isSearching: isSearching) != nil
+    }
+
+    /// Decodes the images of the first cards at the size they show them: with a lead story, the first image (the
+    /// lead's) at full size; every other at card size (#591).
+    static func prefetchCardImages(
+        _ urls: [URL], leadAtFullSize: Bool, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
+    ) async {
+        let lead = leadAtFullSize ? Array(urls.prefix(1)) : []
+        async let leadImage: Void = DecodedImageCache.prefetch(lead, using: loader)
+        await DecodedImageCache.prefetch(Array(urls.dropFirst(lead.count)), size: .card, using: loader)
+        await leadImage
     }
 
     static func prefetchStart(visibleIndex: Int, currentStart: Int) -> Int {
@@ -123,7 +142,7 @@ struct ArticleListView: View {
     }
 
     private func prefetchAhead(of id: String) {
-        groupedEntries.prefetchAhead(of: id, in: buffer.displayed.articles, using: imageLoader)
+        groupedEntries.prefetchAhead(of: id, using: imageLoader)
     }
     @State private var buffer = FeedUpdateBuffer()
     @State private var pageRequest = 0
@@ -308,7 +327,7 @@ struct ArticleListView: View {
         .toolbar(removing: .title)
         .task(id: initialPrefetchURLs) {
             guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
-            await DecodedImageCache.prefetch(initialPrefetchURLs, using: imageLoader)
+            await Self.prefetchCardImages(initialPrefetchURLs, leadAtFullSize: showsLeadImage, using: imageLoader)
         }
         .task(id: taskQueryReloadKey) {
             await performQueryReload()
@@ -320,12 +339,11 @@ struct ArticleListView: View {
     /// in one transition, and only then starts the launch refresh and the catch-up clustering with its image lookup.
     private func settleLaunch() async {
         guard !Self.hasSettledLaunch, articleStore.isReady, !isLoadingPage else { return }
-        let urls = entries.prefix(12).compactMap {
-            FeedArticle.bestCardImage(in: [$0.representative] + $0.visibleArticles)
-        }
+        let urls = entries.prefix(12).compactMap(\.cardImageURL)
+        let leadAtFullSize = showsLeadImage
         let loader = imageLoader
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await DecodedImageCache.prefetch(urls, using: loader) }
+            group.addTask { await Self.prefetchCardImages(urls, leadAtFullSize: leadAtFullSize, using: loader) }
             group.addTask { try? await Task.sleep(for: .seconds(1)) }
             await group.next()
             group.cancelAll()
@@ -1471,6 +1489,7 @@ private final class GroupedEntries {
     private var snapshot: FeedSnapshot?
     private var mode: FeedGroupingMode?
     private var cached: [FeedEntry] = []
+    /// Position of each entry in `cached`, by entry ID (the card's representative story).
     private var indexByID: [String: Int] = [:]
     private var prefetchStart = 0
     private var prefetchTask: Task<Void, Never>?
@@ -1478,14 +1497,12 @@ private final class GroupedEntries {
     func entries(of snapshot: FeedSnapshot, mode: FeedGroupingMode) -> [FeedEntry] {
         if snapshot != self.snapshot || mode != self.mode {
             cached = snapshot.entries(mode)
-            if snapshot.articles != self.snapshot?.articles {
-                var map: [String: Int] = [:]
-                map.reserveCapacity(snapshot.articles.count)
-                for (index, article) in snapshot.articles.enumerated() where map[article.id] == nil {
-                    map[article.id] = index
-                }
-                indexByID = map
+            var map: [String: Int] = [:]
+            map.reserveCapacity(cached.count)
+            for (index, entry) in cached.enumerated() where map[entry.id] == nil {
+                map[entry.id] = index
             }
+            indexByID = map
             self.snapshot = snapshot
             self.mode = mode
         }
@@ -1498,19 +1515,17 @@ private final class GroupedEntries {
         prefetchTask = nil
     }
 
-    func prefetchAhead(
-        of id: String, in articles: [FeedArticle],
-        using loader: @escaping @Sendable (URL) async throws -> CGImage
-    ) {
+    /// Decodes, at card size, the image each of the next 30 listed cards shows (#591).
+    func prefetchAhead(of id: String, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage) {
         guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
-        guard let index = indexByID[id] ?? articles.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = indexByID[id] else { return }
         let nextStart = ArticleListView.prefetchStart(visibleIndex: index, currentStart: prefetchStart)
         guard nextStart != prefetchStart else { return }
         prefetchStart = nextStart
-        let urls = articles.dropFirst(nextStart).prefix(30).compactMap { $0.imageUrl.flatMap(URL.init(string:)) }
+        let urls = cached.dropFirst(nextStart).prefix(30).compactMap(\.cardImageURL)
         prefetchTask?.cancel()
         prefetchTask = Task {
-            await DecodedImageCache.prefetch(urls, using: loader)
+            await DecodedImageCache.prefetch(urls, size: .card, using: loader)
         }
     }
 }

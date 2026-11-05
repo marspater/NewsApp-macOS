@@ -222,7 +222,7 @@ final class StoryBannerPresenter {
     static func photo(at url: URL?, scale: CGFloat) async -> CGImage? {
         guard let url,
             let image = try? await DecodedImageCache.load(
-                url, using: { try await SecureHTTPClient.shared.fetchReaderImage(from: $0) })
+                url, using: { try await SecureHTTPClient.shared.fetchReaderImage(from: $0, maxPixelSize: $1) })
         else { return nil }
         return await Task.detached(priority: .userInitiated) { bannerPhoto(image, scale: scale) }.value
     }

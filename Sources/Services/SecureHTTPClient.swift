@@ -118,14 +118,15 @@ actor SecureHTTPClient {
     }
 
     /// Decodes bounded thumbnails concurrently, away from SwiftUI's main actor and from this actor, so one large image
-    /// never holds up other cards or feed requests.
-    @concurrent nonisolated func fetchReaderImage(from url: URL) async throws -> CGImage {
+    /// never holds up other cards or feed requests. `maxPixelSize` bounds the longer side: the reader's 1600 by default,
+    /// less for cards (#591).
+    @concurrent nonisolated func fetchReaderImage(from url: URL, maxPixelSize: Int = 1600) async throws -> CGImage {
         let (data, _) = try await fetchImage(from: url)
         try Task.checkCancellation()
-        return try Self.decodeReaderImage(data)
+        return try Self.decodeReaderImage(data, maxPixelSize: maxPixelSize)
     }
 
-    nonisolated static func decodeReaderImage(_ data: Data) throws -> CGImage {
+    nonisolated static func decodeReaderImage(_ data: Data, maxPixelSize: Int = 1600) throws -> CGImage {
         guard
             let source = CGImageSourceCreateWithData(
                 data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
@@ -138,7 +139,7 @@ actor SecureHTTPClient {
                 [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 1600,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
                     kCGImageSourceShouldCacheImmediately: true,
                 ] as CFDictionary)
         else {

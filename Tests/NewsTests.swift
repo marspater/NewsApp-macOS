@@ -27667,7 +27667,7 @@ struct NewsTests {
         }
 
         // Test that clear() cancels pending tasks and prevents insertion
-        let slowLoader: @Sendable (URL) async throws -> CGImage = { _ in
+        let slowLoader: @Sendable (URL, Int) async throws -> CGImage = { _, _ in
             try await Task.sleep(for: .milliseconds(500))
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             let ctx = CGContext(
@@ -27700,8 +27700,8 @@ struct NewsTests {
             var cancelled: Int { lock.withLock { cancelledCount } }
             func recordStart() { lock.withLock { startedCount += 1 } }
             func recordCancel() { lock.withLock { cancelledCount += 1 } }
-            var loader: @Sendable (URL) async throws -> CGImage {
-                { [self] _ in
+            var loader: @Sendable (URL, Int) async throws -> CGImage {
+                { [self] _, _ in
                     recordStart()
                     do { try await Task.sleep(for: .seconds(30)) } catch {
                         recordCancel()

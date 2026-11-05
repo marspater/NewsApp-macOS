@@ -23,15 +23,16 @@ extension Notification.Name {
     static let readerImageFinished = Notification.Name("readerImageFinished")
 }
 
-// The default loader retains the protected network path; native harnesses can supply an offline image.
+// The default loader retains the protected network path; native harnesses can supply an offline image. The second
+// argument bounds the decoded image's longer side in pixels.
 private struct ReaderImageLoaderKey: EnvironmentKey {
-    static let defaultValue: @Sendable (URL) async throws -> CGImage = {
-        try await SecureHTTPClient.shared.fetchReaderImage(from: $0)
+    static let defaultValue: @Sendable (URL, Int) async throws -> CGImage = {
+        try await SecureHTTPClient.shared.fetchReaderImage(from: $0, maxPixelSize: $1)
     }
 }
 
 extension EnvironmentValues {
-    var readerImageLoader: @Sendable (URL) async throws -> CGImage {
+    var readerImageLoader: @Sendable (URL, Int) async throws -> CGImage {
         get { self[ReaderImageLoaderKey.self] }
         set { self[ReaderImageLoaderKey.self] = newValue }
     }
@@ -40,12 +41,44 @@ extension EnvironmentValues {
 /// Decoded images by source URL, so a card scrolled back into view shows its image at once instead of fetching and
 /// decoding it again. NSCache evicts under memory pressure.
 @MainActor enum DecodedImageCache {
+    /// Cards decode at card size; the reader, the lead card, the Briefing hero and banners at full size (#591).
+    enum Size: Hashable, Sendable {
+        case card, full
+
+        /// The longest side in pixels: a grid card at its widest on a 2x display, or the reader's bound.
+        var maxPixels: Int {
+            switch self {
+            case .card: Int(AppLayout.gridColumnMaximum * 2)
+            case .full: 1600
+            }
+        }
+    }
+
+    /// Full-size decodes, which also serve a card asking for the same URL.
     static let images: NSCache<NSURL, CGImage> = {
         let cache = NSCache<NSURL, CGImage>()
         cache.totalCostLimit = 192 * 1024 * 1024
         cache.countLimit = 500
         return cache
     }()
+    /// Card-size decodes.
+    static let cardImages: NSCache<NSURL, CGImage> = {
+        let cache = NSCache<NSURL, CGImage>()
+        cache.totalCostLimit = 96 * 1024 * 1024
+        cache.countLimit = 500
+        return cache
+    }()
+
+    /// A decoded image at least as large as `size` asks for: a card takes a full-size decode too.
+    static func cached(_ url: URL, size: Size = .full) -> CGImage? {
+        (size == .card ? cardImages.object(forKey: url as NSURL) : nil) ?? images.object(forKey: url as NSURL)
+    }
+
+    private static func store(_ image: CGImage, for url: URL, size: Size) {
+        (size == .card ? cardImages : images).setObject(
+            image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+    }
+
     /// One download shared by every waiter on a URL. It is cancelled once all waiters that joined have cancelled.
     @MainActor final class SharedLoad {
         let task: Task<CGImage, Error>
@@ -61,11 +94,15 @@ extension EnvironmentValues {
             return cancelledWaiters >= waiters
         }
     }
+    private struct Key: Hashable {
+        let url: URL
+        let size: Size
+    }
     private static var generation: UInt64 = 0
-    private static var pending: [URL: SharedLoad] = [:]
+    private static var pending: [Key: SharedLoad] = [:]
 
     /// The download currently shared for a URL, so tests can observe who has joined it.
-    static func sharedLoad(for url: URL) -> SharedLoad? { pending[url] }
+    static func sharedLoad(for url: URL, size: Size = .full) -> SharedLoad? { pending[Key(url: url, size: size)] }
 
     static func clear() {
         generation &+= 1
@@ -74,60 +111,66 @@ extension EnvironmentValues {
         }
         pending.removeAll()
         images.removeAllObjects()
+        cardImages.removeAllObjects()
     }
 
     /// Width over height of a decoded image, so layouts can frame square and portrait photos differently.
     static func aspectRatio(for url: URL) -> CGFloat? {
-        guard let image = images.object(forKey: url as NSURL), image.height > 0 else { return nil }
+        guard let image = cached(url, size: .card), image.height > 0 else { return nil }
         return CGFloat(image.width) / CGFloat(image.height)
     }
 
-    static func load(_ url: URL, using loader: @escaping @Sendable (URL) async throws -> CGImage) async throws
-        -> CGImage
-    {
-        if let image = images.object(forKey: url as NSURL) { return image }
+    static func load(
+        _ url: URL, size: Size = .full, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
+    ) async throws -> CGImage {
+        if let image = cached(url, size: size) { return image }
         let currentGeneration = generation
+        let key = Key(url: url, size: size)
         // Shared loads survive one card disappearing; the last waiter to cancel stops the download.
         let shared: SharedLoad
-        if let existing = pending[url], !existing.task.isCancelled {
+        if let existing = pending[key], !existing.task.isCancelled {
             shared = existing
         } else {
-            shared = SharedLoad(task: Task { try await loader(ReaderImageCandidate.preferredRendition(of: url)) })
-            pending[url] = shared
+            let maxPixels = size.maxPixels
+            shared = SharedLoad(
+                task: Task { try await loader(ReaderImageCandidate.preferredRendition(of: url), maxPixels) })
+            pending[key] = shared
         }
         let task = shared.task
         shared.join()
         // After clear() a newer load may own the key; only remove this load's own entry.
-        defer { if pending[url] === shared { pending[url] = nil } }
+        defer { if pending[key] === shared { pending[key] = nil } }
         let image = try await withTaskCancellationHandler {
             try await task.value
         } onCancel: {
             Task { @MainActor in
                 if shared.leave() {
                     task.cancel()
-                    if pending[url] === shared { pending[url] = nil }
+                    if pending[key] === shared { pending[key] = nil }
                 }
             }
         }
         if !task.isCancelled && !Task.isCancelled && generation == currentGeneration {
-            images.setObject(image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
+            store(image, for: url, size: size)
         }
         return image
     }
 
-    static func prefetch(_ urls: [URL], using loader: @escaping @Sendable (URL) async throws -> CGImage) async {
+    static func prefetch(
+        _ urls: [URL], size: Size = .full, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
+    ) async {
         var seen = Set<URL>()
         var iterator = urls.filter { seen.insert($0).inserted }.makeIterator()
         await withTaskGroup(of: Void.self) { group in
             for _ in 0..<3 {
-                if let url = iterator.next() { group.addTask { _ = try? await load(url, using: loader) } }
+                if let url = iterator.next() { group.addTask { _ = try? await load(url, size: size, using: loader) } }
             }
             while await group.next() != nil {
                 guard !Task.isCancelled else {
                     group.cancelAll()
                     return
                 }
-                if let url = iterator.next() { group.addTask { _ = try? await load(url, using: loader) } }
+                if let url = iterator.next() { group.addTask { _ = try? await load(url, size: size, using: loader) } }
             }
         }
     }
@@ -171,17 +214,20 @@ struct LeadImageFill: View {
 // Feed image URLs use the same bounded, validated network path as article content.
 struct ArticleRemoteImage<Content: View>: View {
     let url: URL
+    let size: DecodedImageCache.Size
     @ViewBuilder var content: (AsyncImagePhase) -> Content
     @State private var phase: AsyncImagePhase
     @State private var phaseURL: URL
     @Environment(\.readerImageLoader) private var loadImage
 
-    init(url: URL, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content) {
+    init(
+        url: URL, size: DecodedImageCache.Size = .full, @ViewBuilder content: @escaping (AsyncImagePhase) -> Content
+    ) {
         self.url = url
+        self.size = size
         self.content = content
         _phase = State(
-            initialValue: DecodedImageCache.images.object(forKey: url as NSURL).map { .success(Self.image($0)) }
-                ?? .empty)
+            initialValue: DecodedImageCache.cached(url, size: size).map { .success(Self.image($0)) } ?? .empty)
         _phaseURL = State(initialValue: url)
     }
 
@@ -198,7 +244,7 @@ struct ArticleRemoteImage<Content: View>: View {
                     return
                 }
                 phaseURL = url
-                if let cached = DecodedImageCache.images.object(forKey: url as NSURL) {
+                if let cached = DecodedImageCache.cached(url, size: size) {
                     phase = .success(Self.image(cached))
                     NotificationCenter.default.post(
                         name: .readerImageFinished, object: url, userInfo: ["success": true])
@@ -207,7 +253,7 @@ struct ArticleRemoteImage<Content: View>: View {
                 phase = .empty
                 for attempt in 0..<3 {
                     do {
-                        let image = try await DecodedImageCache.load(url, using: loadImage)
+                        let image = try await DecodedImageCache.load(url, size: size, using: loadImage)
                         try Task.checkCancellation()
                         phase = .success(Self.image(image))
                         NotificationCenter.default.post(
