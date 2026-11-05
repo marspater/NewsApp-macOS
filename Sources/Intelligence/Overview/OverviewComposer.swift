@@ -83,6 +83,28 @@ public struct OverviewComposer: Sendable {
     }
 
     /// Ensures a highlight or overview sentence ends with terminal punctuation.
+    /// The position as a whole statement (#994). The stored position stays the verbatim cited words; for display a
+    /// clause that begins in lower case (reported speech after "said") is led by its speaker, "The tribunal said its
+    /// judge had…", and every statement ends with a full stop, inside a closing quotation mark when it ends with one.
+    static func displayStatement(participant: String, position: String) -> String {
+        var statement = position.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = statement.last, ",;:".contains(last) {
+            statement.removeLast()
+            statement = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard let first = statement.first else { return statement }
+        if first.isLowercase {
+            let speaker = participant.trimmingCharacters(in: .whitespacesAndNewlines)
+            statement = "\(speaker.prefix(1).uppercased())\(speaker.dropFirst()) said \(statement)"
+        }
+        if let last = statement.last, "”\"".contains(last) {
+            let inner = String(statement.dropLast())
+            if let end = inner.last, ".!?".contains(end) { return statement }
+            return inner + "." + String(last)
+        }
+        return OverviewComposer.ensureTerminalPeriod(statement)
+    }
+
     static func ensureTerminalPeriod(_ text: String) -> String {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return text }
