@@ -55,6 +55,9 @@ def schema(db: sqlite3.Connection) -> None:
       id TEXT PRIMARY KEY,passage_id TEXT NOT NULL REFERENCES passages(id),sentence TEXT NOT NULL,
       has_core_entity INTEGER NOT NULL,expected_new_fact INTEGER NOT NULL,entity_id TEXT
     );
+    CREATE TABLE semantic_fallback_queue(
+      passage_id TEXT PRIMARY KEY REFERENCES passages(id),event_id TEXT NOT NULL,priority TEXT NOT NULL CHECK(priority='low')
+    );
     CREATE TABLE event_windows(
       event_id TEXT PRIMARY KEY,scenario TEXT NOT NULL,window_start REAL NOT NULL,window_end REAL NOT NULL,
       expected_burst INTEGER NOT NULL
@@ -120,7 +123,7 @@ def seed_articles(db: sqlite3.Connection, rng: random.Random):
                     grade = 1
 
                 publisher = PUBLISHERS[index % len(PUBLISHERS)]
-                independent_publisher = (f"Wire Service {int(wire_id.split('-')[-1]) % 2}" if scenario == "syndication" else publisher)
+                independent_publisher = (f"Wire Service {int(wire_id.split('-')[-1]):02d}" if scenario == "syndication" else publisher)
                 title = f"{topic.replace('-', ' ').title()} event {event_number} report {index:03d}"
                 body = f"{query}. {scenario.replace('_', ' ')} coverage for {event_id}. Wire {wire_id}."
                 elo = 900.0 + ((index * 37 + event_number * 19) % 250)
@@ -197,7 +200,11 @@ def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
         elapsed.append((time.perf_counter()-start)*1000)
         if kind == "semantic_fallback":
             fallback_expected += 1
-            fallback_queued += not bool(candidates)
+            if not candidates:
+                db.execute(
+                    "INSERT OR IGNORE INTO semantic_fallback_queue(passage_id,event_id,priority) VALUES(?,?,?)",
+                    (passage_id,event_id,"low"))
+                fallback_queued += 1
         else:
             lexical_expected += 1
             lexical_found += bool(candidates)
@@ -206,6 +213,7 @@ def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
         "SELECT count(*),count(DISTINCT lower(trim(sentence))),sum(expected_new_fact) "
         "FROM passage_sentences WHERE has_core_entity=1"
     ).fetchone()
+    db.commit()
     anchored_new = db.execute(
         "SELECT sum(CASE WHEN expected_new_fact=1 AND has_core_entity=1 THEN 1 ELSE 0 END) "
         "FROM passage_sentences"
@@ -216,6 +224,7 @@ def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
         "lexical_candidate_recall_on_controlled_corpus": lexical_found/lexical_expected if lexical_expected else None,
         "semantic_fallback_expected_count": fallback_expected,
         "semantic_fallback_queue_count": fallback_queued,
+        "persisted_low_priority_queue_rows": db.execute("SELECT count(*) FROM semantic_fallback_queue WHERE priority='low'").fetchone()[0],
         "semantic_fallback_queue_priority": "low",
         "semantic_fallback_route_rate_on_controlled_corpus": fallback_queued/fallback_expected if fallback_expected else None,
         "entity_anchoring": {
