@@ -11,7 +11,6 @@ import tempfile
 from pathlib import Path
 
 from editorial_fixtures import (
-    BASE,
     UTC,
     DeterministicFixtureRNG,
     schema,
