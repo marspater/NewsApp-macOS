@@ -40,8 +40,57 @@ struct EventMomentumSignal: Equatable, Sendable {
     let isReversing: Bool
 }
 
-/// Incremental-cost O(number of reports + buckets) MACD calculation. This is an isolated primitive; existing Briefing
-/// consumers keep their current six-hour rule until a labelled replay shows that replacing it improves precision.
+/// One O(1) update for each completed time bucket. The EMA states are small enough to persist with the event's
+/// derived signals; rebuilding history is only needed when the bucket size or model parameters change.
+struct EventMomentumMACDPoint: Equatable, Sendable {
+    let velocity: Double
+    let momentum: Double
+    let signalLine: Double
+    let acceleration: Double
+}
+
+struct EventMomentumMACDAccumulator: Sendable {
+    private let shortAlpha: Double
+    private let longAlpha: Double
+    private let signalAlpha: Double
+    private(set) var shortEMA = 0.0
+    private(set) var longEMA = 0.0
+    private(set) var signalEMA = 0.0
+
+    init(
+        bucketSize: TimeInterval = 15 * 60,
+        shortHalfLife: TimeInterval = 3600,
+        longHalfLife: TimeInterval = 6 * 3600,
+        signalHalfLife: TimeInterval = 3 * 3600
+    ) {
+        let bucket = bucketSize.isFinite ? max(60, bucketSize) : 15 * 60
+        func coefficient(_ halfLife: TimeInterval) -> Double {
+            let safeHalfLife = halfLife.isFinite ? max(60, halfLife) : 3600
+            return 1 - exp(-log(2) * bucket / safeHalfLife)
+        }
+        shortAlpha = coefficient(shortHalfLife)
+        longAlpha = coefficient(longHalfLife)
+        signalAlpha = coefficient(signalHalfLife)
+    }
+
+    /// reportsPerHour is the count of independent reports in the just-completed bucket, scaled to an hourly rate.
+    mutating func append(reportsPerHour: Double) -> EventMomentumMACDPoint {
+        let rate = reportsPerHour.isFinite ? max(0, reportsPerHour) : 0
+        shortEMA += shortAlpha * (rate - shortEMA)
+        longEMA += longAlpha * (rate - longEMA)
+        let macd = shortEMA - longEMA
+        signalEMA += signalAlpha * (macd - signalEMA)
+        return EventMomentumMACDPoint(
+            velocity: shortEMA,
+            momentum: macd,
+            signalLine: signalEMA,
+            acceleration: macd - signalEMA)
+    }
+}
+
+/// MACD over independent-report publication rates. The replay is O(N + buckets); live ingestion can update the
+/// accumulator once per bucket in O(1). Existing Briefing consumers keep their six-hour rule until a labelled replay
+/// shows that replacing it improves precision.
 enum EventMomentumMACD {
     static let history: TimeInterval = 24 * 3600
     static let recentWindow: TimeInterval = 6 * 3600
@@ -62,9 +111,9 @@ enum EventMomentumMACD {
         let bucketCount = min(1_440, max(1, Int(ceil(history / safeBucket))))
         let actualBucket = history / Double(bucketCount)
         let oldest = now.addingTimeInterval(-history)
+        let backfillAge = maximumBackfillAge.isFinite ? max(60, maximumBackfillAge) : history
 
         struct TimedReport {
-            let key: String
             let publisher: String
             let date: Date
         }
@@ -72,14 +121,14 @@ enum EventMomentumMACD {
         for report in reports {
             let date = report.publishedAt ?? report.observedAt
             guard date <= now.addingTimeInterval(300),
-                date >= now.addingTimeInterval(-max(60, maximumBackfillAge)),
+                date >= now.addingTimeInterval(-backfillAge),
                 date >= oldest,
                 !report.id.isEmpty,
                 !report.publisher.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else { continue }
             let suppliedKey = report.independenceKey?.trimmingCharacters(in: .whitespacesAndNewlines)
             let key = (suppliedKey?.isEmpty == false ? suppliedKey! : report.id)
-            let item = TimedReport(key: key, publisher: report.publisher.lowercased(), date: date)
+            let item = TimedReport(publisher: report.publisher.lowercased(), date: date)
             // A syndicated copy cannot refresh an event's momentum. Keep the earliest publication time for its group.
             if let previous = independent[key] {
                 if item.date < previous.date { independent[key] = item }
@@ -96,43 +145,32 @@ enum EventMomentumMACD {
             buckets[index] += 1
         }
 
-        func alpha(halfLife: TimeInterval) -> Double {
-            let safeHalfLife = halfLife.isFinite ? max(60, halfLife) : 3600
-            return 1 - exp(-log(2) * actualBucket / safeHalfLife)
-        }
-        func ema(_ values: [Double], halfLife: TimeInterval) -> [Double] {
-            let coefficient = alpha(halfLife: halfLife)
-            var value = 0.0
-            return values.map { sample in
-                value += coefficient * (sample - value)
-                return value
-            }
+        var accumulator = EventMomentumMACDAccumulator(
+            bucketSize: actualBucket,
+            shortHalfLife: shortHalfLife,
+            longHalfLife: longHalfLife,
+            signalHalfLife: signalHalfLife)
+        var point = EventMomentumMACDPoint(velocity: 0, momentum: 0, signalLine: 0, acceleration: 0)
+        for count in buckets {
+            point = accumulator.append(reportsPerHour: count * 3600 / actualBucket)
         }
 
-        let short = ema(buckets, halfLife: shortHalfLife)
-        let long = ema(buckets, halfLife: longHalfLife)
-        let macd = zip(short, long).map { $0.0 - $0.1 }
-        let signal = ema(macd, halfLife: signalHalfLife)
-        let velocity = short.last ?? 0
-        let momentum = macd.last ?? 0
-        let signalLine = signal.last ?? 0
-        let acceleration = momentum - signalLine
         let recent = uniqueReports.filter { $0.date >= now.addingTimeInterval(-recentWindow) }
         let recentPublishers = Set(recent.map(\.publisher)).count
         let hasVolumeFloor = recent.count >= max(1, minimumRecentReports)
             && recentPublishers >= max(1, minimumRecentPublishers)
 
         return EventMomentumSignal(
-            velocity: velocity,
-            momentum: momentum,
-            signalLine: signalLine,
-            acceleration: acceleration,
+            velocity: point.velocity,
+            momentum: point.momentum,
+            signalLine: point.signalLine,
+            acceleration: point.acceleration,
             recentIndependentReports: recent.count,
             recentPublishers: recentPublishers,
             hasVolumeFloor: hasVolumeFloor,
-            isRising: hasVolumeFloor && momentum > 0 && acceleration > 0,
-            isDecelerating: hasVolumeFloor && momentum > 0 && acceleration < 0,
-            isReversing: hasVolumeFloor && momentum < 0)
+            isRising: hasVolumeFloor && point.momentum > 0 && point.acceleration > 0,
+            isDecelerating: hasVolumeFloor && point.momentum > 0 && point.acceleration < 0,
+            isReversing: hasVolumeFloor && point.momentum < 0)
     }
 }
 
