@@ -22003,6 +22003,29 @@ struct NewsTests {
         assertTrue(threw, "A refused add surfaces as a failed post")
         // Without an app (tests, helpers) no presenter is installed, so nothing is drawn.
         assertTrue(await MainActor.run { NotificationService.presentAppBanner == nil }, "No presenter outside the app")
+        // The hop to the main actor re-checks activity: a post made as News became active is added, not drawn.
+        guard let banner = StoryBanner(request(story: true)) else {
+            return assertTrue(false, "A story request makes a banner")
+        }
+        let offered = await MainActor.run {
+            var received: (StoryBanner, Bool)?
+            let presenter: (StoryBanner, Bool) -> Bool = { banner, sounds in
+                received = (banner, sounds)
+                return true
+            }
+            let drawn = StoryBannerRoute.offer(banner, sounds: true, active: false, presenter: presenter)
+            let declined = StoryBannerRoute.offer(banner, sounds: true, active: true, presenter: presenter)
+            let absent = StoryBannerRoute.offer(banner, sounds: true, active: false, presenter: nil)
+            return (drawn, declined, absent, received)
+        }
+        assertTrue(offered.0, "Inactive: the presenter draws the copied banner")
+        assertEqual(offered.3?.0, banner, "The presenter receives the banner copied out of the request")
+        assertEqual(offered.3?.1, true, "The presenter is told the banner asks for a sound")
+        assertFalse(offered.1, "Became active meanwhile: declined, so the add files it for willPresent")
+        assertFalse(offered.2, "No presenter installed: nothing is drawn")
+        // The request form copies the banner out and hops to the main actor; without a presenter it declines.
+        assertFalse(await StoryBannerRoute.offer(request(story: true)), "No presenter: a story request is declined")
+        assertFalse(await StoryBannerRoute.offer(request(story: false)), "A grouped request makes no banner")
     }
 
     static func testNotificationServiceErrorLogging() async {
