@@ -227,7 +227,7 @@ final class StoryBannerPresenter {
                 url, using: { try await SecureHTTPClient.shared.fetchReaderImage(from: $0) })
         } catch {
             // A dismissed banner cancels its photo; anything else names the stage, type and bytes, never the URL.
-            if !(error is CancellationError) {
+            if !ImageLoadFailure.isCancellation(error) {
                 log.error("banner photo failed: \(ImageLoadFailure.describe(error), privacy: .public)")
             }
             return nil

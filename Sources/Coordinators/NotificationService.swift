@@ -607,9 +607,11 @@ final class NotificationService: Sendable {
             try Task.checkCancellation()
             return try Self.makeImageAttachment(data: data, contentType: response.mimeType)
         } catch {
-            // Stage, content type and byte count are public; the URL is not logged (#1010).
-            logger.error(
-                "Notification image attachment failed: \(ImageLoadFailure.describe(error), privacy: .public)")
+            // Stage, content type and byte count are public; the URL is not logged (#1010). Cancelled work is silent.
+            if !ImageLoadFailure.isCancellation(error) {
+                logger.error(
+                    "Notification image attachment failed: \(ImageLoadFailure.describe(error), privacy: .public)")
+            }
             return nil
         }
     }

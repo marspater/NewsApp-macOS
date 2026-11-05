@@ -37,6 +37,11 @@ struct ImageLoadFailure: Error, CustomStringConvertible {
     static func describe(_ error: Error) -> String {
         (error as? ImageLoadFailure ?? ImageLoadFailure(stage: .fetch, underlying: error as NSError)).description
     }
+
+    /// The task's own cancellation or URLSession's (a cache clear, a dismissed banner): not a failure to log.
+    static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
 }
 
 /// Centralized, hardened HTTP client for all remote network ingestion.
@@ -146,7 +151,8 @@ actor SecureHTTPClient {
         let (data, response) = try await fetchImage(from: url)
         try Task.checkCancellation()
         do { return try Self.decodeReaderImage(data) } catch {
-            throw ImageLoadFailure(stage: .decode, contentType: response.mimeType, bytes: data.count)
+            throw ImageLoadFailure(
+                stage: .decode, contentType: response.mimeType, bytes: data.count, underlying: error as NSError)
         }
     }
 

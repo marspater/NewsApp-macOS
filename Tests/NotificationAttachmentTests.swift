@@ -46,6 +46,11 @@ enum NotificationAttachmentTests {
             precondition(
                 ImageLoadFailure.describe(URLError(.cannotDecodeContentData))
                     == "stage=fetch type=unknown bytes=unknown domain=NSURLErrorDomain code=-1016")
+            precondition(
+                ImageLoadFailure.isCancellation(CancellationError())
+                    && ImageLoadFailure.isCancellation(URLError(.cancelled))
+                    && !ImageLoadFailure.isCancellation(URLError(.timedOut)),
+                "Cancelled loads stay out of the log; other request errors do not")
         }
 
         // An 8-bit colormap PNG (#1010) decodes for the reader and becomes the tall crop attachment.
