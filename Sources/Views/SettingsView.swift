@@ -14,6 +14,7 @@
 
 import AppKit
 import SwiftUI
+import UserNotifications
 
 enum SettingsPane: String, CaseIterable, Identifiable {
     case general
@@ -92,6 +93,9 @@ struct SettingsView: View {
     @State private var muteCounts = MuteRuleCounts()
     /// The reader's current top interest categories, shown with the full-mode notification rule.
     @State private var notificationInterests: [String] = []
+    /// What the last test banner did (#926); nil until one is sent.
+    @State private var testNotificationStatus: String?
+    @State private var isSendingTestNotification = false
     @State private var confirmsUnmuteAll = false
     @State private var inferredInterests: [String: Int] = [:]
     @State private var confirmsResetInterests = false
@@ -703,6 +707,29 @@ struct SettingsView: View {
                     }
                 }
             }
+            Section(header: sectionHeader("Test")) {
+                HStack(spacing: AppSpacing.sm) {
+                    Button("Send Test Notification") { Task { await sendTestNotification() } }
+                        .disabled(isSendingTestNotification)
+                    Button("Export Diagnostics…") {
+                        DiagnosticsExport.run(
+                            settings: appSettings, feedManager: feedManager, articleStore: articleStore)
+                    }
+                }
+                Text(
+                    "Posts one random story from your list, with its photo, through the same path as a real notification. The diagnostics zip holds this launch's log, including each banner's route, with story titles and addresses removed."
+                )
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                if let testNotificationStatus {
+                    Text(testNotificationStatus)
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("Test notification result: \(testNotificationStatus)")
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: Self.paneWidth)
@@ -714,6 +741,25 @@ struct SettingsView: View {
                 NewsCategory.allCases.first { $0.rawValue.lowercased() == key }?.rawValue
             }
         }
+    }
+
+    /// Posts one random story through the real notification path and says what came of it (#926).
+    private func sendTestNotification() async {
+        isSendingTestNotification = true
+        defer { isSendingTestNotification = false }
+        guard let story = NotificationService.sampleStory(from: articleStore.articles) else {
+            testNotificationStatus = "No stories in your list yet. Refresh first."
+            return
+        }
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let outcome = await NotificationService.shared.postSample(story) {
+            await MainActor.run {
+                AppSettings.shared.notificationsEnabled && AppSettings.shared.notificationMode == .full
+            }
+        }
+        testNotificationStatus = NotificationService.sampleStatus(
+            outcome, authorization: settings.authorizationStatus, alert: settings.alertSetting,
+            style: settings.alertStyle, previews: settings.showPreviewsSetting)
     }
 
     /// The full-mode rule in one sentence, with the interests it currently reads (#588, #665).

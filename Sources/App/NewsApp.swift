@@ -476,10 +476,8 @@ struct KeyboardShortcutsCommands: Commands {
                 openWindow(id: Self.windowID)
             }
             Button("Show Sample Notification") {
-                // The newest story with a photo, posted through the real path: in front, the app draws its banner.
-                let stories = ArticleStore.shared.articles
-                guard let story = stories.first(where: { FeedArticle.bestCardImage(in: [$0]) != nil }) ?? stories.first
-                else { return }
+                // A random story with a photo, posted through the real path: in front, the app draws its banner.
+                guard let story = NotificationService.sampleStory(from: ArticleStore.shared.articles) else { return }
                 Task {
                     await NotificationService.shared.postSample(story) {
                         await MainActor.run {
