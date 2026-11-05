@@ -111,14 +111,14 @@ enum EventMomentumMACD {
 
         let short = ema(buckets, halfLife: shortHalfLife)
         let long = ema(buckets, halfLife: longHalfLife)
-        let macd = zip(short, long).map(-)
+        let macd = zip(short, long).map { $0.0 - $0.1 }
         let signal = ema(macd, halfLife: signalHalfLife)
         let velocity = short.last ?? 0
         let momentum = macd.last ?? 0
         let signalLine = signal.last ?? 0
         let acceleration = momentum - signalLine
         let recent = uniqueReports.filter { $0.date >= now.addingTimeInterval(-recentWindow) }
-        let recentPublishers = Set(recent.map(\\.publisher)).count
+        let recentPublishers = Set(recent.map(\.publisher)).count
         let hasVolumeFloor = recent.count >= max(1, minimumRecentReports)
             && recentPublishers >= max(1, minimumRecentPublishers)
 
