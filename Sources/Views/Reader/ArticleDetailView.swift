@@ -78,6 +78,8 @@ struct ArticleDetailView: View {
     /// The overview's Check for Updates status line (#992); nil until the person checks this story.
     @State private var storyUpdateStatus: String?
     @State private var isCheckingForUpdates = false
+    /// The running Check for Updates; cleared when the reader closes, so a result after that changes nothing.
+    @State private var storyUpdateCheck: UUID?
     /// Identifies this reader to the overview coordinator, so closing it never clears another reader's event.
     @State private var overviewOwner = UUID()
 
@@ -208,6 +210,7 @@ struct ArticleDetailView: View {
             }
             .onAppear { isViewFocused = true }
             .onDisappear {
+                storyUpdateCheck = nil
                 let owner = overviewOwner
                 Task {
                     await OverviewGenerationCoordinator.shared.clearVisibleEvent(owner: owner)
@@ -1642,14 +1645,18 @@ struct ArticleDetailView: View {
     /// Refreshes the subscriptions, or waits for the refresh already running, and says in the overview header whether
     /// reports joined this story (#992). The line appears on the click and then changes in place (DESIGN.md 13).
     private func checkForUpdates() {
-        guard canCheckForUpdates else { return }
+        guard canCheckForUpdates, let eventID = currentOverview?.eventID else { return }
         let articleID = activeArticle.id
+        let check = UUID()
+        storyUpdateCheck = check
         isCheckingForUpdates = true
         storyUpdateStatus = FeedManager.StoryUpdateResult.checkingText
         Task {
             let result = await feedManager.checkForUpdates(storyOf: articleID)
             isCheckingForUpdates = false
-            guard activeArticle.id == articleID else { return }
+            // Another report of the same event may be open now; only a closed reader or another event drops it.
+            guard storyUpdateCheck == check, currentOverview?.eventID == eventID else { return }
+            storyUpdateCheck = nil
             storyUpdateStatus = result.statusText
             AccessibilityNotification.Announcement(result.statusText).post()
             // New members make the overview stale; it regenerates from the current reports.
@@ -1709,6 +1716,8 @@ struct ArticleDetailView: View {
             currentOverview = nil
             experienceMode = .sourcePublication
         }
+        // A mode the person picks while the overview generates (Story during a Check for Updates) is kept.
+        let modeAtLoad = experienceMode
         setOverviewLoading(true)
 
         let doc = await OverviewGenerationCoordinator.shared.setVisibleEvent(
@@ -1729,7 +1738,7 @@ struct ArticleDetailView: View {
         if let doc = doc {
             currentOverview = doc
             eventMemberArticles = resolvedMembers
-            if returnToOverview && viewMode == .reader {
+            if returnToOverview && viewMode == .reader && experienceMode == modeAtLoad {
                 experienceMode = .eventOverview
                 overviewRequestedArticleID = nil
             }

@@ -189,13 +189,18 @@ class FeedManager: NSObject, ObservableObject {
     func addFeedAndCollect(url: String) async -> String? {
         guard let added = subscribe(url: url) else { return nil }
         await fetchFeedsAsync()
-        // Another subscription change may have cancelled that run and started a replacement; wait for it too.
+        await waitForReplacementRefreshes()
+        return added
+    }
+
+    /// Another subscription change may have cancelled the refresh a caller waited for and started a replacement;
+    /// waits for that too.
+    private func waitForReplacementRefreshes() async {
         for _ in 0..<5 {
             await Task.yield()
             guard let replacement = refreshTask else { break }
             _ = await replacement.value
         }
-        return added
     }
 
     private func subscribe(url: String) -> String? {
@@ -575,6 +580,7 @@ class FeedManager: NSObject, ObservableObject {
         }
         let before = await members()
         await fetchFeedsAsync()
+        await waitForReplacementRefreshes()
         // A refresh that was already running returns before its own clustering starts; ask for one more pass.
         clusterEventsInBackground()
         await waitForEventClustering()

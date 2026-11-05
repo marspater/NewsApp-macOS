@@ -82,7 +82,7 @@ extension FeedManager.StoryUpdateResult {
             if newReports > 0 {
                 text = "\(newReports) new \(newReports == 1 ? "report" : "reports") joined this story"
             } else if deferredMatching {
-                text = "No new reports yet. Low Power Mode delays some story matching"
+                text = "No new reports yet. Some story matching waits while the Mac saves energy or cools down"
             } else {
                 text = "No new reports from your sources"
             }

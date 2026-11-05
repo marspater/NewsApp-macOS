@@ -1834,6 +1834,14 @@ struct NewsTests {
             store.operationError?.contains("read-only") == true
                 && store.operationError?.contains(store.databaseHealthNotice ?? "?") == true,
             "A manual refresh says why, with the library's own notice")
+        // Check for Updates (#992) refuses the same way and downloads nothing.
+        let check = await manager.checkForUpdates(storyOf: "readonly-story")
+        if case .refused(let reason) = check {
+            assertTrue(reason.contains(store.databaseHealthNotice ?? "?"), "Check for Updates names the library notice")
+        } else {
+            assertTrue(false, "Check for Updates is refused while read-only, got \(check)")
+        }
+        assertEqual(await fetches.batches.count, 0, "Check for Updates downloads nothing while read-only")
         await engine.close()
     }
 
@@ -13830,7 +13838,8 @@ struct NewsTests {
             "A feed that failed is named, never hidden")
         assertEqual(
             FeedManager.StoryUpdateResult.checked(newReports: 0, failedFeeds: 0, deferredMatching: true).statusText,
-            "No new reports yet. Low Power Mode delays some story matching", "Low Power Mode claims nothing")
+            "No new reports yet. Some story matching waits while the Mac saves energy or cools down",
+            "Deferred matching claims nothing and names no single cause")
         assertEqual(
             FeedManager.StoryUpdateResult.checked(newReports: 3, failedFeeds: 2, deferredMatching: true).statusText,
             "3 new reports joined this story · 2 feeds could not be checked", "Counts are plural")
