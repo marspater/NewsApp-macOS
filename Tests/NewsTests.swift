@@ -10884,6 +10884,20 @@ struct NewsTests {
             EventMatcher.eventScore(pairs: [pair, pair, pair, pair, pair, diverging, placed], policy: vetoShare) != nil
                 && EventMatcher.eventScore(pairs: [pair, pair, diverging, placed], policy: vetoShare) == nil,
             "The share counts both kinds against all cross-pairs")
+        // A places conflict that also names different headline places stays absolute: the veto never sees it outvoted.
+        // The place fields are set directly so the case does not hang on the tagger.
+        var kyivBlaze = EventFeatures(
+            title: "Fire destroys a warehouse", description: "Firefighters fought the blaze for six hours.", date: now)
+        var lyonBlaze = EventFeatures(
+            title: "Fire destroys a warehouse", description: "Firefighters fought the blaze for six hours.",
+            date: now.addingTimeInterval(600))
+        (kyivBlaze.places, kyivBlaze.titlePlaces) = (["@UA", "kyiv"], ["@UA", "kyiv"])
+        (lyonBlaze.places, lyonBlaze.titlePlaces) = (["@FR", "lyon"], ["@FR", "lyon"])
+        (kyivBlaze.titleSpecificAnchors, lyonBlaze.titleSpecificAnchors) = ([], [])
+        assertEqual(EventMatcher.assess(kyivBlaze, lyonBlaze).conflict, .places, "Disjoint countries are a places veto")
+        assertEqual(
+            EventMatcher.assess(kyivBlaze, lyonBlaze, policy: vetoMinimum).conflict, .headlinePlaces,
+            "Under the veto threshold the headline places conflict behind it is kept")
         var weekday = diverging
         weekday.conflict = .weekday
         assertTrue(
