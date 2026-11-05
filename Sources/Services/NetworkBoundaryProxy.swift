@@ -377,7 +377,7 @@ private final class SOCKSTunnel: @unchecked Sendable {
     private var nextAttempt: DispatchWorkItem?
     /// RFC 8305: the next address starts when the one before has not connected within this delay.
     static let attemptDelay: DispatchTimeInterval = .milliseconds(250)
-    /// Attempts in flight per tunnel.
+    /// Attempts in flight per tunnel; a further address retires the oldest, so stalled attempts cannot hold every slot.
     static let maxAttempts = 3
     private let queue: DispatchQueue
     private let resolver: ProxyResolver
@@ -558,6 +558,11 @@ private final class SOCKSTunnel: @unchecked Sendable {
             startNextAttempt()
             return
         }
+        if attempts.count >= Self.maxAttempts {
+            let oldest = attempts.removeFirst()
+            oldest.stateUpdateHandler = nil
+            oldest.cancel()
+        }
         let connection = connector(host, NWEndpoint.Port(rawValue: port)!)
         attempts.append(connection)
         connection.stateUpdateHandler = { [weak self, weak connection] state in
@@ -565,7 +570,7 @@ private final class SOCKSTunnel: @unchecked Sendable {
             self.attempt(connection, changed: state)
         }
         connection.start(queue: queue)
-        guard !addresses.isEmpty, attempts.count < Self.maxAttempts else { return }
+        guard !addresses.isEmpty else { return }
         let item = DispatchWorkItem { [weak self] in self?.startNextAttempt() }
         nextAttempt = item
         queue.asyncAfter(deadline: .now() + Self.attemptDelay, execute: item)

@@ -20077,19 +20077,20 @@ struct NewsTests {
         let observed = SocketObservation()
         let silentPort = silent.port!
         let upstreamPort = upstream.port!
+        @Sendable func silentConnection(_ host: NWEndpoint.Host, _ port: NWEndpoint.Port) -> NWConnection {
+            let parameters = NWParameters.tcp
+            let context = NWParameters.PrivacyContext(description: "test.fallback.silent")
+            context.proxyConfigurations = [
+                ProxyConfiguration(socksv5Proxy: .hostPort(host: "127.0.0.1", port: silentPort))
+            ]
+            parameters.setPrivacyContext(context)
+            return NWConnection(host: host, port: port, using: parameters)
+        }
         let proxy = NetworkBoundaryProxy(
             resolver: { _ in .allowed(ips: ["2606:4700::1111", "93.184.216.34"]) },
             connector: { host, port in
                 observed.record(host)
-                if case .ipv6 = host {
-                    let parameters = NWParameters.tcp
-                    let context = NWParameters.PrivacyContext(description: "test.fallback.silent")
-                    context.proxyConfigurations = [
-                        ProxyConfiguration(socksv5Proxy: .hostPort(host: "127.0.0.1", port: silentPort))
-                    ]
-                    parameters.setPrivacyContext(context)
-                    return NWConnection(host: host, port: port, using: parameters)
-                }
+                if case .ipv6 = host { return silentConnection(host, port) }
                 return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
             })
         let started = ContinuousClock.now
@@ -20102,9 +20103,28 @@ struct NewsTests {
         assertEqual(held.count, 1, "The dead attempt reached the silent proxy exactly once")
         try await socketSend(client, Data("fallback".utf8))
         assertEqual(try await socketRead(client, count: 8), Data("fallback".utf8), "The tunnel relays over the winner")
-        client.cancel()
+        // Before the client closes: only the winner's selection, not the tunnel's shutdown, may close the loser.
         await eventually("The losing attempt is cancelled once the winner connects") { heldClosed.count == 1 }
+        client.cancel()
         await proxy.stop()
+
+        // Three stalled attempts fill every slot; the fourth address still starts a stagger later, retiring the
+        // oldest, instead of waiting for the handshake timeout.
+        let tried = SocketObservation()
+        let crowded = NetworkBoundaryProxy(
+            resolver: { _ in .allowed(ips: ["93.184.216.1", "93.184.216.2", "93.184.216.3", "93.184.216.4"]) },
+            connector: { host, port in
+                tried.record(host)
+                guard String(describing: host) == "93.184.216.4" else { return silentConnection(host, port) }
+                return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
+            })
+        let crowdedStart = ContinuousClock.now
+        let (crowdedClient, crowdedReply) = try await socksConnect(crowded, host: "crowded.invalid")
+        assertEqual(crowdedReply[1], 0, "The fourth address connects while three attempts stall")
+        assertTrue(ContinuousClock.now - crowdedStart < .seconds(5), "Stalled attempts do not hold the fourth address")
+        assertEqual(tried.hosts.count, 4, "Each address was tried once")
+        crowdedClient.cancel()
+        await crowded.stop()
     }
 
     /// Reads until the peer closes, then records the close: EOF or an error both mean the attempt was torn down.
