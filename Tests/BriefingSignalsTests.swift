@@ -350,6 +350,17 @@ enum BriefingSignalsTests {
         let first = accumulator.append(reportsPerHour: 24)
         let second = accumulator.append(reportsPerHour: 0)
         check(first.velocity > 0 && second.velocity > 0, "MACD accumulator updates its EMA state one bucket at a time")
+
+        var cooling = EventMomentumMACDAccumulator()
+        for _ in 0..<12 { _ = cooling.append(reportsPerHour: 24) }
+        var crossedBelow = false
+        for _ in 0..<120 {
+            if cooling.append(reportsPerHour: 0).crossedBelowSignal {
+                crossedBelow = true
+                break
+            }
+        }
+        check(crossedBelow, "a cooling reporting stream emits one negative-histogram crossover")
     }
 
     static func diversityMMR() {
