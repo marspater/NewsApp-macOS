@@ -109,9 +109,10 @@ struct ArticleListView: View {
 
     private var initialPrefetchURLs: [URL] { CardImagePrefetch.initialURLs(entries) }
 
-    /// Whether the first card with an image is the full-size lead story (macOS 26).
+    /// Whether the first card with an image is the full-size lead story (macOS 26). Only Today shows it at full
+    /// size: the Briefing picks its hero by publisher count, and the hero decodes its own image on demand.
     private var showsLeadImage: Bool {
-        guard #available(macOS 26, *) else { return false }
+        guard #available(macOS 26, *), !isBriefing else { return false }
         return LeadStoryPresentation.firstEligibleID(
             in: entries, selectedTopic: selectedTopic, isSearching: isSearching) != nil
     }

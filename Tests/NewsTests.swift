@@ -27754,9 +27754,13 @@ struct NewsTests {
         let stubborn = QueuedImageLoader(honorsCancellation: false)
         let keptURL = URL(string: "https://cards.example/kept/\(UUID().uuidString).jpg")!
         let waiter = Task { @MainActor in _ = try? await DecodedImageCache.load(keptURL, using: stubborn.loader) }
-        await stubborn.settle()
+        await eventually("The stubborn load is queued before its waiter cancels") { @MainActor in
+            stubborn.requests.count == 1 && stubborn.queued == 1
+        }
         waiter.cancel()
-        await stubborn.settle()
+        await eventually("The cancelled load is still queued before it is released") { @MainActor in
+            stubborn.requests.count == 1 && stubborn.queued == 1
+        }
         stubborn.release(1)
         _ = await waiter.value
         await stubborn.settle()
@@ -27792,8 +27796,8 @@ struct NewsTests {
         let cardURLs = Set(entries.compactMap(\.cardImageURL))
         assertEqual(cardURLs.count, 180, "180 cards show an image of their own")
 
-        // Each card appears, asks the cache as ArticleRemoteImage.init does, moves the prefetch window, and two
-        // queued loads complete before the next card appears.
+        // Each card appears (ArticleRemoteImage.init asks the cache), moves the prefetch window, and two queued
+        // loads complete before the next card appears.
         guard !ProcessInfo.processInfo.isLowPowerModeEnabled else {
             print("    skipped: Low Power Mode turns prefetch off")
             return
@@ -27807,7 +27811,7 @@ struct NewsTests {
         }
         await probe.settle()
         for (index, entry) in entries.enumerated() {
-            if let url = entry.cardImageURL { _ = DecodedImageCache.firstPaint(url, size: .card) }
+            if let url = entry.cardImageURL { _ = ArticleRemoteImage(url: url, size: .card) { _ in EmptyView() } }
             prefetch.ahead(of: index, in: entries, using: probe.loader)
             await probe.settle()
             probe.release(2)
