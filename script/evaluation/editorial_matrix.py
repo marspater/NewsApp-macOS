@@ -427,6 +427,8 @@ def main() -> int:
     output_path=args.output.resolve()
     if output_path.exists():
         raise SystemExit(f"Refusing to overwrite an existing evaluation report: {output_path}")
+    if args.database and output_path in {db_path, *sidecars}:
+        raise SystemExit("The report path must be different from the SQLite database and its sidecars")
 
     db=sqlite3.connect(db_path)
     db.execute("PRAGMA busy_timeout=5000")
