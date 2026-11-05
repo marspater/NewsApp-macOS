@@ -8,15 +8,18 @@ import time
 
 from . import editorial_fixtures
 
-def ndcg10(rows: list[tuple[float, int]]) -> float:
-    """Calculate normalized discounted cumulative gain at rank ten."""
-    ranked = sorted(rows, key=lambda row: (-row[0], -row[1]))[:10]
-    ideal = sorted((grade for _, grade in rows), reverse=True)[:10]
+def ndcg10(rows: list[tuple[float, str, int]]) -> float:
+    """Calculate NDCG@10 with a relevance-independent article-ID tie-breaker."""
+    ranked = sorted(rows, key=lambda row: (-row[0], row[1]))[:10]
+    ideal = sorted((grade for _, _, grade in rows), reverse=True)[:10]
+
     def dcg(grades: list[int]) -> float:
         """Calculate discounted cumulative gain for ordered relevance grades."""
         return sum((2 ** grade - 1) / math.log2(i + 2) for i, grade in enumerate(grades))
+
     denominator = dcg(ideal)
-    return dcg([grade for _, grade in ranked]) / denominator if denominator else 0.0
+    ranked_grades = [grade for _, _, grade in ranked]
+    return dcg(ranked_grades) / denominator if denominator else 0.0
 
 def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
     """Measure FTS5 event-local retrieval and semantic-fallback queue routing."""
@@ -90,20 +93,24 @@ def evaluate_fts_routes(
 
 def entity_anchor_metrics(db: sqlite3.Connection) -> dict:
     """Summarize entity-anchored sentence counts and synthetic new-fact labels."""
-    anchored, distinct_texts, gold_new = db.execute(
-        "SELECT count(*),count(DISTINCT lower(trim(sentence))),sum(expected_new_fact) "
+    anchored, distinct_texts = db.execute(
+        "SELECT count(*),count(DISTINCT lower(trim(sentence))) "
         "FROM passage_sentences WHERE has_core_entity=1"
     ).fetchone()
+    gold_new = db.execute(
+        "SELECT coalesce(sum(expected_new_fact),0) FROM passage_sentences"
+    ).fetchone()[0]
     anchored_new = db.execute(
-        "SELECT sum(CASE WHEN expected_new_fact=1 AND has_core_entity=1 THEN 1 ELSE 0 END) "
+        "SELECT coalesce(sum(CASE WHEN expected_new_fact=1 AND has_core_entity=1 THEN 1 ELSE 0 END),0) "
         "FROM passage_sentences"
-    ).fetchone()[0] or 0
+    ).fetchone()[0]
     return {
         "anchored_sentence_count": anchored,
         "distinct_anchored_sentence_texts": distinct_texts,
         "identical_text_vector_cache_reuse_upper_bound": (anchored - distinct_texts) / anchored if anchored else 0,
-        "gold_net_new_fact_sentences": gold_new or 0,
+        "gold_net_new_fact_sentences": gold_new,
         "entity_anchored_gold_net_new_fact_sentences": anchored_new,
+        "unanchored_gold_net_new_fact_sentences": gold_new - anchored_new,
     }
 
 def floor_confusion_counts(
@@ -192,9 +199,13 @@ def eval_ranking(db: sqlite3.Connection) -> dict:
     ndcgs=[]
     latencies=[]
     for (query,) in db.execute("SELECT DISTINCT query_id FROM ranking_judgements ORDER BY query_id"):
-        rows=db.execute("SELECT source_elo,relevance_grade FROM ranking_judgements WHERE query_id=?",(query,)).fetchall()
+        rows=db.execute(
+            "SELECT source_elo,article_id,relevance_grade FROM ranking_judgements "
+            "WHERE query_id=? ORDER BY source_elo DESC,article_id ASC",
+            (query,),
+        ).fetchall()
         start=time.perf_counter()
-        sorted(rows,key=lambda row:(-row[0],-row[1]))[:10]
+        sorted(rows,key=lambda row:(-row[0],row[1]))[:10]
         latencies.append((time.perf_counter()-start)*1000)
         ndcgs.append(ndcg10(rows))
     return {
@@ -202,6 +213,7 @@ def eval_ranking(db: sqlite3.Connection) -> dict:
         "candidate_count_per_query": 500,
         "baseline_source_elo_NDCG_at_10": statistics.mean(ndcgs) if ndcgs else None,
         "baseline_candidate_sort_median_ms": statistics.median(latencies) if latencies else None,
+        "source_elo_tie_breaker": "article_id_ascending_without_relevance_label",
         "mmr_NDCG_at_10": None,
         "intra_list_semantic_diversity": None,
         "ranking_latency_500_candidate_vectors_ms": None,
