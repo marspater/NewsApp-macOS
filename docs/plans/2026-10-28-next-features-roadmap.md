@@ -116,6 +116,26 @@ Surfaces feed health transparency, entity relationship networks, multi-perspecti
 | W3 (#717) | Multi-Perspective Dual-Reader (Side-by-Side Coverage Comparison) | Side-by-side reading of two distinct publisher reports on the same event for wide displays (>1200 pt), with synchronized passage scrolling and highlighted perspective contrast. | Split view renders on wide displays; synchronized scrolling on shared citations; degrades gracefully on narrow windows. | M | P2 | Blocked by M8 (#581), T4 (#673), and Q2 |
 | W4 (#718) | Interactive Global Hotspot Map (World Tension / International Desk) | Offline vector map in World Tension sheet or dedicated Global Desk; maps event clusters to regions using offline location extraction and country centroids; visualizes global coverage volume and tension factors. | Fully offline vector map rendering; clickable region filters panel headlines; zero external telemetry. | L | P2 | Blocked by L9 (#585), T2 (#671), and W2 |
 
+#### W5–W9 · Editorial signal pipeline (strict phase order)
+
+| # | Issue | Scope | Acceptance | Effort | Pri |
+|---|---|---|---|---|---|
+| W5 (#997) | Passage novelty and extractive evidence | FTS5/BM25, semantic gate, low-priority fallback, entity anchoring, cached sentence vectors and vDSP extractive selection. | Net-new fact precision and ANE/cache/latency metrics measured before UI. | M | P2 |
+| W6 (#998) | Event momentum (MACD) | Short/long EMA, MACD histogram, publication-time replay and independent wire-group counting. | Labelled burst accuracy, false-positive rate, volume floor and DB update latency measured. | M | P2 |
+| W7 (#999) | MMR ranking | Source Elo + momentum + preference relevance; continuous temporal-decay similarity for the Situation Board and Lead. | NDCG@10, intra-list semantic diversity and 500-vector ranking latency measured. | S–M | P2 |
+| W8 (#1000) | Phase 0 evaluation matrix | Seeded SQLite corpus (≥5,000 articles) and the quality/performance matrix for novelty, momentum, ranking and personalization. | Built, run and reviewed before any new Core ML or vDSP invocation for this pipeline. | M | P1 |
+| W9 (#1001) | Impression-backed personalization | Impression denominator, reward signs, EWMA preference vector and fixed 15% adjacent-topic Discovery allocation. UCB1 only after statistical sufficiency. | Recommendation relevance, topic discovery, log storage and update cost measured. | M | P2 |
+
+**Mandatory sequence:** Phase 0 (#1000) → Phase 1 (#997) → Phase 2 (#998) → Phase 3 (#999) → Phase 4 (#1001). No new Core ML or vDSP invocation for this pipeline before Phase 0 has been built, run and reviewed.
+
+**Phase 3/4 interface note:** MMR accepts a preference-score input, but uses a neutral/default preference signal during Phase 3. Phase 4 later supplies the EWMA profile; only then is the full source-Elo + momentum + preference relevance formula evaluated. This preserves the published phase order without hiding the dependency.
+
+**Phase 0 metrics:** net-new fact precision / ANE spin-up / ANE-CPU power / vector-cache hit rate; burst accuracy / false-positive rate / DB insert-update latency; NDCG@10 / intra-list semantic diversity / ranking latency across 500 vectors; recommendation relevance / topic discovery / impression storage / update cost. Measurements requiring future model/vector implementations remain explicitly pending until those phases.
+
+**Deferred:** Temporal Knowledge Graph and bounded local Personalized PageRank are implemented only with Entity Dossiers (#716), never computed on the fly for ordinary feeds.
+
+**Rejected:** DPP, Kleinberg burst detection, NLI contradiction detection and generative LLM/model dependencies. MACD and MMR are the selected algorithms.
+
 ---
 
 ### Epic X · Desktop and System Presence (WidgetKit) (Epic #719, Milestone 24, PARKED)
