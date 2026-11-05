@@ -1,67 +1,30 @@
 #!/usr/bin/env python3
-"""Phase 0 editorial evaluation matrix. Standard-library only; no Core ML or Accelerate calls."""
+"""Phase 0 editorial evaluation matrix command-line runner."""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
-import math
 import os
 import sqlite3
-import statistics
 import tempfile
-import time
-import typing
 from pathlib import Path
 
-UTC = dt.timezone.utc
-BASE = dt.datetime(2026, 11, 1, tzinfo=UTC)
-TOPICS = ["energy", "semiconductors", "monetary-policy", "rail", "shipping",
-          "public-health", "space", "cybersecurity", "agriculture", "climate"]
-SCENARIOS = [("breaking", 20), ("slow_weekend", 15), ("syndication", 15)]
-PUBLISHERS = [f"Publisher {i:02d}" for i in range(20)]
-
-
-T = typing.TypeVar("T")
-
-
-class DeterministicFixtureRNG:
-    """Generate reproducible pseudo-random values for synthetic evaluation fixtures."""
-
-    def __init__(self, seed: int) -> None:
-        """Initialize the fixture stream from a caller-selected integer seed."""
-        self._seed = str(seed).encode("utf-8")
-        self._counter = 0
-
-    def _next_u64(self) -> int:
-        """Return the next 64 bits from the deterministic SHA-256 counter stream."""
-        digest = hashlib.sha256(self._seed + self._counter.to_bytes(8, "big")).digest()
-        self._counter += 1
-        return int.from_bytes(digest[:8], "big")
-
-    def randint(self, start: int, stop: int) -> int:
-        """Return a reproducible integer in the inclusive range [start, stop]."""
-        if start > stop:
-            raise ValueError("start must not exceed stop")
-        span = stop - start + 1
-        ceiling = 1 << 64
-        limit = ceiling - ceiling % span
-        while True:
-            value = self._next_u64()
-            if value < limit:
-                return start + value % span
-
-    def random(self) -> float:
-        """Return a deterministic floating-point value in the half-open range [0, 1)."""
-        return self._next_u64() / float(1 << 64)
-
-    def shuffle(self, values: list[T]) -> None:
-        """Shuffle a list in place using the seeded fixture stream."""
-        for index in range(len(values) - 1, 0, -1):
-            other = self.randint(0, index)
-            values[index], values[other] = values[other], values[index]
-
+from editorial_fixtures import (
+    BASE,
+    UTC,
+    DeterministicFixtureRNG,
+    schema,
+    seed_articles,
+    seed_personalization,
+    seed_ranking,
+)
+from editorial_metrics import (
+    eval_momentum,
+    eval_novelty,
+    eval_personalization,
+    eval_ranking,
+)
 
 def create_empty_file_exclusive(path: Path) -> None:
     """Create a new private file atomically without replacing an existing path."""
@@ -72,567 +35,82 @@ def create_empty_file_exclusive(path: Path) -> None:
     os.close(descriptor)
 
 
-def ts(value: dt.datetime) -> float:
-    """Convert a timezone-aware datetime to a Unix timestamp."""
-    return value.timestamp()
 
 
-def ndcg10(rows: list[tuple[float, int]]) -> float:
-    """Calculate normalized discounted cumulative gain at rank ten."""
-    ranked = sorted(rows, key=lambda row: (-row[0], -row[1]))[:10]
-    ideal = sorted((grade for _, grade in rows), reverse=True)[:10]
-    def dcg(grades: list[int]) -> float:
-        """Calculate discounted cumulative gain for ordered relevance grades."""
-        return sum((2 ** grade - 1) / math.log2(i + 2) for i, grade in enumerate(grades))
-    denominator = dcg(ideal)
-    return dcg([grade for _, grade in ranked]) / denominator if denominator else 0.0
 
 
-def schema(db: sqlite3.Connection) -> None:
-    """Create the isolated Phase 0 SQLite and FTS5 evaluation schema."""
-    schema_path = Path(__file__).with_name("editorial_schema.sql")
-    db.executescript(schema_path.read_text(encoding="utf-8"))
 
 
-def article_timing(
-    scenario: str,
-    index: int,
-    anchor: dt.datetime,
-    rng: DeterministicFixtureRNG,
-) -> tuple[dt.datetime, dt.datetime, int]:
-    """Generate publication/fetch times and a relevance grade for one scenario."""
-    if scenario == "breaking":
-        published = (
-            anchor + dt.timedelta(seconds=index * 20)
-            if index < 80
-            else anchor - dt.timedelta(hours=23) + dt.timedelta(minutes=(index - 80) * 60)
-        )
-        fetched = published + dt.timedelta(minutes=rng.randint(0, 15))
-        grade = 3 if index % 5 == 0 else 2
-    elif scenario == "slow_weekend":
-        published = anchor + dt.timedelta(minutes=index * 43)
-        fetched = published + dt.timedelta(minutes=rng.randint(0, 90))
-        grade = 2 if index % 4 == 0 else 1
-    else:
-        wire_index = index // 20
-        published = anchor + dt.timedelta(hours=wire_index * 3)
-        fetched = published + dt.timedelta(hours=(index % 20) * 2 + rng.randint(0, 20))
-        grade = 1
-    return published, fetched, grade
 
 
-def passage_fixture(
-    scenario: str,
-    bucket: int,
-    query: str,
-    topic: str,
-    article_id: str,
-    wire_id: str,
-    index: int,
-) -> tuple[str, str, int, int, str]:
-    """Build the labelled passage and candidate anchor sentence for one article."""
-    if scenario == "syndication":
-        kind = "repetition"
-        passage = f"{query}. Authorities confirmed syndicated status and timeline."
-        new_fact, anchored = 0, 1
-    elif bucket < 4:
-        kind = "repetition"
-        passage = f"{query}. Authorities confirmed previously reported status and timeline."
-        new_fact = 0
-        anchored = 0 if index % 5 == 0 else 1
-    elif bucket < 8:
-        kind = "potentially_new"
-        passage = f"{query}. Agency identified a newly affected facility and revised the casualty figure."
-        new_fact = 1
-        anchored = 0 if index % 5 == 0 else 1
-    else:
-        kind = "semantic_fallback"
-        passage = f"Officials described the {topic} situation and issued fallbacktoken{article_id.split('-')[-1]} statement."
-        new_fact, anchored = 0, 0 if index % 5 == 0 else 1
-
-    if scenario == "syndication":
-        sentence = f"The {topic} authority confirmed syndicated story {wire_id} status and timeline."
-    elif kind == "potentially_new":
-        sentence = f"The {topic} authority identified newly affected facility {article_id} and revised the count."
-    elif kind == "semantic_fallback":
-        sentence = f"Officials described the {topic} situation for {article_id} and issued an updated statement."
-    else:
-        sentence = f"The {topic} authority confirmed previously reported status for {article_id} and timeline."
-    return kind, passage, new_fact, anchored, sentence
 
 
-def build_article_fixture(
-    scenario: str,
-    event_id: str,
-    event_number: int,
-    topic: str,
-    query: str,
-    anchor: dt.datetime,
-    index: int,
-    rng: DeterministicFixtureRNG,
-) -> tuple[tuple, tuple, tuple, list[tuple]]:
-    """Build one article, its event passage, FTS row, and two candidate sentences."""
-    article_id = f"article-{(event_number - 1) * 100 + index + 1:05d}"
-    wire_id = f"{event_id}-wire-{index // 20:02d}" if scenario == "syndication" else article_id
-    published, fetched, grade = article_timing(scenario, index, anchor, rng)
-    publisher = PUBLISHERS[index % len(PUBLISHERS)]
-    independent = f"Wire Service {wire_id.split('-')[-1]}" if scenario == "syndication" else publisher
-    title = f"{topic.replace('-', ' ').title()} event {event_number} report {index:03d}"
-    body = f"{query}. {scenario.replace('_', ' ')} coverage for {event_id}. Wire {wire_id}."
-    elo = 900.0 + ((index * 37 + event_number * 19) % 250)
-    article_row = (
-        article_id, event_id, scenario, topic, publisher, independent, wire_id,
-        title, body, ts(published), ts(fetched), elo, grade
-    )
-    kind, passage, new_fact, anchored, sentence = passage_fixture(
-        scenario, index % 10, query, topic, article_id, wire_id, index
-    )
-    passage_id = f"passage-{article_id}"
-    passage_row = (passage_id, article_id, event_id, passage, kind, anchored, new_fact)
-    fts_row = (passage_id, event_id, passage)
-    sentence_rows = [
-        (
-            f"sentence-{article_id}-0", passage_id, sentence, anchored, new_fact,
-            f"entity:{topic}" if anchored else None,
-        ),
-        (
-            f"sentence-{article_id}-1", passage_id,
-            "The company declined to comment.", 0, 0, None,
-        ),
-    ]
-    return article_row, passage_row, fts_row, sentence_rows
 
 
-def build_event_fixture(
-    scenario: str,
-    event_number: int,
-    rng: DeterministicFixtureRNG,
-) -> tuple[str, dict[str, str], list[tuple], list[tuple], list[tuple], list[tuple], tuple]:
-    """Build the 100-article controlled fixture and time window for one event."""
-    event_id = f"event-{event_number:03d}"
-    topic = TOPICS[(event_number - 1) % len(TOPICS)]
-    anchor = BASE + dt.timedelta(hours=(event_number % 12) * 2)
-    query = f"incident{event_number:03d} authority operation"
-    article_rows, passage_rows, fts_rows, sentence_rows = [], [], [], []
-    for index in range(100):
-        article, passage, fts, sentences = build_article_fixture(
-            scenario, event_id, event_number, topic, query, anchor, index, rng
-        )
-        article_rows.append(article)
-        passage_rows.append(passage)
-        fts_rows.append(fts)
-        sentence_rows.extend(sentences)
-    window = (
-        event_id, scenario, ts(anchor - dt.timedelta(hours=3)),
-        ts(anchor + dt.timedelta(hours=3)), int(scenario == "breaking"),
-    )
-    return event_id, {"scenario": scenario, "topic": topic, "query": query}, article_rows, passage_rows, fts_rows, sentence_rows, window
 
 
-def insert_seeded_rows(
-    db: sqlite3.Connection,
-    article_rows: list[tuple],
-    passage_rows: list[tuple],
-    fts_rows: list[tuple],
-    sentence_rows: list[tuple],
-    event_windows: list[tuple],
-) -> dict[str, float]:
-    """Persist seeded article and passage rows and return insertion timings."""
-    started = time.perf_counter()
-    db.executemany("INSERT INTO articles VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", article_rows)
-    db.commit()
-    article_insert_ms = (time.perf_counter() - started) * 1000
-    started = time.perf_counter()
-    db.executemany("INSERT INTO passages VALUES(?,?,?,?,?,?,?)", passage_rows)
-    db.executemany("INSERT INTO passage_fts(passage_id,event_id,text) VALUES(?,?,?)", fts_rows)
-    db.executemany("INSERT INTO passage_sentences VALUES(?,?,?,?,?,?)", sentence_rows)
-    db.executemany("INSERT INTO event_windows VALUES(?,?,?,?,?)", event_windows)
-    db.commit()
-    return {
-        "article_insert_ms": article_insert_ms,
-        "passage_and_fts_insert_ms": (time.perf_counter() - started) * 1000,
-    }
 
 
-def seed_articles(
-    db: sqlite3.Connection,
-    rng: DeterministicFixtureRNG,
-) -> tuple[dict[str, dict[str, str]], dict[str, float]]:
-    """Seed the breaking, slow-weekend, and syndicated article corpus."""
-    event_meta = {}
-    article_rows, passage_rows, fts_rows, sentence_rows, event_windows = [], [], [], [], []
-    event_number = 0
-    for scenario, event_count in SCENARIOS:
-        for _ in range(event_count):
-            event_number += 1
-            event_id, metadata, articles, passages, fts, sentences, window = build_event_fixture(
-                scenario, event_number, rng
-            )
-            event_meta[event_id] = metadata
-            article_rows.extend(articles)
-            passage_rows.extend(passages)
-            fts_rows.extend(fts)
-            sentence_rows.extend(sentences)
-            event_windows.append(window)
-    timings = insert_seeded_rows(db, article_rows, passage_rows, fts_rows, sentence_rows, event_windows)
-    return event_meta, timings
 
 
-def fetch_fts_candidates(
-    db: sqlite3.Connection,
-    query: str,
-    event_id: str,
-    article_id: str,
-) -> tuple[list[tuple], float]:
-    """Retrieve up to 32 same-event lexical matches and measure query latency."""
-    started = time.perf_counter()
-    candidates = db.execute(
-        "SELECT passage_fts.passage_id FROM passage_fts JOIN passages p "
-        "ON p.id=passage_fts.passage_id "
-        "WHERE passage_fts MATCH ? AND passage_fts.event_id=? AND p.article_id!=? "
-        "ORDER BY bm25(passage_fts) LIMIT 32",
-        (query, event_id, article_id),
-    ).fetchall()
-    return candidates, (time.perf_counter() - started) * 1000
 
 
-def evaluate_fts_routes(
-    db: sqlite3.Connection,
-    rows: list[tuple],
-    event_meta: dict,
-) -> tuple[int, int, int, int, list[float]]:
-    """Measure lexical recall and persist semantic-miss fallback rows."""
-    lexical_expected = lexical_found = fallback_expected = fallback_queued = 0
-    elapsed = []
-    for passage_id, article_id, event_id, kind in rows:
-        query = (
-            f"fallbacktoken{article_id.split('-')[-1]}"
-            if kind == "semantic_fallback"
-            else event_meta[event_id]["query"]
-        )
-        candidates, latency = fetch_fts_candidates(db, query, event_id, article_id)
-        elapsed.append(latency)
-        if kind == "semantic_fallback":
-            fallback_expected += 1
-            if not candidates:
-                db.execute(
-                    "INSERT OR IGNORE INTO semantic_fallback_queue(passage_id,event_id,priority) VALUES(?,?,?)",
-                    (passage_id, event_id, "low"),
-                )
-                fallback_queued += 1
-        else:
-            lexical_expected += 1
-            lexical_found += bool(candidates)
-    return lexical_expected, lexical_found, fallback_expected, fallback_queued, elapsed
 
 
-def entity_anchor_metrics(db: sqlite3.Connection) -> dict:
-    """Summarize entity-anchored sentence counts and synthetic new-fact labels."""
-    anchored, distinct_texts, gold_new = db.execute(
-        "SELECT count(*),count(DISTINCT lower(trim(sentence))),sum(expected_new_fact) "
-        "FROM passage_sentences WHERE has_core_entity=1"
-    ).fetchone()
-    anchored_new = db.execute(
-        "SELECT sum(CASE WHEN expected_new_fact=1 AND has_core_entity=1 THEN 1 ELSE 0 END) "
-        "FROM passage_sentences"
-    ).fetchone()[0] or 0
-    return {
-        "anchored_sentence_count": anchored,
-        "distinct_anchored_sentence_texts": distinct_texts,
-        "identical_text_vector_cache_reuse_upper_bound": (anchored - distinct_texts) / anchored if anchored else 0,
-        "gold_net_new_fact_sentences": gold_new or 0,
-        "entity_anchored_gold_net_new_fact_sentences": anchored_new,
-    }
 
 
-def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
-    """Measure FTS5 event-local retrieval and semantic-fallback queue routing."""
-    rows = db.execute(
-        "SELECT id,article_id,event_id,expected_class FROM passages ORDER BY id"
-    ).fetchall()
-    lexical, found, fallback, queued, elapsed = evaluate_fts_routes(db, rows, event_meta)
-    db.commit()
-    return {
-        "labelled_passages": len(rows),
-        "fts5_same_event_query_median_ms": statistics.median(elapsed) if elapsed else None,
-        "lexical_candidate_recall_on_controlled_corpus": found / lexical if lexical else None,
-        "semantic_fallback_expected_count": fallback,
-        "semantic_fallback_queue_count": queued,
-        "persisted_low_priority_queue_rows": db.execute(
-            "SELECT count(*) FROM semantic_fallback_queue WHERE priority='low'"
-        ).fetchone()[0],
-        "semantic_fallback_queue_priority": "low",
-        "semantic_fallback_route_rate_on_controlled_corpus": queued / fallback if fallback else None,
-        "entity_anchoring": entity_anchor_metrics(db),
-        "net_new_fact_precision": None,
-        "net_new_fact_precision_status": "not_measured_phase_0_no_embedding_or_extraction_invocations",
-        "note": "Lexical routing and entity anchors use synthetic controls; they are not semantic novelty precision.",
-    }
 
 
-def floor_confusion_counts(
-    rows: list[tuple],
-    report_floor: int,
-    publisher_floor: int,
-) -> tuple[int, int, int, int]:
-    """Count true/false positives and negatives for one volume-floor pair."""
-    counts = [[0, 0], [0, 0]]
-    for _, _, expected, _, independent, publishers in rows:
-        predicted = int(independent >= report_floor and publishers >= publisher_floor)
-        counts[int(bool(expected))][predicted] += 1
-    return counts[1][1], counts[0][1], counts[0][0], counts[1][0]
 
 
-def safe_ratio(numerator: float, denominator: float, default: float | None) -> float | None:
-    """Divide while returning a caller-selected fallback for an empty denominator."""
-    return numerator / denominator if denominator else default
 
 
-def volume_floor_sweep(rows: list[tuple]) -> list[dict]:
-    """Calculate classification metrics for each independent-report/publisher floor."""
-    sweep = []
-    total = len(rows)
-    for floor in (2, 3, 5, 10, 20):
-        for publisher_floor in (1, 2, 3):
-            tp, fp, tn, fn = floor_confusion_counts(rows, floor, publisher_floor)
-            sweep.append({
-                "independent_report_floor": floor,
-                "independent_publisher_floor": publisher_floor,
-                "true_positive": tp, "false_positive": fp,
-                "true_negative": tn, "false_negative": fn,
-                "accuracy": safe_ratio(tp + tn, total, None),
-                "false_positive_rate": safe_ratio(fp, fp + tn, 0.0),
-                "recall": safe_ratio(tp, tp + fn, 0.0),
-                "status": "volume_floor_only_not_MACD",
-            })
-    return sweep
 
 
-def eval_momentum(db: sqlite3.Connection) -> dict:
-    """Evaluate labelled event windows and independent-wire volume-floor controls."""
-    rows = db.execute("""
-      SELECT w.event_id,w.scenario,w.expected_burst,count(a.id),count(DISTINCT a.wire_group_id),count(DISTINCT a.independent_publisher)
-      FROM event_windows w LEFT JOIN articles a
-        ON a.event_id=w.event_id AND a.published_at BETWEEN w.window_start AND w.window_end
-      GROUP BY w.event_id ORDER BY w.event_id
-    """).fetchall()
-    raw = sum(row[3] for row in rows)
-    independent = sum(row[4] for row in rows)
-    independent_publishers = sum(row[5] for row in rows)
-    sample_wire = db.execute(
-        "SELECT event_id,wire_group_id FROM articles WHERE scenario='syndication' "
-        "ORDER BY event_id,wire_group_id LIMIT 1"
-    ).fetchone()
-    if sample_wire is None:
-        raise RuntimeError("The syndication control row is missing")
-    sample_counts = db.execute(
-        "SELECT count(*),count(DISTINCT publisher),count(DISTINCT independent_publisher) "
-        "FROM articles WHERE event_id=? AND wire_group_id=?",
-        sample_wire
-    ).fetchone()
-    return {
-        "labelled_event_windows": len(rows),
-        "windows_by_scenario": {
-            kind: sum(row[1] == kind for row in rows)
-            for kind in ("breaking", "slow_weekend", "syndication")
-        },
-        "raw_article_count_in_windows": raw,
-        "independent_report_count_in_windows": independent,
-        "independent_publisher_count_in_windows": independent_publishers,
-        "single_syndicated_wire_control": {
-            "outlet_rows": sample_counts[0], "local_publishers": sample_counts[1],
-            "independent_publishers": sample_counts[2], "independent_reports": 1,
-        },
-        "syndication_copy_inflation_ratio": raw / max(1, independent),
-        "delayed_fetch_over_six_hours_count": db.execute(
-            "SELECT count(*) FROM articles WHERE fetched_at-published_at>21600"
-        ).fetchone()[0],
-        "volume_floor_sweep": volume_floor_sweep(rows),
-        "MACD_burst_accuracy": None,
-        "MACD_false_positive_rate": None,
-        "MACD_status": "not_measured_phase_0_MACD_not_implemented",
-        "timestamp_policy": "publication timestamp; fetched_at retained separately for delayed-poll controls",
-    }
 
 
-def ranking_relevance_grade(article_topic: str, query_topic_index: int) -> int:
-    """Return the synthetic relevance label for an exact or adjacent topic."""
-    if article_topic == TOPICS[query_topic_index]:
-        return 3
-    article_topic_index = TOPICS.index(article_topic)
-    adjacent_indexes = (
-        (query_topic_index + 1) % len(TOPICS),
-        (query_topic_index - 1) % len(TOPICS),
-    )
-    if article_topic_index in adjacent_indexes:
-        return 1
-    return 0
 
 
-def seed_ranking(db: sqlite3.Connection, rng: DeterministicFixtureRNG) -> float:
-    """Create reproducible 500-candidate ranking judgement sets."""
-    articles = db.execute("SELECT id,topic_id,source_elo FROM articles ORDER BY id").fetchall()
-    rows = []
-    for index, topic in enumerate(TOPICS):
-        candidates = []
-        for article_id, article_topic, elo in articles:
-            grade = ranking_relevance_grade(article_topic, index)
-            candidates.append((f"query-{index:02d}", article_id, grade, article_topic, elo))
-        rng.shuffle(candidates)
-        rows.extend(candidates[:500])
-    started = time.perf_counter()
-    db.executemany("INSERT INTO ranking_judgements VALUES(?,?,?,?,?)", rows)
-    db.commit()
-    return (time.perf_counter() - started) * 1000
 
 
-def eval_ranking(db: sqlite3.Connection) -> dict:
-    """Measure the source-Elo NDCG baseline and metadata-sort latency."""
-    ndcgs=[]
-    latencies=[]
-    for (query,) in db.execute("SELECT DISTINCT query_id FROM ranking_judgements ORDER BY query_id"):
-        rows=db.execute("SELECT source_elo,relevance_grade FROM ranking_judgements WHERE query_id=?",(query,)).fetchall()
-        start=time.perf_counter()
-        sorted(rows,key=lambda row:(-row[0],-row[1]))[:10]
-        latencies.append((time.perf_counter()-start)*1000)
-        ndcgs.append(ndcg10(rows))
-    return {
-        "ranking_queries": len(ndcgs),
-        "candidate_count_per_query": 500,
-        "baseline_source_elo_NDCG_at_10": statistics.mean(ndcgs) if ndcgs else None,
-        "baseline_candidate_sort_median_ms": statistics.median(latencies) if latencies else None,
-        "mmr_NDCG_at_10": None,
-        "intra_list_semantic_diversity": None,
-        "ranking_latency_500_candidate_vectors_ms": None,
-        "vector_metrics_status": "not_measured_phase_0_no_vDSP_or_embedding_invocations",
-    }
 
 
-def build_impression_rows(
-    articles: list[tuple[str, str]],
-    rendered: float,
-    rng: DeterministicFixtureRNG,
-) -> list[tuple]:
-    """Create rendered impressions with deterministic skip and engagement rewards."""
-    impressions = []
-    for user_index in range(10):
-        user = f"user-{user_index:02d}"
-        for article_index, (article_id, topic) in enumerate(articles):
-            choice = rng.random()
-            action, reward = "none", 0.0
-            if choice < 0.58:
-                action, reward = "scrolled_past", -1.0
-            elif choice < 0.68:
-                action, reward = "click", 1.0
-            elif choice < 0.73:
-                action, reward = "save", 2.0
-            impressions.append((
-                None, user, article_id, rendered + article_index, None, action, reward, topic
-            ))
-    return impressions
 
 
-def recommendation_action(slot: int) -> str:
-    """Choose the deterministic engagement label for one recommendation slot."""
-    if slot % 9 == 0:
-        return "click"
-    if slot % 17 == 0:
-        return "save"
-    return "none"
 
 
-def recommendations_for_topic(
-    index: int,
-    preferred: str,
-    by_topic: dict[str, list[str]],
-) -> list[tuple]:
-    """Build one user's 85 core and 15 adjacent-topic discovery slots."""
-    adjacent_topic = TOPICS[(index + 1) % len(TOPICS)]
-    candidates = by_topic[preferred][:85] + by_topic[adjacent_topic][:15]
-    rows = []
-    for slot, article_id in enumerate(candidates):
-        discovery = slot >= 85
-        topic = adjacent_topic if discovery else preferred
-        rows.append((
-            f"user-{index:02d}", article_id, slot,
-            "discovery" if discovery else "core",
-            0 if discovery else 1,
-            recommendation_action(slot),
-            topic,
-        ))
-    return rows
 
 
-def build_recommendation_rows(articles: list[tuple[str, str]]) -> list[tuple]:
-    """Create the fixed 85/15 core and adjacent-topic discovery fixture."""
-    by_topic: dict[str, list[str]] = {}
-    for article_id, topic in articles:
-        by_topic.setdefault(topic, []).append(article_id)
-    recommendations = []
-    for index, preferred in enumerate(TOPICS):
-        recommendations.extend(recommendations_for_topic(index, preferred, by_topic))
-    return recommendations
 
 
-def seed_personalization(
-    db: sqlite3.Connection,
-    rng: DeterministicFixtureRNG,
-) -> tuple[float, float]:
-    """Seed synthetic impression rewards and the fixed core/discovery fixture."""
-    articles = db.execute("SELECT id,topic_id FROM articles ORDER BY id").fetchall()
-    rendered = ts(BASE + dt.timedelta(days=3))
-    impressions = build_impression_rows(articles, rendered, rng)
-    start = time.perf_counter()
-    db.executemany("INSERT INTO impressions VALUES(?,?,?,?,?,?,?,?)", impressions)
-    db.commit()
-    insert_ms = (time.perf_counter() - start) * 1000
-
-    start = time.perf_counter()
-    db.execute(
-        "UPDATE impressions SET scrolled_past_at=rendered_at+30 "
-        "WHERE action='scrolled_past' AND scrolled_past_at IS NULL"
-    )
-    db.commit()
-    update_ms = (time.perf_counter() - start) * 1000
-
-    recommendations = build_recommendation_rows(articles)
-    db.executemany("INSERT INTO recommendation_judgements VALUES(?,?,?,?,?,?,?)", recommendations)
-    db.commit()
-    return insert_ms, update_ms
 
 
-def eval_personalization(db: sqlite3.Connection) -> dict:
-    """Measure impression storage, reward counts, and synthetic discovery exposure."""
-    total,skipped,positive=db.execute(
-        "SELECT count(*),sum(action='scrolled_past'),sum(action IN ('click','save')) FROM impressions").fetchone()
-    discovery,engaged,topics=db.execute(
-        "SELECT count(*),sum(action IN ('click','save')),count(DISTINCT topic_id) "
-        "FROM recommendation_judgements WHERE slot_type='discovery'").fetchone()
-    core,relevant=db.execute(
-        "SELECT count(*),sum(expected_relevant) FROM recommendation_judgements WHERE slot_type='core'").fetchone()
-    try:
-        storage=db.execute(
-            "SELECT coalesce(sum(pgsize),0) FROM dbstat WHERE name IN ('impressions','impressions_user_time')").fetchone()[0]
-        storage_basis="SQLite dbstat table plus index pages"
-    except sqlite3.DatabaseError:
-        storage=db.execute(
-            "SELECT coalesce(sum(length(user_id)+length(article_id)+length(topic_id)+48),0) FROM impressions").fetchone()[0]
-        storage_basis="estimated stored field bytes plus 48-byte row overhead; dbstat unavailable"
-    return {
-        "impression_rows": total,
-        "skipped_impression_count": skipped,
-        "positive_click_or_save_count": positive,
-        "impression_log_table_and_index_bytes": storage,
-        "impression_storage_measurement": storage_basis,
-        "discovery_slot_share": discovery/max(1,discovery+core),
-        "core_recommendation_relevance": relevant/max(1,core),
-        "recommendation_metric_basis": "synthetic topic-label control, not a user-preference model",
-        "discovery_engagement_rate": engaged/max(1,discovery),
-        "distinct_discovery_topics_reached": topics,
-        "topic_discovery_rate": topics/max(1,len(TOPICS)),
-        "ewma_vector_update_cost_ms": None,
-        "ewma_status": "not_measured_phase_0_no_embedding_vectors",
-    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 def parse_args() -> argparse.Namespace:
@@ -841,121 +319,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
-
-
-    """Build the Phase 0 corpus, run its evaluation matrix, and write JSON output."""
-    parser=argparse.ArgumentParser(description="Build and evaluate the Phase 0 editorial evaluation matrix.")
-    parser.add_argument("--output",type=Path,default=Path("docs/benchmarks") /
-                        f"{dt.datetime.now(UTC):%Y-%m-%d}-editorial-matrix.json")
-    parser.add_argument("--database",type=Path,help="Optional retained SQLite database path; temporary by default.")
-    parser.add_argument("--seed",type=int,default=20261105)
-    args=parser.parse_args()
-    # Seeded PRNG is intentional: this produces reproducible synthetic test data only.
-    rng=DeterministicFixtureRNG(args.seed)
-    temporary=None
-    if args.database:
-        db_path=args.database.resolve()
-        db_path.parent.mkdir(parents=True,exist_ok=True)
-        sidecars = [Path(str(db_path) + suffix) for suffix in ("-wal", "-shm", "-journal")]
-        if db_path.exists() or any(sidecar.exists() for sidecar in sidecars):
-            raise SystemExit(f"Refusing to overwrite an existing SQLite database or sidecar: {db_path}")
-    else:
-        temporary=tempfile.TemporaryDirectory(prefix="news-editorial-phase0-")
-        db_path=Path(temporary.name)/"editorial-phase0.sqlite3"
-
-    output_path=args.output.resolve()
-    if output_path.exists():
-        raise SystemExit(f"Refusing to overwrite an existing evaluation report: {output_path}")
-    if args.database and output_path in {db_path, *sidecars}:
-        raise SystemExit("The report path must be different from the SQLite database and its sidecars")
-
-    create_empty_file_exclusive(db_path)
-    db=sqlite3.connect(db_path)
-    db.execute("PRAGMA busy_timeout=5000")
-    try:
-        schema(db)
-        event_meta,event_articles,timings=seed_articles(db,rng)
-        timings["ranking_judgement_insert_ms"]=seed_ranking(db,rng)
-        impression_insert,impression_update=seed_personalization(db,rng)
-        timings["impression_insert_ms"]=impression_insert
-        timings["impression_scroll_update_ms"]=impression_update
-        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        count=db.execute("SELECT count(*) FROM articles").fetchone()[0]
-        if count < 5000:
-            raise RuntimeError(f"Expected at least 5,000 articles; got {count}")
-        scenarios=dict(db.execute("SELECT scenario,count(*) FROM articles GROUP BY scenario"))
-        expected_scenarios={"breaking":2000,"slow_weekend":1500,"syndication":1500}
-        if scenarios != expected_scenarios:
-            raise RuntimeError(f"Unexpected scenario distribution: {scenarios}")
-        event_count=len(event_meta)
-        passage_count=db.execute("SELECT count(*) FROM passages").fetchone()[0]
-        ranking_count=db.execute("SELECT count(*) FROM ranking_judgements").fetchone()[0]
-        impression_count=db.execute("SELECT count(*) FROM impressions").fetchone()[0]
-        if event_count != 50 or passage_count != 5000:
-            raise RuntimeError("The labelled event/passage fixture is incomplete")
-        if ranking_count != 5000 or impression_count != 50000:
-            raise RuntimeError("The ranking/impression fixture is incomplete")
-        matrix={
-            "schema_version":1,
-            "generated_at":dt.datetime.now(UTC).isoformat(timespec="seconds"),
-            "seed":args.seed,
-            "phase":0,
-            "phase_zero_gate":"PASS",
-            "database":{
-                "retained_path":str(db_path) if args.database else None,
-                "article_count":count,
-                "scenario_counts":scenarios,
-                "event_count":event_count,
-                "independent_story_count":db.execute("SELECT count(DISTINCT wire_group_id) FROM articles").fetchone()[0],
-                "passage_count":passage_count,
-                "sentence_count":db.execute("SELECT count(*) FROM passage_sentences").fetchone()[0],
-                "entity_anchored_sentence_count":db.execute("SELECT count(*) FROM passage_sentences WHERE has_core_entity=1").fetchone()[0],
-                "ranking_judgement_count":ranking_count,
-                "impression_count":impression_count,
-                "timings_ms":timings,
-                "sqlite_file_bytes":db_path.stat().st_size,
-            },
-            "novelty_extraction":eval_novelty(db,event_meta),
-            "momentum":eval_momentum(db),
-            "ranking":eval_ranking(db),
-            "personalization":eval_personalization(db),
-            "hardware":{
-                "ane_spin_up_ms":None,
-                "ane_cpu_power_draw":None,
-                "vector_cache_hit_rate":None,
-                "reason":"Intentionally not invoked in Phase 0; the seeded evaluation matrix is the prerequisite for Phase 1 Core ML/vDSP work.",
-            },
-            "phase_zero_constraints":{
-                "coreml_invocations":0,
-                "vDSP_invocations":0,
-                "third_party_dependencies":0,
-                "production_database_migrations":0,
-                "production_consumers_changed":0,
-            },
-            "limitations":[
-                "Synthetic controls test fixture routing and metric calculations; they are not manually adjudicated language-quality labels.",
-                "Net-new fact precision, full MACD accuracy, MMR semantic diversity and EWMA vector update cost remain pending later phases and real holdouts.",
-                "The volume-floor sweep counts distinct wire groups; it is not a MACD result or a selected production threshold.",
-                "The ranking baseline sorts source-Elo metadata; it is not MMR and does not use vectors.",
-                "Recommendation relevance and discovery use synthetic topic labels and an 85/15 exposure fixture; they do not represent a trained reader profile.",
-                "ANE spin-up and ANE/CPU power telemetry require a separate Apple-silicon hardware run after Phase 0 is accepted.",
-            ],
-        }
-        output_path.parent.mkdir(parents=True,exist_ok=True)
-        with output_path.open("x", encoding="utf-8") as report_file:
-            json.dump(matrix, report_file, indent=2, sort_keys=True)
-            report_file.write("\n")
-        print(f"Phase 0 matrix: {count} articles, {len(event_meta)} events, {matrix['database']['passage_count']} passages")
-        print(f"Scenario counts: {scenarios}")
-        print(f"Report: {output_path}")
-        if args.database: print(f"SQLite: {db_path}")
-        print("Core ML invocations: 0; vDSP invocations: 0")
-    finally:
-        db.close()
-        if temporary: temporary.cleanup()
-    return 0
-
-
-if __name__=="__main__":
     raise SystemExit(main())
