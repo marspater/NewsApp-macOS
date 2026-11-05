@@ -34,7 +34,7 @@ The text and labels are deterministic synthetic controls. They are useful for va
 
 | Module | Quality metric | Performance / hardware metric | Phase 0 status |
 |---|---|---|---|
-| Novelty & extraction | Net-new fact precision | ANE spin-up, ANE/CPU power, vector-cache hit rate | FTS5 same-event candidate recall and low-priority fallback routing are exercised. Net-new precision is pending. Exact-text reuse is reported only as a cache-opportunity upper bound, not a hit rate. |
+| Novelty & extraction | Net-new fact precision | ANE spin-up, ANE/CPU power, vector-cache hit rate | FTS5 same-event candidate recall and persisted low-priority semantic-fallback queue routing are exercised. Net-new precision is pending. Exact-text reuse is reported only as a cache-opportunity upper bound, not a hit rate. |
 | Momentum | Burst accuracy, false-positive rate | Database insert/update latency | Labeled burst/quiet/syndication windows and a distinct-wire-group volume-floor sweep are measured. This is not MACD accuracy. |
 | Ranking | NDCG@10, intra-list semantic diversity | Ranking latency across 500 candidate vectors | A source-Elo NDCG@10 baseline and 500-row metadata sort timing are measured. MMR/vector diversity and vector ranking latency are pending. |
 | Personalization | Recommendation relevance, topic discovery rate | Impression-log storage, update cost | Synthetic 85/15 exposure and reward/impression rows are measured. These are fixture controls, not an EWMA preference model. |
@@ -43,7 +43,7 @@ Metrics that need the future model/vector implementations are explicitly emitted
 
 ## Reading the results
 
-- The momentum volume-floor sweep counts distinct wire groups and originating publishers in the labeled window. The single-wire control has 20 local outlet rows but one independent report and one originating publisher. This is only a pre-MACD gate study; it does not select a production threshold.
+- The momentum volume-floor sweep counts distinct wire groups and originating publishers in the labeled window. The single-wire control has 20 local outlet rows but one independent report and one originating publisher. The CI job uploads the synthetic matrix JSON and SQLite file as a 14-day workflow artifact. This is only a pre-MACD gate study; it does not select a production threshold.
 - The ranking NDCG baseline is source-Elo-only. It is not an MMR result.
 - The recommendation relevance and discovery rates are evaluated against synthetic topic labels and a fixed exposure split. They are not evidence of a learned user profile.
 - ANE spin-up, ANE/CPU power draw, vector-cache hit rate, MMR semantic diversity and EWMA vector update cost require later Apple-silicon runs after this Phase 0 gate is accepted.
