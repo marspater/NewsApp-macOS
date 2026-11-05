@@ -3,4 +3,4 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-exec python3 script/evaluation/editorial_matrix.py "$@"
+exec python3 -m script.evaluation.editorial_matrix "$@"

@@ -6,7 +6,7 @@ import sqlite3
 import statistics
 import time
 
-import editorial_fixtures
+from . import editorial_fixtures
 
 def ndcg10(rows: list[tuple[float, int]]) -> float:
     """Calculate normalized discounted cumulative gain at rank ten."""
