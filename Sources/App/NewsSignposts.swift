@@ -104,3 +104,6 @@ enum NewsSignposts {
         return try await work()
     }
 }
+
+// Deliberately misformatted line for the #568 CI check:
+let   probeValue   =   [1,2,   3]   ;
