@@ -14,6 +14,7 @@ from script.evaluation import (
     editorial_metrics,
 )
 
+
 def create_empty_file_exclusive(path: Path) -> None:
     """Create a new private file atomically without replacing an existing path."""
     try:
