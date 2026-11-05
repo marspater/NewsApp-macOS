@@ -34,85 +34,6 @@ def create_empty_file_exclusive(path: Path) -> None:
         raise SystemExit(f"Refusing to overwrite an existing file: {path}") from error
     os.close(descriptor)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def parse_args() -> argparse.Namespace:
     """Parse output, retained-database, and deterministic seed arguments."""
     parser = argparse.ArgumentParser(description="Build and evaluate the Phase 0 editorial evaluation matrix.")
@@ -128,7 +49,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--seed", type=int, default=20261105)
     return parser.parse_args()
-
 
 def prepare_paths(
     args: argparse.Namespace,
@@ -153,7 +73,6 @@ def prepare_paths(
         raise SystemExit("The report path must be different from the SQLite database and its sidecars")
     return db_path, output_path, temporary
 
-
 def seed_phase_zero(
     db: sqlite3.Connection,
     rng: DeterministicFixtureRNG,
@@ -166,7 +85,6 @@ def seed_phase_zero(
     timings["impression_insert_ms"] = insert_ms
     timings["impression_scroll_update_ms"] = update_ms
     return event_meta, timings
-
 
 def validate_fixture(
     db: sqlite3.Connection,
@@ -194,7 +112,6 @@ def validate_fixture(
         "impression_count": impression_count,
     }
 
-
 def database_summary(
     db: sqlite3.Connection,
     args: argparse.Namespace,
@@ -221,7 +138,6 @@ def database_summary(
         "timings_ms": timings,
         "sqlite_file_bytes": db_path.stat().st_size,
     }
-
 
 def build_matrix(
     db: sqlite3.Connection,
@@ -266,7 +182,6 @@ def build_matrix(
         ],
     }
 
-
 def write_report(
     output_path: Path,
     matrix: dict,
@@ -289,7 +204,6 @@ def write_report(
         print(f"SQLite: {db_path}")
     print("Core ML invocations: 0; vDSP invocations: 0")
 
-
 def run_phase_zero(args: argparse.Namespace, db_path: Path, output_path: Path) -> None:
     """Run the SQLite seed, integrity gates, evaluations, and JSON export."""
     rng = DeterministicFixtureRNG(args.seed)
@@ -305,7 +219,6 @@ def run_phase_zero(args: argparse.Namespace, db_path: Path, output_path: Path) -
     finally:
         db.close()
 
-
 def main() -> int:
     """Build the Phase 0 corpus, run its evaluation matrix, and write JSON output."""
     args = parse_args()
@@ -316,7 +229,6 @@ def main() -> int:
         if temporary is not None:
             temporary.cleanup()
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
