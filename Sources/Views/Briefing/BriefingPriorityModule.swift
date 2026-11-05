@@ -15,6 +15,127 @@
 import Foundation
 import SwiftUI
 
+/// A report that may contribute to an event's coverage rate. Supply an independence key from the existing wire-copy
+/// detector when available; otherwise the article ID is used. Publication time is preferred to fetch time so a delayed
+/// feed poll does not manufacture a burst. Old backfills are excluded rather than counted as newly developing coverage.
+struct EventMomentumReport: Sendable {
+    let id: String
+    let publisher: String
+    let independenceKey: String?
+    let publishedAt: Date?
+    let observedAt: Date
+}
+
+/// A MACD-style description of independent reporting activity, evaluated on fixed time buckets.
+struct EventMomentumSignal: Equatable, Sendable {
+    let velocity: Double
+    let momentum: Double
+    let signalLine: Double
+    let acceleration: Double
+    let recentIndependentReports: Int
+    let recentPublishers: Int
+    let hasVolumeFloor: Bool
+    let isRising: Bool
+    let isDecelerating: Bool
+    let isReversing: Bool
+}
+
+/// Incremental-cost O(number of reports + buckets) MACD calculation. This is an isolated primitive; existing Briefing
+/// consumers keep their current six-hour rule until a labelled replay shows that replacing it improves precision.
+enum EventMomentumMACD {
+    static let history: TimeInterval = 24 * 3600
+    static let recentWindow: TimeInterval = 6 * 3600
+    static let defaultBucket: TimeInterval = 15 * 60
+
+    static func assess(
+        _ reports: [EventMomentumReport],
+        now: Date,
+        bucketSize: TimeInterval = defaultBucket,
+        shortHalfLife: TimeInterval = 3600,
+        longHalfLife: TimeInterval = 6 * 3600,
+        signalHalfLife: TimeInterval = 3 * 3600,
+        maximumBackfillAge: TimeInterval = 24 * 3600,
+        minimumRecentReports: Int = 3,
+        minimumRecentPublishers: Int = 2
+    ) -> EventMomentumSignal {
+        let safeBucket = bucketSize.isFinite ? max(60, bucketSize) : defaultBucket
+        let bucketCount = min(1_440, max(1, Int(ceil(history / safeBucket))))
+        let actualBucket = history / Double(bucketCount)
+        let oldest = now.addingTimeInterval(-history)
+
+        struct TimedReport {
+            let key: String
+            let publisher: String
+            let date: Date
+        }
+        var independent: [String: TimedReport] = [:]
+        for report in reports {
+            let date = report.publishedAt ?? report.observedAt
+            guard date <= now.addingTimeInterval(300),
+                date >= now.addingTimeInterval(-max(60, maximumBackfillAge)),
+                date >= oldest,
+                !report.id.isEmpty,
+                !report.publisher.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
+            let suppliedKey = report.independenceKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let key = (suppliedKey?.isEmpty == false ? suppliedKey! : report.id)
+            let item = TimedReport(key: key, publisher: report.publisher.lowercased(), date: date)
+            // A syndicated copy cannot refresh an event's momentum. Keep the earliest publication time for its group.
+            if let previous = independent[key] {
+                if item.date < previous.date { independent[key] = item }
+            } else {
+                independent[key] = item
+            }
+        }
+
+        var buckets = [Double](repeating: 0, count: bucketCount)
+        let uniqueReports = Array(independent.values)
+        for report in uniqueReports {
+            let offset = report.date.timeIntervalSince(oldest)
+            let index = min(bucketCount - 1, max(0, Int(offset / actualBucket)))
+            buckets[index] += 1
+        }
+
+        func alpha(halfLife: TimeInterval) -> Double {
+            let safeHalfLife = halfLife.isFinite ? max(60, halfLife) : 3600
+            return 1 - exp(-log(2) * actualBucket / safeHalfLife)
+        }
+        func ema(_ values: [Double], halfLife: TimeInterval) -> [Double] {
+            let coefficient = alpha(halfLife: halfLife)
+            var value = 0.0
+            return values.map { sample in
+                value += coefficient * (sample - value)
+                return value
+            }
+        }
+
+        let short = ema(buckets, halfLife: shortHalfLife)
+        let long = ema(buckets, halfLife: longHalfLife)
+        let macd = zip(short, long).map(-)
+        let signal = ema(macd, halfLife: signalHalfLife)
+        let velocity = short.last ?? 0
+        let momentum = macd.last ?? 0
+        let signalLine = signal.last ?? 0
+        let acceleration = momentum - signalLine
+        let recent = uniqueReports.filter { $0.date >= now.addingTimeInterval(-recentWindow) }
+        let recentPublishers = Set(recent.map(\\.publisher)).count
+        let hasVolumeFloor = recent.count >= max(1, minimumRecentReports)
+            && recentPublishers >= max(1, minimumRecentPublishers)
+
+        return EventMomentumSignal(
+            velocity: velocity,
+            momentum: momentum,
+            signalLine: signalLine,
+            acceleration: acceleration,
+            recentIndependentReports: recent.count,
+            recentPublishers: recentPublishers,
+            hasVolumeFloor: hasVolumeFloor,
+            isRising: hasVolumeFloor && momentum > 0 && acceleration > 0,
+            isDecelerating: hasVolumeFloor && momentum > 0 && acceleration < 0,
+            isReversing: hasVolumeFloor && momentum < 0)
+    }
+}
+
 /// Priority developments: impact, momentum, original reports and the reported fact of the most-covered threads (#849).
 struct BriefingPriorityData: Equatable, Sendable {
     enum Momentum: Equatable, Sendable {
