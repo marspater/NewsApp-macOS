@@ -26979,6 +26979,25 @@ struct NewsTests {
             tribunalPerspectives.first?.position,
             "its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court",
             "The statement runs past 200 characters to the end of its sentence, through the honorific")
+        // An exclamation or question mark ends an unquoted statement too; one inside a quoted phrase does not.
+        func statements(_ text: String) -> [String] {
+            let passage = EvidencePassage(id: "pass_994b", articleID: "art_persp_1", text: text, ordinal: 4)
+            let citation = OverviewCitation(
+                id: "c_994b", articleID: "art_persp_1", passageID: "pass_994b",
+                passageFingerprint: passage.fingerprint, quote: text)
+            return OverviewPerspectivesExtractor.extractPerspectives(
+                passages: [passage], articles: [article1], existingCitations: ["c_994b": citation]
+            ).map(\.position)
+        }
+        assertEqual(
+            statements("Mayor Elena Rostova said that the evacuation routes are open again! Officials disputed it."),
+            ["the evacuation routes are open again"], "An exclamation mark ends the statement")
+        assertEqual(
+            statements("Mayor Elena Rostova said that residents asked if the routes were open? Officials disputed it."),
+            ["residents asked if the routes were open"], "A question mark ends the statement")
+        assertEqual(
+            statements("Mayor Elena Rostova said that the council answered “Never!” and closed the session."),
+            ["the council answered “Never!” and closed the session"], "A quoted exclamation stays inside the statement")
         assertEqual(
             OverviewComposer.displayStatement(
                 participant: "Constitutional Tribunal", position: tribunalPerspectives.first?.position ?? ""),
