@@ -6,13 +6,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-OUTPUT="\${1:-docs/benchmarks/$(date -u +%F)-editorial-evaluation.json}"
+OUTPUT="${1:-docs/benchmarks/$(date -u +%F)-editorial-evaluation.json}"
 case "$OUTPUT" in
     /*) ;;
     *) OUTPUT="$ROOT/$OUTPUT" ;;
 esac
 
-WORK="$(mktemp -d "\${TMPDIR:-/tmp}/news-editorial-evaluation.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/news-editorial-evaluation.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 
 script/build_test_runner.sh "$WORK/test_runner" -O
