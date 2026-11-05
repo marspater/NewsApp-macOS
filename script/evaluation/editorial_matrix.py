@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Phase 0 editorial evaluation matrix command-line runner."""
 from __future__ import annotations
 
@@ -11,8 +10,8 @@ import tempfile
 from pathlib import Path
 
 from editorial_fixtures import (
-    UTC,
     DeterministicFixtureRNG,
+    UTC,
     schema,
     seed_articles,
     seed_personalization,

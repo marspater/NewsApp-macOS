@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Deterministic Phase 0 corpus builders for the editorial evaluation matrix."""
 from __future__ import annotations
 

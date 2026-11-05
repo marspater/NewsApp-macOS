@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Phase 0 quality and performance measurements over the seeded SQLite corpus."""
 from __future__ import annotations
 
