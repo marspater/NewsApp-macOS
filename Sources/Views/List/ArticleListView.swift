@@ -1539,6 +1539,7 @@ struct KeyboardShortcutsView: View {
                 ("E", "Show or hide event coverage"),
                 ("W", "Next reading mode: Overview, Story, Web"),
                 ("⇧⌘R", "Switch between Story and Web"),
+                ("⌥⌘R", "Check this story for new reports"),
                 ("⇧⌘U", "Mark as read or unread (menu)"),
                 ("⌘S", "Save or remove from Saved Stories (menu)"),
                 ("⌘O", "Open in browser (menu)"),

@@ -35,6 +35,8 @@ struct EventOverviewReaderView: View {
     let textScale: CGFloat
     /// The reading style the body text follows; harnesses keep the default.
     let theme: ArticleThemeType
+    /// Check for Updates' result under the header metadata (#992); nil shows no line.
+    let updateStatus: String?
     let onSelectArticle: (FeedArticle) -> Void
     let onSelectCitation: (OverviewCitation, FeedArticle?) -> Void
     /// Earlier events of the same developing story; merged into this one only when the reader says so.
@@ -48,6 +50,7 @@ struct EventOverviewReaderView: View {
         memberArticles: [FeedArticle],
         textScale: CGFloat = 1.0,
         theme: ArticleThemeType = .edition,
+        updateStatus: String? = nil,
         relatedEvents: [RelatedStoryEvent] = [],
         onSelectArticle: @escaping (FeedArticle) -> Void,
         onSelectCitation: @escaping (OverviewCitation, FeedArticle?) -> Void,
@@ -60,6 +63,7 @@ struct EventOverviewReaderView: View {
         self.memberArticles = memberArticles
         self.textScale = textScale
         self.theme = theme
+        self.updateStatus = updateStatus
         self.relatedEvents = relatedEvents
         self.onSelectArticle = onSelectArticle
         self.onSelectCitation = onSelectCitation
@@ -583,6 +587,14 @@ struct EventOverviewReaderView: View {
                     articleCountText: articleCountText,
                     publisherCountText: publisherCountText
                 ))
+
+            if let updateStatus {
+                Text(updateStatus)
+                    .font(AppTypography.overviewFont(.metadata, scale: textScale))
+                    .foregroundStyle(currentSecondaryTextColor)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 

@@ -28,6 +28,7 @@ struct ArticleDetailView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var themeManager: ThemeManager
+    @EnvironmentObject private var feedManager: FeedManager
     @Environment(\.articleSearchState) private var searchState: ArticleSearchState?
     @Environment(\.effectiveContrast) private var contrast
     @Environment(\.effectiveReduceMotion) private var reduceMotion
@@ -74,6 +75,9 @@ struct ArticleDetailView: View {
     /// already reset the mode.
     @State private var overviewRequestedArticleID: String?
     @State private var isOverviewLoading: Bool = false
+    /// The overview's Check for Updates status line (#992); nil until the person checks this story.
+    @State private var storyUpdateStatus: String?
+    @State private var isCheckingForUpdates = false
     /// Identifies this reader to the overview coordinator, so closing it never clears another reader's event.
     @State private var overviewOwner = UUID()
 
@@ -138,7 +142,8 @@ struct ArticleDetailView: View {
             reload: contentState == .loading ? nil : { reloadReaderContent() },
             copyLink: copyStoryLink,
             webBack: readerModeBinding.wrappedValue == .web && webCanGoBack ? { webAction = .goBack } : nil,
-            webForward: readerModeBinding.wrappedValue == .web && webCanGoForward ? { webAction = .goForward } : nil
+            webForward: readerModeBinding.wrappedValue == .web && webCanGoForward ? { webAction = .goForward } : nil,
+            checkForUpdates: canCheckForUpdates ? { checkForUpdates() } : nil
         )
     }
 
@@ -192,6 +197,7 @@ struct ArticleDetailView: View {
             }
             .onChange(of: activeArticle.id) { _, _ in
                 publisherUpdatesExpanded = false
+                storyUpdateStatus = nil
             }
             .onChange(of: currentArticle.publisherInputHash) { _, _ in
                 analysis = nil
@@ -218,6 +224,7 @@ struct ArticleDetailView: View {
                     memberArticles: eventMemberArticles.isEmpty ? [currentArticle] : eventMemberArticles,
                     textScale: readerTextScale,
                     theme: themeManager.articleTheme,
+                    updateStatus: storyUpdateStatus,
                     relatedEvents: Self.relatedEventsToShow(relatedStories, overviewEventID: overview.eventID),
                     onSelectArticle: { article in
                         selectSourceArticle(article)
@@ -1046,6 +1053,13 @@ struct ArticleDetailView: View {
                 .disabled(!webCanGoForward)
                 .help("Go forward")
             }
+            if readerModeBinding.wrappedValue == .overview {
+                Button(action: checkForUpdates) {
+                    Label("Check for Updates", systemImage: "arrow.clockwise")
+                }
+                .disabled(!canCheckForUpdates)
+                .help("Check feeds for new reports in this story (⌥⌘R)")
+            }
             Button(action: toggleSave) {
                 Label(
                     isSaved ? "Remove from Saved Stories" : "Save Story",
@@ -1618,6 +1632,28 @@ struct ArticleDetailView: View {
             withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
                 isOverviewLoading = loading
             }
+        }
+    }
+
+    private var canCheckForUpdates: Bool {
+        readerModeBinding.wrappedValue == .overview && currentOverview != nil && !isCheckingForUpdates
+    }
+
+    /// Refreshes the subscriptions, or waits for the refresh already running, and says in the overview header whether
+    /// reports joined this story (#992). The line appears on the click and then changes in place (DESIGN.md 13).
+    private func checkForUpdates() {
+        guard canCheckForUpdates else { return }
+        let articleID = activeArticle.id
+        isCheckingForUpdates = true
+        storyUpdateStatus = FeedManager.StoryUpdateResult.checkingText
+        Task {
+            let result = await feedManager.checkForUpdates(storyOf: articleID)
+            isCheckingForUpdates = false
+            guard activeArticle.id == articleID else { return }
+            storyUpdateStatus = result.statusText
+            AccessibilityNotification.Announcement(result.statusText).post()
+            // New members make the overview stale; it regenerates from the current reports.
+            await loadEventOverviewForActiveArticle()
         }
     }
 
