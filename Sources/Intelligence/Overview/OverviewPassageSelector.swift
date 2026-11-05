@@ -158,11 +158,8 @@ enum PassageNoveltyScorer {
                 comparedCandidates: candidates.count)
         }
 
-        let comparable = results.compactMap { result -> (Double, Double)? in
-            guard let score = result.noveltyScore,
-                let input = inputs.first(where: { $0.id == result.id }),
-                input.weight.isFinite, input.weight > 0
-            else { return nil }
+        let comparable = zip(inputs, results).compactMap { input, result -> (Double, Double)? in
+            guard let score = result.noveltyScore, input.weight.isFinite, input.weight > 0 else { return nil }
             return (score, input.weight)
         }
         let totalWeight = comparable.reduce(0) { $0 + $1.1 }
