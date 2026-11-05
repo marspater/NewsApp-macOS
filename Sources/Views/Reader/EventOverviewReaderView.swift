@@ -1245,12 +1245,14 @@ struct EventOverviewReaderView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .textSelection(.enabled)
 
-            Text(Self.cleanDisplayPosition(perspective.position))
-                .font(bodyFont)
-                .lineSpacing(bodyLineSpacing)
-                .foregroundStyle(AppColor.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            Text(
+                OverviewComposer.displayStatement(participant: perspective.participant, position: perspective.position)
+            )
+            .font(bodyFont)
+            .lineSpacing(bodyLineSpacing)
+            .foregroundStyle(AppColor.primaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
 
             let hasSource = source != nil && !source!.isEmpty
             let hasCitations = !citations.isEmpty
@@ -1304,7 +1306,8 @@ struct EventOverviewReaderView: View {
         .accessibilityLabel(
             Self.perspectiveAccessibilityLabel(
                 participant: perspective.participant,
-                position: Self.cleanDisplayPosition(perspective.position),
+                position: OverviewComposer.displayStatement(
+                    participant: perspective.participant, position: perspective.position),
                 source: source,
                 citations: citations
             )

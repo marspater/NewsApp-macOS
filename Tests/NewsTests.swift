@@ -26849,6 +26849,48 @@ struct NewsTests {
             ),
         ]
 
+        // #994: a statement runs to the end of its sentence, however long, and an honorific's full stop does not end
+        // it; the display leads a lower-case clause with its speaker and closes every statement.
+        let tribunal =
+            "Late on Friday (October 30, 2026), the Constitutional Tribunal said its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court."
+        let tribunalPassage = EvidencePassage(id: "pass_994", articleID: "art_persp_1", text: tribunal, ordinal: 3)
+        let tribunalCitation = OverviewCitation(
+            id: "c_994", articleID: "art_persp_1", passageID: "pass_994",
+            passageFingerprint: tribunalPassage.fingerprint,
+            quote: tribunal)
+        let tribunalPerspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [tribunalPassage], articles: [article1], existingCitations: ["c_994": tribunalCitation])
+        assertEqual(tribunalPerspectives.count, 1, "The tribunal's statement is one perspective")
+        assertEqual(
+            tribunalPerspectives.first?.position,
+            "its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court",
+            "The statement runs past 200 characters to the end of its sentence, through the honorific")
+        assertEqual(
+            OverviewComposer.displayStatement(
+                participant: "Constitutional Tribunal", position: tribunalPerspectives.first?.position ?? ""),
+            "Constitutional Tribunal said its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court.",
+            "A lower-case clause is led by its speaker and closed with a full stop")
+        assertEqual(
+            OverviewComposer.displayStatement(
+                participant: "the officers",
+                position:
+                    "they have since taken more than 340 witness statements - including from Brand's former employers, his ex-colleagues and associates"
+            ),
+            "The officers said they have since taken more than 340 witness statements - including from Brand's former employers, his ex-colleagues and associates.",
+            "The speaker's first letter is capitalised")
+        assertEqual(
+            OverviewComposer.displayStatement(
+                participant: "Presiding Judge Joel Bennathan",
+                position: "Brand would face a \"significant custodial term\""),
+            "Brand would face a \"significant custodial term.\"", "The full stop goes inside a closing quotation mark")
+        assertEqual(
+            OverviewComposer.displayStatement(
+                participant: "Mayor Elena Rostova", position: "The routes are open,"),
+            "The routes are open.", "A capitalised statement keeps its words and loses a trailing comma")
+        assertEqual(
+            OverviewComposer.displayStatement(participant: "A", position: "“We will win”"),
+            "“We will win.”", "A typographic quotation closes after the full stop")
+
         // 1. Extraction: extractPerspectives correctly extracts attributed positions
         let perspectives = OverviewPerspectivesExtractor.extractPerspectives(
             passages: [passage1, passage2, passage3],
