@@ -417,13 +417,16 @@ def main() -> int:
     if args.database:
         db_path=args.database.resolve()
         db_path.parent.mkdir(parents=True,exist_ok=True)
-        if db_path.exists(): db_path.unlink()
-        for suffix in ("-wal", "-shm"):
-            sidecar = Path(str(db_path) + suffix)
-            if sidecar.exists(): sidecar.unlink()
+        sidecars = [Path(str(db_path) + suffix) for suffix in ("-wal", "-shm")]
+        if db_path.exists() or any(sidecar.exists() for sidecar in sidecars):
+            raise SystemExit(f"Refusing to overwrite an existing SQLite database or sidecar: {db_path}")
     else:
         temporary=tempfile.TemporaryDirectory(prefix="news-editorial-phase0-")
         db_path=Path(temporary.name)/"editorial-phase0.sqlite3"
+
+    output_path=args.output.resolve()
+    if output_path.exists():
+        raise SystemExit(f"Refusing to overwrite an existing evaluation report: {output_path}")
 
     db=sqlite3.connect(db_path)
     db.execute("PRAGMA busy_timeout=5000")
@@ -496,7 +499,7 @@ def main() -> int:
         args.output.write_text(json.dumps(matrix,indent=2,sort_keys=True)+"\n",encoding="utf-8")
         print(f"Phase 0 matrix: {count} articles, {len(event_meta)} events, {matrix['database']['passage_count']} passages")
         print(f"Scenario counts: {scenarios}")
-        print(f"Report: {args.output.resolve()}")
+        print(f"Report: {output_path}")
         if args.database: print(f"SQLite: {db_path}")
         print("Core ML invocations: 0; vDSP invocations: 0")
     finally:
