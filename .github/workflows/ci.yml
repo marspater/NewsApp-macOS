@@ -91,6 +91,16 @@ jobs:
             --database "$RUNNER_TEMP/editorial-phase0.sqlite3" \
             --output "$RUNNER_TEMP/editorial-matrix.json"
 
+      - name: Upload Phase 0 Editorial Matrix
+        uses: actions/upload-artifact@v7
+        with:
+          name: editorial-phase0-matrix
+          path: |
+            \${{ runner.temp }}/editorial-matrix.json
+            \${{ runner.temp }}/editorial-phase0.sqlite3
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Verify Publisher Excerpts
         run: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
 
