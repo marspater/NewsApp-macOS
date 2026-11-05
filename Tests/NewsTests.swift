@@ -10899,6 +10899,60 @@ struct NewsTests {
                 "A hard \(conflict) minority vetoes admission")
         }
 
+        // Veto threshold (#737, evaluation): one semantic veto among three cross-pairs is outvoted only when switched on.
+        var diverging = pair
+        diverging.conflict = .semanticDivergence
+        diverging.isMatch = false
+        diverging.isCompatible = false
+        var vetoMinimum = EventMatchPolicy.standard
+        vetoMinimum.vetoMinimum = 2
+        var vetoShare = EventMatchPolicy.standard
+        vetoShare.vetoShare = 0.34
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, diverging]) == nil, "One semantic veto blocks by default")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, diverging], policy: vetoMinimum) != nil,
+            "One semantic veto is outvoted when two are required")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, diverging], policy: vetoShare) != nil,
+            "One veto in three is not more than a 0.34 share")
+        var placed = diverging
+        placed.conflict = .places
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, pair, diverging, placed], policy: vetoMinimum) == nil,
+            "Two vetoes of either outvotable kind block under the minimum")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, pair, pair, pair, diverging, placed], policy: vetoShare) != nil
+                && EventMatcher.eventScore(pairs: [pair, pair, diverging, placed], policy: vetoShare) == nil,
+            "The share counts both kinds against all cross-pairs")
+        var weekday = diverging
+        weekday.conflict = .weekday
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, weekday], policy: vetoMinimum) == nil,
+            "Other conflicts stay absolute under the veto threshold")
+
+        // Borderline floor (#737, evaluation): a compatible borderline pair the pair model scores low needs three names.
+        var borderline = pair
+        borderline.isMatch = false
+        borderline.sharedSpecificAnchors = 1
+        var floor = EventMatchPolicy.standard
+        floor.borderlineFloor = 0.5
+        let defaultFloor = EventMatcher.applyingBorderlineFloor(borderline, probability: 0.3)
+        assertTrue(
+            defaultFloor.isCompatible && EventMatcher.eventScore(pairs: [pair, defaultFloor]) != nil,
+            "A low-scored borderline pair is compatible by default")
+        let floored = EventMatcher.applyingBorderlineFloor(borderline, probability: 0.3, policy: floor)
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, floored], policy: floor) == nil,
+            "Below the floor with one shared name it no longer carries the join")
+        var named = borderline
+        named.sharedSpecificAnchors = 3
+        assertTrue(
+            EventMatcher.applyingBorderlineFloor(named, probability: 0.3, policy: floor).isCompatible
+                && EventMatcher.applyingBorderlineFloor(borderline, probability: 0.6, policy: floor).isCompatible
+                && EventMatcher.applyingBorderlineFloor(borderline, probability: nil, policy: floor).isCompatible,
+            "Three shared names, a score at the floor or no score leave the pair compatible")
+
         // #307 bounded corrections: background-clause false merges, cross-tagged anchors and false place/weekday vetoes.
         let bridgeStrike = EventFeatures(
             title: "Russia hits second major bridge in Ukraine's capital Kyiv",
@@ -16231,6 +16285,8 @@ struct NewsTests {
                         if let pairModel, pairModel >= diagnosePolicy.pairModelThreshold {
                             pair = EventMatcher.modelConfirmed(pair, policy: diagnosePolicy)
                         }
+                        pair = EventMatcher.applyingBorderlineFloor(
+                            pair, probability: pairModel, policy: diagnosePolicy)
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
                         let primaryDisjoint =
