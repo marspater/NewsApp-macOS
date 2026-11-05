@@ -41,7 +41,7 @@ def schema(db: sqlite3.Connection) -> None:
     PRAGMA foreign_keys=ON;
     CREATE TABLE articles(
       id TEXT PRIMARY KEY,event_id TEXT NOT NULL,scenario TEXT NOT NULL,topic_id TEXT NOT NULL,
-      publisher TEXT NOT NULL,wire_group_id TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,
+      publisher TEXT NOT NULL,independent_publisher TEXT NOT NULL,wire_group_id TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,
       published_at REAL NOT NULL,fetched_at REAL NOT NULL,source_elo REAL NOT NULL,relevance_grade INTEGER NOT NULL
     );
     CREATE INDEX articles_event_date ON articles(event_id,published_at);
@@ -120,10 +120,11 @@ def seed_articles(db: sqlite3.Connection, rng: random.Random):
                     grade = 1
 
                 publisher = PUBLISHERS[index % len(PUBLISHERS)]
+                independent_publisher = (f"Wire Service {int(wire_group.split('-')[-1]) % 2}" if scenario == "syndication" else publisher)
                 title = f"{topic.replace('-', ' ').title()} event {event_number} report {index:03d}"
                 body = f"{query}. {scenario.replace('_', ' ')} coverage for {event_id}. Wire {wire_id}."
                 elo = 900.0 + ((index * 37 + event_number * 19) % 250)
-                article_rows.append((article_id,event_id,scenario,topic,publisher,wire_id,title,body,
+                article_rows.append((article_id,event_id,scenario,topic,publisher,independent_publisher,wire_id,title,body,
                                      ts(published),ts(fetched),elo,grade))
                 ids.append(article_id)
 
@@ -163,7 +164,7 @@ def seed_articles(db: sqlite3.Connection, rng: random.Random):
                                   ts(anchor+dt.timedelta(hours=3)),1 if scenario == "breaking" else 0))
 
     started = time.perf_counter()
-    db.executemany("INSERT INTO articles VALUES(?,?,?,?,?,?,?,?,?,?,?,?)", article_rows)
+    db.executemany("INSERT INTO articles VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", article_rows)
     db.commit()
     article_insert_ms = (time.perf_counter()-started)*1000
 
@@ -232,36 +233,48 @@ def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
 
 def eval_momentum(db: sqlite3.Connection) -> dict:
     rows = db.execute("""
-      SELECT w.event_id,w.scenario,w.expected_burst,count(a.id),count(DISTINCT a.wire_group_id)
+      SELECT w.event_id,w.scenario,w.expected_burst,count(a.id),count(DISTINCT a.wire_group_id),count(DISTINCT a.independent_publisher)
       FROM event_windows w LEFT JOIN articles a
         ON a.event_id=w.event_id AND a.published_at BETWEEN w.window_start AND w.window_end
       GROUP BY w.event_id ORDER BY w.event_id
     """).fetchall()
     sweep = []
     for floor in (2,3,5,10,20):
-        tp=fp=tn=fn=0
-        for _,_,expected,_,independent in rows:
-            predicted = independent >= floor
-            if predicted and expected: tp += 1
-            elif predicted: fp += 1
-            elif expected: fn += 1
-            else: tn += 1
-        sweep.append({
-            "independent_report_floor": floor,
-            "true_positive": tp, "false_positive": fp, "true_negative": tn, "false_negative": fn,
-            "accuracy": (tp+tn)/len(rows) if rows else None,
-            "false_positive_rate": fp/(fp+tn) if fp+tn else 0.0,
-            "recall": tp/(tp+fn) if tp+fn else 0.0,
-            "status": "volume_floor_only_not_MACD",
-        })
-    raw = sum(row[3] for row in rows)
-    independent = sum(row[4] for row in rows)
+        for publisher_floor in (1,2,3):
+            tp=fp=tn=fn=0
+            for _,_,expected,_,_,independent,publishers in rows:
+                predicted = independent >= floor and publishers >= publisher_floor
+                if predicted and expected: tp += 1
+                elif predicted: fp += 1
+                elif expected: fn += 1
+                else: tn += 1
+            sweep.append({
+                "independent_report_floor": floor,
+                "independent_publisher_floor": publisher_floor,
+                "true_positive": tp, "false_positive": fp, "true_negative": tn, "false_negative": fn,
+                "accuracy": (tp+tn)/len(rows) if rows else None,
+                "false_positive_rate": fp/(fp+tn) if fp+tn else 0.0,
+                "recall": tp/(tp+fn) if tp+fn else 0.0,
+                "status": "volume_floor_only_not_MACD",
+            })
+    raw = sum(row[4] for row in rows)
+    independent = sum(row[5] for row in rows)
+    independent_publishers = sum(row[6] for row in rows)
+    sample_wire = db.execute("SELECT event_id,wire_group_id FROM articles WHERE scenario='syndication' ORDER BY event_id,wire_group_id LIMIT 1").fetchone()
+    sample_counts = db.execute(
+        "SELECT count(*),count(DISTINCT publisher),count(DISTINCT independent_publisher) FROM articles WHERE event_id=? AND wire_group_id=?",
+        sample_wire).fetchone()
     return {
         "labelled_event_windows": len(rows),
         "windows_by_scenario": {kind: sum(row[1] == kind for row in rows)
                                 for kind in ("breaking","slow_weekend","syndication")},
         "raw_article_count_in_windows": raw,
         "independent_report_count_in_windows": independent,
+        "independent_publisher_count_in_windows": independent_publishers,
+        "single_syndicated_wire_control": {
+            "outlet_rows": sample_counts[0], "local_publishers": sample_counts[1],
+            "independent_publishers": sample_counts[2], "independent_reports": 1,
+        },
         "syndication_copy_inflation_ratio": raw/max(1,independent),
         "delayed_fetch_over_six_hours_count": db.execute(
             "SELECT count(*) FROM articles WHERE fetched_at-published_at>21600").fetchone()[0],
