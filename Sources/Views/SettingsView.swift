@@ -751,12 +751,13 @@ struct SettingsView: View {
             testNotificationStatus = "No stories in your list yet. Refresh first."
             return
         }
-        let settings = await UNUserNotificationCenter.current().notificationSettings()
         let outcome = await NotificationService.shared.postSample(story) {
             await MainActor.run {
                 AppSettings.shared.notificationsEnabled && AppSettings.shared.notificationMode == .full
             }
         }
+        // Read after posting: permission granted while the sample was on its way is what the line reports.
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
         testNotificationStatus = NotificationService.sampleStatus(
             outcome, authorization: settings.authorizationStatus, alert: settings.alertSetting,
             style: settings.alertStyle, previews: settings.showPreviewsSetting)

@@ -22547,6 +22547,9 @@ struct NewsTests {
             status(.failed(domain: "Other", code: 7)).contains("Other 7"), "Any other refusal shows domain and code")
         assertTrue(
             status(.posted, authorization: .denied).contains("turned off"), "Denied permission is named after a post")
+        assertTrue(
+            status(.posted, authorization: .notDetermined).contains("not asked"),
+            "Permission not yet asked is named after a post")
         assertTrue(status(.posted, style: .none).contains("None"), "Alert style None is named")
         assertTrue(status(.posted, alert: .disabled).contains("alerts for News are off"), "Alerts off is named")
         assertTrue(status(.posted, previews: .never).contains("story hidden"), "Hidden previews are named")
