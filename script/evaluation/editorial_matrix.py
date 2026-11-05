@@ -586,7 +586,7 @@ def main() -> int:
     if args.database:
         db_path=args.database.resolve()
         db_path.parent.mkdir(parents=True,exist_ok=True)
-        sidecars = [Path(str(db_path) + suffix) for suffix in ("-wal", "-shm")]
+        sidecars = [Path(str(db_path) + suffix) for suffix in ("-wal", "-shm", "-journal")]
         if db_path.exists() or any(sidecar.exists() for sidecar in sidecars):
             raise SystemExit(f"Refusing to overwrite an existing SQLite database or sidecar: {db_path}")
     else:
