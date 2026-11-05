@@ -6,7 +6,6 @@ import sqlite3
 import statistics
 import time
 
-from . import editorial_fixtures
 
 def ndcg10(rows: list[tuple[float, str, int]]) -> float:
     """Calculate NDCG@10 with a relevance-independent article-ID tie-breaker."""
@@ -220,7 +219,7 @@ def eval_ranking(db: sqlite3.Connection) -> dict:
         "vector_metrics_status": "not_measured_phase_0_no_vDSP_or_embedding_invocations",
     }
 
-def eval_personalization(db: sqlite3.Connection) -> dict:
+def eval_personalization(db: sqlite3.Connection, topics: list[str]) -> dict:
     """Measure impression storage, reward counts, and synthetic discovery exposure."""
     total,skipped,positive=db.execute(
         "SELECT count(*),sum(action='scrolled_past'),sum(action IN ('click','save')) FROM impressions").fetchone()
@@ -248,7 +247,7 @@ def eval_personalization(db: sqlite3.Connection) -> dict:
         "recommendation_metric_basis": "synthetic topic-label control, not a user-preference model",
         "discovery_engagement_rate": engaged/max(1,discovery),
         "distinct_discovery_topics_reached": topics,
-        "topic_discovery_rate": topics/max(1,len(editorial_fixtures.TOPICS)),
+        "topic_discovery_rate": topics/max(1,len(topics)),
         "ewma_vector_update_cost_ms": None,
         "ewma_status": "not_measured_phase_0_no_embedding_vectors",
     }

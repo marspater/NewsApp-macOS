@@ -143,7 +143,7 @@ def build_matrix(
         "novelty_extraction": editorial_metrics.eval_novelty(db, event_meta),
         "momentum": editorial_metrics.eval_momentum(db),
         "ranking": editorial_metrics.eval_ranking(db),
-        "personalization": editorial_metrics.eval_personalization(db),
+        "personalization": editorial_metrics.eval_personalization(db, editorial_fixtures.TOPICS),
         "hardware": {
             "ane_spin_up_ms": None,
             "ane_cpu_power_draw": None,
