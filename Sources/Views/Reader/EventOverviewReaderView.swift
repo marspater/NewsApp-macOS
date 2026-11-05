@@ -387,7 +387,9 @@ struct EventOverviewReaderView: View {
         let pPart = participant.trimmingCharacters(in: .whitespacesAndNewlines)
         let pPosTrimmed = position.trimmingCharacters(in: .whitespacesAndNewlines)
         let pPos = pPosTrimmed.hasSuffix(".") ? String(pPosTrimmed.dropLast()) : pPosTrimmed
-        var parts = [pPart, pPos]
+        // A displayed statement led by its speaker ("The officers said they…") already names the participant (#994).
+        let namesSpeaker = pPos.lowercased().hasPrefix(pPart.lowercased() + " said ")
+        var parts = namesSpeaker ? [pPos] : [pPart, pPos]
         if let source, !source.isEmpty {
             parts.append(source)
         } else {
@@ -776,14 +778,9 @@ struct EventOverviewReaderView: View {
 
     /// A sentence with its cited publishers as linked runs at its end, so a source never sits on a line of its own
     /// (#993). Each run links to `news-citation://cite/<id>`; VoiceOver reads the sentence, then the sources, and the
-    /// enclosing row's actions open them.
-    private func sourcedSentence(_ text: String, citations: [OverviewCitation]) -> some View {
-        let sources = citations.map { citation in
-            (
-                id: citation.id,
-                label: Self.citationLabel(sourceName: citation.sourceName, match: matchingArticle(for: citation))
-            )
-        }
+    /// enclosing row's `sourcedSentenceActions` open them.
+    private func sourcedSentence(_ text: String, citations: [OverviewCitation], fallback: String? = nil) -> some View {
+        let sources = citations.map { (id: $0.id, label: inlineSourceLabel($0, fallback: fallback)) }
         return Text(Self.sourcedAttributedString(text, sources: sources, scale: textScale, contrast: contrast))
             .font(bodyFont)
             .lineSpacing(bodyLineSpacing)
@@ -791,6 +788,26 @@ struct EventOverviewReaderView: View {
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
             .environment(\.openURL, citationOpenURLAction(citations))
+    }
+
+    /// An inline source's name: the citation pill's label, or `fallback` (a perspective's publisher) instead of the
+    /// generic "Source" when neither the citation nor a member report names one.
+    private func inlineSourceLabel(_ citation: OverviewCitation, fallback: String?) -> String {
+        let label = Self.citationLabel(sourceName: citation.sourceName, match: matchingArticle(for: citation))
+        guard label == "Source", let fallback = fallback?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !fallback.isEmpty
+        else { return label }
+        return fallback
+    }
+
+    /// One VoiceOver action per inline source, in the sentence's order, so every cited passage opens: also a second
+    /// passage of one report and a citation without a matched report, which `citedSources` leaves out.
+    private func sourcedSentenceActions(_ citations: [OverviewCitation], fallback: String? = nil) -> some View {
+        ForEach(Array(citations.enumerated()), id: \.offset) { offset, citation in
+            Button("Open source \(offset + 1), \(inlineSourceLabel(citation, fallback: fallback))") {
+                onSelectCitation(citation, matchingArticle(for: citation))
+            }
+        }
     }
 
     /// Opens the citation a `news-citation://cite/<id>` link names; every other link keeps the system behaviour.
@@ -829,7 +846,6 @@ struct EventOverviewReaderView: View {
     private func highlightRow(_ fact: OverviewFact) -> some View {
         let publisher = factPublisher(fact)
         let citations = fact.citationIDs.compactMap { overview.citations[$0] }
-        let sources = citedSources(fact.citationIDs)
 
         HStack(alignment: .top, spacing: AppSpacing.sm) {
             Circle()
@@ -848,7 +864,7 @@ struct EventOverviewReaderView: View {
                 citations: citations
             )
         )
-        .accessibilityActions { citationAccessibilityActions(sources) }
+        .accessibilityActions { sourcedSentenceActions(citations) }
     }
 
     private func factWithSuperscript(_ fact: OverviewFact) -> some View {
@@ -1293,7 +1309,7 @@ struct EventOverviewReaderView: View {
             // The sources follow the statement and wrap with it (#993).
             sourcedSentence(
                 OverviewComposer.displayStatement(participant: perspective.participant, position: perspective.position),
-                citations: citations)
+                citations: citations, fallback: perspective.sourcePublisher)
 
             let hasWireSyndicate =
                 !(perspective.originalWireSource?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
@@ -1314,7 +1330,6 @@ struct EventOverviewReaderView: View {
             publisher: perspective.sourcePublisher
         )
         let citations = perspective.citationIDs.compactMap { overview.citations[$0] }
-        let sources = citedSources(perspective.citationIDs)
 
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             HStack(alignment: .top, spacing: AppSpacing.sm) {
@@ -1340,7 +1355,7 @@ struct EventOverviewReaderView: View {
                 citations: citations
             )
         )
-        .accessibilityActions { citationAccessibilityActions(sources) }
+        .accessibilityActions { sourcedSentenceActions(citations, fallback: perspective.sourcePublisher) }
     }
 
     private var industryImpactSection: some View {

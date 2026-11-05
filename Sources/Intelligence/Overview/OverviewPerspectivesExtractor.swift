@@ -596,19 +596,23 @@ struct OverviewPerspectivesExtractor: Sendable {
             quoted.append(Attribution(speakerToldBeforeQuote, participantGroup: 1, statementGroup: 2, minimumLength: 0))
             quoted.append(Attribution(accordingToQuoted, participantGroup: 1, statementGroup: 2, minimumLength: 0))
         }
+        // An unquoted statement ends at its sentence's ".", "!" or "?"; a quoted phrase inside it ("…replied “Never!”
+        // and left") is kept whole, so its own "!" or "?" does not end the statement.
+        let statementTail =
+            #"(?:“[^”\n]{1,120}”|"[^"\n]{1,120}"|[^.!?\n]|\#(nonTerminalDot)){15,400}(?=[.!?\n]|$)"#
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         // A statement runs to the end of its sentence (up to 400 characters) or there is no match: a plain length
         // cap cut "…an appointee of Mr. Tusk's predecessor…" to "…appointee of Mr" (#994).
         let patternSpeakerFirst =
-            #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+((?:[^.\n]|\#(nonTerminalDot)){15,400}(?=[.\n]|$))"#
+            #"([A-Z][A-Za-z0-9\s,\.\-]{2,60})\s+(?:said that|stated that|announced that|argued that|warned that|noted that|confirmed that|emphasized that|urged that)\s+(\#(statementTail))"#
         // Pattern 2b: reported speech without an adjacent "that" (#313): "Foreign Secretary Ed Miliband said his
         // country does not accept…", "Édouard Geffray told TF1 television on Thursday night that…". The speaker
         // excludes full stops, so it cannot reach back into the previous sentence. The statement keeps decimals ("£8.9bn") and abbreviations ("Mr.").
         let patternReported =
-            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says|say)\s+(?:at|during|in|on)\s+[^,.\n"“”]{1,40}?\s+that\s+|(?:said|says|say)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?|\p{Ll}+(?:\s+\p{Ll}+)?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can|late|early|earlier|later|and|but|a\s+day\s+after)\b|as\b(?!\s+(?:many|much|few|little|far|long|soon|well)\b)|\p{Ll}+ing\b)([\p{L}0-9“\"](?:[^.\n]|\#(nonTerminalDot)){15,400}(?=[.\n]|$))"#
+            #"(\p{Lu}[\p{L}0-9\s,'’\-]{1,60}?)\s+(?:(?:said|says|say)\s+(?:at|during|in|on)\s+[^,.\n"“”]{1,40}?\s+that\s+|(?:said|says|say)\#(time)\s+(?:that\s+)?|told\s+(?:(?:[Tt]he|[Aa]n?)\s+[\p{L}0-9\s]{1,40}?|\p{Lu}[\p{L}0-9\s]{1,40}?|\p{Ll}+(?:\s+\p{Ll}+)?)\#(time)\s+that\s+)(?!(?:in|on|at|of|for|during|after|before|while|with|is|are|was|were|has|have|had|would|will|could|should|can|late|early|earlier|later|and|but|a\s+day\s+after)\b|as\b(?!\s+(?:many|much|few|little|far|long|soon|well)\b)|\p{Ll}+ing\b)((?=[\p{L}0-9“\"])\#(statementTail))"#
         // Pattern 3: According to [Participant], [Statement].
         let patternAccordingTo =
-            #"According to\s+((?:\p{Ll}[\p{L}\-]*\s+){0,3}\p{Lu}[\p{L}0-9\s,\.\-]{1,80}),\s+(?=[\p{Ll}\d])((?:[^.\n]|\#(nonTerminalDot)){15,400}(?=[.\n]|$))"#
+            #"According to\s+((?:\p{Ll}[\p{L}\-]*\s+){0,3}\p{Lu}[\p{L}0-9\s,\.\-]{1,80}),\s+(?=[\p{Ll}\d])(\#(statementTail))"#
         // Pattern 4 (#547): a whole sentence closed by its attribution, without quotation marks: "Russia launched
         // 50 drones at Kyiv, the Ukrainian air force said.", "…, said Mayor Vitali Klitschko.", "…, according to
         // the Gaza health ministry.", "…, Peskov told reporters on Monday." The tag must end the sentence.
