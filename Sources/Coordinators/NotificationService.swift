@@ -421,8 +421,8 @@ final class NotificationService: Sendable {
     }
 
     static func sampleStory(from stories: [FeedArticle]) -> FeedArticle? {
-        var generator = SystemRandomNumberGenerator()
-        return sampleStory(from: stories, using: &generator)
+        let withPhoto = stories.filter { FeedArticle.bestCardImage(in: [$0]) != nil }
+        return (withPhoto.isEmpty ? stories : withPhoto).randomElement()
     }
 
     /// What Settings says after a test banner: why nothing was sent, why macOS refused it, or what the reader's
@@ -442,8 +442,16 @@ final class NotificationService: Sendable {
             }
             return "macOS refused it (\(domain) \(code)). Help › Export Diagnostics has the log."
         case .posted:
-            break
+            return deliveryStatus(authorization: authorization, alert: alert, style: style, previews: previews)
         }
+    }
+
+    /// What the reader's notification settings make of a banner macOS accepted.
+    private static func deliveryStatus(
+        authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle,
+        previews: UNShowPreviewsSetting
+    ) -> String {
+        let systemSettings = "System Settings › Notifications › News"
         switch authorization {
         case .denied: return "Sent, but notifications for News are turned off. Allow them in \(systemSettings)."
         case .notDetermined:
