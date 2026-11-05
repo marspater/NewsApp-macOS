@@ -15,6 +15,69 @@
 import Foundation
 import SwiftUI
 
+/// One ranked candidate for bounded editorial diversification. Relevance is a caller-calibrated value in 0...1;
+/// embeddings must be normalized 384-float vectors from the same SentenceEmbedder model version.
+struct EditorialMMRCandidate: Sendable {
+    let id: String
+    let relevance: Double
+    let embedding: [Float]?
+    let timestamp: Date
+}
+
+/// Greedy Maximal Marginal Relevance. This chooses among already-distinct stories; it never changes event membership.
+/// The continuous exponential time decay avoids a hard age boundary in the redundancy penalty.
+enum EditorialMMR {
+    static func select(
+        _ candidates: [EditorialMMRCandidate],
+        limit: Int,
+        relevanceWeight: Double = 0.7,
+        temporalTimeConstant: TimeInterval = 12 * 3600
+    ) -> [EditorialMMRCandidate] {
+        guard limit > 0, !candidates.isEmpty else { return [] }
+        let weight = min(1, max(0, relevanceWeight.isFinite ? relevanceWeight : 0.7))
+        let timeConstant = max(1, temporalTimeConstant.isFinite ? temporalTimeConstant : 12 * 3600)
+        var remaining = Array(candidates.indices)
+        var selected: [Int] = []
+        selected.reserveCapacity(min(limit, candidates.count))
+
+        while selected.count < min(limit, candidates.count), !remaining.isEmpty {
+            var bestPosition = 0
+            var bestScore = -Double.infinity
+            for (position, candidateIndex) in remaining.enumerated() {
+                let candidate = candidates[candidateIndex]
+                let redundancy = selected.reduce(0.0) { current, selectedIndex in
+                    max(current, temporalSimilarity(
+                        candidate, candidates[selectedIndex], timeConstant: timeConstant))
+                }
+                let relevance = min(1, max(0, candidate.relevance.isFinite ? candidate.relevance : 0))
+                let score = weight * relevance - (1 - weight) * redundancy
+                if score > bestScore
+                    || (score == bestScore && candidate.id < candidates[remaining[bestPosition]].id)
+                {
+                    bestScore = score
+                    bestPosition = position
+                }
+            }
+            selected.append(remaining.remove(at: bestPosition))
+        }
+        return selected.map { candidates[$0] }
+    }
+
+    /// Cosine redundancy fades continuously with temporal separation. Both vectors must use the same model version.
+    static func temporalSimilarity(
+        _ lhs: EditorialMMRCandidate,
+        _ rhs: EditorialMMRCandidate,
+        timeConstant: TimeInterval = 12 * 3600
+    ) -> Double {
+        guard let a = lhs.embedding, let b = rhs.embedding,
+            a.count == SentenceEmbedder.vectorDimension, b.count == SentenceEmbedder.vectorDimension
+        else { return 0 }
+        let cosine = min(1, max(0, SentenceEmbedder.cosineSimilarity(a, b)))
+        let decay = exp(-abs(lhs.timestamp.timeIntervalSince(rhs.timestamp)) / max(1, timeConstant))
+        return cosine * decay
+    }
+}
+
 /// A report that may contribute to an event's coverage rate. Supply an independence key from the existing wire-copy
 /// detector when available; otherwise the article ID is used. Publication time is preferred to fetch time so a delayed
 /// feed poll does not manufacture a burst. Old backfills are excluded rather than counted as newly developing coverage.
