@@ -5,14 +5,14 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
-import os
 import json
 import math
-import typing
+import os
 import sqlite3
 import statistics
 import tempfile
 import time
+import typing
 from pathlib import Path
 
 UTC = dt.timezone.utc
