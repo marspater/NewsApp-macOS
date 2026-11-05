@@ -269,8 +269,8 @@ section 17, and the PR carries the DESIGN.md checklist.
 
 ## Test banner
 
-Help › Show Sample Notification and Settings › Notifications › Send Test Notification post one random story with a
-photo through `NotificationService.postSample`: the real path (image attachment, category, the Full-mode gate before
+Help › Show Sample Notification and Settings › Notifications › Send Test Notification post one random story, with a
+photo when it has one, through `NotificationService.postSample`: the real path (image attachment, category, the Full-mode gate before
 the download and the post), outside triage, its limits and the delivery log, under the identifier `news-sample`. The
 Settings button then shows one status line from `sampleStatus`: the Full-mode gate, macOS's refusal with its domain
 and code, or the reader's authorization, alert and preview settings (#926). Settings also offers Export Diagnostics

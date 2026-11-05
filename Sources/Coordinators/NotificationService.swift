@@ -459,13 +459,14 @@ final class NotificationService: Sendable {
         default: break
         }
         if alert != .enabled { return "Sent, but alerts for News are off. Turn them on in \(systemSettings)." }
+        let hiddenPreviews = previews == .never ? " with the story hidden until you open it" : ""
         switch style {
         case .none: return "Sent, but the alert style is None, so nothing shows. Choose Banners in \(systemSettings)."
-        case .alert: return "Sent. macOS shows it as an alert that stays until dismissed."
+        case .alert: return "Sent. macOS shows it as an alert that stays until dismissed\(hiddenPreviews)."
         default: break
         }
         if previews == .never {
-            return "Sent. macOS shows it as a banner with hidden previews; News does not draw its own banner then."
+            return "Sent. macOS shows it as a banner\(hiddenPreviews); News does not draw its own banner then."
         }
         return
             "Sent. With News in front, or a News window open behind another app, News draws the banner itself; otherwise macOS shows it."

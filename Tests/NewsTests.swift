@@ -22549,7 +22549,10 @@ struct NewsTests {
             status(.posted, authorization: .denied).contains("turned off"), "Denied permission is named after a post")
         assertTrue(status(.posted, style: .none).contains("None"), "Alert style None is named")
         assertTrue(status(.posted, alert: .disabled).contains("alerts for News are off"), "Alerts off is named")
-        assertTrue(status(.posted, previews: .never).contains("hidden previews"), "Hidden previews are named")
+        assertTrue(status(.posted, previews: .never).contains("story hidden"), "Hidden previews are named")
+        assertTrue(
+            status(.posted, style: .alert, previews: .never).contains("story hidden"),
+            "Hidden previews are named for the Alerts style too")
         assertTrue(status(.posted).hasPrefix("Sent."), "A plain success says so")
     }
 

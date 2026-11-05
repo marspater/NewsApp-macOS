@@ -717,7 +717,7 @@ struct SettingsView: View {
                     }
                 }
                 Text(
-                    "Posts one random story from your list, with its photo, through the same path as a real notification. The diagnostics zip holds this launch's log, including each banner's route, with story titles and addresses removed."
+                    "Posts one random story from your list, with its photo when it has one, through the same path as a real notification. The diagnostics zip holds this launch's log, including each banner's route, with story titles and addresses removed."
                 )
                 .font(AppTypography.caption)
                 .foregroundStyle(AppColor.secondaryText)
