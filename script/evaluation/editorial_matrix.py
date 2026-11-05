@@ -192,8 +192,9 @@ def eval_novelty(db: sqlite3.Connection, event_meta: dict) -> dict:
         query = f"fallbacktoken{article_id.split('-')[-1]}" if kind == "semantic_fallback" else event_meta[event_id]["query"]
         start = time.perf_counter()
         candidates = db.execute(
-            "SELECT f.passage_id FROM passage_fts f JOIN passages p ON p.id=f.passage_id "
-            "WHERE passage_fts MATCH ? AND f.event_id=? AND p.article_id!=? "
+            "SELECT passage_fts.passage_id FROM passage_fts JOIN passages p "
+            "ON p.id=passage_fts.passage_id "
+            "WHERE passage_fts MATCH ? AND passage_fts.event_id=? AND p.article_id!=? "
             "ORDER BY bm25(passage_fts) LIMIT 32",
             (query,event_id,article_id),
         ).fetchall()
