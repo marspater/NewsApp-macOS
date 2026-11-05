@@ -85,6 +85,12 @@ jobs:
           flags: macos-26
           fail_ci_if_error: true
 
+      - name: Run Phase 0 Editorial Matrix
+        run: |
+          python3 script/evaluation/editorial_matrix.py \
+            --database "$RUNNER_TEMP/editorial-phase0.sqlite3" \
+            --output "$RUNNER_TEMP/editorial-matrix.json"
+
       - name: Verify Publisher Excerpts
         run: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
 
