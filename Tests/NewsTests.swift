@@ -19928,10 +19928,16 @@ struct NewsTests {
         let timedOut = await ProxyResolver(lookup: hang, deadline: .milliseconds(200)).resolve("slow.invalid")
         assertEqual(timedOut, .unresolvable(reason: "Timed out"), "An unanswered lookup ends at the deadline")
         assertTrue(ContinuousClock.now - started < .seconds(5), "The deadline is the bound, not the system's")
-        // Cancelling the caller resumes it at once and leaves no pending work behind.
-        let resolver = ProxyResolver(lookup: hang, deadline: .seconds(600))
+        // Cancelling the caller resumes it at once and leaves no pending work behind. The lookup signals that it is
+        // in flight, so the cancellation reaches a started lookup, not one still queued.
+        let lookupStarted = SocketObservation()
+        let resolver = ProxyResolver(
+            lookup: { host in
+                lookupStarted.recordText("started")
+                return await hang(host)
+            }, deadline: .seconds(600))
         let cancelled = Task { await resolver.resolve("slow.invalid") }
-        try? await Task.sleep(for: .milliseconds(50))
+        await eventually("The lookup is in flight before it is cancelled") { lookupStarted.count == 1 }
         let cancelledAt = ContinuousClock.now
         cancelled.cancel()
         assertEqual(await cancelled.value, .unresolvable(reason: "Cancelled"), "A cancelled lookup says so")
