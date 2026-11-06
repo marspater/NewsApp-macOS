@@ -94,7 +94,9 @@ actor EnrichmentQueue {
 
     private let maxConcurrency: Int = 3
     private var activeCount: Int = 0
-    private var jobs: [String: Job] = [:]  // Indexed by articleId (active/queued/cancelled/failed; completed removed)
+    /// Indexed by articleId (active and queued; completed and cancelled removed, #535, #986).
+    private var jobs: [String: Job] = [:]
+    private var cancelledCounts: [String: Int] = [:]
     /// Publisher input hash each article was classified from this session (#820): a changed input, or a clear of
     /// derived data, makes the article eligible again.
     private var completedInputs: [String: String] = [:]
@@ -188,21 +190,21 @@ actor EnrichmentQueue {
 
     /// Cancels a specific article's enrichment job.
     func cancel(articleId: String, reason: EnrichmentCancellationReason = .user) {
-        guard var job = jobs[articleId] else { return }
+        guard let job = jobs[articleId] else { return }
         job.task?.cancel()
-        job.state = .cancelled(reason)
-        jobs[articleId] = job
+        jobs.removeValue(forKey: articleId)
+        cancelledCounts[reason.rawValue, default: 0] += 1
         logger.debug("Cancelled enrichment for '\(articleId)': \(reason.rawValue)")
     }
 
     /// Cancels all pending and in-flight jobs (e.g. on feed refresh or settings change).
     func cancelAll(reason: EnrichmentCancellationReason = .superseded) {
-        for (id, var job) in jobs {
+        for (id, job) in jobs {
             // Finished work stays finished, so a refresh does not classify the same articles again.
             if case .completed = job.state { continue }
             job.task?.cancel()
-            job.state = .cancelled(reason)
-            jobs[id] = job
+            jobs.removeValue(forKey: id)
+            cancelledCounts[reason.rawValue, default: 0] += 1
         }
         queuedHeap.removeAll()
         for (eventID, task) in overviewTasks {
@@ -274,6 +276,9 @@ actor EnrichmentQueue {
             case .failed: name = "failed"
             }
             counts[name, default: 0] += 1
+        }
+        for (reason, count) in cancelledCounts {
+            counts["cancelled (\(reason))", default: 0] += count
         }
         if !completedInputs.isEmpty { counts["classified this session"] = completedInputs.count }
         return counts
@@ -385,12 +390,11 @@ actor EnrichmentQueue {
             processNextJobs()
         }
 
-        // Check cancellation before heavy work
-        if jobs[articleId]?.generation != generation || isJobCancelled(articleId) {
-            return
-        }
+        // Check cancellation before heavy work. A cancelled job was already evicted by `cancel` or `cancelAll`, and an
+        // article enqueued again since has a newer generation: this task never evicts its replacement (#986).
+        if jobs[articleId]?.generation != generation { return }
         if Task.isCancelled {
-            markJobState(articleId: articleId, state: .cancelled(.superseded))
+            evictJob(articleId, generation: generation)
             return
         }
 
@@ -413,11 +417,9 @@ actor EnrichmentQueue {
             rssCategory: nil
         )
 
-        if jobs[articleId]?.generation != generation || isJobCancelled(articleId) {
-            return
-        }
+        if jobs[articleId]?.generation != generation { return }
         if Task.isCancelled {
-            markJobState(articleId: articleId, state: .cancelled(.superseded))
+            evictJob(articleId, generation: generation)
             return
         }
 
@@ -444,28 +446,15 @@ actor EnrichmentQueue {
             coalescesPublication: true
         )
 
-        guard jobs[articleId]?.generation == generation, !Task.isCancelled else { return }
+        guard jobs[articleId]?.generation == generation else { return }
+        evictJob(articleId, generation: generation)
         // A refused write (the publisher changed the story, or the analysis was cleared) leaves the story eligible
         // for the next enqueue instead of counting as classified (#820).
-        if stored {
-            jobs.removeValue(forKey: articleId)
-            completedInputs[articleId] = article.publisherInputHash
-        } else {
-            jobs.removeValue(forKey: articleId)
-        }
+        if stored, !Task.isCancelled { completedInputs[articleId] = article.publisherInputHash }
     }
 
-    private func isJobCancelled(_ articleId: String) -> Bool {
-        if let state = jobs[articleId]?.state, case .cancelled = state {
-            return true
-        }
-        return false
-    }
-
-    private func markJobState(articleId: String, state: EnrichmentJobState) {
-        if var job = jobs[articleId] {
-            job.state = state
-            jobs[articleId] = job
-        }
+    /// Drops a finished or cancelled job and the story it retains, unless the article was enqueued again since.
+    private func evictJob(_ articleId: String, generation: UUID) {
+        if jobs[articleId]?.generation == generation { jobs.removeValue(forKey: articleId) }
     }
 }
