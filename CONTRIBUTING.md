@@ -60,6 +60,7 @@ make run                             # Build and launch "News Dev.app" as com.ma
 python3 -m unittest discover -s script/evaluation -p 'test_editorial*.py' # Editorial metric, historical retrieval and failure controls
 bash script/test_editorial_evaluation.sh # Phase 0 prerequisite: seeded 5,000-article SQLite corpus and asserted routing/ranking/impression controls; no Core ML or vDSP invocations. Fixture validation does not constitute review acceptance or production-quality evidence.
 bash script/test_editorial_novelty.sh Tests/Fixtures/editorial/novelty-smoke.json /private/tmp/new-novelty-results # Opt-in shipped-model novelty smoke experiment through the Xcode Release runner; fictional authored labels, no production consumer.
+bash script/test_editorial_momentum.sh /private/tmp/new-momentum-results # Opt-in retrospective MACD sweep on the synthetic Phase 0 fixture through the Xcode Release runner; no production consumer.
 ./test.sh --transport-cancellation # Optimized refresh shutdown over controlled HTTP/SOCKS sockets
 ./test.sh --publisher-cancellation # Opt-in, live: refresh and stop the twelve panel feeds over real HTTPS
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
