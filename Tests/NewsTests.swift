@@ -10899,6 +10899,82 @@ struct NewsTests {
                 "A hard \(conflict) minority vetoes admission")
         }
 
+        // Veto threshold (#737, evaluation): one semantic veto among three cross-pairs is outvoted only when switched on.
+        var diverging = pair
+        diverging.conflict = .semanticDivergence
+        diverging.isMatch = false
+        diverging.isCompatible = false
+        var vetoMinimum = EventMatchPolicy.standard
+        vetoMinimum.vetoMinimum = 2
+        var vetoShare = EventMatchPolicy.standard
+        vetoShare.vetoShare = 0.34
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, diverging]) == nil, "One semantic veto blocks by default")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, diverging], policy: vetoMinimum) != nil,
+            "One semantic veto is outvoted when two are required")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, diverging], policy: vetoShare) != nil,
+            "One veto in three is not more than a 0.34 share")
+        var placed = diverging
+        placed.conflict = .places
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, pair, diverging, placed], policy: vetoMinimum) == nil,
+            "Two vetoes of either outvotable kind block under the minimum")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, pair, pair, pair, diverging, placed], policy: vetoShare) != nil
+                && EventMatcher.eventScore(pairs: [pair, pair, diverging, placed], policy: vetoShare) == nil,
+            "The share counts both kinds against all cross-pairs")
+        // A places conflict that also names different headline places stays absolute: the veto never sees it outvoted.
+        // The place fields are set directly so the case does not hang on the tagger.
+        var kyivBlaze = EventFeatures(
+            title: "Fire destroys a warehouse", description: "Firefighters fought the blaze for six hours.", date: now)
+        var lyonBlaze = EventFeatures(
+            title: "Fire destroys a warehouse", description: "Firefighters fought the blaze for six hours.",
+            date: now.addingTimeInterval(600))
+        (kyivBlaze.places, kyivBlaze.titlePlaces) = (["@UA", "kyiv"], ["@UA", "kyiv"])
+        (lyonBlaze.places, lyonBlaze.titlePlaces) = (["@FR", "lyon"], ["@FR", "lyon"])
+        (kyivBlaze.titleSpecificAnchors, lyonBlaze.titleSpecificAnchors) = ([], [])
+        assertEqual(EventMatcher.assess(kyivBlaze, lyonBlaze).conflict, .places, "Disjoint countries are a places veto")
+        let maskedPlaces = EventMatcher.assess(kyivBlaze, lyonBlaze, policy: vetoMinimum)
+        assertTrue(
+            maskedPlaces.conflict == .places && maskedPlaces.masksAbsoluteConflict,
+            "Under the veto threshold the conflict stays places, so story links keep the veto, and is marked absolute")
+        assertTrue(
+            EventMatcher.conflictsBlock([pair, pair, pair, maskedPlaces], policy: vetoMinimum),
+            "A places veto with a headline conflict behind it is not outvoted")
+        assertTrue(
+            !EventMatcher.conflictsBlock(
+                [pair, EventMatcher.forced(maskedPlaces, policy: vetoMinimum)], policy: vetoMinimum),
+            "A reader's Same Event verdict clears the absolute mask too, so revalidation keeps the pair")
+        var weekday = diverging
+        weekday.conflict = .weekday
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, weekday], policy: vetoMinimum) == nil,
+            "Other conflicts stay absolute under the veto threshold")
+
+        // Borderline floor (#737, evaluation): a compatible borderline pair the pair model scores low needs three names.
+        var borderline = pair
+        borderline.isMatch = false
+        borderline.sharedSpecificAnchors = 1
+        var floor = EventMatchPolicy.standard
+        floor.borderlineFloor = 0.5
+        let defaultFloor = EventMatcher.applyingBorderlineFloor(borderline, probability: 0.3)
+        assertTrue(
+            defaultFloor.isCompatible && EventMatcher.eventScore(pairs: [pair, defaultFloor]) != nil,
+            "A low-scored borderline pair is compatible by default")
+        let floored = EventMatcher.applyingBorderlineFloor(borderline, probability: 0.3, policy: floor)
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, floored], policy: floor) == nil,
+            "Below the floor with one shared name it no longer carries the join")
+        var named = borderline
+        named.sharedSpecificAnchors = 3
+        assertTrue(
+            EventMatcher.applyingBorderlineFloor(named, probability: 0.3, policy: floor).isCompatible
+                && EventMatcher.applyingBorderlineFloor(borderline, probability: 0.6, policy: floor).isCompatible
+                && EventMatcher.applyingBorderlineFloor(borderline, probability: nil, policy: floor).isCompatible,
+            "Three shared names, a score at the floor or no score leave the pair compatible")
+
         // #307 bounded corrections: background-clause false merges, cross-tagged anchors and false place/weekday vetoes.
         let bridgeStrike = EventFeatures(
             title: "Russia hits second major bridge in Ukraine's capital Kyiv",
@@ -16231,6 +16307,8 @@ struct NewsTests {
                         if let pairModel, pairModel >= diagnosePolicy.pairModelThreshold {
                             pair = EventMatcher.modelConfirmed(pair, policy: diagnosePolicy)
                         }
+                        pair = EventMatcher.applyingBorderlineFloor(
+                            pair, probability: pairModel, policy: diagnosePolicy)
                         let nonPlaceB = b.keywords.union(b.titleNumbers).union(b.tollNumbers)
                         let nonPlaceA = a.keywords.union(a.titleNumbers).union(a.tollNumbers)
                         let primaryDisjoint =

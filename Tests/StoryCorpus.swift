@@ -261,6 +261,19 @@ enum StoryCorpus {
             policy.storyModelThreshold = value
         }
         if let value = environment["NEWS_PAIR_PREFIX"] { policy.pairModelPrefix = value == "1" }
+        // The veto threshold and the borderline floor of event admission (#737).
+        if let value = environment["NEWS_VETO_MIN"].flatMap(Int.init), value >= 1 { policy.vetoMinimum = value }
+        if let value = environment["NEWS_VETO_SHARE"].flatMap(Double.init), value.isFinite, (0...1).contains(value) {
+            policy.vetoShare = value
+        }
+        if let value = environment["NEWS_BORDERLINE_FLOOR"].flatMap(Double.init), value.isFinite,
+            (0...1).contains(value)
+        {
+            policy.borderlineFloor = value
+        }
+        if let value = environment["NEWS_BORDERLINE_NAMES"].flatMap(Int.init), value >= 1 {
+            policy.borderlineNames = value
+        }
         // The semantic veto and rescue cutoffs (#628), swept when the sentence encoder changes.
         if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init), value.isFinite {
             policy.semanticVetoThreshold = value

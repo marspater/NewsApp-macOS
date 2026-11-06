@@ -713,6 +713,17 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// each text (#626). Off: the shipped model was trained without the prefix, and the prefixed candidates added false
     /// merges on tune (docs/audits/2026-10-24-pair-model-pretraining.md). On to evaluate a model trained with it.
     var pairModelPrefix = false
+    /// Veto threshold for event admission (#737, evaluation): with either set, a `semanticDivergence` or `places`
+    /// conflict from a cross-pair blocks the join only when at least `vetoMinimum` cross-pairs veto, or when the vetoing
+    /// share of the cross-pairs exceeds `vetoShare`; a tolerated vetoing pair still counts against the two-thirds rule.
+    /// Other conflicts stay absolute. Nil: every cross-pair must be conflict-free (default).
+    var vetoMinimum: Int?
+    var vetoShare: Double?
+    var vetoThreshold: Bool { vetoMinimum != nil || vetoShare != nil }
+    /// Borderline floor for the two-thirds rule (#737, evaluation): a pair the pair model scored below this, and that
+    /// is no match, counts as compatible only when it shares at least `borderlineNames` specific names. Nil turns it off.
+    var borderlineFloor: Double?
+    var borderlineNames = 3
     static let standard = EventMatchPolicy()
 }
 
@@ -802,6 +813,9 @@ struct EventPairAssessment: Sendable, Equatable {
     var neuralEligible = true
     /// No shared anchor, but a cosine high enough for the pair model to be asked (#582).
     var anchorlessModelCandidate = false
+    /// Under the veto threshold (#737): a `places` conflict that also has a headline-places or different-act conflict
+    /// behind it, which the event veto may not outvote. The conflict stays `places`, so story links still see it.
+    var masksAbsoluteConflict = false
 }
 
 enum EventMatcher {
@@ -844,6 +858,15 @@ enum EventMatcher {
             && (disjoint(a.countries, b.countries) || disjoint(a.localPlaces, b.localPlaces))
         {
             return .places
+        }
+        return headlineOrActConflict(a, b)
+    }
+
+    /// The checks after `places`: under the veto threshold (#737) a `places` conflict may be outvoted, these may not,
+    /// so `assess` reads them for a `places` pair too.
+    private static func headlineOrActConflict(_ a: EventFeatures, _ b: EventFeatures) -> EventConflict? {
+        func disjoint(_ lhs: Set<String>, _ rhs: Set<String>) -> Bool {
+            !lhs.isEmpty && !rhs.isEmpty && lhs.isDisjoint(with: rhs)
         }
         // Headlines that place the reports in different countries or cities, with no place, person or two specific
         // names in common, report different events however much the descriptions mention each other's places (#737:
@@ -911,6 +934,7 @@ enum EventMatcher {
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
         var conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap, sameSeries: sameSeries)
+        let masksAbsolute = conflict == .places && policy.vetoThreshold && headlineOrActConflict(a, b) != nil
         let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).union(crossSpecific).count
         let sharedEvidence =
             sharedKeywords
@@ -955,7 +979,8 @@ enum EventMatcher {
             score: max(score, embeddingSimilarity ?? 0.0), what: what, entity: entity, sharedAnchors: sharedAnchors,
             sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
             isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity,
-            neuralEligible: neuralEligible, anchorlessModelCandidate: anchorlessCandidate)
+            neuralEligible: neuralEligible, anchorlessModelCandidate: anchorlessCandidate,
+            masksAbsoluteConflict: masksAbsolute)
     }
 
     /// The pair model's input for one side of a pair (#626): "gap 14 hours; same publisher. " and then the matching
@@ -1009,6 +1034,7 @@ enum EventMatcher {
     static func forced(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
         var pair = pair
         pair.conflict = nil
+        pair.masksAbsoluteConflict = false
         pair.isBorderline = false
         pair.isMatch = true
         pair.isCompatible = true
@@ -1026,14 +1052,43 @@ enum EventMatcher {
     }
 
     static func eventScore(pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Double? {
-        guard !pairs.isEmpty, pairs.count < policy.maximumEventSize,
-            pairs.allSatisfy({ $0.conflict == nil && ($0.sharedSpecificAnchors >= 1 || $0.modelConfirmed) }),
+        guard !pairs.isEmpty, pairs.count < policy.maximumEventSize, !conflictsBlock(pairs, policy: policy),
+            pairs.allSatisfy({ $0.sharedSpecificAnchors >= 1 || $0.modelConfirmed }),
             pairs.contains(where: \.isMatch)
         else { return nil }
         let required = Int((Double(pairs.count) * policy.compatibleShare).rounded(.up))
         guard pairs.filter(\.isCompatible).count >= required else { return nil }
         let mean = pairs.map(\.score).reduce(0, +) / Double(pairs.count)
         return mean >= policy.eventScore ? mean : nil
+    }
+
+    /// The conflicts the veto threshold (#737) lets other cross-pairs outvote.
+    static let outvotable: Set<EventConflict> = [.semanticDivergence, .places]
+
+    /// Whether the cross-pairs' conflicts refuse admission: any conflict by default; under the veto threshold
+    /// (`vetoMinimum`, `vetoShare`, #737) a `semanticDivergence` or `places` conflict only when enough pairs raise one.
+    static func conflictsBlock(_ pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Bool {
+        guard policy.vetoThreshold else { return pairs.contains { $0.conflict != nil } }
+        if pairs.contains(where: { $0.masksAbsoluteConflict || $0.conflict.map { !outvotable.contains($0) } ?? false })
+        {
+            return true
+        }
+        let vetoes = pairs.filter { $0.conflict != nil }.count
+        return policy.vetoMinimum.map { vetoes >= $0 } == true
+            || policy.vetoShare.map { Double(vetoes) / Double(max(pairs.count, 1)) > $0 } == true
+    }
+
+    /// The borderline floor (#737, evaluation): a pair that is no match, scored by the pair model below
+    /// `borderlineFloor`, is compatible only when it shares `borderlineNames` specific names.
+    static func applyingBorderlineFloor(
+        _ pair: EventPairAssessment, probability: Double?, policy: EventMatchPolicy = .standard
+    ) -> EventPairAssessment {
+        guard let floor = policy.borderlineFloor, let probability, probability < floor, !pair.isMatch,
+            pair.sharedSpecificAnchors < policy.borderlineNames
+        else { return pair }
+        var pair = pair
+        pair.isCompatible = false
+        return pair
     }
 
     private static func cosine(_ shared: Int, _ left: Int, _ right: Int) -> Double {
