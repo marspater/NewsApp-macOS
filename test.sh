@@ -107,6 +107,7 @@ else
     job() { printf '%s\t%s\n' "$1" "$2" >> "$JOB_LIST"; }
     # Longest first, so the pool ends evenly.
     job "NewsTests-slow" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=slow"
+    job "NewsTests-sockets" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=sockets"
     for ((i = 0; i < SHARDS; i++)); do
         job "NewsTests-$i-of-$SHARDS" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=$i/$SHARDS"
     done

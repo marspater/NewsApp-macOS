@@ -359,24 +359,33 @@ struct NewsTests {
 
     /// Tests that take longer than a whole shard; NEWS_TEST_SHARD=slow runs only these, in their own process.
     static let slowTests: Set<String> = ["testActiveWorkCancellation"]
+    /// The loopback socket tests. They share the machine's ephemeral ports and 4-tuples with every parallel process
+    /// and collided on CI (EADDRINUSE twice in one run, 6 November 2026; docs/audits/2026-11-06-socket-contention.md);
+    /// NEWS_TEST_SHARD=sockets runs only these, one after another in their own process, beside the other lanes.
+    static let socketTests: Set<String> = [
+        "testGatewayRejectionIsTransport", "testSocketNetworkBoundary", "testTransportCancellation",
+        "testGatewayAddressFallback",
+    ]
 
-    /// NEWS_TEST_SHARD="i/n" runs every n-th test from the i-th (0-based) that is not slow, "slow" the slow ones;
-    /// test.sh runs the shards as separate processes, so each test keeps the process-wide state it expects.
-    /// NEWS_TEST_TIMING=1 prints each duration.
+    /// NEWS_TEST_SHARD="i/n" runs every n-th test from the i-th (0-based) that is neither slow nor a socket test,
+    /// "slow" the slow ones and "sockets" the socket ones; test.sh runs the lanes as separate processes, so each test
+    /// keeps the process-wide state it expects. NEWS_TEST_TIMING=1 prints each duration.
     static func shardIncludes(_ index: Int, name: String) -> Bool {
         guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"] else { return true }
         if spec == "slow" { return slowTests.contains(name) }
+        if spec == "sockets" { return socketTests.contains(name) }
         let parts = spec.split(separator: "/").compactMap { Int($0) }
-        return !slowTests.contains(name) && index % parts[1] == parts[0]
+        return !slowTests.contains(name) && !socketTests.contains(name) && index % parts[1] == parts[0]
     }
 
     /// A malformed or out-of-range shard would run nothing and pass; it stops the process instead.
     static func validateShard() {
-        guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"], spec != "slow" else { return }
+        guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"], spec != "slow", spec != "sockets"
+        else { return }
         let parts = spec.split(separator: "/", omittingEmptySubsequences: false).map { Int($0) }
         guard parts.count == 2, let shard = parts[0], let count = parts[1], count > 0, (0..<count).contains(shard)
         else {
-            print("❌ NEWS_TEST_SHARD must be \"slow\" or i/n with 0 <= i < n, not \"\(spec)\"")
+            print("❌ NEWS_TEST_SHARD must be \"slow\", \"sockets\" or i/n with 0 <= i < n, not \"\(spec)\"")
             exit(2)
         }
     }
@@ -21994,8 +22003,35 @@ struct NewsTests {
             try await test()
         } catch let error where error is LoopbackTimeout || error as? NWError == .posix(.EADDRINUSE) {
             print("  ↻ Loopback transport error under load (\(error)); running the socket test once more")
-            try await test()
+            do { try await test() } catch {
+                // The second failure carries the socket state, so a CI log can say what collided.
+                print("  socket state at the second failure: \(loopbackSocketSummary())")
+                throw error
+            }
         }
+    }
+
+    /// TIME_WAIT and loopback LISTEN/ESTABLISHED counts and the ephemeral port range, from netstat and sysctl.
+    static func loopbackSocketSummary() -> String {
+        func run(_ path: String, _ arguments: [String]) -> String {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = arguments
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return "" }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: data, as: UTF8.self)
+        }
+        let sockets = run("/usr/sbin/netstat", ["-an", "-p", "tcp"]).split(separator: "\n")
+        let timeWait = sockets.filter { $0.contains("TIME_WAIT") }.count
+        let loopback = sockets.filter { $0.contains("127.0.0.1") }
+        let range = run("/usr/sbin/sysctl", ["-n", "net.inet.ip.portrange.first", "net.inet.ip.portrange.last"])
+            .split(separator: "\n").joined(separator: "-")
+        return "TIME_WAIT \(timeWait), loopback LISTEN \(loopback.filter { $0.contains("LISTEN") }.count), "
+            + "loopback ESTABLISHED \(loopback.filter { $0.contains("ESTABLISHED") }.count), ephemeral ports \(range)"
     }
 
     static func testSocketNetworkBoundary() async throws {
