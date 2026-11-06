@@ -22,7 +22,8 @@ import SwiftUI
 /// script/native_performance_baseline.sh DIR`; `NEWS_CAPTURES=overview` or `NEWS_CAPTURES=grid` runs one set,
 /// `NEWS_CAPTURE_SET=tension` renders the World Tension sheet, sidebar foot and Briefing strip instead (#781), and
 /// `NEWS_CAPTURE_SET=briefing` the Briefing situation board (#780), and `NEWS_CAPTURE_SET=search` story cards of a
-/// search with highlighted excerpts, list and grid (#708).
+/// search with highlighted excerpts, list and grid (#708), and `NEWS_CAPTURE_SET=health` the Publisher Health sheet
+/// (#715).
 @main
 struct OverviewCaptures {
     static func main() async {
@@ -35,6 +36,7 @@ struct OverviewCaptures {
         case "tension": failures = await MainActor.run { captureTension(into: output) }
         case "briefing": failures = await MainActor.run { captureBriefing(into: output) }
         case "search": failures = await SearchCardCaptures.capture(into: output)
+        case "health": failures = await MainActor.run { captureHealth(into: output) }
         default:
             if only != "grid" { failures = await MainActor.run { capture(into: output) } }
             if only != "overview" { failures += await GridRowCaptures.capture(into: output) }
@@ -101,6 +103,96 @@ struct OverviewCaptures {
                         }
                     }
                 }
+            }
+        }
+        return failures
+    }
+
+    /// The Publisher Health sheet with fictional feeds: light, dark and Increase Contrast of each.
+    @MainActor
+    static func captureHealth(into output: URL) -> Int {
+        let now = Date(timeIntervalSince1970: 1_793_491_200)
+        let day: TimeInterval = 24 * 60 * 60
+        func row(_ name: String, _ observed: FeedHealthObservations, state: FeedFetchState) -> PublisherHealthRow {
+            PublisherHealthRow(
+                feedURL: "https://\(name.lowercased().replacingOccurrences(of: " ", with: ""))/feed",
+                storedPublisher: name, metrics: FeedHealthMetrics(observed, now: now),
+                health: FeedHealth(state, now: now))
+        }
+        var healthy = FeedFetchState()
+        healthy.lastFetchedAt = now
+        healthy.latestItemAt = now - 3600
+        var failing = healthy
+        failing.failures = 3
+        var stale = healthy
+        stale.latestItemAt = now - 40 * day
+        let rows = [
+            row(
+                "Northwind Post",
+                FeedHealthObservations(
+                    attempts: 100, successes: 41, latencyTotal: 115, recentItems: 90, oldestRecentItem: now - 30 * day,
+                    teaser: 4), state: failing),
+            row(
+                "Harbor Times",
+                FeedHealthObservations(
+                    attempts: 100, successes: 96, latencyTotal: 86, recentItems: 140, oldestRecentItem: now - 10 * day,
+                    subscriberOnly: 5), state: healthy),
+            row(
+                "Old Port Review", FeedHealthObservations(attempts: 100, successes: 98, latencyTotal: 59), state: stale),
+            row(
+                "Dawn Sample",
+                FeedHealthObservations(
+                    attempts: 100, successes: 99, latencyTotal: 119, recentItems: 290, oldestRecentItem: now - 10 * day,
+                    fullReader: 9), state: healthy),
+            row(
+                "Bay Courier",
+                FeedHealthObservations(
+                    attempts: 100, successes: 100, latencyTotal: 30, recentItems: 300, oldestRecentItem: now - 10 * day,
+                    teaser: 6), state: healthy),
+            row("New Feed", FeedHealthObservations(), state: FeedFetchState()),
+        ]
+        let variants:
+            [(name: String, appearance: NSAppearance.Name, scheme: ColorScheme, contrast: ColorSchemeContrast)] = [
+                ("light", .aqua, .light, .standard), ("dark", .darkAqua, .dark, .standard),
+                ("light-ic", .accessibilityHighContrastAqua, .light, .increased),
+                ("dark-ic", .accessibilityHighContrastDarkAqua, .dark, .increased),
+            ]
+        var failures = 0
+        for variant in variants {
+            let appearance = NSAppearance(named: variant.appearance) ?? NSAppearance.currentDrawing()
+            let view = NSHostingView(
+                rootView: PublisherHealthContent(phase: .loaded(rows))
+                    .frame(width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetMinHeight)
+                    .background(AppColor.background)
+                    .environment(\.colorScheme, variant.scheme)
+                    .environment(\.overrideContrast, variant.contrast))
+            view.appearance = appearance
+            view.frame = NSRect(
+                x: 0, y: 0, width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetMinHeight)
+            // A table only draws its rows in a window; this one is never ordered on screen.
+            let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.appearance = appearance
+            window.contentView = view
+            RunLoop.main.run(until: Date().addingTimeInterval(0.5))
+            var rendered: NSBitmapImageRep?
+            appearance.performAsCurrentDrawingAppearance {
+                view.layoutSubtreeIfNeeded()
+                guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
+                view.cacheDisplay(in: view.bounds, to: bitmap)
+                rendered = bitmap
+            }
+            window.contentView = nil
+            guard let bitmap = rendered, distinctColors(bitmap) > 8 else {
+                print("  blank: health-\(variant.name)")
+                failures += 1
+                continue
+            }
+            do {
+                try write(bitmap, to: output.appendingPathComponent("health-\(variant.name).png"))
+            } catch {
+                print("  write failed: health-\(variant.name): \(error.localizedDescription)")
+                failures += 1
             }
         }
         return failures

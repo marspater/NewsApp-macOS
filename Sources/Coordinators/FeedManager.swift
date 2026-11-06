@@ -96,6 +96,9 @@ class FeedManager: NSObject, ObservableObject {
     private var lastPruneAt: Date?
     /// When the latest refresh published its stories; shown in the list header.
     @Published private(set) var lastRefreshCompletedAt: Date?
+    /// Advances when a refresh ends without completing: a cancelled fetch may still have recorded feed samples, so
+    /// the Publisher Health sheet reloads on it. `lastRefreshCompletedAt` stays limited to completed refreshes (#715).
+    @Published private(set) var cancelledRefreshCount = 0
     private let wakeRefreshDelay: Duration
     private let now: () -> Date
 
@@ -344,6 +347,20 @@ class FeedManager: NSObject, ObservableObject {
         )
     }
 
+    /// One row per subscription for the Publisher Health inspector (#715). The database actor does the reading.
+    func publisherHealthRows(now: Date = Date()) async throws -> [PublisherHealthRow] {
+        let database = articleStore.database
+        let metrics = try await database.feedHealthMetrics(now: now)
+        let publishers = try await database.feedPublisherNames()
+        let states = try await database.feedFetchStates()
+        let empty = FeedHealthMetrics(FeedHealthObservations(), now: now)
+        return appSettings.feedURLs.map { url in
+            PublisherHealthRow(
+                feedURL: url, storedPublisher: publishers[url], metrics: metrics[url] ?? empty,
+                health: FeedHealth(states[url], now: now))
+        }
+    }
+
     // MARK: - Caching & Persistence
 
     func loadCachedArticles() {
@@ -574,6 +591,7 @@ class FeedManager: NSObject, ObservableObject {
         guard refreshRunID == runID else {
             // Cancelled between the pipeline's return and this resumption: the next run notifies these.
             pendingNotificationArticles.append(contentsOf: newArticles)
+            cancelledRefreshCount += 1
             return
         }
         refreshTask = nil

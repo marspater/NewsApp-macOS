@@ -205,6 +205,12 @@ enum AppLayout {
     static let progressBarHeight: CGFloat = 2
     static let catalogSheetWidth: CGFloat = 720
     static let catalogSheetMinHeight: CGFloat = 560
+    static let publisherHealthSheetWidth: CGFloat = 720
+    static let publisherHealthSheetMinHeight: CGFloat = 560
+    static let publisherHealthFeedColumnMinWidth: CGFloat = 150
+    static let publisherHealthNumberColumnWidth: CGFloat = 68
+    static let publisherHealthTextColumnWidth: CGFloat = 72
+    static let publisherHealthRecommendationColumnMinWidth: CGFloat = 192
     static let smartBinderSheetWidth: CGFloat = 520
     static let smartBinderSheetHeight: CGFloat = 600
     static let iconButtonSize: CGFloat = 28
