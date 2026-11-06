@@ -277,10 +277,23 @@ enum FeedHealthMetricsTests {
         let bad = row(FeedHealthObservations(attempts: 4, successes: 1))
         let good = row(FeedHealthObservations(attempts: 4, successes: 4))
         check(
-            [fresh, good, bad].sorted(using: KeyPathComparator(\.successSortKey)).map(\.successText) == [
+            [fresh, good, bad].sorted(using: PublisherHealthSort(.success)).map(\.successText) == [
                 "25%", "100%", "—",
             ],
             "the default order leads with trouble and leaves unknowns last")
+        check(
+            [fresh, good, bad].sorted(using: PublisherHealthSort(.success, order: .reverse)).map(\.successText) == [
+                "100%", "25%", "—",
+            ],
+            "a descending order leads with the best and still leaves unknowns last")
+        check(
+            [fresh, quiet, busy].sorted(using: PublisherHealthSort(.frequency, order: .reverse)).map(\.frequencyText)
+                == ["15", "0", "—"],
+            "a measured zero frequency stays a zero, below every measured rate and above an unknown one")
+        check(
+            [fresh, busy, quiet].sorted(using: PublisherHealthSort(.latency, order: .reverse)).map(\.latencyText)
+                == ["1.0 s", "0.9 s", "—"],
+            "descending latency also leaves unknowns last")
 
         let catalogFeed = FeedCatalog.allFeeds[0]
         check(

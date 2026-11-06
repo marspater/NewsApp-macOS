@@ -100,8 +100,44 @@ enum FeedHealthRecommendation: String, CaseIterable, Sendable {
     case requiresWebView = "Requires Web View"
 }
 
+/// The table's sort. A measured value never sorts below an unavailable one, ascending or descending, so the highest
+/// and lowest measured values stay at the top; text columns compare as a reader would sort names (#715).
+struct PublisherHealthSort: SortComparator, Hashable, Sendable {
+    enum Column: Hashable, Sendable { case name, success, latency, frequency, extraction, recommendation }
+
+    var column: Column
+    var order: SortOrder
+
+    init(_ column: Column, order: SortOrder = .forward) {
+        self.column = column
+        self.order = order
+    }
+
+    func compare(_ lhs: PublisherHealthRow, _ rhs: PublisherHealthRow) -> ComparisonResult {
+        switch column {
+        case .name: return text(lhs.name, rhs.name)
+        case .extraction: return text(lhs.extractionText, rhs.extractionText)
+        case .recommendation: return text(lhs.recommendationText, rhs.recommendationText)
+        case .success: return number(lhs.successSortKey, rhs.successSortKey)
+        case .latency: return number(lhs.latencySortKey, rhs.latencySortKey)
+        case .frequency: return number(lhs.frequencySortKey, rhs.frequencySortKey)
+        }
+    }
+
+    private func text(_ lhs: String, _ rhs: String) -> ComparisonResult {
+        order == .forward ? lhs.localizedStandardCompare(rhs) : rhs.localizedStandardCompare(lhs)
+    }
+
+    private func number(_ lhs: Double?, _ rhs: Double?) -> ComparisonResult {
+        guard let lhs else { return rhs == nil ? .orderedSame : .orderedDescending }
+        guard let rhs else { return .orderedAscending }
+        let (low, high) = order == .forward ? (lhs, rhs) : (rhs, lhs)
+        return low < high ? .orderedAscending : low > high ? .orderedDescending : .orderedSame
+    }
+}
+
 /// One feed's row in the Publisher Health table: its numbers, recommendations, display text and sort keys. Pure, so
-/// the wording and order need no view. Unknown values sort last in ascending order, after the feeds in most trouble.
+/// the wording and order need no view. Unknown values sort last in either direction.
 struct PublisherHealthRow: Identifiable, Equatable, Sendable {
     static let unknownText = "—"
     static let footnote =
@@ -134,9 +170,10 @@ struct PublisherHealthRow: Identifiable, Equatable, Sendable {
         return URL(string: feedURL)?.host ?? feedURL
     }
 
-    var successSortKey: Double { metrics.successRate ?? .infinity }
-    var latencySortKey: Double { metrics.averageLatency ?? .infinity }
-    var frequencySortKey: Double { metrics.itemsPerDay ?? (metrics.successRate == nil ? .infinity : 0) }
+    /// Nil is unavailable, which `PublisherHealthSort` keeps last in both directions.
+    var successSortKey: Double? { metrics.successRate }
+    var latencySortKey: Double? { metrics.averageLatency }
+    var frequencySortKey: Double? { metrics.itemsPerDay ?? (metrics.successRate == nil ? nil : 0) }
 
     /// Rounded down, so 100% means no failure.
     var successText: String {

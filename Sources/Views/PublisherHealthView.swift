@@ -16,7 +16,7 @@ import SwiftUI
 
 /// The Publisher Health sheet, opened from Settings → Subscriptions (#715): one sortable row per feed. It describes
 /// how feeds behave technically and never rates their reporting. The database actor computes the rows off the main
-/// thread; they reload when the sheet opens and after each refresh.
+/// thread; they reload when the sheet opens and after each refresh, completed or cancelled.
 struct PublisherHealthView: View {
     @EnvironmentObject private var feedManager: FeedManager
     @Environment(\.dismiss) private var dismiss
@@ -34,8 +34,19 @@ struct PublisherHealthView: View {
                         .keyboardShortcut(.defaultAction)
                 }
             }
-            .task(id: feedManager.lastRefreshCompletedAt) { await load() }
+            .task(
+                id: ReloadTrigger(
+                    completed: feedManager.lastRefreshCompletedAt, cancelled: feedManager.cancelledRefreshCount)
+            ) {
+                await load()
+            }
             .onExitCommand { dismiss() }
+    }
+
+    /// A completed refresh or a cancelled one, either of which may have recorded feed samples.
+    private struct ReloadTrigger: Equatable {
+        let completed: Date?
+        let cancelled: Int
     }
 
     private func load() async {
@@ -116,35 +127,35 @@ struct PublisherHealthContent: View {
 private struct PublisherHealthTable: View {
     let rows: [PublisherHealthRow]
     @State private var selection: PublisherHealthRow.ID?
-    @State private var sortOrder = [KeyPathComparator(\PublisherHealthRow.successSortKey)]
+    @State private var sortOrder = [PublisherHealthSort(.success)]
 
     var body: some View {
         Table(rows.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
-            TableColumn("Feed", value: \.name) { row in
+            TableColumn("Feed", sortUsing: PublisherHealthSort(.name)) { row in
                 Text(row.name)
                     .help(row.id)
                     .accessibilityHint(row.id)
             }
             .width(min: AppLayout.publisherHealthFeedColumnMinWidth, ideal: AppLayout.publisherHealthFeedColumnMinWidth)
-            TableColumn("Success", value: \.successSortKey) { row in
+            TableColumn("Success", sortUsing: PublisherHealthSort(.success)) { row in
                 metric(row.successText, spoken: row.successSpoken)
             }
             .width(AppLayout.publisherHealthNumberColumnWidth)
-            TableColumn("Latency", value: \.latencySortKey) { row in
+            TableColumn("Latency", sortUsing: PublisherHealthSort(.latency)) { row in
                 metric(row.latencyText, spoken: row.latencySpoken)
             }
             .width(AppLayout.publisherHealthNumberColumnWidth)
-            TableColumn("Per Day", value: \.frequencySortKey) { row in
+            TableColumn("Per Day", sortUsing: PublisherHealthSort(.frequency)) { row in
                 metric(row.frequencyText, spoken: row.frequencySpoken)
             }
             .width(AppLayout.publisherHealthNumberColumnWidth)
-            TableColumn("Text", value: \.extractionText) { row in
+            TableColumn("Text", sortUsing: PublisherHealthSort(.extraction)) { row in
                 Text(row.extractionText)
                     .foregroundStyle(
                         row.metrics.extractionClass == .unknown ? AppColor.secondaryText : AppColor.primaryText)
             }
             .width(AppLayout.publisherHealthTextColumnWidth)
-            TableColumn("Recommendation", value: \.recommendationText) { row in
+            TableColumn("Recommendation", sortUsing: PublisherHealthSort(.recommendation)) { row in
                 recommendation(row)
             }
             .width(min: AppLayout.publisherHealthRecommendationColumnMinWidth)
