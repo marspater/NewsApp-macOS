@@ -1653,9 +1653,19 @@ struct ArticleDetailView: View {
         storyUpdateStatus = FeedManager.StoryUpdateResult.checkingText
         Task {
             let result = await feedManager.checkForUpdates(storyOf: articleID)
+            // Regeneration can clear the overview while this event is still open. Resolve membership independently,
+            // retrying if navigation changes the article during the database read.
+            var activeEventID: String?
+            while storyUpdateCheck == check {
+                let activeID = activeArticle.id
+                let resolvedEventID = try? await articleStore.database.eventID(forArticle: activeID)
+                guard activeArticle.id == activeID else { continue }
+                activeEventID = resolvedEventID
+                break
+            }
             isCheckingForUpdates = false
             // Another report of the same event may be open now; only a closed reader or another event drops it.
-            guard storyUpdateCheck == check, currentOverview?.eventID == eventID else {
+            guard storyUpdateCheck == check, activeEventID == eventID else {
                 // A dropped result leaves no "Checking your feeds…" line behind.
                 if storyUpdateStatus == FeedManager.StoryUpdateResult.checkingText { storyUpdateStatus = nil }
                 return
