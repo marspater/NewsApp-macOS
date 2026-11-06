@@ -21,18 +21,15 @@ extension DatabaseEngine {
         return try articleIDs.map { id in
             try Task.checkCancellation()
             guard let article = try fetchArticles(limit: 1, id: id).first else {
-                throw CocoaError(.fileReadNoSuchFile)
+                throw KnowledgeEPUB.Error.storyMissing
             }
             let overview = try fetchEventOverview(forArticleID: article.id)
             let quotes = try (overview?.citations.values.sorted { $0.id < $1.id } ?? []).map { citation in
                 let source = try fetchArticles(limit: 1, id: citation.articleID).first
                 return KnowledgeExport.quote(citation, sourceArticle: source)
             }
-            let text =
-                article.readerDocument?.blocks.map(\.text).joined(separator: "\n\n")
-                ?? FeedXMLParser.stripHTMLSimple(article.fullContent ?? article.description)
             let notes = try fetchNotes(for: article.id)
-            let body = digest ? FeedXMLParser.stripHTMLSimple(article.description) : text
+            let body = digest ? FeedXMLParser.stripHTMLSimple(article.description) : Self.exportText(of: article)
             guard body.utf8.count <= 2 * 1024 * 1024, notes.count <= 10000, quotes.count <= 1000 else {
                 throw KnowledgeEPUB.Error.tooLarge
             }
@@ -41,5 +38,16 @@ extension DatabaseEngine {
                 url: article.link, published: article.pubDate == DateParser.unknownDate ? nil : article.pubDate,
                 body: body, tags: article.category.map { [$0] } ?? [], quotes: quotes, notes: notes)
         }
+    }
+
+    /// The reader's text without embed notices or boilerplate; figure captions and tables stay. A document with no text
+    /// left, such as a media-only page, falls back to the cached body and then the description.
+    private static func exportText(of article: FeedArticle) -> String {
+        let blocks = (article.readerDocument?.blocks ?? []).filter { block in
+            block.kind != .embed && !block.text.isEmpty && !ArticleContentRedactor.isBoilerplateLine(block.text)
+        }
+        if !blocks.isEmpty { return blocks.map(\.text).joined(separator: "\n\n") }
+        let cached = FeedXMLParser.stripHTMLSimple(article.fullContent ?? "")
+        return cached.isEmpty ? FeedXMLParser.stripHTMLSimple(article.description) : cached
     }
 }

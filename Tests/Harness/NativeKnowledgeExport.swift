@@ -32,6 +32,18 @@ import SwiftUI
 @MainActor private final class KnowledgeExportQADelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let root = NSMenu()
+        let app = NSMenuItem()
+        app.submenu = NSMenu(title: "Knowledge QA")
+        app.submenu?.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        root.addItem(app)
+        let export = NSMenuItem(title: "Export", action: nil, keyEquivalent: "")
+        export.submenu = NSMenu(title: "Export")
+        let notes = NSMenuItem(title: "Add to Apple Notes…", action: #selector(showNotes), keyEquivalent: "")
+        notes.target = self
+        export.submenu?.addItem(notes)
+        root.addItem(export)
+        NSApp.mainMenu = root
         Task {
             do {
                 try await run()
@@ -42,6 +54,26 @@ import SwiftUI
                 fputs("Knowledge export QA failed: \(error)\n", stderr)
                 exit(1)
             }
+        }
+    }
+
+    @objc private func showNotes() {
+        let document = KnowledgeExportDocument(
+            id: "qa", title: "Fictional knowledge export QA",
+            publisher: "Example Publisher", url: "https://example.com/story", published: nil,
+            body: "A fictional offline story for format verification.", tags: [],
+            quotes: [
+                KnowledgeExportQuote(
+                    text: "A qualified fictional quotation.", publisher: "Second Publisher",
+                    url: "https://example.org/report")
+            ],
+            notes: [
+                UserNote(
+                    articleID: "qa", paragraphIndex: 0, charStart: 0, selectedText: "Fictional highlight", prefix: "",
+                    suffix: "", noteBody: "Fictional private note")
+            ])
+        do { try KnowledgeExportUI.shareToNotes([document], title: "Fictional knowledge export QA") } catch {
+            fputs("Notes preview failed: \(error)\n", stderr)
         }
     }
 

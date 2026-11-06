@@ -16,7 +16,16 @@ import Foundation
 
 /// Offline EPUB 3 with fixed internal paths and stored ZIP members.
 enum KnowledgeEPUB {
-    enum Error: Swift.Error { case tooLarge }
+    enum Error: LocalizedError {
+        case tooLarge, storyMissing
+
+        var errorDescription: String? {
+            switch self {
+            case .tooLarge: "This export is too large. Select fewer stories or remove some notes, then try again."
+            case .storyMissing: "A selected story is no longer in your library. Select it again, then try again."
+            }
+        }
+    }
     private static let maxBytes = 32 * 1024 * 1024
     private static let maxDocuments = 500
 
@@ -119,29 +128,13 @@ enum KnowledgeEPUB {
             let checksum = crc32(content)
             output.le(UInt32(0x0403_4b50))
             output.le(UInt16(20))
-            output.le(UInt16(0))
-            output.le(UInt16(0))
-            output.le(UInt16(0))
-            output.le(UInt16(0x21))
-            output.le(checksum)
-            output.le(length)
-            output.le(length)
-            output.le(nameLength)
-            output.le(UInt16(0))
+            output.zipEntryFields(checksum: checksum, length: length, nameLength: nameLength)
             output.append(filename)
             output.append(content)
             directory.le(UInt32(0x0201_4b50))
             directory.le(UInt16(20))
             directory.le(UInt16(20))
-            directory.le(UInt16(0))
-            directory.le(UInt16(0))
-            directory.le(UInt16(0))
-            directory.le(UInt16(0x21))
-            directory.le(checksum)
-            directory.le(length)
-            directory.le(length)
-            directory.le(nameLength)
-            directory.le(UInt16(0))
+            directory.zipEntryFields(checksum: checksum, length: length, nameLength: nameLength)
             directory.le(UInt16(0))
             directory.le(UInt16(0))
             directory.le(UInt16(0))
@@ -178,5 +171,18 @@ extension Data {
     fileprivate mutating func le<T: FixedWidthInteger>(_ value: T) {
         var little = value.littleEndian
         Swift.withUnsafeBytes(of: &little) { append(contentsOf: $0) }
+    }
+
+    /// The fields a ZIP local header and central directory entry share: a stored member with a fixed DOS date.
+    fileprivate mutating func zipEntryFields(checksum: UInt32, length: UInt32, nameLength: UInt16) {
+        le(UInt16(0))
+        le(UInt16(0))
+        le(UInt16(0))
+        le(UInt16(0x21))
+        le(checksum)
+        le(length)
+        le(length)
+        le(nameLength)
+        le(UInt16(0))
     }
 }

@@ -99,7 +99,33 @@ enum KnowledgeExportTests {
             do {
                 _ = try await db.knowledgeExportDocuments(articleIDs: ["missing"])
                 check(false, "missing story must fail, never silently omit")
-            } catch { check(true, "missing story rejected") }
+            } catch {
+                check(
+                    error.localizedDescription == KnowledgeEPUB.Error.storyMissing.errorDescription,
+                    "missing story rejected with a readable message")
+            }
+            check(
+                KnowledgeEPUB.Error.tooLarge.localizedDescription.hasPrefix("This export is too large"),
+                "size limit explains itself")
+            var mediaOnly = FeedArticle(
+                title: "Media only", link: "https://example.com/media-only", guid: "media-only",
+                description: "<p>Media description</p>",
+                pubDate: Date(timeIntervalSince1970: 1000), source: "Publisher")
+            mediaOnly.readerDocument = ReaderDocument(blocks: [ReaderBlock(kind: .embed, text: "Social post")])
+            var mixed = FeedArticle(
+                title: "Mixed", link: "https://example.com/mixed", guid: "mixed", description: "Mixed description",
+                pubDate: Date(timeIntervalSince1970: 1000), source: "Publisher")
+            mixed.readerDocument = ReaderDocument(blocks: [
+                ReaderBlock(kind: .paragraph, text: "Story text"), ReaderBlock(kind: .embed, text: "example.com"),
+                ReaderBlock(kind: .figure, text: "A caption"), ReaderBlock(kind: .divider, text: ""),
+                ReaderBlock(kind: .table, text: "a\tb"),
+            ])
+            try await db.upsertArticles([mediaOnly, mixed])
+            let blockDocuments = try await db.knowledgeExportDocuments(articleIDs: [mediaOnly.id, mixed.id])
+            check(blockDocuments[0].body == "Media description", "media-only document falls back to the description")
+            check(
+                blockDocuments[1].body == "Story text\n\nA caption\n\na\tb",
+                "embed notices leave the export; captions and tables stay")
             if let directory = ProcessInfo.processInfo.environment["NEWS_KNOWLEDGE_OUTPUT"] {
                 let root = URL(fileURLWithPath: directory)
                 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -15,13 +15,10 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
 * **Spotlight Indexing**: Only stories you explicitly save are indexed in macOS Spotlight (`CoreSpotlight`) on your Mac, with their title, publisher, the publisher's own description, and publication date (`com.marspater.news.saved-stories`); text generated on your Mac is never indexed in new entries, and entries made by earlier versions are replaced at the next launch's rebuild once it succeeds. Unread and read feed items are never indexed. Removing a story from Saved Stories removes its Spotlight entry immediately, clearing caches leaves saved-story entries intact, and each launch rebuilds the Spotlight entries from the library, so after a restore only the restored library's saved stories remain. Deleting the library files by hand leaves entries in Spotlight until News next launches.
 * **Muting**: Muted publisher hosts and topic words are stored in the app's local preferences and applied on your Mac; they are never sent anywhere.
 * **Backups**: Back Up Library… writes a backup only where you save it; it contains your library, settings and World Tension history and is readable by your user account only. NewsApp never uploads it; a synced folder you save it to, such as iCloud Drive, may. Restoring keeps the replaced library beside it on your Mac (newest two copies).
+* **Knowledge Exports**: Export Story or Briefing in the File menu, and the Export menu in the toolbar, write cached publisher text, cited passages and your private highlights and notes only to the file you choose. Exporting does not fetch pages. Add to Apple Notes… sends the export, including private notes, to the native Notes sharing service. It may add the note directly using your Notes account and sync settings. Files from Export as Markdown… and Compile to EPUB… can sync through the destination folder you select.
 * **No Account Required**: The application does not require user registration, account creation, or cloud authentication.
 
 ---
-
-## Knowledge exports
-
-Export Reading / Briefing writes cached publisher text, cited passages and your private highlights and notes only to the file you choose. Exporting does not fetch pages. Add to Apple Notes opens the native sharing service; saving there follows your Notes account and sync settings. Exported files can sync through the destination folder you select.
 
 ## 2. Zero Telemetry & Network Egress Boundary
 

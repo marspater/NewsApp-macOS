@@ -132,7 +132,7 @@ private actor KnowledgeExportEncoder {
         return result
     }
 
-    private static func shareToNotes(_ documents: [KnowledgeExportDocument], title: String) throws {
+    static func shareToNotes(_ documents: [KnowledgeExportDocument], title: String) throws {
         let service = NSSharingService(named: NSSharingService.Name("com.apple.Notes.SharingExtension"))
         let items: [Any] = [richText(documents, title: title)]
         guard let service, service.canPerform(withItems: items) else { throw CocoaError(.featureUnsupported) }
