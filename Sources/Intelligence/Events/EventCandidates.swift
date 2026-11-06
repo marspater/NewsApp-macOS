@@ -103,10 +103,11 @@ struct EventCandidate: Hashable, Sendable {
     let eventID: String?
 }
 
-/// A candidate row's language for one clustering pass (#572), kept with the text it was read from so an edit that
-/// lands while the pass is suspended is never answered with the old language.
+/// A candidate row's language for one clustering pass (#572), kept with a hash of the text it was read from so an edit
+/// that lands while the pass is suspended is never answered with the old language, and a pass over a large library
+/// retains no row text. The hash only lives for the pass, so its per-process seed does not matter.
 struct EventCandidateLanguage: Equatable, Sendable {
-    var text: String
+    var textHash: Int
     var language: String?
 }
 
@@ -114,6 +115,10 @@ enum EventCandidateFinder {
     /// The text a row's language is recognized from.
     static func languageText(title: String, description: String) -> String {
         title + "\n" + String(description.prefix(600))
+    }
+
+    private static func textHash(title: String, description: String) -> Int {
+        languageText(title: title, description: description).hashValue
     }
 
     /// Candidates for one article. Reads at most twice `policy.limit` rows; never scans the archive.
@@ -152,27 +157,29 @@ enum EventCandidateFinder {
             try Task.checkCancellation()
             // Different languages are not compared directly; unknown languages stay eligible.
             if let language = key.language {
-                let text = languageText(title: row.title, description: row.description)
-                if languages[row.id]?.text != text {
+                let hash = textHash(title: row.title, description: row.description)
+                if languages[row.id]?.textHash != hash {
                     // Stored signals come in batches of `policy.limit` rows, the next only when the rows so far did
                     // not fill the limit, and every hit is kept for the later probes of the pass.
                     if index >= batchEnd {
                         batchEnd = min(index + policy.limit, rows.count)
                         let unread = rows[index..<batchEnd].filter {
-                            languages[$0.id]?.text != languageText(title: $0.title, description: $0.description)
+                            languages[$0.id]?.textHash != textHash(title: $0.title, description: $0.description)
                         }
                         let stored = try await database.fetchArticleFeatures(
                             articleIDs: unread.map(\.id), version: EventFeatures.storageVersion)
                         for other in unread {
                             guard let signals = stored[other.id] else { continue }
                             languages[other.id] = EventCandidateLanguage(
-                                text: languageText(title: other.title, description: other.description),
+                                textHash: textHash(title: other.title, description: other.description),
                                 language: signals.language)
                         }
                     }
-                    if languages[row.id]?.text != text {
+                    if languages[row.id]?.textHash != hash {
                         languages[row.id] = EventCandidateLanguage(
-                            text: text, language: EventMatchKey.language(of: text, using: recognizer))
+                            textHash: hash,
+                            language: EventMatchKey.language(
+                                of: languageText(title: row.title, description: row.description), using: recognizer))
                     }
                 }
                 if let other = languages[row.id]?.language, other != language { continue }
