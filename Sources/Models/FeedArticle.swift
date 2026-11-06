@@ -151,6 +151,17 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         rankedCardImages(in: articles).map(\.url)
     }
 
+    /// The story's lead first, then its other usable reader candidates and the feed image, distinct, for a download
+    /// that falls back when the lead is not an image: a page URL recorded as the lead (#1010) still leaves a photo.
+    static func attachmentImages(for article: FeedArticle) -> [URL] {
+        var urls = rankedCardImages(in: [article]).map(\.url)
+        let others = (article.readerDocument?.images ?? []).map(\.url) + [article.imageUrl].compactMap { $0 }
+        for raw in others where ReaderImageCandidate.usable(url: raw) {
+            if let url = URL(string: raw), !urls.contains(url) { urls.append(url) }
+        }
+        return urls
+    }
+
     /// Distinct usable member leads ranked as `bestCardImage` chooses, each with the article it came from.
     static func rankedCardImages(in articles: [FeedArticle]) -> [(url: URL, article: FeedArticle)] {
         struct Candidate {
