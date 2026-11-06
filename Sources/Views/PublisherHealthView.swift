@@ -125,7 +125,7 @@ private struct PublisherHealthTable: View {
                     .help(row.id)
                     .accessibilityHint(row.id)
             }
-            .width(min: AppLayout.publisherHealthFeedColumnMinWidth)
+            .width(min: AppLayout.publisherHealthFeedColumnMinWidth, ideal: AppLayout.publisherHealthFeedColumnMinWidth)
             TableColumn("Success", value: \.successSortKey) { row in
                 metric(row.successText, spoken: row.successSpoken)
             }
