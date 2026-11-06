@@ -21634,6 +21634,44 @@ struct NewsTests {
         var fetched = 0
         for item in five { fetched += await log.count(item.link) }
         assertEqual(fetched, OverviewGenerationCoordinator.maxEvidenceFetches, "Four representatives at most")
+
+        // Clear Article Cache while the warm-up's fetches are in flight: nothing lands afterwards (#982). Without the
+        // coordinator's reset the store's generation refuses the write; with it the fetches are cancelled as well.
+        func enrichmentRows(_ id: String) async throws -> Int {
+            let rows = try await database.eventRows(
+                "SELECT count(*) FROM article_enrichment WHERE article_id = ?;", [.text(id)])
+            return rows.first?.first.flatMap { $0.flatMap { Int($0) } } ?? -1
+        }
+        for (wired, names) in [(false, ("ev-x1", "ev-x2")), (true, ("ev-y1", "ev-y2"))] {
+            let (x, y) = (article(names.0, "Publisher \(names.0)"), article(names.1, "Publisher \(names.1)"))
+            _ = try await database.upsertArticles([x, y])
+            let hold = OpenGate()
+            for item in [x, y] { await pages.set(item.link, success(page(item.source)), gate: hold) }
+            let warm = coordinator()
+            store.analysisClearedHandler = nil
+            if wired { store.analysisClearedHandler = { await warm.analysisCleared() } }
+            let warming = Task { await warm.articlesWithPublisherText([x, y], excluding: [], store: store) }
+            while await hold.arrivals < 2 { await Task.yield() }
+            try await store.clearArticleCache()
+            await hold.open()
+            _ = await warming.value
+            while !(await log.isIdle) { await Task.yield() }
+            try await Task.sleep(for: .milliseconds(100))
+            for item in [x, y] {
+                let row = try await stored(item.id)
+                assertEqual(row?.fullContent, nil, "A body fetched before Clear Article Cache is not written back")
+                assertEqual(row?.readerDocument, nil, "No reader document comes back after the clear")
+                assertEqual(try await enrichmentRows(item.id), 0, "No enrichment row comes back after the clear")
+            }
+            if wired {
+                // A fetch that starts after the clear runs under the new generation and stores.
+                _ = await warm.articlesWithPublisherText([x, y], excluding: [], store: store)
+                assertEqual(
+                    try await stored(x.id)?.fullContent, page(x.source), "A warm-up after the clear stores its text")
+                assertEqual(try await enrichmentRows(x.id), 1, "and its enrichment row")
+            }
+        }
+        store.analysisClearedHandler = nil
     }
 
     /// Every framework error type reaches one of the three outcomes (#508); the macOS 27 types exist only in that SDK.
