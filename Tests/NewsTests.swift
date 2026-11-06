@@ -7209,7 +7209,7 @@ struct NewsTests {
                 "\(format): clock skew keeps the date")
         }
         let futureCard = await MainActor.run { stored.first { $0.title == "RSS future" }?.cardDateText() }
-        assertEqual(futureCard, "Date unavailable", "A future date never reads Just now")
+        assertTrue(futureCard?.hasPrefix("Added ") == true, "A future date shows when the story was added (#1037)")
         try await db.upsertArticles(articles, now: now.addingTimeInterval(60))
         let refreshed = try await db.fetchArticles()
         assertEqual(
