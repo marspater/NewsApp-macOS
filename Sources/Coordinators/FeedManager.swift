@@ -42,6 +42,14 @@ class FeedManager: NSObject, ObservableObject {
     @Published var isAnyFeedLoading: Bool = false
     /// Operational health per subscription, refreshed after every refresh and when a view asks.
     @Published private(set) var feedHealth: [String: FeedHealth] = [:]
+    /// The last finished clustering pass and image lookup of this launch, for the diagnostics export (#1006).
+    struct ClusteringPass: Sendable {
+        let report: EventClusteringReport
+        let seconds: Double
+        let finishedAt: Date
+    }
+    private(set) var lastClusteringPass: ClusteringPass?
+    private(set) var lastImageLookup: StoryCurator.Report?
 
     let appSettings: AppSettings
     let articleStore: ArticleStore
@@ -49,7 +57,7 @@ class FeedManager: NSObject, ObservableObject {
     typealias FeedBatch = [FeedFetchResult]
     private let fetchBatch: @Sendable ([String], Bool) async -> FeedBatch
     private let notifyBatch: @MainActor ([FeedArticle], NotificationDelivery) async -> Void
-    private let enrichmentQueue: EnrichmentQueue
+    let enrichmentQueue: EnrichmentQueue
     private let allowsBackgroundWork: @MainActor () -> Bool
     private let imageFinder: StoryImageFinder
     private var isStopped = false
@@ -189,13 +197,18 @@ class FeedManager: NSObject, ObservableObject {
     func addFeedAndCollect(url: String) async -> String? {
         guard let added = subscribe(url: url) else { return nil }
         await fetchFeedsAsync()
-        // Another subscription change may have cancelled that run and started a replacement; wait for it too.
+        await waitForReplacementRefreshes()
+        return added
+    }
+
+    /// Another subscription change may have cancelled the refresh a caller waited for and started a replacement;
+    /// waits for that too.
+    private func waitForReplacementRefreshes() async {
         for _ in 0..<5 {
             await Task.yield()
             guard let replacement = refreshTask else { break }
             _ = await replacement.value
         }
-        return added
     }
 
     private func subscribe(url: String) -> String? {
@@ -556,6 +569,36 @@ class FeedManager: NSObject, ObservableObject {
         await notifyAndEnrich(newArticles)
     }
 
+    /// What Check for Updates found for an open story (#992).
+    enum StoryUpdateResult: Equatable, Sendable {
+        /// Nothing can be stored; the reason, as `refreshBlockedReason` gives it.
+        case refused(String)
+        /// Reports that joined the story during the check, subscriptions whose last fetch failed, and whether Low
+        /// Power Mode or thermal pressure held back part of the matching.
+        case checked(newReports: Int, failedFeeds: Int, deferredMatching: Bool)
+    }
+
+    /// Refreshes the subscriptions (or waits for the refresh already running), waits for clustering and compares the
+    /// story's reports before and after (#992). Only reports that joined count: a regrouping that removes one adds none.
+    func checkForUpdates(storyOf articleID: String) async -> StoryUpdateResult {
+        if let reason = await refreshBlockedReason() { return .refused(reason) }
+        func members() async -> Set<String> {
+            let summary = (try? await articleStore.eventFeedSummaries(for: [articleID]))?.first
+            return Set(summary?.members.map(\.articleID) ?? [articleID])
+        }
+        let before = await members()
+        await fetchFeedsAsync()
+        await waitForReplacementRefreshes()
+        // A refresh that was already running returns before its own clustering starts; ask for one more pass.
+        clusterEventsInBackground()
+        await waitForEventClustering()
+        let after = await members()
+        let subscribed = Set(appSettings.effectiveFeedURLs)
+        let failed = feedStatuses.filter { subscribed.contains($0.key) && $0.value.errorMessage != nil }.count
+        return .checked(
+            newReports: after.subtracting(before).count, failedFeeds: failed, deferredMatching: !allowsBackgroundWork())
+    }
+
     /// Starts the notification pass for the new stories of a finished refresh and enriches in the background.
     private func notifyAndEnrich(_ newArticles: [FeedArticle]) async {
         let eligible: Set<String>
@@ -780,9 +823,11 @@ class FeedManager: NSObject, ObservableObject {
             repeat {
                 self?.needsClusteringPass = false
                 let allowsEnergy = self?.allowsBackgroundWork() ?? true
-                let work = Task.detached(priority: .utility) { () throws -> Bool in
-                    let clustering = try await EventClusterer.run(in: database, allowsEnergy: allowsEnergy)
-                    return !clustering.changedEvents.isEmpty
+                let work = Task.detached(priority: .utility) { () throws -> ClusteringPass in
+                    let started = ProcessInfo.processInfo.systemUptime
+                    let report = try await EventClusterer.run(in: database, allowsEnergy: allowsEnergy)
+                    return ClusteringPass(
+                        report: report, seconds: ProcessInfo.processInfo.systemUptime - started, finishedAt: Date())
                 }
                 let result = await withTaskCancellationHandler {
                     await work.result
@@ -791,8 +836,9 @@ class FeedManager: NSObject, ObservableObject {
                 }
                 guard let self, self.clusteringRunID == runID, !Task.isCancelled else { return }
                 switch result {
-                case .success(let changed):
-                    if changed { self.articleStore.noteEventsChanged() }
+                case .success(let pass):
+                    self.lastClusteringPass = pass
+                    if !pass.report.changedEvents.isEmpty { self.articleStore.noteEventsChanged() }
                 case .failure(let error):
                     if !(error is CancellationError) {
                         self.logger.error("Event clustering failed: \(error.localizedDescription)")
@@ -842,6 +888,7 @@ class FeedManager: NSObject, ObservableObject {
             guard let self, !Task.isCancelled else { return }
             switch result {
             case .success(let report):
+                self.lastImageLookup = report
                 if report.changed { self.articleStore.noteEventsChanged() }
             case .failure(let error):
                 if !(error is CancellationError) {

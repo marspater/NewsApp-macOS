@@ -31,26 +31,35 @@ struct IPAddressValidator: Sendable {
         _ rawHost: String,
         resolver: (String) -> ValidationResult = resolveAndValidateHost
     ) -> ValidationResult {
+        let (host, guarded) = hostnameGuard(rawHost)
+        return guarded ?? resolver(host)
+    }
+
+    /// The checks that need no DNS: the normalized host, and its verdict when the name or literal address decides it.
+    /// Nil means the host is a name whose addresses decide; the gateway and the preflight resolve it (#945).
+    static func hostnameGuard(_ rawHost: String) -> (host: String, result: ValidationResult?) {
         var host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if host.hasSuffix(".") { host.removeLast() }
 
-        guard !host.contains("%"), !host.contains("\0") else { return .blocked(reason: "Scoped or malformed address") }
+        guard !host.contains("%"), !host.contains("\0") else {
+            return (host, .blocked(reason: "Scoped or malformed address"))
+        }
 
         // 1. Literal hostname checks
         if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local")
             || host.hasSuffix(".internal")
         {
-            return .blocked(reason: "Localhost or internal domain name")
+            return (host, .blocked(reason: "Localhost or internal domain name"))
         }
 
         // Single-label names may implicitly bypass native proxy routing.
         guard host.contains(".") || host.contains(":") else {
-            return .blocked(reason: "Single-label network host")
+            return (host, .blocked(reason: "Single-label network host"))
         }
 
         // 2. Direct IP address check (if user provided literal IP)
         if let directBlockReason = checkLiteralIP(host) {
-            return .blocked(reason: directBlockReason)
+            return (host, .blocked(reason: directBlockReason))
         }
 
         // 3. A public literal is its own answer. Resolving it with AI_ADDRCONFIG would refuse it whenever
@@ -59,11 +68,11 @@ struct IPAddressValidator: Sendable {
         var ipv4 = in_addr()
         var ipv6 = in6_addr()
         if inet_pton(AF_INET, literal, &ipv4) == 1 || inet_pton(AF_INET6, literal, &ipv6) == 1 {
-            return .allowed(ips: [literal])
+            return (host, .allowed(ips: [literal]))
         }
 
-        // 4. DNS Resolution check (resolves host and validates all resolved IP addresses)
-        return resolver(host)
+        // 4. The name's addresses decide.
+        return (host, nil)
     }
 
     /// Checks whether an individual literal IP string (IPv4 or IPv6) is forbidden.
@@ -103,8 +112,26 @@ struct IPAddressValidator: Sendable {
         }
     }
 
+    /// The numeric text of an IPv4 or IPv6 socket address; nil for any other family.
+    static func addressString(_ sockaddrPtr: UnsafePointer<sockaddr>) -> String? {
+        var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+        switch sockaddrPtr.pointee.sa_family {
+        case UInt8(AF_INET):
+            var addr = sockaddrPtr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr }
+            inet_ntop(AF_INET, &addr, &buffer, socklen_t(INET_ADDRSTRLEN))
+        case UInt8(AF_INET6):
+            var addr = sockaddrPtr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee.sin6_addr }
+            inet_ntop(AF_INET6, &addr, &buffer, socklen_t(INET6_ADDRSTRLEN))
+        default:
+            return nil
+        }
+        return buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+    }
+
     // MARK: - DNS Resolution Engine
 
+    /// Blocking system resolution for the synchronous `validateHost` (tests, and FeedManager's test-only helper). The
+    /// gateway and the preflight resolve through `DNSLookup`, which is asynchronous and cancellable (#945).
     private static func resolveAndValidateHost(_ host: String) -> ValidationResult {
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
@@ -124,26 +151,8 @@ struct IPAddressValidator: Sendable {
 
         while let ptr = current {
             if let aiAddr = ptr.pointee.ai_addr {
-                let family = ptr.pointee.ai_family
-                var ipBuffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
-
-                if family == AF_INET {
-                    let sin = aiAddr.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee }
-                    if let reason = isBlockedIPv4(sin.sin_addr) {
-                        return .blocked(reason: reason)
-                    }
-                    var addr = sin.sin_addr
-                    inet_ntop(AF_INET, &addr, &ipBuffer, socklen_t(INET_ADDRSTRLEN))
-                    resolvedIPs.append(ipBuffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) })
-                } else if family == AF_INET6 {
-                    let sin6 = aiAddr.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee }
-                    if let reason = isBlockedIPv6(sin6.sin6_addr) {
-                        return .blocked(reason: reason)
-                    }
-                    var addr6 = sin6.sin6_addr
-                    inet_ntop(AF_INET6, &addr6, &ipBuffer, socklen_t(INET6_ADDRSTRLEN))
-                    resolvedIPs.append(ipBuffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) })
-                }
+                if let reason = validateSocketAddress(aiAddr) { return .blocked(reason: reason) }
+                if let text = addressString(aiAddr) { resolvedIPs.append(text) }
             }
             current = ptr.pointee.ai_next
         }

@@ -60,7 +60,7 @@ NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional public-publisher network checks
 swift build --target News         # SwiftPM compiler check; not an app bundle
 ```
 
-`make run` and the Codex Run action use the app-bundle launcher. `TARGET_MACOS` defaults to `15.0`; SDK selection follows the selected Xcode. Both build scripts use ad-hoc signing for verification. Developer ID signing, notarization and Intel builds are outside the current development scope; the dormant notarization script is not part of the build workflow.
+`make run` and the Codex Run action use the app-bundle launcher. That development bundle (`com.marspater.news.dev`) adds Help › Show Log (⌥⌘L), a live view of this launch's log with level, category and text filters; release builds have no Log window. `TARGET_MACOS` defaults to `15.0`; SDK selection follows the selected Xcode. Both build scripts use ad-hoc signing for verification. Developer ID signing, notarization and Intel builds are outside the current development scope; the dormant notarization script is not part of the build workflow.
 
 CI builds and verifies the bundle on [GitHub’s `xcode-27` Apple-silicon runner](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md) for the required SDK, and runs the test suite on the [`macos-26` runner](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md) with Xcode 26.6 so macOS 26 is covered at runtime; CircleCI and Codemagic test on macOS 27 with Xcode 27. Uploaded bundles are development verification artifacts, not notarized releases.
 

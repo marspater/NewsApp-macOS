@@ -123,7 +123,7 @@ sequenceDiagram
 
 | Area | Owns |
 |---|---|
-| `Sources/App/` | `NewsApp` lifecycle, scenes, commands, notification routing · `AppContainer` DI · `AppSettings` defaults, feed URL normalization, mute rules storage · `ThemeManager` · `UpdateChecker` · `NewsSignposts` |
+| `Sources/App/` | `NewsApp` lifecycle, scenes, commands, notification routing · `AppContainer` DI · `AppSettings` defaults, feed URL normalization, mute rules storage · `ThemeManager` · `UpdateChecker` · `NewsSignposts` log categories and signposts · `DiagnosticsExport` (Help › Export Diagnostics: a redacted zip of this launch's log, combined and per category, and one file per subsystem's state, read through each owner's own API and assembled into reports by `DiagnosticsExport` off the main actor (#1006); its `logLines(since:)` also feeds the development-only Log window, `Sources/Views/LogWindowView.swift`, shown when the bundle id is `com.marspater.news.dev`) |
 | `Sources/Views/` | `MainView` coordinator · `SidebarView`, `ArticleListView`, `ArticleCardView`, `EventCardView`, `FeedHealthLine` · `ArticleDetailView` + `ReaderSupportViews`, `ArticleWebView`, `WebPreviewPolicy` · `EventOverviewReaderView` · `TensionIndexView` · `ArticleRemoteImage` · `FeedCatalogView` · `SettingsView` · `StoryBanner` (app-drawn notification banner) · `DesignSystem` |
 | `Sources/Storage/` | `DatabaseEngine` schema, WAL/FTS5 · `DatabaseEngine+Events` events, overviews, reading state, embeddings · `ArticleStore` · `MigrationCoordinator` · `ReadManager`, `SavedStoriesManager` · `CacheManager` (HTTP cache, separate from user state) |
 | `Sources/Models/` | `FeedArticle`, `ArticleIdentity` · `FeedFetchState` validators and backoff · `FeedCatalog` · `EventOverview`, `EventFeed` · `FeedAdvisory`, `ArchiveSearchToken` · `MuteRules` · `FeedError` |
@@ -234,13 +234,13 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready. Clustering runs first, so the reports of one event notify once, through the report that scores highest. Full mode sorts each story or event into a priority, starred or normal lane with its own limits, recorded in side tables so they hold across refreshes and relaunches (`docs/notifications.md`).
 
-- All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it.
+- All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it. Names resolve through `ProxyResolver` over `DNSLookup` (dns_sd, asynchronous and cancellable, a 5 s deadline per lookup, the configured address families with a 100 ms grace for the second to end) in the preflight and in the gateway; the redirect delegate applies only the DNS-free hostname guard. The gateway connects with Happy Eyeballs (`SOCKSTunnel`: interleaved families, 250 ms attempt delay, at most three attempts in flight) to validated numeric addresses (#945).
 
 - Feed XML: depth 64, 500 items, entity declarations rejected (64 KiB prolog scan + callbacks), FeedKit gets reserialized DTD-free items ≤512 KiB and never fetches URLs. JSON feeds ≤10 MiB, trimmed to 500 items.
 
 - OPML import (#928): ≤5 MB, full-input entity and DTD attribute-list scans (including UTF-16/32), parser callbacks, depth 64 and ≤20,000 outlines. Entity and attribute-list declarations are rejected before Foundation can expand or supply DTD defaults. A refused file names the guard in the alert and changes no subscription or section.
 
-- Image requests honor HTTP freshness/no-store after destination validation; decoded images live in a session-only `NSCache`.
+- Image requests honor HTTP freshness/no-store after destination validation; decoded images live in session-only `NSCache`s: cards at 840 px (128 MB, 90 images), the reader, lead card, Briefing hero and banners at 1600 px (64 MB, 24 images). A shared decode is stored once it finishes, even when every card waiting for it has gone; the last waiter cancelling stops an unfinished download. Lists prefetch each card's own image (`FeedEntry.cardImageURL`) for the first 30 cards and a 30-card window around the scroll position (#591).
 
 </details>
 
