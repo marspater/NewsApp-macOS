@@ -54,7 +54,7 @@ Metrics that need the future model/vector implementations are explicitly emitted
 1. **Phase 0:** build, run and review this seeded database and evaluation matrix.
 2. **Phase 1:** only after Phase 0, implement FTS5/semantic novelty, entity anchoring, cached sentence embeddings and extractive vDSP selection.
 3. **Phase 2:** implement MACD using publication timestamps, distinct independent wire groups and an empirically selected volume floor.
-4. **Phase 3:** implement MMR using source Elo, momentum and Phase 4 preference signals, with continuous temporal decay.
+4. **Phase 3:** implement MMR using source Elo, momentum and a neutral/default preference signal, with continuous temporal decay; Phase 4 later supplies the EWMA profile.
 5. **Phase 4:** implement impression-backed rewards, EWMA interest vectors and a fixed 15% adjacent-topic Discovery allocation; defer UCB1 until impression volume is statistically sufficient.
 6. **Deferred/rejected:** keep the temporal knowledge graph until Entity Dossiers; do not introduce DPP, Kleinberg, NLI or generative model dependencies.
 
