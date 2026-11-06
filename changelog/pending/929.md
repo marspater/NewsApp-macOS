@@ -1,0 +1,1 @@
+- Export Diagnostics adds `gateway-timing.txt`: DNS wait, connect and first-byte times for this launch, by subscription host, with all other hosts combined and unnamed.
