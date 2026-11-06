@@ -603,13 +603,15 @@ final class NotificationService: Sendable {
 
     private func downloadNotificationAttachment(from url: URL) async -> UNNotificationAttachment? {
         do {
-            let (data, _) = try await SecureHTTPClient.shared.fetchImage(from: url, allowHTTP: false)
+            let (data, response) = try await SecureHTTPClient.shared.fetchImage(from: url, allowHTTP: false)
             try Task.checkCancellation()
-            return try Self.makeImageAttachment(data: data)
+            return try Self.makeImageAttachment(data: data, contentType: response.mimeType)
         } catch {
-            let error = error as NSError
-            logger.error(
-                "Notification image attachment failed: domain=\(error.domain, privacy: .public) code=\(error.code)")
+            // Stage, content type and byte count are public; the URL is not logged (#1010). Cancelled work is silent.
+            if !ImageLoadFailure.isCancellation(error) {
+                logger.error(
+                    "Notification image attachment failed: \(ImageLoadFailure.describe(error), privacy: .public)")
+            }
             return nil
         }
     }

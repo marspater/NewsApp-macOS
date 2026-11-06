@@ -220,11 +220,25 @@ final class StoryBannerPresenter {
     /// The story photo through the reader's image cache, cropped to the banner's trailing side and dissolved toward
     /// the text at the screen's scale; nil without a photo or when it cannot load.
     static func photo(at url: URL?, scale: CGFloat) async -> CGImage? {
-        guard let url,
-            let image = try? await DecodedImageCache.load(
+        guard let url else { return nil }
+        let image: CGImage
+        do {
+            image = try await DecodedImageCache.load(
                 url, using: { try await SecureHTTPClient.shared.fetchReaderImage(from: $0, maxPixelSize: $1) })
-        else { return nil }
-        return await Task.detached(priority: .userInitiated) { bannerPhoto(image, scale: scale) }.value
+        } catch {
+            // A dismissed banner cancels its photo; anything else names the stage, type and bytes, never the URL.
+            if !ImageLoadFailure.isCancellation(error) {
+                log.error("banner photo failed: \(ImageLoadFailure.describe(error), privacy: .public)")
+            }
+            return nil
+        }
+        let photo = await Task.detached(priority: .userInitiated) { bannerPhoto(image, scale: scale) }.value
+        if photo == nil {
+            log.error(
+                "banner photo failed: stage=crop size=\(image.width, privacy: .public)x\(image.height, privacy: .public)"
+            )
+        }
+        return photo
     }
 
     nonisolated static func bannerPhoto(_ image: CGImage, scale: CGFloat) -> CGImage? {

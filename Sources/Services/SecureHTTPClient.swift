@@ -16,6 +16,34 @@ import Foundation
 import ImageIO
 import Network
 
+/// An image that did not load, named by the stage that refused it and what the host sent, so `log show` can tell a
+/// response that is not the image from bytes ImageIO or the PNG encoder rejects (#1010). It never carries the URL.
+struct ImageLoadFailure: Error, CustomStringConvertible {
+    enum Stage: String, Sendable { case fetch, decode, crop, encode, size, attach }
+    let stage: Stage
+    var contentType: String?
+    var bytes: Int?
+    var underlying: NSError?
+
+    var description: String {
+        let count = bytes.map(String.init) ?? "unknown"
+        var text = "stage=\(stage.rawValue) type=\(contentType ?? "unknown") bytes=\(count)"
+        if let underlying { text += " domain=\(underlying.domain) code=\(underlying.code)" }
+        return text
+    }
+
+    /// The failure as a log line: anything that is not an `ImageLoadFailure` came from the request itself, whose
+    /// own -1016 (an undecodable content encoding) would otherwise read like a decode failure.
+    static func describe(_ error: Error) -> String {
+        (error as? ImageLoadFailure ?? ImageLoadFailure(stage: .fetch, underlying: error as NSError)).description
+    }
+
+    /// The task's own cancellation or URLSession's (a cache clear, a dismissed banner): not a failure to log.
+    static func isCancellation(_ error: Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
+    }
+}
+
 /// Centralized, hardened HTTP client for all remote network ingestion.
 /// Enforces strict scheme/port rules, DNS resolution validation, socket-level public-address enforcement,
 /// redirect validation with HTTPS downgrade protection, and progressive streaming response bounds.
@@ -117,9 +145,12 @@ actor SecureHTTPClient {
     /// never holds up other cards or feed requests. `maxPixelSize` bounds the longer side: the reader's 1600 by default,
     /// less for cards (#591).
     @concurrent nonisolated func fetchReaderImage(from url: URL, maxPixelSize: Int = 1600) async throws -> CGImage {
-        let (data, _) = try await fetchImage(from: url)
+        let (data, response) = try await fetchImage(from: url)
         try Task.checkCancellation()
-        return try Self.decodeReaderImage(data, maxPixelSize: maxPixelSize)
+        do { return try Self.decodeReaderImage(data, maxPixelSize: maxPixelSize) } catch {
+            throw ImageLoadFailure(
+                stage: .decode, contentType: response.mimeType, bytes: data.count, underlying: error as NSError)
+        }
     }
 
     nonisolated static func decodeReaderImage(_ data: Data, maxPixelSize: Int = 1600) throws -> CGImage {
