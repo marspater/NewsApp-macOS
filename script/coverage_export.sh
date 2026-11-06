@@ -6,7 +6,7 @@ PROFILE_DIR="$1"
 RUNNER="$2"
 LCOV_PATH="$3"
 PROFILES=("$PROFILE_DIR"/*.profraw)
-if [ ! -e "${PROFILES[0]}" ]; then
+if [[ ! -e "${PROFILES[0]}" ]]; then
     echo "Coverage export failed: the runner wrote no coverage profile. Was it built with -profile-generate?" >&2
     exit 1
 fi

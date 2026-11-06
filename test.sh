@@ -20,11 +20,20 @@ python3 script/training/pretrain_pairs.py --self-check
 
 # Content key of everything the Swift runner compiles or reads: the working tree (tracked and new files) without
 # docs, Markdown other than PRIVACY.md and the Python tooling checked above, plus toolchain, OS and NEWS_* settings.
+# A coverage report written inside the tree is an output: it leaves the key, by its path relative to the tree so
+# an absolute path is excluded too and nothing else is. A tracked file is never an output.
 KEY_EXCLUDES=()
-case "${NEWS_TEST_COVERAGE:-}" in
-    "" | /*) ;;
-    *) KEY_EXCLUDES=(":(exclude)$NEWS_TEST_COVERAGE") ;;
-esac
+if [[ -n "${NEWS_TEST_COVERAGE:-}" ]]; then
+    REPORT_PATH=$(python3 -c 'import os, sys; print(os.path.relpath(os.path.abspath(sys.argv[1]), sys.argv[2]))' \
+        "$NEWS_TEST_COVERAGE" "$(git rev-parse --show-toplevel)")
+    if [[ "$REPORT_PATH" != ../* ]]; then
+        if git ls-files --error-unmatch -- "$REPORT_PATH" > /dev/null 2>&1; then
+            echo "❌ NEWS_TEST_COVERAGE names a tracked file ($REPORT_PATH); write the report elsewhere." >&2
+            exit 2
+        fi
+        KEY_EXCLUDES=(":(exclude)$REPORT_PATH")
+    fi
+fi
 runner_inputs_key() {
     local index
     index=$(mktemp "${TMPDIR:-/tmp}/news-test-index.XXXXXX")
@@ -51,13 +60,17 @@ if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/d
     PASS_STAMP="${TMPDIR:-/tmp}/news-test-passes/$KEY"
     # A coverage run skips only with the report these inputs produced (kept beside the stamp); a run whose export
     # failed, or whose report came from other inputs, runs again.
-    if [ -f "$PASS_STAMP" ] && { [ -z "${NEWS_TEST_COVERAGE:-}" ] || [ -f "$PASS_STAMP.lcov" ]; }; then
-        if [ -n "${NEWS_TEST_COVERAGE:-}" ]; then
-            mkdir -p "$(dirname "$NEWS_TEST_COVERAGE")" && cp "$PASS_STAMP.lcov" "$NEWS_TEST_COVERAGE"
+    if [[ -f "$PASS_STAMP" ]]; then
+        if [[ -z "${NEWS_TEST_COVERAGE:-}" ]]; then
+            echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
+            exit 0
+        elif [[ -f "$PASS_STAMP.lcov" ]] && mkdir -p "$(dirname "$NEWS_TEST_COVERAGE")" \
+            && cp "$PASS_STAMP.lcov" "$NEWS_TEST_COVERAGE"; then
             echo "Coverage written to $NEWS_TEST_COVERAGE (from the earlier run with these inputs)"
+            echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
+            exit 0
         fi
-        echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
-        exit 0
+        # No report for these inputs, or it could not be copied: the run produces it.
     fi
 fi
 
@@ -182,7 +195,14 @@ else
         # The tests are the gate and have passed; a failed export leaves no partial report and does not fail the run.
         if script/coverage_export.sh "$LOGS/profiles" "$RUNNER" "$NEWS_TEST_COVERAGE"; then
             echo "Coverage written to $NEWS_TEST_COVERAGE"
-            if [ -n "$PASS_STAMP" ]; then mkdir -p "$(dirname "$PASS_STAMP")" && cp "$NEWS_TEST_COVERAGE" "$PASS_STAMP.lcov"; fi
+            # The copy beside the stamp lands whole or not at all; without it the next run exports again.
+            if [[ -n "$PASS_STAMP" ]] && ! {
+                mkdir -p "$(dirname "$PASS_STAMP")" && cp "$NEWS_TEST_COVERAGE" "$PASS_STAMP.lcov.tmp" \
+                    && mv -f "$PASS_STAMP.lcov.tmp" "$PASS_STAMP.lcov"
+            }; then
+                rm -f "$PASS_STAMP.lcov.tmp"
+                echo "⚠️ Could not keep the coverage report beside the pass stamp; the next run exports it again." >&2
+            fi
         else
             rm -f "$NEWS_TEST_COVERAGE"
             echo "⚠️ Coverage export failed; the tests passed." >&2
