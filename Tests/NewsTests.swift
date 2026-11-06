@@ -6077,7 +6077,7 @@ struct NewsTests {
             let sheetNew = SmartBinderSheet()
             let hostNew = NSHostingView(rootView: sheetNew.environmentObject(settings))
             window.contentView = hostNew
-            window.makeKeyAndOrderFront(nil)
+            // Laid out in a window that is never ordered on screen: the headless suite opens none (#991).
             hostNew.layoutSubtreeIfNeeded()
             _ = hostNew.fittingSize
 

@@ -138,6 +138,10 @@ final class StoryBannerPresenter {
     /// How long a banner stays while the pointer is not over it.
     static let lifetime: Duration = .seconds(6)
 
+    /// Tests set this so the presenter's logic runs with nothing ordered on screen: any News window that can become
+    /// main counts as open whether or not it is visible, and the panel is laid out but never ordered front (#991).
+    var isHeadless = false
+
     private var panel: NSPanel?
     private var host: FirstClickHostingView<StoryBannerView>?
     /// The banner on screen, its photo once loaded, and whether the pointer is over it.
@@ -183,7 +187,7 @@ final class StoryBannerPresenter {
     /// Shows the banner when a News window is open on screen, and says whether it did; the caller then files the
     /// notification without a system banner. The text shows at once and the photo joins when it loads.
     func present(_ banner: StoryBanner) -> Bool {
-        let window = Self.openWindow()
+        let window = isHeadless ? NSApp?.windows.first { $0.canBecomeMain } : Self.openWindow()
         Self.log.notice(
             "present \(banner.id, privacy: .private(mask: .hash)): active=\(NSApp?.isActive ?? false, privacy: .public) window=\(window != nil, privacy: .public)"
         )
@@ -291,7 +295,7 @@ final class StoryBannerPresenter {
         let slide = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : AppLayout.bannerMargin * 2
         panel.setFrame(frame.offsetBy(dx: slide, dy: 0), display: false)
         panel.alphaValue = 0
-        panel.orderFrontRegardless()
+        if !isHeadless { panel.orderFrontRegardless() }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
             panel.animator().setFrame(frame, display: true)
