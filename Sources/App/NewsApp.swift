@@ -151,7 +151,6 @@ struct NewsApp: App {
         .commands {
             SidebarCommands()
             KeyboardShortcutsCommands()
-            LogWindowCommands()
             CommandGroup(after: .textEditing) {
                 Button("Search Archive") { archiveSearch?.perform() }
                     .keyboardShortcut("f", modifiers: .command)
@@ -328,6 +327,9 @@ struct NewsApp: App {
                 .preferredColorScheme(themeManager.appearance.colorScheme)
                 .modifier(SystemSettingsOverrideModifier())
         }
+        // The commands builder takes ten entries under Xcode 26's SDK, which CI compiles with; the Log window's
+        // commands go in a second call rather than an eleventh entry.
+        .commands { LogWindowCommands() }
         .windowResizability(.contentSize)
 
         // Development builds only (#1005): Help › Show Log opens it; it has no Window menu item and is not restored.
