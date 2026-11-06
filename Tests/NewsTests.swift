@@ -4289,6 +4289,22 @@ struct NewsTests {
         assertEqual(first.pubDate, DateParser.unknownDate, "Undated XML stories do not become breaking news")
         assertEqual(first.publicationDateText, "Date unavailable", "Unknown dates have an honest display label")
         assertEqual(first.cardDateText(), "Date unavailable", "Cards keep the honest unknown-date label")
+        assertEqual(first.dateAccessibilityText, "publication date unavailable", "No date, no claim of publication")
+        // An undated story with an ingestion time shows when it was added (#1037).
+        var storedLate = first
+        storedLate.queryOrderValue = Date().addingTimeInterval(-2 * 3600).timeIntervalSince1970
+        let addedText = storedLate.cardDateText()
+        assertTrue(
+            addedText.hasPrefix("Added ") && addedText.contains("2 hr"),
+            "A card shows when an undated story was added (\(addedText))")
+        assertTrue(storedLate.publicationDateText.hasPrefix("Added "), "The reader shows the added date")
+        assertTrue(storedLate.dateAccessibilityText.hasPrefix("added "), "Accessibility says added, not published")
+        var dated = FeedArticle(
+            title: "Dated", link: "https://example.com/dated", guid: nil, description: "",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Publisher")
+        dated.queryOrderValue = storedLate.queryOrderValue
+        assertTrue(dated.dateAccessibilityText.hasPrefix("published "), "A dated story is still published")
+        assertFalse(dated.cardDateText().hasPrefix("Added"), "A dated story ignores the ingestion time")
         do {
             let now = Date(timeIntervalSince1970: 1_700_000_000)
             func story(ageInSeconds age: TimeInterval) -> FeedArticle {
