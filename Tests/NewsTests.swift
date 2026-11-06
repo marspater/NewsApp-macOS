@@ -5278,15 +5278,34 @@ struct NewsTests {
         let scheduledRun = Task { await racing.fetchFeedsAsync(scheduled: true) }
         await eventually("The scheduled refresh is collecting") { entered.count == 1 }
         let manualRun = Task { await racing.fetchFeedsAsync() }
-        await eventually("The manual refresh waits for the scheduled one") { racing.manualRefreshWaiting }
+        await eventually("The manual refresh waits for the scheduled one") { !racing.manualRefreshWaiters.isEmpty }
         released.recordText("released")
-        await scheduledRun.value
         await manualRun.value
         assertEqual(
             requests.sorted(), [retrying, healthy, healthy].sorted(),
-            "The scheduled refresh keeps the wait, and the manual one then retries the feed")
+            "The manual caller returns only after the refresh that retries the feed")
         assertEqual(try await kind(retrying), nil, "The manual refresh that waited leaves the feed healthy")
-        assertTrue(!racing.manualRefreshWaiting, "The request runs once")
+        await scheduledRun.value
+        assertTrue(racing.manualRefreshWaiters.isEmpty, "The request runs once")
+
+        // Stopping during the scheduled refresh resumes the caller waiting behind it, with no refresh after it.
+        let cancelledEntered = SocketObservation()
+        let cancelling = FeedManager(
+            settings: racingSettings, store: store, schedulesRefresh: false,
+            fetchBatch: { _, _ in
+                cancelledEntered.recordText("entered")
+                while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+                return []
+            },
+            notifyBatch: { _, _ in }, now: { clock.now })
+        let cancelledRun = Task { await cancelling.fetchFeedsAsync(scheduled: true) }
+        await eventually("The refresh to cancel is collecting") { cancelledEntered.count == 1 }
+        let abandonedRun = Task { await cancelling.fetchFeedsAsync() }
+        await eventually("The manual refresh waits behind it") { !cancelling.manualRefreshWaiters.isEmpty }
+        cancelling.stopBackgroundWork()
+        await abandonedRun.value
+        await cancelledRun.value
+        assertEqual(cancelledEntered.count, 1, "A cancelled refresh starts nothing after it")
     }
 
     /// The kind survives a reopen, and a failure recorded before schema 32 never qualifies for the retry (#927).

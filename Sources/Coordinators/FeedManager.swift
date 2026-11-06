@@ -69,8 +69,9 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
     private var runningRefreshIsScheduled = false
-    /// The reader asked for a refresh while a scheduled one was collecting (#927).
-    private(set) var manualRefreshWaiting = false
+    /// Callers that asked for a manual refresh while a scheduled one was collecting: one more refresh runs after it,
+    /// and they resume when that ends (#927).
+    private(set) var manualRefreshWaiters: [CheckedContinuation<Void, Never>] = []
     private var enrichmentTask: Task<Void, Never>?
     private var overviewWarmupTask: Task<Void, Never>?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
@@ -456,7 +457,8 @@ class FeedManager: NSObject, ObservableObject {
         refreshTask?.cancel()
         refreshTask = nil
         refreshRunID = nil
-        manualRefreshWaiting = false
+        manualRefreshWaiters.forEach { $0.resume() }
+        manualRefreshWaiters = []
         // The waiting caller returns without finishing the run, so the loading state ends here.
         for (url, status) in feedStatuses where status == .loading { feedStatuses[url] = .idle }
         isAnyFeedLoading = false
@@ -551,9 +553,12 @@ class FeedManager: NSObject, ObservableObject {
         guard !isStopped else { return }
         if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
         if let refreshTask {
-            // A scheduled refresh keeps connectivity backoff, so the reader's request runs once it ends (#927).
-            if !scheduled, runningRefreshIsScheduled { manualRefreshWaiting = true }
-            _ = await refreshTask.value
+            if !scheduled, runningRefreshIsScheduled {
+                // A scheduled refresh keeps connectivity backoff, so this request is answered by a refresh after it.
+                await withCheckedContinuation { manualRefreshWaiters.append($0) }
+            } else {
+                _ = await refreshTask.value
+            }
             return
         }
         let runID = UUID()
@@ -577,9 +582,10 @@ class FeedManager: NSObject, ObservableObject {
         lastRefreshCompletedAt = now()
         refreshInterruptedBySleep = false
 
-        // Taken here so that stopping now drops the request instead of leaving it for some later refresh.
-        let manualRefreshRequested = manualRefreshWaiting
-        manualRefreshWaiting = false
+        // Taken here so that stopping now drops the request, and resumes its callers, instead of leaving it for later.
+        let manualWaiters = manualRefreshWaiters
+        manualRefreshWaiters = []
+        defer { manualWaiters.forEach { $0.resume() } }
 
         guard !isStopped else { return }
         await pruneIfDue()
@@ -588,7 +594,7 @@ class FeedManager: NSObject, ObservableObject {
         await waitForEventClustering()
         guard !Task.isCancelled, !isStopped else { return }
         await notifyAndEnrich(newArticles)
-        if manualRefreshRequested { await fetchFeedsAsync() }
+        if !manualWaiters.isEmpty { await fetchFeedsAsync() }
     }
 
     /// What Check for Updates found for an open story (#992).
