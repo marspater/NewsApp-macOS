@@ -26879,7 +26879,9 @@ struct NewsTests {
         assertEqual(
             statements("Mayor Elena Rostova said that \(atLimit). Officials disputed it."),
             [atLimit], "A complete 400-character statement is retained")
-        for attribution in ["Mayor Elena Rostova said that", "Mayor Elena Rostova said", "According to Mayor Elena Rostova,"] {
+        for attribution in [
+            "Mayor Elena Rostova said that", "Mayor Elena Rostova said", "According to Mayor Elena Rostova,",
+        ] {
             for dot in ["Mr.", "Dr.", "U.S.", "8.9"] {
                 let overlong = "the council consulted \(dot) " + String(repeating: "residents ", count: 45)
                 assertTrue(
