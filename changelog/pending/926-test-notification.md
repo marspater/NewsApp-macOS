@@ -1,0 +1,1 @@
+- Settings › Notifications gains Send Test Notification, which posts one random story from your list with its photo when it has one through the real notification path and says what macOS made of it, next to Export Diagnostics (#926).

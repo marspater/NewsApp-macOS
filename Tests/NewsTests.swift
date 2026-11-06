@@ -22776,6 +22776,51 @@ struct NewsTests {
         } catch {
             assertTrue(false, "Notification delivery storage failed: \(error)")
         }
+
+        // Settings › Notifications › Send Test Notification (#926): a random story with a photo, and a status line
+        // that names the reason nothing showed.
+        let plain = FeedArticle(
+            title: "No photo", link: "https://example.com/plain", guid: "sample-plain", description: "Summary",
+            pubDate: Date(), source: "Publisher")
+        let photo = FeedArticle(
+            title: "Photo", link: "https://example.com/photo", guid: "sample-photo", description: "Summary",
+            pubDate: Date(), source: "Publisher", imageUrl: "https://example.com/photo.jpg")
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<10 {
+            assertEqual(
+                NotificationService.sampleStory(from: [plain, photo, plain], using: &generator)?.id, photo.id,
+                "The test banner prefers a story with a photo")
+        }
+        assertEqual(
+            NotificationService.sampleStory(from: [plain], using: &generator)?.id, plain.id,
+            "Without any photo, any story serves as the test banner")
+        assertTrue(NotificationService.sampleStory(from: []) == nil, "No stories, no test banner")
+        func status(
+            _ outcome: NotificationService.PostOutcome, authorization: UNAuthorizationStatus = .authorized,
+            alert: UNNotificationSetting = .enabled, style: UNAlertStyle = .banner,
+            previews: UNShowPreviewsSetting = .always
+        ) -> String {
+            NotificationService.sampleStatus(
+                outcome, authorization: authorization, alert: alert, style: style, previews: previews)
+        }
+        assertTrue(status(.halted).hasPrefix("Not sent:"), "A halted test names the mode setting")
+        assertTrue(
+            status(.failed(domain: UNErrorDomain, code: UNError.Code.notificationsNotAllowed.rawValue))
+                .contains("not allowed"), "A refused post names the permission")
+        assertTrue(
+            status(.failed(domain: "Other", code: 7)).contains("Other 7"), "Any other refusal shows domain and code")
+        assertTrue(
+            status(.posted, authorization: .denied).contains("turned off"), "Denied permission is named after a post")
+        assertTrue(
+            status(.posted, authorization: .notDetermined).contains("not asked"),
+            "Permission not yet asked is named after a post")
+        assertTrue(status(.posted, style: .none).contains("None"), "Alert style None is named")
+        assertTrue(status(.posted, alert: .disabled).contains("alerts for News are off"), "Alerts off is named")
+        assertTrue(status(.posted, previews: .never).contains("story hidden"), "Hidden previews are named")
+        assertTrue(
+            status(.posted, style: .alert, previews: .never).contains("story hidden"),
+            "Hidden previews are named for the Alerts style too")
+        assertTrue(status(.posted).hasPrefix("Sent."), "A plain success says so")
     }
 
     /// #790: a banner for a report outside any event records the report itself. When another outlet's report later
