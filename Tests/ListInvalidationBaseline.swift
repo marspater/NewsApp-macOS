@@ -134,7 +134,7 @@ struct ListInvalidationBaseline {
             .environmentObject(container.readManager)
             .environmentObject(container.savedStories)
             .defaultAppStorage(defaults)
-            .environment(\.readerImageLoader) { _ in try OfflineImage.make() }
+            .environment(\.readerImageLoader) { _, _ in try OfflineImage.make() }
         let view = NSHostingView(rootView: root)
         view.frame = NSRect(x: 0, y: 0, width: 1100, height: 800)
 

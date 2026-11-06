@@ -26,6 +26,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
+import dnssd
 
 #if canImport(FoundationModels)
     import FoundationModels
@@ -1019,6 +1020,10 @@ struct NewsTests {
             ("testSocketNetworkBoundary", { try await rerunningLoopbackFlake(testSocketNetworkBoundary) }),
             ("testTransportCancellation", { try await rerunningLoopbackFlake(testTransportCancellation) }),
             ("testProxyWaitingClassification", { await testProxyWaitingClassification() }),
+            ("testResolverLifecycle", { await testResolverLifecycle() }),
+            ("testLookupFailsClosedAcrossFamilies", { testLookupFailsClosedAcrossFamilies() }),
+            ("testRedirectDelegateDoesNoDNS", { await testRedirectDelegateDoesNoDNS() }),
+            ("testGatewayAddressFallback", { try await rerunningLoopbackFlake(testGatewayAddressFallback) }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
             ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
             ("testRetentionPruneAfterRefresh", { try await testRetentionPruneAfterRefresh() }),
@@ -1071,6 +1076,7 @@ struct NewsTests {
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
             ("testOverviewSourcesFollowTheSentence", { testOverviewSourcesFollowTheSentence() }),
+            ("testCardImagePrefetchFirstPaint", { await testCardImagePrefetchFirstPaint() }),
             (
                 "testHybridSearchSemanticRetrievalAndSnippets",
                 { try await testHybridSearchSemanticRetrievalAndSnippets() }
@@ -2997,8 +3003,8 @@ struct NewsTests {
         task.cancel()
 
         // Redirect safety state is keyed per task object, not by task identifier across sessions (#808). The
-        // injected resolver keeps the allowed redirect off the network.
-        let keyed = SecureSessionDelegateCoordinator(resolver: { _ in .allowed(ips: ["93.184.216.34"]) })
+        // delegate resolves nothing (#945), so the allowed redirect stays off the network.
+        let keyed = SecureSessionDelegateCoordinator()
         let sessionConfig = URLSessionConfiguration.ephemeral
         let sessionA = URLSession(configuration: sessionConfig)
         let sessionB = URLSession(configuration: sessionConfig)
@@ -19995,6 +20001,264 @@ struct NewsTests {
             "A non-POSIX waiting error is waited out")
     }
 
+    static func testLookupFailsClosedAcrossFamilies() {
+        print("  - Testing the lookup: a blocked address in the slower family still refuses the host (#945)...")
+        let v4 = Int32(AF_INET)
+        let v6 = Int32(AF_INET6)
+        let noRecord = DNSServiceErrorType(kDNSServiceErr_NoSuchRecord)
+        // The first family ends with a public address; the host is not allowed until the other family has answered,
+        // so a blocked address arriving later, after any grace a stagger would have given, still fails it closed.
+        var late = DNSAnswer()
+        assertEqual(
+            late.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"), nil,
+            "One family's end does not answer while the other is still owed")
+        assertEqual(
+            late.received(family: v6, moreComing: false, error: 0, blocked: "Private address", address: nil),
+            .blocked(reason: "Private address"), "A blocked address after the first family ended fails the host closed")
+        // One batch carrying both families answers when its flag clears, in arrival order.
+        var batch = DNSAnswer()
+        assertEqual(
+            batch.received(family: v6, moreComing: true, error: 0, blocked: nil, address: "2606:2800:21f:cb07::1"), nil,
+            "More coming keeps the batch open")
+        assertEqual(
+            batch.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"),
+            .allowed(ips: ["2606:2800:21f:cb07::1", "93.184.216.34"]), "Both families in one batch answer at its end")
+        // A family without records ends at once; the host answers when the other has ended too.
+        var v4Only = DNSAnswer()
+        assertEqual(
+            v4Only.received(family: v6, moreComing: false, error: noRecord, blocked: nil, address: nil), nil,
+            "No IPv6 record alone does not answer")
+        assertEqual(
+            v4Only.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"),
+            .allowed(ips: ["93.184.216.34"]), "The host answers once both families ended")
+        var none = DNSAnswer()
+        _ = none.received(family: v6, moreComing: true, error: noRecord, blocked: nil, address: nil)
+        assertEqual(
+            none.received(family: v4, moreComing: false, error: noRecord, blocked: nil, address: nil),
+            .unresolvable(reason: "No valid addresses resolved"), "No record in either family is unresolvable")
+    }
+
+    static func testResolverLifecycle() async {
+        print("  - Testing the resolver: bounded lookups, prompt cancellation, no worker to exhaust (#945)...")
+        let hang: ProxyResolver.Lookup = { _ in
+            try? await Task.sleep(for: .seconds(600))
+            return .unresolvable(reason: "Cancelled")
+        }
+        // A resolver that never answers ends inside the deadline.
+        let started = ContinuousClock.now
+        let timedOut = await ProxyResolver(lookup: hang, deadline: .milliseconds(200)).resolve("slow.invalid")
+        assertEqual(timedOut, .unresolvable(reason: "Timed out"), "An unanswered lookup ends at the deadline")
+        assertTrue(ContinuousClock.now - started < .seconds(5), "The deadline is the bound, not the system's")
+        // Cancelling the caller resumes it at once and leaves no pending work behind. The lookup signals that it is
+        // in flight, so the cancellation reaches a started lookup, not one still queued.
+        let lookupStarted = SocketObservation()
+        let resolver = ProxyResolver(
+            lookup: { host in
+                lookupStarted.recordText("started")
+                return await hang(host)
+            }, deadline: .seconds(600))
+        let cancelled = Task { await resolver.resolve("slow.invalid") }
+        await eventually("The lookup is in flight before it is cancelled") { lookupStarted.count == 1 }
+        let cancelledAt = ContinuousClock.now
+        cancelled.cancel()
+        assertEqual(await cancelled.value, .unresolvable(reason: "Cancelled"), "A cancelled lookup says so")
+        assertTrue(ContinuousClock.now - cancelledAt < .seconds(5), "Cancellation resumes the caller at once")
+        // Hung lookups do not occupy anything other lookups wait for.
+        let mixed = ProxyResolver(
+            lookup: { host in
+                if host.hasPrefix("hang") { return await hang(host) }
+                return .allowed(ips: ["93.184.216.34"])
+            }, deadline: .seconds(600))
+        let hung = (0..<12).map { index in Task { await mixed.resolve("hang-\(index).invalid") } }
+        let quick = await mixed.resolve("quick.invalid")
+        assertEqual(quick, .allowed(ips: ["93.184.216.34"]), "A lookup behind twelve hung ones still resolves")
+        for task in hung { task.cancel() }
+        for task in hung { _ = await task.value }
+        // The production path answers names and literals the hostname guard decides without any DNS.
+        let production = ProxyResolver(deadline: .seconds(600))
+        for host in ["localhost", "127.0.0.1", "printer.local", "intranet", "[::1]"] {
+            if case .blocked = await production.resolve(host) { continue }
+            assertTrue(false, "\(host) is refused by the hostname guard before DNS")
+        }
+        assertEqual(
+            await production.resolve("93.184.216.34"), .allowed(ips: ["93.184.216.34"]),
+            "A public literal is its own answer")
+        if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
+            if case .allowed(let ips) = await production.resolve("example.com") {
+                assertTrue(!ips.isEmpty, "The system lookup answers a public name with its addresses")
+            } else {
+                assertTrue(false, "The system lookup resolves a public name")
+            }
+            if case .blocked = await production.resolve("localtest.me") {
+            } else {
+                assertTrue(false, "A name answering with a private address is refused by the system lookup")
+            }
+        }
+        assertEqual(
+            NetworkBoundaryProxy.interleaved(["2606:4700::1111", "2606:4700::1001", "1.1.1.1", "1.0.0.1"]),
+            ["2606:4700::1111", "1.1.1.1", "2606:4700::1001", "1.0.0.1"], "Address families take turns")
+        assertEqual(
+            NetworkBoundaryProxy.interleaved(["1.1.1.1", "2606:4700::1111"]), ["1.1.1.1", "2606:4700::1111"],
+            "The first answer's family leads")
+    }
+
+    /// A redirect does no DNS on the session's serial delegate queue (#945): with a resolver that hangs, redirects
+    /// for two tasks still complete at once, and the resolver is never consulted.
+    static func testRedirectDelegateDoesNoDNS() async {
+        print("  - Testing that redirects never wait on a slow resolver on the delegate queue (#945)...")
+        let lookups = SocketObservation()
+        let client = SecureHTTPClient(
+            configuration: .ephemeral,
+            resolver: { host in
+                lookups.recordText(host)
+                _ = DispatchSemaphore(value: 0).wait(timeout: .now() + 600)
+                return .unresolvable(reason: "Timed out")
+            })
+        let coordinator = client.delegateCoordinator
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let first = session.dataTask(with: URL(string: "https://example.com/first")!)
+        let started = ContinuousClock.now
+        let followed = await redirect(coordinator, session, first, to: "https://slow.invalid/next")
+        assertEqual(followed?.url?.absoluteString, "https://slow.invalid/next", "The redirect is followed")
+        assertTrue(ContinuousClock.now - started < .seconds(1), "The redirect completes without waiting on DNS")
+        let tasks = ["a", "b"].map { session.dataTask(with: URL(string: "https://example.com/\($0)")!) }
+        let concurrentStart = ContinuousClock.now
+        let results = await withTaskGroup(of: String?.self) { group in
+            for (index, task) in tasks.enumerated() {
+                group.addTask {
+                    await redirect(coordinator, session, task, to: "https://slow.invalid/\(index)")?.url?.absoluteString
+                }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
+        assertEqual(
+            Set(results.compactMap { $0 }), ["https://slow.invalid/0", "https://slow.invalid/1"],
+            "Both tasks' redirects are followed")
+        assertTrue(
+            ContinuousClock.now - concurrentStart < .seconds(1), "Neither task's callback waits behind the other's")
+        assertEqual(lookups.count, 0, "The redirect path never reaches the resolver")
+        for task in [first] + tasks { task.cancel() }
+    }
+
+    static func redirect(
+        _ coordinator: SecureSessionDelegateCoordinator, _ session: URLSession, _ task: URLSessionTask,
+        to target: String
+    ) async -> URLRequest? {
+        let response = HTTPURLResponse(
+            url: task.originalRequest!.url!, statusCode: 302, httpVersion: "HTTP/1.1",
+            headerFields: ["Location": target])!
+        return await withCheckedContinuation { continuation in
+            coordinator.urlSession(
+                session, task: task, willPerformHTTPRedirection: response,
+                newRequest: URLRequest(url: URL(string: target)!)
+            ) { continuation.resume(returning: $0) }
+        }
+    }
+
+    /// A first address that never connects (a broken IPv6 route) falls back to the second well inside the
+    /// handshake timeout (#945).
+    @MainActor
+    static func testGatewayAddressFallback() async throws {
+        print("  - Testing the gateway's address fallback: a dead first address yields to the second (#945)...")
+        // The dead address connects through a SOCKS proxy that accepts and never answers, so the attempt stays
+        // in preparation the way an unanswered SYN does.
+        let silent = try NWListener(using: .tcp, on: .any)
+        let silentQueue = DispatchQueue(label: "test.fallback.silent")
+        let held = SocketObservation()
+        let heldClosed = SocketObservation()
+        silent.newConnectionHandler = { connection in
+            held.recordText("held")
+            connection.start(queue: silentQueue)
+            recordClose(connection, closed: heldClosed)
+        }
+        let upstream = try NWListener(using: .tcp, on: .any)
+        let upstreamQueue = DispatchQueue(label: "test.fallback.upstream")
+        upstream.newConnectionHandler = { connection in
+            connection.start(queue: upstreamQueue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { data, _, _, _ in
+                connection.send(content: data, completion: .contentProcessed { _ in })
+            }
+        }
+        for listener in [silent, upstream] {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let once = SocketObservation()
+                listener.stateUpdateHandler = { state in
+                    if case .ready = state, once.claim() { continuation.resume() }
+                    if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
+                }
+                listener.start(queue: listener === silent ? silentQueue : upstreamQueue)
+            }
+        }
+        defer {
+            silent.cancel()
+            upstream.cancel()
+        }
+        let observed = SocketObservation()
+        let silentPort = silent.port!
+        let upstreamPort = upstream.port!
+        @Sendable func silentConnection(_ host: NWEndpoint.Host, _ port: NWEndpoint.Port) -> NWConnection {
+            let parameters = NWParameters.tcp
+            let context = NWParameters.PrivacyContext(description: "test.fallback.silent")
+            context.proxyConfigurations = [
+                ProxyConfiguration(socksv5Proxy: .hostPort(host: "127.0.0.1", port: silentPort))
+            ]
+            parameters.setPrivacyContext(context)
+            return NWConnection(host: host, port: port, using: parameters)
+        }
+        let proxy = NetworkBoundaryProxy(
+            resolver: { _ in .allowed(ips: ["2606:4700::1111", "93.184.216.34"]) },
+            connector: { host, port in
+                observed.record(host)
+                if case .ipv6 = host { return silentConnection(host, port) }
+                return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
+            })
+        let started = ContinuousClock.now
+        let (client, reply) = try await socksConnect(proxy, host: "dual.invalid")
+        let elapsed = ContinuousClock.now - started
+        assertEqual(reply[1], 0, "The second address connects while the first is still waiting")
+        assertTrue(elapsed < .seconds(5), "The fallback takes about a quarter second, not the handshake timeout")
+        assertEqual(
+            observed.hosts, ["2606:4700::1111", "93.184.216.34"], "IPv6 was tried first, IPv4 after the delay")
+        assertEqual(held.count, 1, "The dead attempt reached the silent proxy exactly once")
+        try await socketSend(client, Data("fallback".utf8))
+        assertEqual(try await socketRead(client, count: 8), Data("fallback".utf8), "The tunnel relays over the winner")
+        // Before the client closes: only the winner's selection, not the tunnel's shutdown, may close the loser.
+        await eventually("The losing attempt is cancelled once the winner connects") { heldClosed.count == 1 }
+        client.cancel()
+        await proxy.stop()
+
+        // Three stalled attempts fill every slot; the fourth address still starts a stagger later, retiring the
+        // oldest, instead of waiting for the handshake timeout.
+        let tried = SocketObservation()
+        let crowded = NetworkBoundaryProxy(
+            resolver: { _ in .allowed(ips: ["93.184.216.1", "93.184.216.2", "93.184.216.3", "93.184.216.4"]) },
+            connector: { host, port in
+                tried.record(host)
+                guard String(describing: host) == "93.184.216.4" else { return silentConnection(host, port) }
+                return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
+            })
+        let crowdedStart = ContinuousClock.now
+        let (crowdedClient, crowdedReply) = try await socksConnect(crowded, host: "crowded.invalid")
+        assertEqual(crowdedReply[1], 0, "The fourth address connects while three attempts stall")
+        assertTrue(ContinuousClock.now - crowdedStart < .seconds(5), "Stalled attempts do not hold the fourth address")
+        assertEqual(tried.hosts.count, 4, "Each address was tried once")
+        crowdedClient.cancel()
+        await crowded.stop()
+    }
+
+    /// Reads until the peer closes, then records the close: EOF or an error both mean the attempt was torn down.
+    static func recordClose(_ connection: NWConnection, closed: SocketObservation) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { _, _, eof, error in
+            if eof || error != nil {
+                closed.recordText("closed")
+                connection.cancel()
+            } else {
+                recordClose(connection, closed: closed)
+            }
+        }
+    }
+
     @MainActor
     static func testTransportCancellation() async throws {
         print("  - Testing refresh shutdown over real HTTP/SOCKS sockets...")
@@ -22592,6 +22856,51 @@ struct NewsTests {
         } catch {
             assertTrue(false, "Notification delivery storage failed: \(error)")
         }
+
+        // Settings › Notifications › Send Test Notification (#926): a random story with a photo, and a status line
+        // that names the reason nothing showed.
+        let plain = FeedArticle(
+            title: "No photo", link: "https://example.com/plain", guid: "sample-plain", description: "Summary",
+            pubDate: Date(), source: "Publisher")
+        let photo = FeedArticle(
+            title: "Photo", link: "https://example.com/photo", guid: "sample-photo", description: "Summary",
+            pubDate: Date(), source: "Publisher", imageUrl: "https://example.com/photo.jpg")
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<10 {
+            assertEqual(
+                NotificationService.sampleStory(from: [plain, photo, plain], using: &generator)?.id, photo.id,
+                "The test banner prefers a story with a photo")
+        }
+        assertEqual(
+            NotificationService.sampleStory(from: [plain], using: &generator)?.id, plain.id,
+            "Without any photo, any story serves as the test banner")
+        assertTrue(NotificationService.sampleStory(from: []) == nil, "No stories, no test banner")
+        func status(
+            _ outcome: NotificationService.PostOutcome, authorization: UNAuthorizationStatus = .authorized,
+            alert: UNNotificationSetting = .enabled, style: UNAlertStyle = .banner,
+            previews: UNShowPreviewsSetting = .always
+        ) -> String {
+            NotificationService.sampleStatus(
+                outcome, authorization: authorization, alert: alert, style: style, previews: previews)
+        }
+        assertTrue(status(.halted).hasPrefix("Not sent:"), "A halted test names the mode setting")
+        assertTrue(
+            status(.failed(domain: UNErrorDomain, code: UNError.Code.notificationsNotAllowed.rawValue))
+                .contains("not allowed"), "A refused post names the permission")
+        assertTrue(
+            status(.failed(domain: "Other", code: 7)).contains("Other 7"), "Any other refusal shows domain and code")
+        assertTrue(
+            status(.posted, authorization: .denied).contains("turned off"), "Denied permission is named after a post")
+        assertTrue(
+            status(.posted, authorization: .notDetermined).contains("not asked"),
+            "Permission not yet asked is named after a post")
+        assertTrue(status(.posted, style: .none).contains("None"), "Alert style None is named")
+        assertTrue(status(.posted, alert: .disabled).contains("alerts for News are off"), "Alerts off is named")
+        assertTrue(status(.posted, previews: .never).contains("story hidden"), "Hidden previews are named")
+        assertTrue(
+            status(.posted, style: .alert, previews: .never).contains("story hidden"),
+            "Hidden previews are named for the Alerts style too")
+        assertTrue(status(.posted).hasPrefix("Sent."), "A plain success says so")
     }
 
     /// #790: a banner for a report outside any event records the report itself. When another outlet's report later
@@ -27918,17 +28227,185 @@ struct NewsTests {
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 
+    /// A loader whose completions wait in a queue until the test releases them, oldest first (#591).
+    @MainActor final class QueuedImageLoader {
+        private struct Waiting {
+            let id: UUID
+            let url: URL
+            let continuation: CheckedContinuation<CGImage, Error>
+        }
+        let honorsCancellation: Bool
+        private(set) var requests: [URL] = []
+        /// The pixel bound each request asked for, in request order.
+        private(set) var pixelBounds: [Int] = []
+        private var queue: [Waiting] = []
+        private let image: CGImage = {
+            CGContext(
+                data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                .makeImage()!
+        }()
+        var queued: Int { queue.count }
+
+        init(honorsCancellation: Bool = true) { self.honorsCancellation = honorsCancellation }
+
+        var loader: @Sendable (URL, Int) async throws -> CGImage {
+            { url, maxPixels in try await self.enqueue(url, maxPixels: maxPixels) }
+        }
+
+        private func enqueue(_ url: URL, maxPixels: Int) async throws -> CGImage {
+            requests.append(url)
+            pixelBounds.append(maxPixels)
+            let id = UUID()
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    queue.append(Waiting(id: id, url: url, continuation: continuation))
+                }
+            } onCancel: {
+                Task { @MainActor in self.cancel(id) }
+            }
+        }
+
+        private func cancel(_ id: UUID) {
+            guard honorsCancellation, let index = queue.firstIndex(where: { $0.id == id }) else { return }
+            queue.remove(at: index).continuation.resume(throwing: CancellationError())
+        }
+
+        /// Completes the `count` oldest waiting loads.
+        func release(_ count: Int) {
+            let released = queue.prefix(count)
+            queue.removeFirst(released.count)
+            for waiting in released { waiting.continuation.resume(returning: image) }
+        }
+
+        /// Waits until the loads that released ones lead to have reached the queue: no change across ten 1 ms polls.
+        func settle() async {
+            var last = (-1, -1)
+            var stable = 0
+            while stable < 10 {
+                try? await Task.sleep(for: .milliseconds(1))
+                let now = (requests.count, queue.count)
+                stable = now == last ? stable + 1 : 0
+                last = now
+            }
+        }
+    }
+
+    /// #591: scrolling 200 cards shows at most 5% placeholders at first paint when prefetch decodes each card's own
+    /// image ahead of it, and nothing else is fetched; a decode that finished is kept though its only waiter cancelled.
+    @MainActor static func testCardImagePrefetchFirstPaint() async {
+        print("  - Testing card image prefetch and placeholders at first paint...")
+        DecodedImageCache.clear()
+        defer {
+            DecodedImageCache.cardFirstPaints = nil
+            DecodedImageCache.clear()
+        }
+
+        // This loader ignores cancellation, so it finishes after the shared task was cancelled.
+        let stubborn = QueuedImageLoader(honorsCancellation: false)
+        let keptURL = URL(string: "https://cards.example/kept/\(UUID().uuidString).jpg")!
+        let waiter = Task { @MainActor in _ = try? await DecodedImageCache.load(keptURL, using: stubborn.loader) }
+        await eventually("The stubborn load is queued before its waiter cancels") { @MainActor in
+            stubborn.requests.count == 1 && stubborn.queued == 1
+        }
+        let shared = DecodedImageCache.sharedLoad(for: keptURL)
+        assertTrue(shared != nil, "The stubborn load is shared under its URL")
+        waiter.cancel()
+        // The last waiter's cancellation cancels the shared task on the main actor; release only after it has.
+        await eventually("The shared load is cancelled while its decode is still queued") { @MainActor in
+            shared?.task.isCancelled == true && stubborn.queued == 1
+        }
+        stubborn.release(1)
+        _ = await waiter.value
+        await stubborn.settle()
+        assertTrue(DecodedImageCache.cached(keptURL) != nil, "A finished decode is kept after its waiter cancelled")
+
+        // 200 cards: every fifth an event of three reports with an image each, every tenth without an image.
+        let now = Date()
+        var articles: [FeedArticle] = []
+        var events: [EventFeedSummary] = []
+        for index in 0..<200 {
+            let members = (0..<(index % 5 == 0 ? 3 : 1)).map { member in
+                FeedArticle(
+                    title: "Prefetch story \(index) report \(member)",
+                    link: "https://news.example/\(index)/\(member)", guid: "prefetch-\(index)-\(member)",
+                    description: "Summary", pubDate: now.addingTimeInterval(-Double(index * 10 + member)),
+                    source: "Publisher \(member)",
+                    imageUrl: index % 10 == 9 ? nil : "https://cards.example/\(index)/\(member).jpg")
+            }
+            articles += members
+            if members.count > 1 {
+                events.append(
+                    EventFeedSummary(
+                        eventID: "prefetch-event-\(index)", membershipVersion: 1, seenVersion: nil,
+                        members: members.map {
+                            EventFeedMember(
+                                articleID: $0.id, source: $0.source, title: $0.title, date: $0.pubDate,
+                                joinedVersion: 1, isRead: false, isSaved: false)
+                        }))
+            }
+        }
+        let entries = FeedSnapshot(articles: articles, events: events).entries(.events)
+        assertEqual(entries.count, 200, "The seeded list has 200 cards")
+        let cardURLs = Set(entries.compactMap(\.cardImageURL))
+        assertEqual(cardURLs.count, 180, "180 cards show an image of their own")
+
+        // Each card appears (ArticleRemoteImage.init asks the cache), moves the prefetch window, and two queued
+        // loads complete before the next card appears.
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else {
+            print("    skipped: Low Power Mode turns prefetch off")
+            return
+        }
+        let probe = QueuedImageLoader()
+        let prefetch = CardImagePrefetch()
+        DecodedImageCache.cardFirstPaints = (0, 0)
+        let initial = Task { @MainActor in
+            await CardImagePrefetch.first(
+                CardImagePrefetch.initialURLs(entries), leadAtFullSize: false, using: probe.loader)
+        }
+        await probe.settle()
+        for (index, entry) in entries.enumerated() {
+            if let url = entry.cardImageURL { _ = ArticleRemoteImage(url: url, size: .card) { _ in EmptyView() } }
+            prefetch.ahead(of: index, in: entries, using: probe.loader)
+            await probe.settle()
+            probe.release(2)
+            await probe.settle()
+        }
+        let counts = DecodedImageCache.cardFirstPaints ?? (0, 0)
+        assertEqual(counts.placeholders + counts.images, 180, "Every card with an image is counted once")
+        print("    card placeholders at first paint: \(counts.placeholders) of 180")
+        assertTrue(
+            Double(counts.placeholders) <= 0.05 * 180, "At most 5% of cards show a placeholder at first paint")
+        let others = Set(probe.requests).subtracting(cardURLs)
+        assertTrue(others.isEmpty, "Only the images cards show are fetched (\(others.count) others)")
+        assertTrue(
+            !probe.pixelBounds.isEmpty && probe.pixelBounds.allSatisfy { $0 == DecodedImageCache.Size.card.maxPixels },
+            "Without a lead, every card prefetch decodes at card size, never at the reader's bound")
+        assertEqual(stubborn.pixelBounds, [DecodedImageCache.Size.full.maxPixels], "A plain load decodes at full size")
+        prefetch.reset()
+        initial.cancel()
+        while probe.queued > 0 {
+            probe.release(probe.queued)
+            await probe.settle()
+        }
+        _ = await initial.value
+    }
+
     static func testMemoryLeakMitigationsAndErrorHandling() async throws {
         print("  - Testing Resource Leak Mitigations & Error Resilience...")
 
         // 1. DecodedImageCache bounds and clear
         await MainActor.run {
             DecodedImageCache.clear()
-            assertEqual(DecodedImageCache.images.countLimit, 500, "DecodedImageCache must bound max image count")
+            assertEqual(DecodedImageCache.images.countLimit, 24, "The full-size cache bounds its image count")
+            assertEqual(DecodedImageCache.cardImages.countLimit, 90, "The card cache bounds its image count")
+            assertEqual(
+                DecodedImageCache.images.totalCostLimit + DecodedImageCache.cardImages.totalCostLimit,
+                192 * 1024 * 1024, "Card and full-size caches together keep the 192 MB ceiling")
         }
 
         // Test that clear() cancels pending tasks and prevents insertion
-        let slowLoader: @Sendable (URL) async throws -> CGImage = { _ in
+        let slowLoader: @Sendable (URL, Int) async throws -> CGImage = { _, _ in
             try await Task.sleep(for: .milliseconds(500))
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             let ctx = CGContext(
@@ -27961,8 +28438,8 @@ struct NewsTests {
             var cancelled: Int { lock.withLock { cancelledCount } }
             func recordStart() { lock.withLock { startedCount += 1 } }
             func recordCancel() { lock.withLock { cancelledCount += 1 } }
-            var loader: @Sendable (URL) async throws -> CGImage {
-                { [self] _ in
+            var loader: @Sendable (URL, Int) async throws -> CGImage {
+                { [self] _, _ in
                     recordStart()
                     do { try await Task.sleep(for: .seconds(30)) } catch {
                         recordCancel()
