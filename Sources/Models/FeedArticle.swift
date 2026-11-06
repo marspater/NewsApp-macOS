@@ -776,12 +776,12 @@ struct PublisherContentRevision: Equatable, Sendable, Identifiable {
             .filter { changedFields & $0.0 != 0 }.map { $0.1 }.joined(separator: ", ")
     }
 
+    // ponytail: "small part" is a fixed ratio (the current text is more than three times the old one plus 400
+    // characters); learn it from reviewed stories if teasers and real expansions keep being confused.
     /// The publisher updates a diff against `current` can show, newest first: those that kept the text they replaced
     /// and that no extraction followed (an extraction changes what the text is: a summary becomes a body), and whose
     /// replaced text is not a small part of the current one (a feed teaser that the page's body completed is not an
     /// edit by the publisher).
-    // ponytail: "small part" is a fixed ratio (the current text is more than three times the old one plus 400
-    // characters); learn it from reviewed stories if teasers and real expansions keep being confused.
     static func comparable(_ revisions: [PublisherContentRevision], current: String) -> [PublisherContentRevision] {
         var comparable: [PublisherContentRevision] = []
         var extracted = false

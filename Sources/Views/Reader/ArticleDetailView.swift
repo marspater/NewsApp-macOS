@@ -1098,6 +1098,7 @@ struct ArticleDetailView: View {
             "\(showsChanges && isStoryReady):\(changesBase?.version ?? 0):\(currentArticle.publisherInputHash):\(blocks)"
     }
 
+    /// Works out the diff overlay off the main actor and keeps it with the comparison it belongs to.
     private func updateChangeOverlay() async {
         guard showsChanges, isStoryReady, let before = changesBase?.previousText else {
             changeOverlay = ("", SentenceDiff.Overlay())

@@ -18038,6 +18038,7 @@ struct NewsTests {
             painted, ["Officials said the bridge opens"], "Only the quote has a background; a stale range is ignored")
     }
 
+    /// The sentence diff on a three-revision breaking story, its block overlay, the pair budget and which updates a story can be compared with (#712).
     static func testSentenceDiffAndStoryEvolution() {
         print("  - Testing the sentence diff on a multi-revision breaking story (#712)...")
         let first =
@@ -18050,6 +18051,7 @@ struct NewsTests {
             "Three people were hurt when a bus hit a bridge rail on Monday. Police closed the road. "
             + "The driver, 54, was taken to hospital. The road reopened at 9 pm."
 
+        /// The diff of two texts as "= kept", "+ added" and "- retracted" lines.
         func kinds(_ before: String, _ after: String) -> [String] {
             SentenceDiff.diff(before: before, after: after).map { item in
                 switch item.kind {
@@ -18086,6 +18088,7 @@ struct NewsTests {
             "The driver, 54, was taken to hospital. The road reopened at 9 pm.",
         ]
         let overlay = SentenceDiff.overlay(before: second, after: third, blocks: blocks)
+        /// The characters of `range` in the block's text.
         func slice(_ block: Int, _ range: Range<Int>) -> String {
             String(Array(blocks[block])[range])
         }
@@ -18127,6 +18130,7 @@ struct NewsTests {
         assertEqual(items.filter { $0.kind == .retracted }.count, 2_100, "And the old middle is retracted whole")
 
         // Which updates a story can be compared with.
+        /// A revision with the given kind and kept text.
         func revision(_ version: Int, _ kind: PublisherContentRevision.Kind, _ previous: String?)
             -> PublisherContentRevision
         {
@@ -18164,6 +18168,7 @@ struct NewsTests {
         assertEqual(PublisherContentRevision.text(description: "Summary", content: nil), "Summary", "No body")
     }
 
+    /// The text kept for publisher updates: the chain, the summary-only and title-only cases, the size limit, the cache purge and the schema 30 migration (#712).
     static func testPublisherRevisionTextStorage() async throws {
         print("  - Testing the text kept for publisher updates, its limits and its migration (#712)...")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -18171,6 +18176,7 @@ struct NewsTests {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("library.sqlite3").path
+        /// Runs SQL on the fixture file outside the engine.
         func execute(_ sql: String) {
             var handle: OpaquePointer?
             assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the revision fixture")
@@ -18189,6 +18195,7 @@ struct NewsTests {
         _ = try await db.upsertArticles([saved])
         try await db.setSaved(articleId: saved.id, isSaved: true)
 
+        /// A story's stored revisions, newest first.
         func revisions(_ id: String = "evolving") async throws -> [PublisherContentRevision] {
             try await db.publisherContentRevisions(for: id)
         }
