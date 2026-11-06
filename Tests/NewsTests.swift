@@ -27095,6 +27095,9 @@ struct NewsTests {
             "The officers said they have since taken more than 340 witness statements - including from Brand's former employers, his ex-colleagues and associates.",
             "The speaker's first letter is capitalised")
         assertEqual(
+            OverviewComposer.displayStatement(participant: "the mayor", position: "“we will rebuild the bridge”"),
+            "The mayor said “we will rebuild the bridge.”", "A quotation opening in lower case is led by its speaker")
+        assertEqual(
             OverviewComposer.displayStatement(
                 participant: "Presiding Judge Joel Bennathan",
                 position: "Brand would face a \"significant custodial term\""),
