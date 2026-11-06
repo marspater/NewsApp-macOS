@@ -197,7 +197,8 @@ def eval_momentum(db: sqlite3.Connection) -> dict:
         "independent_publisher_count_in_windows": sum(row[5] for row in rows),
         "single_syndicated_wire_control": {
             "outlet_rows": sample_counts[0], "local_publishers": sample_counts[1],
-            "independent_publishers": sample_counts[2], "independent_reports": 1,
+            "independent_publishers": sample_counts[2],
+            "independent_reports": sum(1 for _, event, wire, _ in timeline if (event, wire) == sample_wire),
         },
         "publication_replay_independent_reports": len(timeline),
         "publication_replay_invariant_to_fetch_order": timeline == independent_report_timeline(list(reversed(reports))),

@@ -211,7 +211,7 @@ def provenance(db: sqlite3.Connection) -> dict:
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     labels = {
         "passages": db.execute(
-            "SELECT id,expected_class,expected_new_fact FROM passages ORDER BY id"
+            "SELECT id,expected_class,has_core_entity,expected_new_fact,expected_lexical_match FROM passages ORDER BY id"
         ).fetchall(),
         "sentences": db.execute(
             "SELECT id,has_core_entity,expected_new_fact FROM passage_sentences ORDER BY id"
@@ -223,7 +223,7 @@ def provenance(db: sqlite3.Connection) -> dict:
             "SELECT event_id,expected_burst FROM event_windows ORDER BY event_id"
         ).fetchall(),
         "recommendations": db.execute(
-            "SELECT user_id,article_id,expected_relevant FROM recommendation_judgements "
+            "SELECT user_id,article_id,slot_type,expected_relevant FROM recommendation_judgements "
             "ORDER BY user_id,article_id"
         ).fetchall(),
     }

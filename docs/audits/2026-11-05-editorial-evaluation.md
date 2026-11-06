@@ -75,8 +75,9 @@ No Phase 1–4 production algorithm is part of this Phase 0 change.
 - The full repository `./test.sh` regression suite passed locally with isolated temporary files and caches; compiler source-location warnings were non-fatal.
 - Two independent fixed-seed matrix runs reproduced the logical data and label hashes with zero routing mismatches. Independent review accepted Phase 0 for algorithm experiments only.
 - Logical fixture SHA-256: `8ef6484ba7b805d42100b8ed42bd77f0761efa32da6566561640a8cd44fd45e9`.
-- Label SHA-256: `ee7f749bf2b51471bba4671f6cd68df61f020502fdb686a4e9f8b93891277ec7`.
+- Original label projection SHA-256: `ee7f749bf2b51471bba4671f6cd68df61f020502fdb686a4e9f8b93891277ec7`.
 - Neutral-source NDCG@10: `0.14379946271267668`. This is a synthetic metadata baseline, not recommendation quality or MMR accuracy.
 - The availability-index defect found by the failing end-to-end gate was corrected before acceptance. The report retains source hashes alongside the base commit for uncommitted verification.
 - Local runs used Python 3.15.2 and SQLite 3.54.1. Hosted CI, hardware energy measurements and production editorial quality are not established by these results.
 - Follow-up review cleanup split schema and validation helpers and replaced process-based revision lookup with direct Git metadata reads. All 22 Python regressions pass, including loose, detached and packed linked-worktree revision controls; logical fixture and label hashes remain unchanged.
+- Subsequent review added passage entity/lexical routing labels and recommendation slot type to the dedicated label fingerprint, and derived the wire control count from replay. All 24 Python regressions pass. The updated label SHA-256 is `5b704dc0d6a1d0f334977dc0e3301f39da3928c079a322aa522297d4c645f690`; the logical fixture hash is unchanged. The original receipt above records the earlier projection.

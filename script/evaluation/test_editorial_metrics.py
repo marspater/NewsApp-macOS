@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import sqlite3
 import unittest
+from unittest.mock import patch
 
 from script.evaluation import editorial_fixtures as fixtures
 from script.evaluation import editorial_metrics as metrics
@@ -135,6 +136,15 @@ class GateTests(unittest.TestCase):
             "render_scroll_action_chronology_rewards_neutral_and_repeated_impressions",
             "per_reader_fifteen_percent_adjacent_underexposed_discovery",
         })
+
+    def test_wire_control_reads_replay_timeline(self) -> None:
+        """A missing replay report cannot be hidden by a literal control count."""
+        with patch.object(metrics, "independent_report_timeline", return_value=[]):
+            broken = dict(self.evaluations)
+            broken["momentum"] = metrics.eval_momentum(self.db)
+        self.assertEqual(broken["momentum"]["single_syndicated_wire_control"]["independent_reports"], 0)
+        with self.assertRaises(RuntimeError):
+            metrics.validate_evaluation(self.db, broken)
 
     def test_missing_index_rows_fail_despite_unchanged_corpus(self) -> None:
         """Deleting FTS rows must fail the gate even though source table counts are unchanged."""

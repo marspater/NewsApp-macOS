@@ -69,6 +69,22 @@ class MatrixValidationTests(unittest.TestCase):
         changed = editorial_matrix.provenance(self.db)
         self.assertNotEqual(original["labels_sha256"], changed["labels_sha256"])
 
+    def test_routing_labels_change_label_hash(self) -> None:
+        """Each routing label contributes independently to the dedicated label fingerprint."""
+        mutations = (
+            "UPDATE passages SET expected_lexical_match=1-expected_lexical_match WHERE rowid=1",
+            "UPDATE passages SET has_core_entity=1-has_core_entity WHERE rowid=1",
+            "UPDATE recommendation_judgements SET slot_type=slot_type || '-changed' WHERE rowid=1",
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                self.db.execute("SAVEPOINT label_mutation")
+                original = editorial_matrix.provenance(self.db)["labels_sha256"]
+                self.db.execute(mutation)
+                self.assertNotEqual(original, editorial_matrix.provenance(self.db)["labels_sha256"])
+                self.db.execute("ROLLBACK TO label_mutation")
+                self.db.execute("RELEASE label_mutation")
+
 
 class OutputProtectionTests(unittest.TestCase):
     """No invocation replaces a previous report or SQLite sidecar."""
