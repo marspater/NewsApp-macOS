@@ -67,6 +67,9 @@ if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/d
             if copy_coverage "$PASS_STAMP.lcov" "$NEWS_TEST_COVERAGE"; then
                 echo "Coverage written to $NEWS_TEST_COVERAGE (from the earlier run with these inputs)"
             else
+                if ! rm -f "$NEWS_TEST_COVERAGE"; then
+                    echo "⚠️ STALE COVERAGE: could not remove $NEWS_TEST_COVERAGE; do not consume it." >&2
+                fi
                 echo "⚠️ Could not copy cached coverage; the tests passed." >&2
             fi
         fi
