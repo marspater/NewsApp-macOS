@@ -63,16 +63,9 @@ jobs:
           key: swiftpm-${{ runner.os }}-xcode26-${{ hashFiles('Package.resolved') }}
           restore-keys: swiftpm-${{ runner.os }}-xcode26-
 
+      # One instrumented run is the gate and writes coverage.lcov; a failed export leaves no file and does not fail the step.
       - name: Run Unit Tests
-        run: ./test.sh
-
-      # Every runner atom (script/test_atoms.sh, as test.sh and CircleCI Smarter Testing use), rerun with an instrumented runner for LCOV.
-      - name: Collect Coverage
-        # Informational: Run Unit Tests above is the gate, so a flaky rerun never fails the job.
-        continue-on-error: true
-        run: |
-          script/test_atoms.sh | xargs script/ci_testsuite.sh --lcov coverage.lcov \
-            || { rm -f coverage.lcov; exit 1; } # a failed export can leave a partial report
+        run: NEWS_TEST_COVERAGE=coverage.lcov ./test.sh
 
       - name: Upload Coverage to Codecov
         if: hashFiles('coverage.lcov') != ''

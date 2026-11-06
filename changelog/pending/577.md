@@ -1,0 +1,1 @@
+- `NEWS_TEST_COVERAGE=PATH ./test.sh` writes an LCOV report of the one gating run; GitHub Actions no longer reruns every test atom a second time for coverage (#577).

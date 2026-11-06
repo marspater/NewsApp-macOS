@@ -74,7 +74,14 @@ trap cleanup_run EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 RUNNER="$LOGS/test_runner.$RUN_TAG"
-script/build_test_runner.sh "$RUNNER" "${TEST_OPT_FLAGS[@]}"
+# NEWS_TEST_COVERAGE=PATH makes the plain run write an LCOV report of itself: the one runner is built instrumented,
+# every job keeps its own profile, and the profiles merge once the pool passed. One run, gate and coverage (#577).
+COVERAGE_FLAGS=()
+if [[ -n "${NEWS_TEST_COVERAGE:-}" && $# -eq 0 ]]; then
+    COVERAGE_FLAGS=(-profile-generate -profile-coverage-mapping)
+    mkdir -p "$LOGS/profiles"
+fi
+script/build_test_runner.sh "$RUNNER" "${TEST_OPT_FLAGS[@]}" "${COVERAGE_FLAGS[@]}"
 
 if [[ $# -gt 0 ]]; then
     # A run with arguments is a single targeted mode.
@@ -103,8 +110,12 @@ else
     done
     JOB_LIST="$LOGS/jobs"
     : > "$JOB_LIST"
-    # A job is a name and the environment its copy of the runner gets.
-    job() { printf '%s\t%s\n' "$1" "$2" >> "$JOB_LIST"; }
+    # A job is a name and the environment its copy of the runner gets; an instrumented runner also gets its profile path.
+    job() {
+        local environment="$2"
+        if [[ ${#COVERAGE_FLAGS[@]} -gt 0 ]]; then environment="$environment LLVM_PROFILE_FILE=$LOGS/profiles/%p.profraw"; fi
+        printf '%s\t%s\n' "$1" "$environment" >> "$JOB_LIST"
+    }
     # Longest first, so the pool ends evenly.
     job "NewsTests-slow" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=slow"
     for ((i = 0; i < SHARDS; i++)); do
@@ -155,6 +166,15 @@ else
     if [[ -n "$FAILED" || "$STATUS_COUNT" -ne "$JOB_COUNT" || "$POOL_STATUS" -ne 0 ]]; then
         echo "❌ $STATUS_COUNT of $JOB_COUNT test jobs finished; the pool exited $POOL_STATUS." >&2
         exit 1
+    fi
+    if [[ ${#COVERAGE_FLAGS[@]} -gt 0 ]]; then
+        # The tests are the gate and have passed; a failed export leaves no partial report and does not fail the run.
+        if script/coverage_export.sh "$LOGS/profiles" "$RUNNER" "$NEWS_TEST_COVERAGE"; then
+            echo "Coverage written to $NEWS_TEST_COVERAGE"
+        else
+            rm -f "$NEWS_TEST_COVERAGE"
+            echo "⚠️ Coverage export failed; the tests passed." >&2
+        fi
     fi
 fi
 
