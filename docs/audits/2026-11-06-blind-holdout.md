@@ -6,7 +6,7 @@ Route 3, stage 0. The 3 November holdout has been read many times, so it becomes
 
 - Source: the installed app's library, opened `mode=ro` once for `.backup`; live file mtime 5 November 22:03:28. It was not written to or reopened.
 - Copy: `~/news-eval/library-2026-11-06.sqlite3` (`0600`), integrity check ok, 2,830 articles, SHA-256 `2c739d87562b3c06ee88b484009a36e0988835e9a0192c180a3f455f6cdc4690`.
-- Draw: main at 38613da, event tables wiped, `NEWS_RELATED_RECLUSTER=1 ./test.sh --related-live`, then `--review-pairs --holdout-candidates`.
+- Draw: main at 38613da, event tables wiped from a working copy `$C` of the library copy, in a private `/private/tmp` directory. Then `NEWS_RELATED_RECLUSTER=1 ./test.sh --related-live "$C" "$T"`, with `$T` a second private temporary directory. `$C` then moved to `$H`, `~/news-eval/holdout-2026-11-06/`, and `NEWS_SNAPSHOT_DB="$C" NEWS_EVENT_OUTPUT="$H" ./test.sh --review-pairs --holdout-candidates`.
 - Window: 945 articles after the 3 November set's last article (2 November 16:52 UTC). Candidate pairs run from 2 November 21:32 to 5 November 20:44 UTC.
 - Candidates: 189 pairs (70 borderline, 59 singleton, 60 fragments), none sharing an article with the 3 November set.
 - Clock pin: `NEWS_HOLDOUT_NOW=1793915517`, the newest article plus one hour.
@@ -37,7 +37,10 @@ The set is less than fully blind:
 
 ## Limits
 
-With 16 `same` pairs, one pair moves strict recall by about 6 points. Story recall has 59 true pairs. All pairs come from one library and one three-day window. 
+With 16 `same` pairs, one pair moves strict recall by about 6 points. Story recall has 59 true pairs. All pairs come from one library and one three-day window.
+
+The matcher chose the candidates: high-scoring borderline pairs, singletons next to an event, and earliest members of two events sharing terms. Pairs inside one event and pairs the matcher saw no link in were not sampled, so false merges and some missed links can go unseen. Scores on this set do not estimate library-wide precision or recall.
+
 ## Decision on the gate (Mars)
 
 - v2 stays sealed and unchanged as its own cohort. It is topped up by a later, independent draw (v3) before it serves as the final acceptance gate.
