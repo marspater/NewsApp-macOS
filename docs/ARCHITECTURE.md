@@ -51,7 +51,7 @@ flowchart LR
         GW["<b>NetworkBoundaryProxy</b><br/>IPAddressValidator"]
     end
 
-    subgraph Store["Storage · SQLite v29"]
+    subgraph Store["Storage · SQLite"]
         AS["<b>ArticleStore</b>"]
         DB[("<b>DatabaseEngine</b><br/>+Events<br/>WAL · FTS5")]
     end
@@ -175,6 +175,10 @@ timeline
         v27 : events.story_id (story layer)
         v28 : publisher categories repaired (#817)
         v29 : Briefing edition snapshots and sitrep cache (#849)
+        v30 : user_notes, highlights and notes (#711)
+        v31 : publisher_content_revisions.previous_text (#712)
+    section Feeds and search, continued
+        v32 : feeds.last_failure_kind (#927)
 ```
 
 ## Invariants
@@ -224,7 +228,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Subscription URLs are stored after `AppSettings.normalizeFeedURL` (lowercase scheme/host, HTTPS, bare root slash removed). A non-root trailing slash is part of the address. Duplicate checks use slash-insensitive `AppSettings.feedKey`. Stored subscriptions are never rewritten: scoped GUIDs hash the exact string.
 
-- `FeedFetcher` is the single refresh path: ≤6 requests, ≤2 per host. Backoff 10 min doubling to 6 h; `Retry-After` on 429/503 is a lower bound capped at 24 h. Local rejections, cancellation and fully offline batches are not failures.
+- `FeedFetcher` is the single refresh path: ≤6 requests, ≤2 per host. Backoff 10 min doubling to 6 h; `Retry-After` on 429/503 is a lower bound capped at 24 h. Local rejections, cancellation and fully offline batches are not failures. Each failure stores its kind (DNS, no such host, transport, timeout, TLS, HTTP, policy, parse, unknown), and a manual refresh lifts the wait only of a feed whose last failure was DNS, transport or timeout: a server's wait, a certificate failure and a host cooldown hold for every refresh (#927).
 
 - Requests are conditional. ETag/Last-Modified live in `feeds`, written only inside the ingestion transaction, short printable ASCII only; 304 touches nothing.
 

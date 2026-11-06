@@ -68,6 +68,10 @@ class FeedManager: NSObject, ObservableObject {
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
+    private var runningRefreshIsScheduled = false
+    /// Callers that asked for a manual refresh while a scheduled one was collecting: one more refresh runs after it,
+    /// and they resume when that ends (#927).
+    private(set) var manualRefreshWaiters: [CheckedContinuation<Void, Never>] = []
     private var enrichmentTask: Task<Void, Never>?
     private var overviewWarmupTask: Task<Void, Never>?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
@@ -453,6 +457,8 @@ class FeedManager: NSObject, ObservableObject {
         refreshTask?.cancel()
         refreshTask = nil
         refreshRunID = nil
+        for waiter in manualRefreshWaiters { waiter.resume() }
+        manualRefreshWaiters = []
         // The waiting caller returns without finishing the run, so the loading state ends here.
         for (url, status) in feedStatuses where status == .loading { feedStatuses[url] = .idle }
         isAnyFeedLoading = false
@@ -529,6 +535,15 @@ class FeedManager: NSObject, ObservableObject {
         return true
     }
 
+    /// A feed that failed while a VPN or network switched is healthy, so asking for a refresh retries it at once (#927).
+    private func retryConnectivityFailures() async {
+        do {
+            try await articleStore.database.clearConnectivityBackoff(at: now())
+        } catch {
+            logger.error("Could not lift connectivity backoff: \(error.localizedDescription)")
+        }
+    }
+
     /// Returns once new articles are collected, published and rated. Notification banners and background
     /// classification then run on their own: banners post minutes apart, so no caller waits for them.
     ///
@@ -538,13 +553,20 @@ class FeedManager: NSObject, ObservableObject {
         guard !isStopped else { return }
         if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
         if let refreshTask {
-            _ = await refreshTask.value
+            if !scheduled, runningRefreshIsScheduled {
+                // A scheduled refresh keeps connectivity backoff, so this request is answered by a refresh after it.
+                await withCheckedContinuation { manualRefreshWaiters.append($0) }
+            } else {
+                _ = await refreshTask.value
+            }
             return
         }
         let runID = UUID()
         refreshRunID = runID
+        runningRefreshIsScheduled = scheduled
         let task = Task<[FeedArticle], Never> { [weak self] in
-            await self?.performRefreshPipeline() ?? []
+            if !scheduled { await self?.retryConnectivityFailures() }
+            return await self?.performRefreshPipeline() ?? []
         }
         // Retain the work itself so subscription changes cancel ingestion as well as fetching.
         refreshTask = task
@@ -560,13 +582,19 @@ class FeedManager: NSObject, ObservableObject {
         lastRefreshCompletedAt = now()
         refreshInterruptedBySleep = false
 
+        // Taken here so that stopping now drops the request, and resumes its callers, instead of leaving it for later.
+        let manualWaiters = manualRefreshWaiters
+        manualRefreshWaiters = []
+        defer { for waiter in manualWaiters { waiter.resume() } }
+
         guard !isStopped else { return }
         await pruneIfDue()
         clusterEventsInBackground()
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
-        guard !Task.isCancelled, !isStopped else { return }
-        await notifyAndEnrich(newArticles)
+        if !Task.isCancelled, !isStopped { await notifyAndEnrich(newArticles) }
+        // In a task of its own: cancelling this caller, a scheduled refresh, does not cancel the reader's request.
+        if !manualWaiters.isEmpty { await Task { [weak self] in await self?.fetchFeedsAsync() }.value }
     }
 
     /// What Check for Updates found for an open story (#992).

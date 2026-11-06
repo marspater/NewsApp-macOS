@@ -211,7 +211,7 @@ struct DNSAnswer {
     private mutating func familiesEnded(_ families: Set<Int32>) -> IPAddressValidator.ValidationResult? {
         ended.formUnion(families)
         guard Self.families.isSubset(of: ended) else { return nil }
-        return addresses.isEmpty ? .unresolvable(reason: "No valid addresses resolved") : .allowed(ips: addresses)
+        return addresses.isEmpty ? .noSuchHost : .allowed(ips: addresses)
     }
 }
 

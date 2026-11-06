@@ -22,7 +22,10 @@ struct IPAddressValidator: Sendable {
     enum ValidationResult: Equatable, Sendable {
         case allowed(ips: [String])
         case blocked(reason: String)
+        /// The resolver did not answer.
         case unresolvable(reason: String)
+        /// The resolver answered: neither address family has a record for the host.
+        case noSuchHost
     }
 
     /// Comprehensive pre-flight check for a given hostname or IP string.

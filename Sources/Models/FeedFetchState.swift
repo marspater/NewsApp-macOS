@@ -45,12 +45,26 @@ struct FeedValidators: Equatable, Sendable {
     }
 }
 
+/// What a feed's failed request ran into, stored with its fetch state so a manual refresh can tell, even after a
+/// relaunch, a feed that a network change backed off from one that a server or a certificate did (#927).
+enum FeedFailureKind: String, CaseIterable, Sendable {
+    case dns, noSuchHost, transport, timeout, tls, http, policy, parse, unknown
+
+    /// The kinds that say something about the path to the publisher and nothing about the feed.
+    static let connectivity: [FeedFailureKind] = [.dns, .transport, .timeout]
+
+    var isConnectivity: Bool { Self.connectivity.contains(self) }
+}
+
 /// Everything stored about a feed's last requests.
 struct FeedFetchState: Equatable, Sendable {
     var validators: FeedValidators?
     var failures = 0
-    /// No request is made before this time, whether the refresh is scheduled or manual.
+    /// No request is made before this time. A manual refresh first lifts it for a feed whose last failure was
+    /// connectivity (#927); a server's wait and every other failure hold for every refresh.
     var retryAt: Date?
+    /// What the last failure ran into; nil after a success, and for a failure recorded before schema 32.
+    var lastFailureKind: FeedFailureKind?
     /// Last successful response (200 or 304).
     var lastFetchedAt: Date?
     /// What the feed carried the last time its content changed.
@@ -196,11 +210,54 @@ extension FeedError {
         }
     }
 
-    /// The request may not have reached the publisher at all (offline, DNS, timeout).
-    var isConnectivity: Bool {
+    /// Exhaustive, so a new case has to choose a kind.
+    var failureKind: FeedFailureKind {
         switch self {
-        case .network, .timeout: return true
-        default: return false
+        case .malformedURL, .insecureScheme, .blockedPort, .blockedHost, .redirectBlocked, .dnsRebindingDetected,
+            .responseTooLarge:
+            return .policy
+        case .tooManyRedirects, .httpStatus, .serverBusy: return .http
+        case .unsupportedFormat, .parseFailed: return .parse
+        case .network: return .transport
+        case .timeout: return .timeout
+        case .dnsUnanswered: return .dns
+        case .noSuchHost: return .noSuchHost
+        case .tls: return .tls
+        case .retryScheduled, .unclassified: return .unknown
+        }
+    }
+
+    /// The request may not have reached the publisher at all (offline, no DNS answer, no route, timeout).
+    var isConnectivity: Bool { failureKind.isConnectivity }
+
+    /// The failure for an error `URLSession` or the task reported instead of a `FeedError`. Requests run through the
+    /// loopback gateway, so a failure past it reaches `URLSession` as a SOCKS outcome (measured on macOS 27, #927):
+    /// - `badURL` (-1000) is the gateway's rejection, the reply it sends when no upstream connection could be made.
+    ///   The URL itself passed `validateDestination`, so it is not the cause. A destination the gateway refused
+    ///   looks the same; the preflight catches nearly all of those first, and every retry validates again.
+    /// - `notConnectedToInternet` (-1009) is a tunnel the gateway closed with no reply.
+    /// - `cannotConnectToHost` (-1004) is the gateway itself not listening.
+    init(transportFailure error: Error) {
+        let message = error.localizedDescription
+        guard let failure = error as? URLError else {
+            // A cancelled batch records nothing, whatever it is called here.
+            self = error is CancellationError ? .network(message) : .unclassified(message)
+            return
+        }
+        switch failure.code {
+        case .timedOut:
+            self = .timeout
+        case .cannotFindHost, .dnsLookupFailed:
+            self = .dnsUnanswered(host: failure.failingURL?.host ?? "unknown", reason: message)
+        case .badURL, .notConnectedToInternet, .networkConnectionLost, .cannotConnectToHost, .internationalRoamingOff,
+            .callIsActive, .dataNotAllowed, .cancelled:
+            self = .network(message)
+        case .secureConnectionFailed, .serverCertificateHasBadDate, .serverCertificateUntrusted,
+            .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid, .clientCertificateRejected,
+            .clientCertificateRequired, .appTransportSecurityRequiresSecureConnection:
+            self = .tls(message)
+        default:
+            self = .unclassified(message)
         }
     }
 

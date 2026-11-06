@@ -365,7 +365,8 @@ enum DiagnosticsExport {
                     + "retry \(state.retryAt.map { $0 > now ? $0.formatted(.iso8601) : "due" } ?? "none"), "
                     + "validators \(validators.isEmpty ? "none" : validators.joined(separator: " and ")), "
                     + "items \(state.itemCount), full text \(state.fullTextItems) of \(state.itemCount), "
-                    + "newest item \(time(state.latestItemAt))")
+                    + "newest item \(time(state.latestItemAt)), "
+                    + "last failure \(state.lastFailureKind?.rawValue ?? "none")")
         }
         return lines.joined(separator: "\n") + "\n"
     }
