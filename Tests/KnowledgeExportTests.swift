@@ -27,6 +27,20 @@ enum KnowledgeExportTests {
     }
     @MainActor static func run() async {
         do {
+            let commandOwner = NSObject()
+            let context = KnowledgeExportActions.Context(
+                articleIDs: ["one"], title: "Story", storeID: ObjectIdentifier(commandOwner), digest: false)
+            let firstActions = KnowledgeExportActions(markdown: {}, epub: {}, notes: {}, context: context)
+            let newClosures = KnowledgeExportActions(
+                markdown: { print("unused") }, epub: {}, notes: {}, context: context)
+            check(
+                firstActions == newClosures,
+                "fresh closures for unchanged focused commands do not invalidate the window")
+            let nextStory = KnowledgeExportActions(
+                markdown: {}, epub: {}, notes: {},
+                context: .init(
+                    articleIDs: ["two"], title: "Story", storeID: ObjectIdentifier(commandOwner), digest: false))
+            check(firstActions != nextStory, "new selection replaces captured export commands")
             let text = "Title: \"quoted\"\n---\n<script> & café 🐈\u{2028}end"
             let scalar = KnowledgeExport.yamlString(text)
             check(

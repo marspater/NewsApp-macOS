@@ -16,10 +16,20 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct KnowledgeExportActions {
+/// Focused commands compare their captured context, not new closure instances on every reader render.
+struct KnowledgeExportActions: Equatable {
+    struct Context: Equatable {
+        let articleIDs: [String]
+        let title: String
+        let storeID: ObjectIdentifier
+        let digest: Bool
+    }
     let markdown: () -> Void
     let epub: () -> Void
     let notes: () -> Void
+    var context: Context? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.context == rhs.context }
 }
 private struct KnowledgeExportActionsKey: FocusedValueKey { typealias Value = KnowledgeExportActions }
 extension FocusedValues {
@@ -71,7 +81,9 @@ private actor KnowledgeExportEncoder {
         KnowledgeExportActions(
             markdown: { start(articles: articles, title: title, store: store, digest: digest, format: .markdown) },
             epub: { start(articles: articles, title: title, store: store, digest: digest, format: .epub) },
-            notes: { start(articles: articles, title: title, store: store, digest: digest, format: .notes) })
+            notes: { start(articles: articles, title: title, store: store, digest: digest, format: .notes) },
+            context: .init(
+                articleIDs: articles.map(\.id), title: title, storeID: ObjectIdentifier(store), digest: digest))
     }
 
     private static func start(
