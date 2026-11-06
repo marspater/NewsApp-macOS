@@ -29294,6 +29294,12 @@ struct NewsTests {
             queryEmbedding: queryVec
         )
         assertEqual(hybridResults.count, 2, "Both lexical and semantic candidates surfaced")
+        // A caller that resolved no vector keeps it: the page does not look one up again behind its counts (#985)
+        let resolvedWithoutVector = try await db.searchArticles(
+            query: "astronomy cosmic exploration", limit: 10, queryEmbedding: nil, vectorResolved: true)
+        assertFalse(
+            resolvedWithoutVector.contains { $0.id == "art-jwst" },
+            "A resolved nil vector stays lexical: the semantic candidate does not surface (#985)")
 
         let jwstHit = hybridResults.first { $0.id == "art-jwst" }
         assertTrue(jwstHit != nil, "Semantic candidate surfaced despite zero keyword overlap")
