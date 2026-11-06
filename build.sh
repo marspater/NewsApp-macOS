@@ -153,10 +153,14 @@ SWIFT_SOURCES=(
     Sources/App/LibraryBackup.swift \
     Sources/App/NewsApp.swift \
 )
+NEWS_APP_INTENTS_DIR="build/incremental/app-intents"
 source script/app_intents_metadata.sh
 source script/sentry_dev.sh
-swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "${NEWS_SENTRY_FLAGS[@]}" "${NEWS_APP_INTENTS_FLAGS[@]}" -swift-version 6 -O -parse-as-library \
-    -target "arm64-apple-macos${TARGET_MACOS}" "${SWIFT_SOURCES[@]}" -o "${MACOS_DIR}/${APP_NAME}"
+# Incremental (#1020): unchanged files are not recompiled; the objects live under build/incremental.
+source script/swift_incremental.sh
+news_swift_compile app "${MACOS_DIR}/${APP_NAME}" "${NEWS_DEPENDENCY_FLAGS[@]}" "${NEWS_SENTRY_FLAGS[@]}" \
+    "${NEWS_APP_INTENTS_FLAGS[@]}" -swift-version 6 -O -parse-as-library \
+    -target "arm64-apple-macos${TARGET_MACOS}" "${SWIFT_SOURCES[@]}"
 news_app_intents_metadata "${RESOURCES_DIR}" "${TARGET_MACOS}"
 
 # Create Info.plist

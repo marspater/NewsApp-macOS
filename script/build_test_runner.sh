@@ -12,16 +12,19 @@ TARGET_MACOS="${TARGET_MACOS:-15.0}"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
 export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
 
-TEST_STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-tests.XXXXXX")
-trap 'rm -rf "$TEST_STAGE"' EXIT
+# The staged copies keep a fixed place and their modification time while unchanged, so the incremental compile (#1020)
+# recompiles a staged file only when its source changed.
+TEST_STAGE="build/incremental/test-stage"
+mkdir -p "$TEST_STAGE"
 # Keep the existing runner unchanged while including the dedicated parsing checks in every full regression run.
 # The staged copies blank the lines they drop and name their source file, so an assertion still reports the real
 # file and line.
 stage() {
     local source="$1"
     shift
-    { echo "#sourceLocation(file: \"$source\", line: 1)"; sed -e 's/^@main$//' "$@" "$source"; } \
-        > "$TEST_STAGE/$(basename "$source")"
+    local staged="$TEST_STAGE/$(basename "$source")"
+    { echo "#sourceLocation(file: \"$source\", line: 1)"; sed -e 's/^@main$//' "$@" "$source"; } > "$staged.new"
+    if cmp -s "$staged.new" "$staged"; then rm "$staged.new"; else mv "$staged.new" "$staged"; fi
 }
 stage Tests/NewsTests.swift
 # The headless harnesses (Story Overview sections, reader accessibility, tension calibration) compile into the same
@@ -29,7 +32,7 @@ stage Tests/NewsTests.swift
 # files declare the reader's command notification names that NewsApp.swift provides in the app; one copy is kept.
 stage Tests/EventOverviewAccessibilityTests.swift
 stage Tests/ReaderAccessibilityTests.swift -e '/^extension Notification.Name {$/,/^}$/s/.*//'
-cat > "$TEST_STAGE/Runner.swift" <<'SWIFT'
+cat > "$TEST_STAGE/Runner.swift.new" <<'SWIFT'
 import Foundation
 
 @main
@@ -70,10 +73,19 @@ struct NewsRegressionRunner {
     }
 }
 SWIFT
+if cmp -s "$TEST_STAGE/Runner.swift.new" "$TEST_STAGE/Runner.swift"; then
+    rm "$TEST_STAGE/Runner.swift.new"
+else
+    mv "$TEST_STAGE/Runner.swift.new" "$TEST_STAGE/Runner.swift"
+fi
 
 echo "Compiling tests for macOS ${TARGET_MACOS} ($(uname -m))..."
 source script/swiftpm_dependencies.sh
-swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
+source script/swift_incremental.sh
+# The driver skips unchanged files only when the output path is the one it recorded, and every test.sh run names its
+# runner after itself, so the runner is built at one fixed path and copied to OUTPUT.
+RUNNER_BUILD="build/incremental/runner-$(news_swift_cache_key "${NEWS_DEPENDENCY_FLAGS[@]}" "$@")"
+news_swift_compile tests "$RUNNER_BUILD" "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
     Sources/Services/DateParser.swift \
     Sources/Models/FeedError.swift \
     Sources/Models/FeedFetchState.swift \
@@ -194,5 +206,5 @@ swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" "$@" -target "$(uname -m)-apple-macos${TARG
     Tests/TensionCalibrationTests.swift \
     "$TEST_STAGE/EventOverviewAccessibilityTests.swift" "$TEST_STAGE/ReaderAccessibilityTests.swift" \
     "$TEST_STAGE/NewsTests.swift" Tests/FeedKitSwiftSoupTests.swift Tests/NotificationAttachmentTests.swift "$TEST_STAGE/Runner.swift" \
-    Tests/TestDefaults.swift \
-    -o "$OUTPUT"
+    Tests/TestDefaults.swift
+cp -f "$RUNNER_BUILD" "$OUTPUT"
