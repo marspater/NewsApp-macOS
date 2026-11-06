@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 LIBRARY="${1:?Usage: script/test_editorial_wire_identity.sh LIBRARY_COPY [OUTPUT_DIR]}"
-if [[ "$(cd "$(dirname "$LIBRARY")" && pwd -P)" == */Library/Containers/* ]]; then
+if [[ "$(realpath "$LIBRARY")" == */Library/Containers/* ]]; then
     echo "Refusing a live library; pass a copy: $LIBRARY" >&2
     exit 1
 fi

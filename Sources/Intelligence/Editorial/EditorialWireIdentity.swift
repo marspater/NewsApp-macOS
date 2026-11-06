@@ -151,10 +151,10 @@ enum EditorialWireIdentity {
         let groups = Dictionary(grouping: articles.indices, by: root)
         return articles.indices.map { index in
             let group = groups[root(index)] ?? [index]
-            let (wire, origin, basis) = attribution(
-                of: group.map { evidence[$0] }, lowestID: articles[group[0]].articleID)
+            let found = attribution(of: group.map { evidence[$0] }, lowestID: articles[group[0]].articleID)
             return WireIdentity(
-                articleID: articles[index].articleID, wireGroupID: wire, originPublisherID: origin, basis: basis)
+                articleID: articles[index].articleID, wireGroupID: found.wire, originPublisherID: found.origin,
+                basis: found.basis)
         }
     }
 
@@ -185,21 +185,35 @@ enum EditorialWireIdentity {
         return Double(left.intersection(right).count) / Double(left.union(right).count) >= titleSimilarity
     }
 
-    private static func attribution(of group: [Evidence], lowestID: String) -> (String?, String?, WireIdentity.Basis) {
+    private struct Attribution {
+        var wire: String?
+        var origin: String?
+        var basis: WireIdentity.Basis
+    }
+
+    private static func attribution(of group: [Evidence], lowestID: String) -> Attribution {
         let credits = group.reduce(into: Set<String>()) { $0.formUnion($1.credits) }.sorted()
-        if credits.count == 1 { return ("wire:\(credits[0])", "agency:\(credits[0])", .credited) }
-        if credits.count > 1 { return ("wire:" + credits.joined(separator: "+"), nil, .multipleCredits) }
+        if credits.count == 1 {
+            return Attribution(wire: "wire:\(credits[0])", origin: "agency:\(credits[0])", basis: .credited)
+        }
+        if credits.count > 1 {
+            return Attribution(wire: "wire:" + credits.joined(separator: "+"), origin: nil, basis: .multipleCredits)
+        }
         guard group.count == 1 else {
             let outlet = Set(group.map(\.publisher))
             // Several outlets share an unnamed source: one report and one origin, which no outlet can claim. One
             // outlet repeating its own full text is that outlet's report.
             let own = outlet.count == 1 && !group[0].publisher.isEmpty && group.contains(where: \.hasFullText)
-            return ("copy:\(lowestID)", own ? "publisher:\(group[0].publisher)" : "unattributed:\(lowestID)", .copies)
+            return Attribution(
+                wire: "copy:\(lowestID)", origin: own ? "publisher:\(group[0].publisher)" : "unattributed:\(lowestID)",
+                basis: .copies)
         }
         let article = group[0]
-        guard article.hasFullText, !article.publisher.isEmpty else { return (nil, nil, .insufficient) }
-        if article.mentionsAgency { return (nil, nil, .agencyMention) }
-        return ("report:\(lowestID)", "publisher:\(article.publisher)", .fullText)
+        guard article.hasFullText, !article.publisher.isEmpty else {
+            return Attribution(wire: nil, origin: nil, basis: .insufficient)
+        }
+        if article.mentionsAgency { return Attribution(wire: nil, origin: nil, basis: .agencyMention) }
+        return Attribution(wire: "report:\(lowestID)", origin: "publisher:\(article.publisher)", basis: .fullText)
     }
 
     private static func credits(
