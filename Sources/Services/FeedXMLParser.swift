@@ -144,7 +144,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                 description: articles[i].description, pubDate: articles[i].pubDate, source: name,
                 imageUrl: articles[i].imageUrl, aiSummary: articles[i].aiSummary,
                 fullContent: articles[i].fullContent, category: articles[i].category,
-                contentFetched: articles[i].contentFetched, readerDocument: articles[i].readerDocument)
+                contentFetched: articles[i].contentFetched, readerDocument: articles[i].readerDocument,
+                author: articles[i].author)
         }
     }
 
@@ -610,7 +611,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             title: title.trimmingCharacters(in: .whitespacesAndNewlines), link: article.link, guid: article.guid,
             description: desc, pubDate: date, source: article.source, imageUrl: article.imageUrl,
             fullContent: article.fullContent, category: cat, contentFetched: article.contentFetched,
-            readerDocument: article.readerDocument)
+            readerDocument: article.readerDocument, author: Self.byline(item.author) ?? Self.byline(dc?.creator))
     }
 
     private func atomArticle(_ item: FeedKit.AtomFeedEntry, keeping article: FeedArticle) -> FeedArticle {
@@ -624,7 +625,15 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             title: title.trimmingCharacters(in: .whitespacesAndNewlines), link: article.link, guid: article.guid,
             description: desc, pubDate: date, source: article.source, imageUrl: article.imageUrl,
             fullContent: article.fullContent, category: article.category, contentFetched: article.contentFetched,
-            readerDocument: article.readerDocument)
+            readerDocument: article.readerDocument,
+            author: Self.byline(item.authors?.compactMap(\.name).joined(separator: ", ")))
+    }
+
+    /// A feed's author text, bounded because the field is untrusted and never needs more than a few names.
+    private static func byline(_ raw: String?) -> String? {
+        let text = ContentExtractionPipeline.shared.decodeHTMLEntities(raw ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : String(text.prefix(300))
     }
 
     private func applyFeedKitMedia(_ media: FeedKit.Media?, baseURL: URL?, to article: FeedArticle)

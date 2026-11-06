@@ -1,6 +1,8 @@
 #!/bin/bash
 # Opt-in wire identity coverage and momentum replay over a copy of a library; the report holds aggregates only.
 # Back up first: sqlite3 "file:<library>?mode=ro" ".backup '<copy>'", then pragma journal_mode=delete on the copy.
+# It also reviews the schema upgrade on a second private copy. NEWS_WIRE_IDENTITY_FETCH_FEEDS=1 fetches the copy's
+# subscribed feeds once, as a refresh would, and measures the rows those feeds still serve with their authors.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 LIBRARY="${1:?Usage: script/test_editorial_wire_identity.sh LIBRARY_COPY [OUTPUT_DIR]}"
@@ -14,7 +16,16 @@ chmod 700 "$OUTPUT"
 [[ ! -e "$OUTPUT/wire-identity.json" ]] || { echo "Refusing to overwrite $OUTPUT/wire-identity.json" >&2; exit 1; }
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-wire-identity-build.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
-python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json"
+if [[ "${NEWS_WIRE_IDENTITY_FETCH_FEEDS:-}" == 1 ]]; then
+    python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json" \
+        --feeds-directory "$STAGE/feeds"
+    export NEWS_WIRE_IDENTITY_FEEDS="$STAGE/feeds"
+else
+    python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json"
+fi
+mkdir -m 700 "$STAGE/migration"
+cp "$LIBRARY" "$STAGE/migration/news.sqlite3"
 script/build_test_runner.sh "$STAGE/runner" -O
 NEWS_TEST_ATOM=Tests/EditorialWireIdentityTests.swift NEWS_WIRE_IDENTITY_INPUT="$STAGE/inputs.json" \
-    NEWS_WIRE_IDENTITY_OUTPUT="$OUTPUT/wire-identity.json" "$STAGE/runner"
+    NEWS_WIRE_IDENTITY_OUTPUT="$OUTPUT/wire-identity.json" NEWS_WIRE_IDENTITY_MIGRATE="$STAGE/migration/news.sqlite3" \
+    "$STAGE/runner"

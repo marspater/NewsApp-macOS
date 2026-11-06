@@ -23,12 +23,14 @@ struct WireIdentityArticle: Sendable {
     let content: String?
     let publishedAt: Date
     let fetchedAt: Date
+    /// The feed's author field, when the article was stored with one.
+    var author: String? = nil
 }
 
 /// Who an article's report comes from, or an explicit nil where the stored text cannot say.
 struct WireIdentity: Sendable, Equatable {
     enum Basis: String, Sendable, CaseIterable {
-        /// A byline-position credit names one agency, here or in a near-identical copy.
+        /// The feed's author field or a byline-position credit names one agency, here or in a near-identical copy.
         case credited
         /// Credits name several agencies: the wire group is known, the one origin is not.
         case multipleCredits
@@ -116,12 +118,15 @@ enum EditorialWireIdentity {
             hasFullText = longest.count >= EditorialWireIdentity.fullTextWords
             shingles = EditorialWireIdentity.shingles(longest)
             credits = EditorialWireIdentity.credits(
-                publisher: article.publisher, description: description, content: content)
+                publisher: article.publisher, author: article.author, description: description, content: content)
             mentionsAgency = !EditorialWireIdentity.agencyIDs(
                 in: [article.title, description, content].joined(separator: "\n")
             ).isEmpty
         }
     }
+
+    /// The agencies a feed author field names, as stable ids. The field is a byline, so any exact name there counts.
+    static func bylineAgencies(_ author: String) -> Set<String> { agencyIDs(in: withoutFormatMarks(author)) }
 
     /// One identity per distinct article, sorted by article id; the result does not depend on input order. A group's
     /// ids derive from its lowest article id, and each group has one origin, so `EditorialMomentum` never sees
@@ -197,9 +202,12 @@ enum EditorialWireIdentity {
         return ("report:\(lowestID)", "publisher:\(article.publisher)", .fullText)
     }
 
-    private static func credits(publisher: String, description: String, content: String) -> Set<String> {
+    private static func credits(
+        publisher: String, author: String?, description: String, content: String
+    ) -> Set<String> {
         var found = Set<String>()
         for (name, id) in agencyByName where name.caseInsensitiveCompare(publisher) == .orderedSame { found.insert(id) }
+        found.formUnion(bylineAgencies(author ?? ""))
         for text in [description, content] {
             let range = NSRange(text.startIndex..., in: text)
             for shape in creditShapes {

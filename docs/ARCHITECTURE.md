@@ -179,6 +179,7 @@ timeline
         v31 : publisher_content_revisions.previous_text (#712)
     section Feeds and search, continued
         v32 : feeds.last_failure_kind (#927)
+        v33 : articles.author (#998)
 ```
 
 ## Invariants
