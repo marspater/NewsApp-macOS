@@ -1,0 +1,1 @@
+- The loopback socket tests run one after another in their own lane of `./test.sh`, and a second socket failure prints the socket state, after an address-in-use collision on CI (#577).
