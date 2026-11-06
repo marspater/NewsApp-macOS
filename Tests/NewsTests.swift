@@ -26929,6 +26929,9 @@ struct NewsTests {
         assertEqual(
             statements("Mayor Elena Rostova said that the council answered “Never!” and closed the session."),
             ["the council answered “Never!” and closed the session"], "A quoted exclamation stays inside the statement")
+        assertTrue(
+            !statements("Mayor Elena Rostova said that demonstrators shouted “Stop.” Officials rejected the claim.")
+                .contains { $0.contains("Officials") }, "A quote that ends its sentence ends the statement")
         assertEqual(
             OverviewComposer.displayStatement(
                 participant: "Constitutional Tribunal", position: tribunalPerspectives.first?.position ?? ""),

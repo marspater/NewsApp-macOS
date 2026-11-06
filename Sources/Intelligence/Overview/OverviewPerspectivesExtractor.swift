@@ -597,9 +597,12 @@ struct OverviewPerspectivesExtractor: Sendable {
             quoted.append(Attribution(accordingToQuoted, participantGroup: 1, statementGroup: 2, minimumLength: 0))
         }
         // An unquoted statement ends at its sentence's ".", "!" or "?"; a quoted phrase inside it ("…replied “Never!”
-        // and left") is kept whole, so its own "!" or "?" does not end the statement.
+        // and left") is kept whole, so its own "!" or "?" does not end the statement. A quote that closes on one and is
+        // followed by a capital or the end ("…shouted “Stop.” Officials…") ends the sentence: it is not taken whole, so
+        // the statement stops inside it and the unbalanced quote is rejected, as before.
+        let sentenceEnd = #"(?:(?<![.!?][”"])|(?!\s+\p{Lu}|\s*$))"#
         let statementTail =
-            #"(?:“[^”\n]{1,120}”|"[^"\n]{1,120}"|[^.!?\n]|\#(nonTerminalDot)){15,400}(?=[.!?\n]|$)"#
+            #"(?:“[^”\n]{1,120}”\#(sentenceEnd)|"[^"\n]{1,120}"\#(sentenceEnd)|[^.!?\n]|\#(nonTerminalDot)){15,400}(?=[.!?\n]|$)"#
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         // A statement runs to the end of its sentence (up to 400 characters) or there is no match: a plain length
         // cap cut "…an appointee of Mr. Tusk's predecessor…" to "…appointee of Mr" (#994).
