@@ -43,6 +43,7 @@ struct NewsRegressionRunner {
             if selected("Tests/AnalysisGenerationTests.swift") { await AnalysisGenerationTests.run() }
             if selected("Tests/EditorialNoveltyTests.swift") { await EditorialNoveltyTests.run() }
             if selected("Tests/EditorialMomentumTests.swift") { await EditorialMomentumTests.run() }
+            if selected("Tests/EditorialRankingTests.swift") { await EditorialRankingTests.run() }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
             // The harness suites run only when named: a targeted runner mode must not pick them up.
             if atom == "Tests/EventOverviewAccessibilityTests.swift" { await EventOverviewAccessibilityTests.main() }
