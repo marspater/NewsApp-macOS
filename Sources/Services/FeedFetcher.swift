@@ -32,10 +32,17 @@ actor FeedFetcher {
     private let client: SecureHTTPClient
     private let now: @Sendable () -> Date
     private var hostCooldowns: [String: Date] = [:]
+    /// The `URLError` code behind a transport failure in the current batch; `FeedError` keeps only its message.
+    private var urlErrorCodes: [String: Int] = [:]
+    private let timeline: NetworkTimeline
     private let logger = NewsSignposts.feedsLog
 
-    init(client: SecureHTTPClient = .shared, now: @escaping @Sendable () -> Date = { Date() }) {
+    init(
+        client: SecureHTTPClient = .shared, timeline: NetworkTimeline = .shared,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.client = client
+        self.timeline = timeline
         self.now = now
     }
 
@@ -75,6 +82,7 @@ actor FeedFetcher {
         } catch let error as FeedError {
             return (urlString, nil, error, nil)
         } catch {
+            if let failure = error as? URLError { urlErrorCodes[urlString] = failure.errorCode }
             return (urlString, nil, FeedError(transportFailure: error), nil)
         }
     }
@@ -112,11 +120,14 @@ actor FeedFetcher {
                 due.append(url)
             }
         }
+        let pathChangesAtStart = timeline.pathChanges
+        urlErrorCodes = [:]
         let (attempted, latencies) = await fetchWindowed(
             due, allowHTTP: allowHTTP, validators: stored.compactMapValues(\.validators))
         if let state, !Task.isCancelled {
             await recordOutcomes(
-                attempted.filter { $0.error.map(\.isScheduledPause) != true }, latencies: latencies, in: state)
+                attempted.filter { $0.error.map(\.isScheduledPause) != true }, latencies: latencies,
+                pathChangesAtStart: pathChangesAtStart, in: state)
         }
         return results + attempted
     }
@@ -197,17 +208,26 @@ actor FeedFetcher {
     }
 
     private func recordOutcomes(
-        _ attempted: [FeedFetchResult], latencies: [String: TimeInterval], in state: DatabaseEngine
+        _ attempted: [FeedFetchResult], latencies: [String: TimeInterval], pathChangesAtStart: Int,
+        in state: DatabaseEngine
     ) async {
         // Every request failing to connect means this device is probably offline; that says nothing about the feeds.
         let offline = !attempted.isEmpty && attempted.allSatisfy { $0.error?.isConnectivity == true }
         let at = now()
+        timeline.record(
+            attempted: attempted.count, failed: attempted.filter { $0.error != nil }.count, takenForOffline: offline,
+            pathChangesAtStart: pathChangesAtStart)
+        let pathChanged = timeline.pathChanges != pathChangesAtStart
         for result in attempted {
             do {
                 if let error = result.error {
+                    let detail = error.failureDetail(urlErrorCode: urlErrorCodes[result.urlString])
+                    logger.notice(
+                        "Feed request failed: host \(Self.host(result.urlString), privacy: .private(mask: .hash)), \(detail, privacy: .public), offline batch \(offline, privacy: .public), path changed \(pathChanged, privacy: .public)"
+                    )
                     guard !offline, !error.isLocalRejection else { continue }
                     try await state.recordFeedFailure(
-                        result.urlString, kind: error.failureKind, retryAfter: error.retryAfter, at: at)
+                        result.urlString, kind: error.failureKind, detail: detail, retryAfter: error.retryAfter, at: at)
                     try await state.recordFeedSample(result.urlString, latency: nil)
                 } else {
                     try await state.recordFeedSuccess(result.urlString, at: at)
