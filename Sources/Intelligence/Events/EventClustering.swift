@@ -127,12 +127,12 @@ enum EventClusterer {
         /// Same-event and related-act probabilities for the story signal (#627): a separate story model when given,
         /// else the pair model (an injected scorer answers p_same only).
         func pairProbabilities(_ a: String, _ b: String) async -> (same: Double, related: Double)? {
-            if let storyProbabilities { return await storyProbabilities(a, b) }
             let start = DispatchTime.now().uptimeNanoseconds
             defer {
                 stages.pairModel += seconds(since: start)
                 stages.pairModelCalls += 1
             }
+            if let storyProbabilities { return await storyProbabilities(a, b) }
             if let injectedProbability { return await injectedProbability(a, b).map { ($0, 0) } }
             return await PairScorer.shared.probabilities(a, b)
         }
@@ -433,11 +433,13 @@ enum EventClusterer {
                         }
                         remaining -= members.count
                         report.processed += members.count
-                        if let changed = try await database.repartitionEvent(
-                            event.id, expectedVersion: snapshot.version, expectedMembers: snapshot.members,
-                            groups: groups.map { $0.map(\.id) }, matcherVersion: EventMatcher.version,
-                            activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime), at: now)
-                        {
+                        let repartitioned = try await timing(\.matchCommits) {
+                            try await database.repartitionEvent(
+                                event.id, expectedVersion: snapshot.version, expectedMembers: snapshot.members,
+                                groups: groups.map { $0.map(\.id) }, matcherVersion: EventMatcher.version,
+                                activeSince: now.addingTimeInterval(-candidatePolicy.activeEventLifetime), at: now)
+                        }
+                        if let changed = repartitioned {
                             handled.formUnion(members.map(\.id))
                             report.detached += groups.dropFirst().reduce(0) { $0 + $1.count }
                             report.changedEvents.formUnion(changed)
