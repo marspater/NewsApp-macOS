@@ -25,5 +25,7 @@ fi
 # Git exports these to hooks; SwiftPM's dependency checkout in a fresh worktree then reads the wrong repository.
 # Only the tests drop them: format.sh must stage into the index this commit uses (a temporary one for `commit -a`).
 # NEWS_TEST_FORCE is dropped too: a suite that just passed is never run twice by the hook.
-env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u NEWS_TEST_FORCE ./test.sh --changed
+changed_atoms=$(script/changed_atoms.sh)
+env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u NEWS_TEST_FORCE \
+    TEST_CHANGED_ATOMS_OVERRIDE="$changed_atoms" ./test.sh --changed
 echo "✅ All tests passed. Proceeding with commit."

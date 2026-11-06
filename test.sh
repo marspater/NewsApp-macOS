@@ -9,7 +9,8 @@ MODE="full"
 if [[ "${1:-}" == "--changed" ]]; then
     MODE="changed"
     shift
-    ONLY_ATOMS=$(script/changed_atoms.sh)
+    ONLY_ATOMS=${TEST_CHANGED_ATOMS_OVERRIDE-$(script/changed_atoms.sh)}
+    unset TEST_CHANGED_ATOMS_OVERRIDE
     if [[ -z "$ONLY_ATOMS" ]]; then
         echo "✅ SUCCESS: no changed file has tests to run."
         exit 0

@@ -4,16 +4,23 @@
 # every atom whose test file names its type (the file's basename, up to any `+`). Any other change (test.sh,
 # Tests/Runner.swift, scripts, resources, Package.swift, or a Sources/ file no atom names) prints every atom, so a
 # selection never silently skips a test. Markdown and docs/ select nothing. No changed file prints nothing.
-# ponytail: the hook calls this without GIT_INDEX_FILE, so `git commit -a` with other files staged by hand selects
-# only the hand-staged ones; pass the list as arguments from the hook if that mix ever matters.
 # Arguments replace the changed-file list: `script/changed_atoms.sh Sources/Services/IPAddressValidator.swift`.
 set -e
 cd "$(dirname "$0")/.."
 if [[ $# -gt 0 ]]; then
     changed=$(printf '%s\n' "$@")
 else
-    changed=$(git diff --cached --name-only --diff-filter=d)
-    [[ -z "$changed" ]] && changed=$(git diff --name-only --diff-filter=d HEAD)
+    if git diff --cached --quiet; then
+        diff_args=(HEAD)
+    else
+        diff_args=(--cached)
+    fi
+    deleted=$(git diff "${diff_args[@]}" --no-renames --name-only --diff-filter=D)
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+        case "$file" in *.md | docs/*) ;; *) exec script/test_atoms.sh ;; esac
+    done <<< "$deleted"
+    changed=$(git diff "${diff_args[@]}" --no-renames --name-only)
 fi
 atoms=$(script/test_atoms.sh)
 selected=""
