@@ -10936,9 +10936,13 @@ struct NewsTests {
         (lyonBlaze.places, lyonBlaze.titlePlaces) = (["@FR", "lyon"], ["@FR", "lyon"])
         (kyivBlaze.titleSpecificAnchors, lyonBlaze.titleSpecificAnchors) = ([], [])
         assertEqual(EventMatcher.assess(kyivBlaze, lyonBlaze).conflict, .places, "Disjoint countries are a places veto")
-        assertEqual(
-            EventMatcher.assess(kyivBlaze, lyonBlaze, policy: vetoMinimum).conflict, .headlinePlaces,
-            "Under the veto threshold the headline places conflict behind it is kept")
+        let maskedPlaces = EventMatcher.assess(kyivBlaze, lyonBlaze, policy: vetoMinimum)
+        assertTrue(
+            maskedPlaces.conflict == .places && maskedPlaces.masksAbsoluteConflict,
+            "Under the veto threshold the conflict stays places, so story links keep the veto, and is marked absolute")
+        assertTrue(
+            EventMatcher.conflictsBlock([pair, pair, pair, maskedPlaces], policy: vetoMinimum),
+            "A places veto with a headline conflict behind it is not outvoted")
         var weekday = diverging
         weekday.conflict = .weekday
         assertTrue(
