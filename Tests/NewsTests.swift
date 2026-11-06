@@ -876,6 +876,7 @@ struct NewsTests {
             ("testOfflineCacheAndResilience", { await testOfflineCacheAndResilience() }),
             ("testArticleIdentityDeep", { await testArticleIdentityDeep() }),
             ("testPublisherTitleAliases", { try await testPublisherTitleAliases() }),
+            ("testNewsletterStrip", { testNewsletterStrip() }),
             ("testDatabaseEnginePersistence", { await testDatabaseEnginePersistence() }),
             ("testCanonicalArticleIngestion", { try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot) }),
             ("testPersistentArticleAliases", { try await testPersistentArticleAliases(fixtureRoot: fixtureRoot) }),
@@ -8201,6 +8202,42 @@ struct NewsTests {
             "Clear All Caches must clear DecodedImageCache"
         )
         await testDB.close()
+    }
+
+    /// The pair model's newsletter strip (#737): series suffix, sign-up line and teaser go; everything else stays.
+    static func testNewsletterStrip() {
+        let edition = EventMatcher.newsletterStripped(
+            title: "Stevens defects to back El-Sayed’s opponent | First Thing",
+            description: "Trump called the candidate a ‘jihadist’. Plus an Australian fish worth its weight in gold\n\n"
+                + "Don’t already get First Thing in your inbox? Sign up here\n\nGood morning. Stevens endorsed Rogers.")
+        assertEqual(edition.title, "Stevens defects to back El-Sayed’s opponent", "Series suffix is dropped")
+        assertEqual(
+            edition.description, "Trump called the candidate a ‘jihadist’.\nGood morning. Stevens endorsed Rogers.",
+            "Sign-up line and teaser are dropped")
+        let reported = EventMatcher.newsletterStripped(
+            title: "Hackers strike | First Thing",
+            description: "A newsletter leaked 40,000 records, police said.\nSign up to First Thing\nSubscribe here")
+        assertEqual(
+            reported.description, "A newsletter leaked 40,000 records, police said.",
+            "A paragraph that reports on a newsletter stays; only the calls to action go")
+        var stripPolicy = EventMatchPolicy.standard
+        stripPolicy.pairModelStripsNewsletter = true
+        assertEqual(
+            EventMatcher.pairModelText(
+                title: "Hackers strike | First Thing", description: "Sign up here", gap: nil, samePublisher: nil,
+                policy: stripPolicy),
+            EventFeatures.matchingText(title: "Hackers strike", description: ""),
+            "The pair model's text follows the policy's strip")
+        let column = EventMatcher.newsletterStripped(
+            title: "Why growth is a lie | Radical Thinking with Aditya Chakrabortty", description: "A column.")
+        assertEqual(column.title, "Why growth is a lie", "A column's author suffix is dropped too")
+        assertEqual(column.description, "A column.", "A plain body is unchanged")
+        let plain = EventMatcher.newsletterStripped(
+            title: "Binance CEO says 90 percent of stolen assets have been replenished", description: "Sign up here")
+        assertEqual(plain.title, "Binance CEO says 90 percent of stolen assets have been replenished", "No suffix")
+        assertEqual(plain.description, "Sign up here", "Without a suffix the body is left alone")
+        let scored = EventMatcher.newsletterStripped(title: "Lakers beat Celtics | 102-99", description: "")
+        assertEqual(scored.title, "Lakers beat Celtics | 102-99", "A suffix with digits is not a series")
     }
 
     /// One publisher, one headline, two GUIDs and two URLs within hours: one story (#583). A recurring headline a day
@@ -16761,13 +16798,11 @@ struct NewsTests {
                             pair.isCompatible = false
                         }
                         func input(_ index: Int) -> String {
-                            let text = EventFeatures.matchingText(
-                                title: items[index].title, description: items[index].description ?? "")
                             let known = !items[i].source.isEmpty && !items[j].source.isEmpty
-                            return diagnosePolicy.pairModelPrefix
-                                ? EventMatcher.pairModelInput(
-                                    text, gap: abs(items[i].published.timeIntervalSince(items[j].published)),
-                                    samePublisher: known ? items[i].source == items[j].source : nil) : text
+                            return EventMatcher.pairModelText(
+                                title: items[index].title, description: items[index].description ?? "",
+                                gap: abs(items[i].published.timeIntervalSince(items[j].published)),
+                                samePublisher: known ? items[i].source == items[j].source : nil, policy: diagnosePolicy)
                         }
                         let pairModel = EventMatcher.needsPairModel(pair) ? await probability(input(i), input(j)) : nil
                         // As the clusterer does: a borderline pair the model confirms at the cutoff is a match.
