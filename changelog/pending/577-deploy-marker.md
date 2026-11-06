@@ -1,0 +1,1 @@
+- CircleCI's deployment marker no longer rebuilds the release artifact after the test job; Codemagic and GitHub keep the arm64 verification build (#577).
