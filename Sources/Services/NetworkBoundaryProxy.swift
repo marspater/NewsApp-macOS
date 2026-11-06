@@ -71,6 +71,10 @@ actor NetworkBoundaryProxy {
         return parameters
     }
 
+    nonisolated static func permitsUpstream(proxyConfigured: Bool?) -> Bool {
+        proxyConfigured == false
+    }
+
     init(
         resolver: Resolver? = nil,
         connector: @escaping Connector = { NWConnection(host: $0, port: $1, using: directParameters) }
@@ -619,9 +623,9 @@ private final class SOCKSTunnel: @unchecked Sendable {
             // the gateway's place, so the destination is no longer the validated one (#929).
             connection.requestEstablishmentReport(queue: queue) { [weak self] report in
                 guard let self, !self.finished, self.upstream === connection else { return }
-                if report?.proxyConfigured == true {
+                guard NetworkBoundaryProxy.permitsUpstream(proxyConfigured: report?.proxyConfigured) else {
                     NetworkBoundaryProxy.logger.error(
-                        "Upstream connect to port \(port, privacy: .public) refused: a system proxy handled it")
+                        "Upstream port \(port, privacy: .public) refused: proxy status is not verified direct")
                     self.reject()
                     return
                 }
