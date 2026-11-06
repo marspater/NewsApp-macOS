@@ -36,9 +36,38 @@ enum NotificationAttachmentTests {
             precondition(second.type == UTType.png.identifier, "Existing PNG images remain supported")
         } catch { fatalError("Notification image conversion failed: \(error)") }
         do {
-            _ = try NotificationService.makeImageAttachment(data: Data("not an image".utf8))
+            _ = try NotificationService.makeImageAttachment(data: Data("not an image".utf8), contentType: "text/html")
             fatalError("Malformed images must not become notification attachments")
-        } catch {}
+        } catch {
+            // The log names the stage and what the host sent (#1010); a request error reads as the fetch stage.
+            precondition(
+                ImageLoadFailure.describe(error).hasPrefix("stage=decode type=text/html bytes=12"),
+                "Decode failure names its stage, got \(error)")
+            precondition(
+                ImageLoadFailure.describe(URLError(.cannotDecodeContentData))
+                    == "stage=fetch type=unknown bytes=unknown domain=NSURLErrorDomain code=-1016")
+            precondition(
+                ImageLoadFailure.isCancellation(CancellationError())
+                    && ImageLoadFailure.isCancellation(URLError(.cancelled))
+                    && !ImageLoadFailure.isCancellation(URLError(.timedOut)),
+                "Cancelled loads stay out of the log; other request errors do not")
+        }
+
+        // An 8-bit colormap PNG (#1010) decodes for the reader and becomes the tall crop attachment.
+        do {
+            let palette = palettePNG(width: 962, height: 548)
+            precondition(palette[25] == 3, "The fixture is a palette PNG (IHDR colour type 3), got \(palette[25])")
+            let decoded = try SecureHTTPClient.decodeReaderImage(palette)
+            precondition(decoded.width == 962 && decoded.height == 548, "Palette PNG decodes at its size")
+            let attachment = try NotificationService.makeImageAttachment(data: palette, contentType: "image/png")
+            let image = CGImageSourceCreateImageAtIndex(
+                CGImageSourceCreateWithData(try Data(contentsOf: attachment.url) as CFData, nil)!, 0, nil)!
+            precondition(
+                image.width == 366 && image.height == 548,
+                "Palette PNG becomes the 2:3 crop, got \(image.width) × \(image.height)")
+            precondition(alpha(image, x: 360, y: 274) == 255, "Palette crop is opaque at the trailing edge")
+            precondition(StoryBannerPresenter.bannerPhoto(decoded, scale: 2) != nil, "Palette banner photo renders")
+        } catch { fatalError("Palette PNG notification image failed: \(error)") }
 
         // The tall fading crop (#589): a 1200 × 1200 source becomes a 600 × 900 portrait PNG with alpha,
         // transparent at the leading edge and opaque at the trailing edge; the same input renders the same bytes,
@@ -193,6 +222,22 @@ enum NotificationAttachmentTests {
         context.setFillColor(CGColor(srgbRed: 0.9, green: 0.3, blue: 0.1, alpha: 1))
         context.fill(CGRect(x: width / 4, y: height / 4, width: width / 2, height: height / 2))
         let image = context.makeImage()!
+        let data = NSMutableData()
+        let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, image, nil)
+        precondition(CGImageDestinationFinalize(destination))
+        return data as Data
+    }
+    /// A palette PNG of four colour bands, written by ImageIO from an indexed image.
+    private static func palettePNG(width: Int, height: Int) -> Data {
+        let table: [UInt8] = [20, 40, 200, 230, 80, 30, 30, 160, 60, 240, 240, 240]
+        let space = CGColorSpace(indexedBaseSpace: CGColorSpace(name: CGColorSpace.sRGB)!, last: 3, colorTable: table)!
+        let pixels = Data((0..<(width * height)).map { UInt8(($0 % width) * 4 / width) })
+        let image = CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: width, space: space,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+            provider: CGDataProvider(data: pixels as CFData)!, decode: nil, shouldInterpolate: false,
+            intent: .defaultIntent)!
         let data = NSMutableData()
         let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
         CGImageDestinationAddImage(destination, image, nil)

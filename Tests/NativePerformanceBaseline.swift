@@ -117,7 +117,7 @@ private final class BaselineDelegate: NSObject, NSApplicationDelegate {
                 .environmentObject(container.readManager)
                 .environmentObject(container.savedStories)
                 .defaultAppStorage(defaults)
-                .environment(\.readerImageLoader) { url in try await imageProbe.load(url) }
+                .environment(\.readerImageLoader) { url, _ in try await imageProbe.load(url) }
             let view = NSHostingView(rootView: root)
             let current = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800),

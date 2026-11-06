@@ -156,6 +156,27 @@ enum StoryBannerRoute: Equatable, Sendable {
         try await add(request)
         return .notificationCenter
     }
+
+    /// Offers a story request to the app's presenter. The banner's fields are copied out first, so only a Sendable
+    /// value crosses to the main actor, where the installed presenter and the app's activity decide.
+    static func offer(_ request: UNNotificationRequest) async -> Bool {
+        guard let banner = StoryBanner(request) else { return false }
+        let sounds = request.content.sound != nil
+        return await MainActor.run {
+            offer(
+                banner, sounds: sounds, active: NSApplication.shared.isActive,
+                presenter: NotificationService.presentAppBanner)
+        }
+    }
+
+    /// Offers a story banner to the app's presenter on the main actor. News became active between the post and this
+    /// hop: it is declined, so the add files the notification and `willPresent` draws it, never both banners.
+    @MainActor static func offer(
+        _ banner: StoryBanner, sounds: Bool, active: Bool, presenter: ((StoryBanner, Bool) -> Bool)?
+    ) -> Bool {
+        guard !active else { return false }
+        return presenter?(banner, sounds) ?? false
+    }
 }
 
 /// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
@@ -186,7 +207,8 @@ final class NotificationService: Sendable {
 
     /// Draws a story banner in the app and says whether it did; installed by the app delegate, which owns the
     /// presenter. Nil (tests, helper processes) leaves every banner to the system.
-    @MainActor static var presentAppBanner: ((UNNotificationRequest) -> Bool)?
+    /// The second argument says whether the story's banner asks for a sound.
+    @MainActor static var presentAppBanner: ((StoryBanner, Bool) -> Bool)?
 
     init(
         post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = bannerSpacing
@@ -207,11 +229,7 @@ final class NotificationService: Sendable {
                         let settings = await UNUserNotificationCenter.current().notificationSettings()
                         return (settings.alertSetting, settings.alertStyle, settings.showPreviewsSetting)
                     },
-                    present: { request in
-                        // A request is immutable once made (its content is copied in), so the main actor may read it.
-                        nonisolated(unsafe) let request = request
-                        return await MainActor.run { NotificationService.presentAppBanner?(request) ?? false }
-                    },
+                    present: { request in await StoryBannerRoute.offer(request) },
                     add: { try await UNUserNotificationCenter.current().add($0) })
                 log.notice(
                     "posted \(request.identifier, privacy: .private(mask: .hash)) route=\(String(describing: route), privacy: .public)"
@@ -383,13 +401,75 @@ final class NotificationService: Sendable {
         }
     }
 
-    /// Posts one story banner now, outside triage and its limits (Help > Show Sample Notification), so the banner can be
-    /// checked without waiting for a refresh. Nothing is recorded in the delivery log, and its own identifier keeps it
-    /// from replacing or clearing the story's real banner. `continues` is asked before the image download and the post,
-    /// as for a real banner, so a reader outside Full mode gets no headline and no image request.
-    func postSample(_ article: FeedArticle, continues: @Sendable () async -> Bool) async {
+    /// Posts one story banner now, outside triage and its limits (Help > Show Sample Notification, Settings >
+    /// Notifications > Send Test Notification), so the banner can be checked without waiting for a refresh. Nothing is
+    /// recorded in the delivery log, and its own identifier keeps it from replacing or clearing the story's real banner.
+    /// `continues` is asked before the image download and the post, as for a real banner, so a reader outside Full
+    /// mode gets no headline and no image request.
+    @discardableResult
+    func postSample(_ article: FeedArticle, continues: @Sendable () async -> Bool) async -> PostOutcome {
         let banner = PlannedBanner(lane: .normal, grouped: false, article: article, thread: "news-sample", sound: false)
-        _ = await triggerFullNotification(banner, at: Date(), identifier: "news-sample", continues: continues)
+        return await triggerFullNotification(banner, at: Date(), identifier: "news-sample", continues: continues)
+    }
+
+    /// A random story of the list for a test banner, one with a photo when the list has any (#926).
+    static func sampleStory<Generator: RandomNumberGenerator>(
+        from stories: [FeedArticle], using generator: inout Generator
+    ) -> FeedArticle? {
+        let withPhoto = stories.filter { FeedArticle.bestCardImage(in: [$0]) != nil }
+        return (withPhoto.isEmpty ? stories : withPhoto).randomElement(using: &generator)
+    }
+
+    static func sampleStory(from stories: [FeedArticle]) -> FeedArticle? {
+        let withPhoto = stories.filter { FeedArticle.bestCardImage(in: [$0]) != nil }
+        return (withPhoto.isEmpty ? stories : withPhoto).randomElement()
+    }
+
+    /// What Settings says after a test banner: why nothing was sent, why macOS refused it, or what the reader's
+    /// notification settings make of it. Sentence case, no claim beyond what the outcome and settings show.
+    static func sampleStatus(
+        _ outcome: PostOutcome, authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle,
+        previews: UNShowPreviewsSetting
+    ) -> String {
+        let systemSettings = "System Settings › Notifications › News"
+        switch outcome {
+        case .halted:
+            return
+                "Not sent: notifications are off or not at Full detail. Turn on Enable Notifications and choose Full."
+        case .failed(let domain, let code):
+            if domain == UNErrorDomain, code == UNError.Code.notificationsNotAllowed.rawValue {
+                return "macOS refused it: notifications for News are not allowed. Allow them in \(systemSettings)."
+            }
+            return "macOS refused it (\(domain) \(code)). Help › Export Diagnostics has the log."
+        case .posted:
+            return deliveryStatus(authorization: authorization, alert: alert, style: style, previews: previews)
+        }
+    }
+
+    /// What the reader's notification settings make of a banner macOS accepted.
+    private static func deliveryStatus(
+        authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle,
+        previews: UNShowPreviewsSetting
+    ) -> String {
+        let systemSettings = "System Settings › Notifications › News"
+        switch authorization {
+        case .denied: return "Sent, but notifications for News are turned off. Allow them in \(systemSettings)."
+        case .notDetermined:
+            return "Sent, but macOS has not asked for permission yet. News asks after the first refresh with stories."
+        default: break
+        }
+        if alert != .enabled { return "Sent, but alerts for News are off. Turn them on in \(systemSettings)." }
+        let hiddenPreviews = previews == .never ? " with the story hidden until you open it" : ""
+        switch style {
+        case .none: return "Sent, but the alert style is None, so nothing shows. Choose Banners in \(systemSettings)."
+        case .alert: return "Sent. macOS shows it as an alert that stays until dismissed\(hiddenPreviews)."
+        default: break
+        }
+        if previews == .never {
+            return "Sent. macOS shows it as a banner\(hiddenPreviews); News does not draw its own banner then."
+        }
+        return
+            "Sent. With News in front, or a News window open behind another app, News draws the banner itself; otherwise macOS shows it."
     }
 
     /// Stable across launches, so a story replaces its earlier banner; `hashValue` is reseeded per process.
@@ -462,8 +542,10 @@ final class NotificationService: Sendable {
     /// Posts one full-mode banner; `continues` is asked again right before the post, after the image download,
     /// so a reader who switched to Privacy or turned notifications off during the download sees no headline.
     /// How one banner ended: posted, refused by the notification center, or halted because the pass may not go on.
-    enum PostOutcome: Equatable {
-        case posted, failed, halted
+    enum PostOutcome: Equatable, Sendable {
+        case posted, halted
+        /// The error's domain and code, public in the log as well (#926).
+        case failed(domain: String, code: Int)
     }
 
     private func triggerFullNotification(
@@ -515,19 +597,21 @@ final class NotificationService: Sendable {
             logger.error(
                 "Failed to schedule full notification '\(identifier)': domain=\(error.domain, privacy: .public) code=\(error.code, privacy: .public) \(error.localizedDescription)"
             )
-            return .failed
+            return .failed(domain: error.domain, code: error.code)
         }
     }
 
     private func downloadNotificationAttachment(from url: URL) async -> UNNotificationAttachment? {
         do {
-            let (data, _) = try await SecureHTTPClient.shared.fetchImage(from: url, allowHTTP: false)
+            let (data, response) = try await SecureHTTPClient.shared.fetchImage(from: url, allowHTTP: false)
             try Task.checkCancellation()
-            return try Self.makeImageAttachment(data: data)
+            return try Self.makeImageAttachment(data: data, contentType: response.mimeType)
         } catch {
-            let error = error as NSError
-            logger.error(
-                "Notification image attachment failed: domain=\(error.domain, privacy: .public) code=\(error.code)")
+            // Stage, content type and byte count are public; the URL is not logged (#1010). Cancelled work is silent.
+            if !ImageLoadFailure.isCancellation(error) {
+                logger.error(
+                    "Notification image attachment failed: \(ImageLoadFailure.describe(error), privacy: .public)")
+            }
             return nil
         }
     }

@@ -80,7 +80,7 @@ private final class MatrixDelegate: NSObject, NSApplicationDelegate {
                 window.contentView = NSHostingView(
                     rootView: HostRootView(state: host.state)
                         .defaultAppStorage(defaults)
-                        .environment(\.readerImageLoader, { _ in image })
+                        .environment(\.readerImageLoader, { _, _ in image })
                         .environment(\._colorSchemeContrast, contrast)
                         .environment(\.overrideContrast, contrast))
                 // Reader figures decode asynchronously; the other fixtures settle within one pass.

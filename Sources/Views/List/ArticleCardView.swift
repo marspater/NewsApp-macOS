@@ -189,19 +189,25 @@ struct ArticleCardView<Footer: View>: View {
     private var cardImage: some View {
         Group {
             if let url = cardImageURL {
-                ArticleRemoteImage(url: url) { phase in
-                    if case .success(let image) = phase {
-                        // The clear frame takes the column's size; a filled image wider than it must not push past it.
-                        Color.clear
-                            .frame(maxWidth: .infinity)
-                            .frame(height: cardHeaderHeight)
-                            .overlay { image.resizable().aspectRatio(contentMode: .fill) }
-                            .clipped()
-                            // Clipping hides the overflow but does not stop it taking clicks meant for the card above.
-                            .contentShape(Rectangle())
-                    } else {
-                        editorialPlaceholder
+                ArticleRemoteImage(url: url, size: .card) { phase in
+                    ZStack {
+                        if case .success(let image) = phase {
+                            // The clear frame takes the column's size; a filled image wider than it must not push
+                            // past it.
+                            Color.clear
+                                .frame(maxWidth: .infinity)
+                                .frame(height: cardHeaderHeight)
+                                .overlay { image.resizable().aspectRatio(contentMode: .fill) }
+                                .clipped()
+                                // Clipping hides the overflow but does not stop it taking clicks meant for the card
+                                // above.
+                                .contentShape(Rectangle())
+                        } else {
+                            editorialPlaceholder
+                        }
                     }
+                    // The placeholder fades into a photo that arrives after the card appeared (DESIGN.md 8.2).
+                    .animation(reduceMotion ? nil : AppMotion.state, value: phase.image != nil)
                 }
             } else {
                 editorialPlaceholder
@@ -348,6 +354,7 @@ struct ArticleCardView<Footer: View>: View {
                     AppColor.leadPlaceholder
                 }
             }
+            .animation(reduceMotion ? nil : AppMotion.state, value: image != nil)
             .accessibilityHidden(true)
 
             leadCaption

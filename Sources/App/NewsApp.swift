@@ -476,10 +476,8 @@ struct KeyboardShortcutsCommands: Commands {
                 openWindow(id: Self.windowID)
             }
             Button("Show Sample Notification") {
-                // The newest story with a photo, posted through the real path: in front, the app draws its banner.
-                let stories = ArticleStore.shared.articles
-                guard let story = stories.first(where: { FeedArticle.bestCardImage(in: [$0]) != nil }) ?? stories.first
-                else { return }
+                // A random story with a photo, posted through the real path: in front, the app draws its banner.
+                guard let story = NotificationService.sampleStory(from: ArticleStore.shared.articles) else { return }
                 Task {
                     await NotificationService.shared.postSample(story) {
                         await MainActor.run {
@@ -554,11 +552,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         NotificationActionIdentifier.registerCategories()
         UNUserNotificationCenter.current().delegate = self
         // Behind another app macOS never asks `willPresent`; the post itself offers a story banner to the app (#926).
-        NotificationService.presentAppBanner = { request in
-            guard let banner = StoryBanner(request), StoryBannerPresenter.shared.present(banner) else { return false }
+        NotificationService.presentAppBanner = { banner, sounds in
+            guard StoryBannerPresenter.shared.present(banner) else { return false }
             // Nothing is added, so the system plays no sound. A requested sound is not permission to play one:
             // honor the reader's current notification sound setting before using the reader's alert sound.
-            if request.content.sound != nil {
+            if sounds {
                 Task { @MainActor in
                     let settings = await UNUserNotificationCenter.current().notificationSettings()
                     guard settings.soundSetting == .enabled else { return }
