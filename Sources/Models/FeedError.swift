@@ -31,8 +31,17 @@ enum FeedError: LocalizedError, Equatable, Sendable {
     case retryScheduled(until: Date)
     case unsupportedFormat(String)
     case parseFailed(String)
+    /// The connection could not be made or was lost.
     case network(String)
     case timeout
+    /// The resolver did not answer: it timed out or reported an error of its own.
+    case dnsUnanswered(host: String, reason: String)
+    /// The resolver answered that the host has no address, which a dead domain keeps doing on any network.
+    case noSuchHost(String)
+    /// The TLS handshake or the server's certificate failed. Waiting for a better network does not change either.
+    case tls(String)
+    /// A failure with no known cause.
+    case unclassified(String)
 
     var errorDescription: String? {
         switch self {
@@ -70,6 +79,14 @@ enum FeedError: LocalizedError, Equatable, Sendable {
             return "Network error: \(message)"
         case .timeout:
             return "Request timed out."
+        case .dnsUnanswered(let host, let reason):
+            return "Network error: Host '\(host)' unresolvable: \(reason)"
+        case .noSuchHost(let host):
+            return "Host '\(host)' has no address. The feed's domain may no longer exist."
+        case .tls(let message):
+            return "Secure connection failed: \(message)"
+        case .unclassified(let message):
+            return "Request failed: \(message)"
         }
     }
 }

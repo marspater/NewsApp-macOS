@@ -75,7 +75,7 @@ actor FeedFetcher {
         } catch let error as FeedError {
             return (urlString, nil, error, nil)
         } catch {
-            return (urlString, nil, .network(error.localizedDescription), nil)
+            return (urlString, nil, FeedError(transportFailure: error), nil)
         }
     }
 
@@ -89,7 +89,8 @@ actor FeedFetcher {
     }
 
     /// With `state`, known feeds are requested conditionally and paused ones are skipped; outcomes are recorded for the next run.
-    /// Scheduled and manual refreshes take this same path, so neither can bypass a server's wait.
+    /// Scheduled and manual refreshes take this same path, so neither can bypass a server's wait. A manual refresh
+    /// lifts only connectivity backoff, in the database, before it calls this (`clearConnectivityBackoff`, #927).
     func fetchAllFeeds(urls: [String], allowHTTP: Bool = false, state: DatabaseEngine? = nil) async -> [FeedFetchResult]
     {
         var stored: [String: FeedFetchState] = [:]
@@ -196,7 +197,8 @@ actor FeedFetcher {
             do {
                 if let error = result.error {
                     guard !offline, !error.isLocalRejection else { continue }
-                    try await state.recordFeedFailure(result.urlString, retryAfter: error.retryAfter, at: at)
+                    try await state.recordFeedFailure(
+                        result.urlString, kind: error.failureKind, retryAfter: error.retryAfter, at: at)
                 } else {
                     try await state.recordFeedSuccess(result.urlString, at: at)
                 }

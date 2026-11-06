@@ -203,7 +203,9 @@ actor SecureHTTPClient {
         case .blocked(let reason):
             throw FeedError.blockedHost(host: host, reason: reason)
         case .unresolvable(let reason):
-            throw FeedError.network("Host '\(host)' unresolvable: \(reason)")
+            throw FeedError.dnsUnanswered(host: host, reason: reason)
+        case .noSuchHost:
+            throw FeedError.noSuchHost(host)
         }
 
     }
@@ -255,7 +257,7 @@ actor SecureHTTPClient {
         defer { asyncBytes.task.cancel() }
 
         guard let httpResponse = rawResponse as? HTTPURLResponse else {
-            throw FeedError.network("Invalid non-HTTP response received")
+            throw FeedError.unclassified("Invalid non-HTTP response received")
         }
 
         // 5. Verify HTTP status before reading the body, so a large error page reports its status, not its size

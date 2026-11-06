@@ -529,6 +529,15 @@ class FeedManager: NSObject, ObservableObject {
         return true
     }
 
+    /// A feed that failed while a VPN or network switched is healthy, so asking for a refresh retries it at once (#927).
+    private func retryConnectivityFailures() async {
+        do {
+            try await articleStore.database.clearConnectivityBackoff()
+        } catch {
+            logger.error("Could not lift connectivity backoff: \(error.localizedDescription)")
+        }
+    }
+
     /// Returns once new articles are collected, published and rated. Notification banners and background
     /// classification then run on their own: banners post minutes apart, so no caller waits for them.
     ///
@@ -544,7 +553,8 @@ class FeedManager: NSObject, ObservableObject {
         let runID = UUID()
         refreshRunID = runID
         let task = Task<[FeedArticle], Never> { [weak self] in
-            await self?.performRefreshPipeline() ?? []
+            if !scheduled { await self?.retryConnectivityFailures() }
+            return await self?.performRefreshPipeline() ?? []
         }
         // Retain the work itself so subscription changes cancel ingestion as well as fetching.
         refreshTask = task

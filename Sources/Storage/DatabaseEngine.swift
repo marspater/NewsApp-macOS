@@ -90,7 +90,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 31
+    static let schemaVersion = 32
     /// The longest text a publisher update keeps of what it replaced (#712): a cut text would show invented changes.
     static let maximumRevisionTextLength = 50_000
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
@@ -1927,6 +1927,22 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 32 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // What each feed's last failure ran into (#927). A failure recorded before this has no kind, which
+                // never qualifies for a manual refresh's retry.
+                if try !columnNames(of: "feeds").contains("last_failure_kind") {
+                    try executeSimple("ALTER TABLE feeds ADD COLUMN last_failure_kind TEXT;")
+                }
+                try setUserVersion(32)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                throw error
+            }
+        }
     }
 
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -2761,7 +2777,7 @@ actor DatabaseEngine {
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
         let sql =
-            "SELECT url, etag, last_modified, consecutive_failures, next_attempt_at, last_fetched_at, latest_item_at, item_count, full_text_items FROM feeds;"
+            "SELECT url, etag, last_modified, consecutive_failures, next_attempt_at, last_fetched_at, latest_item_at, item_count, full_text_items, last_failure_kind FROM feeds;"
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
             throw NSError(
@@ -2782,7 +2798,8 @@ actor DatabaseEngine {
                 result[url] = FeedFetchState(
                     validators: validators.isEmpty ? nil : validators,
                     failures: Int(sqlite3_column_int(statement, 3)),
-                    retryAt: date(4), lastFetchedAt: date(5), latestItemAt: date(6),
+                    retryAt: date(4), lastFailureKind: text(9).flatMap(FeedFailureKind.init(rawValue:)),
+                    lastFetchedAt: date(5), latestItemAt: date(6),
                     itemCount: Int(sqlite3_column_int(statement, 7)),
                     fullTextItems: Int(sqlite3_column_int(statement, 8)))
             }
@@ -2793,32 +2810,48 @@ actor DatabaseEngine {
         return result
     }
 
-    /// A successful response (200 or 304) ends any backoff. Validators are untouched: they change only with ingestion.
+    /// A successful response (200 or 304) ends any backoff and forgets the failure's kind. Validators are untouched:
+    /// they change only with ingestion.
     func recordFeedSuccess(_ feedURL: String, at now: Date) throws {
-        try writeFeedSchedule(feedURL, failures: 0, retryAt: nil, fetchedAt: now.timeIntervalSince1970)
+        try writeFeedSchedule(feedURL, failures: 0, retryAt: nil, kind: nil, fetchedAt: now.timeIntervalSince1970)
+    }
+
+    /// A manual refresh retries the feeds a network change backed off (#927). Only their wait ends: the failure count
+    /// stays until a success, so a scheduled refresh keeps backing off if the retry fails too. A row of any other kind
+    /// keeps its wait, and a host's in-memory cooldown still applies in `FeedFetcher`.
+    func clearConnectivityBackoff() throws {
+        let kinds = FeedFailureKind.connectivity.map { "'\($0.rawValue)'" }.joined(separator: ", ")
+        try executeSimple(
+            "UPDATE feeds SET next_attempt_at = NULL WHERE next_attempt_at IS NOT NULL AND last_failure_kind IN (\(kinds));"
+        )
     }
 
     /// Counts a failed request and returns when the feed may be requested again.
     @discardableResult
-    func recordFeedFailure(_ feedURL: String, retryAfter: TimeInterval?, at now: Date) throws -> Date {
+    func recordFeedFailure(_ feedURL: String, kind: FeedFailureKind = .unknown, retryAfter: TimeInterval?, at now: Date)
+        throws -> Date
+    {
         let previous = try feedFetchStates()[feedURL]
         // A long quiet period forgives old failures; a subscription removed and re-added months later starts fresh.
         let stale = previous?.retryAt.map { now.timeIntervalSince($0) > FeedRetryPolicy.maximumDelay } ?? false
         let failures = (stale ? 0 : previous?.failures ?? 0) + 1
         let retryAt = now.addingTimeInterval(FeedRetryPolicy.delay(afterFailures: failures, retryAfter: retryAfter))
-        try writeFeedSchedule(feedURL, failures: failures, retryAt: retryAt, fetchedAt: nil)
+        try writeFeedSchedule(feedURL, failures: failures, retryAt: retryAt, kind: kind, fetchedAt: nil)
         return retryAt
     }
 
-    private func writeFeedSchedule(_ feedURL: String, failures: Int, retryAt: Date?, fetchedAt: Double?) throws {
+    private func writeFeedSchedule(
+        _ feedURL: String, failures: Int, retryAt: Date?, kind: FeedFailureKind?, fetchedAt: Double?
+    ) throws {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
         let sql = """
-            INSERT INTO feeds (id, url, created_at, last_fetched_at, consecutive_failures, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO feeds (id, url, created_at, last_fetched_at, consecutive_failures, next_attempt_at, last_failure_kind) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(url) DO UPDATE SET last_fetched_at = coalesce(excluded.last_fetched_at, feeds.last_fetched_at),
-                consecutive_failures = excluded.consecutive_failures, next_attempt_at = excluded.next_attempt_at;
+                consecutive_failures = excluded.consecutive_failures, next_attempt_at = excluded.next_attempt_at,
+                last_failure_kind = excluded.last_failure_kind;
             """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -2836,6 +2869,11 @@ actor DatabaseEngine {
             sqlite3_bind_double(statement, 6, retryAt.timeIntervalSince1970)
         } else {
             sqlite3_bind_null(statement, 6)
+        }
+        if let kind {
+            sqlite3_bind_text(statement, 7, kind.rawValue, -1, Self.sqliteTransient)
+        } else {
+            sqlite3_bind_null(statement, 7)
         }
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw NSError(

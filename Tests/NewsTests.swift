@@ -845,6 +845,9 @@ struct NewsTests {
             ("testAuditRefreshRegressions", { try await testAuditRefreshRegressions(fixtureRoot: fixtureRoot) }),
             ("testConditionalFeedRequests", { try await testConditionalFeedRequests(fixtureRoot: fixtureRoot) }),
             ("testFeedBackoffAndHostLimits", { try await testFeedBackoffAndHostLimits() }),
+            ("testFeedFailureKinds", { try await testFeedFailureKinds() }),
+            ("testFeedFailureKindMigration", { try await testFeedFailureKindMigration() }),
+            ("testGatewayRejectionIsTransport", { try await rerunningLoopbackFlake(testGatewayRejectionIsTransport) }),
             ("testRefreshEndsAtCollection", { try await testRefreshEndsAtCollection() }),
             ("testFeedCatalog", { try await testFeedCatalog() }),
             ("testCatalogReviewAndAlternatives", { try await testCatalogReviewAndAlternatives() }),
@@ -1562,7 +1565,8 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "31", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
+            "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(
             value(copy, "SELECT count(*) FROM articles WHERE category IS NOT NULL;"), "0",
             "A library from before v22 keeps none of the classifier labels v22 wrote into the publisher column (#817)")
@@ -1640,7 +1644,9 @@ struct NewsTests {
         let shrinkPath = directory.appendingPathComponent("shrink.sqlite3").path
         let shrinkDB = DatabaseEngine(path: shrinkPath)
         try await shrinkDB.open()
-        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "31", "New database opens at schema v31")
+        assertEqual(
+            value(shrinkPath, "PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
+            "New database opens at the current schema")
         assertEqual(value(shrinkPath, "PRAGMA auto_vacuum;"), "2", "New database uses incremental auto_vacuum (2)")
 
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -2450,7 +2456,7 @@ struct NewsTests {
         let db = DatabaseEngine(path: workingCopy.path)
         try await db.open()
         assertEqual(
-            value(workingCopy.path, "PRAGMA user_version;"), "31",
+            value(workingCopy.path, "PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
             "Fixture migrates cleanly to current schema v26 (#539)"
         )
         assertEqual(
@@ -5092,6 +5098,234 @@ struct NewsTests {
             manager.feedStatuses[shown], .failed(.retryScheduled(until: refreshStart.addingTimeInterval(1800))),
             "The paused feed reports when it resumes")
         manager.stopBackgroundWork()
+    }
+
+    /// A manual refresh retries a feed a network change backed off, and nothing else (#927).
+    @MainActor
+    static func testFeedFailureKinds() async throws {
+        print("  - Testing failure kinds and the manual retry of connectivity backoff (#927)...")
+        assertEqual(
+            FeedFailureKind.allCases.filter(\.isConnectivity), [.dns, .transport, .timeout],
+            "Only an unanswered lookup, a lost path and a timeout count as connectivity")
+        let urlErrors: [(URLError.Code, FeedFailureKind)] = [
+            (.timedOut, .timeout), (.cannotFindHost, .dns), (.dnsLookupFailed, .dns),
+            (.badURL, .transport), (.notConnectedToInternet, .transport), (.networkConnectionLost, .transport),
+            (.cannotConnectToHost, .transport), (.dataNotAllowed, .transport), (.cancelled, .transport),
+            (.secureConnectionFailed, .tls), (.serverCertificateUntrusted, .tls), (.serverCertificateHasBadDate, .tls),
+            (.serverCertificateHasUnknownRoot, .tls), (.serverCertificateNotYetValid, .tls),
+            (.clientCertificateRejected, .tls), (.clientCertificateRequired, .tls),
+            (.badServerResponse, .unknown), (.cannotParseResponse, .unknown), (.userAuthenticationRequired, .unknown),
+        ]
+        for (code, kind) in urlErrors {
+            assertEqual(FeedError(transportFailure: URLError(code)).failureKind, kind, "URLError \(code.rawValue)")
+        }
+        assertEqual(
+            FeedError(transportFailure: CocoaError(.fileReadUnknown)).failureKind, .unknown,
+            "An error of no known domain never counts as connectivity")
+        let feedErrors: [(FeedError, FeedFailureKind)] = [
+            (.malformedURL("x"), .policy), (.insecureScheme("http"), .policy), (.blockedPort(22), .policy),
+            (.blockedHost(host: "x", reason: "y"), .policy),
+            (.redirectBlocked(from: "a", to: "b", reason: "c"), .policy),
+            (.dnsRebindingDetected(host: "x", ip: "y"), .policy), (.responseTooLarge(bytes: 2, maxAllowed: 1), .policy),
+            (.tooManyRedirects(6), .http), (.httpStatus(500), .http), (.serverBusy(status: 429, retryAfter: 60), .http),
+            (.unsupportedFormat("x"), .parse), (.parseFailed("x"), .parse),
+            (.network("x"), .transport), (.timeout, .timeout), (.dnsUnanswered(host: "x", reason: "y"), .dns),
+            (.noSuchHost("x"), .noSuchHost), (.tls("x"), .tls), (.unclassified("x"), .unknown),
+            (.retryScheduled(until: Date()), .unknown),
+        ]
+        for (error, kind) in feedErrors {
+            assertEqual(error.failureKind, kind, "\(error)")
+            assertTrue(error.errorDescription?.isEmpty == false, "\(error) has text for Settings")
+        }
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let db = DatabaseEngine(path: directory.appendingPathComponent("kinds.sqlite").path)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        func kind(_ url: String) async throws -> FeedFailureKind? {
+            try await db.feedFetchStates()[url]?.lastFailureKind
+        }
+
+        // A dead domain is not an offline batch, and an unanswered lookup is (no feed is blamed).
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        let clock = TestClock(t0)
+        let mockConfig = URLSessionConfiguration.default
+        mockConfig.protocolClasses = [MockURLProtocol.self]
+        defer { MockURLProtocol.requestHandler = nil }
+        let dead = ["https://gone.example/one.xml", "https://gone.example/two.xml"]
+        _ = await FeedFetcher(
+            client: SecureHTTPClient(configuration: mockConfig, resolver: { _ in .noSuchHost }), now: { clock.now }
+        ).fetchAllFeeds(urls: dead, state: db)
+        assertEqual(try await kind(dead[0]), .noSuchHost, "A batch of dead domains is recorded, not taken for offline")
+        let silent = "https://silent.example/feed.xml"
+        _ = await FeedFetcher(
+            client: SecureHTTPClient(configuration: mockConfig, resolver: { _ in .unresolvable(reason: "Timed out") }),
+            now: { clock.now }
+        ).fetchAllFeeds(urls: [silent], state: db)
+        assertEqual(try await db.feedFetchStates()[silent], nil, "A batch whose lookups go unanswered blames no feed")
+
+        // One feed of each kind, in one batch so the batch is not offline.
+        let lost = "https://8.8.8.8/lost.xml"
+        let certificate = "https://8.8.8.8/certificate.xml"
+        let busy = "https://8.8.4.4/busy.xml"
+        let failing = "https://example.org/failing.xml"
+        let healthy = "https://example.org/healthy.xml"
+        let body = Data(
+            "<rss version='2.0'><channel><title>T</title><item><title>One</title><link>https://example.com/one</link><guid>one</guid></item></channel></rss>"
+                .utf8)
+        var requests: [String] = []
+        var networkIsBack = false
+        MockURLProtocol.requestHandler = { request in
+            let url = request.url!.absoluteString
+            requests.append(url)
+            func answer(_ status: Int, _ headers: [String: String]? = nil, _ data: Data = Data()) -> (
+                HTTPURLResponse, Data
+            ) {
+                (HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: headers)!, data)
+            }
+            switch url {
+            case lost where !networkIsBack: throw URLError(.networkConnectionLost)
+            case certificate: throw URLError(.serverCertificateUntrusted)
+            case busy: return answer(503, ["Retry-After": "3600"])
+            case failing: return answer(500)
+            default: return answer(200, nil, body)
+            }
+        }
+        let fetcher = FeedFetcher(client: mockHTTPClient(configuration: mockConfig), now: { clock.now })
+        _ = await fetcher.fetchAllFeeds(urls: [lost, certificate, busy, failing, healthy], state: db)
+        assertEqual(try await kind(lost), .transport, "A lost connection is stored as transport")
+        assertEqual(try await kind(certificate), .tls, "A certificate failure is stored as TLS")
+        assertEqual(try await kind(busy), .http, "A 503 is stored as HTTP")
+        assertEqual(try await kind(failing), .http, "A 500 is stored as HTTP")
+        assertEqual(try await kind(healthy), nil, "A success stores no kind")
+        let busyUntil = try await db.feedFetchStates()[busy]?.retryAt
+        assertEqual(busyUntil, t0.addingTimeInterval(3600), "The server's wait is stored")
+        // A failure of unknown cause, and a connectivity failure on the host that just asked to be left alone.
+        let unknown = "https://example.com/unknown.xml"
+        try await db.recordFeedFailure(unknown, retryAfter: nil, at: t0)
+        assertEqual(try await kind(unknown), .unknown, "A failure with no kind given is unknown")
+        let cooled = "https://8.8.4.4/cooled.xml"
+        try await db.recordFeedFailure(cooled, kind: .timeout, retryAfter: nil, at: t0)
+
+        let suite = testDefaultsSuite("test.failure-kinds")
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: UserDefaults(suiteName: suite)!)
+        settings.feedURLs = [lost, certificate, busy, failing, healthy, unknown, cooled] + dead
+        settings.aiEnabled = false
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
+            notifyBatch: { _, _ in })
+        defer { manager.stopBackgroundWork() }
+        clock.advance(by: 60)
+
+        // A scheduled refresh keeps every wait.
+        requests = []
+        await manager.fetchFeedsAsync(scheduled: true)
+        assertEqual(requests, [healthy], "A scheduled refresh does not retry a feed in backoff")
+
+        // A manual refresh on a network still down: the retry happens, fails and backs off further.
+        requests = []
+        await manager.fetchFeedsAsync()
+        assertEqual(
+            requests.sorted(), [lost, healthy].sorted(),
+            "A manual refresh retries the connectivity failure and nothing a server, certificate or dead domain caused")
+        var stored = try await db.feedFetchStates()[lost]
+        assertEqual(stored?.failures, 2, "A failed retry still counts")
+        assertEqual(stored?.retryAt, clock.now.addingTimeInterval(1200), "A failed retry backs off further")
+        assertEqual(try await db.feedFetchStates()[busy]?.retryAt, busyUntil, "Retry-After still wins")
+        if case .failed(.retryScheduled(let until))? = manager.feedStatuses[cooled] {
+            assertEqual(until, busyUntil, "A host cooldown holds a connectivity failure on that host")
+        } else {
+            assertTrue(
+                false,
+                "The cooled host's feed reports its wait, not \(String(describing: manager.feedStatuses[cooled]))")
+        }
+
+        // Back online: the next manual refresh leaves the feed healthy.
+        networkIsBack = true
+        requests = []
+        await manager.fetchFeedsAsync()
+        assertEqual(requests.sorted(), [lost, healthy].sorted(), "The manual refresh retries it inside its backoff")
+        stored = try await db.feedFetchStates()[lost]
+        assertEqual(stored?.failures, 0, "A success clears the failure count")
+        assertEqual(stored?.retryAt, nil, "A success clears the wait")
+        assertEqual(stored?.lastFailureKind, nil, "A success clears the kind")
+        assertEqual(try await kind(certificate), .tls, "A certificate failure stays until it succeeds")
+    }
+
+    /// The kind survives a reopen, and a failure recorded before schema 32 never qualifies for the retry (#927).
+    static func testFeedFailureKindMigration() async throws {
+        print("  - Testing the stored failure kind across a reopen and the schema 31 migration (#927)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let feed = "https://8.8.8.8/feed.xml"
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        var db = DatabaseEngine(path: path)
+        try await db.open()
+        let retryAt = try await db.recordFeedFailure(feed, kind: .timeout, retryAfter: nil, at: t0)
+        await db.close()
+
+        db = DatabaseEngine(path: path)
+        try await db.open()
+        var stored = try await db.feedFetchStates()[feed]
+        assertEqual(stored?.lastFailureKind, .timeout, "The kind survives a reopen")
+        assertEqual(stored?.retryAt, retryAt, "The wait survives a reopen")
+        try await db.clearConnectivityBackoff()
+        stored = try await db.feedFetchStates()[feed]
+        assertEqual(stored?.retryAt, nil, "The retry ends a connectivity failure's wait after a reopen")
+        assertEqual(stored?.failures, 1, "The retry keeps the failure count")
+        let legacyRetryAt = try await db.recordFeedFailure(feed, kind: .timeout, retryAfter: nil, at: t0)
+        await db.close()
+
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the fixture library")
+        assertEqual(
+            sqlite3_exec(
+                handle, "ALTER TABLE feeds DROP COLUMN last_failure_kind; PRAGMA user_version = 31;", nil, nil, nil),
+            SQLITE_OK, "Take the library back to schema 31")
+        sqlite3_close(handle)
+
+        db = DatabaseEngine(path: path)
+        try await db.open()
+        assertEqual(
+            try await db.storedSchemaVersion(), DatabaseEngine.schemaVersion, "A schema 31 library migrates")
+        stored = try await db.feedFetchStates()[feed]
+        assertEqual(stored?.failures, 2, "The migration keeps the failure count")
+        assertEqual(stored?.retryAt, legacyRetryAt, "The migration keeps the wait")
+        assertEqual(stored?.lastFailureKind, nil, "A failure from before the migration has no kind")
+        try await db.clearConnectivityBackoff()
+        assertEqual(
+            try await db.feedFetchStates()[feed]?.retryAt, legacyRetryAt,
+            "A failure from before the migration is not retried early")
+        await db.close()
+    }
+
+    /// Upstream failures reach `URLSession` only as the gateway's SOCKS rejection, so this runs the real gateway and
+    /// the real `URLSession`: if the error the OS reports for it changes, a VPN switch must not turn into `unknown`.
+    static func testGatewayRejectionIsTransport() async throws {
+        print("  - Testing that a gateway rejection is classified as transport (#927)...")
+        let publicAddress: IPAddressValidator.ValidationResult = .allowed(ips: ["93.184.216.34"])
+        func failure(gatewayAnswer: IPAddressValidator.ValidationResult) async -> FeedFailureKind? {
+            let gateway = NetworkBoundaryProxy(
+                resolver: { _ in gatewayAnswer },
+                // Port 1 on loopback refuses at once: an upstream that cannot be reached.
+                connector: { _, _ in NWConnection(host: "127.0.0.1", port: 1, using: .tcp) })
+            let client = SecureHTTPClient(gateway: gateway, resolver: { _ in publicAddress })
+            let result = await FeedFetcher(client: client).fetchSingleFeed(urlString: "https://example.com/feed.xml")
+            await gateway.stop()
+            return result.error?.failureKind
+        }
+        assertEqual(
+            await failure(gatewayAnswer: publicAddress), .transport,
+            "An upstream that refuses is a transport failure")
+        assertEqual(
+            await failure(gatewayAnswer: .unresolvable(reason: "Timed out")), .transport,
+            "A lookup the gateway could not finish is a transport failure")
     }
 
     /// Polls observable state with a deadline so a regression fails instead of hanging.
@@ -8460,7 +8694,9 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "31", "Copied v4 library upgrades to the current schema")
+        assertEqual(
+            value(copyPath, "PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
+            "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -8715,7 +8951,9 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied library upgrades to the current schema")
+        assertEqual(
+            value(copy, "PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
+            "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -10155,7 +10393,9 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied v11 library upgrades to the current schema")
+        assertEqual(
+            value(copy, "PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
+            "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -12896,7 +13136,9 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "31", "Existing v18 libraries receive the image index migration")
+        assertEqual(
+            value("PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
+            "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -12947,7 +13189,8 @@ struct NewsTests {
                 "UPDATE articles SET category = 'World' WHERE id = 'hint-classified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-publisher'; UPDATE articles SET category = 'World' WHERE id = 'hint-unclassified'; UPDATE articles SET category = 'Politics' WHERE id = 'hint-unrated'; PRAGMA user_version = 27;",
                 nil, nil, nil), SQLITE_OK, "Reconstruct a v27 library with a classifier category in the hint column")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "31", "The v27 library migrates to v28")
+        assertEqual(
+            value("PRAGMA user_version;"), String(DatabaseEngine.schemaVersion), "The v27 library migrates to v28")
         assertEqual(
             value("SELECT category FROM articles WHERE id = 'hint-classified';"), nil,
             "v28 clears a hint that holds the classifier's category")
@@ -13682,7 +13925,9 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied v13 library upgrades to the current schema")
+        assertEqual(
+            value(copy, "PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
+            "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -14817,7 +15062,9 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Provenance schema upgrades to the current schema")
+        assertEqual(
+            value(copy, "PRAGMA user_version;"), String(DatabaseEngine.schemaVersion),
+            "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -18003,7 +18250,9 @@ struct NewsTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
         try await database.open()
-        assertEqual(try await database.storedSchemaVersion(), 31, "The library migrates to the current schema")
+        assertEqual(
+            try await database.storedSchemaVersion(), DatabaseEngine.schemaVersion,
+            "The library migrates to the current schema")
 
         // Rows of the index itself: a listing joins the notes table and would hide a row a trigger left behind.
         /// How many index rows match the word.
@@ -18430,7 +18679,9 @@ struct NewsTests {
             """)
         let migrated = DatabaseEngine(path: path)
         try await migrated.open()
-        assertEqual(try await migrated.storedSchemaVersion(), 31, "A schema 30 library migrates to 31")
+        assertEqual(
+            try await migrated.storedSchemaVersion(), DatabaseEngine.schemaVersion,
+            "A schema 30 library migrates to the current schema")
         assertEqual(
             try await migrated.publisherContentRevisions(for: article.id).count, hugeRevisions.count,
             "Revisions survive the migration")
@@ -20792,7 +21043,14 @@ struct NewsTests {
         _ = none.received(family: v6, moreComing: true, error: noRecord, blocked: nil, address: nil)
         assertEqual(
             none.received(family: v4, moreComing: false, error: noRecord, blocked: nil, address: nil),
-            .unresolvable(reason: "No valid addresses resolved"), "No record in either family is unresolvable")
+            .noSuchHost, "No record in either family says the host has no address")
+        var failed = DNSAnswer()
+        assertEqual(
+            failed.received(
+                family: v4, moreComing: false, error: Int32(kDNSServiceErr_ServiceNotRunning), blocked: nil,
+                address: nil),
+            .unresolvable(reason: "dns \(kDNSServiceErr_ServiceNotRunning)"),
+            "A resolver error is no answer, not a missing host")
     }
 
     static func testResolverLifecycle() async {
