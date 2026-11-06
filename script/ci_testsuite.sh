@@ -79,8 +79,11 @@ if [ -n "$LCOV_PATH" ] && [ $# -gt 0 ]; then
     xcrun llvm-profdata merge -sparse "${PROFILES[@]}" -o "$WORK/coverage.profdata" || exit 1
     mkdir -p "$(dirname "$LCOV_PATH")"
     # Report repository sources only: drop the SwiftPM dependency checkouts.
+    # llvm-cov can report a wrapped-around line count (2^64 - 1) that CircleCI's parser rejects. Report those lines
+    # as covered: impact analysis then runs the atom more often, never less.
     xcrun llvm-cov export -format=lcov -instr-profile "$WORK/coverage.profdata" "$RUNNER" \
-        -ignore-filename-regex='/SourcePackages/' > "$LCOV_PATH" || exit 1
+        -ignore-filename-regex='/SourcePackages/' \
+        | sed -E 's/^(DA:[0-9]+,)[0-9]{19,}$/\11/' > "$LCOV_PATH" || exit 1
 fi
 
 exit $STATUS
