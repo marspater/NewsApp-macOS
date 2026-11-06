@@ -572,12 +572,14 @@ final class NotificationService: Sendable {
             content.categoryIdentifier = NotificationActionIdentifier.category
             // No image request once the reader has left Full mode (PRIVACY.md): asked right before the download.
             guard await continues(), !Task.isCancelled else { return .halted }
-            if let imageUrl = FeedArticle.bestCardImage(in: [article]),
-                let attachment = await downloadNotificationAttachment(from: imageUrl)
-            {
+            // The lead, then the other candidates (#1010): a lead that decodes as a page is not the only photo.
+            for imageUrl in FeedArticle.attachmentImages(for: article).prefix(3) {
+                guard await continues(), !Task.isCancelled else { return .halted }
+                guard let attachment = await downloadNotificationAttachment(from: imageUrl) else { continue }
                 content.attachments = [attachment]
                 // The app-drawn banner loads the photo again through the reader's image cache.
                 content.userInfo["imageURL"] = imageUrl.absoluteString
+                break
             }
             identifier = sampleIdentifier ?? Self.notificationIdentifier(for: article)
         } else {

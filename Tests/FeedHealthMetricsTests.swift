@@ -314,7 +314,7 @@ enum FeedHealthMetricsTests {
         await db.close()
     }
 
-    static func run() async {
+    static func run(exitOnFailure: Bool = true) async {
         do {
             checkArithmetic()
             try await checkRows()
@@ -322,6 +322,6 @@ enum FeedHealthMetricsTests {
             try await checkRefresh()
         } catch { check(false, "Unexpected error: \(error)") }
         print("Finished \(checks) feed health metric checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if exitOnFailure && failures > 0 { exit(1) }
     }
 }
