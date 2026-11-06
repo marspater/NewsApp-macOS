@@ -59,6 +59,8 @@ struct NotesHighlightsView: View {
                 }
             }
         }
+        // Fill the cover: a shorter empty state would let the list under it show through.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(AppColor.background)
         .task(id: "\(query)\u{0}\(articleStore.userNotesRevision)") {
             let found = await articleStore.noteListings(matching: query)
