@@ -728,6 +728,10 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// body's sign-up line and "Plus …" teaser crush the pair model's score of a newsletter edition
     /// (docs/audits/2026-11-05-recall-levers.md). Off: the features and the embedding keep reading the full text.
     var pairModelStripsNewsletter = false
+    /// Edition-aware admission (#737, evaluation): a newsletter edition reports several events, so it joins an event
+    /// through its best matched pair alone, its other items raising no veto, and it does not count toward the two-thirds
+    /// rule of other reports. Off: an edition is a report like any other.
+    var editionAdmission = false
     static let standard = EventMatchPolicy()
 }
 
@@ -820,6 +824,9 @@ struct EventPairAssessment: Sendable, Equatable {
     /// Under the veto threshold (#737): a `places` conflict that also has a headline-places or different-act conflict
     /// behind it, which the event veto may not outvote. The conflict stays `places`, so story links still see it.
     var masksAbsoluteConflict = false
+    /// Under `editionAdmission` (#737): the joining report, or the event member it is assessed against, is an edition.
+    var rowIsEdition = false
+    var memberIsEdition = false
 }
 
 enum EventMatcher {
@@ -995,10 +1002,7 @@ enum EventMatcher {
     /// words without a digit marks the edition; its sign-up line and the first paragraph's "Plus …" teaser are dropped.
     /// Any other text returns unchanged.
     static func newsletterStripped(title: String, description: String) -> (title: String, description: String) {
-        guard let separator = title.range(of: " | ", options: .backwards) else { return (title, description) }
-        let suffix = title[separator.upperBound...]
-        let words = suffix.split(whereSeparator: \.isWhitespace).count
-        guard (1...6).contains(words), !suffix.contains(where: \.isNumber) else { return (title, description) }
+        guard let separator = newsletterSeparator(in: title) else { return (title, description) }
         var paragraphs = description.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { paragraph in
@@ -1011,6 +1015,28 @@ enum EventMatcher {
             paragraphs[0] = String(first[..<teaser.lowerBound]) + "."
         }
         return (String(title[..<separator.lowerBound]), paragraphs.joined(separator: "\n"))
+    }
+
+    /// A newsletter edition's title (#737): it ends in a ` | <series>` suffix of one to six words without a digit.
+    static func isNewsletterEdition(title: String) -> Bool { newsletterSeparator(in: title) != nil }
+
+    private static func newsletterSeparator(in title: String) -> Range<String.Index>? {
+        guard let separator = title.range(of: " | ", options: .backwards) else { return nil }
+        let suffix = title[separator.upperBound...]
+        let words = suffix.split(whereSeparator: \.isWhitespace).count
+        return (1...6).contains(words) && !suffix.contains(where: \.isNumber) ? separator : nil
+    }
+
+    /// The pair model's text for one report: the matching text under the policy's newsletter strip and prefix.
+    static func pairModelText(
+        title: String, description: String, gap: TimeInterval?, samePublisher: Bool?,
+        policy: EventMatchPolicy = .standard
+    ) -> String {
+        let stripped =
+            policy.pairModelStripsNewsletter
+            ? newsletterStripped(title: title, description: description) : (title: title, description: description)
+        let text = EventFeatures.matchingText(title: stripped.title, description: stripped.description)
+        return policy.pairModelPrefix ? pairModelInput(text, gap: gap, samePublisher: samePublisher) : text
     }
 
     private static let newsletterBoilerplate = try! NSRegularExpression(
@@ -1064,6 +1090,7 @@ enum EventMatcher {
         var pair = pair
         pair.conflict = nil
         pair.masksAbsoluteConflict = false
+        pair.memberIsEdition = false
         pair.isBorderline = false
         pair.isMatch = true
         pair.isCompatible = true
@@ -1080,8 +1107,23 @@ enum EventMatcher {
         return eventScore(pairs: members.map { assess(article, $0, policy: policy) }, policy: policy)
     }
 
+    /// The cross-pairs admission reads under `editionAdmission` (#737): an edition's best matched pair alone, or a
+    /// report's pairs without the editions among the members, unless only editions are there.
+    static func admissionPairs(_ pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard)
+        -> [EventPairAssessment]
+    {
+        guard policy.editionAdmission else { return pairs }
+        if pairs.first?.rowIsEdition == true {
+            return pairs.filter(\.isMatch).max { $0.score < $1.score }.map { [$0] } ?? pairs
+        }
+        let reports = pairs.filter { !$0.memberIsEdition }
+        return reports.isEmpty ? pairs : reports
+    }
+
     static func eventScore(pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Double? {
-        guard !pairs.isEmpty, pairs.count < policy.maximumEventSize, !conflictsBlock(pairs, policy: policy),
+        guard pairs.count < policy.maximumEventSize else { return nil }
+        let pairs = admissionPairs(pairs, policy: policy)
+        guard !pairs.isEmpty, !conflictsBlock(pairs, policy: policy),
             pairs.allSatisfy({ $0.sharedSpecificAnchors >= 1 || $0.modelConfirmed }),
             pairs.contains(where: \.isMatch)
         else { return nil }
