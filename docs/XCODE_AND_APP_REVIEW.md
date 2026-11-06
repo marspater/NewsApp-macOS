@@ -23,52 +23,38 @@ News is a native, local-first RSS, Atom, and JSON Feed reader built with SwiftUI
 
 ## 2. Xcode Project Setup & Build Settings
 
-Today News builds only through the shell pipeline: `build.sh` and `build_release.sh` compile `Sources/` with `swiftc` from hand-kept source lists, link the SwiftPM dependency archive (`script/swiftpm_dependencies.sh`) and sign the bundle ad hoc; `./test.sh` builds the test runner the same way. There is no `.xcodeproj` and no Xcode scheme in the repository. `Package.swift` lets Xcode open the sources as a Swift package for editing and `swift build --target News` checks that they compile, but it produces no app bundle. An Xcode project over a SwiftPM core is planned in #931; sections 2.1, 2.2 and 5.1–5.3 describe that target setup and do not work until it lands.
+`News.xcodeproj` (#931) is the build: `build.sh`, `build_release.sh` and `script/build_test_runner.sh` call `xcodebuild` on it, every CI provider runs those scripts, and Xcode opens it for debugging, profiling and archiving. `Package.swift` resolves SwiftSoup and FeedKit (the project references the package in its own directory) and `swift build --target News` remains the compiler check CodeQL uses; it produces no app bundle.
 
-### 2.1 Workspace & Scheme Architecture
+### 2.1 Targets & Schemes
 
-Planned (#931); none of these schemes exist yet. When the Xcode project is added:
+Three targets, each with a shared scheme of the same name, over the synchronized `Sources/` folder (no per-file project entries):
 
-1. **`News` (App Scheme)**:
-   - Primary executable target compiling `Sources/`.
-   - Linked frameworks: `SwiftSoup` (static), `FeedKit` (static), Apple SDKs (`Foundation`, `SwiftUI`, `AppKit`, `WebKit`, `Charts`, `SQLite3`, `NaturalLanguage`, `CoreML`, `CoreSpotlight`, `OSLog`).
-   - Active scheme for Run, Test, Profile, and Archive.
-2. **`NewsTests` (Test Scheme)**:
-   - Compiles unit tests and E2E suites (`Tests/`).
-   - Validates all parsing, security boundaries, classification, and situation board behaviors.
+1. **`News`** (app): every file under `Sources/`, `Info.plist`, `News.entitlements`, `Assets/AppIcon.icon`, `container-migration.plist`, `PrivacyInfo.xcprivacy` and the `Sources/Resources/CoreML` folder; App Intents metadata is extracted by Xcode. The scheme runs, profiles and archives it. Debug builds use the development identifier `com.marspater.news.dev`, so a run from Xcode never opens the real library; Release builds use `com.marspater.news`.
+2. **`NewsTestRunner`** (command-line tool): `Sources/` without `App/Main.swift` plus every `Tests/*.swift` outside `Harness/` and `Fixtures/`; `Tests/Runner.swift` is its entry point and `NEWS_TEST_ATOM` selects one file's tests. Swift 5 language mode, as the suites are written.
+3. **`NewsHarness`** (app): the app's files without `App/Main.swift` plus `Tests/TestDefaults.swift` and the entry file(s) `NEWS_HARNESS` names under `Tests/Harness/` (`INCLUDED_SOURCE_FILE_NAMES`); the QA and baseline scripts build it through `build.sh`.
 
-### 2.2 Recommended Xcode Build Settings
+### 2.2 Build Settings
 
-Configure the following build settings in Xcode to guarantee Apple compliance and performance:
+The project sets, for every target:
 
 ```xcconfig
-// Deployment & Architecture
-MACOSX_DEPLOYMENT_TARGET = 15.0
+MACOSX_DEPLOYMENT_TARGET = 15.0   // build scripts pass TARGET_MACOS
 ARCHS = arm64
-ONLY_ACTIVE_ARCH = NO
-
-// Swift 6 Language & Concurrency
-SWIFT_VERSION = 6.0
-SWIFT_STRICT_CONCURRENCY = complete
-SWIFT_DEFAULT_ACTOR_ISOLATION = Complete
-OTHER_SWIFT_FLAGS = $(inherited) -package-name News
-
-// App Sandbox & Security
-ENABLE_HARDENED_RUNTIME = YES
-CODE_SIGN_ENTITLEMENTS = News.entitlements
-CODE_SIGN_STYLE = Manual // or Automatic with Apple Developer Team
-ENABLE_USER_SCRIPT_SANDBOXING = YES
-
-// Code Generation & Optimization
+SWIFT_VERSION = 6.0               // 5.0 for NewsTestRunner
 SWIFT_OPTIMIZATION_LEVEL[config=Debug] = -Onone
 SWIFT_OPTIMIZATION_LEVEL[config=Release] = -O
-DEBUG_INFORMATION_FORMAT[config=Release] = dwarf-with-dsym
-
-// Assets & App Icon
+SWIFT_COMPILATION_MODE[config=Release] = singlefile   // build_release.sh overrides wholemodule
+CODE_SIGN_IDENTITY = -            // ad hoc; a Developer ID or App Store identity goes on the command line
+CODE_SIGN_STYLE = Manual
+ENABLE_HARDENED_RUNTIME = YES     // NO for the tool
+CODE_SIGN_ENTITLEMENTS = News.entitlements
+ENABLE_USER_SCRIPT_SANDBOXING = YES
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 GENERATE_INFOPLIST_FILE = NO
-INFOPLIST_FILE = News.app/Contents/Info.plist // or shared template
+INFOPLIST_FILE = Info.plist       // MARKETING_VERSION and CURRENT_PROJECT_VERSION come from script/version.sh
 ```
+
+Build products live in `build/DerivedData` of the checkout (`script/xcode_build.sh`), so builds are incremental and worktrees never share one.
 
 ### 2.3 Entitlements Architecture (`News.entitlements`)
 
@@ -235,7 +221,7 @@ Prepare 5 screenshots matching Apple's macOS App Store resolution standards:
 
 ### 5.1 Producing the Release Archive via Command Line
 
-Today's release artifact is the ad-hoc signed bundle from `./build_release.sh` (zipped with its SHA-256 by `.github/workflows/release.yml` for a `vX.Y.Z` tag). The `xcodebuild archive` step below needs the `News` scheme of the planned Xcode project (#931) and fails on the current repository; the export step (5.3) needs the archive it produces and an export options plist:
+Today's release artifact is the ad-hoc signed bundle from `./build_release.sh` (zipped with its SHA-256 by `.github/workflows/release.yml` for a `vX.Y.Z` tag). The `xcodebuild archive` step below uses the shared `News` scheme; the export step (5.3) needs the archive it produces, an export options plist and a signing identity:
 
 ```bash
 # 1. Clean build artifacts
@@ -246,7 +232,7 @@ rm -rf build/ News.xcarchive News.app
 
 # 3. Create Xcode Archive (for App Store Connect or Notarization)
 xcodebuild archive \
-  -scheme News \
+  -project News.xcodeproj -scheme News \
   -destination 'generic/platform=macOS' \
   -archivePath "build/News.xcarchive"
 ```

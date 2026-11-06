@@ -19,16 +19,6 @@ import AppKit
 import Foundation
 import SwiftUI
 
-// Defined in NewsApp.swift, which this standalone runner does not compile; the reader's command modifier uses them.
-extension Notification.Name {
-    static let nextArticleCommand = Notification.Name("nextArticleCommand")
-    static let prevArticleCommand = Notification.Name("prevArticleCommand")
-    static let toggleReadCommand = Notification.Name("toggleReadCommand")
-    static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
-    static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-}
-
-@main
 @MainActor
 struct EventOverviewAccessibilityTests {
     static var testsRun = 0

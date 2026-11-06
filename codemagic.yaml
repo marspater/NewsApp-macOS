@@ -20,6 +20,7 @@ workflows:
     cache:
       cache_paths:
         - $CM_BUILD_DIR/.build
+        - $CM_BUILD_DIR/build/DerivedData/SourcePackages
         - $HOME/Library/Caches/org.swift.swiftpm
     # Documentation-only changes need no macOS build (same rule as the GitHub workflow and CircleCI).
     when:
@@ -53,7 +54,7 @@ workflows:
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
-          NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh build/ci/excerpts 2>&1 | tee build/ci/excerpts.log
+          NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh build/ci/excerpts 2>&1 | tee build/ci/excerpts.log
       - name: Verify SwiftPM app target
         script: |
           #!/usr/bin/env bash

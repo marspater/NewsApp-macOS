@@ -62,7 +62,7 @@ plus the extra commands that are not in the plain run.
   in `Tests/NewsTests.swift`, and `Tests/FeedKitSwiftSoupTests.swift`.
 - `./test.sh --parsing-regressions` for the offline HTML and feed compatibility and safety checks.
 - `./test.sh --transport-cancellation` for refresh shutdown over controlled HTTP and SOCKS sockets (optimized build).
-- `NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh` (run by CI too).
+- `NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh` (run by CI too).
 - CI additionally runs `.github/workflows/security.yml` (CodeQL, dependency review, secret scan).
 
 ## 3. Matcher holdout
@@ -99,7 +99,7 @@ fresh holdout, as the audits describe.
 - `script/test_event_overview_accessibility.sh` (Story Overview sections), `script/test_reader_accessibility.sh`,
   `script/test_tension_calibration.sh`: headless, no window.
 - Captures without a window or Screen Recording:
-  `NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift script/native_performance_baseline.sh DIR` (every Story Overview
+  `NEWS_NATIVE_HARNESS=Tests/Harness/OverviewCaptures.swift script/native_performance_baseline.sh DIR` (every Story Overview
   section at 900 and 1,400 pt, text size 1.0 and 1.3, light, dark and Increase Contrast). Review the images in `DIR`.
 - `script/design_lint.sh` (first step of `./test.sh`).
 - Not part of the gate: `script/appearance_matrix.sh` opens windows and needs Screen Recording, and the VoiceOver
@@ -115,7 +115,7 @@ the release owner; an unacknowledged regression blocks the release.
 ```sh
 ./test.sh --performance-baseline
 ./script/native_performance_baseline.sh
-NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/ListInvalidationBaseline.swift script/native_performance_baseline.sh DIR
+NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/Harness/ListInvalidationBaseline.swift script/native_performance_baseline.sh DIR
 ./script/launch_baseline.sh
 ```
 

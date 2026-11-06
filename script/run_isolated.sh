@@ -18,7 +18,6 @@ set -euo pipefail
 #   --seed                    Seed isolated library with sample events and stories
 
 cd "$(dirname "$0")/.."
-ROOT=$(pwd)
 BUNDLE_ID="com.marspater.news.isolatedqa"
 CONTAINER="$HOME/Library/Containers/$BUNDLE_ID/Data"
 LIBRARY_DIR="$CONTAINER/Library/Application Support/com.marspater.news"
@@ -47,13 +46,9 @@ for arg in "$@"; do
     fi
 done
 
-echo "Staging isolated build in ${STAGE}..."
-rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude .build --exclude '*.app' "$ROOT/" "$STAGE/src/"
-sed -i '' "s|<string>com.marspater.news</string>|<string>$BUNDLE_ID</string>|" "$STAGE/src/build.sh"
-
-echo "Building isolated News.app (bundle ID: ${BUNDLE_ID})..."
-(cd "$STAGE/src" && ./build.sh >/dev/null)
+echo "Building isolated News.app (bundle ID: ${BUNDLE_ID}) in ${STAGE}..."
 APP="$STAGE/src/News.app"
+NEWS_BUNDLE_ID="$BUNDLE_ID" NEWS_APP_DIR="$APP" ./build.sh >/dev/null
 
 # Prepare isolated library directory
 mkdir -p "$LIBRARY_DIR"

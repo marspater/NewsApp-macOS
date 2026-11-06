@@ -57,7 +57,8 @@ NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional public-publisher network checks
 ./build.sh                        # arm64, News.app
 ./build_release.sh                # Optimized arm64 verification, News.app
 ./script/build_and_run.sh --verify
-swift build --target News         # SwiftPM compiler check; not an app bundle
+swift build --target News         # SwiftPM compiler check (CodeQL); not an app bundle
+open News.xcodeproj               # Debug the real bundle in Xcode (Debug builds use the com.marspater.news.dev container)
 ```
 
 `make run` and the Codex Run action use the app-bundle launcher. `TARGET_MACOS` defaults to `15.0`; SDK selection follows the selected Xcode. Both build scripts use ad-hoc signing for verification. Developer ID signing, notarization and Intel builds are outside the current development scope; the dormant notarization script is not part of the build workflow.

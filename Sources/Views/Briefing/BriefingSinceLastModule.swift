@@ -122,7 +122,7 @@ struct BriefingSinceLastData: Equatable, Sendable {
         }
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         Self(
             rows: [

@@ -330,7 +330,6 @@ enum EventControlSet {
     }
 }
 
-@main
 struct NewsTests {
     static func mockHTTPClient(configuration: URLSessionConfiguration) -> SecureHTTPClient {
         // URLProtocol supplies bytes; fixture DNS must also stay independent of the network.

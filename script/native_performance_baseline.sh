@@ -11,9 +11,8 @@ mkdir -p "$OUTPUT"
 OUTPUT=$(cd "$OUTPUT" && pwd)
 if [[ "${NEWS_READING_FULL_APP:-0}" == "1" ]]; then
     # Reuse the app-bundle build and production entitlements; never replace the installed app.
-    rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude .build --exclude '*.app' ./ "$STAGE/src/"
-    sed -i '' '/^@main$/d' "$STAGE/src/Sources/App/NewsApp.swift"
-    sed -i '' 's|Sources/App/NewsApp.swift \\|Sources/App/NewsApp.swift Tests/NativeReadingMemory.swift Tests/TestDefaults.swift \\|; s|<string>com.marspater.news</string>|<string>com.marspater.news.workloadcheck</string>|' "$STAGE/src/build.sh"
+    rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude .build --exclude build \
+        --exclude '*.app' ./ "$STAGE/src/"
     # Observe native didFinish, rather than treating cancellation as a successful Web load.
     # This hook exists only in the staged verification bundle, never in shipping sources.
     python3 - "$STAGE/src/Sources/Views/Reader/ArticleWebView.swift" <<'PY_WEB'
@@ -27,10 +26,12 @@ assert source.count(needle) == 1
 source = source.replace(needle, needle + '            NotificationCenter.default.post(name: Notification.Name("workloadWebFinished"), object: nil)\n')
 path.write_text(source)
 PY_WEB
-    (cd "$STAGE/src" && ./build.sh > "$OUTPUT/build.log" 2>&1)
-    codesign --verify --deep --strict "$STAGE/src/News.app"
+    (cd "$STAGE/src" && NEWS_HARNESS=Tests/Harness/NativeReadingMemory.swift \
+        NEWS_BUNDLE_ID=com.marspater.news.workloadcheck ./build.sh > "$OUTPUT/build.log" 2>&1)
+    APP="$STAGE/src/NewsHarness.app"
+    codesign --verify --deep --strict "$APP"
     WORKLOAD_STATUS=0
-    "$STAGE/src/News.app/Contents/MacOS/News" "$OUTPUT" > "$OUTPUT/workload.log" 2>&1 || WORKLOAD_STATUS=$?
+    "$APP/Contents/MacOS/NewsHarness" "$OUTPUT" > "$OUTPUT/workload.log" 2>&1 || WORKLOAD_STATUS=$?
     python3 - "$OUTPUT" "$(git rev-parse HEAD)" "$(git status --porcelain --untracked-files=no)" <<'PY_REPORT'
 import base64, json, pathlib, shutil, subprocess, sys
 out = pathlib.Path(sys.argv[1])
@@ -49,33 +50,26 @@ PY_REPORT
     echo "Combined app workload evidence: $OUTPUT"
     exit "$WORKLOAD_STATUS"
 fi
-SOURCE_DIR=Sources
+SOURCE_ROOT=.
 if [[ "${NEWS_NATIVE_BODY_COUNTS:-0}" == "1" ]]; then
-    # Counted views (#778, Tests/ListInvalidationBaseline.swift): a staged copy of the sources ticks the harness's
-    # BodyCount at the top of each view body, the list's page fetch and the reader's revision query. Shipping sources
-    # carry no counters.
-    cp -R Sources "$STAGE/Sources"
+    # Counted views (#778, Tests/Harness/ListInvalidationBaseline.swift): a staged copy of the checkout ticks the
+    # harness's BodyCount at the top of each view body, the list's page fetch and the reader's revision query.
+    # Shipping sources carry no counters.
+    rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude .build --exclude build \
+        --exclude '*.app' ./ "$STAGE/src/"
     for view in MainView SidebarView ArticleListView ArticleCardView EventCardView ArticleDetailView; do
         # The views live in sub-folders of Views (List, Reader, ...), so find each by name.
-        file=$(find "$STAGE/Sources/Views" -name "$view.swift" -print -quit)
+        file=$(find "$STAGE/src/Sources/Views" -name "$view.swift" -print -quit)
         if [[ -z "$file" ]]; then echo "❌ Counted view $view.swift not found under Sources/Views" >&2; exit 1; fi
         perl -0pi -e "s/(var body: some View \{)/\$1 let _ = BodyCount.tick(\"$view\");/" "$file"
     done
-    perl -0pi -e 's/(private func fetchPage\([^{]*\{)/$1 BodyCount.tick("ListFetch");/' "$STAGE/Sources/Views/List/ArticleListView.swift"
+    perl -0pi -e 's/(private func fetchPage\([^{]*\{)/$1 BodyCount.tick("ListFetch");/' "$STAGE/src/Sources/Views/List/ArticleListView.swift"
     perl -0pi -e 's/(let revisions = try\? await articleStore\.database\.publisherContentRevisions)/BodyCount.tick("ReaderRevisionQuery"); $1/' \
-        "$STAGE/Sources/Views/Reader/ArticleDetailView.swift"
-    SOURCE_DIR="$STAGE/Sources"
+        "$STAGE/src/Sources/Views/Reader/ArticleDetailView.swift"
+    SOURCE_ROOT="$STAGE/src"
 fi
-sed '/^@main$/d' "$SOURCE_DIR/App/NewsApp.swift" > "$STAGE/NewsApp.swift"
-SOURCES=()
-while IFS= read -r source; do
-    if [[ "$source" != "$SOURCE_DIR/App/NewsApp.swift" ]]; then SOURCES+=("$source"); fi
-done < <(find "$SOURCE_DIR" -name '*.swift' -print | sort)
-export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
-export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
-NEWS_DEPENDENCY_ARCH=arm64
-source script/swiftpm_dependencies.sh
-swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -target arm64-apple-macos15.0 \
-    "${SOURCES[@]}" "$STAGE/NewsApp.swift" "${NEWS_NATIVE_HARNESS:-Tests/NativePerformanceBaseline.swift}" Tests/TestDefaults.swift -o "$STAGE/news_native_baseline"
-"$STAGE/news_native_baseline" "$OUTPUT"
+# The harness app: the production sources with the harness as entry point (build.sh, NewsHarness target).
+(cd "$SOURCE_ROOT" && NEWS_HARNESS="${NEWS_NATIVE_HARNESS:-Tests/Harness/NativePerformanceBaseline.swift}" \
+    NEWS_APP_DIR="$STAGE/NewsHarness.app" ./build.sh)
+"$STAGE/NewsHarness.app/Contents/MacOS/NewsHarness" "$OUTPUT"
 echo "Native performance evidence: $OUTPUT"

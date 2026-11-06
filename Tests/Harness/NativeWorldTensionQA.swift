@@ -16,7 +16,7 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
-/// Run through NEWS_NATIVE_HARNESS=Tests/NativeWorldTensionQA.swift script/native_performance_baseline.sh.
+/// Run through NEWS_NATIVE_HARNESS=Tests/Harness/NativeWorldTensionQA.swift script/native_performance_baseline.sh.
 /// Uses temporary storage/defaults and synthetic headlines; never reads the installed app's library.
 @main
 struct NativeWorldTensionQA {

@@ -126,7 +126,7 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
         return make(entries: context.entries, evidence: evidence, captions: captions)
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         let now = Date(timeIntervalSince1970: 1_793_188_800)
         func entry(_ id: String, _ title: String, _ publisher: String) -> FeedEntry {

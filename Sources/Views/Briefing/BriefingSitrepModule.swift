@@ -104,7 +104,7 @@ struct BriefingSitrepData: Equatable, Sendable {
         return lines.count >= 2 ? Self(lines: lines) : nil
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         Self(lines: [
             Line(

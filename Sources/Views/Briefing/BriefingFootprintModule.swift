@@ -69,7 +69,7 @@ struct BriefingFootprintData: Equatable, Sendable {
         return data.publisherCount > 1 ? data : nil
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         Self(
             groups: [
