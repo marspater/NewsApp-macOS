@@ -111,6 +111,19 @@ enum EventCandidateFinder {
         policy: EventCandidatePolicy = .standard,
         now: Date = Date()
     ) async throws -> [EventCandidate] {
+        var languages: [String: String?] = [:]
+        return try await candidates(for: article, in: database, policy: policy, now: now, languages: &languages)
+    }
+
+    /// `languages` keeps each candidate row's language by article id for the caller's pass (#572): a row is read once,
+    /// from its stored signals when it has them at the current version and recognized otherwise.
+    static func candidates(
+        for article: FeedArticle,
+        in database: DatabaseEngine,
+        policy: EventCandidatePolicy = .standard,
+        now: Date = Date(),
+        languages: inout [String: String?]
+    ) async throws -> [EventCandidate] {
         let key = EventMatchKey(article: article)
         guard let query = key.ftsQuery, policy.limit > 0 else { return [] }
         let date = article.pubDate == DateParser.unknownDate ? now : article.pubDate
@@ -119,17 +132,27 @@ enum EventCandidateFinder {
             activeSince: now.addingTimeInterval(-policy.activeEventLifetime),
             excluding: article.id, limit: policy.limit * 2)
         var candidates: [EventCandidate] = []
+        let unread = key.language == nil ? [] : rows.map(\.id).filter { languages[$0] == nil }
+        let stored =
+            unread.isEmpty
+            ? [:] : try await database.fetchArticleFeatures(articleIDs: unread, version: EventFeatures.storageVersion)
         // Reset between candidates so language evidence cannot leak from the previous article.
         let recognizer = NLLanguageRecognizer()
         for row in rows where candidates.count < policy.limit {
             try Task.checkCancellation()
             // Different languages are not compared directly; unknown languages stay eligible.
-            if let language = key.language,
-                let other = EventMatchKey.language(
-                    of: row.title + "\n" + String(row.description.prefix(600)), using: recognizer),
-                other != language
-            {
-                continue
+            if let language = key.language {
+                let other: String?
+                if let known = languages[row.id] {
+                    other = known
+                } else {
+                    other =
+                        stored[row.id].map(\.language)
+                        ?? EventMatchKey.language(
+                            of: row.title + "\n" + String(row.description.prefix(600)), using: recognizer)
+                    languages[row.id] = other
+                }
+                if let other, other != language { continue }
             }
             candidates.append(EventCandidate(articleID: row.id, eventID: row.eventID))
         }

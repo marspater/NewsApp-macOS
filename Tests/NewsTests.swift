@@ -10694,6 +10694,27 @@ struct NewsTests {
             candidates.first { $0.articleID == "active" }?.eventID, active.id, "Candidates carry their active event")
         assertEqual(candidates.first { $0.articleID == "recent" }?.eventID, nil, "Unclustered candidates have no event")
 
+        // One language per row within a pass (#572): the first reading stands, and stored signals come before the recognizer.
+        var pass: [String: String?] = [:]
+        let first = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &pass)
+        assertEqual(first, candidates, "The pass's language map changes no candidate")
+        assertEqual(pass["german"], .some("de"), "The pass keeps a row's recognized language")
+        pass["german"] = .some("en")
+        let reread = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &pass)
+        assertTrue(reread.contains { $0.articleID == "german" }, "A row is not recognized again in one pass")
+        var signals = EventFeatures(title: "Erdbeben erschüttert Lviv", description: german, date: now)
+        signals.language = "en"
+        try await db.upsertArticleFeatures(
+            ["german": signals], version: EventFeatures.storageVersion - 1, at: now)
+        var stale: [String: String?] = [:]
+        let staleRead = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &stale)
+        assertFalse(staleRead.contains { $0.articleID == "german" }, "Signals of an older version are not read")
+        try await db.upsertArticleFeatures(["german": signals], version: EventFeatures.storageVersion, at: now)
+        var fresh: [String: String?] = [:]
+        let storedRead = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &fresh)
+        assertTrue(storedRead.contains { $0.articleID == "german" }, "A row's stored language comes first")
+        try await db.eventRows("DELETE FROM article_features;")
+
         try await db.upsertArticles(
             (0..<30).map { article("bulk-\($0)", "Lviv earthquake update \($0)", english, hoursAgo: 1) })
         var narrow = EventCandidatePolicy.standard
