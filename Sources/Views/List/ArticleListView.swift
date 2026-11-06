@@ -648,7 +648,8 @@ struct ArticleListView: View {
     {
         if isSearching {
             return try await articleStore.database.searchArticles(
-                query: searchText, limit: 201, after: pageCursor, muting: muting, queryEmbedding: queryVector)
+                query: searchText, limit: 201, after: pageCursor, muting: muting, queryEmbedding: queryVector,
+                vectorResolved: true)
         }
         let filters = listFilters
         if let binder = currentSmartBinder {
