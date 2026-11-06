@@ -799,7 +799,9 @@ extension DatabaseEngine {
 
     /// "Same event": merges `sourceEventID` into `targetEventID` and records an inclusion for every pair across
     /// them, so later passes keep them together (#524). An exclusion of such a pair is dropped: the newer correction
-    /// wins, as `separateArticle` drops inclusions.
+    /// wins, as `separateArticle` drops inclusions. The combination is the reader's own change, so the combined
+    /// story is marked seen in the same transaction, at the versions the move produced: a report that joins
+    /// afterwards still shows as updated.
     @discardableResult
     func includeEvent(_ sourceEventID: String, inEvent targetEventID: String, at date: Date = Date()) throws
         -> StoryEvent
@@ -807,7 +809,10 @@ extension DatabaseEngine {
         let id = try inEventTransaction { () throws -> String in
             let target = try liveEvent(targetEventID)
             let source = try liveEvent(sourceEventID)
-            guard source.id != target.id else { return target.id }
+            guard source.id != target.id else {
+                try recordEventSeen(target.id, at: date)
+                return target.id
+            }
             func members(_ eventID: String) throws -> [String] {
                 try eventRows("SELECT article_id FROM event_members WHERE event_id = ?;", [.text(eventID)])
                     .compactMap { $0[0] }
@@ -830,6 +835,7 @@ extension DatabaseEngine {
                 }
             }
             try moveMembers(of: source, into: target, at: now)
+            try recordEventSeen(target.id, at: date)
             return target.id
         }
         return try requireEvent(id)
@@ -1381,24 +1387,28 @@ extension DatabaseEngine {
     /// sum is returned, matching `eventFeedSummaries`.
     @discardableResult
     func markEventSeen(_ eventID: String, version: Int? = nil, at date: Date = Date()) throws -> Int {
-        try inEventTransaction { () throws -> Int in
-            let live = try liveEvent(eventID)
-            let events = try storyEventIDs(live.id)
-            var total = 0
-            for id in events {
-                let event = try liveEvent(id)
-                let seen = max(1, min(events.count == 1 ? (version ?? event.version) : event.version, event.version))
-                try eventRows(
-                    """
-                    INSERT INTO event_state(event_id, seen_version, seen_at) VALUES (?, ?, ?)
-                    ON CONFLICT(event_id) DO UPDATE SET seen_version = max(seen_version, excluded.seen_version), seen_at = excluded.seen_at;
-                    """, [.text(id), .integer(seen), .real(date.timeIntervalSince1970)])
-                total +=
-                    try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(id)]).first?[0]
-                    .flatMap { Int($0) } ?? seen
-            }
-            return total
+        try inEventTransaction { try recordEventSeen(eventID, version: version, at: date) }
+    }
+
+    /// The body of `markEventSeen`, for callers that already hold the event transaction.
+    @discardableResult
+    private func recordEventSeen(_ eventID: String, version: Int? = nil, at date: Date) throws -> Int {
+        let live = try liveEvent(eventID)
+        let events = try storyEventIDs(live.id)
+        var total = 0
+        for id in events {
+            let event = try liveEvent(id)
+            let seen = max(1, min(events.count == 1 ? (version ?? event.version) : event.version, event.version))
+            try eventRows(
+                """
+                INSERT INTO event_state(event_id, seen_version, seen_at) VALUES (?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET seen_version = max(seen_version, excluded.seen_version), seen_at = excluded.seen_at;
+                """, [.text(id), .integer(seen), .real(date.timeIntervalSince1970)])
+            total +=
+                try eventRows("SELECT seen_version FROM event_state WHERE event_id = ?;", [.text(id)]).first?[0]
+                .flatMap { Int($0) } ?? seen
         }
+        return total
     }
 
     func eventSeenVersion(_ eventID: String) throws -> Int? {

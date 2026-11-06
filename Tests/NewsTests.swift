@@ -15642,6 +15642,10 @@ struct NewsTests {
             return
         }
         try await db.includeEvent(vote, inEvent: protest)
+        // The combination is the reader's change: it is already seen, without a second call to race a clustering pass.
+        var card = try await db.eventFeedSummaries(forArticles: [ids[0]]).first
+        assertEqual(card?.seenVersion, card?.membershipVersion, "Same Event records the combined version as seen")
+        assertFalse(card?.hasSubstantiveUpdate ?? true, "The combination itself is not an update")
         assertEqual(try await event(0), protest, "Same Event moves the related event's reports into this one")
         assertEqual(try await db.resolvedEventID(vote), protest, "The absorbed event forwards to the survivor")
         assertEqual(
@@ -15659,6 +15663,8 @@ struct NewsTests {
         ids.append(try await db.resolvedArticleID(for: later))
         _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(90))
         assertEqual(try await event(4), protest, "A later vote report joins the combined event")
+        card = try await db.eventFeedSummaries(forArticles: [ids[0]]).first
+        assertTrue(card?.hasSubstantiveUpdate ?? false, "A report that joined after Same Event still shows Updated")
 
         // Separating it later wins over the inclusion, and including it again wins over the separation.
         try await db.separateArticle(ids[0], fromEvent: protest)
