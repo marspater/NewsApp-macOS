@@ -27,13 +27,14 @@ enum EditorialRankingEvaluation {
         let config = MomentumConfiguration(
             bucketSeconds: 300, shortHalfLife: 1800, longHalfLife: 10800,
             signalHalfLife: 1800, volumeWindow: 3600, minimumIndependentReports: 3, minimumOriginPublishers: 2)
-        let values = try (0..<50).map { event -> Double in
-            let reports = (0..<(event % 5 * 3)).map { index in
-                MomentumReport(
+        let values = try (0..<50).map { (event: Int) throws -> Double in
+            let reports = (0..<(event % 5 * 3)).map { (index: Int) -> MomentumReport in
+                let ageSeconds = Double(index + 1) * 60
+                return MomentumReport(
                     articleID: "r-\(event)-\(index)", eventID: "event", wireGroupID: "wire-\(index)",
-                    localPublisherID: "local-\(index)", originPublisherID: "origin-\(index%5)",
-                    publishedAt: now.addingTimeInterval(-Double(index + 1) * 60),
-                    fetchedAt: now.addingTimeInterval(-Double(index + 1) * 60 + 10))
+                    localPublisherID: "local-\(index)", originPublisherID: "origin-\(index % 5)",
+                    publishedAt: now.addingTimeInterval(-ageSeconds),
+                    fetchedAt: now.addingTimeInterval(10 - ageSeconds))
             }
             let summary = try EditorialMomentum.replay(
                 reports: reports, eventID: "event", windowStart: now.addingTimeInterval(-172800), through: now,

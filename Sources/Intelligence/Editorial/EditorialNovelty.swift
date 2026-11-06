@@ -132,7 +132,10 @@ actor EditorialNovelty {
         else { return .deferred }
         let eligible = historicalBaseline(baseline, candidate: candidate)
         let index = try EditorialPassageIndex(passages: Array(eligible))
-        let matches = try index.matches(candidate.passage.text, limit: policy.maxCandidates)
+        let entityPhrases = coreEntities.filter { Self.hasAnchor(candidate.passage.text, entities: [$0]) }
+            .map { Self.words($0).joined(separator: " ") }
+        let matches = try index.matches(
+            candidate.passage.text, entityPhrases: entityPhrases, limit: policy.maxCandidates)
         guard !matches.isEmpty else { return .lowPrioritySemanticFallback }
         let sentences = PassageFactExtractor.segmentedSentences(in: candidate.passage.text)
             .map { String(candidate.passage.text[$0]).trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -311,12 +314,12 @@ private final class EditorialPassageIndex {
 
     deinit { sqlite3_close(database) }
 
-    func matches(_ text: String, limit: Int) throws -> [EditorialPassage] {
-        let terms = Array(
-            Set(
-                text.lowercased().components(separatedBy: .alphanumerics.inverted)
-                    .filter { $0.count >= 3 && !EventFeatures.stopwords.contains($0) }.prefix(64))
-        ).sorted()
+    /// Entity phrases come first and stay whole, so a short or stopword entity ("US") is not filtered away and an
+    /// entity's own stopword ("the" in "The Fed") does not match every passage on its own.
+    func matches(_ text: String, entityPhrases: [String], limit: Int) throws -> [EditorialPassage] {
+        let tokens = text.lowercased().components(separatedBy: .alphanumerics.inverted)
+            .filter { $0.count >= 3 && !EventFeatures.stopwords.contains($0) }
+        let terms = Array(Set((entityPhrases + tokens).prefix(64))).sorted()
         guard !terms.isEmpty else { return [] }
         let query = terms.map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }.joined(
             separator: " OR ")

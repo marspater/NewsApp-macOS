@@ -107,6 +107,23 @@ enum EditorialNoveltyTests {
         } else {
             check(false, "reject sentences without a core actor")
         }
+        let shortEntityText = "US officials report new updates."
+        let shortEntityRepeat = try await subject.analyze(
+            candidate: passage("short-repeat", shortEntityText, observed: 20),
+            baseline: [passage("short-baseline", shortEntityText)], coreEntities: ["US"], stamp: stamp)
+        if case .repetition = shortEntityRepeat {
+            check(true, "short entity repetition")
+        } else {
+            check(false, "a short core entity reaches the retrieval query, so its repeat is repetition")
+        }
+        let stopwordEntityMiss = try await subject.analyze(
+            candidate: passage("phrase-miss", "The Fed met.", observed: 20),
+            baseline: [passage("phrase-baseline", "The satellites orbit.")], coreEntities: ["The Fed"], stamp: stamp)
+        if case .lowPrioritySemanticFallback = stopwordEntityMiss {
+            check(true, "entity phrase lexical miss")
+        } else {
+            check(false, "an entity's stopword alone is not a lexical match")
+        }
     }
 
     static func historicalBoundaries() async throws {
