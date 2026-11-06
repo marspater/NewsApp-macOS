@@ -566,13 +566,16 @@ struct ArticleListView: View {
         defer { if queryRunID == runID { isLoadingPage = false } }
         do {
             let muting = listMuting
+            // One vector for the page and its counts: another window's search must not change what they count (#985).
+            let queryVector =
+                isSearching ? try await articleStore.database.searchQueryVector(for: searchText) : nil
             let fetched = try await fetchPage(
-                after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting)
+                after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting, queryVector: queryVector)
             try Task.checkCancellation()
             if !isPaging {
                 var hidden = 0
-                if !muting.isEmpty { hidden = try await countMuted(muting) }
-                let totals = try await countListed(showsMuted ? MuteRules() : muting)
+                if !muting.isEmpty { hidden = try await countMuted(muting, queryVector: queryVector) }
+                let totals = try await countListed(showsMuted ? MuteRules() : muting, queryVector: queryVector)
                 // A search that finds nothing offers the closest spelling that does; a failure means no suggestion.
                 var suggestion: String?
                 if isSearching && fetched.isEmpty {
@@ -640,10 +643,13 @@ struct ArticleListView: View {
         return appSettings.smartBinder(forTag: topic)
     }
 
-    private func fetchPage(after pageCursor: ArticleQueryCursor?, muting: MuteRules) async throws -> [FeedArticle] {
+    private func fetchPage(after pageCursor: ArticleQueryCursor?, muting: MuteRules, queryVector: [Float]?) async throws
+        -> [FeedArticle]
+    {
         if isSearching {
             return try await articleStore.database.searchArticles(
-                query: searchText, limit: 201, after: pageCursor, muting: muting)
+                query: searchText, limit: 201, after: pageCursor, muting: muting, queryEmbedding: queryVector,
+                vectorResolved: true)
         }
         let filters = listFilters
         if let binder = currentSmartBinder {
@@ -656,9 +662,10 @@ struct ArticleListView: View {
             limit: 201, after: pageCursor, muting: muting)
     }
 
-    private func countMuted(_ muting: MuteRules) async throws -> Int {
+    private func countMuted(_ muting: MuteRules, queryVector: [Float]?) async throws -> Int {
         if isSearching {
-            return try await articleStore.database.mutedArticleCount(search: searchText, muting: muting)
+            return try await articleStore.database.mutedArticleCount(
+                search: searchText, searchVector: queryVector, muting: muting)
         }
         let filters = listFilters
         if let binder = currentSmartBinder {
@@ -670,9 +677,10 @@ struct ArticleListView: View {
     }
 
     /// The masthead's totals: every story of the list, across all its pages, and the events grouping them (#782).
-    private func countListed(_ muting: MuteRules) async throws -> (stories: Int, events: Int) {
+    private func countListed(_ muting: MuteRules, queryVector: [Float]?) async throws -> (stories: Int, events: Int) {
         if isSearching {
-            return try await articleStore.database.listTotals(search: searchText, muting: muting)
+            return try await articleStore.database.listTotals(
+                search: searchText, searchVector: queryVector, muting: muting)
         }
         let filters = listFilters
         if let binder = currentSmartBinder {

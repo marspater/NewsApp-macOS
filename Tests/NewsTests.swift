@@ -2921,8 +2921,9 @@ struct NewsTests {
             searches += 1
             let start = ProcessInfo.processInfo.systemUptime
             let page = try await db.searchArticles(query: text, limit: 201, muting: muting)
-            _ = try await db.mutedArticleCount(search: text, muting: muting)
-            let totals = try await db.listTotals(search: text, muting: muting)
+            let vector = try await db.searchQueryVector(for: text)
+            _ = try await db.mutedArticleCount(search: text, searchVector: vector, muting: muting)
+            let totals = try await db.listTotals(search: text, searchVector: vector, muting: muting)
             if let last = page.last {
                 _ = try await db.searchArticles(
                     query: text, limit: 201, after: ArticleQueryCursor(last), muting: muting)
@@ -29402,6 +29403,12 @@ struct NewsTests {
             queryEmbedding: queryVec
         )
         assertEqual(hybridResults.count, 2, "Both lexical and semantic candidates surfaced")
+        // A caller that resolved no vector keeps it: the page does not look one up again behind its counts (#985)
+        let resolvedWithoutVector = try await db.searchArticles(
+            query: "astronomy cosmic exploration", limit: 10, queryEmbedding: nil, vectorResolved: true)
+        assertFalse(
+            resolvedWithoutVector.contains { $0.id == "art-jwst" },
+            "A resolved nil vector stays lexical: the semantic candidate does not surface (#985)")
 
         let jwstHit = hybridResults.first { $0.id == "art-jwst" }
         assertTrue(jwstHit != nil, "Semantic candidate surfaced despite zero keyword overlap")
@@ -29418,7 +29425,7 @@ struct NewsTests {
             query: "astronomy cosmic exploration", limit: 10, queryEmbedding: queryVec)
         assertEqual(repeated.map(\.id), hybridResults.map(\.id), "The fused order is the same on every run")
         assertEqual(
-            try await db.listTotals(search: "astronomy cosmic exploration").stories, 2,
+            try await db.listTotals(search: "astronomy cosmic exploration", searchVector: queryVec).stories, 2,
             "The masthead total counts the semantic match the list shows")
 
         // A quoted phrase (an entity tag) asks for those exact words: no semantic matches, in the list or the count.
@@ -29426,7 +29433,7 @@ struct NewsTests {
             query: "\"astronomy cosmic exploration\"", limit: 10, queryEmbedding: queryVec)
         assertEqual(phrase.map(\.id), ["art-lexical"], "A quoted phrase stays lexical")
         assertEqual(
-            try await db.listTotals(search: "\"astronomy cosmic exploration\"").stories, 1,
+            try await db.listTotals(search: "\"astronomy cosmic exploration\"", searchVector: queryVec).stories, 1,
             "A quoted phrase's total counts lexical matches only")
     }
 
@@ -29481,8 +29488,11 @@ struct NewsTests {
         _ = try await db.searchArticles(
             query: "superconductors", limit: 10, muting: muteRules, queryEmbedding: quantumVec)
         assertEqual(
-            try await db.mutedArticleCount(search: "superconductors", muting: muteRules), 1,
-            "The muted count includes a muted story the semantic arm would list")
+            try await db.mutedArticleCount(search: "superconductors", muting: muteRules), 0,
+            "Without the query vector the count is lexical, and nothing matches the word")
+        assertEqual(
+            try await db.mutedArticleCount(search: "superconductors", searchVector: quantumVec, muting: muteRules), 1,
+            "The muted count includes a muted story the semantic arm would list, and is not the lexical one cached")
 
         // 2. Mute topic crypto
         let topicMuting = MuteRules(topics: ["Crypto"])
@@ -29499,6 +29509,29 @@ struct NewsTests {
         let reutersResults = try await db.searchArticles(
             query: "quantum source:reuters", limit: 10, queryEmbedding: quantumVec)
         assertEqual(reutersResults.map(\.id), ["art-2"], "source:reuters filters to Reuters stories")
+
+        // 5. Two searches interleave (#985): B runs between A's page and A's counts. Each search's counts follow its
+        // own vector, so they equal its result set whatever the other search did.
+        let pageA = try await db.searchArticles(
+            query: "superconductors", limit: 10, muting: muteRules, queryEmbedding: quantumVec)
+        let pageB = try await db.searchArticles(
+            query: "ledgers", limit: 10, muting: muteRules, queryEmbedding: cryptoVec)
+        let hiddenA = try await db.mutedArticleCount(
+            search: "superconductors", searchVector: quantumVec, muting: muteRules)
+        let totalsA = try await db.listTotals(
+            search: "superconductors", searchVector: quantumVec, muting: muteRules)
+        let totalsB = try await db.listTotals(search: "ledgers", searchVector: cryptoVec, muting: muteRules)
+        assertEqual(pageA.map(\.id), ["art-2"], "Search A lists its own semantic match")
+        assertEqual(pageB.map(\.id), ["art-3"], "Search B lists its own semantic match")
+        assertEqual(totalsA.stories, pageA.count, "A's total equals A's results after B ran")
+        assertEqual(totalsB.stories, pageB.count, "B's total equals B's results")
+        assertEqual(hiddenA, 1, "A's muted count still includes the story its vector reaches")
+        assertEqual(
+            try await db.mutedArticleCount(search: "ledgers", searchVector: cryptoVec, muting: muteRules), 0,
+            "B hides nothing")
+        let phraseVector = try await db.searchQueryVector(for: "\"quantum research\"")
+        let operatorVector = try await db.searchQueryVector(for: "is:unread")
+        assertTrue(phraseVector == nil && operatorVector == nil, "A quoted phrase and operators alone have no vector")
     }
 
     static func testHybridSearchCursorPagination() async throws {
