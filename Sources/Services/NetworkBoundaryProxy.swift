@@ -146,9 +146,11 @@ final class ProxyResolver: Sendable {
     static let cancellations = OSAllocatedUnfairLock(initialState: 0)
     private let lookup: Lookup
     private let deadline: Duration
+    private let timeline: NetworkTimeline?
 
     /// `body` keeps a test's synchronous answers; production resolves through `DNSLookup`.
     init(body: NetworkBoundaryProxy.Resolver? = nil, deadline: Duration = defaultDeadline) {
+        timeline = body == nil ? .shared : nil
         if let body {
             self.lookup = { body($0) }
         } else {
@@ -161,14 +163,16 @@ final class ProxyResolver: Sendable {
         self.deadline = deadline
     }
 
-    init(lookup: @escaping Lookup, deadline: Duration = defaultDeadline) {
+    init(lookup: @escaping Lookup, deadline: Duration = defaultDeadline, timeline: NetworkTimeline? = nil) {
         self.lookup = lookup
         self.deadline = deadline
+        self.timeline = timeline
     }
 
     func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
         guard !Task.isCancelled else {
             Self.cancellations.withLock { $0 += 1 }
+            timeline?.record(resolverOutcome: "cancelled")
             return .unresolvable(reason: "Cancelled")
         }
         let lookup = lookup
@@ -188,6 +192,7 @@ final class ProxyResolver: Sendable {
             if Task.isCancelled, first == .unresolvable(reason: "Cancelled") {
                 Self.cancellations.withLock { $0 += 1 }
             }
+            timeline?.record(resolverOutcome: NetworkTimeline.outcomeClass(first))
             return first
         }
     }

@@ -181,6 +181,7 @@ timeline
         v32 : feeds.last_failure_kind (#927)
         v33 : articles.author (#998)
         v34 : feed request counters, articles.reader_barrier (#715)
+        v35 : feeds.last_failure_at and last_failure_detail (#929)
 ```
 
 ## Invariants
