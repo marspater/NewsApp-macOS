@@ -103,7 +103,19 @@ struct EventCandidate: Hashable, Sendable {
     let eventID: String?
 }
 
+/// A candidate row's language for one clustering pass (#572), kept with the text it was read from so an edit that
+/// lands while the pass is suspended is never answered with the old language.
+struct EventCandidateLanguage: Equatable, Sendable {
+    var text: String
+    var language: String?
+}
+
 enum EventCandidateFinder {
+    /// The text a row's language is recognized from.
+    static func languageText(title: String, description: String) -> String {
+        title + "\n" + String(description.prefix(600))
+    }
+
     /// Candidates for one article. Reads at most twice `policy.limit` rows; never scans the archive.
     static func candidates(
         for article: FeedArticle,
@@ -111,18 +123,19 @@ enum EventCandidateFinder {
         policy: EventCandidatePolicy = .standard,
         now: Date = Date()
     ) async throws -> [EventCandidate] {
-        var languages: [String: String?] = [:]
+        var languages: [String: EventCandidateLanguage] = [:]
         return try await candidates(for: article, in: database, policy: policy, now: now, languages: &languages)
     }
 
     /// `languages` keeps each candidate row's language by article id for the caller's pass (#572): a row is read once,
-    /// from its stored signals when it has them at the current version and recognized otherwise.
+    /// from its stored signals when it has them at the current version and recognized otherwise. An entry answers only
+    /// while the row's text is the text it was read from.
     static func candidates(
         for article: FeedArticle,
         in database: DatabaseEngine,
         policy: EventCandidatePolicy = .standard,
         now: Date = Date(),
-        languages: inout [String: String?]
+        languages: inout [String: EventCandidateLanguage]
     ) async throws -> [EventCandidate] {
         let key = EventMatchKey(article: article)
         guard let query = key.ftsQuery, policy.limit > 0 else { return [] }
@@ -132,27 +145,37 @@ enum EventCandidateFinder {
             activeSince: now.addingTimeInterval(-policy.activeEventLifetime),
             excluding: article.id, limit: policy.limit * 2)
         var candidates: [EventCandidate] = []
-        let unread = key.language == nil ? [] : rows.map(\.id).filter { languages[$0] == nil }
-        let stored =
-            unread.isEmpty
-            ? [:] : try await database.fetchArticleFeatures(articleIDs: unread, version: EventFeatures.storageVersion)
         // Reset between candidates so language evidence cannot leak from the previous article.
         let recognizer = NLLanguageRecognizer()
-        for row in rows where candidates.count < policy.limit {
+        var batchEnd = 0
+        for (index, row) in rows.enumerated() where candidates.count < policy.limit {
             try Task.checkCancellation()
             // Different languages are not compared directly; unknown languages stay eligible.
             if let language = key.language {
-                let other: String?
-                if let known = languages[row.id] {
-                    other = known
-                } else {
-                    other =
-                        stored[row.id].map(\.language)
-                        ?? EventMatchKey.language(
-                            of: row.title + "\n" + String(row.description.prefix(600)), using: recognizer)
-                    languages[row.id] = other
+                let text = languageText(title: row.title, description: row.description)
+                if languages[row.id]?.text != text {
+                    // Stored signals come in batches of `policy.limit` rows, the next only when the rows so far did
+                    // not fill the limit, and every hit is kept for the later probes of the pass.
+                    if index >= batchEnd {
+                        batchEnd = min(index + policy.limit, rows.count)
+                        let unread = rows[index..<batchEnd].filter {
+                            languages[$0.id]?.text != languageText(title: $0.title, description: $0.description)
+                        }
+                        let stored = try await database.fetchArticleFeatures(
+                            articleIDs: unread.map(\.id), version: EventFeatures.storageVersion)
+                        for other in unread {
+                            guard let signals = stored[other.id] else { continue }
+                            languages[other.id] = EventCandidateLanguage(
+                                text: languageText(title: other.title, description: other.description),
+                                language: signals.language)
+                        }
+                    }
+                    if languages[row.id]?.text != text {
+                        languages[row.id] = EventCandidateLanguage(
+                            text: text, language: EventMatchKey.language(of: text, using: recognizer))
+                    }
                 }
-                if let other, other != language { continue }
+                if let other = languages[row.id]?.language, other != language { continue }
             }
             candidates.append(EventCandidate(articleID: row.id, eventID: row.eventID))
         }

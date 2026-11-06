@@ -119,7 +119,14 @@ NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/Harness/ListInvalidationBase
 ./script/launch_baseline.sh
 ```
 
-Re-clustering budget (#691), from scratch on a library copy with a Release runner on an idle Mac: 14 s per 1,000 recent rows with stored signals and vectors, 15 s without them. See `docs/audits/2026-11-06-candidate-language.md`.
+Re-clustering budget (#691, #572): 14 s per 1,000 recent rows with stored signals and vectors, 15 s without them, from scratch on a library copy on an idle Mac. `--library-holdout` builds a Release runner. Measure it with the library copy and holdout of section 3, a fresh copy for each run, and take the median of three runs of each:
+
+```sh
+NEWS_HOLDOUT_NOW=<epoch of the holdout> NEWS_SNAPSHOT_DB=<library copy> NEWS_LIBRARY_HOLDOUT=<holdout.json> ./test.sh --library-holdout
+NEWS_HOLDOUT_COLD=1 NEWS_HOLDOUT_NOW=<epoch of the holdout> NEWS_SNAPSHOT_DB=<library copy> NEWS_LIBRARY_HOLDOUT=<holdout.json> ./test.sh --library-holdout
+```
+
+The first command is warm, the second cold. Seconds per 1,000 rows is the `total` seconds of the final `stages:` line divided by the rows the passes `processed`, times 1,000; the per-pass lines name each pass's rows. See `docs/audits/2026-11-06-recluster-stages.md` and `docs/audits/2026-11-06-candidate-language.md`.
 
 ## 8. Privacy manifest and documentation consistency
 

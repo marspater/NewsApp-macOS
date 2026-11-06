@@ -10695,22 +10695,27 @@ struct NewsTests {
         assertEqual(candidates.first { $0.articleID == "recent" }?.eventID, nil, "Unclustered candidates have no event")
 
         // One language per row within a pass (#572): the first reading stands, and stored signals come before the recognizer.
-        var pass: [String: String?] = [:]
+        var pass: [String: EventCandidateLanguage] = [:]
         let first = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &pass)
         assertEqual(first, candidates, "The pass's language map changes no candidate")
-        assertEqual(pass["german"], .some("de"), "The pass keeps a row's recognized language")
-        pass["german"] = .some("en")
+        assertEqual(pass["german"]?.language, "de", "The pass keeps a row's recognized language")
+        let germanText = EventCandidateFinder.languageText(title: "Erdbeben erschüttert Lviv", description: german)
+        pass["german"] = EventCandidateLanguage(text: germanText, language: "en")
         let reread = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &pass)
         assertTrue(reread.contains { $0.articleID == "german" }, "A row is not recognized again in one pass")
+        pass["german"] = EventCandidateLanguage(text: "an earlier edit of the row", language: "en")
+        let edited = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &pass)
+        assertFalse(edited.contains { $0.articleID == "german" }, "A row edited since it was read is read again")
+        assertEqual(pass["german"]?.language, "de", "The new text replaces the old reading")
         var signals = EventFeatures(title: "Erdbeben erschüttert Lviv", description: german, date: now)
         signals.language = "en"
         try await db.upsertArticleFeatures(
             ["german": signals], version: EventFeatures.storageVersion - 1, at: now)
-        var stale: [String: String?] = [:]
+        var stale: [String: EventCandidateLanguage] = [:]
         let staleRead = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &stale)
         assertFalse(staleRead.contains { $0.articleID == "german" }, "Signals of an older version are not read")
         try await db.upsertArticleFeatures(["german": signals], version: EventFeatures.storageVersion, at: now)
-        var fresh: [String: String?] = [:]
+        var fresh: [String: EventCandidateLanguage] = [:]
         let storedRead = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &fresh)
         assertTrue(storedRead.contains { $0.articleID == "german" }, "A row's stored language comes first")
         try await db.eventRows("DELETE FROM article_features;")

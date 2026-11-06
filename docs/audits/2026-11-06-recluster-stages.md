@@ -1,6 +1,6 @@
 # Full re-clustering cost by stage (#691, 6 November 2026)
 
-**Finding: one language check takes about three quarters of a from-scratch re-clustering.** `EventCandidateFinder.candidates` runs `NLLanguageRecognizer` on every candidate row of every article: 86,957 recognitions for 1,156 articles. The 27 October figure was 505.7 s for 2,077 rows at a load of about 180. Here 1,454 rows take about a minute with a Release runner; the two runs differ in load, input and possibly build, so this does not separate those causes.
+**Finding: candidate search takes about three quarters of a from-scratch re-clustering.** The three-run medians put it at 75 % of the warm total. A separate warm run with a temporary patch, at a different load, split candidate search and put about 90 % of that run's candidate-search time in `NLLanguageRecognizer`, which runs on every candidate row of every article: 86,957 recognitions for 1,156 articles. That split is one run, so it locates the cost without measuring its share of the total. The 27 October figure was 505.7 s for 2,077 rows at a load of about 180. Here 1,454 rows take about a minute with a Release runner; the two runs differ in load, input and possibly build, so this does not separate those causes.
 
 ## Method
 
@@ -43,7 +43,7 @@ That is 0.75 ms per recognition, repeated for the same rows across articles.
 
 ## Budget
 
-Per 1,000 recent rows from scratch, on this machine with a Release runner, median plus about 25 %: **48 s warm** (38.3 s measured) and **72 s cold** (57.3 s measured). The budget is recorded in `docs/RELEASE_CHECKLIST.md`. These describe today's cost, including the language check. Lower them when that check is fixed.
+The #691 baseline budget, set before the language reuse of #572. Per 1,000 recent rows from scratch, on this machine with a Release runner, median plus about 25 %: **48 s warm** (38.3 s measured) and **72 s cold** (57.3 s measured). These describe the cost at that time, including the language check. The current budget is in `docs/RELEASE_CHECKLIST.md`.
 
 ## Stages above 25 %
 
