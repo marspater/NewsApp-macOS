@@ -2550,7 +2550,8 @@ struct NewsTests {
         func record(_ name: String, from start: Double) {
             measurements[name, default: []].append((ProcessInfo.processInfo.systemUptime - start) * 1000)
         }
-        // Diagnostics export (#1006) on the 10,000-story library: every state writer plus the log and the redaction.
+        // Diagnostics reports (#1006) on the 10,000-story library: every state writer plus the log and the redaction.
+        // The app snapshot and the zip that Help › Export Diagnostics adds are not part of this time.
         let exportStart = ProcessInfo.processInfo.systemUptime
         let exportLog = try DiagnosticsExport.logLines(since: .distantPast)
         let exportSections = await DiagnosticsExport.sectionFiles(
@@ -2558,7 +2559,9 @@ struct NewsTests {
         let exportFiles = DiagnosticsExport.files(
             summary: "News diagnostics\n", sections: exportSections, log: exportLog, titles: archive.map(\.title))
         record("diagnosticsExport", from: exportStart)
-        print("Diagnostics export: \(exportFiles.count) files in \(measurements["diagnosticsExport"]?.last ?? 0) ms")
+        print(
+            "Diagnostics reports (no snapshot or zip): \(exportFiles.count) files in \(measurements["diagnosticsExport"]?.last ?? 0) ms"
+        )
         let coldStart = ProcessInfo.processInfo.systemUptime
         assertTrue(await store.refreshState(), "Baseline snapshot hydrates")
         record("snapshot_first_500_ms", from: coldStart)

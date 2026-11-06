@@ -671,42 +671,50 @@ enum DiagnosticsExport {
     }
 
     static func notificationSettingsLines(_ settings: UNNotificationSettings) -> [String] {
-        func setting(_ value: UNNotificationSetting) -> String {
-            switch value {
-            case .enabled: return "on"
-            case .disabled: return "off"
-            case .notSupported: return "not supported"
-            @unknown default: return "unknown"
-            }
-        }
-        let authorization: String
-        switch settings.authorizationStatus {
-        case .notDetermined: authorization = "not asked yet"
-        case .denied: authorization = "denied"
-        case .authorized: authorization = "authorized"
-        case .provisional: authorization = "provisional"
-        case .ephemeral: authorization = "ephemeral"
-        @unknown default: authorization = "unknown"
-        }
-        let style: String
-        switch settings.alertStyle {
-        case .none: style = "none"
-        case .banner: style = "banners"
-        case .alert: style = "alerts"
-        @unknown default: style = "unknown"
-        }
-        let previews: String
-        switch settings.showPreviewsSetting {
-        case .always: previews = "always"
-        case .whenAuthenticated: previews = "when unlocked"
-        case .never: previews = "never"
-        @unknown default: previews = "unknown"
-        }
-        return [
-            "Authorization: \(authorization)", "Alerts: \(setting(settings.alertSetting)), style \(style)",
-            "Previews: \(previews)", "Sound: \(setting(settings.soundSetting))",
-            "Badge: \(setting(settings.badgeSetting))",
-            "Notification Center: \(setting(settings.notificationCenterSetting))",
+        [
+            "Authorization: \(name(of: settings.authorizationStatus))",
+            "Alerts: \(name(of: settings.alertSetting)), style \(name(of: settings.alertStyle))",
+            "Previews: \(name(of: settings.showPreviewsSetting))", "Sound: \(name(of: settings.soundSetting))",
+            "Badge: \(name(of: settings.badgeSetting))",
+            "Notification Center: \(name(of: settings.notificationCenterSetting))",
         ]
+    }
+
+    private static func name(of setting: UNNotificationSetting) -> String {
+        switch setting {
+        case .enabled: return "on"
+        case .disabled: return "off"
+        case .notSupported: return "not supported"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func name(of status: UNAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined: return "not asked yet"
+        case .denied: return "denied"
+        case .authorized: return "authorized"
+        case .provisional: return "provisional"
+        case .ephemeral: return "ephemeral"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func name(of style: UNAlertStyle) -> String {
+        switch style {
+        case .none: return "none"
+        case .banner: return "banners"
+        case .alert: return "alerts"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func name(of previews: UNShowPreviewsSetting) -> String {
+        switch previews {
+        case .always: return "always"
+        case .whenAuthenticated: return "when unlocked"
+        case .never: return "never"
+        @unknown default: return "unknown"
+        }
     }
 }
