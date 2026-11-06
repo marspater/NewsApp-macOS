@@ -8225,6 +8225,13 @@ struct NewsTests {
         assertEqual(
             reported.description, "A newsletter leaked 40,000 records, police said.",
             "A paragraph that reports on a newsletter stays; only the calls to action go")
+        let inbox = EventMatcher.newsletterStripped(
+            title: "Hackers strike | First Thing",
+            description: "Leaked files were found in your inbox, police said.\nGet First Thing in your inbox\n"
+                + "Don’t already get First Thing in your inbox?")
+        assertEqual(
+            inbox.description, "Leaked files were found in your inbox, police said.",
+            "A paragraph that reports an inbox event stays; only the inbox calls to action go")
         var stripPolicy = EventMatchPolicy.standard
         stripPolicy.pairModelStripsNewsletter = true
         assertEqual(

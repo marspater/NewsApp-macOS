@@ -1035,10 +1035,12 @@ enum EventMatcher {
         return policy.pairModelPrefix ? pairModelInput(text, gap: gap, samePublisher: samePublisher) : text
     }
 
-    /// A call to action, not any mention: "A newsletter leaked records" is the reported event.
+    /// A call to action, not any mention: "A newsletter leaked records" and "Files were found in your inbox, police
+    /// said" are the reported event.
     private static let newsletterBoilerplate =
         (try? NSRegularExpression(
-            pattern: "(?i)\\bin your inbox\\b|^(sign up|subscribe)\\b|\\b(sign up|subscribe) (here|now|today)\\b"))
+            pattern: "(?i)^(don[’']t already get|get|want)\\b.*\\bin your inbox\\b|^(sign up|subscribe)\\b"
+                + "|\\b(sign up|subscribe) (here|now|today)\\b"))
         ?? NSRegularExpression()
 
     /// The pair model's input for one side of a pair (#626): "gap 14 hours; same publisher. " and then the matching
