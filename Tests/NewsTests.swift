@@ -28987,6 +28987,50 @@ struct NewsTests {
             "Rebuild drops entries the open library does not hold (#812)")
         assertTrue(
             await mockIndexer.contains(id: "spotlight-unit-1"), "Rebuild indexes the library's saved stories (#812)")
+
+        // 6. A generated summary never reaches the entry, so Clear AI Analysis leaves none behind (#983)
+        let generated = "Model-written summary of the fusion story."
+        let analysis = ArticleAnalysis(
+            summary: generated, keyPoints: [], entities: [], category: "Science",
+            modelIdentifier: "test", analysisVersion: 1)
+        await store.saveArticleAnalysis(analysis, for: "spotlight-unit-1")
+        await store.rebuildSpotlightIndex()
+        let withSummary = await mockIndexer.item(for: "spotlight-unit-1")
+        assertEqual(
+            withSummary?.attributeSet.contentDescription, "Scientists achieved sustained net energy gain.",
+            "A saved story with a generated summary is indexed with the publisher description only (#983)")
+        try await store.clearAIAnalysis()
+        await store.rebuildSpotlightIndex()
+        let afterClear = await mockIndexer.item(for: "spotlight-unit-1")
+        assertEqual(
+            afterClear?.attributeSet.contentDescription, "Scientists achieved sustained net energy gain.",
+            "The entry stays and holds the publisher description, not the generated summary, after a clear (#983)")
+        // A story that already carries a generated summary when it is saved (no rebuild involved)
+        let later = FeedArticle(
+            storedID: "spotlight-unit-2", title: "Fusion Follow-up", link: "https://example.com/fusion-2",
+            guid: "spotlight-unit-2", description: "Follow-up from the publisher.", pubDate: pubDate,
+            source: "Science Daily")
+        await store.batchUpsert(articles: [later], feedUrl: "https://example.com/rss")
+        await store.saveArticleAnalysis(analysis, for: "spotlight-unit-2")
+        let summarised = try await db.fetchArticles().first { $0.id == "spotlight-unit-2" }
+        assertEqual(summarised?.aiSummary, generated, "The unsaved story carries its generated summary")
+        savedManager.save(summarised ?? later)
+        await savedManager.waitForPendingChanges()
+        assertEqual(
+            await mockIndexer.item(for: "spotlight-unit-2")?.attributeSet.contentDescription,
+            "Follow-up from the publisher.",
+            "Saving a story with a summary indexes the publisher description only (#983)")
+        try await store.clearAIAnalysis()
+        assertEqual(
+            await mockIndexer.item(for: "spotlight-unit-2")?.attributeSet.contentDescription,
+            "Follow-up from the publisher.",
+            "The saved entry still holds no generated text after Clear AI Analysis (#983)")
+        var enriched = article
+        enriched.aiSummary = generated
+        assertEqual(
+            SystemSpotlightIndexer.makeSearchableItem(for: enriched).attributeSet.contentDescription,
+            "Scientists achieved sustained net energy gain.",
+            "An article carrying aiSummary still indexes the publisher description (#983)")
         await db.close()
     }
 
