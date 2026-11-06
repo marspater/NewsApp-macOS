@@ -505,7 +505,7 @@ actor DatabaseEngine {
         return target
     }
 
-    /// The file-level fallback of ``keepCopyBeside``: copies the library and its write-ahead log to `partial`, then folds
+    /// The file-level fallback of `keepCopyBeside`: copies the library and its write-ahead log to `partial`, then folds
     /// the log into the copy and returns it to one self-contained file. Folding fails on a damaged library; the copy then
     /// keeps `<partial>-wal` beside it, which SQLite replays when the copy is opened (#946).
     nonisolated static func copyLibraryFiles(of library: String, to partial: URL) throws {
