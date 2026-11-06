@@ -106,7 +106,7 @@ struct BriefingTimelineData: Equatable, Sendable {
         return ordered.isEmpty ? nil : Self(threads: ordered)
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         let now = Date(timeIntervalSince1970: 1_793_372_400)
         let entry = BriefingRegionsData.sampleEntry(

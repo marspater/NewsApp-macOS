@@ -254,8 +254,8 @@ public struct NewsShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: AddFeedIntent(),
             phrases: [
-                "Add feed \(\.$url) to \(.applicationName)",
-                "Subscribe to \(\.$url) in \(.applicationName)",
+                "Add a feed to \(.applicationName)",
+                "Subscribe to a feed in \(.applicationName)",
             ],
             shortTitle: "Add Feed",
             systemImageName: "plus"

@@ -20,16 +20,9 @@ import Foundation
 import SwiftUI
 import Vision
 
+// The reader's command names come from NewsApp.swift, compiled into the harness app.
 extension Notification.Name {
     static let openArticleFromNotification = Notification.Name("openArticleFromNotification")
-    static let refreshFeedsCommand = Notification.Name("refreshFeedsCommand")
-    static let markAllReadCommand = Notification.Name("markAllReadCommand")
-    static let nextArticleCommand = Notification.Name("nextArticleCommand")
-    static let prevArticleCommand = Notification.Name("prevArticleCommand")
-    static let toggleReadCommand = Notification.Name("toggleReadCommand")
-    static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
-    static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-    static let showFeedUpdatesCommand = Notification.Name("showFeedUpdatesCommand")
 }
 
 @main

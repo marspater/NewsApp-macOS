@@ -174,7 +174,7 @@ struct BriefingRegionsData: Equatable, Sendable {
         return Self(rows: grouped.rows, regionsByEntry: grouped.regionsByEntry, facts: facts, now: context.now)
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         let now = Date(timeIntervalSince1970: 1_793_372_400)
         let stories: [SampleStory] = [

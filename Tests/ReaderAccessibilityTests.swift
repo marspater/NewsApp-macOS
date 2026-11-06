@@ -19,15 +19,6 @@ import AppKit
 import Foundation
 import SwiftUI
 
-extension Notification.Name {
-    static let nextArticleCommand = Notification.Name("nextArticleCommand")
-    static let prevArticleCommand = Notification.Name("prevArticleCommand")
-    static let toggleReadCommand = Notification.Name("toggleReadCommand")
-    static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
-    static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-}
-
-@main
 @MainActor
 struct ReaderAccessibilityTests {
     static var testsRun = 0

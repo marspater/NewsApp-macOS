@@ -84,7 +84,6 @@ extension Notification.Name {
     static let newSmartBinderCommand = Notification.Name("newSmartBinderCommand")
 }
 
-@main
 struct NewsApp: App {
     @FocusedValue(\.archiveSearch) private var archiveSearch
     @FocusedValue(\.selectedStory) private var selectedStory

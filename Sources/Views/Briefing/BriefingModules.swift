@@ -250,7 +250,7 @@ struct BriefingBoardData: Equatable, Sendable {
         return data
     }
 
-    /// Every module's capture sample, for `Tests/OverviewCaptures.swift`.
+    /// Every module's capture sample, for `Tests/Harness/OverviewCaptures.swift`.
     static func captureFixture(details: BriefingStoryDetails) -> Self {
         Self(
             details: details, sitrep: BriefingSitrepData.captureFixture,
