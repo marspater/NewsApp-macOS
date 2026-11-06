@@ -42,7 +42,8 @@ runner_inputs_key() {
 PASS_STAMP=""
 if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/dev/null); then
     PASS_STAMP="${TMPDIR:-/tmp}/news-test-passes/$KEY"
-    if [ -f "$PASS_STAMP" ]; then
+    # A coverage run whose report is missing (the export failed) runs again: the stamp alone is not the report.
+    if [ -f "$PASS_STAMP" ] && { [ -z "${NEWS_TEST_COVERAGE:-}" ] || [ -f "$NEWS_TEST_COVERAGE" ]; }; then
         echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
         exit 0
     fi
@@ -110,12 +111,8 @@ else
     done
     JOB_LIST="$LOGS/jobs"
     : > "$JOB_LIST"
-    # A job is a name and the environment its copy of the runner gets; an instrumented runner also gets its profile path.
-    job() {
-        local environment="$2"
-        if [[ ${#COVERAGE_FLAGS[@]} -gt 0 ]]; then environment="$environment LLVM_PROFILE_FILE=$LOGS/profiles/%p.profraw"; fi
-        printf '%s\t%s\n' "$1" "$environment" >> "$JOB_LIST"
-    }
+    # A job is a name and the environment its copy of the runner gets.
+    job() { printf '%s\t%s\n' "$1" "$2" >> "$JOB_LIST"; }
     # Longest first, so the pool ends evenly.
     job "NewsTests-slow" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=slow"
     for ((i = 0; i < SHARDS; i++)); do
@@ -136,6 +133,8 @@ else
         start=$(date +%s)
         copy="$LOGS/$name.$RUN_TAG.runner"
         cp "$LOGS/test_runner.$RUN_TAG" "$copy"
+        # An instrumented runner writes its profile here; set in the worker, so a space in the path survives xargs.
+        if [[ -d "$LOGS/profiles" ]]; then export LLVM_PROFILE_FILE="$LOGS/profiles/%p.profraw"; fi
         env "$@" "$copy" > "$LOGS/$name.log" 2>&1
         status=$?
         # Cleanup that fails marks the job failed, so a run never passes while runner state is left behind.

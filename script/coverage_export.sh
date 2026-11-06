@@ -7,7 +7,7 @@ RUNNER="$2"
 LCOV_PATH="$3"
 PROFILES=("$PROFILE_DIR"/*.profraw)
 if [ ! -e "${PROFILES[0]}" ]; then
-    echo "Coverage export failed: the runner wrote no profile. Was it built with -profile-generate?" >&2
+    echo "Coverage export failed: the runner wrote no coverage profile. Was it built with -profile-generate?" >&2
     exit 1
 fi
 xcrun llvm-profdata merge -sparse "${PROFILES[@]}" -o "$PROFILE_DIR/coverage.profdata" || exit 1
