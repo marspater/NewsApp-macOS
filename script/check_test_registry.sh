@@ -23,5 +23,12 @@ for file in $(grep -lE 'static func (run|main|runAllTests)\(\)' Tests/*.swift); 
     echo "❌ $file has an entry point but nothing runs it: add it to Tests/Runner.swift"
     status=1
 done
+# A domain atom (a file with its own test list) never runs in a targeted mode: `--story-regressions` runs only itself.
+for file in $(grep -lE 'try await runSharded\(tests\)' Tests/*.swift); do
+    [ "$file" = Tests/NewsTests.swift ] && continue
+    grep -qF "selected(\"$file\"), !targetedMode" Tests/Runner.swift || {
+        echo "❌ $file must be dispatched with !targetedMode in Tests/Runner.swift"; status=1;
+    }
+done
 [ "$status" -eq 0 ] && echo "Test registry: every suite runs once ($(echo "$atoms" | wc -l | tr -d ' ') atoms)"
 exit $status

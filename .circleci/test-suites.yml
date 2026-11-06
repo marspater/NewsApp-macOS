@@ -25,3 +25,6 @@ options:
     - test-atom: Tests/NewsTests.swift
       include:
         - Tests/NewsTests.swift
+    - test-atom: Tests/StorageTests.swift
+      include:
+        - Tests/StorageTests.swift
