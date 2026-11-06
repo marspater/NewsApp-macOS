@@ -577,17 +577,18 @@ class FeedManager: NSObject, ObservableObject {
         lastRefreshCompletedAt = now()
         refreshInterruptedBySleep = false
 
+        // Taken here so that stopping now drops the request instead of leaving it for some later refresh.
+        let manualRefreshRequested = manualRefreshWaiting
+        manualRefreshWaiting = false
+
         guard !isStopped else { return }
-        if manualRefreshWaiting {
-            manualRefreshWaiting = false
-            await fetchFeedsAsync()
-        }
         await pruneIfDue()
         clusterEventsInBackground()
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
         guard !Task.isCancelled, !isStopped else { return }
         await notifyAndEnrich(newArticles)
+        if manualRefreshRequested { await fetchFeedsAsync() }
     }
 
     /// What Check for Updates found for an open story (#992).
