@@ -84,6 +84,12 @@ struct NewsRegressionRunner {
                     exit(1)
                 }
             }
+            if selected("Tests/IntelligenceTests.swift"), !targetedMode {
+                do { try await IntelligenceTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
             // The harness suites run only when named: a targeted runner mode must not pick them up.
             if atom == "Tests/EventOverviewAccessibilityTests.swift" { await EventOverviewAccessibilityTests.main() }
