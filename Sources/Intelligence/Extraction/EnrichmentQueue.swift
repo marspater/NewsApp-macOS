@@ -493,8 +493,9 @@ actor EnrichmentQueue {
         completedInputs[articleId] = hash
         completedInputOrder.append((articleId, hash))
         if completedInputOrder.count > Self.completedInputLimit {
-            for old in completedInputOrder.prefix(Self.completedInputEvictionBatch) {
-                if completedInputs[old.id] == old.hash { completedInputs.removeValue(forKey: old.id) }
+            for old in completedInputOrder.prefix(Self.completedInputEvictionBatch)
+            where completedInputs[old.id] == old.hash {
+                completedInputs.removeValue(forKey: old.id)
             }
             completedInputOrder.removeFirst(Self.completedInputEvictionBatch)
         }
