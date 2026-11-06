@@ -5217,7 +5217,7 @@ struct NewsTests {
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
-            notifyBatch: { _, _ in })
+            notifyBatch: { _, _ in }, now: { clock.now })
         defer { manager.stopBackgroundWork() }
         clock.advance(by: 60)
 
@@ -5254,6 +5254,39 @@ struct NewsTests {
         assertEqual(stored?.retryAt, nil, "A success clears the wait")
         assertEqual(stored?.lastFailureKind, nil, "A success clears the kind")
         assertEqual(try await kind(certificate), .tls, "A certificate failure stays until it succeeds")
+
+        // A manual refresh that arrives during a scheduled one runs when that one ends.
+        let retrying = "https://8.8.8.8/retrying.xml"
+        try await db.recordFeedFailure(retrying, kind: .transport, retryAfter: nil, at: clock.now)
+        let racingSuite = testDefaultsSuite("test.failure-kinds-racing")
+        defer { removeTestDefaults(racingSuite) }
+        let racingSettings = AppSettings(defaults: UserDefaults(suiteName: racingSuite)!)
+        racingSettings.feedURLs = [retrying, healthy]
+        racingSettings.aiEnabled = false
+        let entered = SocketObservation()
+        let released = SocketObservation()
+        let racing = FeedManager(
+            settings: racingSettings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, allowHTTP in
+                entered.recordText("entered")
+                while released.count == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+                return await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db)
+            },
+            notifyBatch: { _, _ in }, now: { clock.now })
+        defer { racing.stopBackgroundWork() }
+        requests = []
+        let scheduledRun = Task { await racing.fetchFeedsAsync(scheduled: true) }
+        await eventually("The scheduled refresh is collecting") { entered.count == 1 }
+        let manualRun = Task { await racing.fetchFeedsAsync() }
+        await eventually("The manual refresh waits for the scheduled one") { racing.manualRefreshWaiting }
+        released.recordText("released")
+        await scheduledRun.value
+        await manualRun.value
+        assertEqual(
+            requests.sorted(), [retrying, healthy, healthy].sorted(),
+            "The scheduled refresh keeps the wait, and the manual one then retries the feed")
+        assertEqual(try await kind(retrying), nil, "The manual refresh that waited leaves the feed healthy")
+        assertTrue(!racing.manualRefreshWaiting, "The request runs once")
     }
 
     /// The kind survives a reopen, and a failure recorded before schema 32 never qualifies for the retry (#927).
@@ -5275,10 +5308,21 @@ struct NewsTests {
         var stored = try await db.feedFetchStates()[feed]
         assertEqual(stored?.lastFailureKind, .timeout, "The kind survives a reopen")
         assertEqual(stored?.retryAt, retryAt, "The wait survives a reopen")
-        try await db.clearConnectivityBackoff()
+        try await db.clearConnectivityBackoff(at: t0)
         stored = try await db.feedFetchStates()[feed]
-        assertEqual(stored?.retryAt, nil, "The retry ends a connectivity failure's wait after a reopen")
+        assertEqual(stored?.retryAt, t0, "The retry ends a connectivity failure's wait after a reopen")
         assertEqual(stored?.failures, 1, "The retry keeps the failure count")
+
+        // A lifted or expired wait still dates the failure, so a failure long after it starts the schedule again.
+        let muchLater = t0.addingTimeInterval(FeedRetryPolicy.maximumDelay + 3600)
+        try await db.clearConnectivityBackoff(at: muchLater)
+        assertEqual(try await db.feedFetchStates()[feed]?.retryAt, t0, "An expired wait is left as it is")
+        assertEqual(
+            try await db.recordFeedFailure(feed, kind: .timeout, retryAfter: nil, at: muchLater),
+            muchLater.addingTimeInterval(FeedRetryPolicy.baseDelay),
+            "A failed retry long after the last one backs off from the start")
+        assertEqual(try await db.feedFetchStates()[feed]?.failures, 1, "Old failures are forgiven")
+
         let legacyRetryAt = try await db.recordFeedFailure(feed, kind: .timeout, retryAfter: nil, at: t0)
         await db.close()
 
@@ -5298,7 +5342,7 @@ struct NewsTests {
         assertEqual(stored?.failures, 2, "The migration keeps the failure count")
         assertEqual(stored?.retryAt, legacyRetryAt, "The migration keeps the wait")
         assertEqual(stored?.lastFailureKind, nil, "A failure from before the migration has no kind")
-        try await db.clearConnectivityBackoff()
+        try await db.clearConnectivityBackoff(at: t0)
         assertEqual(
             try await db.feedFetchStates()[feed]?.retryAt, legacyRetryAt,
             "A failure from before the migration is not retried early")

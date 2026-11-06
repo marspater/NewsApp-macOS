@@ -68,6 +68,9 @@ class FeedManager: NSObject, ObservableObject {
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
+    private var runningRefreshIsScheduled = false
+    /// The reader asked for a refresh while a scheduled one was collecting (#927).
+    private(set) var manualRefreshWaiting = false
     private var enrichmentTask: Task<Void, Never>?
     private var overviewWarmupTask: Task<Void, Never>?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
@@ -453,6 +456,7 @@ class FeedManager: NSObject, ObservableObject {
         refreshTask?.cancel()
         refreshTask = nil
         refreshRunID = nil
+        manualRefreshWaiting = false
         // The waiting caller returns without finishing the run, so the loading state ends here.
         for (url, status) in feedStatuses where status == .loading { feedStatuses[url] = .idle }
         isAnyFeedLoading = false
@@ -532,7 +536,7 @@ class FeedManager: NSObject, ObservableObject {
     /// A feed that failed while a VPN or network switched is healthy, so asking for a refresh retries it at once (#927).
     private func retryConnectivityFailures() async {
         do {
-            try await articleStore.database.clearConnectivityBackoff()
+            try await articleStore.database.clearConnectivityBackoff(at: now())
         } catch {
             logger.error("Could not lift connectivity backoff: \(error.localizedDescription)")
         }
@@ -547,11 +551,14 @@ class FeedManager: NSObject, ObservableObject {
         guard !isStopped else { return }
         if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
         if let refreshTask {
+            // A scheduled refresh keeps connectivity backoff, so the reader's request runs once it ends (#927).
+            if !scheduled, runningRefreshIsScheduled { manualRefreshWaiting = true }
             _ = await refreshTask.value
             return
         }
         let runID = UUID()
         refreshRunID = runID
+        runningRefreshIsScheduled = scheduled
         let task = Task<[FeedArticle], Never> { [weak self] in
             if !scheduled { await self?.retryConnectivityFailures() }
             return await self?.performRefreshPipeline() ?? []
@@ -571,6 +578,10 @@ class FeedManager: NSObject, ObservableObject {
         refreshInterruptedBySleep = false
 
         guard !isStopped else { return }
+        if manualRefreshWaiting {
+            manualRefreshWaiting = false
+            await fetchFeedsAsync()
+        }
         await pruneIfDue()
         clusterEventsInBackground()
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.

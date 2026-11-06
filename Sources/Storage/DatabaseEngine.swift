@@ -2817,12 +2817,14 @@ actor DatabaseEngine {
     }
 
     /// A manual refresh retries the feeds a network change backed off (#927). Only their wait ends: the failure count
-    /// stays until a success, so a scheduled refresh keeps backing off if the retry fails too. A row of any other kind
-    /// keeps its wait, and a host's in-memory cooldown still applies in `FeedFetcher`.
-    func clearConnectivityBackoff() throws {
+    /// stays until a success, so a scheduled refresh keeps backing off if the retry fails too. The wait ends at `now`
+    /// rather than becoming NULL, and an expired one stays, because `recordFeedFailure` forgives old failures by that
+    /// time. A row of any other kind keeps its wait, and a host's in-memory cooldown still applies in `FeedFetcher`.
+    func clearConnectivityBackoff(at now: Date) throws {
         let kinds = FeedFailureKind.connectivity.map { "'\($0.rawValue)'" }.joined(separator: ", ")
+        let time = now.timeIntervalSince1970
         try executeSimple(
-            "UPDATE feeds SET next_attempt_at = NULL WHERE next_attempt_at IS NOT NULL AND last_failure_kind IN (\(kinds));"
+            "UPDATE feeds SET next_attempt_at = \(time) WHERE next_attempt_at > \(time) AND last_failure_kind IN (\(kinds));"
         )
     }
 
