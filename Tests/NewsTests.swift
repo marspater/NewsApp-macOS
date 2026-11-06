@@ -4340,7 +4340,9 @@ struct NewsTests {
         assertTrue(listed?.ingestedAt != nil, "A listed undated story carries when it was stored")
         let found = try await undatedDB.searchArticles(query: "zeppelin").first
         assertEqual(found?.id, listed?.id, "The search finds the undated story")
-        assertEqual(found?.ingestedAt, nil, "A search score is never shown as a date")
+        assertTrue((found?.queryOrderValue ?? 1_000) < 1, "A search keeps its score as the order value")
+        assertTrue(found?.ingestedAt != nil, "A search result still carries when the story was stored")
+        assertEqual(found?.ingestedAt, listed?.ingestedAt, "The stored time is not the score")
         await undatedDB.close()
         do {
             let now = Date(timeIntervalSince1970: 1_700_000_000)
