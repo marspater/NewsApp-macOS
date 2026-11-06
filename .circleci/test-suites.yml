@@ -28,6 +28,9 @@ options:
     - test-atom: Tests/StorageTests.swift
       include:
         - Tests/StorageTests.swift
+    - test-atom: Tests/MigrationTests.swift
+      include:
+        - Tests/MigrationTests.swift
     - test-atom: Tests/NetworkingTests.swift
       include:
         - Tests/NetworkingTests.swift
