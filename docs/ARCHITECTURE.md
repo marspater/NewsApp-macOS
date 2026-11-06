@@ -375,3 +375,9 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 - World Tension (`WorldTension`, methodology v2) reasons over bounded headlines with lexical grounding. `TensionMethodology` and [the v1 methodology](methodology/tension-index-v1.md) change together; it computes no score until weights are calibrated (#158).
 
 </details>
+
+### Curated knowledge export (#713)
+
+`DatabaseEngine+KnowledgeExport` captures stored text, source-specific overview quotations and private notes in one actor turn, without fetching or changing read state. Reader exports contain cached full text; frozen Briefing exports use the selected edition's order and compact feed excerpts. Deleted stories cause an explicit error rather than a silently incomplete export. Citation fallback resolves the cited article, never the unrelated representative.
+
+The reader toolbar and File › Export Story or Briefing expose frontmatter Markdown, native Notes rich-text sharing and offline EPUB. `KnowledgeExportEncoder` serializes bounded encoding and atomic writes away from the main actor; replacing an explicit export cancels presentation of its older result. Save panels disclose that exports include private notes. Markdown quotes YAML scalars and escapes publisher/note markup. `KnowledgeEPUB` writes a fixed-path EPUB container with CRC-protected ZIP members and no remote resources or executable HTML. No storage migration or new shipping dependency is required. Notes and user-chosen file destinations follow their own sync settings.

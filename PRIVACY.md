@@ -19,6 +19,10 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
 
 ---
 
+## Knowledge exports
+
+Export Reading / Briefing writes cached publisher text, cited passages and your private highlights and notes only to the file you choose. Exporting does not fetch pages. Add to Apple Notes opens the native sharing service; saving there follows your Notes account and sync settings. Exported files can sync through the destination folder you select.
+
 ## 2. Zero Telemetry & Network Egress Boundary
 
 * **No Analytics or Tracking**: NewsApp contains zero telemetry SDKs, zero user tracking scripts, and zero third-party diagnostic reporters (e.g., no Google Analytics, no Firebase, no Sentry, no Mixpanel).
