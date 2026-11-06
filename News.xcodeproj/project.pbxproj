@@ -16,6 +16,7 @@
 		0A0000000000000000000036 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000024 /* PrivacyInfo.xcprivacy */; };
 		0A0000000000000000000037 /* NewsParsingDependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000063 /* NewsParsingDependencies */; };
 		0A0000000000000000000038 /* NewsParsingDependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000062 /* NewsParsingDependencies */; };
+		0A0000000000000000000080 /* NewsParsingDependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000081 /* NewsParsingDependencies */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +28,7 @@
 		0A0000000000000000000025 /* News.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = News.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000000000000000000026 /* NewsTestRunner */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = NewsTestRunner; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000000000000000000027 /* NewsHarness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NewsHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0A0000000000000000000082 /* NewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -66,6 +68,29 @@
 			);
 			target = 0A0000000000000000000042 /* NewsHarness */;
 		};
+		0A0000000000000000000083 /* Exceptions for "Sources" folder in "NewsTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				App/Main.swift,
+				App/NewsApp.swift,
+				Resources,
+				ThirdPartyNotices.txt,
+				Views/List/ArticleListView.swift,
+				Views/List/EventCardView.swift,
+				Views/MainView.swift,
+				Views/OnboardingView.swift,
+				Views/SidebarView.swift,
+			);
+			target = 0A000000000000000000008A /* NewsTests */;
+		};
+		0A0000000000000000000084 /* Exceptions for "Tests" folder in "NewsTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Fixtures,
+				Runner.swift,
+			);
+			target = 0A000000000000000000008A /* NewsTests */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -74,6 +99,7 @@
 			exceptions = (
 				0A0000000000000000000012 /* Exceptions for "Sources" folder in "NewsTestRunner" target */,
 				0A0000000000000000000013 /* Exceptions for "Sources" folder in "NewsHarness" target */,
+				0A0000000000000000000083 /* Exceptions for "Sources" folder in "NewsTests" target */,
 			);
 			explicitFileTypes = {
 			};
@@ -88,6 +114,7 @@
 			exceptions = (
 				0A0000000000000000000014 /* Exceptions for "Tests" folder in "NewsTestRunner" target */,
 				0A0000000000000000000015 /* Exceptions for "Tests" folder in "NewsHarness" target */,
+				0A0000000000000000000084 /* Exceptions for "Tests" folder in "NewsTests" target */,
 			);
 			explicitFileTypes = {
 			};
@@ -124,6 +151,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0A0000000000000000000085 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0A0000000000000000000080 /* NewsParsingDependencies in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -147,6 +182,7 @@
 				0A0000000000000000000025 /* News.app */,
 				0A0000000000000000000026 /* NewsTestRunner */,
 				0A0000000000000000000027 /* NewsHarness.app */,
+				0A0000000000000000000082 /* NewsTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -224,6 +260,29 @@
 			productReference = 0A0000000000000000000027 /* NewsHarness.app */;
 			productType = "com.apple.product-type.application";
 		};
+		0A000000000000000000008A /* NewsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A0000000000000000000087 /* Build configuration list for PBXNativeTarget "NewsTests" */;
+			buildPhases = (
+				0A0000000000000000000086 /* Sources */,
+				0A0000000000000000000085 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0A0000000000000000000010 /* Sources */,
+				0A0000000000000000000011 /* Tests */,
+			);
+			name = NewsTests;
+			packageProductDependencies = (
+				0A0000000000000000000081 /* NewsParsingDependencies */,
+			);
+			productName = NewsTests;
+			productReference = 0A0000000000000000000082 /* NewsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -240,6 +299,9 @@
 						CreatedOnToolsVersion = 27.0;
 					};
 					0A0000000000000000000042 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					0A000000000000000000008A = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -264,6 +326,7 @@
 				0A0000000000000000000040 /* News */,
 				0A0000000000000000000041 /* NewsTestRunner */,
 				0A0000000000000000000042 /* NewsHarness */,
+				0A000000000000000000008A /* NewsTests */,
 			);
 		};
 /* End PBXProject section */
@@ -307,6 +370,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		0A0000000000000000000055 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0A0000000000000000000086 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -415,7 +485,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/*";
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/Harness/*",
+					"Tests/Native/*",
+				);
 				PRODUCT_NAME = NewsTestRunner;
 				SWIFT_VERSION = 5.0;
 			};
@@ -425,7 +498,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/*";
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/Harness/*",
+					"Tests/Native/*",
+				);
 				PRODUCT_NAME = NewsTestRunner;
 				SWIFT_VERSION = 5.0;
 			};
@@ -438,7 +514,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* container-migration.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* container-migration.plist";
 				GENERATE_INFOPLIST_FILE = NO;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/TestDefaults.swift $(NEWS_HARNESS)";
 				INFOPLIST_FILE = Info.plist;
@@ -460,7 +536,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* container-migration.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* container-migration.plist";
 				GENERATE_INFOPLIST_FILE = NO;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/TestDefaults.swift $(NEWS_HARNESS)";
 				INFOPLIST_FILE = Info.plist;
@@ -472,6 +548,32 @@
 				NEWS_HARNESS = Tests/Harness/NativePerformanceBaseline.swift;
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.harness;
 				PRODUCT_NAME = NewsHarness;
+			};
+			name = Release;
+		};
+		0A0000000000000000000088 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/*";
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
+				PRODUCT_MODULE_NAME = NewsNativeTests;
+				PRODUCT_NAME = NewsTests;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		0A0000000000000000000089 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/*";
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
+				PRODUCT_MODULE_NAME = NewsNativeTests;
+				PRODUCT_NAME = NewsTests;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -514,6 +616,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		0A0000000000000000000087 /* Build configuration list for PBXNativeTarget "NewsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A0000000000000000000088 /* Debug */,
+				0A0000000000000000000089 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -533,6 +644,10 @@
 			productName = NewsParsingDependencies;
 		};
 		0A0000000000000000000063 /* NewsParsingDependencies */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NewsParsingDependencies;
+		};
+		0A0000000000000000000081 /* NewsParsingDependencies */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NewsParsingDependencies;
 		};
