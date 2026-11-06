@@ -650,9 +650,8 @@ final class ArticleStore: ObservableObject {
     func pruneOldArticles(keepReadDays: Int = 30) async -> Int {
         do {
             let count = try await database.pruneOldArticles(keepReadDays: keepReadDays)
-            if count > 0 {
-                await refreshState()
-            }
+            // Retention also repairs future dates (#981), which changes rows without deleting any.
+            await refreshState()
             return count
         } catch {
             logger.error("Failed to prune old articles: \(error.localizedDescription)")
