@@ -28987,6 +28987,30 @@ struct NewsTests {
             "Rebuild drops entries the open library does not hold (#812)")
         assertTrue(
             await mockIndexer.contains(id: "spotlight-unit-1"), "Rebuild indexes the library's saved stories (#812)")
+
+        // 6. A generated summary never reaches the entry, so Clear AI Analysis leaves none behind (#983)
+        let generated = "Model-written summary of the fusion story."
+        let analysis = ArticleAnalysis(
+            summary: generated, keyPoints: [], entities: [], category: "Science",
+            modelIdentifier: "test", analysisVersion: 1)
+        await store.saveArticleAnalysis(analysis, for: "spotlight-unit-1")
+        await store.rebuildSpotlightIndex()
+        let withSummary = await mockIndexer.item(for: "spotlight-unit-1")
+        assertEqual(
+            withSummary?.attributeSet.contentDescription, "Scientists achieved sustained net energy gain.",
+            "A saved story with a generated summary is indexed with the publisher description only (#983)")
+        try await store.clearAIAnalysis()
+        await store.rebuildSpotlightIndex()
+        let afterClear = await mockIndexer.item(for: "spotlight-unit-1")
+        assertTrue(
+            afterClear?.attributeSet.contentDescription?.contains(generated) != true,
+            "The generated summary is absent from the Spotlight entry after Clear AI Analysis (#983)")
+        var enriched = article
+        enriched.aiSummary = generated
+        assertEqual(
+            SystemSpotlightIndexer.makeSearchableItem(for: enriched).attributeSet.contentDescription,
+            "Scientists achieved sustained net energy gain.",
+            "An article carrying aiSummary still indexes the publisher description (#983)")
         await db.close()
     }
 
