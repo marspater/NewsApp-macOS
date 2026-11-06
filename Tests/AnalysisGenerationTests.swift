@@ -38,6 +38,7 @@ enum AnalysisGenerationTests {
             try await notificationBookkeepingIsAtomic()
             try await clusteringStorageFailuresEndThePass()
             try await failedClearChangesNothing()
+            try await clearThatCommitsStillResetsTheSession()
         } catch {
             check(false, "Unexpected error: \(error)")
         }
@@ -121,6 +122,34 @@ enum AnalysisGenerationTests {
         try await cache.clearArticleCache()
         check(await cache.analysisGeneration == 1, "A Clear Article Cache that commits bumps the generation")
         await cache.close()
+    }
+
+    /// The SQL committed but the tension rewrite failed: the clear throws, yet the generation moved and the session
+    /// reset ran, so nothing computed before the clear stays writable or visible (#984). A directory in place of the
+    /// side file makes the atomic rewrite fail.
+    @MainActor
+    static func clearThatCommitsStillResetsTheSession() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("news-clear-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        try FileManager.default.createDirectory(
+            atPath: path + ".world-tension-v2.json", withIntermediateDirectories: true)
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        var resets = 0
+        store.analysisClearedHandler = { resets += 1 }
+        do {
+            try await store.clearAIAnalysis()
+            check(false, "A failed tension rewrite makes the clear throw")
+        } catch {
+            check(true, "The clear reports the failed rewrite")
+        }
+        check(await db.analysisGeneration == 1, "The committed clear moved the generation")
+        check(resets == 1, "The session resets although the rewrite failed")
+        check(store.analysisGeneration == 1, "The store publishes the moved generation")
+        await db.close()
     }
 
     /// Every derived kind refuses a write that started before a clear of derived data.
