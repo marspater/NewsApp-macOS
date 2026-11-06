@@ -5216,10 +5216,8 @@ struct NewsTests {
 
         // A blocked literal address involves no DNS answer, so it stays a plain block, never a filtered or fake-IP one.
         for literal in ["198.18.0.1", "0.0.0.0", "[::]"] {
-            // The literal guard runs in the resolver, as in production; an injected body skips it, so wrap it.
-            let client = SecureHTTPClient(
-                configuration: mockConfig,
-                resolver: { IPAddressValidator.validateHost($0, resolver: { _ in .allowed(ips: ["8.8.8.8"]) }) })
+            // No injected resolver: the system path guards literal addresses before any lookup.
+            let client = SecureHTTPClient(configuration: mockConfig)
             do {
                 try await client.validateDestination(URL(string: "https://\(literal)/feed.xml")!)
                 assertTrue(false, "\(literal) is blocked")
