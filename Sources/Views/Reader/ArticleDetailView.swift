@@ -1655,7 +1655,11 @@ struct ArticleDetailView: View {
             let result = await feedManager.checkForUpdates(storyOf: articleID)
             isCheckingForUpdates = false
             // Another report of the same event may be open now; only a closed reader or another event drops it.
-            guard storyUpdateCheck == check, currentOverview?.eventID == eventID else { return }
+            guard storyUpdateCheck == check, currentOverview?.eventID == eventID else {
+                // A dropped result leaves no "Checking your feeds…" line behind.
+                if storyUpdateStatus == FeedManager.StoryUpdateResult.checkingText { storyUpdateStatus = nil }
+                return
+            }
             storyUpdateCheck = nil
             storyUpdateStatus = result.statusText
             AccessibilityNotification.Announcement(result.statusText).post()
