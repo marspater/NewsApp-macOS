@@ -522,7 +522,9 @@ enum StoryCorpus {
     /// A private, writable copy of a library snapshot: eval backups are kept read-only (0444), and a copy would inherit
     /// that mode, so opening it (WAL, migrations, re-clustering) would fail.
     static func writableCopy(of snapshot: String, to copy: String) throws {
-        try FileManager.default.copyItem(atPath: snapshot, toPath: copy)
+        // A symlinked snapshot would be copied as a link, and a cold holdout would then empty the original's signals.
+        let resolved = URL(fileURLWithPath: snapshot).resolvingSymlinksInPath().path
+        try FileManager.default.copyItem(atPath: resolved, toPath: copy)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: copy)
     }
 
