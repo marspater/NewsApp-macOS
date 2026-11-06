@@ -2577,8 +2577,10 @@ struct NewsTests {
                 source: "Publisher \(index % 20)", imageUrl: image, fullContent: prose, readerDocument: document)
         }
         let archive = (0..<10_000).map(article)
-        try await db.upsertArticles(archive)
         let clusterNow = Date(timeIntervalSince1970: 1_800_010_250)
+        // The archive is dated by its own clock: against the wall clock its dates are in the future, and an upsert
+        // stores a future feed date as unknown (#981), which would empty the candidate window below (#1043).
+        try await db.upsertArticles(archive, now: clusterNow)
         // Steady-state archive, rather than a first-launch clustering backlog competing with refresh.
         try await db.markEventMatchProcessed(archive.map(\.id), matcherVersion: EventMatcher.version, at: clusterNow)
         var measurements = [String: [Double]]()
