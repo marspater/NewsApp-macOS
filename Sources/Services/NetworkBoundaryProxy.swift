@@ -141,7 +141,12 @@ final class DNSAnswerCache: Sendable {
         let addresses: [String]
         let expires: ContinuousClock.Instant
     }
-    private let entries = OSAllocatedUnfairLock(initialState: [String: Entry]())
+    private struct State {
+        var entries: [String: Entry] = [:]
+        /// Advances with every clear, so an answer looked up before a path change is never stored after it.
+        var generation = 0
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private let pathMonitor = NWPathMonitor()
     private let timeToLive: Duration
     private let capacity: Int
@@ -167,39 +172,48 @@ final class DNSAnswerCache: Sendable {
     func answer(for host: String) -> IPAddressValidator.ValidationResult? {
         let key = Self.key(host)
         let time = now()
-        return entries.withLock { entries in
-            guard let entry = entries[key] else { return nil }
+        return state.withLock { state in
+            guard let entry = state.entries[key] else { return nil }
             guard entry.expires > time else {
-                entries[key] = nil
+                state.entries[key] = nil
                 return nil
             }
             return .allowed(ips: entry.addresses)
         }
     }
 
+    /// The generation to pass to `store` for a lookup that starts now.
+    var generation: Int { state.withLock(\.generation) }
+
     /// Keeps `.allowed` answers with at least one address and ignores every other result. A full cache drops expired
-    /// entries, then the one closest to expiring.
-    func store(_ result: IPAddressValidator.ValidationResult, for host: String) {
+    /// entries, then the one closest to expiring. With `generation`, an answer from before a clear is dropped.
+    func store(_ result: IPAddressValidator.ValidationResult, for host: String, generation: Int? = nil) {
         guard capacity > 0, case .allowed(let addresses) = result, !addresses.isEmpty else { return }
         let key = Self.key(host)
         let time = now()
         let entry = Entry(addresses: addresses, expires: time.advanced(by: timeToLive))
-        entries.withLock { entries in
-            if entries[key] == nil, entries.count >= capacity {
-                entries = entries.filter { $0.value.expires > time }
-                if entries.count >= capacity,
-                    let oldest = entries.min(by: { $0.value.expires < $1.value.expires })?.key
+        state.withLock { state in
+            if let generation, generation != state.generation { return }
+            if state.entries[key] == nil, state.entries.count >= capacity {
+                state.entries = state.entries.filter { $0.value.expires > time }
+                if state.entries.count >= capacity,
+                    let oldest = state.entries.min(by: { $0.value.expires < $1.value.expires })?.key
                 {
-                    entries[oldest] = nil
+                    state.entries[oldest] = nil
                 }
             }
-            entries[key] = entry
+            state.entries[key] = entry
         }
     }
 
-    func clear() { entries.withLock { $0.removeAll() } }
+    func clear() {
+        state.withLock {
+            $0.entries.removeAll()
+            $0.generation += 1
+        }
+    }
 
-    var count: Int { entries.withLock(\.count) }
+    var count: Int { state.withLock(\.entries.count) }
 }
 
 /// Resolves and validates one host for the gateway and the preflight (#945). The system lookup is asynchronous and
@@ -242,6 +256,7 @@ final class ProxyResolver: Sendable {
             return .unresolvable(reason: "Cancelled")
         }
         if let cached = cache?.answer(for: host) { return cached }
+        let generation = cache?.generation
         let lookup = lookup
         let deadline = deadline
         return await withTaskGroup(of: IPAddressValidator.ValidationResult.self) { group in
@@ -259,7 +274,7 @@ final class ProxyResolver: Sendable {
             if Task.isCancelled, first == .unresolvable(reason: "Cancelled") {
                 Self.cancellations.withLock { $0 += 1 }
             }
-            cache?.store(first, for: host)
+            cache?.store(first, for: host, generation: generation)
             return first
         }
     }

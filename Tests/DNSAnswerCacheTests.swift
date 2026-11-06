@@ -73,6 +73,13 @@ enum DNSAnswerCacheTests {
         cache.clear()
         _ = await resolver.resolve("example.com")
         check(fixture.lookupCount == 4, "a cleared cache looks up again")
+        // An answer looked up before a path change is never stored after it.
+        let before = cache.generation
+        cache.clear()
+        cache.store(.allowed(ips: ["1.1.1.1"]), for: "stale.example", generation: before)
+        check(cache.answer(for: "stale.example") == nil, "an answer from before a clear is dropped")
+        cache.store(.allowed(ips: ["1.1.1.1"]), for: "fresh.example", generation: cache.generation)
+        check(cache.answer(for: "fresh.example") != nil, "an answer from after a clear is kept")
     }
 
     static func checkOnlyAllowed() async {
