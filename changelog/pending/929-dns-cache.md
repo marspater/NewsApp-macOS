@@ -1,0 +1,1 @@
+- Refreshes resolve each host once rather than twice: validated DNS answers are reused for up to 60 seconds and dropped on a network change. Blocked answers are never reused.
