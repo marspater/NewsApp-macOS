@@ -166,22 +166,49 @@ final class ProxyResolver: Sendable {
     }
 }
 
-/// One system DNS lookup through dns_sd, answered address by address on a serial queue and validated as it arrives:
-/// one blocked address fails the host closed. The configured address families are queried; each ends with its last address or
-/// with no record, and once one has ended, the other gets `familyGrace` to follow before the lookup answers with
-/// what it has (a filter that drops AAAA queries answers nothing for that family). Cancellation deallocates the query.
-final class DNSLookup: @unchecked Sendable {
-    private static let queue = DispatchQueue(label: "com.marspater.news.dns")
-    /// RFC 8305 names 50 ms for the first family to wait for the second; a little more absorbs a slower upstream.
-    static let familyGrace: DispatchTimeInterval = .milliseconds(100)
-    private var service: DNSServiceRef?
-    private var continuation: CheckedContinuation<IPAddressValidator.ValidationResult, Never>?
+/// The bookkeeping of one lookup, apart from dns_sd so a test can feed it callbacks: the validated addresses in
+/// arrival order, the families seen in the open batch and the families that ended. A lookup is decided by a blocked
+/// address, however late it arrives, or once both families have ended; a family that never answers leaves it to
+/// `ProxyResolver`'s deadline, so a host is never allowed with one family unchecked.
+struct DNSAnswer {
+    private static let families: Set<Int32> = [AF_INET, AF_INET6]
     private var addresses: [String] = []
-    /// Families with an address so far, and families that ended: the batch that carried their addresses is complete,
-    /// or they have no record. -1 stands for an answer that names no family.
     private var seen: Set<Int32> = []
     private var ended: Set<Int32> = []
-    private var grace: DispatchWorkItem?
+
+    /// One callback: `blocked` is the validator's reason for the address and `address` its text; -1 names no family.
+    mutating func received(
+        family: Int32, moreComing: Bool, error: DNSServiceErrorType, blocked: String?, address: String?
+    ) -> IPAddressValidator.ValidationResult? {
+        switch Int(error) {
+        case kDNSServiceErr_NoError:
+            if let blocked { return .blocked(reason: blocked) }
+            if let address { addresses.append(address) }
+            seen.insert(family)
+            // The flag clears at the end of a batch, which may carry both families' addresses.
+            return moreComing ? nil : familiesEnded(seen)
+        case kDNSServiceErr_NoSuchRecord:
+            return familiesEnded([family])
+        default:
+            return .unresolvable(reason: "dns \(error)")
+        }
+    }
+
+    private mutating func familiesEnded(_ families: Set<Int32>) -> IPAddressValidator.ValidationResult? {
+        ended.formUnion(families)
+        guard Self.families.isSubset(of: ended) else { return nil }
+        return addresses.isEmpty ? .unresolvable(reason: "No valid addresses resolved") : .allowed(ips: addresses)
+    }
+}
+
+/// One system DNS lookup through dns_sd, answered address by address on a serial queue and validated as it arrives:
+/// one blocked address fails the host closed. Both address families are queried and each ends with its last address
+/// or with no record; the lookup answers once both have (`DNSAnswer`). Cancellation deallocates the query.
+final class DNSLookup: @unchecked Sendable {
+    private static let queue = DispatchQueue(label: "com.marspater.news.dns")
+    private var service: DNSServiceRef?
+    private var continuation: CheckedContinuation<IPAddressValidator.ValidationResult, Never>?
+    private var answer = DNSAnswer()
     /// Cancelled before the query started: a task already cancelled runs its cancellation handler first.
     private var cancelledBeforeStart = false
 
@@ -205,13 +232,14 @@ final class DNSLookup: @unchecked Sendable {
             Unmanaged<DNSLookup>.fromOpaque(context).takeUnretainedValue()
                 .received(flags: flags, error: error, address: address)
         }
-        // Protocol 0 queries the families this Mac has a routable address for, as AI_ADDRCONFIG did: a Mac with a
-        // broken IPv6 route still has the address, so both are asked and the gateway falls back to IPv4. Intermediates
-        // report a family without records (or a name that does not exist) at once instead of staying silent; the
-        // timeout flag ends an unanswered query with kDNSServiceErr_Timeout.
+        // Both families are asked by name, so dns_sd owes an answer for each: addresses, or with intermediates a
+        // family without records (or a name that does not exist) at once instead of staying silent. An address this
+        // Mac cannot route fails its connect at once and the gateway moves to the next. The timeout flag ends an
+        // unanswered query with kDNSServiceErr_Timeout.
         var ref: DNSServiceRef?
         let error = DNSServiceGetAddrInfo(
-            &ref, DNSServiceFlags(kDNSServiceFlagsTimeout | kDNSServiceFlagsReturnIntermediates), 0, 0, host, reply,
+            &ref, DNSServiceFlags(kDNSServiceFlagsTimeout | kDNSServiceFlagsReturnIntermediates), 0,
+            DNSServiceProtocol(kDNSServiceProtocol_IPv4 | kDNSServiceProtocol_IPv6), host, reply,
             Unmanaged.passRetained(self).toOpaque())
         guard error == kDNSServiceErr_NoError, let ref else {
             Unmanaged.passUnretained(self).release()
@@ -225,38 +253,13 @@ final class DNSLookup: @unchecked Sendable {
 
     private func received(flags: DNSServiceFlags, error: DNSServiceErrorType, address: UnsafePointer<sockaddr>?) {
         guard continuation != nil else { return }
-        let family = address.map { Int32($0.pointee.sa_family) } ?? -1
-        switch Int(error) {
-        case kDNSServiceErr_NoError:
-            guard let address else { return }
-            if let reason = IPAddressValidator.validateSocketAddress(address) {
-                return complete(.blocked(reason: reason))
-            }
-            if let text = IPAddressValidator.addressString(address) { addresses.append(text) }
-            seen.insert(family)
-            // The flag clears at the end of a batch, which may carry both families' addresses.
-            if flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) == 0 { familiesEnded(seen) }
-        case kDNSServiceErr_NoSuchRecord:
-            familiesEnded([family])
-        default:
-            complete(.unresolvable(reason: "dns \(error)"))
-        }
-    }
-
-    private func familiesEnded(_ families: Set<Int32>) {
-        ended.formUnion(families)
-        if ended.count >= 2 { return complete(answer) }
-        guard !addresses.isEmpty, grace == nil else { return }
-        let item = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            self.complete(self.answer)
-        }
-        grace = item
-        Self.queue.asyncAfter(deadline: .now() + Self.familyGrace, execute: item)
-    }
-
-    private var answer: IPAddressValidator.ValidationResult {
-        addresses.isEmpty ? .unresolvable(reason: "No valid addresses resolved") : .allowed(ips: addresses)
+        if Int(error) == kDNSServiceErr_NoError, address == nil { return }
+        let result = answer.received(
+            family: address.map { Int32($0.pointee.sa_family) } ?? -1,
+            moreComing: flags & DNSServiceFlags(kDNSServiceFlagsMoreComing) != 0, error: error,
+            blocked: address.flatMap(IPAddressValidator.validateSocketAddress),
+            address: address.flatMap(IPAddressValidator.addressString))
+        if let result { complete(result) }
     }
 
     /// Exactly once: deallocating the service cancels the query and stops its callbacks.
@@ -266,8 +269,6 @@ final class DNSLookup: @unchecked Sendable {
             return
         }
         self.continuation = nil
-        grace?.cancel()
-        grace = nil
         if let service {
             DNSServiceRefDeallocate(service)
             self.service = nil

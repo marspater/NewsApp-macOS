@@ -26,6 +26,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
+import dnssd
 
 #if canImport(FoundationModels)
     import FoundationModels
@@ -1018,6 +1019,7 @@ struct NewsTests {
             ("testTransportCancellation", { try await rerunningLoopbackFlake(testTransportCancellation) }),
             ("testProxyWaitingClassification", { await testProxyWaitingClassification() }),
             ("testResolverLifecycle", { await testResolverLifecycle() }),
+            ("testLookupFailsClosedAcrossFamilies", { testLookupFailsClosedAcrossFamilies() }),
             ("testRedirectDelegateDoesNoDNS", { await testRedirectDelegateDoesNoDNS() }),
             ("testGatewayAddressFallback", { try await rerunningLoopbackFlake(testGatewayAddressFallback) }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
@@ -19916,6 +19918,43 @@ struct NewsTests {
         assertFalse(
             NetworkBoundaryProxy.waitingFailsAtOnce(.dns(DNSServiceErrorType(kDNSServiceErr_Timeout))),
             "A non-POSIX waiting error is waited out")
+    }
+
+    static func testLookupFailsClosedAcrossFamilies() {
+        print("  - Testing the lookup: a blocked address in the slower family still refuses the host (#945)...")
+        let v4 = Int32(AF_INET)
+        let v6 = Int32(AF_INET6)
+        let noRecord = DNSServiceErrorType(kDNSServiceErr_NoSuchRecord)
+        // The first family ends with a public address; the host is not allowed until the other family has answered,
+        // so a blocked address arriving later, after any grace a stagger would have given, still fails it closed.
+        var late = DNSAnswer()
+        assertEqual(
+            late.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"), nil,
+            "One family's end does not answer while the other is still owed")
+        assertEqual(
+            late.received(family: v6, moreComing: false, error: 0, blocked: "Private address", address: nil),
+            .blocked(reason: "Private address"), "A blocked address after the first family ended fails the host closed")
+        // One batch carrying both families answers when its flag clears, in arrival order.
+        var batch = DNSAnswer()
+        assertEqual(
+            batch.received(family: v6, moreComing: true, error: 0, blocked: nil, address: "2606:2800:21f:cb07::1"), nil,
+            "More coming keeps the batch open")
+        assertEqual(
+            batch.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"),
+            .allowed(ips: ["2606:2800:21f:cb07::1", "93.184.216.34"]), "Both families in one batch answer at its end")
+        // A family without records ends at once; the host answers when the other has ended too.
+        var v4Only = DNSAnswer()
+        assertEqual(
+            v4Only.received(family: v6, moreComing: false, error: noRecord, blocked: nil, address: nil), nil,
+            "No IPv6 record alone does not answer")
+        assertEqual(
+            v4Only.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"),
+            .allowed(ips: ["93.184.216.34"]), "The host answers once both families ended")
+        var none = DNSAnswer()
+        _ = none.received(family: v6, moreComing: true, error: noRecord, blocked: nil, address: nil)
+        assertEqual(
+            none.received(family: v4, moreComing: false, error: noRecord, blocked: nil, address: nil),
+            .unresolvable(reason: "No valid addresses resolved"), "No record in either family is unresolvable")
     }
 
     static func testResolverLifecycle() async {
