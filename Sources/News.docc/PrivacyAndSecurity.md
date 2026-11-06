@@ -4,7 +4,9 @@ Know what leaves the Mac, what is treated as untrusted, and which layer enforces
 
 ## Overview
 
-Library data stays on the Mac. The only traffic that leaves is feed, article and image requests to publishers, and one update check to GitHub through ``UpdateChecker``. Publishers see the client's IP address and the requested URLs. Release builds link no analytics or crash-reporting SDK; only a development build with a Sentry DSN configured links Sentry.
+Library data stays on the Mac. In a release build, the traffic that leaves is feed, article and image requests to publishers, the resources a page loads when a story is opened in Web view, and one update check to GitHub through ``UpdateChecker``. Publishers see the client's IP address and the requested URLs, and so do any third parties that serve a Web view page's resources.
+
+Release builds link no analytics or crash-reporting SDK. Only a development build with a Sentry DSN configured links Sentry, and it sends crash reports and warning and error logs, with non-public values redacted, to that Sentry project.
 
 All URLs, feed bodies, HTML, redirects, DNS answers and OPML files are untrusted, including content from public HTTPS endpoints.
 
