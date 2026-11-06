@@ -32,7 +32,8 @@ extension DatabaseEngine {
         limit: Int = 100,
         after: ArticleQueryCursor? = nil,
         muting: MuteRules = MuteRules(),
-        queryEmbedding: [Float]? = nil
+        queryEmbedding: [Float]? = nil,
+        vectorResolved: Bool = false
     ) async throws -> [FeedArticle] {
         guard db != nil else {
             throw NSError(
@@ -49,9 +50,10 @@ extension DatabaseEngine {
                     sql: sql, params: params, prepareErrorMessage: "Failed to prepare operator search query"))
         }
 
-        // The page's own vector ranks it; callers hand the same vector to the counts (`searchQueryVector`).
+        // The page's own vector ranks it; callers hand the same vector to the counts (`searchQueryVector`). A caller
+        // that already asked for it (`vectorResolved`) keeps a nil answer, so a retry cannot rank what the counts did not.
         var vector = queryEmbedding
-        if vector == nil { vector = try await searchQueryVector(for: trimmed) }
+        if vector == nil, !vectorResolved { vector = try await searchQueryVector(for: trimmed) }
         let (sql, params) = hybridSearchQuery(
             parsed: parsed, muting: muting, after: after, limit: limit,
             embedding: Self.usableVector(vector, for: parsed))
