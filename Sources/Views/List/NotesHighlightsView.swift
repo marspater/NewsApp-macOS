@@ -76,6 +76,7 @@ struct NotesHighlightsView: View {
         }
     }
 
+    /// One note with its story title, source and date; the row opens the story.
     private func row(_ listing: UserNoteListing) -> some View {
         let note = listing.note
         return HStack(alignment: .top, spacing: AppSpacing.sm) {

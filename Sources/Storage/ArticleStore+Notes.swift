@@ -17,6 +17,7 @@ import Foundation
 /// Private highlights and notes (V1 #711). Every change bumps `userNotesRevision`, which the reader and the Library
 /// list watch to reload.
 extension ArticleStore {
+    /// One story's notes in reading order; empty, with a log line, when the library cannot be read.
     func notes(for articleID: String) async -> [UserNote] {
         do { return try await database.fetchNotes(for: articleID) } catch {
             logger.error("Failed to read notes: \(error.localizedDescription)")
@@ -24,6 +25,7 @@ extension ArticleStore {
         }
     }
 
+    /// Every note with its story, newest first, or those matching the words of `query`.
     func noteListings(matching query: String = "") async -> [UserNoteListing] {
         do { return try await database.noteListings(matching: query) } catch {
             logger.error("Failed to list notes: \(error.localizedDescription)")
@@ -46,6 +48,7 @@ extension ArticleStore {
         }
     }
 
+    /// Deletes a note; false, with a notice, when the library refused.
     @discardableResult
     func deleteNote(id: String) async -> Bool {
         do {

@@ -44,6 +44,7 @@ extension DatabaseEngine {
         }
     }
 
+    /// Deletes one note; its index row goes with it through the trigger.
     func deleteNote(id: String) throws {
         try requireWritable()
         try eventRows("DELETE FROM user_notes WHERE id = ?;", [.text(id)])
@@ -84,6 +85,7 @@ extension DatabaseEngine {
         }
     }
 
+    /// A note from the first ten columns of a row, nil when one is missing or malformed.
     private static func userNote(from row: [String?]) -> UserNote? {
         guard row.count >= 10, let id = row[0], let articleID = row[1], let index = row[2].flatMap(Int.init),
             let start = row[3].flatMap(Int.init), let quote = row[4], let prefix = row[5], let suffix = row[6],

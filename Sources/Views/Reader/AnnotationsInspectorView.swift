@@ -64,6 +64,7 @@ struct AnnotationsInspectorView: View {
         }
     }
 
+    /// One note: its quote, a notice when the passage is gone, and its text with the actions or the editor.
     private func row(_ note: UserNote) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             quote(note)
@@ -78,6 +79,7 @@ struct AnnotationsInspectorView: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// The quoted passage; it shows the passage in the story.
     private func quote(_ note: UserNote) -> some View {
         Button {
             onReveal(note)
@@ -98,6 +100,7 @@ struct AnnotationsInspectorView: View {
         .accessibilityHint("Scrolls the story to this passage")
     }
 
+    /// The field and buttons that edit a note's text.
     @ViewBuilder
     private func editor(_ note: UserNote) -> some View {
         TextField("Private note", text: $draft, axis: .vertical)
@@ -118,6 +121,7 @@ struct AnnotationsInspectorView: View {
         .controlSize(.small)
     }
 
+    /// A note's text and its Edit and Delete actions.
     @ViewBuilder
     private func footer(_ note: UserNote) -> some View {
         if note.hasBody {

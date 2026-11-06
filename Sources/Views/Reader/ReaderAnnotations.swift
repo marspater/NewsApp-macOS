@@ -56,6 +56,7 @@ struct ReaderAnnotationCommands: ViewModifier {
     let onAddNote: () -> Void
     let onToggleInspector: () -> Void
 
+    /// Listens for the three commands on the reader.
     func body(content: Content) -> some View {
         content
             .onReceive(NotificationCenter.default.publisher(for: .highlightSelectionCommand)) { _ in onHighlight() }
@@ -70,6 +71,7 @@ struct ReaderAnnotationCommands: ViewModifier {
 enum ReaderSelection {
     // ponytail: a clipboard manager may log the instant copy; an NSTextView per block would avoid it but costs the
     // reader's text styling and accessibility.
+    /// The selected text, or nil when nothing is selected where the keyboard focus is.
     @MainActor
     static func current() -> String? {
         let board = NSPasteboard.general
@@ -115,6 +117,7 @@ struct ReaderOverlay {
         }
     }
 
+    /// `text` of block `index` with the highlights and added sentences painted.
     func styled(_ text: AttributedString, at index: Int) -> AttributedString {
         var text = text
         for range in changes.added[index] ?? [] {
