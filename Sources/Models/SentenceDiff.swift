@@ -81,6 +81,8 @@ enum SentenceDiff {
         return items
     }
 
+    /// The longest-common-subsequence diff of the sentences between the shared head and tail, or the middle replaced
+    /// whole when it is empty on one side or past `maximumCells`.
     private static func middle(old: [(String, String)], new: [(String, String)]) -> [Item] {
         if old.isEmpty || new.isEmpty || old.count * new.count > maximumCells {
             return old.map { Item(text: $0.0, kind: .retracted) } + new.map { Item(text: $0.0, kind: .added) }
