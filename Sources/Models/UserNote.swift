@@ -43,6 +43,13 @@ struct UserNoteListing: Identifiable, Sendable, Equatable {
     var id: String { note.id }
 }
 
+/// Where one line of the reader's selection sits in the story.
+struct NotePlace {
+    let index: Int
+    let start: Int
+    let quote: String
+}
+
 /// Places notes in the blocks of a story. Offsets count `Character`s, the unit `AttributedString` indexes by.
 enum NoteAnchor {
     static let contextLength = 32
@@ -73,8 +80,8 @@ enum NoteAnchor {
     /// is not.
     static func place(
         selection: String, in paragraphs: [String], taken: [(index: Int, range: Range<Int>)] = []
-    ) -> [(index: Int, start: Int, quote: String)]? {
-        var placed: [(index: Int, start: Int, quote: String)] = []
+    ) -> [NotePlace]? {
+        var placed: [NotePlace] = []
         var floor = 0
         for line in selection.split(whereSeparator: \.isNewline) {
             let quote = line.trimmingCharacters(in: .whitespaces)
@@ -88,7 +95,7 @@ enum NoteAnchor {
                     !taken.contains { $0.index == spot.index && $0.range == spot.start..<spot.start + quote.count }
                 }) ?? spots.first
             else { return nil }
-            placed.append((spot.index, spot.start, quote))
+            placed.append(NotePlace(index: spot.index, start: spot.start, quote: quote))
             floor = spot.index
         }
         return placed.isEmpty ? nil : placed

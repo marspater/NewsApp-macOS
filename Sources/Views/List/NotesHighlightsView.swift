@@ -25,6 +25,8 @@ struct NotesHighlightsView: View {
     @State private var listings: [UserNoteListing] = []
     @State private var query = ""
     @State private var selectedID: String?
+    @State private var loaded = false
+    @State private var deleting: UserNote?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,7 +34,10 @@ struct NotesHighlightsView: View {
                 .textFieldStyle(.roundedBorder)
                 .padding(AppSpacing.md)
             Divider()
-            if listings.isEmpty {
+            if !loaded {
+                // The first lookup is still running: no empty state yet.
+                Color.clear
+            } else if listings.isEmpty {
                 ContentUnavailableView {
                     Label(query.isEmpty ? "No Notes & Highlights" : "No Matches", systemImage: "highlighter")
                 } description: {
@@ -59,6 +64,15 @@ struct NotesHighlightsView: View {
             let found = await articleStore.noteListings(matching: query)
             guard !Task.isCancelled else { return }
             listings = found
+            loaded = true
+        }
+        .confirmationDialog(
+            "Delete this note?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            presenting: deleting
+        ) { note in
+            Button("Delete", role: .destructive) { Task { await articleStore.deleteNote(id: note.id) } }
+        } message: { note in
+            Text("“\(note.noteBody.prefix(80))” is deleted with its highlight.")
         }
     }
 
@@ -99,7 +113,7 @@ struct NotesHighlightsView: View {
             .buttonStyle(.plain)
             .accessibilityHint("Opens the story")
             Button(role: .destructive) {
-                Task { await articleStore.deleteNote(id: note.id) }
+                if note.hasBody { deleting = note } else { Task { await articleStore.deleteNote(id: note.id) } }
             } label: {
                 Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
             }

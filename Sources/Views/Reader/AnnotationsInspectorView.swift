@@ -26,6 +26,7 @@ struct AnnotationsInspectorView: View {
     @State private var editingID: String?
     @State private var draft = ""
     @State private var selectedID: String?
+    @State private var deleting: UserNote?
 
     var body: some View {
         Group {
@@ -53,76 +54,93 @@ struct AnnotationsInspectorView: View {
             }
         }
         .navigationTitle("Annotations")
+        .confirmationDialog(
+            "Delete this note?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
+            presenting: deleting
+        ) { note in
+            Button("Delete", role: .destructive) { onDelete(note.id) }
+        } message: { note in
+            Text("“\(note.noteBody.prefix(80))” is deleted with its highlight.")
+        }
     }
 
     private func row(_ note: UserNote) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
-            Button {
-                onReveal(note)
-            } label: {
-                HStack(alignment: .top, spacing: AppSpacing.xs) {
-                    Rectangle()
-                        .fill(AppColor.noteHighlight)
-                        .frame(width: AppLayout.quoteBarWidth)
-                    Text("“\(note.selectedText)”")
-                        .font(AppTypography.callout)
-                        .foregroundStyle(AppColor.primaryText)
-                        .lineLimit(4)
-                        .multilineTextAlignment(.leading)
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(lostIDs.contains(note.id))
-            .accessibilityHint("Scrolls the story to this passage")
-
+            quote(note)
             if lostIDs.contains(note.id) {
                 Text("This passage is no longer in the publisher's text.")
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
             }
-
-            if editingID == note.id {
-                TextField("Private note", text: $draft, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(2...6)
-                HStack {
-                    Button("Cancel") { editingID = nil }
-                        .keyboardShortcut(.cancelAction)
-                    Button("Save") {
-                        var edited = note
-                        edited.noteBody = draft
-                        edited.updatedAt = Date()
-                        onSave(edited)
-                        editingID = nil
-                    }
-                    .keyboardShortcut(.return, modifiers: .command)
-                }
-                .controlSize(.small)
-            } else {
-                if note.hasBody {
-                    Text(note.noteBody)
-                        .font(AppTypography.body)
-                        .foregroundStyle(AppColor.primaryText)
-                }
-                HStack {
-                    Button(note.hasBody ? "Edit Note" : "Add Note") {
-                        draft = note.noteBody
-                        editingID = note.id
-                    }
-                    Spacer()
-                    Button(role: .destructive) {
-                        onDelete(note.id)
-                    } label: {
-                        Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
-                    }
-                    .help("Delete this highlight")
-                    .accessibilityLabel("Delete highlight “\(note.selectedText.prefix(40))”")
-                }
-                .buttonStyle(.borderless)
-                .font(AppTypography.caption)
-            }
+            if editingID == note.id { editor(note) } else { footer(note) }
         }
         .padding(.vertical, AppSpacing.xs)
         .accessibilityElement(children: .contain)
+    }
+
+    private func quote(_ note: UserNote) -> some View {
+        Button {
+            onReveal(note)
+        } label: {
+            HStack(alignment: .top, spacing: AppSpacing.xs) {
+                Rectangle()
+                    .fill(AppColor.noteHighlight)
+                    .frame(width: AppLayout.quoteBarWidth)
+                Text("“\(note.selectedText)”")
+                    .font(AppTypography.callout)
+                    .foregroundStyle(AppColor.primaryText)
+                    .lineLimit(4)
+                    .multilineTextAlignment(.leading)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(lostIDs.contains(note.id))
+        .accessibilityHint("Scrolls the story to this passage")
+    }
+
+    @ViewBuilder
+    private func editor(_ note: UserNote) -> some View {
+        TextField("Private note", text: $draft, axis: .vertical)
+            .textFieldStyle(.roundedBorder)
+            .lineLimit(2...6)
+        HStack {
+            Button("Cancel") { editingID = nil }
+                .keyboardShortcut(.cancelAction)
+            Button("Save") {
+                var edited = note
+                edited.noteBody = draft
+                edited.updatedAt = Date()
+                onSave(edited)
+                editingID = nil
+            }
+            .keyboardShortcut(.return, modifiers: .command)
+        }
+        .controlSize(.small)
+    }
+
+    @ViewBuilder
+    private func footer(_ note: UserNote) -> some View {
+        if note.hasBody {
+            Text(note.noteBody)
+                .font(AppTypography.body)
+                .foregroundStyle(AppColor.primaryText)
+        }
+        HStack {
+            Button(note.hasBody ? "Edit Note" : "Add Note") {
+                draft = note.noteBody
+                editingID = note.id
+            }
+            Spacer()
+            Button(role: .destructive) {
+                // A note with text asks first: a mis-click next to Edit Note would lose what was typed.
+                if note.hasBody { deleting = note } else { onDelete(note.id) }
+            } label: {
+                Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+            }
+            .help("Delete this highlight")
+            .accessibilityLabel("Delete highlight “\(note.selectedText.prefix(40))”")
+        }
+        .buttonStyle(.borderless)
+        .font(AppTypography.caption)
     }
 }
