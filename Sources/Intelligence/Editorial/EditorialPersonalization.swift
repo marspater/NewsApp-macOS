@@ -234,13 +234,13 @@ actor EditorialPersonalization {
             modelVersion == self.modelVersion, at.timeIntervalSince1970.isFinite,
             vector.map({ $0.count == 384 && $0.allSatisfy(\.isFinite) }) ?? true
         else { throw PersonalizationError.invalidInput }
-        let trustedNow = now()
-        let current = trustedNow.timeIntervalSince1970
+        let clockNow = now()
+        let current = clockNow.timeIntervalSince1970
         let rendered = at.timeIntervalSince1970
         guard current.isFinite, rendered <= current, rendered >= current - 30 * 86400 else {
             throw PersonalizationError.invalidTime
         }
-        try prune(at: trustedNow)
+        try prune(at: clockNow)
         let stmt = try prepare(
             "INSERT OR IGNORE INTO impressions(id,article,topic,vector,rendered) VALUES(?,?,?,?,?)")
         defer { sqlite3_finalize(stmt) }
@@ -301,12 +301,12 @@ actor EditorialPersonalization {
         guard !id.isEmpty, id.utf8.count <= 1024, !id.contains("\0") else {
             throw PersonalizationError.invalidInput
         }
-        let trustedNow = now()
+        let clockNow = now()
         let time = at.timeIntervalSince1970
-        guard time.isFinite, trustedNow.timeIntervalSince1970.isFinite,
-            time <= trustedNow.timeIntervalSince1970
+        guard time.isFinite, clockNow.timeIntervalSince1970.isFinite,
+            time <= clockNow.timeIntervalSince1970
         else { throw PersonalizationError.invalidTime }
-        try prune(at: trustedNow)
+        try prune(at: clockNow)
         try execute("BEGIN IMMEDIATE")
         do {
             let impression = try loadImpression(id, kind: kind)
