@@ -2989,9 +2989,9 @@ actor DatabaseEngine {
 
     // MARK: - Article Queries
 
-    func executeQueryArticles(sql: String, params: [QueryParameter], prepareErrorMessage: String) throws
-        -> [FeedArticle]
-    {
+    func executeQueryArticles(
+        sql: String, params: [QueryParameter], prepareErrorMessage: String, orderIsDate: Bool = true
+    ) throws -> [FeedArticle] {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
@@ -3014,7 +3014,10 @@ actor DatabaseEngine {
             try Task.checkCancellation()
             if var article = parseArticleRow(stmt) {
                 if columnCount > 18 {
-                    article.queryOrderValue = sqlite3_column_double(stmt, 18)
+                    let order = sqlite3_column_double(stmt, 18)
+                    article.queryOrderValue = order
+                    // A search's order value is its score; only a date order says when the story was stored.
+                    if orderIsDate { article.ingestedAt = Date(timeIntervalSince1970: order) }
                 }
                 if columnCount > 19, let snip = sqlite3_column_text(stmt, 19) {
                     article.searchSnippet = String(cString: snip)

@@ -58,7 +58,8 @@ extension DatabaseEngine {
             parsed: parsed, muting: muting, after: after, limit: limit,
             embedding: Self.usableVector(vector, for: parsed))
         return try curateImages(
-            in: executeQueryArticles(sql: sql, params: params, prepareErrorMessage: "Failed to prepare search query"))
+            in: executeQueryArticles(
+                sql: sql, params: params, prepareErrorMessage: "Failed to prepare search query", orderIsDate: false))
     }
 
     /// The vector a free-text search ranks and counts with, or nil when it stays lexical: operators only, a quoted

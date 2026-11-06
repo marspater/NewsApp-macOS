@@ -16,6 +16,9 @@ import Foundation
 
 struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var queryOrderValue: Double? = nil
+    /// When News stored the story, from a query that orders by date (not a search score). Only read for a story with no
+    /// publication date, whose order value is that moment.
+    var ingestedAt: Date? = nil
     // Database identity survives corrected publisher GUIDs and URLs. Absent in legacy JSON.
     var storedID: String? = nil
     // Present on incoming subscription articles; absent in legacy caches.
@@ -55,12 +58,8 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         PublisherContentRevision.inputHash(title: title, description: description, content: fullContent)
     }
 
-    /// When News first stored a story that has no publication date (its ordering value), or nil for a dated story or
-    /// one loaded without an ordering value.
-    private var ingestionDate: Date? {
-        guard pubDate == DateParser.unknownDate else { return nil }
-        return queryOrderValue.map { Date(timeIntervalSince1970: $0) }
-    }
+    /// When News first stored a story that has no publication date, or nil for a dated story or one loaded without it.
+    private var ingestionDate: Date? { pubDate == DateParser.unknownDate ? ingestedAt : nil }
 
     /// The full publication date for the reader ("October 10, 2026" in English); an undated story shows when it was
     /// added instead.

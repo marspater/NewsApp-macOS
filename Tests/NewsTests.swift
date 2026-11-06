@@ -4313,7 +4313,7 @@ struct NewsTests {
         // An undated story with an ingestion time shows when it was added (#1037).
         var storedLate = first
         let clock = Date(timeIntervalSince1970: 1_800_000_000)
-        storedLate.queryOrderValue = clock.addingTimeInterval(-2 * 3600).timeIntervalSince1970
+        storedLate.ingestedAt = clock.addingTimeInterval(-2 * 3600)
         // The same short date a dated story shows for that moment, so the test holds under any locale and OS wording.
         let twoHoursAgo = FeedArticle(
             title: "Dated", link: "https://example.com/two-hours", guid: nil, description: "",
@@ -4326,9 +4326,22 @@ struct NewsTests {
         var dated = FeedArticle(
             title: "Dated", link: "https://example.com/dated", guid: nil, description: "",
             pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Publisher")
-        dated.queryOrderValue = storedLate.queryOrderValue
+        dated.ingestedAt = storedLate.ingestedAt
         assertTrue(dated.dateAccessibilityText.hasPrefix("published "), "A dated story is still published")
         assertFalse(dated.cardDateText().hasPrefix("Added"), "A dated story ignores the ingestion time")
+        // Loaded from the database an undated story carries its ingestion time; a search result carries a score instead (#1037).
+        let undatedDB = DatabaseEngine(path: ":memory:")
+        try await undatedDB.open()
+        let undatedStory = FeedArticle(
+            title: "Zeppelin harbour inspection", link: "https://example.com/zeppelin", guid: "zeppelin",
+            description: "", pubDate: DateParser.unknownDate, source: "Publisher")
+        try await undatedDB.upsertArticles([undatedStory])
+        let listed = try await undatedDB.fetchArticles().first
+        assertTrue(listed?.ingestedAt != nil, "A listed undated story carries when it was stored")
+        let found = try await undatedDB.searchArticles(query: "zeppelin").first
+        assertEqual(found?.id, listed?.id, "The search finds the undated story")
+        assertEqual(found?.ingestedAt, nil, "A search score is never shown as a date")
+        await undatedDB.close()
         do {
             let now = Date(timeIntervalSince1970: 1_700_000_000)
             func story(ageInSeconds age: TimeInterval) -> FeedArticle {
