@@ -100,6 +100,10 @@ actor EnrichmentQueue {
     /// Publisher input hash each article was classified from this session (#820): a changed input, or a clear of
     /// derived data, makes the article eligible again.
     private var completedInputs: [String: String] = [:]
+    /// Only a bounded recent deduplication window is needed; the database keeps the durable classification.
+    private static let completedInputLimit = 12_000
+    private static let completedInputEvictionBatch = 3_000
+    private var completedInputOrder: [(id: String, hash: String)] = []
     private var queuedHeap: [QueuedEntry] = []
 
     private let store: ArticleStore?
@@ -212,6 +216,8 @@ actor EnrichmentQueue {
             logger.debug("Cancelled overview generation for '\(eventID)': \(reason.rawValue)")
         }
         overviewTasks.removeAll()
+        // Also invalidate generations waiting for a worker slot, which have no task to cancel yet.
+        overviewGenerations.removeAll()
         // Cancelled tasks occupy slots until their deferred cleanup runs.
         logger.info("Cancelled all enrichment jobs: \(reason.rawValue)")
     }
@@ -219,6 +225,8 @@ actor EnrichmentQueue {
     // MARK: - Overview Generation Integration
 
     private var overviewTasks: [String: Task<EventOverviewDocument?, Never>] = [:]
+    /// A request owns its event from enqueue time, including time spent waiting for capacity.
+    private var overviewGenerations: [String: UUID] = [:]
 
     /// Runs overview generation using the enrichment queue's bounded concurrency and cancellation tracking.
     func scheduleOverviewGeneration(
@@ -227,11 +235,21 @@ actor EnrichmentQueue {
         operation: @escaping @Sendable () async -> EventOverviewDocument?
     ) async -> EventOverviewDocument? {
         cancelOverview(eventID: eventID, reason: .superseded)
+        let generation = UUID()
+        overviewGenerations[eventID] = generation
+        defer {
+            if overviewGenerations[eventID] == generation { overviewGenerations.removeValue(forKey: eventID) }
+        }
 
         while activeCount >= maxConcurrency {
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            if Task.isCancelled { return nil }
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return nil
+            }
+            guard !Task.isCancelled, overviewGenerations[eventID] == generation else { return nil }
         }
+        guard !Task.isCancelled, overviewGenerations[eventID] == generation else { return nil }
 
         activeCount += 1
         defer {
@@ -246,15 +264,19 @@ actor EnrichmentQueue {
         overviewTasks[eventID] = task
         defer { if overviewTasks[eventID] == task { overviewTasks.removeValue(forKey: eventID) } }
 
-        return await withTaskCancellationHandler {
+        let result = await withTaskCancellationHandler {
             await task.value
         } onCancel: {
             task.cancel()
         }
+        // A cancelled or superseded operation may ignore cancellation; never publish its stale result.
+        guard !Task.isCancelled, overviewGenerations[eventID] == generation else { return nil }
+        return result
     }
 
-    /// Cancels overview generation for a specific event.
+    /// Cancels overview generation for a specific event, even before it acquires a worker slot.
     func cancelOverview(eventID: String, reason: EnrichmentCancellationReason = .user) {
+        overviewGenerations.removeValue(forKey: eventID)
         if let task = overviewTasks.removeValue(forKey: eventID) {
             task.cancel()
             logger.debug("Cancelled overview generation for '\(eventID)': \(reason.rawValue)")
@@ -293,6 +315,7 @@ actor EnrichmentQueue {
     /// story is eligible for classification again.
     func analysisCleared() {
         completedInputs.removeAll()
+        completedInputOrder.removeAll()
         cancelAll(reason: .superseded)
     }
 
@@ -450,7 +473,19 @@ actor EnrichmentQueue {
         evictJob(articleId, generation: generation)
         // A refused write (the publisher changed the story, or the analysis was cleared) leaves the story eligible
         // for the next enqueue instead of counting as classified (#820).
-        if stored, !Task.isCancelled { completedInputs[articleId] = article.publisherInputHash }
+        if stored, !Task.isCancelled { recordCompletedInput(articleId, hash: article.publisherInputHash) }
+    }
+
+    /// Evicts old deduplication entries in batches to avoid indefinite session growth without O(n) work per result.
+    private func recordCompletedInput(_ articleId: String, hash: String) {
+        completedInputs[articleId] = hash
+        completedInputOrder.append((articleId, hash))
+        if completedInputOrder.count > Self.completedInputLimit {
+            for old in completedInputOrder.prefix(Self.completedInputEvictionBatch) {
+                if completedInputs[old.id] == old.hash { completedInputs.removeValue(forKey: old.id) }
+            }
+            completedInputOrder.removeFirst(Self.completedInputEvictionBatch)
+        }
     }
 
     /// Drops a finished or cancelled job and the story it retains, unless the article was enqueued again since.
