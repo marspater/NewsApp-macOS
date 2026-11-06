@@ -90,9 +90,8 @@ extension ArticleStore {
     @discardableResult
     func includeEvent(_ relatedEventID: String, inEvent eventID: String) async -> Bool {
         do {
-            let combined = try await database.includeEvent(relatedEventID, inEvent: eventID)
-            // The reader made this change: it is no new reporting to flag as "Updated".
-            _ = try? await database.markEventSeen(combined.id)
+            // The reader made this change: the database marks it seen, so it is no new reporting to flag as "Updated".
+            try await database.includeEvent(relatedEventID, inEvent: eventID)
             eventRevision &+= 1
             return true
         } catch {

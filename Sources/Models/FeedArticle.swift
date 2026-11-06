@@ -30,7 +30,7 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     let link: String
     let guid: String?
     let description: String
-    let pubDate: Date
+    var pubDate: Date
     let source: String
     var imageUrl: String?
     var aiSummary: String?

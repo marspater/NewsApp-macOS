@@ -39,7 +39,8 @@ actor DatabaseEngine {
     private var countsCache:
         (changes: ChangeToken, scope: [String], muting: MuteRules, value: (unread: Int, saved: Int, total: Int))?
     private var mutedCountCache: (changes: ChangeToken?, counts: [MutedCountKey: Int]) = (nil, [:])
-    /// The last search's query vector, so its pages and counts rank and count the same stories (#708).
+    /// The last free-text search's query vector, a cache so paging does not embed the text again (#708). Counts take
+    /// their vector from the caller: this slot is shared by every window's search (#985).
     var searchEmbedding: (text: String, vector: [Float])?
     /// This connection's writes (`sqlite3_total_changes`) and other connections' commits (`PRAGMA data_version`).
     private struct ChangeToken: Equatable {
@@ -62,6 +63,7 @@ actor DatabaseEngine {
         let isRead: Bool?
         let isSaved: Bool?
         let search: String?
+        let hasVector: Bool
         let muting: MuteRules
         let scope: [String]
     }
@@ -2302,7 +2304,9 @@ actor DatabaseEngine {
             guid = coalesce(excluded.guid, articles.guid),
             canonical_url = CASE WHEN ?
                 THEN excluded.canonical_url ELSE articles.canonical_url END,
-            published_at = CASE WHEN excluded.published_at = ? THEN articles.published_at ELSE excluded.published_at END,
+            published_at = CASE WHEN excluded.published_at = ?16
+                THEN (CASE WHEN articles.published_at > ?13 + \(futureDateSkew) THEN excluded.published_at ELSE articles.published_at END)
+                ELSE excluded.published_at END,
             title = excluded.title,
             source = excluded.source,
             description = excluded.description,
@@ -2379,16 +2383,29 @@ actor DatabaseEngine {
         sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
     }
 
+    /// A feed date further ahead than this is a typo, a wrong-zone embargo or a hostile value, not clock skew (#981).
+    static let futureDateSkew: TimeInterval = 15 * 60
+
     /// `validators` accompany a fresh 200 response. They and the response's content stats are written in the same
     /// transaction as the articles, so a feed is only ever answered "not modified" for content that was durably ingested.
     @discardableResult
     func upsertArticles(
         _ articles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil,
-        preservingStoredContent: Bool = false
+        preservingStoredContent: Bool = false, now clock: Date = Date()
     ) throws -> Set<String> {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        // A date from the future would head every list and escape retention until it came due. Treat it as unknown:
+        // storage then orders it by ingestion time, a refresh keeps the stored date and feed health ignores it (#981).
+        let articles = articles.map { article -> FeedArticle in
+            guard article.pubDate.timeIntervalSince(clock) > Self.futureDateSkew else { return article }
+            var clamped = article
+            clamped.pubDate = DateParser.unknownDate
+            // A link-less, GUID-less item is identified by a fingerprint of its date; keep the ID the parser gave it.
+            if clamped.storedID == nil, clamped.id != article.id { clamped.storedID = article.id }
+            return clamped
         }
         guard !articles.isEmpty else {
             // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
@@ -2490,7 +2507,7 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(expiredStmt) }
         var insertedIDs = Set<String>()
-        let now = Date().timeIntervalSince1970
+        let now = clock.timeIntervalSince1970
 
         for article in articles {
             try Task.checkCancellation()
@@ -3900,14 +3917,14 @@ actor DatabaseEngine {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        try finishAnalysisClear()
         logger.info("Cleared all article enrichment data.")
     }
 
-    /// Everything Clear Analysis removes, for the caller's open transaction (#811). The generation bump goes with
-    /// it, so every clear of derived data refuses the writes still in flight (#844).
+    /// The SQL half of Clear Analysis, for the caller's open transaction (#811). The caller runs
+    /// `finishAnalysisClear()` after its commit: the tension side file and the in-memory generation sit outside
+    /// SQLite's rollback, so a clear that fails leaves both as they were (#984).
     private func deleteAnalysisRows() throws {
-        analysisGeneration &+= 1
-        try clearWorldTensionHistory()
         try executeSimple("DELETE FROM article_enrichment;")
         try clearEventOverviews()
         // Sitrep lines restate overview highlights, so they go with the overviews.
@@ -3917,13 +3934,21 @@ actor DatabaseEngine {
         try executeSimple("UPDATE pair_assessments SET features = NULL;")
     }
 
+    /// After a committed clear: bump the generation, so every clear of derived data refuses the writes still in
+    /// flight (#844), then rewrite the World Tension history. The generation moves first, so a failed rewrite
+    /// cannot leave stale work writable; the clear is repeatable.
+    private func finishAnalysisClear() throws {
+        analysisGeneration &+= 1
+        try clearWorldTensionHistory()
+    }
+
     /// Clears persisted article body text from local storage.
     /// Preserves subscriptions, saved stories, and read history markers.
     func clearArticleCache() throws {
+        try requireWritable()
         repeatedImageCache = [:]
         try beginTransaction()
         do {
-            analysisGeneration &+= 1
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
             )
@@ -3935,6 +3960,7 @@ actor DatabaseEngine {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        analysisGeneration &+= 1
     }
 
     /// Clears replaceable data; article headers, read history and saved bodies are user data.
@@ -3954,6 +3980,7 @@ actor DatabaseEngine {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        try finishAnalysisClear()
     }
 
     // MARK: - Retention Policy & Pruning
@@ -3998,6 +4025,13 @@ actor DatabaseEngine {
         defer {
             if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
+        // Rows stored before upserts clamped future dates (#981) return to ingestion-time order, so retention sees them.
+        try eventRows(
+            "UPDATE articles SET published_at = ? WHERE published_at > ?;",
+            [
+                .real(DateParser.unknownDate.timeIntervalSince1970),
+                .real(nowTimestamp + Self.futureDateSkew),
+            ])
         var changes = 0
         for (sql, step) in [(tombstones, "tombstones"), ("DELETE FROM articles WHERE id IN (\(doomed));", "pruning")] {
             var stmt: OpaquePointer?
@@ -4126,6 +4160,7 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         search: String? = nil,
+        searchVector: [Float]? = nil,
         muting: MuteRules
     ) throws -> Int {
         guard !muting.isEmpty, db != nil else { return 0 }
@@ -4135,12 +4170,13 @@ actor DatabaseEngine {
         if changes == nil || mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
         let key = MutedCountKey(
             section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
-            muting: muting,
+            hasVector: searchVector != nil, muting: muting,
             scope: collectionOnlyFeedURLs)
         if let known = mutedCountCache.counts[key] { return known }
         let count = try listAggregates(
             "count(*)", section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
-            filter: " AND " + Self.mutedArticle, filterParameters: Self.mutingParameters(muting))[0]
+            searchVector: searchVector, filter: " AND " + Self.mutedArticle,
+            filterParameters: Self.mutingParameters(muting))[0]
         guard changes != nil else { return count }
         if mutedCountCache.counts.count >= 32 { mutedCountCache.counts = [:] }
         mutedCountCache.counts[key] = count
@@ -4156,6 +4192,7 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         search: String? = nil,
+        searchVector: [Float]? = nil,
         muting: MuteRules = MuteRules()
     ) throws -> (stories: Int, events: Int) {
         let totals = try listAggregates(
@@ -4167,6 +4204,7 @@ actor DatabaseEngine {
                      WHERE \(Self.visibleArticle) GROUP BY 1) g ON g.story = coalesce(e.story_id, e.id)
                 """,
             section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
+            searchVector: searchVector,
             filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
             filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))
         return (totals[0], totals[1])
@@ -4176,7 +4214,7 @@ actor DatabaseEngine {
     /// `filter`.
     private func listAggregates(
         _ columns: String, joins: String = "", section: String?, smartBinder: SmartBinder? = nil, isRead: Bool?,
-        isSaved: Bool?, search: String?,
+        isSaved: Bool?, search: String?, searchVector: [Float]?,
         filter: String, filterParameters: [QueryParameter]
     ) throws -> [Int] {
         guard let db = db else {
@@ -4194,7 +4232,7 @@ actor DatabaseEngine {
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         } else {
-            let conditions = searchConditions(ArticleFilterQuery.parse(searchText))
+            let conditions = searchConditions(ArticleFilterQuery.parse(searchText), vector: searchVector)
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         }
