@@ -1,0 +1,1 @@
+- `./test.sh` with a targeted mode runs only that mode; the design lint, the Python self-checks and the new test-registry check (every suite runs exactly once) stay in the plain run (#577).
