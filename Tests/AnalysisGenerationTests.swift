@@ -37,6 +37,7 @@ enum AnalysisGenerationTests {
             try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
             try await clusteringStorageFailuresEndThePass()
+            try await failedClearChangesNothing()
         } catch {
             check(false, "Unexpected error: \(error)")
         }
@@ -59,6 +60,67 @@ enum AnalysisGenerationTests {
             try? await Task.sleep(for: .milliseconds(50))
         }
         check(await condition(), message)
+    }
+
+    /// A clear that fails mid-transaction rolls back SQLite's half only if the side file and the generation have not
+    /// moved yet (#984); a clear on a read-only library says so for every clear.
+    static func failedClearChangesNothing() async throws {
+        let reading = WorldTensionReading(
+            evaluatedAt: Date(timeIntervalSince1970: 1_793_188_800), inputHash: "h", modelGeneration: "g",
+            headlines: [WorldTensionHeadline(id: "C1", title: "Peace talks resume", publisher: "Panel")],
+            assessment: WorldTensionAssessment(
+                score: 28,
+                summary: "Ceasefire talks suggest a reversible diplomatic response to the crisis.",
+                reasons: WorldTensionFactor.allCases.map { factor in
+                    .init(factor: factor, explanation: "The supplied headline reports continued ceasefire talks.")
+                }))
+        for (name, clear) in [
+            ("Clear Analysis", { (db: DatabaseEngine) in try await db.clearArticleEnrichment() }),
+            ("Clear All Caches", { (db: DatabaseEngine) in try await db.clearAllDatabaseCache() }),
+        ] as [(String, (DatabaseEngine) async throws -> Void)] {
+            let db = DatabaseEngine(path: ":memory:")
+            try await db.open()
+            try await db.upsertArticles([article("clear-fail")])
+            check(try await db.saveWorldTensionReading(reading), "\(name): a tension reading is stored")
+            // Dropped after the tension history and the article_enrichment delete, so the failure lands mid-clear.
+            try await db.eventRows("DROP TABLE article_embeddings;")
+            let generation = await db.analysisGeneration
+            do {
+                try await clear(db)
+                check(false, "\(name): the failing clear throws")
+            } catch {
+                check(error.localizedDescription.contains("no such table"), "\(name): the clear reports the failure")
+            }
+            check(await db.analysisGeneration == generation, "\(name): a failed clear leaves the generation alone")
+            check(try await db.worldTensionHistory() == [reading], "\(name): a failed clear keeps the tension history")
+            await db.close()
+
+            let working = DatabaseEngine(path: ":memory:")
+            try await working.open()
+            check(try await working.saveWorldTensionReading(reading), "\(name): a tension reading is stored again")
+            try await clear(working)
+            check(await working.analysisGeneration == 1, "\(name): a clear that commits bumps the generation")
+            check(try await working.worldTensionHistory().isEmpty, "\(name): a clear that commits empties the history")
+            await working.close()
+        }
+
+        // Clear Article Cache bumps only after its commit, too.
+        let cache = DatabaseEngine(path: ":memory:")
+        try await cache.open()
+        try await cache.upsertArticles([article("cache-fail")])
+        try await cache.eventRows(
+            "CREATE TRIGGER fail_clear BEFORE UPDATE ON articles BEGIN SELECT RAISE(ABORT, 'fixture'); END;")
+        do {
+            try await cache.clearArticleCache()
+            check(false, "Clear Article Cache: the failing clear throws")
+        } catch {
+            check(error.localizedDescription.contains("fixture"), "Clear Article Cache reports the SQL failure")
+        }
+        check(await cache.analysisGeneration == 0, "A failed Clear Article Cache leaves the generation alone")
+        try await cache.eventRows("DROP TRIGGER fail_clear;")
+        try await cache.clearArticleCache()
+        check(await cache.analysisGeneration == 1, "A Clear Article Cache that commits bumps the generation")
+        await cache.close()
     }
 
     /// Every derived kind refuses a write that started before a clear of derived data.

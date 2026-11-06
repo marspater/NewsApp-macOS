@@ -3900,14 +3900,14 @@ actor DatabaseEngine {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        try finishAnalysisClear()
         logger.info("Cleared all article enrichment data.")
     }
 
-    /// Everything Clear Analysis removes, for the caller's open transaction (#811). The generation bump goes with
-    /// it, so every clear of derived data refuses the writes still in flight (#844).
+    /// The SQL half of Clear Analysis, for the caller's open transaction (#811). The caller runs
+    /// `finishAnalysisClear()` after its commit: the tension side file and the in-memory generation sit outside
+    /// SQLite's rollback, so a clear that fails leaves both as they were (#984).
     private func deleteAnalysisRows() throws {
-        analysisGeneration &+= 1
-        try clearWorldTensionHistory()
         try executeSimple("DELETE FROM article_enrichment;")
         try clearEventOverviews()
         // Sitrep lines restate overview highlights, so they go with the overviews.
@@ -3917,13 +3917,21 @@ actor DatabaseEngine {
         try executeSimple("UPDATE pair_assessments SET features = NULL;")
     }
 
+    /// After a committed clear: bump the generation, so every clear of derived data refuses the writes still in
+    /// flight (#844), then rewrite the World Tension history. The generation moves first, so a failed rewrite
+    /// cannot leave stale work writable; the clear is repeatable.
+    private func finishAnalysisClear() throws {
+        analysisGeneration &+= 1
+        try clearWorldTensionHistory()
+    }
+
     /// Clears persisted article body text from local storage.
     /// Preserves subscriptions, saved stories, and read history markers.
     func clearArticleCache() throws {
+        try requireWritable()
         repeatedImageCache = [:]
         try beginTransaction()
         do {
-            analysisGeneration &+= 1
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
             )
@@ -3935,6 +3943,7 @@ actor DatabaseEngine {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        analysisGeneration &+= 1
     }
 
     /// Clears replaceable data; article headers, read history and saved bodies are user data.
@@ -3954,6 +3963,7 @@ actor DatabaseEngine {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        try finishAnalysisClear()
     }
 
     // MARK: - Retention Policy & Pruning
