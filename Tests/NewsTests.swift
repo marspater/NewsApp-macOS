@@ -24436,10 +24436,13 @@ struct NewsTests {
         assertEqual(sizedArticle.readerDocument?.images?.count, 2, "Video media:content is not an image")
         // A site mark is not the story's picture (#995): the SVG of CNBC's page chrome blocked the page lookup.
         let vectorRSS =
-            "<rss xmlns:media='http://search.yahoo.com/mrss/'><channel><title>Publisher</title><item><title>Vector report</title><link>\(base)</link><media:content url='\(base)/mark.svg' type='image/svg+xml'/><description><![CDATA[<img src='\(base)/site.svg'><img src='\(base)/photo.jpg'>Text]]></description></item><item><title>Mark only</title><link>\(base)/2</link><media:content url='\(base)/mark.svg' type='image/svg+xml'/></item></channel></rss>"
+            "<rss xmlns:media='http://search.yahoo.com/mrss/'><channel><title>Publisher</title><item><title>Vector report</title><link>\(base)</link><media:content url='\(base)/mark.svg' type='image/svg+xml'/><description><![CDATA[<img src='\(base)/site.svg'><img src='\(base)/photo.jpg'>Text]]></description></item><item><title>Mark only</title><link>\(base)/2</link><media:content url='\(base)/mark.svg' type='image/svg+xml'/></item><item><title>Typed mark</title><link>\(base)/3</link><media:content url='\(base)/mark' type='image/svg+xml'/><description><![CDATA[<img src='\(base)/pixel.gif'><img src='\(base)/story.jpg'>Text]]></description></item></channel></rss>"
         let vectorArticles = FeedXMLParser(data: Data(vectorRSS.utf8), feedURL: base).parse()
         assertEqual(vectorArticles.first?.imageUrl, base + "/photo.jpg", "A feed SVG gives way to the photo after it")
-        assertTrue(vectorArticles.last?.imageUrl == nil, "A feed with only an SVG has no image: the page lookup runs")
+        assertTrue(vectorArticles[1].imageUrl == nil, "A feed with only an SVG has no image: the page lookup runs")
+        assertEqual(
+            vectorArticles.last?.imageUrl, base + "/story.jpg",
+            "A declared SVG type and a tracking pixel give way to the photo")
         let entityRSS =
             "<rss><channel><title>Publisher</title><item><title>Entity report</title><link>\(base)/entity</link><description><![CDATA[Infantino in March&#039;s vote &#x2014; &hellip;]]></description></item></channel></rss>"
         assertEqual(

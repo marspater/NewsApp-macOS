@@ -302,7 +302,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                     || (elementName == "media:content" && (medium == nil || medium == "image")
                         && (width != nil || isImageExtension))
                     || isImageExtension))
-        if isImage, ReaderImageCandidate.usable(url: url, width: width, height: height),
+        if isImage, ReaderImageCandidate.usable(url: url, width: width, height: height, type: type),
             itemImageCandidates.count < 8
         {
             itemImageCandidates.append(ReaderImageCandidate(url: url, origin: .feed, width: width, height: height))
@@ -640,7 +640,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                     || (attributes.type == nil && attributes.medium == nil && attributes.width != nil)
             else { continue }
             let url = resolvedURL(raw, baseURL: baseURL)
-            guard ReaderImageCandidate.usable(url: url, width: attributes.width, height: attributes.height),
+            guard
+                ReaderImageCandidate.usable(
+                    url: url, width: attributes.width, height: attributes.height, type: attributes.type),
                 !images.contains(where: { $0.url == url }), images.count < 8
             else { continue }
             images.append(
@@ -728,9 +730,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         // Avoid repeated compilation of regex per parsed item
         guard let regex = Self.imageRegex else { return nil }
         let range = NSRange(html.startIndex..., in: html)
-        // The first picture that is not vector artwork (a site mark, not a story photo).
+        // The first picture the feed gate accepts: not vector artwork, a tracking pixel or a site mark.
         return regex.matches(in: html, range: range).lazy
             .compactMap { Range($0.range(at: 1), in: html).map { String(html[$0]) } }
-            .first { !ReaderImageCandidate.isVectorArtwork($0) }
+            .first { ReaderImageCandidate.usable(url: resolvedURL($0)) }
     }
 }
