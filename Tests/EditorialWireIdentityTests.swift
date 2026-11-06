@@ -222,6 +222,11 @@ enum EditorialWireIdentityTests {
         check(
             repeated.count == 1 && repeated[0].publishedAt == dated.publishedAt,
             "a repeated article keeps its first dated row")
+        let datedAlone = EditorialWireIdentity.momentumReports(eventID: "event", members: [dated])[0]
+        check(
+            repeated[0].wireGroupID == datedAlone.wireGroupID && datedAlone.wireGroupID != nil
+                && repeated[0].originPublisherID == datedAlone.originPublisherID,
+            "a repeated article's identity comes from the same dated copy")
         check(try replay([dated, dated]).rawRowsInWindow == 1, "a repeated article counts once in the replay")
     }
 
