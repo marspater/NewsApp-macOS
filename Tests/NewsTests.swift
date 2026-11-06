@@ -1071,6 +1071,7 @@ struct NewsTests {
             ("testExtractionOutcomeDiagnostics", { await testExtractionOutcomeDiagnostics() }),
             ("testCanonicalClassificationDisambiguation", { await testCanonicalClassificationDisambiguation() }),
             ("testDiagnosticsExport", { try await testDiagnosticsExport() }),
+            ("testLogWindowModel", { await testLogWindowModel() }),
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
@@ -24318,18 +24319,65 @@ struct NewsTests {
             names.contains("News Diagnostics/summary.txt") && names.contains("News Diagnostics/log.txt"),
             "The zip holds the summary and the log: \(names)")
 
-        // This process's own entries are readable from the unified log, as the app's are.
+        // This process's own entries are readable from the unified log, as the app's are; private values stay redacted.
         let marker = "diagnostics-check-\(UUID().uuidString)"
-        NewsSignposts.launchLog.notice("\(marker, privacy: .public)")
+        let secret = "https://feeds.example/private?token=\(UUID().uuidString)"
+        NewsSignposts.launchLog.notice("\(marker, privacy: .public) \(secret)")
         // The unified log may store the entry a moment later; poll briefly instead of reading once.
         let deadline = ContinuousClock.now + .seconds(5)
         var found = false
         while !found && ContinuousClock.now < deadline {
             let own = try DiagnosticsExport.currentLaunchLog()
-            found = own.contains { $0.message == marker && $0.category == "Launch" }
+            found = own.contains { $0.message == "\(marker) <private>" && $0.category == "Launch" }
             if !found { try await Task.sleep(for: .milliseconds(100)) }
         }
         assertTrue(found, "The export reads this launch's log")
+    }
+
+    @MainActor
+    static func testLogWindowModel() async {
+        print("  - Testing the development Log window's filters and gate (#1005)...")
+        assertTrue(LogWindowModel.isAvailable(bundleIdentifier: "com.marspater.news.dev"), "make run shows the Log")
+        assertTrue(!LogWindowModel.isAvailable(bundleIdentifier: "com.marspater.news"), "A release build has no Log")
+        assertTrue(!LogWindowModel.isAvailable(bundleIdentifier: nil), "No bundle id, no Log")
+        let start = Date(timeIntervalSince1970: 1_790_000_000)
+        func line(_ offset: TimeInterval, _ category: String, _ level: String, _ message: String)
+            -> DiagnosticsExport.LogLine
+        {
+            DiagnosticsExport.LogLine(
+                date: start.addingTimeInterval(offset), category: category, level: level, message: message)
+        }
+        let model = LogWindowModel()
+        model.follows = false
+        model.clear()
+        assertTrue(model.follows, "Clear follows new lines again: an empty view has nothing to scroll back from")
+        model.append([
+            line(0, "Feeds", "Info", "Fetched 12 items"), line(1, "Database", "Error", "Integrity check failed"),
+            line(2, "Feeds", "Error", "Fetch failed for news.example.com"),
+        ])
+        // A reread from the last line's time returns it again; only newer lines are added.
+        model.append([
+            line(2, "Feeds", "Error", "Fetch failed for news.example.com"), line(3, "Launch", "Notice", "Ready"),
+        ])
+        assertEqual(model.entries.count, 4, "Rereads add only newer lines")
+        assertEqual(model.visible.map(\.line.message).last, "Ready", "Newest last")
+        assertEqual(model.categories, ["Database", "Feeds", "Launch"], "Categories come from the entries")
+        model.level = "Error"
+        assertEqual(model.visible.count, 2, "Level filter")
+        model.category = "Feeds"
+        assertEqual(model.visible.map(\.line.message), ["Fetch failed for news.example.com"], "Level and category")
+        model.level = nil
+        model.search = "FETCHED"
+        assertEqual(model.visible.map(\.line.message), ["Fetched 12 items"], "Search ignores case")
+        model.category = nil
+        model.search = "database"
+        assertEqual(model.visible.count, 1, "Search matches the category too")
+        assertTrue(model.visibleText.hasSuffix("Error Database: Integrity check failed"), "Copy holds visible lines")
+        model.search = ""
+        model.clear()
+        assertTrue(model.visible.isEmpty, "Clear hides what was shown")
+        model.append([line(1, "Feeds", "Info", "Old"), line(4, "Feeds", "Info", "After clear")])
+        assertEqual(model.visible.map(\.line.message), ["After clear"], "Lines shown before Clear stay hidden")
     }
 
     @MainActor

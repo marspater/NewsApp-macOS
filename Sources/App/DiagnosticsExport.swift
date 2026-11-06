@@ -59,15 +59,36 @@ enum DiagnosticsExport {
     /// The unified log of this process only: a sandboxed app cannot read earlier launches, so the export covers the
     /// current launch, and of a launch older than a day only its last 24 hours.
     static func currentLaunchLog(now: Date = Date()) throws -> [LogLine] {
+        try logLines(since: now.addingTimeInterval(-window))
+    }
+
+    /// This process's entries for the app's subsystem from `start` on, as the log redacts them; the export and the
+    /// development Log window (#1005) read through here.
+    static func logLines(since start: Date) throws -> [LogLine] {
         let store = try OSLogStore(scope: .currentProcessIdentifier)
-        let start = store.position(date: now.addingTimeInterval(-window))
         let subsystem = NSPredicate(format: "subsystem == %@", NewsSignposts.subsystem)
-        return try store.getEntries(at: start, matching: subsystem).compactMap { entry in
+        return try store.getEntries(at: store.position(date: start), matching: subsystem).compactMap { entry in
             guard let log = entry as? OSLogEntryLog else { return nil }
             return LogLine(
-                date: log.date, category: log.category, level: name(of: log.level), message: log.composedMessage)
+                date: log.date, category: log.category, level: name(of: log.level), message: redacted(log))
         }
     }
+
+    /// Read in-process, the unified log returns private values in clear (feed URLs can carry tokens), so they are
+    /// redacted here as the system log would: only `.public` values and unannotated numbers are kept.
+    static func redacted(_ entry: OSLogEntryLog) -> String {
+        entry.components.map { component in
+            guard !component.placeholder.isEmpty else { return component.formatSubstring }
+            let numbers: [OSLogMessageComponent.ArgumentCategory] = [.double, .int64, .uInt64]
+            let number = numbers.contains(component.argumentCategory)
+            let shown =
+                component.placeholder.contains("public") || (number && !component.placeholder.contains("private"))
+            let value = number ? component.argumentNumberValue?.stringValue : component.argumentStringValue
+            return component.formatSubstring + (shown ? value ?? "" : "<private>")
+        }.joined()
+    }
+
+    static let levels = ["Debug", "Info", "Notice", "Error", "Fault"]
 
     private static func name(of level: OSLogEntryLog.Level) -> String {
         switch level {
