@@ -24448,6 +24448,10 @@ struct NewsTests {
         assertTrue(text.contains("validators ETag, items 12, full text 3 of 12"), "Feeds list validators and items")
         assertTrue(text.contains("2. other.example: status idle"), "Every subscription is listed")
         assertTrue(!text.contains("/private/") && !text.contains("token"), "Feeds keep only the host")
+        assertTrue(
+            DiagnosticsExport.feeds(feedURLs: [url], states: nil, statuses: [:], now: now)
+                .contains("1. feeds.example.org: status idle, fetch state unreadable"),
+            "An unreadable library is named, not reported as empty states")
         assertEqual(
             DiagnosticsExport.failureKind(.network("https://x.example/a failed")), "network",
             "A failure kind carries no payload")
@@ -24597,7 +24601,7 @@ struct NewsTests {
                 message: "Cleared HTTP network cache.")
         ]
         let text = DiagnosticsExport.spotlightAndCaches(app, log: log)
-        assertTrue(text.contains("indexing available, saved stories indexed 3"), "Spotlight state: \(text)")
+        assertTrue(text.contains("indexing available, saved stories to index 3"), "Spotlight state: \(text)")
         assertTrue(text.contains("URL cache: memory 1 KB of 4 KB"), "URL cache use")
         assertTrue(text.contains("2026-09-21T14:13:20Z Cleared HTTP network cache."), "Clear commands run")
     }

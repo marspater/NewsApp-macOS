@@ -212,7 +212,8 @@ enum DiagnosticsExport {
     /// What the export reads from the main actor and the other actors before it leaves for the background.
     struct AppSnapshot: Sendable {
         var feedURLs: [String] = []
-        var feedStates: [String: FeedFetchState] = [:]
+        /// Nil when the library could not be read: the export says so instead of reporting empty states.
+        var feedStates: [String: FeedFetchState]? = [:]
         /// Per feed: idle, loading or the failure kind (`failureKind`).
         var feedStatuses: [String: String] = [:]
         var lastClusteringPass: FeedManager.ClusteringPass?
@@ -343,18 +344,23 @@ enum DiagnosticsExport {
 
     /// Feeds: per subscription, by host and position, what the last fetch left.
     static func feeds(
-        feedURLs: [String], states: [String: FeedFetchState], statuses: [String: String], now: Date
+        feedURLs: [String], states: [String: FeedFetchState]?, statuses: [String: String], now: Date
     ) -> String {
         func time(_ date: Date?) -> String { date?.formatted(.iso8601) ?? "never" }
         var lines = ["Subscriptions: \(feedURLs.count)", "Response sizes are not recorded.", ""]
         for (index, url) in feedURLs.enumerated() {
+            let host = URL(string: url)?.host ?? "unreadable feed address"
+            guard let states else {
+                lines.append("\(index + 1). \(host): status \(statuses[url] ?? "idle"), fetch state unreadable")
+                continue
+            }
             let state = states[url] ?? FeedFetchState()
             let validators = [
                 state.validators?.etag == nil ? nil : "ETag",
                 state.validators?.lastModified == nil ? nil : "Last-Modified",
             ].compactMap { $0 }
             lines.append(
-                "\(index + 1). \(URL(string: url)?.host ?? "unreadable feed address"): status \(statuses[url] ?? "idle"), "
+                "\(index + 1). \(host): status \(statuses[url] ?? "idle"), "
                     + "last fetch \(time(state.lastFetchedAt)), failures \(state.failures), "
                     + "retry \(state.retryAt.map { $0 > now ? $0.formatted(.iso8601) : "due" } ?? "none"), "
                     + "validators \(validators.isEmpty ? "none" : validators.joined(separator: " and ")), "
@@ -596,7 +602,7 @@ enum DiagnosticsExport {
     static func spotlightAndCaches(_ app: AppSnapshot, log: [LogLine]) -> String {
         let cache = app.urlCache
         var lines = [
-            "Spotlight: indexing \(app.spotlightAvailable ? "available" : "unavailable"), saved stories indexed \(app.savedStories)",
+            "Spotlight: indexing \(app.spotlightAvailable ? "available" : "unavailable"), saved stories to index \(app.savedStories)",
             "URL cache: memory \(byteText(cache.memory)) of \(byteText(cache.memoryCapacity)), disk \(byteText(cache.disk)) of \(byteText(cache.diskCapacity))",
             "Cache folder on disk: \(byteText(Int(app.cacheFolderBytes)))",
             "", "Clear commands this launch",
@@ -627,7 +633,7 @@ enum DiagnosticsExport {
     static func snapshot(feedManager: FeedManager, articleStore: ArticleStore) async -> AppSnapshot {
         var app = AppSnapshot()
         app.feedURLs = feedManager.appSettings.feedURLs
-        app.feedStates = (try? await articleStore.database.feedFetchStates()) ?? [:]
+        app.feedStates = try? await articleStore.database.feedFetchStates()
         app.feedStatuses = feedManager.feedStatuses.mapValues { status in
             switch status {
             case .idle: return "idle"
