@@ -139,8 +139,8 @@ final class NetworkTimeline: Sendable {
             case "Timed out": return "unresolvable timeout"
             case "Cancelled": return "cancelled"
             default:
-                // Only "dns <code>" passes: other reasons can be system text naming a host.
-                return reason.wholeMatch(of: /dns -?\d+/) != nil ? "unresolvable \(reason)" : "unresolvable"
+                // Only "dns <code>" and "dns queue" pass: other reasons can be system text naming a host.
+                return reason.wholeMatch(of: /dns (-?\d+|queue)/) != nil ? "unresolvable \(reason)" : "unresolvable"
             }
         }
     }
