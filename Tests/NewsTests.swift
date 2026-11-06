@@ -876,6 +876,7 @@ struct NewsTests {
             ("testOfflineCacheAndResilience", { await testOfflineCacheAndResilience() }),
             ("testArticleIdentityDeep", { await testArticleIdentityDeep() }),
             ("testPublisherTitleAliases", { try await testPublisherTitleAliases() }),
+            ("testNewsletterStrip", { testNewsletterStrip() }),
             ("testDatabaseEnginePersistence", { await testDatabaseEnginePersistence() }),
             ("testCanonicalArticleIngestion", { try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot) }),
             ("testPersistentArticleAliases", { try await testPersistentArticleAliases(fixtureRoot: fixtureRoot) }),
@@ -2564,6 +2565,9 @@ struct NewsTests {
         let prose = (1...20).map {
             "Researchers in London compared observation \($0) with the published evidence and documented the results."
         }.joined(separator: " ")
+        // Past wall-clock dates: an upsert stores a future feed date as unknown (#981), which would empty the candidate
+        // window below and leave the refreshed stories undated, behind the archive (#1043).
+        let clusterNow = Date()
         func article(_ index: Int) -> FeedArticle {
             let image = "https://baseline.example/media/publisher-\(index % 20).jpg"
             let document = ReaderDocument(
@@ -2573,12 +2577,11 @@ struct NewsTests {
             return FeedArticle(
                 title: "Research report \(index)", link: "https://baseline.example/article/\(index)",
                 guid: "baseline-\(index)", description: "Research evidence",
-                pubDate: Date(timeIntervalSince1970: 1_800_000_000 + Double(index)),
+                pubDate: clusterNow.addingTimeInterval(Double(index) - 10_250),
                 source: "Publisher \(index % 20)", imageUrl: image, fullContent: prose, readerDocument: document)
         }
         let archive = (0..<10_000).map(article)
-        try await db.upsertArticles(archive)
-        let clusterNow = Date(timeIntervalSince1970: 1_800_010_250)
+        try await db.upsertArticles(archive, now: clusterNow)
         // Steady-state archive, rather than a first-launch clustering backlog competing with refresh.
         try await db.markEventMatchProcessed(archive.map(\.id), matcherVersion: EventMatcher.version, at: clusterNow)
         var measurements = [String: [Double]]()
@@ -2602,6 +2605,7 @@ struct NewsTests {
         record("snapshot_first_500_ms", from: coldStart)
         assertEqual(store.articles.count, 500, "Baseline keeps the real snapshot limit")
         let batches = (0..<5).map { offset in (0..<50).map { article(10_000 + offset * 50 + $0) } }
+        let freshGUIDs = Set(batches.flatMap { $0.compactMap(\.guid) })
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in
@@ -2612,6 +2616,8 @@ struct NewsTests {
             await manager.fetchFeedsAsync()
             record("refresh_5_mocked_feeds_ms", from: start)
             assertEqual(manager.articles.count, 500, "Refresh publishes the bounded snapshot")
+            assertTrue(
+                freshGUIDs.isSubset(of: Set(manager.articles.compactMap(\.guid))), "Refresh publishes the new stories")
             await manager.waitForEventClustering()
         }
         assertEqual(try await db.counts().total, 10_250, "Repeated refreshes keep one row per document")
@@ -4140,7 +4146,9 @@ struct NewsTests {
 
         // Test 1: Successful image fetch
         let mockData = Data(repeating: 0xAA, count: 1024)
+        let requestedAccept = SocketObservation()
         MockURLProtocol.requestHandler = { request in
+            requestedAccept.recordText(request.value(forHTTPHeaderField: "Accept") ?? "")
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, mockData)
         }
@@ -4149,6 +4157,8 @@ struct NewsTests {
             let (data, response) = try await client.fetchImage(from: targetURL)
             assertEqual(data.count, 1024, "Should download exact mock bytes")
             assertEqual(response.statusCode, 200, "Should get 200 status code")
+            // The request itself carries the image Accept header, not the document one (#1010).
+            assertEqual(requestedAccept.hosts, [SecureHTTPClient.imageAccept], "Image requests send the image Accept")
         } catch {
             print("❌ Unexpected error in fetchImage success test: \(error)")
             exit(1)
@@ -8197,6 +8207,42 @@ struct NewsTests {
             "Clear All Caches must clear DecodedImageCache"
         )
         await testDB.close()
+    }
+
+    /// The pair model's newsletter strip (#737): series suffix, sign-up line and teaser go; everything else stays.
+    static func testNewsletterStrip() {
+        let edition = EventMatcher.newsletterStripped(
+            title: "Stevens defects to back El-Sayed’s opponent | First Thing",
+            description: "Trump called the candidate a ‘jihadist’. Plus an Australian fish worth its weight in gold\n\n"
+                + "Don’t already get First Thing in your inbox? Sign up here\n\nGood morning. Stevens endorsed Rogers.")
+        assertEqual(edition.title, "Stevens defects to back El-Sayed’s opponent", "Series suffix is dropped")
+        assertEqual(
+            edition.description, "Trump called the candidate a ‘jihadist’.\nGood morning. Stevens endorsed Rogers.",
+            "Sign-up line and teaser are dropped")
+        let reported = EventMatcher.newsletterStripped(
+            title: "Hackers strike | First Thing",
+            description: "A newsletter leaked 40,000 records, police said.\nSign up to First Thing\nSubscribe here")
+        assertEqual(
+            reported.description, "A newsletter leaked 40,000 records, police said.",
+            "A paragraph that reports on a newsletter stays; only the calls to action go")
+        var stripPolicy = EventMatchPolicy.standard
+        stripPolicy.pairModelStripsNewsletter = true
+        assertEqual(
+            EventMatcher.pairModelText(
+                title: "Hackers strike | First Thing", description: "Sign up here", gap: nil, samePublisher: nil,
+                policy: stripPolicy),
+            EventFeatures.matchingText(title: "Hackers strike", description: ""),
+            "The pair model's text follows the policy's strip")
+        let column = EventMatcher.newsletterStripped(
+            title: "Why growth is a lie | Radical Thinking with Aditya Chakrabortty", description: "A column.")
+        assertEqual(column.title, "Why growth is a lie", "A column's author suffix is dropped too")
+        assertEqual(column.description, "A column.", "A plain body is unchanged")
+        let plain = EventMatcher.newsletterStripped(
+            title: "Binance CEO says 90 percent of stolen assets have been replenished", description: "Sign up here")
+        assertEqual(plain.title, "Binance CEO says 90 percent of stolen assets have been replenished", "No suffix")
+        assertEqual(plain.description, "Sign up here", "Without a suffix the body is left alone")
+        let scored = EventMatcher.newsletterStripped(title: "Lakers beat Celtics | 102-99", description: "")
+        assertEqual(scored.title, "Lakers beat Celtics | 102-99", "A suffix with digits is not a series")
     }
 
     /// One publisher, one headline, two GUIDs and two URLs within hours: one story (#583). A recurring headline a day
@@ -16757,13 +16803,11 @@ struct NewsTests {
                             pair.isCompatible = false
                         }
                         func input(_ index: Int) -> String {
-                            let text = EventFeatures.matchingText(
-                                title: items[index].title, description: items[index].description ?? "")
                             let known = !items[i].source.isEmpty && !items[j].source.isEmpty
-                            return diagnosePolicy.pairModelPrefix
-                                ? EventMatcher.pairModelInput(
-                                    text, gap: abs(items[i].published.timeIntervalSince(items[j].published)),
-                                    samePublisher: known ? items[i].source == items[j].source : nil) : text
+                            return EventMatcher.pairModelText(
+                                title: items[index].title, description: items[index].description ?? "",
+                                gap: abs(items[i].published.timeIntervalSince(items[j].published)),
+                                samePublisher: known ? items[i].source == items[j].source : nil, policy: diagnosePolicy)
                         }
                         let pairModel = EventMatcher.needsPairModel(pair) ? await probability(input(i), input(j)) : nil
                         // As the clusterer does: a borderline pair the model confirms at the cutoff is a match.

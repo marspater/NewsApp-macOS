@@ -214,7 +214,7 @@ extension EventFeatures {
         "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "dozen": "12", "twenty": "20", "hundred": "100",
     ]
     /// News boilerplate and honorifics: frequent across unrelated stories, so they are not evidence.
-    private static let stopwords: Set<String> = [
+    static let stopwords: Set<String> = [
         "say", "said", "says", "tell", "told", "report", "reported", "reports", "according", "accord", "people",
         "person",
         "official", "officials", "news", "year", "years", "day", "days", "time", "times", "week", "weeks", "month",
@@ -724,6 +724,10 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// is no match, counts as compatible only when it shares at least `borderlineNames` specific names. Nil turns it off.
     var borderlineFloor: Double?
     var borderlineNames = 3
+    /// Newsletter strip for the pair-model input (#737, evaluation): a title's trailing ` | <series>` suffix and the
+    /// body's sign-up line and "Plus …" teaser crush the pair model's score of a newsletter edition
+    /// (docs/audits/2026-11-05-recall-levers.md). Off: the features and the embedding keep reading the full text.
+    var pairModelStripsNewsletter = false
     static let standard = EventMatchPolicy()
 }
 
@@ -982,6 +986,46 @@ enum EventMatcher {
             neuralEligible: neuralEligible, anchorlessModelCandidate: anchorlessCandidate,
             masksAbsoluteConflict: masksAbsolute)
     }
+
+    /// The newsletter edition's title and body for the pair model (#737): a trailing ` | <series>` suffix of one to six
+    /// words without a digit marks the edition; its sign-up call to action and the first paragraph's "Plus …" teaser are dropped.
+    /// Any other text returns unchanged.
+    static func newsletterStripped(title: String, description: String) -> (title: String, description: String) {
+        guard let separator = title.range(of: " | ", options: .backwards) else { return (title, description) }
+        let suffix = title[separator.upperBound...]
+        let words = suffix.split(whereSeparator: \.isWhitespace).count
+        guard (1...6).contains(words), !suffix.contains(where: \.isNumber) else { return (title, description) }
+        var paragraphs = description.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { paragraph in
+                !paragraph.isEmpty
+                    && !(paragraph.count <= 200
+                        && newsletterBoilerplate.firstMatch(
+                            in: paragraph, range: NSRange(paragraph.startIndex..., in: paragraph)) != nil)
+            }
+        if let first = paragraphs.first, let teaser = first.range(of: ". Plus ") {
+            paragraphs[0] = String(first[..<teaser.lowerBound]) + "."
+        }
+        return (String(title[..<separator.lowerBound]), paragraphs.joined(separator: "\n"))
+    }
+
+    /// The pair model's text for one report: the matching text under the policy's newsletter strip and prefix.
+    static func pairModelText(
+        title: String, description: String, gap: TimeInterval?, samePublisher: Bool?,
+        policy: EventMatchPolicy = .standard
+    ) -> String {
+        let stripped =
+            policy.pairModelStripsNewsletter
+            ? newsletterStripped(title: title, description: description) : (title: title, description: description)
+        let text = EventFeatures.matchingText(title: stripped.title, description: stripped.description)
+        return policy.pairModelPrefix ? pairModelInput(text, gap: gap, samePublisher: samePublisher) : text
+    }
+
+    /// A call to action, not any mention: "A newsletter leaked records" is the reported event.
+    private static let newsletterBoilerplate =
+        (try? NSRegularExpression(
+            pattern: "(?i)\\bin your inbox\\b|^(sign up|subscribe)\\b|\\b(sign up|subscribe) (here|now|today)\\b"))
+        ?? NSRegularExpression()
 
     /// The pair model's input for one side of a pair (#626): "gap 14 hours; same publisher. " and then the matching
     /// text. The prefix is the same on both sides, plain words only, and says "unknown" where the data has no gap or

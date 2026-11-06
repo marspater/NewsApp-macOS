@@ -67,6 +67,11 @@ enum NotificationAttachmentTests {
                 "Palette PNG becomes the 2:3 crop, got \(image.width) × \(image.height)")
             precondition(alpha(image, x: 360, y: 274) == 255, "Palette crop is opaque at the trailing edge")
             precondition(StoryBannerPresenter.bannerPhoto(decoded, scale: 2) != nil, "Palette banner photo renders")
+            // The host serves the named PNG, not a `Vary: Accept` WebP or AVIF variant, to an image request (#1010).
+            precondition(
+                SecureHTTPClient.imageAccept.hasPrefix("image/png,")
+                    && !SecureHTTPClient.imageAccept.contains("webp") && !SecureHTTPClient.imageAccept.contains("avif"),
+                "Image requests do not invite WebP or AVIF variants")
         } catch { fatalError("Palette PNG notification image failed: \(error)") }
 
         // The tall fading crop (#589): a 1200 × 1200 source becomes a 600 × 900 portrait PNG with alpha,
