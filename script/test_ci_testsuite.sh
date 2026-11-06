@@ -45,7 +45,7 @@ STUB
 chmod +x "$WORK/bin/xcrun" "$WORK/profiling-runner"
 PATH="$WORK/bin:$PATH" NEWS_TEST_RUNNER="$WORK/profiling-runner" \
     script/ci_testsuite.sh --lcov "$WORK/out.lcov" Tests/Passing.swift > /dev/null 2>&1 || fail "analysis with a profile must exit 0"
-[ "$(tr '\n' ' ' < "$WORK/out.lcov")" = "DA:1,0 DA:2,12 DA:3,1 " ] || fail "a wrapped-around count must become 1 and other counts stay"
+[[ "$(tr '\n' ' ' < "$WORK/out.lcov")" == "DA:1,0 DA:2,12 DA:3,1 " ]] || fail "a wrapped-around count must become 1 and other counts stay"
 
 NEWS_TEST_RUNNER="$WORK/unbuilt" script/ci_testsuite.sh "$WORK/junit.xml" > /dev/null || fail "no selected atom must exit 0"
 [ ! -e "$WORK/unbuilt" ] || fail "no selected atom must not compile the runner"
