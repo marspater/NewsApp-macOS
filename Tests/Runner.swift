@@ -40,6 +40,8 @@ struct NewsRegressionRunner {
             if selected("Tests/BriefingIntelligenceTests.swift") { await BriefingIntelligenceTests.run() }
             if selected("Tests/BriefingImpactTests.swift") { await BriefingImpactTests.run() }
             if selected("Tests/BriefingSignalsTests.swift") { await BriefingSignalsTests.run() }
+            if selected("Tests/KnowledgeEPUBTests.swift") { await KnowledgeEPUBTests.run() }
+            if selected("Tests/KnowledgeExportTests.swift") { await KnowledgeExportTests.run() }
             if selected("Tests/AnalysisGenerationTests.swift") { await AnalysisGenerationTests.run() }
             if selected("Tests/EditorialNoveltyTests.swift") { await EditorialNoveltyTests.run() }
             if selected("Tests/EditorialMomentumTests.swift") { await EditorialMomentumTests.run() }

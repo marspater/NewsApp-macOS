@@ -260,6 +260,14 @@ struct ArticleListView: View {
         return filteredArticles.first { $0.id == focusedArticleID }
     }
 
+    private var knowledgeExportActions: KnowledgeExportActions? {
+        guard articlePath.isEmpty, isBriefing, let briefing, !briefing.articles.isEmpty else { return nil }
+        return KnowledgeExportUI.actions(
+            articles: briefing.articles,
+            title: "Briefing · " + briefing.startedAt.formatted(date: .abbreviated, time: .omitted),
+            store: articleStore, digest: true)
+    }
+
     private var listCommandActions: ListCommandActions? {
         guard articlePath.isEmpty else { return nil }
         let backAction: (() -> Void)? = {
@@ -295,6 +303,7 @@ struct ArticleListView: View {
         }
         .focusedSceneValue(\.selectedStory, selectedStory)
         .focusedSceneValue(\.listActions, listCommandActions)
+        .focusedSceneValue(\.knowledgeExport, knowledgeExportActions)
         .sheet(isPresented: $showsCustomizeBriefing) {
             BriefingCustomizeSheet().environmentObject(appSettings)
         }
@@ -912,6 +921,9 @@ struct ArticleListView: View {
             refreshToolbarItem
         #endif
         if isBriefing {
+            if let actions = knowledgeExportActions {
+                ToolbarItem(placement: .primaryAction) { KnowledgeExportMenu(actions: actions) }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showsCustomizeBriefing = true

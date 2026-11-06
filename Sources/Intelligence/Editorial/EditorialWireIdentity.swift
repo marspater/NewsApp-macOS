@@ -131,9 +131,13 @@ enum EditorialWireIdentity {
     /// One identity per distinct article, sorted by article id; the result does not depend on input order. A group's
     /// ids derive from its lowest article id, and each group has one origin, so `EditorialMomentum` never sees
     /// conflicting origins. `textContainment` is the shared-passage share of the shorter text that makes two copies.
+    /// An article repeated in `members` is read from its first dated copy, the one `momentumReports` reports.
     static func identities(event members: [WireIdentityArticle], textContainment: Double = 0.8) -> [WireIdentity] {
         var seen = Set<String>()
-        let articles = members.filter { seen.insert($0.articleID).inserted }.sorted { $0.articleID < $1.articleID }
+        let datedFirst =
+            members.filter { $0.publishedAt != DateParser.unknownDate }
+            + members.filter { $0.publishedAt == DateParser.unknownDate }
+        let articles = datedFirst.filter { seen.insert($0.articleID).inserted }.sorted { $0.articleID < $1.articleID }
         let evidence = articles.map(Evidence.init)
         var parent = Array(articles.indices)
         func root(_ index: Int) -> Int {
@@ -160,11 +164,15 @@ enum EditorialWireIdentity {
 
     /// Replay rows for one event. An undated article has no publication time to bucket and is left out. An article
     /// stamped after News stored it (a revision date or a wrong clock) was published by the time it was stored at the
-    /// latest, so its publication is clamped there rather than failing the event's replay.
+    /// latest, so its publication is clamped there rather than failing the event's replay. An article repeated in `members` keeps
+    /// its first dated row.
     static func momentumReports(eventID: String, members: [WireIdentityArticle]) -> [MomentumReport] {
         let identified = Dictionary(uniqueKeysWithValues: identities(event: members).map { ($0.articleID, $0) })
+        var seen = Set<String>()
         return members.compactMap { article in
-            guard article.publishedAt != DateParser.unknownDate else { return nil }
+            guard article.publishedAt != DateParser.unknownDate, seen.insert(article.articleID).inserted else {
+                return nil
+            }
             return MomentumReport(
                 articleID: article.articleID, eventID: eventID, wireGroupID: identified[article.articleID]?.wireGroupID,
                 localPublisherID: slug(article.publisher),
