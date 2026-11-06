@@ -182,6 +182,7 @@ enum NotificationAttachmentTests {
         presenter.isHeadless = true
         defer { presenter.isHeadless = false }
         precondition(presenter.present(banner), "Banner presents when a window is open")
+        precondition(!testWindow.isVisible, "Headless presentation orders no window on screen (#991)")
 
         // Notification handlers
         NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: NSWindow())
