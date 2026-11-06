@@ -4314,10 +4314,13 @@ struct NewsTests {
         var storedLate = first
         let clock = Date(timeIntervalSince1970: 1_800_000_000)
         storedLate.queryOrderValue = clock.addingTimeInterval(-2 * 3600).timeIntervalSince1970
-        let addedText = storedLate.cardDateText(now: clock)
-        assertTrue(
-            addedText.hasPrefix("Added ") && addedText.contains("2 hr"),
-            "A card shows when an undated story was added (\(addedText))")
+        // The same short date a dated story shows for that moment, so the test holds under any locale and OS wording.
+        let twoHoursAgo = FeedArticle(
+            title: "Dated", link: "https://example.com/two-hours", guid: nil, description: "",
+            pubDate: clock.addingTimeInterval(-2 * 3600), source: "Publisher")
+        assertEqual(
+            storedLate.cardDateText(now: clock), "Added " + twoHoursAgo.cardDateText(now: clock),
+            "A card shows when an undated story was added")
         assertTrue(storedLate.publicationDateText.hasPrefix("Added "), "The reader shows the added date")
         assertTrue(storedLate.dateAccessibilityText.hasPrefix("added "), "Accessibility says added, not published")
         var dated = FeedArticle(
