@@ -4,11 +4,13 @@ Follows [the recall levers audit](2026-11-05-recall-levers.md), whose next lever
 
 ## Knob
 
-`NEWS_PAIR_STRIP_NEWSLETTER=1` sets `EventMatchPolicy.pairModelStripsNewsletter`, read by the test runner (`Tests/StoryCorpus.swift`, `policyFromEnvironment`). `EventMatcher.newsletterStripped(title:description:)` drops a trailing ` | <series>` suffix of one to six words without a digit, the body lines that carry a sign-up or newsletter phrase (at most 200 characters) and the first paragraph's `. Plus …` teaser. Only the pair-model input changes; the deterministic features and the sentence embedding keep reading the full text.
+`NEWS_PAIR_STRIP_NEWSLETTER=1` sets `EventMatchPolicy.pairModelStripsNewsletter`, read by the test runner (`Tests/StoryCorpus.swift`, `policyFromEnvironment`). `EventMatcher.newsletterStripped(title:description:)` drops a trailing ` | <series>` suffix of one to six words without a digit, the body lines of at most 200 characters that carry a sign-up call to action ("in your inbox", a line that opens with "sign up" or "subscribe", or either followed by "here", "now" or "today") and the first paragraph's `. Plus …` teaser. Only the pair-model input changes; the deterministic features and the sentence embedding keep reading the full text.
 
 ## Method
 
 Same holdout, library copy, clock pin and matcher as the recall levers audit: `~/news-eval/holdout-2026-11-03/library-holdout-2026-11-03.json` (218 pairs), a fresh `0600` copy of `recluster.sqlite3` per run, `NEWS_HOLDOUT_NOW=1793642173`, matcher v15, pair-model prefix off, `NEWS_EVENT_DIAGNOSE=1`. Setting g is `NEWS_VETO_SHARE=0.34 NEWS_PAIR_THRESHOLD=0.85 NEWS_BORDERLINE_FLOOR=0.5`. The baseline and g ran on `origin/main` 1a3a7ca, which includes the 47706ce veto fix; the strip runs on the knob build.
+
+The call-to-action pattern replaced a broader one that also matched any mention of a newsletter after these runs. The holdout window's only line either pattern removes is First Thing's "Don’t already get First Thing in your inbox? Sign up here", so the rows below were not re-run.
 
 ## Results
 

@@ -236,13 +236,9 @@ enum EventClusterer {
                         matchPolicy.pairModelPrefix && !a.source.isEmpty && !b.source.isEmpty
                         ? a.source == b.source : nil
                     func input(_ row: EventMatchRow) -> String {
-                        let stripped =
-                            matchPolicy.pairModelStripsNewsletter
-                            ? EventMatcher.newsletterStripped(title: row.title, description: row.description)
-                            : (title: row.title, description: row.description)
-                        let text = EventFeatures.matchingText(title: stripped.title, description: stripped.description)
-                        return matchPolicy.pairModelPrefix
-                            ? EventMatcher.pairModelInput(text, gap: gap, samePublisher: samePublisher) : text
+                        EventMatcher.pairModelText(
+                            title: row.title, description: row.description, gap: gap, samePublisher: samePublisher,
+                            policy: matchPolicy)
                     }
                     modelScores[key] = await pairProbability(input(a), input(b))
                 }
