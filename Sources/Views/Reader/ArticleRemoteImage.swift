@@ -56,10 +56,10 @@ extension EnvironmentValues {
 
     /// Card decodes hold about three prefetch windows (behind, visible, ahead); full-size decodes about three stories'
     /// figures plus the lead and the hero. Together they keep the 192 MB ceiling of the single cache before #591.
-    static let cardCostLimit = 128 * 1024 * 1024
-    static let cardCountLimit = 90
-    static let fullCostLimit = 64 * 1024 * 1024
-    static let fullCountLimit = 24
+    nonisolated static let cardCostLimit = 128 * 1024 * 1024
+    nonisolated static let cardCountLimit = 90
+    nonisolated static let fullCostLimit = 64 * 1024 * 1024
+    nonisolated static let fullCountLimit = 24
 
     /// Full-size decodes, which also serve a card asking for the same URL.
     static let images: NSCache<NSURL, CGImage> = {

@@ -108,6 +108,12 @@ actor NetworkBoundaryProxy {
         return configuration
     }
 
+    /// The running gateway's port, or nil before the first request and after it stopped; never starts one (#1006).
+    func runningPort() async -> UInt16? {
+        guard let startup else { return nil }
+        return try? await startup.value.runningPort
+    }
+
     /// The next `port()` call starts a new listener.
     func stop() async {
         let task = startup
@@ -123,6 +129,8 @@ final class ProxyResolver: Sendable {
     typealias Lookup = @Sendable (String) async -> IPAddressValidator.ValidationResult
     /// Longer than a healthy answer by far, shorter than the request timeout that would otherwise absorb a hang.
     static let defaultDeadline: Duration = .seconds(5)
+    /// Lookups the caller cancelled before they answered, for the diagnostics export (#1006).
+    static let cancellations = OSAllocatedUnfairLock(initialState: 0)
     private let lookup: Lookup
     private let deadline: Duration
 
@@ -146,7 +154,10 @@ final class ProxyResolver: Sendable {
     }
 
     func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
-        guard !Task.isCancelled else { return .unresolvable(reason: "Cancelled") }
+        guard !Task.isCancelled else {
+            Self.cancellations.withLock { $0 += 1 }
+            return .unresolvable(reason: "Cancelled")
+        }
         let lookup = lookup
         let deadline = deadline
         return await withTaskGroup(of: IPAddressValidator.ValidationResult.self) { group in
@@ -161,6 +172,9 @@ final class ProxyResolver: Sendable {
             }
             let first = await group.next() ?? .unresolvable(reason: "Cancelled")
             group.cancelAll()
+            if Task.isCancelled, first == .unresolvable(reason: "Cancelled") {
+                Self.cancellations.withLock { $0 += 1 }
+            }
             return first
         }
     }
