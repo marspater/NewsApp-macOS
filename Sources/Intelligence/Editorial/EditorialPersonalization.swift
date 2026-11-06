@@ -22,6 +22,14 @@ struct PersonalizationPolicy: Sendable {
     let saveWeight: Double
     let skipWeight: Double
 }
+struct EditorialRenderedImpression: Sendable {
+    let impressionID: String
+    let articleID: String
+    let topicID: String
+    let vector: [Float]?
+    let modelVersion: String
+    let at: Date
+}
 struct PersonalizationCounts: Sendable {
     let impressions: Int
     let skips: Int
@@ -71,7 +79,7 @@ actor EditorialPersonalization {
     ) throws {
         guard policy.halfLife.isFinite, policy.halfLife > 0, policy.clickWeight.isFinite,
             policy.clickWeight > 0, policy.saveWeight.isFinite, policy.saveWeight > 0,
-            policy.skipWeight.isFinite, policy.skipWeight < 0, !modelVersion.isEmpty,
+            policy.skipWeight.isFinite, policy.skipWeight < 0, !modelVersion.isEmpty, !modelVersion.contains("\0"),
             now().timeIntervalSince1970.isFinite
         else { throw PersonalizationError.invalidPolicy }
         self.policy = policy
@@ -87,13 +95,18 @@ actor EditorialPersonalization {
                 var reserved = stat()
                 defer { Darwin.close(fd) }
                 guard fstat(fd, &reserved) == 0 else { throw PersonalizationError.sqlite }
-                let owner = try openConnection(path, flags: SQLITE_OPEN_READWRITE)
-                try verifyIdentity(path, reserved)
-                try verifyEmpty(owner.handle)
-                try initialize(owner.handle, modelVersion: modelVersion)
-                try verifyStore(owner.handle, modelVersion: modelVersion)
-                try expire(owner.handle, at: now)
-                return owner
+                do {
+                    let owner = try openConnection(path, flags: SQLITE_OPEN_READWRITE)
+                    try verifyIdentity(path, reserved)
+                    try verifyEmpty(owner.handle)
+                    try initialize(owner.handle, modelVersion: modelVersion)
+                    try verifyStore(owner.handle, modelVersion: modelVersion)
+                    try expire(owner.handle, at: now)
+                    return owner
+                } catch {
+                    if (try? verifyIdentity(path, reserved)) != nil { _ = Darwin.unlink(path) }
+                    throw error
+                }
             }
             guard errno == EEXIST else { throw PersonalizationError.sqlite }
             var before = stat()
@@ -208,13 +221,15 @@ actor EditorialPersonalization {
 
     func setEnabled(_ value: Bool) { enabled = value }
 
-    func recordRendered(
-        impressionID: String, articleID: String, topicID: String, vector: [Float]?,
-        modelVersion: String, at: Date
-    ) throws {
+    func recordRendered(_ impression: EditorialRenderedImpression) throws {
         guard enabled else { return }
+        let (impressionID, articleID, topicID, vector, modelVersion, at) = (
+            impression.impressionID, impression.articleID, impression.topicID, impression.vector,
+            impression.modelVersion, impression.at
+        )
         guard !impressionID.isEmpty, !articleID.isEmpty, !topicID.isEmpty,
             impressionID.utf8.count <= 1024, articleID.utf8.count <= 1024, topicID.utf8.count <= 1024,
+            !impressionID.contains("\0"), !articleID.contains("\0"), !topicID.contains("\0"),
             modelVersion == self.modelVersion, at.timeIntervalSince1970.isFinite,
             vector.map({ $0.count == 384 && $0.allSatisfy(\.isFinite) }) ?? true
         else { throw PersonalizationError.invalidInput }
@@ -236,13 +251,39 @@ actor EditorialPersonalization {
         try done(stmt)
     }
     func recordScrolledPast(impressionID: String, at: Date) throws {
-        try record("skip", id: impressionID, at: at)
+        try record(.skip, id: impressionID, at: at)
     }
     func recordClick(impressionID: String, at: Date) throws {
-        try record("click", id: impressionID, at: at)
+        try record(.click, id: impressionID, at: at)
     }
     func recordSave(impressionID: String, at: Date) throws {
-        try record("save", id: impressionID, at: at)
+        try record(.save, id: impressionID, at: at)
+    }
+
+    private enum Action {
+        case skip, click, save
+
+        var column: Int32 {
+            switch self {
+            case .skip: 1
+            case .click: 2
+            case .save: 3
+            }
+        }
+        var sql: String {
+            switch self {
+            case .skip: "UPDATE impressions SET skip=? WHERE id=?"
+            case .click: "UPDATE impressions SET click=? WHERE id=?"
+            case .save: "UPDATE impressions SET save=? WHERE id=?"
+            }
+        }
+        func weight(policy: PersonalizationPolicy, engaged: Bool) -> Double {
+            switch self {
+            case .skip: engaged ? 0 : policy.skipWeight
+            case .click: policy.clickWeight
+            case .save: policy.saveWeight
+            }
+        }
     }
 
     private struct RecordedImpression {
@@ -254,8 +295,11 @@ actor EditorialPersonalization {
         let vector: [Float]?
     }
 
-    private func record(_ kind: String, id: String, at: Date) throws {
+    private func record(_ kind: Action, id: String, at: Date) throws {
         guard enabled else { return }
+        guard !id.isEmpty, id.utf8.count <= 1024, !id.contains("\0") else {
+            throw PersonalizationError.invalidInput
+        }
         let trustedNow = now()
         let time = at.timeIntervalSince1970
         guard time.isFinite, trustedNow.timeIntervalSince1970.isFinite,
@@ -266,7 +310,7 @@ actor EditorialPersonalization {
         do {
             let impression = try loadImpression(id, kind: kind)
             guard time >= impression.rendered else { throw PersonalizationError.invalidTime }
-            guard kind == "skip" || !impression.skipped || impression.engaged else {
+            guard kind == .skip || !impression.skipped || impression.engaged else {
                 throw PersonalizationError.invalidInput
             }
             if !impression.already {
@@ -275,10 +319,7 @@ actor EditorialPersonalization {
                 }
                 try validateClock(time)
                 try markAction(kind, id: id, time: time)
-                let weight =
-                    kind == "skip"
-                    ? (impression.engaged ? 0 : policy.skipWeight)
-                    : (kind == "click" ? policy.clickWeight : policy.saveWeight)
+                let weight = kind.weight(policy: policy, engaged: impression.engaged)
                 if weight != 0 {
                     try advanceClock(time)
                     if let vector = impression.vector { try updateProfile(vector, weight: weight, time: time) }
@@ -291,12 +332,12 @@ actor EditorialPersonalization {
         }
     }
 
-    private func loadImpression(_ id: String, kind: String) throws -> RecordedImpression {
+    private func loadImpression(_ id: String, kind: Action) throws -> RecordedImpression {
         let query = try prepare("SELECT rendered,skip,click,save,vector FROM impressions WHERE id=?")
         defer { sqlite3_finalize(query) }
         bind(id, to: 1, in: query)
         guard sqlite3_step(query) == SQLITE_ROW else { throw PersonalizationError.invalidInput }
-        let column: Int32 = kind == "skip" ? 1 : (kind == "click" ? 2 : 3)
+        let column = kind.column
         let vector = readVector(query, column: 4)
         guard sqlite3_column_type(query, 4) == SQLITE_NULL || vector != nil else {
             throw PersonalizationError.invalidInput
@@ -322,13 +363,8 @@ actor EditorialPersonalization {
         }
     }
 
-    private func markAction(_ kind: String, id: String, time: Double) throws {
-        let sql =
-            kind == "skip"
-            ? "UPDATE impressions SET skip=? WHERE id=?"
-            : (kind == "click"
-                ? "UPDATE impressions SET click=? WHERE id=?" : "UPDATE impressions SET save=? WHERE id=?")
-        let stmt = try prepare(sql)
+    private func markAction(_ kind: Action, id: String, time: Double) throws {
+        let stmt = try prepare(kind.sql)
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_double(stmt, 1, time)
         bind(id, to: 2, in: stmt)

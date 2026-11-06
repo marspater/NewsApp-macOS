@@ -87,17 +87,19 @@ enum EditorialPersonalizationEvaluation {
         var skipVector = Array(repeating: Float.zero, count: 384)
         skipVector[1] = 1
         try await store.recordRendered(
-            impressionID: "disabled", articleID: "disabled", topicID: "topic", vector: vector,
-            modelVersion: "synthetic-v1", at: time)
+            .init(
+                impressionID: "disabled", articleID: "disabled", topicID: "topic", vector: vector,
+                modelVersion: "synthetic-v1", at: time))
         let disabledCount = try await store.counts().impressions
         await store.setEnabled(true)
         let start = Date()
         for index in 0..<1000 {
             let id = "episode-\(index)"
             try await store.recordRendered(
-                impressionID: id, articleID: "article-\(index % 100)", topicID: "topic-\(index % 10)",
-                vector: index % 4 == 3 ? nil : (index % 4 == 2 ? skipVector : vector), modelVersion: "synthetic-v1",
-                at: time)
+                .init(
+                    impressionID: id, articleID: "article-\(index % 100)", topicID: "topic-\(index % 10)",
+                    vector: index % 4 == 3 ? nil : (index % 4 == 2 ? skipVector : vector), modelVersion: "synthetic-v1",
+                    at: time))
             switch index % 4 {
             case 0: try await store.recordClick(impressionID: id, at: time)
             case 1: try await store.recordSave(impressionID: id, at: time)

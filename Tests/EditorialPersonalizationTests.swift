@@ -31,6 +31,17 @@ private final class PersonalizationTestClock: @unchecked Sendable {
     }
 }
 
+private final class FailingInitializationClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        calls += 1
+        return Date(timeIntervalSince1970: calls == 1 ? 100 : .nan)
+    }
+}
+
 enum EditorialPersonalizationTests {
     nonisolated(unsafe) static var checks = 0
     nonisolated(unsafe) static var failures = 0
@@ -85,6 +96,23 @@ enum EditorialPersonalizationTests {
         check(sqlite3_step(statement) == SQLITE_ROW && sqlite3_column_int(statement, 0) == 42)
         sqlite3_finalize(statement)
         sqlite3_close(raw)
+        let failedPath = dir.appendingPathComponent("failed.sqlite").path
+        let failingClock = FailingInitializationClock()
+        do {
+            _ = try EditorialPersonalization(
+                policy: p, modelVersion: "v1", path: failedPath,
+                now: { failingClock.now() })
+            check(false)
+        } catch PersonalizationError.invalidTime { check(true) }
+        check(!FileManager.default.fileExists(atPath: failedPath))
+        _ = try EditorialPersonalization(
+            policy: p, modelVersion: "v1", path: failedPath,
+            now: { Date(timeIntervalSince1970: 100) })
+        check(FileManager.default.fileExists(atPath: failedPath))
+        do {
+            _ = try EditorialPersonalization(policy: p, modelVersion: "v1\0other")
+            check(false)
+        } catch PersonalizationError.invalidPolicy { check(true) }
         let store = try EditorialPersonalization(
             policy: p, modelVersion: "v1", path: path, now: { Date(timeIntervalSince1970: 111) })
         let attributes = try FileManager.default.attributesOfItem(atPath: path)
@@ -130,8 +158,9 @@ enum EditorialPersonalizationTests {
             path: dir.appendingPathComponent("ttl.sqlite").path, now: { clock.now() })
         await ttlStore.setEnabled(true)
         try await ttlStore.recordRendered(
-            impressionID: "ttl", articleID: "a", topicID: "t", vector: nil,
-            modelVersion: "v1", at: clock.now())
+            .init(
+                impressionID: "ttl", articleID: "a", topicID: "t", vector: nil,
+                modelVersion: "v1", at: clock.now()))
         check(try await ttlStore.counts().impressions == 1)
         clock.set(Date(timeIntervalSince1970: 100 + 30 * 86400 + 1))
         check(try await ttlStore.counts().impressions == 0)
@@ -142,15 +171,36 @@ enum EditorialPersonalizationTests {
         y[0] = 0
         y[1] = 1
         try await store.recordRendered(
-            impressionID: "disabled", articleID: "a", topicID: "t", vector: x, modelVersion: "v1", at: t)
+            .init(
+                impressionID: "disabled", articleID: "a", topicID: "t", vector: x, modelVersion: "v1", at: t))
         check(try await store.counts().impressions == 0)
         await store.setEnabled(true)
+        for bad in [
+            EditorialRenderedImpression(
+                impressionID: "a\0b", articleID: "a", topicID: "t", vector: x, modelVersion: "v1", at: t),
+            EditorialRenderedImpression(
+                impressionID: "a", articleID: "a\0b", topicID: "t", vector: x, modelVersion: "v1", at: t),
+            EditorialRenderedImpression(
+                impressionID: "a", articleID: "a", topicID: "t\0b", vector: x, modelVersion: "v1", at: t),
+        ] {
+            do {
+                try await store.recordRendered(bad)
+                check(false)
+            } catch PersonalizationError.invalidInput { check(true) }
+        }
+        do {
+            try await store.recordClick(impressionID: "a\0b", at: t)
+            check(false)
+        } catch PersonalizationError.invalidInput { check(true) }
         try await store.recordRendered(
-            impressionID: "a", articleID: "a", topicID: "t", vector: x, modelVersion: "v1", at: t)
+            .init(
+                impressionID: "a", articleID: "a", topicID: "t", vector: x, modelVersion: "v1", at: t))
         try await store.recordRendered(
-            impressionID: "b", articleID: "a", topicID: "t", vector: y, modelVersion: "v1", at: t)
+            .init(
+                impressionID: "b", articleID: "a", topicID: "t", vector: y, modelVersion: "v1", at: t))
         try await store.recordRendered(
-            impressionID: "c", articleID: "c", topicID: "t", vector: nil, modelVersion: "v1", at: t)
+            .init(
+                impressionID: "c", articleID: "c", topicID: "t", vector: nil, modelVersion: "v1", at: t))
         try await store.recordClick(impressionID: "a", at: t)
         try await store.recordClick(impressionID: "a", at: t)
         try await store.recordClick(impressionID: "c", at: t.addingTimeInterval(5))
@@ -181,7 +231,8 @@ enum EditorialPersonalizationTests {
         try await store.recordClick(impressionID: "a", at: t)
         try await store.recordSave(impressionID: "a", at: t.addingTimeInterval(11))
         try await store.recordRendered(
-            impressionID: "closed", articleID: "d", topicID: "t", vector: x, modelVersion: "v1", at: t)
+            .init(
+                impressionID: "closed", articleID: "d", topicID: "t", vector: x, modelVersion: "v1", at: t))
         try await store.recordScrolledPast(impressionID: "closed", at: t.addingTimeInterval(11))
         do {
             try await store.recordClick(impressionID: "closed", at: t.addingTimeInterval(11))
@@ -192,18 +243,21 @@ enum EditorialPersonalizationTests {
             check(false)  // "closed episode save")
         } catch PersonalizationError.invalidInput {}
         try await store.recordRendered(
-            impressionID: "returned", articleID: "d", topicID: "t", vector: x, modelVersion: "v1", at: t)
+            .init(
+                impressionID: "returned", articleID: "d", topicID: "t", vector: x, modelVersion: "v1", at: t))
         try await store.recordClick(impressionID: "returned", at: t.addingTimeInterval(11))
         do {
             try await store.recordRendered(
-                impressionID: "future", articleID: "d", topicID: "t", vector: x,
-                modelVersion: "v1", at: t.addingTimeInterval(12))
+                .init(
+                    impressionID: "future", articleID: "d", topicID: "t", vector: x,
+                    modelVersion: "v1", at: t.addingTimeInterval(12)))
             check(false)  // "future render")
         } catch PersonalizationError.invalidTime {}
         do {
             try await store.recordRendered(
-                impressionID: "old", articleID: "d", topicID: "t", vector: x,
-                modelVersion: "v1", at: t.addingTimeInterval(11 - 30 * 86400 - 1))
+                .init(
+                    impressionID: "old", articleID: "d", topicID: "t", vector: x,
+                    modelVersion: "v1", at: t.addingTimeInterval(11 - 30 * 86400 - 1)))
             check(false)  // "expired render")
         } catch PersonalizationError.invalidTime {}
         do {
@@ -218,8 +272,9 @@ enum EditorialPersonalizationTests {
         check(try await expired.counts().impressions == 0)
         await store.setEnabled(true)
         try await store.recordRendered(
-            impressionID: "fresh", articleID: "a", topicID: "t", vector: x,
-            modelVersion: "v1", at: t)
+            .init(
+                impressionID: "fresh", articleID: "a", topicID: "t", vector: x,
+                modelVersion: "v1", at: t))
         let reopened = try EditorialPersonalization(
             policy: p, modelVersion: "v1", path: path, now: { Date(timeIntervalSince1970: 100) })
         await reopened.setEnabled(true)
@@ -237,11 +292,13 @@ enum EditorialPersonalizationTests {
         check(try await reopened.profile(at: t.addingTimeInterval(100)) == nil)
         do {
             try await reopened.recordRendered(
-                impressionID: "bad", articleID: "a", topicID: "t", vector: [1], modelVersion: "v1", at: t)
+                .init(
+                    impressionID: "bad", articleID: "a", topicID: "t", vector: [1], modelVersion: "v1", at: t))
             check(false)  // "dimension")
         } catch PersonalizationError.invalidInput {}
         try await reopened.recordRendered(
-            impressionID: "corrupt", articleID: "a", topicID: "t", vector: x, modelVersion: "v1", at: t)
+            .init(
+                impressionID: "corrupt", articleID: "a", topicID: "t", vector: x, modelVersion: "v1", at: t))
         raw = nil
         check(sqlite3_open(path, &raw) == SQLITE_OK)
         check(
@@ -264,6 +321,24 @@ enum EditorialPersonalizationTests {
         let e = try EditorialPersonalization.discoveryAllocation(
             batchSize: 1, remainder: 0, candidates: candidates, baselineExposure: 3)
         check(e.requested == 0 && e.remainder == 3)
+        var remainderA = 0
+        var remainderB = 0
+        var requestedA = 0
+        var requestedB = 0
+        for index in 0..<20 {
+            let a = try EditorialPersonalization.discoveryAllocation(
+                batchSize: 1, remainder: remainderA, candidates: candidates, baselineExposure: 3)
+            remainderA = a.remainder
+            requestedA += a.requested
+            if index < 7 {
+                let b = try EditorialPersonalization.discoveryAllocation(
+                    batchSize: 1, remainder: remainderB, candidates: candidates, baselineExposure: 3)
+                remainderB = b.remainder
+                requestedB += b.requested
+            }
+        }
+        check(requestedA == 3 && remainderA == 0)
+        check(requestedB == 1 && remainderB == 1)
         print("Personalization behavioral controls passed")
     }
 }

@@ -1,6 +1,6 @@
 # Editorial personalization experiment — 6 November 2026
 
-Status: gated #1001 implementation stacked on #999. No production settings, impression hooks or recommendation consumers are enabled. Chronological lists and global importance retain their existing behavior.
+Status: gated implementation for issue #1001, stacked on ranking PR #1048 for issue #999. No production settings, impression hooks or recommendation consumers are enabled. Chronological lists and global importance retain their existing behavior.
 
 The actor owns a private SQLite database and starts disabled on every opening. Enabling is explicit. One impression ID represents one visible episode, with separate rendered, scroll, click and save times. Repeated appearances use fresh IDs; repeated action callbacks are idempotent. Unengaged scrolling closes the episode with a negative reward. Engaged scrolling is neutral. A later return after an unengaged scroll requires a new impression. New actions cannot precede rendering, prior actions on the episode or the global reward clock; future timestamps are rejected against an injected clock.
 
