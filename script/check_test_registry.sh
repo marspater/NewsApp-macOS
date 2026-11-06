@@ -9,6 +9,10 @@ status=0
 atoms=$(script/test_atoms.sh)
 for atom in $atoms; do
     [ -f "$atom" ] || { echo "❌ Runner.swift dispatches $atom, which does not exist"; status=1; }
+    type=$(basename "$atom" .swift)
+    grep -qE "\b$type\.(run|main|runAllTests)\(" Tests/Runner.swift || {
+        echo "❌ $atom is registered but its suite is not called by Runner.swift"; status=1;
+    }
 done
 for file in $(grep -lE 'static func (run|main|runAllTests)\(\)' Tests/*.swift); do
     [ "$file" = Tests/Runner.swift ] && continue
