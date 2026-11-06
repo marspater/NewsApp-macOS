@@ -7149,7 +7149,8 @@ struct NewsTests {
     /// neighbours) in every format; a few minutes ahead keeps its date.
     static func testFutureDatedItems() async throws {
         print("  - Testing future-dated feed items...")
-        let now = Date()
+        // A fixed clock handed to every upsert keeps the test off the wall clock.
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
         let iso = ISO8601DateFormatter()
         let soon = iso.string(from: now.addingTimeInterval(300))
         let rss = """
@@ -7176,7 +7177,7 @@ struct NewsTests {
         assertEqual(articles.count, 6, "All three formats parse")
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
-        try await db.upsertArticles(articles)
+        try await db.upsertArticles(articles, now: now)
         let stored = try await db.fetchArticles()
         for format in ["RSS", "Atom", "JSON"] {
             let future = stored.first { $0.title == "\(format) future" }
@@ -7191,7 +7192,7 @@ struct NewsTests {
         }
         let futureCard = await MainActor.run { stored.first { $0.title == "RSS future" }?.cardDateText() }
         assertEqual(futureCard, "Date unavailable", "A future date never reads Just now")
-        try await db.upsertArticles(articles)
+        try await db.upsertArticles(articles, now: now.addingTimeInterval(60))
         let refreshed = try await db.fetchArticles()
         assertEqual(
             refreshed.first { $0.title == "RSS future" }?.queryOrderValue,
@@ -7201,7 +7202,7 @@ struct NewsTests {
         let stale = stored.first { $0.title == "RSS future" }!
         _ = try await db.eventRows(
             "UPDATE articles SET published_at = ? WHERE id = ?;", [.real(2_524_608_000), .text(stale.id)])
-        try await db.upsertArticles(articles)
+        try await db.upsertArticles(articles, now: now.addingTimeInterval(120))
         assertEqual(
             try await db.fetchArticles().first { $0.title == "RSS future" }?.pubDate, DateParser.unknownDate,
             "A refresh repairs a stored future date")
@@ -7221,7 +7222,7 @@ struct NewsTests {
             source: "Wire")
         let healthFeed = "https://example.com/health"
         let inserted = try await db.upsertArticles(
-            [linkless], feedUrl: healthFeed, validators: FeedValidators(etag: nil, lastModified: nil))
+            [linkless], feedUrl: healthFeed, validators: FeedValidators(etag: nil, lastModified: nil), now: now)
         assertTrue(inserted.contains(linkless.id), "A clamped link-less item keeps its parsed ID")
         assertEqual(
             try await db.feedFetchStates()[healthFeed]?.latestItemAt, nil, "A future date is not the newest item")
