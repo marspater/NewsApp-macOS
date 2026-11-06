@@ -2018,6 +2018,7 @@ struct NewsTests {
         for (name, write) in [
             ("saving a World Tension reading", { _ = try await newer.saveWorldTensionReading(reading) }),
             ("clearing enrichment", { try await newer.clearArticleEnrichment() }),
+            ("clearing the article cache", { try await newer.clearArticleCache() }),
             ("clearing the database cache", { try await newer.clearAllDatabaseCache() }),
         ] as [(String, () async throws -> Void)] {
             do {

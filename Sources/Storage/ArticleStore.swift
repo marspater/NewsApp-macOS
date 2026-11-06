@@ -608,7 +608,7 @@ final class ArticleStore: ObservableObject {
 
     /// Purges all generated AI analysis data while preserving articles and subscriptions.
     func clearAIAnalysis() async throws {
-        try await database.clearArticleEnrichment()
+        try await resettingAfterClear { try await database.clearArticleEnrichment() }
         logger.notice("Cleared AI analysis")
         // Running work is refused at commit by the generation bump; its session state is reset here (#805).
         await finishAnalysisClear()
@@ -616,7 +616,7 @@ final class ArticleStore: ObservableObject {
 
     /// Clears cached full article content while preserving subscriptions, saved stories, and read history.
     func clearArticleCache() async throws {
-        try await database.clearArticleCache()
+        try await resettingAfterClear { try await database.clearArticleCache() }
         logger.notice("Cleared story body cache")
         // This clear removes enrichment for unsaved stories too, so running work and its session state are reset (#886).
         await finishAnalysisClear()
@@ -624,10 +624,22 @@ final class ArticleStore: ObservableObject {
 
     /// Clears replaceable caches while preserving subscriptions, history and saved bodies.
     func clearAllDatabaseCache() async throws {
-        try await database.clearAllDatabaseCache()
+        try await resettingAfterClear { try await database.clearAllDatabaseCache() }
         logger.notice("Cleared all database caches")
         // This clear removes enrichment too, so running work and its session state are reset the same way (#805).
         await finishAnalysisClear()
+    }
+
+    /// Runs a clear. One that commits and then fails to rewrite the tension history still moved the database's
+    /// generation and emptied the tables, so the session resets before the error surfaces (#984).
+    private func resettingAfterClear(_ clear: () async throws -> Void) async throws {
+        let before = await database.analysisGeneration
+        do {
+            try await clear()
+        } catch {
+            if await database.analysisGeneration != before { await finishAnalysisClear() }
+            throw error
+        }
     }
 
     /// Clears running at once; while any runs, `refreshState` leaves `analysisGeneration` alone.
