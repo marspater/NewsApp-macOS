@@ -49,9 +49,14 @@ struct FeedValidators: Equatable, Sendable {
 /// relaunch, a feed that a network change backed off from one that a server or a certificate did (#927).
 enum FeedFailureKind: String, CaseIterable, Sendable {
     case dns, noSuchHost, transport, timeout, tls, http, policy, parse, unknown
+    /// A VPN's or resolver's filter answered a sinkhole address, or a fake-IP tunnel answered for the name (#929).
+    case dnsFiltered, fakeIP
 
     /// The kinds that say something about the path to the publisher and nothing about the feed.
     static let connectivity: [FeedFailureKind] = [.dns, .transport, .timeout]
+    /// What a manual refresh lifts: connectivity, and a filtered or substituted answer the reader may have fixed by
+    /// changing the network. A whole batch of filtered answers is still recorded, so the kind reaches diagnostics.
+    static let liftedByManualRefresh: [FeedFailureKind] = connectivity + [.dnsFiltered, .fakeIP]
 
     var isConnectivity: Bool { Self.connectivity.contains(self) }
 }
@@ -216,6 +221,8 @@ extension FeedError {
         case .malformedURL, .insecureScheme, .blockedPort, .blockedHost, .redirectBlocked, .dnsRebindingDetected,
             .responseTooLarge:
             return .policy
+        case .substitutedAnswer(_, .sinkhole): return .dnsFiltered
+        case .substitutedAnswer(_, .fakeIP): return .fakeIP
         case .tooManyRedirects, .httpStatus, .serverBusy: return .http
         case .unsupportedFormat, .parseFailed: return .parse
         case .network: return .transport

@@ -62,9 +62,22 @@ actor NetworkBoundaryProxy {
     private let connector: Connector
     private var startup: Task<SOCKSListener, Error>?
 
+    /// Upstream connections ask for no proxy (#929): the gateway must open every connection itself to the address it
+    /// validated. `preferNoProxies` is a preference, so a connection a system proxy or PAC rule handled anyway is
+    /// refused when its establishment report says so.
+    static var directParameters: NWParameters {
+        let parameters = NWParameters.tcp
+        parameters.preferNoProxies = true
+        return parameters
+    }
+
+    nonisolated static func permitsUpstream(proxyConfigured: Bool?) -> Bool {
+        proxyConfigured == false
+    }
+
     init(
         resolver: Resolver? = nil,
-        connector: @escaping Connector = { NWConnection(host: $0, port: $1, using: .tcp) }
+        connector: @escaping Connector = { NWConnection(host: $0, port: $1, using: directParameters) }
     ) {
         self.resolver = resolver
         self.connector = connector
@@ -606,17 +619,18 @@ private final class SOCKSTunnel: @unchecked Sendable {
             attempts = []
             addresses = []
             connection.stateUpdateHandler = nil
-            client.send(
-                content: Data([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]),
-                completion: .contentProcessed { [weak self] error in
-                    guard let self, error == nil else {
-                        self?.finish()
-                        return
-                    }
-                    self.touch()
-                    self.relay(from: self.client, to: connection)
-                    self.relay(from: connection, to: self.client)
-                })
+            // Fail closed on a proxied connection: a system proxy or PAC rule would have resolved and connected in
+            // the gateway's place, so the destination is no longer the validated one (#929).
+            connection.requestEstablishmentReport(queue: queue) { [weak self] report in
+                guard let self, !self.finished, self.upstream === connection else { return }
+                guard NetworkBoundaryProxy.permitsUpstream(proxyConfigured: report?.proxyConfigured) else {
+                    NetworkBoundaryProxy.logger.error(
+                        "Upstream port \(port, privacy: .public) refused: proxy status is not verified direct")
+                    self.reject()
+                    return
+                }
+                self.relayThroughUpstream(connection)
+            }
         case .failed(let error):
             let reason = NetworkBoundaryProxy.logDescription(error)
             NetworkBoundaryProxy.logger.error(
@@ -670,6 +684,21 @@ private final class SOCKSTunnel: @unchecked Sendable {
                     self.relay(from: source, to: destination)
                 })
         }
+    }
+
+    /// The SOCKS success reply, then bytes flow both ways.
+    private func relayThroughUpstream(_ connection: NWConnection) {
+        client.send(
+            content: Data([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]),
+            completion: .contentProcessed { [weak self] error in
+                guard let self, error == nil else {
+                    self?.finish()
+                    return
+                }
+                self.touch()
+                self.relay(from: self.client, to: connection)
+                self.relay(from: connection, to: self.client)
+            })
     }
 
     private func reject() {

@@ -28,6 +28,18 @@ struct IPAddressValidator: Sendable {
         case noSuchHost
     }
 
+    /// An answer a VPN or DNS filter put in the publisher's place (#929): a sinkhole (`0.0.0.0/8`, `::`) from threat
+    /// protection or content blocking, or a fake-IP tunnel that answers every name from the benchmarking range
+    /// `198.18.0.0/15`. Both stay blocked; naming the cause lets the reader change the network instead of the feed.
+    enum AnswerSubstitution: String, Sendable { case sinkhole, fakeIP }
+
+    /// The substitution a blocked reason describes, read from the reasons this validator returns.
+    static func substitution(in reason: String) -> AnswerSubstitution? {
+        if reason.contains("(0.0.0.0/8)") || reason.contains("(::)") { return .sinkhole }
+        if reason.contains("benchmarking") { return .fakeIP }
+        return nil
+    }
+
     /// Comprehensive pre-flight check for a given hostname or IP string.
     /// Injected DNS results still follow the hostname and literal-address guards.
     static func validateHost(

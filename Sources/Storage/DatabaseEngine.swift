@@ -2865,7 +2865,7 @@ actor DatabaseEngine {
     /// rather than becoming NULL, and an expired one stays, because `recordFeedFailure` forgives old failures by that
     /// time. A row of any other kind keeps its wait, and a host's in-memory cooldown still applies in `FeedFetcher`.
     func clearConnectivityBackoff(at now: Date) throws {
-        let kinds = FeedFailureKind.connectivity.map { "'\($0.rawValue)'" }.joined(separator: ", ")
+        let kinds = FeedFailureKind.liftedByManualRefresh.map { "'\($0.rawValue)'" }.joined(separator: ", ")
         let time = now.timeIntervalSince1970
         try executeSimple(
             "UPDATE feeds SET next_attempt_at = \(time) WHERE next_attempt_at > \(time) AND last_failure_kind IN (\(kinds));"

@@ -5117,6 +5117,25 @@ struct NewsTests {
         assertEqual(
             FeedFailureKind.allCases.filter(\.isConnectivity), [.dns, .transport, .timeout],
             "Only an unanswered lookup, a lost path and a timeout count as connectivity")
+        assertEqual(
+            FeedFailureKind.liftedByManualRefresh, [.dns, .transport, .timeout, .dnsFiltered, .fakeIP],
+            "A manual refresh also lifts a filtered or fake-IP answer (#929)")
+        for (reason, kind) in [
+            ("IPv4 current network (0.0.0.0/8)", IPAddressValidator.AnswerSubstitution.sinkhole),
+            ("IPv6 unspecified address (::)", .sinkhole),
+            ("IPv4-mapped IPv6 (IPv4 current network (0.0.0.0/8))", .sinkhole),
+            ("IPv4 benchmarking network", .fakeIP),
+        ] {
+            assertEqual(IPAddressValidator.substitution(in: reason), kind, "\(reason) names its substitution")
+        }
+        for reason in [
+            "RFC 1918 private network (10.0.0.0/8)", "IPv6 loopback (::1)", "Multicast address (224.0.0.0/4)",
+        ] {
+            assertEqual(IPAddressValidator.substitution(in: reason), nil, "\(reason) is a plain block")
+        }
+        assertTrue(
+            !FeedError.substitutedAnswer(host: "x", kind: .sinkhole).isLocalRejection,
+            "A substituted answer is recorded, so diagnostics show it")
         let urlErrors: [(URLError.Code, FeedFailureKind)] = [
             (.timedOut, .timeout), (.cannotFindHost, .dns), (.dnsLookupFailed, .dns),
             (.badURL, .transport), (.notConnectedToInternet, .transport), (.networkConnectionLost, .transport),
@@ -5135,6 +5154,8 @@ struct NewsTests {
         let feedErrors: [(FeedError, FeedFailureKind)] = [
             (.malformedURL("x"), .policy), (.insecureScheme("http"), .policy), (.blockedPort(22), .policy),
             (.blockedHost(host: "x", reason: "y"), .policy),
+            (.substitutedAnswer(host: "x", kind: .sinkhole), .dnsFiltered),
+            (.substitutedAnswer(host: "x", kind: .fakeIP), .fakeIP),
             (.redirectBlocked(from: "a", to: "b", reason: "c"), .policy),
             (.dnsRebindingDetected(host: "x", ip: "y"), .policy), (.responseTooLarge(bytes: 2, maxAllowed: 1), .policy),
             (.tooManyRedirects(6), .http), (.httpStatus(500), .http), (.serverBusy(status: 429, retryAfter: 60), .http),
@@ -5175,6 +5196,45 @@ struct NewsTests {
             now: { clock.now }
         ).fetchAllFeeds(urls: [silent], state: db)
         assertEqual(try await db.feedFetchStates()[silent], nil, "A batch whose lookups go unanswered blames no feed")
+
+        // A fake-IP tunnel answers every name from 198.18.0.0/15 (#929): recorded with its own kind, never taken for
+        // offline, and lifted by a manual refresh once the reader has changed the network.
+        let tunnelled = "https://tunnel.example/feed.xml"
+        _ = await FeedFetcher(
+            client: SecureHTTPClient(
+                configuration: mockConfig, resolver: { _ in .blocked(reason: "IPv4 benchmarking network") }),
+            now: { clock.now }
+        ).fetchAllFeeds(urls: [tunnelled], state: db)
+        assertEqual(try await kind(tunnelled), .fakeIP, "A fake-IP answer is recorded as such")
+        assertTrue(
+            try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 > clock.now } == true,
+            "A fake-IP answer backs the feed off until the network changes")
+        try await db.clearConnectivityBackoff(at: clock.now)
+        assertTrue(
+            try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 <= clock.now } == true,
+            "A manual refresh lifts a fake-IP backoff")
+
+        // A blocked literal address involves no DNS answer, so it stays a plain block, never a filtered or fake-IP one.
+        for literal in ["198.18.0.1", "198.18.0.1.", "0.0.0.0", "[::]"] {
+            // No injected resolver: the system path guards literal addresses before any lookup.
+            let client = SecureHTTPClient(configuration: mockConfig)
+            do {
+                try await client.validateDestination(URL(string: "https://\(literal)/feed.xml")!)
+                assertTrue(false, "\(literal) is blocked")
+            } catch let error as FeedError {
+                if case .blockedHost = error {} else { assertTrue(false, "\(literal) is a plain block, got \(error)") }
+            }
+        }
+        // A name whose answer is a sinkhole is the substituted answer, and its text names no single address.
+        do {
+            try await SecureHTTPClient(
+                configuration: mockConfig, resolver: { _ in .blocked(reason: "IPv6 unspecified address (::)") }
+            ).validateDestination(URL(string: "https://filtered.example/feed.xml")!)
+            assertTrue(false, "A sinkhole answer is blocked")
+        } catch let error as FeedError {
+            assertEqual(error.failureKind, .dnsFiltered, "A sinkhole answer for a name is the filtered kind")
+            assertFalse(error.errorDescription?.contains("0.0.0.0") ?? true, "The text names no single address")
+        }
 
         // One feed of each kind, in one batch so the batch is not offline.
         let lost = "https://8.8.8.8/lost.xml"
@@ -5391,6 +5451,10 @@ struct NewsTests {
                 resolver: { _ in gatewayAnswer },
                 // Port 1 on loopback refuses at once: an upstream that cannot be reached.
                 connector: { _, _ in NWConnection(host: "127.0.0.1", port: 1, using: .tcp) })
+            assertTrue(NetworkBoundaryProxy.directParameters.preferNoProxies, "Upstream asks for no proxy (#929)")
+            assertTrue(NetworkBoundaryProxy.permitsUpstream(proxyConfigured: false), "A direct connection may relay")
+            assertTrue(!NetworkBoundaryProxy.permitsUpstream(proxyConfigured: true), "A proxied connection is refused")
+            assertTrue(!NetworkBoundaryProxy.permitsUpstream(proxyConfigured: nil), "A missing report is refused")
             let client = SecureHTTPClient(gateway: gateway, resolver: { _ in publicAddress })
             let result = await FeedFetcher(client: client).fetchSingleFeed(urlString: "https://example.com/feed.xml")
             await gateway.stop()
