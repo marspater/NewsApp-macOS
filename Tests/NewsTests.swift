@@ -24039,6 +24039,9 @@ struct NewsTests {
                 date: start.addingTimeInterval(offset), category: category, level: level, message: message)
         }
         let model = LogWindowModel()
+        model.follows = false
+        model.clear()
+        assertTrue(model.follows, "Clear follows new lines again: an empty view has nothing to scroll back from")
         model.append([
             line(0, "Feeds", "Info", "Fetched 12 items"), line(1, "Database", "Error", "Integrity check failed"),
             line(2, "Feeds", "Error", "Fetch failed for news.example.com"),

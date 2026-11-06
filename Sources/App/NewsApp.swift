@@ -151,6 +151,7 @@ struct NewsApp: App {
         .commands {
             SidebarCommands()
             KeyboardShortcutsCommands()
+            LogWindowCommands()
             CommandGroup(after: .textEditing) {
                 Button("Search Archive") { archiveSearch?.perform() }
                     .keyboardShortcut("f", modifiers: .command)
@@ -447,6 +448,23 @@ struct ListViewCommands: Commands {
             }
 
             Divider()
+        }
+    }
+}
+
+/// Edit › Copy Log and Clear Log for the development Log window in front (#1005); absent in release builds.
+struct LogWindowCommands: Commands {
+    @FocusedObject private var log: LogWindowModel?
+
+    var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            if LogWindowModel.isAvailable {
+                Divider()
+                Button("Copy Log") { log?.copyVisible() }
+                    .disabled(log?.visible.isEmpty ?? true)
+                Button("Clear Log") { log?.clear() }
+                    .disabled(log?.entries.isEmpty ?? true)
+            }
         }
     }
 }
