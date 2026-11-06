@@ -55,6 +55,41 @@ struct EventClusteringReport: Equatable, Sendable {
     /// Rows left for a pass with energy because a model they needed did not run (#534).
     var deferred = 0
     var changedEvents: Set<String> = []
+    var stages = EventClusteringStages()
+}
+
+/// Wall-clock seconds a pass spent per stage (#691). The phases (`fragmentMerge`, `storyPass`, and what is left of
+/// `total` as matching) add up to `total`; the others cut across them, so they overlap the phases, not each other.
+struct EventClusteringStages: Equatable, Sendable {
+    var total = 0.0
+    var fragmentMerge = 0.0
+    var storyPass = 0.0
+    var features = 0.0
+    var embeddings = 0.0
+    var ruleAssessment = 0.0
+    var pairModel = 0.0
+    var writes = 0.0
+    var candidateSearch = 0.0
+    var eventReads = 0.0
+    var matchCommits = 0.0
+    var pairModelCalls = 0
+    var embeddedRows = 0
+
+    mutating func add(_ other: EventClusteringStages) {
+        total += other.total
+        fragmentMerge += other.fragmentMerge
+        storyPass += other.storyPass
+        features += other.features
+        embeddings += other.embeddings
+        ruleAssessment += other.ruleAssessment
+        pairModel += other.pairModel
+        writes += other.writes
+        candidateSearch += other.candidateSearch
+        eventReads += other.eventReads
+        matchCommits += other.matchCommits
+        pairModelCalls += other.pairModelCalls
+        embeddedRows += other.embeddedRows
+    }
 }
 
 /// Incremental event clustering. Each pass handles only articles that are new, whose title or description changed
@@ -75,12 +110,29 @@ enum EventClusterer {
         storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)? = nil,
         calibrationRows: [PairCalibration.Row]? = nil
     ) async throws -> EventClusteringReport {
+        let passStart = DispatchTime.now().uptimeNanoseconds
+        var stages = EventClusteringStages()
+        func seconds(since start: UInt64) -> Double {
+            Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000_000
+        }
+        func timing<T>(_ stage: WritableKeyPath<EventClusteringStages, Double>, _ body: () async throws -> T)
+            async rethrows -> T
+        {
+            let start = DispatchTime.now().uptimeNanoseconds
+            defer { stages[keyPath: stage] += seconds(since: start) }
+            return try await body()
+        }
         let injectedProbability = pairProbability
         let pairProbability = pairProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
         /// Same-event and related-act probabilities for the story signal (#627): a separate story model when given,
         /// else the pair model (an injected scorer answers p_same only).
         func pairProbabilities(_ a: String, _ b: String) async -> (same: Double, related: Double)? {
             if let storyProbabilities { return await storyProbabilities(a, b) }
+            let start = DispatchTime.now().uptimeNanoseconds
+            defer {
+                stages.pairModel += seconds(since: start)
+                stages.pairModelCalls += 1
+            }
             if let injectedProbability { return await injectedProbability(a, b).map { ($0, 0) } }
             return await PairScorer.shared.probabilities(a, b)
         }
@@ -123,6 +175,8 @@ enum EventClusterer {
         func features(_ row: EventMatchRow) -> EventFeatures {
             if let cached = cache[row.id] { return cached }
             read(row)
+            let start = DispatchTime.now().uptimeNanoseconds
+            defer { stages.features += seconds(since: start) }
             let value = EventFeatures(title: row.title, description: row.description, date: row.date)
             cache[row.id] = value
             newFeatures[row.id] = value
@@ -141,8 +195,10 @@ enum EventClusterer {
             }
             let missing = rows.filter { cache[$0.id] == nil }
             if !missing.isEmpty {
+                let start = DispatchTime.now().uptimeNanoseconds
                 let stored = try await database.fetchArticleFeatures(
                     articleIDs: missing.map(\.id), version: EventFeatures.storageVersion)
+                stages.features += seconds(since: start)
                 for row in missing {
                     if var value = stored[row.id] {
                         // Publication dates are rewritten on upsert without touching the stored signals.
@@ -160,6 +216,8 @@ enum EventClusterer {
             }
             guard !unembedded.isEmpty else { return }
             embeddingLookups.formUnion(unembedded.map(\.id))
+            let start = DispatchTime.now().uptimeNanoseconds
+            defer { stages.embeddings += seconds(since: start) }
             let stored = try await database.fetchArticleEmbeddings(
                 articleIDs: unembedded.map(\.id), modelVersion: SentenceEmbedder.modelVersion)
             var pending: [EventMatchRow] = []
@@ -173,6 +231,7 @@ enum EventClusterer {
                 guard let vector else { continue }
                 embeddingCache[row.id] = vector
                 newEmbeddings[row.id] = vector
+                stages.embeddedRows += 1
             }
         }
         func record(_ a: EventMatchRow, _ b: EventMatchRow, _ pair: EventPairAssessment, probability: Double? = nil) {
@@ -210,8 +269,11 @@ enum EventClusterer {
             } else {
                 sim = nil
             }
+            let (left, right) = (features(a), features(b))
+            let start = DispatchTime.now().uptimeNanoseconds
+            defer { stages.ruleAssessment += seconds(since: start) }
             return EventMatcher.assess(
-                features(a), features(b), policy: matchPolicy, embeddingSimilarity: sim,
+                left, right, policy: matchPolicy, embeddingSimilarity: sim,
                 samePublisher: !a.source.isEmpty && a.source == b.source)
         }
         func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async throws -> EventPairAssessment {
@@ -240,7 +302,10 @@ enum EventClusterer {
                             title: row.title, description: row.description, gap: gap, samePublisher: samePublisher,
                             policy: matchPolicy)
                     }
+                    let start = DispatchTime.now().uptimeNanoseconds
                     modelScores[key] = await pairProbability(input(a), input(b))
+                    stages.pairModel += seconds(since: start)
+                    stages.pairModelCalls += 1
                 }
                 let cutoff = { (probability: Double) -> Double in
                     guard let calibration else { return matchPolicy.pairModelThreshold }
@@ -290,6 +355,8 @@ enum EventClusterer {
             inclusionLookups.formUnion(ids)
         }
         func store() async throws {
+            let start = DispatchTime.now().uptimeNanoseconds
+            defer { stages.writes += seconds(since: start) }
             // A clear of derived data since the pass began ends it quietly; a failed write ends it with the error.
             let stored = try await database.storeClusteringPass(
                 DatabaseEngine.ClusteringPassWrites(
@@ -381,7 +448,7 @@ enum EventClusterer {
                     }
                     remaining -= 1
                     report.processed += 1
-                    let excluded = try await database.eventExclusions(of: row.id)
+                    let excluded = try await timing(\.eventReads) { try await database.eventExclusions(of: row.id) }
 
                     // Active version upgrades were partitioned above. Archived unchanged groups stay intact;
                     // edited members must still fit their remaining event.
@@ -408,10 +475,14 @@ enum EventClusterer {
                     let probe = FeedArticle(
                         storedID: row.id, title: row.title, link: "", guid: nil,
                         description: row.description, pubDate: row.date, source: row.source)
-                    let candidates = try await EventCandidateFinder.candidates(
-                        for: probe, in: database, policy: candidatePolicy, now: now)
+                    let candidates = try await timing(\.candidateSearch) {
+                        try await EventCandidateFinder.candidates(
+                            for: probe, in: database, policy: candidatePolicy, now: now)
+                    }
                     let rows = Dictionary(
-                        try await database.eventMatchRows(articleIDs: candidates.map(\.articleID)).map { ($0.id, $0) },
+                        try await timing(\.eventReads) {
+                            try await database.eventMatchRows(articleIDs: candidates.map(\.articleID))
+                        }.map { ($0.id, $0) },
                         uniquingKeysWith: { first, _ in first })
                     try await prefetch(Array(rows.values))
 
@@ -419,7 +490,10 @@ enum EventClusterer {
                     var best: (id: String, version: Int, score: Double)?
                     for eventID in Set(candidates.compactMap(\.eventID)).sorted() {
                         try Task.checkCancellation()
-                        guard let event = try await database.eventMatchMembers(eventID: eventID) else { continue }
+                        let found = try await timing(\.eventReads) {
+                            try await database.eventMatchMembers(eventID: eventID)
+                        }
+                        guard let event = found else { continue }
                         let members = event.members.filter { $0.id != row.id }
                         guard !members.isEmpty, members.count < matchPolicy.maximumEventSize,
                             !members.contains(where: { excluded.contains($0.id) })
@@ -461,12 +535,16 @@ enum EventClusterer {
                     }
 
                     guard let decision else {
-                        try await database.markEventMatchProcessed(
-                            [row.id], matcherVersion: EventMatcher.version, at: now)
+                        try await timing(\.matchCommits) {
+                            try await database.markEventMatchProcessed(
+                                [row.id], matcherVersion: EventMatcher.version, at: now)
+                        }
                         continue
                     }
-                    let outcome = try await database.applyEventMatch(
-                        row.id, decision, matcherVersion: EventMatcher.version, at: now)
+                    let outcome = try await timing(\.matchCommits) {
+                        try await database.applyEventMatch(
+                            row.id, decision, matcherVersion: EventMatcher.version, at: now)
+                    }
                     switch outcome {
                     case .joined(let id):
                         report.joined += 1
@@ -968,7 +1046,9 @@ enum EventClusterer {
             }
             return merges
         }
+        let mergeStart = DispatchTime.now().uptimeNanoseconds
         let merges = try await mergeFragments()
+        stages.fragmentMerge = seconds(since: mergeStart)
         report.merged = merges.merged
         report.changedEvents.formUnion(merges.changedEvents)
         try await store()
@@ -986,10 +1066,14 @@ enum EventClusterer {
         if report.processed > 0 || !report.changedEvents.isEmpty || storiesStale || storiesPending {
             await database.deferStoryPass()
             if allowsEnergy {
+                let storyStart = DispatchTime.now().uptimeNanoseconds
                 report.changedEvents.formUnion(try await linkStories())
+                stages.storyPass = seconds(since: storyStart)
                 await database.recordStoryPass(at: now)
             }
         }
+        stages.total = seconds(since: passStart)
+        report.stages = stages
         return report
     }
 
