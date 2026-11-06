@@ -16,7 +16,10 @@ if [ -x "./script/format.sh" ]; then
     ./script/format.sh --staged
 fi
 
-# 2. Run the test atoms that cover the staged files (script/changed_atoms.sh; the whole suite when the change
+# 2. DESIGN.md ratchet: the plain ./test.sh runs it first; the selective run below does not, so it runs here.
+./script/design_lint.sh
+
+# 3. Run the test atoms that cover the staged files (script/changed_atoms.sh; the whole suite when the change
 # reaches past Sources/ and Tests/). ./test.sh still skips the Swift runner when the same inputs already passed the
 # plain run. The design lint and the Python self-checks stay in the plain run and CI.
 # Git exports these to hooks; SwiftPM's dependency checkout in a fresh worktree then reads the wrong repository.

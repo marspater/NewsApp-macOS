@@ -4,6 +4,8 @@
 # every atom whose test file names its type (the file's basename, up to any `+`). Any other change (test.sh,
 # Tests/Runner.swift, scripts, resources, Package.swift, or a Sources/ file no atom names) prints every atom, so a
 # selection never silently skips a test. Markdown and docs/ select nothing. No changed file prints nothing.
+# ponytail: the hook calls this without GIT_INDEX_FILE, so `git commit -a` with other files staged by hand selects
+# only the hand-staged ones; pass the list as arguments from the hook if that mix ever matters.
 # Arguments replace the changed-file list: `script/changed_atoms.sh Sources/Services/IPAddressValidator.swift`.
 set -e
 cd "$(dirname "$0")/.."
