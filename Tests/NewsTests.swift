@@ -27647,6 +27647,9 @@ struct NewsTests {
             OverviewComposer.displayStatement(participant: "the mayor", position: "“we will rebuild the bridge”"),
             "The mayor said “we will rebuild the bridge.”", "A quotation opening in lower case is led by its speaker")
         assertEqual(
+            OverviewComposer.displayStatement(participant: "the mayor", position: "“we will rebuild the bridge,”"),
+            "The mayor said “we will rebuild the bridge.”", "A comma inside the closing quote becomes the full stop")
+        assertEqual(
             OverviewComposer.displayStatement(
                 participant: "Presiding Judge Joel Bennathan",
                 position: "Brand would face a \"significant custodial term\""),

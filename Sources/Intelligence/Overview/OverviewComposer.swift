@@ -101,7 +101,8 @@ public struct OverviewComposer: Sendable {
             statement = "\(speaker.prefix(1).uppercased())\(speaker.dropFirst()) said \(statement)"
         }
         if let last = statement.last, "”\"".contains(last) {
-            let inner = String(statement.dropLast())
+            var inner = String(statement.dropLast())
+            while let end = inner.last, ",;:".contains(end) { inner.removeLast() }
             if let end = inner.last, ".!?".contains(end) { return statement }
             return inner + "." + String(last)
         }
