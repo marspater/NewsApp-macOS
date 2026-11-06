@@ -125,10 +125,16 @@ actor SecureHTTPClient {
         try await fetchData(from: url, maxBytes: 256 * 1024, timeout: Self.defaultTimeout, prefixOnly: true)
     }
 
+    /// Image requests ask for the baseline formats: a document `Accept` that lists WebP and AVIF makes a CDN serve a
+    /// `Vary: Accept` variant instead of the PNG or JPEG the feed named, which the notification attachment cannot use and
+    /// which was larger than the PNG for the palette image of #1010.
+    static let imageAccept = "image/png,image/jpeg,image/gif,image/svg+xml,image/*;q=0.8,*/*;q=0.5"
+
     func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
         try await fetchData(
             from: allowHTTP ? url : Self.upgradedToHTTPS(url), maxBytes: Self.defaultImageLimit,
-            timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy)
+            timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy,
+            customHeaders: ["Accept": Self.imageAccept])
     }
 
     /// Feeds still publish `http://` image addresses that their hosts also serve over HTTPS (#794). Card, reader and

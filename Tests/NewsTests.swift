@@ -4140,7 +4140,9 @@ struct NewsTests {
 
         // Test 1: Successful image fetch
         let mockData = Data(repeating: 0xAA, count: 1024)
+        let requestedAccept = SocketObservation()
         MockURLProtocol.requestHandler = { request in
+            requestedAccept.recordText(request.value(forHTTPHeaderField: "Accept") ?? "")
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
             return (response, mockData)
         }
@@ -4149,6 +4151,8 @@ struct NewsTests {
             let (data, response) = try await client.fetchImage(from: targetURL)
             assertEqual(data.count, 1024, "Should download exact mock bytes")
             assertEqual(response.statusCode, 200, "Should get 200 status code")
+            // The request itself carries the image Accept header, not the document one (#1010).
+            assertEqual(requestedAccept.hosts, [SecureHTTPClient.imageAccept], "Image requests send the image Accept")
         } catch {
             print("❌ Unexpected error in fetchImage success test: \(error)")
             exit(1)
