@@ -48,7 +48,7 @@ Metrics that need the future model/vector implementations are explicitly emitted
 
 Counts alone do not pass the gate. Validation must assert historical same-event retrieval, lexical-hit and lexical-miss routing, wire deduplication, each 500-candidate ranking set, valid impression chronology and reward signs, and adjacent underexposed Discovery exposure. Broken deterministic controls must fail the command and CI. Unit tests include hand-calculated NDCG examples, label-independent ties and negative controls. Reports retain seed, commit, runtime versions and logical data/label hashes so repeated runs can compare data and quality results while excluding timing and output-path differences.
 
-Independent review acceptance is recorded separately from executable fixture validation. No successful review, local hardware measurement or hosted CI result is implied by this document. Review receipts and completed command results belong in the issue and dated evidence after execution.
+Fixture validation does not establish independent review acceptance, local hardware measurements or hosted CI results. Generated matrix reports always set `review_acceptance` to `pending_independent_review`; review acceptance is recorded separately. Review receipts and completed command results belong in the issue and dated evidence after execution.
 
 ## Reading the results
 
