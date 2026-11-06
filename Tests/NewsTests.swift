@@ -22011,8 +22011,8 @@ struct NewsTests {
         }
     }
 
-    /// TIME_WAIT counts (all, and loopback rows with their distinct local ports), loopback LISTEN/ESTABLISHED counts
-    /// and the ephemeral port range, from netstat and sysctl.
+    /// TIME_WAIT counts (all, loopback rows, and the distinct loopback local ports inside the ephemeral range),
+    /// loopback LISTEN/ESTABLISHED counts and the ephemeral port range, from netstat and sysctl.
     static func loopbackSocketSummary() -> String {
         func run(_ path: String, _ arguments: [String]) -> String {
             let process = Process()
@@ -22030,15 +22030,22 @@ struct NewsTests {
         let timeWait = sockets.filter { $0.contains("TIME_WAIT") }.count
         let loopback = sockets.filter { $0.contains("127.0.0.1") }
         let loopbackTimeWait = loopback.filter { $0.contains("TIME_WAIT") }
-        // netstat columns: Proto Recv-Q Send-Q Local-Address Foreign-Address State; the local port follows the last dot.
+        let bounds = run("/usr/sbin/sysctl", ["-n", "net.inet.ip.portrange.first", "net.inet.ip.portrange.last"])
+            .split(separator: "\n").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        let ephemeral = bounds.count == 2 && bounds[0] <= bounds[1] ? bounds[0]...bounds[1] : 49152...65535
+        // netstat columns: Proto Recv-Q Send-Q Local-Address Foreign-Address State; the local port follows the last
+        // dot. Only ports inside the ephemeral range count towards exhaustion.
         let localPorts = Set(
-            loopbackTimeWait.compactMap { line -> Substring? in
+            loopbackTimeWait.compactMap { line -> Int? in
                 let columns = line.split(separator: " ", omittingEmptySubsequences: true)
-                return columns.count > 3 ? columns[3].split(separator: ".").last : nil
+                guard columns.count > 3, let port = columns[3].split(separator: ".").last.flatMap({ Int($0) }),
+                    ephemeral.contains(port)
+                else { return nil }
+                return port
             })
-        let range = run("/usr/sbin/sysctl", ["-n", "net.inet.ip.portrange.first", "net.inet.ip.portrange.last"])
-            .split(separator: "\n").joined(separator: "-")
-        return "TIME_WAIT \(timeWait) (loopback \(loopbackTimeWait.count) on \(localPorts.count) local ports), "
+        let range = "\(ephemeral.lowerBound)-\(ephemeral.upperBound)"
+        return
+            "TIME_WAIT \(timeWait) (loopback \(loopbackTimeWait.count), \(localPorts.count) distinct ephemeral local ports), "
             + "loopback LISTEN \(loopback.filter { $0.contains("LISTEN") }.count), "
             + "loopback ESTABLISHED \(loopback.filter { $0.contains("ESTABLISHED") }.count), ephemeral ports \(range)"
     }
