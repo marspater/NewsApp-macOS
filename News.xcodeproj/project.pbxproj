@@ -34,8 +34,14 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				App/Main.swift,
+				App/NewsApp.swift,
 				Resources,
 				ThirdPartyNotices.txt,
+				Views/List/ArticleListView.swift,
+				Views/List/EventCardView.swift,
+				Views/MainView.swift,
+				Views/OnboardingView.swift,
+				Views/SidebarView.swift,
 			);
 			target = 0A0000000000000000000041 /* NewsTestRunner */;
 		};
