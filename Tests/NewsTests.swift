@@ -876,6 +876,7 @@ struct NewsTests {
             ("testOfflineCacheAndResilience", { await testOfflineCacheAndResilience() }),
             ("testArticleIdentityDeep", { await testArticleIdentityDeep() }),
             ("testPublisherTitleAliases", { try await testPublisherTitleAliases() }),
+            ("testNewsletterStrip", { testNewsletterStrip() }),
             ("testDatabaseEnginePersistence", { await testDatabaseEnginePersistence() }),
             ("testCanonicalArticleIngestion", { try await testCanonicalArticleIngestion(fixtureRoot: fixtureRoot) }),
             ("testPersistentArticleAliases", { try await testPersistentArticleAliases(fixtureRoot: fixtureRoot) }),
@@ -8201,6 +8202,28 @@ struct NewsTests {
 
     /// One publisher, one headline, two GUIDs and two URLs within hours: one story (#583). A recurring headline a day
     /// apart, another publisher, or a short headline stays separate.
+    /// The pair model's newsletter strip (#737): series suffix, sign-up line and teaser go; everything else stays.
+    static func testNewsletterStrip() {
+        let edition = EventMatcher.newsletterStripped(
+            title: "Stevens defects to back El-Sayed’s opponent | First Thing",
+            description: "Trump called the candidate a ‘jihadist’. Plus an Australian fish worth its weight in gold\n\n"
+                + "Don’t already get First Thing in your inbox? Sign up here\n\nGood morning. Stevens endorsed Rogers.")
+        assertEqual(edition.title, "Stevens defects to back El-Sayed’s opponent", "Series suffix is dropped")
+        assertEqual(
+            edition.description, "Trump called the candidate a ‘jihadist’.\nGood morning. Stevens endorsed Rogers.",
+            "Sign-up line and teaser are dropped")
+        let column = EventMatcher.newsletterStripped(
+            title: "Why growth is a lie | Radical Thinking with Aditya Chakrabortty", description: "A column.")
+        assertEqual(column.title, "Why growth is a lie", "A column's author suffix is dropped too")
+        assertEqual(column.description, "A column.", "A plain body is unchanged")
+        let plain = EventMatcher.newsletterStripped(
+            title: "Binance CEO says 90 percent of stolen assets have been replenished", description: "Sign up here")
+        assertEqual(plain.title, "Binance CEO says 90 percent of stolen assets have been replenished", "No suffix")
+        assertEqual(plain.description, "Sign up here", "Without a suffix the body is left alone")
+        let scored = EventMatcher.newsletterStripped(title: "Lakers beat Celtics | 102-99", description: "")
+        assertEqual(scored.title, "Lakers beat Celtics | 102-99", "A suffix with digits is not a series")
+    }
+
     static func testPublisherTitleAliases() async throws {
         print("  - Testing same-publisher duplicate items aliased by headline (#583)...")
         let db = DatabaseEngine(path: ":memory:")

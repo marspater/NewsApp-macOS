@@ -724,6 +724,10 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// is no match, counts as compatible only when it shares at least `borderlineNames` specific names. Nil turns it off.
     var borderlineFloor: Double?
     var borderlineNames = 3
+    /// Newsletter strip for the pair-model input (#737, evaluation): a title's trailing ` | <series>` suffix and the
+    /// body's sign-up line and "Plus …" teaser crush the pair model's score of a newsletter edition
+    /// (docs/audits/2026-11-05-recall-levers.md). Off: the features and the embedding keep reading the full text.
+    var pairModelStripsNewsletter = false
     static let standard = EventMatchPolicy()
 }
 
@@ -987,6 +991,31 @@ enum EventMatcher {
     /// text. The prefix is the same on both sides, plain words only, and says "unknown" where the data has no gap or
     /// publisher (the public pretraining sets), so the model learns what the words mean from the library rows.
     /// `wordpiece.pair_prefix` in `script/training` writes the same prefix for the training rows.
+    /// The newsletter edition's title and body for the pair model (#737): a trailing ` | <series>` suffix of one to six
+    /// words without a digit marks the edition; its sign-up line and the first paragraph's "Plus …" teaser are dropped.
+    /// Any other text returns unchanged.
+    static func newsletterStripped(title: String, description: String) -> (title: String, description: String) {
+        guard let separator = title.range(of: " | ", options: .backwards) else { return (title, description) }
+        let suffix = title[separator.upperBound...]
+        let words = suffix.split(whereSeparator: \.isWhitespace).count
+        guard (1...6).contains(words), !suffix.contains(where: \.isNumber) else { return (title, description) }
+        var paragraphs = description.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { paragraph in
+                !paragraph.isEmpty
+                    && !(paragraph.count <= 200
+                        && newsletterBoilerplate.firstMatch(
+                            in: paragraph, range: NSRange(paragraph.startIndex..., in: paragraph)) != nil)
+            }
+        if let first = paragraphs.first, let teaser = first.range(of: ". Plus ") {
+            paragraphs[0] = String(first[..<teaser.lowerBound]) + "."
+        }
+        return (String(title[..<separator.lowerBound]), paragraphs.joined(separator: "\n"))
+    }
+
+    private static let newsletterBoilerplate = try! NSRegularExpression(
+        pattern: "(?i)\\b(sign up|subscribe|newsletter|in your inbox)\\b")
+
     static func pairModelInput(_ text: String, gap: TimeInterval?, samePublisher: Bool?) -> String {
         let hours = gap.map { "gap \(Int(($0 / 3600).rounded())) hours" } ?? "gap unknown"
         let publisher =
