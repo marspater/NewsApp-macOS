@@ -2393,6 +2393,16 @@ actor DatabaseEngine {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
         }
+        // A date from the future would head every list and escape retention until it came due. Treat it as unknown:
+        // storage then orders it by ingestion time, a refresh keeps the stored date and feed health ignores it (#981).
+        let articles = articles.map { article -> FeedArticle in
+            guard article.pubDate.timeIntervalSince(clock) > Self.futureDateSkew else { return article }
+            var clamped = article
+            clamped.pubDate = DateParser.unknownDate
+            // A link-less, GUID-less item is identified by a fingerprint of its date; keep the ID the parser gave it.
+            if clamped.storedID == nil, clamped.id != article.id { clamped.storedID = article.id }
+            return clamped
+        }
         guard !articles.isEmpty else {
             // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
             // must be stored, or the old ETag keeps being sent and health keeps the old item counts.
@@ -2495,13 +2505,8 @@ actor DatabaseEngine {
         var insertedIDs = Set<String>()
         let now = clock.timeIntervalSince1970
 
-        for var article in articles {
+        for article in articles {
             try Task.checkCancellation()
-            // A date from the future would head every list and escape retention until it came due. Treat it as
-            // unknown: storage then orders it by ingestion time, and a refresh keeps the stored date (#981).
-            if article.pubDate.timeIntervalSince1970 > now + Self.futureDateSkew {
-                article.pubDate = DateParser.unknownDate
-            }
             let identityFeedURL = feedUrl ?? article.identityFeedURL
             let id: String
             do {
@@ -4011,7 +4016,7 @@ actor DatabaseEngine {
             "UPDATE articles SET published_at = ? WHERE published_at > ?;",
             [
                 .real(DateParser.unknownDate.timeIntervalSince1970),
-                .real(Date().timeIntervalSince1970 + Self.futureDateSkew),
+                .real(nowTimestamp + Self.futureDateSkew),
             ])
         var changes = 0
         for (sql, step) in [(tombstones, "tombstones"), ("DELETE FROM articles WHERE id IN (\(doomed));", "pruning")] {

@@ -6938,7 +6938,7 @@ struct NewsTests {
     @MainActor
     static func testFeedHealth() async throws {
         print("  - Testing feed health: availability, freshness, text quality and persistence...")
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
         func health(_ configure: (inout FeedFetchState) -> Void) -> FeedHealth {
             var state = FeedFetchState(lastFetchedAt: now)
             configure(&state)
@@ -7188,6 +7188,18 @@ struct NewsTests {
         assertEqual(
             try await db.pruneOldArticles(keepReadDays: 30, now: now.addingTimeInterval(60 * 86400)), 6,
             "Future-dated stories are pruned with their neighbours")
+        // Feed health ignores a clamped date, and a link-less item keeps the ID the parser gave it (its fingerprint
+        // would otherwise change with the date).
+        let linkless = FeedArticle(
+            title: "Wire brief", link: "", guid: nil, description: "Brief",
+            pubDate: Date(timeIntervalSince1970: 2_524_608_000),
+            source: "Wire")
+        let healthFeed = "https://example.com/health"
+        let inserted = try await db.upsertArticles(
+            [linkless], feedUrl: healthFeed, validators: FeedValidators(etag: nil, lastModified: nil))
+        assertTrue(inserted.contains(linkless.id), "A clamped link-less item keeps its parsed ID")
+        assertEqual(
+            try await db.feedFetchStates()[healthFeed]?.latestItemAt, nil, "A future date is not the newest item")
         await db.close()
     }
 
