@@ -207,6 +207,9 @@ actor SecureHTTPClient {
         case .allowed:
             break
         case .blocked(let reason):
+            if let kind = IPAddressValidator.substitution(in: reason) {
+                throw FeedError.substitutedAnswer(host: host, kind: kind)
+            }
             throw FeedError.blockedHost(host: host, reason: reason)
         case .unresolvable(let reason):
             throw FeedError.dnsUnanswered(host: host, reason: reason)

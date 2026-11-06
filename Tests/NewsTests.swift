@@ -5117,6 +5117,25 @@ struct NewsTests {
         assertEqual(
             FeedFailureKind.allCases.filter(\.isConnectivity), [.dns, .transport, .timeout],
             "Only an unanswered lookup, a lost path and a timeout count as connectivity")
+        assertEqual(
+            FeedFailureKind.liftedByManualRefresh, [.dns, .transport, .timeout, .dnsFiltered, .fakeIP],
+            "A manual refresh also lifts a filtered or fake-IP answer (#929)")
+        for (reason, kind) in [
+            ("IPv4 current network (0.0.0.0/8)", IPAddressValidator.AnswerSubstitution.sinkhole),
+            ("IPv6 unspecified address (::)", .sinkhole),
+            ("IPv4-mapped IPv6 (IPv4 current network (0.0.0.0/8))", .sinkhole),
+            ("IPv4 benchmarking network", .fakeIP),
+        ] {
+            assertEqual(IPAddressValidator.substitution(in: reason), kind, "\(reason) names its substitution")
+        }
+        for reason in [
+            "RFC 1918 private network (10.0.0.0/8)", "IPv6 loopback (::1)", "Multicast address (224.0.0.0/4)",
+        ] {
+            assertEqual(IPAddressValidator.substitution(in: reason), nil, "\(reason) is a plain block")
+        }
+        assertTrue(
+            !FeedError.substitutedAnswer(host: "x", kind: .sinkhole).isLocalRejection,
+            "A substituted answer is recorded, so diagnostics show it")
         let urlErrors: [(URLError.Code, FeedFailureKind)] = [
             (.timedOut, .timeout), (.cannotFindHost, .dns), (.dnsLookupFailed, .dns),
             (.badURL, .transport), (.notConnectedToInternet, .transport), (.networkConnectionLost, .transport),
@@ -5135,6 +5154,8 @@ struct NewsTests {
         let feedErrors: [(FeedError, FeedFailureKind)] = [
             (.malformedURL("x"), .policy), (.insecureScheme("http"), .policy), (.blockedPort(22), .policy),
             (.blockedHost(host: "x", reason: "y"), .policy),
+            (.substitutedAnswer(host: "x", kind: .sinkhole), .dnsFiltered),
+            (.substitutedAnswer(host: "x", kind: .fakeIP), .fakeIP),
             (.redirectBlocked(from: "a", to: "b", reason: "c"), .policy),
             (.dnsRebindingDetected(host: "x", ip: "y"), .policy), (.responseTooLarge(bytes: 2, maxAllowed: 1), .policy),
             (.tooManyRedirects(6), .http), (.httpStatus(500), .http), (.serverBusy(status: 429, retryAfter: 60), .http),
@@ -5175,6 +5196,23 @@ struct NewsTests {
             now: { clock.now }
         ).fetchAllFeeds(urls: [silent], state: db)
         assertEqual(try await db.feedFetchStates()[silent], nil, "A batch whose lookups go unanswered blames no feed")
+
+        // A fake-IP tunnel answers every name from 198.18.0.0/15 (#929): recorded with its own kind, never taken for
+        // offline, and lifted by a manual refresh once the reader has changed the network.
+        let tunnelled = "https://tunnel.example/feed.xml"
+        _ = await FeedFetcher(
+            client: SecureHTTPClient(
+                configuration: mockConfig, resolver: { _ in .blocked(reason: "IPv4 benchmarking network") }),
+            now: { clock.now }
+        ).fetchAllFeeds(urls: [tunnelled], state: db)
+        assertEqual(try await kind(tunnelled), .fakeIP, "A fake-IP answer is recorded as such")
+        assertTrue(
+            try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 > clock.now } == true,
+            "A fake-IP answer backs the feed off until the network changes")
+        try await db.clearConnectivityBackoff(at: clock.now)
+        assertTrue(
+            try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 <= clock.now } == true,
+            "A manual refresh lifts a fake-IP backoff")
 
         // One feed of each kind, in one batch so the batch is not offline.
         let lost = "https://8.8.8.8/lost.xml"

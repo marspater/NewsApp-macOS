@@ -20,6 +20,8 @@ enum FeedError: LocalizedError, Equatable, Sendable {
     case insecureScheme(String)
     case blockedPort(Int)
     case blockedHost(host: String, reason: String)
+    /// The resolver answered with an address a VPN or DNS filter substituted for the publisher's (#929).
+    case substitutedAnswer(host: String, kind: IPAddressValidator.AnswerSubstitution)
     case redirectBlocked(from: String, to: String, reason: String)
     case tooManyRedirects(Int)
     case dnsRebindingDetected(host: String, ip: String)
@@ -53,6 +55,12 @@ enum FeedError: LocalizedError, Equatable, Sendable {
             return "Port \(port) is blocked for security reasons."
         case .blockedHost(let host, let reason):
             return "Security Block: Host '\(host)' rejected (\(reason))."
+        case .substitutedAnswer(let host, .sinkhole):
+            return
+                "A DNS filter on this network answered 0.0.0.0 for '\(host)'. Turn off the VPN's threat protection or content blocking for News, then Refresh."
+        case .substitutedAnswer(_, .fakeIP):
+            return
+                "This VPN or proxy answers every name from a fake-IP range, which News cannot verify. Switch it to a mode that returns real addresses, or turn it off, then Refresh."
         case .redirectBlocked(let from, let to, let reason):
             return "Security Block: Redirect from \(from) to \(to) rejected (\(reason))."
         case .tooManyRedirects(let count):
