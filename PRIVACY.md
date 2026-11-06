@@ -64,8 +64,7 @@ NewsApp is signed with macOS **Hardened Runtime** and declares only the absolute
 |:---|:---|
 | `com.apple.security.network.client` | Outgoing HTTP/HTTPS network connections to fetch feeds and article web pages. |
 | `com.apple.security.network.server` | An ephemeral listener bound strictly to `127.0.0.1` for the on-device destination-validation gateway; no LAN listener. |
-
-| `com.apple.security.files.user-selected.read-write` | User-initiated file dialogs to import and export OPML subscription lists. |
+| `com.apple.security.files.user-selected.read-write` | User-initiated file dialogs to import and export OPML subscription lists, and to save Markdown and EPUB exports, library backups and diagnostics. |
 
 No access is requested or granted for:
 * Camera or Microphone

@@ -24,13 +24,18 @@ extension DatabaseEngine {
                 throw KnowledgeEPUB.Error.storyMissing
             }
             let overview = try fetchEventOverview(forArticleID: article.id)
-            let quotes = try (overview?.citations.values.sorted { $0.id < $1.id } ?? []).map { citation in
-                let source = try fetchArticles(limit: 1, id: citation.articleID).first
-                return KnowledgeExport.quote(citation, sourceArticle: source)
+            let citations = overview?.citations.values.sorted { $0.id < $1.id } ?? []
+            guard citations.count <= 1000 else { throw KnowledgeEPUB.Error.tooLarge }
+            var sources: [String: FeedArticle?] = [:]
+            let quotes = try citations.map { citation in
+                if sources[citation.articleID] == nil {
+                    sources[citation.articleID] = .some(try fetchArticles(limit: 1, id: citation.articleID).first)
+                }
+                return KnowledgeExport.quote(citation, sourceArticle: sources[citation.articleID] ?? nil)
             }
             let notes = try fetchNotes(for: article.id)
             let body = digest ? FeedXMLParser.stripHTMLSimple(article.description) : Self.exportText(of: article)
-            guard body.utf8.count <= 2 * 1024 * 1024, notes.count <= 10000, quotes.count <= 1000 else {
+            guard body.utf8.count <= 2 * 1024 * 1024, notes.count <= 10000 else {
                 throw KnowledgeEPUB.Error.tooLarge
             }
             return KnowledgeExportDocument(
