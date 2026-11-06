@@ -693,7 +693,9 @@ class FeedManager: NSObject, ObservableObject {
             return NotificationService.topInterests(try await database.briefingInterests(now: now, resetAt: resetAt))
         } catch {
             if !(error is CancellationError) {
-                NewsSignposts.feedsLog.error("Could not load reading interests for notification triage: \(error.localizedDescription)")
+                NewsSignposts.feedsLog.error(
+                    "Could not load reading interests for notification triage: \(error.localizedDescription)"
+                )
             }
             return []
         }
@@ -731,7 +733,9 @@ class FeedManager: NSObject, ObservableObject {
                         await self?.markNotified(banner.stories)
                     } catch {
                         if !(error is CancellationError) {
-                            NewsSignposts.feedsLog.error("Could not record delivered notification: \(error.localizedDescription)")
+                            NewsSignposts.feedsLog.error(
+                                "Could not record delivered notification: \(error.localizedDescription)"
+                            )
                         }
                     }
                 }
@@ -740,7 +744,9 @@ class FeedManager: NSObject, ObservableObject {
                         try await database.queuePriority(waiting, at: posted)
                     } catch {
                         if !(error is CancellationError) {
-                            NewsSignposts.feedsLog.error("Could not queue priority notifications: \(error.localizedDescription)")
+                            NewsSignposts.feedsLog.error(
+                                "Could not queue priority notifications: \(error.localizedDescription)"
+                            )
                         }
                     }
                 }
@@ -757,7 +763,9 @@ class FeedManager: NSObject, ObservableObject {
             }
         } catch {
             if !(error is CancellationError) {
-                logger.error("Could not prepare notification delivery; skipping this pass: \(error.localizedDescription)")
+                logger.error(
+                    "Could not prepare notification delivery; skipping this pass: \(error.localizedDescription)"
+                )
             }
             return
         }
