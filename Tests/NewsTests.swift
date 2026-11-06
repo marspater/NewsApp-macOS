@@ -22004,14 +22004,15 @@ struct NewsTests {
         } catch let error where error is LoopbackTimeout || error as? NWError == .posix(.EADDRINUSE) {
             print("  ↻ Loopback transport error under load (\(error)); running the socket test once more")
             do { try await test() } catch {
-                // The second failure carries the socket state, so a CI log can say what collided.
-                print("  socket state at the second failure: \(loopbackSocketSummary())")
+                // The second failure carries the error and the socket state, so a CI log can say what collided.
+                print("  socket state at the second failure (\(error)): \(loopbackSocketSummary())")
                 throw error
             }
         }
     }
 
-    /// TIME_WAIT and loopback LISTEN/ESTABLISHED counts and the ephemeral port range, from netstat and sysctl.
+    /// TIME_WAIT counts (all, and loopback rows with their distinct local ports), loopback LISTEN/ESTABLISHED counts
+    /// and the ephemeral port range, from netstat and sysctl.
     static func loopbackSocketSummary() -> String {
         func run(_ path: String, _ arguments: [String]) -> String {
             let process = Process()
@@ -22028,9 +22029,17 @@ struct NewsTests {
         let sockets = run("/usr/sbin/netstat", ["-an", "-p", "tcp"]).split(separator: "\n")
         let timeWait = sockets.filter { $0.contains("TIME_WAIT") }.count
         let loopback = sockets.filter { $0.contains("127.0.0.1") }
+        let loopbackTimeWait = loopback.filter { $0.contains("TIME_WAIT") }
+        // netstat columns: Proto Recv-Q Send-Q Local-Address Foreign-Address State; the local port follows the last dot.
+        let localPorts = Set(
+            loopbackTimeWait.compactMap { line -> Substring? in
+                let columns = line.split(separator: " ", omittingEmptySubsequences: true)
+                return columns.count > 3 ? columns[3].split(separator: ".").last : nil
+            })
         let range = run("/usr/sbin/sysctl", ["-n", "net.inet.ip.portrange.first", "net.inet.ip.portrange.last"])
             .split(separator: "\n").joined(separator: "-")
-        return "TIME_WAIT \(timeWait), loopback LISTEN \(loopback.filter { $0.contains("LISTEN") }.count), "
+        return "TIME_WAIT \(timeWait) (loopback \(loopbackTimeWait.count) on \(localPorts.count) local ports), "
+            + "loopback LISTEN \(loopback.filter { $0.contains("LISTEN") }.count), "
             + "loopback ESTABLISHED \(loopback.filter { $0.contains("ESTABLISHED") }.count), ephemeral ports \(range)"
     }
 
