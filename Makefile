@@ -1,16 +1,12 @@
-SCRATCH_PATH ?= $(HOME)/.swiftbuild/News
-
 .PHONY: all build release test run clean app
 
 all: build
 
 build:
-	@mkdir -p "$(SCRATCH_PATH)"
-	swift build --arch arm64 --scratch-path "$(SCRATCH_PATH)"
+	./build.sh
 
 release:
-	@mkdir -p "$(SCRATCH_PATH)"
-	swift build -c release --arch arm64 --scratch-path "$(SCRATCH_PATH)"
+	./build_release.sh
 
 run:
 	./script/build_and_run.sh
@@ -22,4 +18,4 @@ test:
 	./test.sh
 
 clean:
-	rm -rf -- "$(SCRATCH_PATH)" .build
+	rm -rf -- .build build/DerivedData News.app "News Dev.app" NewsHarness.app

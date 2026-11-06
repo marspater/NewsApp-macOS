@@ -33,10 +33,13 @@ enum StoryCurator {
         var changed: Bool { expired > 0 || imagesChecked > 0 }
     }
 
+    /// Publisher pages one lookup pass may request.
+    static let imageBudget = 30
+
     static func run(
         in database: DatabaseEngine,
         imageFinder: StoryImageFinder = .unavailable,
-        imageBudget: Int = 30,
+        imageBudget: Int = imageBudget,
         muting: MuteRules = MuteRules(),
         keepingFeedURLs: [String] = [],
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,

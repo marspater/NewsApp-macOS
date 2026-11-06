@@ -123,7 +123,7 @@ struct BriefingDriversData: Equatable, Sendable {
         make(await BriefingOverviews.load(context.entries, store: store))
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         let now = Date(timeIntervalSince1970: 1_793_372_400)
         let samples: [SampleDriver] = [

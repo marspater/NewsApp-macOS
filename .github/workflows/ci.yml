@@ -52,12 +52,13 @@ jobs:
       - name: Ensure Executable Permissions
         run: chmod +x test.sh build.sh build_release.sh
 
-      # Xcode 26.6 build products: a cache of their own, apart from the Xcode 27 build job's.
+      # Xcode 26.6 package checkouts and build products: a cache of their own, apart from the Xcode 27 build job's.
       - name: Cache SwiftPM
         uses: actions/cache@v6
         with:
           path: |
             .build
+            build/DerivedData/SourcePackages
             ~/Library/Caches/org.swift.swiftpm
           key: swiftpm-${{ runner.os }}-xcode26-${{ hashFiles('Package.resolved') }}
           restore-keys: swiftpm-${{ runner.os }}-xcode26-
@@ -102,7 +103,7 @@ jobs:
           retention-days: 14
 
       - name: Verify Publisher Excerpts
-        run: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
+        run: NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
 
       - name: Verify Swift Package Manager Build
         run: swift build --force-resolved-versions --target News
@@ -130,6 +131,7 @@ jobs:
         with:
           path: |
             .build
+            build/DerivedData/SourcePackages
             ~/Library/Caches/org.swift.swiftpm
           key: swiftpm-${{ runner.os }}-xcode27-${{ hashFiles('Package.resolved') }}
           restore-keys: swiftpm-${{ runner.os }}-xcode27-

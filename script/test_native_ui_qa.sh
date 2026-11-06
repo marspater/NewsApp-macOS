@@ -1,122 +1,15 @@
 #!/bin/bash
+# Native UI QA checks (Tests/Harness/NativeUIQAChecks.swift): a harness app built from the production views, run with
+# the arguments given.
 set -e
 
-TARGET_MACOS="${TARGET_MACOS:-15.0}"
-export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-${TMPDIR:-/tmp}/news-module-cache}"
-export SWIFT_MODULECACHE_PATH="$CLANG_MODULE_CACHE_PATH"
+cd "$(dirname "$0")/.."
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-ui-qa.XXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
 
-echo "Compiling Native UI QA Checks for macOS ${TARGET_MACOS} ($(uname -m))..."
-source script/swiftpm_dependencies.sh
-swiftc "${NEWS_DEPENDENCY_FLAGS[@]}" -swift-version 6 -O -parse-as-library -target "$(uname -m)-apple-macos${TARGET_MACOS}" \
-    Sources/Services/DateParser.swift \
-    Sources/Models/FeedError.swift \
-    Sources/Models/FeedFetchState.swift \
-    Sources/Models/FeedCatalog.swift \
-    Sources/Models/FeedAdvisory.swift \
-    Sources/Models/MuteRules.swift \
-    Sources/Services/IPAddressValidator.swift \
-    Sources/Models/ArticleIdentity.swift \
-    Sources/Models/EventOverview.swift \
-    Sources/Models/EventFeed.swift \
-    Sources/Storage/DatabaseEngine.swift \
-    Sources/Storage/DatabaseEngine+Events.swift \
-    Sources/Storage/DatabaseEngine+Search.swift \
-    Sources/Storage/MigrationCoordinator.swift \
-    Sources/Storage/ArticleStore.swift \
-    Sources/Storage/ArticleStore+Spotlight.swift \
-    Sources/Storage/ArticleStore+Events.swift \
-    Sources/Storage/SpotlightIndexer.swift \
-    Sources/Intelligence/ArticleIntelligence.swift \
-    Sources/Intelligence/Overview/OverviewPassageSelector.swift \
-    Sources/Intelligence/PromptDefense.swift \
-    Sources/Intelligence/Overview/PassageFactExtractor.swift \
-    Sources/Intelligence/Tension/TensionMethodology.swift \
-    Sources/Intelligence/Tension/WorldTension.swift \
-    Sources/Intelligence/Overview/OverviewComposer.swift \
-    Sources/Intelligence/Overview/OverviewTimelineBuilder.swift \
-    Sources/Intelligence/Overview/OverviewQualityAuditor.swift \
-    Sources/Intelligence/Overview/GeneratedTextFidelity.swift \
-    Sources/Intelligence/Overview/OverviewClaimVerifier.swift \
-    Sources/Intelligence/Overview/OverviewTimelineExtractor.swift \
-    Sources/Intelligence/Overview/OverviewPerspectivesExtractor.swift \
-    Sources/Intelligence/Overview/OverviewThematicAngleExtractor.swift \
-    Sources/Intelligence/Overview/OverviewIndustryImpactExtractor.swift \
-    Sources/Intelligence/Overview/CoverageSentimentEvaluator.swift \
-    Sources/Intelligence/Events/EventCandidates.swift \
-    Sources/Intelligence/IntelligencePolicy.swift \
-    Sources/Intelligence/Events/ActClass.swift \
-    Sources/Intelligence/Events/EventMatcher.swift \
-    Sources/Intelligence/Events/EventClustering.swift \
-    Sources/Intelligence/Events/SentenceEmbedder.swift \
-    Sources/Intelligence/Events/EventJudge.swift \
-    Sources/Intelligence/Events/StoryImportance.swift \
-    Sources/Intelligence/Extraction/ContentExtractionPipeline.swift \
-    Sources/Intelligence/Extraction/EnrichmentQueue.swift \
-    Sources/Intelligence/Overview/OverviewGenerationCoordinator.swift \
-    Sources/Services/NetworkBoundaryProxy.swift \
-    Sources/Views/Reader/WebPreviewPolicy.swift \
-    Sources/Services/SecureHTTPClient.swift \
-    Sources/App/AppSettings.swift \
-    Sources/Services/FeedXMLParser.swift \
-    Sources/Coordinators/NotificationService.swift \
-    Sources/Coordinators/NotificationImage.swift \
-    Sources/Services/FeedFetcher.swift \
-    Sources/Services/JSONFeedParser.swift \
-    Sources/Storage/ReadManager.swift \
-    Sources/App/ThemeManager.swift \
-    Sources/Models/FeedArticle.swift \
-    Sources/Models/ArchiveSearchToken.swift \
-    Sources/Models/SmartBinder.swift \
-    Sources/Models/ArticleSearchState.swift \
-    Sources/Storage/CacheManager.swift \
-    Sources/Coordinators/FeedManager.swift \
-    Sources/App/AppContainer.swift \
-    Sources/Views/DesignSystem.swift \
-    Sources/Views/SidebarView.swift \
-    Sources/Views/List/ArticleCardView.swift \
-    Sources/Views/List/EventCardView.swift \
-    Sources/Views/List/ArticleListView.swift \
-    Sources/Views/List/StoryQuickLook.swift \
-    Sources/Views/Briefing/BriefingComponents.swift \
-    Sources/Views/Briefing/BriefingView.swift \
-    Sources/Views/Briefing/BriefingHeroCarouselView.swift \
-    Sources/Views/Briefing/BriefingBoardLayout.swift \
-    Sources/Views/Briefing/BriefingModules.swift \
-    Sources/Views/Briefing/BriefingSitrepModule.swift \
-    Sources/Views/Briefing/BriefingSinceLastModule.swift \
-    Sources/Views/Briefing/BriefingPriorityModule.swift \
-    Sources/Views/Briefing/BriefingFootprintModule.swift \
-    Sources/Views/Briefing/BriefingRegionsModule.swift \
-    Sources/Views/Briefing/BriefingIndustryModule.swift \
-    Sources/Views/Briefing/BriefingDriversModule.swift \
-    Sources/Views/Briefing/BriefingTimelineModule.swift \
-    Sources/Views/Briefing/BriefingWeakSignalsModule.swift \
-    Sources/Views/Briefing/BriefingForwardWatchModule.swift \
-    Sources/Intelligence/Briefing/ForwardWatchExtractor.swift \
-    Sources/Intelligence/Briefing/BriefingSitrepComposer.swift \
-    Sources/Storage/DatabaseEngine+Briefing.swift \
-    Sources/Views/Reader/ArticleWebView.swift \
-    Sources/Views/Reader/ArticleRemoteImage.swift \
-    Sources/Views/Reader/EventOverviewReaderView.swift \
-    Sources/Views/Reader/ArticleDetailView.swift \
-    Sources/Views/Reader/ReaderSupportViews.swift \
-    Sources/Storage/SavedStoriesManager.swift \
-    Sources/Services/OPMLManager.swift \
-    Sources/App/NewsSignposts.swift \
-    Sources/App/UpdateChecker.swift \
-    Sources/App/NotificationActionRouter.swift \
-    Sources/App/LibraryBackup.swift \
-    Sources/Views/List/FeedHealthLine.swift \
-    Sources/Views/FeedCatalogView.swift \
-    Sources/Views/SmartBinderSheet.swift \
-    Sources/Views/TensionIndexView.swift \
-    Sources/Views/SettingsView.swift \
-    Tests/NativeUIQAChecks.swift \
-    Tests/TestDefaults.swift \
-    -o native_ui_qa_runner
+echo "Compiling Native UI QA Checks..."
+NEWS_HARNESS=Tests/Harness/NativeUIQAChecks.swift NEWS_APP_DIR="$STAGE/NewsHarness.app" ./build.sh
 
 echo "Running Native UI QA Checks..."
-./native_ui_qa_runner "$@"
-
-rm -f native_ui_qa_runner
+"$STAGE/NewsHarness.app/Contents/MacOS/NewsHarness" "$@"
 echo "Native UI QA Checks completed successfully."

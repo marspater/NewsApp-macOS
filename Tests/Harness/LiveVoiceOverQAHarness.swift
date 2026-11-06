@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Tests/LiveVoiceOverQAHarness.swift
+// Tests/Harness/LiveVoiceOverQAHarness.swift
 // Live VoiceOver QA Harness on isolated data (Issue #155)
 //
 // Exercises live AppKit/SwiftUI view rendering, inspects the macOS Accessibility tree
@@ -634,7 +634,7 @@ final class LiveVoiceOverHost {
         let view = NSHostingView(
             rootView: HostRootView(state: state)
                 .defaultAppStorage(defaults)
-                .environment(\.readerImageLoader, { _ in image }))
+                .environment(\.readerImageLoader, { _, _ in image }))
         window.contentView = view
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()
@@ -1227,7 +1227,7 @@ private func selfTest() async throws {
 }
 
 @MainActor
-private final class QADelegate: NSObject, NSApplicationDelegate {
+final class QADelegate: NSObject, NSApplicationDelegate {
     var host: LiveVoiceOverHost?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1314,28 +1314,5 @@ private final class QADelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
         return .terminateLater
-    }
-}
-
-@main
-struct LiveVoiceOverEntry {
-    @MainActor
-    static func main() {
-        signal(SIGPIPE, SIG_IGN)
-        // Crash recovery dialogs must never block this disposable fixture's startup.
-        // Argument-domain overrides are volatile and do not change the reader's real preferences.
-        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
-        arguments["ApplePersistenceIgnoreState"] = true
-        arguments["NSQuitAlwaysKeepsWindows"] = false
-        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
-        let app = NSApplication.shared
-        let delegate = QADelegate()
-        app.delegate = delegate
-        let visible =
-            CommandLine.arguments.contains("--host") || CommandLine.arguments.contains("--manual")
-            || CommandLine.arguments.contains("--smoke")
-        app.setActivationPolicy(visible ? .regular : .prohibited)
-        app.run()
-        withExtendedLifetime(delegate) {}
     }
 }

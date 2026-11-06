@@ -24,16 +24,21 @@ import UserNotifications
 extension NotificationService {
     /// Notification attachments do not support every format the protected reader can decode (notably WebP/AVIF).
     /// The attachment is the tall fading crop of `notificationImage`, or the decoded image when the source is small.
-    static func makeImageAttachment(data: Data) throws -> UNNotificationAttachment {
-        let decoded = try SecureHTTPClient.decodeReaderImage(data)
+    /// Every failure is an `ImageLoadFailure` naming its stage with `contentType` and the byte count (#1010).
+    static func makeImageAttachment(data: Data, contentType: String? = nil) throws -> UNNotificationAttachment {
+        func failure(_ stage: ImageLoadFailure.Stage, _ error: Error? = nil) -> ImageLoadFailure {
+            ImageLoadFailure(
+                stage: stage, contentType: contentType, bytes: data.count, underlying: error.map { $0 as NSError })
+        }
+        let decoded: CGImage
+        do { decoded = try SecureHTTPClient.decodeReaderImage(data) } catch { throw failure(.decode, error) }
         let image = notificationImage(decoded) ?? decoded
         let encoded = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(encoded, UTType.png.identifier as CFString, 1, nil)
-        else { throw URLError(.cannotDecodeContentData) }
+        else { throw failure(.encode) }
         CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination), encoded.length <= Self.attachmentLimit else {
-            throw URLError(.cannotDecodeContentData)
-        }
+        guard CGImageDestinationFinalize(destination) else { throw failure(.encode) }
+        guard encoded.length <= Self.attachmentLimit else { throw failure(.size) }
         let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
         do {
             try (encoded as Data).write(to: fileURL)
@@ -41,7 +46,7 @@ extension NotificationService {
             return try UNNotificationAttachment(identifier: UUID().uuidString, url: fileURL, options: nil)
         } catch {
             try? FileManager.default.removeItem(at: fileURL)
-            throw error
+            throw failure(.attach, error)
         }
     }
 

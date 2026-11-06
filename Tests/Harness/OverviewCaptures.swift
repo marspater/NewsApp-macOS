@@ -18,7 +18,7 @@ import SwiftUI
 /// Story Overview captures for Epic T (#669–#673) without a window or Screen Recording: the reader view is rendered
 /// offscreen at 900 pt and 1,400 pt, text sizes 1.0 and 1.3, light, dark and Increase Contrast, each also redrawn in
 /// gray. Then two rows of story grid cards (#779), collapsed and with the event card's sources shown, in light and
-/// dark, with each card's height. Run with `NEWS_NATIVE_HARNESS=Tests/OverviewCaptures.swift
+/// dark, with each card's height. Run with `NEWS_NATIVE_HARNESS=Tests/Harness/OverviewCaptures.swift
 /// script/native_performance_baseline.sh DIR`; `NEWS_CAPTURES=overview` or `NEWS_CAPTURES=grid` runs one set,
 /// `NEWS_CAPTURE_SET=tension` renders the World Tension sheet, sidebar foot and Briefing strip instead (#781), and
 /// `NEWS_CAPTURE_SET=briefing` the Briefing situation board (#780), and `NEWS_CAPTURE_SET=search` story cards of a

@@ -11,14 +11,16 @@ options:
     - .circleci/test-suites.yml
     - test.sh
     - script/build_test_runner.sh
+    - script/xcode_build.sh
     - script/ci_testsuite.sh
     - script/test_atoms.sh
-    - script/swiftpm_dependencies.sh
+    - Tests/Runner.swift
+    - News.xcodeproj/**
     - Package.swift
     - Package.resolved
     # Fixtures are read at run time, which coverage cannot attribute to a test atom.
     - Tests/Fixtures/**
-  # The runner compiles a staged copy of NewsTests.swift, so coverage cannot see the original file.
+  # Tests/NewsTests.swift holds its own tests: a change there always runs its atom, whatever coverage attributes.
   test-selection-rules:
     - test-atom: Tests/NewsTests.swift
       include:
