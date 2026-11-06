@@ -212,6 +212,16 @@ enum EditorialWireIdentityTests {
             articleID: "u", publisher: "First", title: "Undated", description: prose("one"), content: nil,
             publishedAt: DateParser.unknownDate, fetchedAt: epoch)
         check(EditorialWireIdentity.momentumReports(eventID: "event", members: [undated]).isEmpty, "undated stays out")
+        let undatedCopy = WireIdentityArticle(
+            articleID: "a", publisher: "First", title: "Repeat", description: prose("one"), content: nil,
+            publishedAt: DateParser.unknownDate, fetchedAt: epoch)
+        let dated = article("a", content: prose("one"), published: 10, fetched: 30)
+        let repeated = EditorialWireIdentity.momentumReports(
+            eventID: "event", members: [undatedCopy, dated, dated])
+        check(
+            repeated.count == 1 && repeated[0].publishedAt == dated.publishedAt,
+            "a repeated article keeps its first dated row")
+        check(try replay([dated, dated]).rawRowsInWindow == 1, "a repeated article counts once in the replay")
     }
 
     static func run() async {

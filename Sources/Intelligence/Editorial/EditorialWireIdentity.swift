@@ -155,11 +155,15 @@ enum EditorialWireIdentity {
 
     /// Replay rows for one event. An undated article has no publication time to bucket and is left out. An article
     /// stamped after News stored it (a revision date or a wrong clock) was published by the time it was stored at the
-    /// latest, so its publication is clamped there rather than failing the event's replay.
+    /// latest, so its publication is clamped there rather than failing the event's replay. An article repeated in `members` keeps
+    /// its first dated row.
     static func momentumReports(eventID: String, members: [WireIdentityArticle]) -> [MomentumReport] {
         let identified = Dictionary(uniqueKeysWithValues: identities(event: members).map { ($0.articleID, $0) })
+        var seen = Set<String>()
         return members.compactMap { article in
-            guard article.publishedAt != DateParser.unknownDate else { return nil }
+            guard article.publishedAt != DateParser.unknownDate, seen.insert(article.articleID).inserted else {
+                return nil
+            }
             return MomentumReport(
                 articleID: article.articleID, eventID: eventID, wireGroupID: identified[article.articleID]?.wireGroupID,
                 localPublisherID: slug(article.publisher),

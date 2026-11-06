@@ -9,8 +9,10 @@ if [[ "$(realpath "$LIBRARY")" == */Library/Containers/* ]]; then
     exit 1
 fi
 OUTPUT="${2:-$(mktemp -d "${TMPDIR:-/tmp}/news-wire-identity-results.XXXXXX")}"
-mkdir -p "$OUTPUT"
-chmod 700 "$OUTPUT"
+if [[ ! -d "$OUTPUT" ]]; then
+    mkdir -p "$OUTPUT"
+    chmod 700 "$OUTPUT"
+fi
 [[ ! -e "$OUTPUT/wire-identity.json" ]] || { echo "Refusing to overwrite $OUTPUT/wire-identity.json" >&2; exit 1; }
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-wire-identity-build.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
