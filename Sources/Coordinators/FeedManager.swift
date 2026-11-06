@@ -68,6 +68,7 @@ class FeedManager: NSObject, ObservableObject {
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
+    private var pendingReplacementRunID: UUID?
     private var runningRefreshIsScheduled = false
     /// Manual callers wait for the scheduled collection they actually joined, not an older run's completion.
     /// One follow-up manual collection serves that run's callers; cancelled callers can leave immediately (#927).
@@ -218,7 +219,7 @@ class FeedManager: NSObject, ObservableObject {
 
     private func subscribe(url: String) -> String? {
         guard let added = appSettings.addFeed(url: url) else { return nil }
-        cancelRefresh()
+        cancelRefresh(preserveManualWaiters: true)
         feedStatuses[added] = .idle
         return added
     }
@@ -228,7 +229,7 @@ class FeedManager: NSObject, ObservableObject {
     func addCatalogFeeds(_ feeds: [CatalogFeed]) -> Int {
         let added = appSettings.addCatalogFeeds(feeds)
         guard added > 0 else { return 0 }
-        cancelRefresh()
+        cancelRefresh(preserveManualWaiters: true)
         fetchFeeds()
         return added
     }
@@ -243,7 +244,7 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     func removeFeed(url: String) {
-        cancelRefresh()
+        cancelRefresh(preserveManualWaiters: true)
         appSettings.removeFeed(url: url)
         let key = AppSettings.feedKey(url)
         for stored in feedStatuses.keys where AppSettings.feedKey(stored) == key {
@@ -268,7 +269,7 @@ class FeedManager: NSObject, ObservableObject {
         }
         let count = appSettings.importFeeds(from: opmlData)
         if count > 0 {
-            cancelRefresh()
+            cancelRefresh(preserveManualWaiters: true)
             fetchFeeds()
         }
         return count
@@ -454,11 +455,20 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
-    private func cancelRefresh() {
+    private func cancelRefresh(preserveManualWaiters: Bool = false) {
         refreshTask?.cancel()
         refreshTask = nil
         refreshRunID = nil
-        resumeAllManualRefreshWaiters()
+        if preserveManualWaiters && !manualRefreshWaiters.isEmpty {
+            let replacementID = pendingReplacementRunID ?? UUID()
+            pendingReplacementRunID = replacementID
+            for id in manualRefreshWaiters.keys {
+                manualRefreshWaiters[id]?.scheduledRunID = replacementID
+            }
+        } else {
+            pendingReplacementRunID = nil
+            resumeAllManualRefreshWaiters()
+        }
         // The waiting caller returns without finishing the run, so the loading state ends here.
         for (url, status) in feedStatuses where status == .loading { feedStatuses[url] = .idle }
         isAnyFeedLoading = false
@@ -584,7 +594,13 @@ class FeedManager: NSObject, ObservableObject {
     /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
     func fetchFeedsAsync(scheduled: Bool = false) async {
         guard !isStopped else { return }
-        if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
+        if await refusesCollectionWhileReadOnly(manual: !scheduled) {
+            if let replacementID = pendingReplacementRunID {
+                pendingReplacementRunID = nil
+                resumeManualRefreshWaiters(for: replacementID)
+            }
+            return
+        }
         if let refreshTask {
             if !scheduled, runningRefreshIsScheduled, let scheduledRunID = refreshRunID {
                 // A scheduled refresh keeps connectivity backoff, so this request is answered by a refresh after it.
@@ -594,7 +610,8 @@ class FeedManager: NSObject, ObservableObject {
             }
             return
         }
-        let runID = UUID()
+        let runID = pendingReplacementRunID ?? UUID()
+        pendingReplacementRunID = nil
         refreshRunID = runID
         runningRefreshIsScheduled = scheduled
         let task = Task<[FeedArticle], Never> { [weak self] in

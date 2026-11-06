@@ -37,6 +37,7 @@ enum AnalysisGenerationTests {
             await queuedOverviewsRespectCancellationAndSupersession()
             await cancelledManualRefreshWaiterDoesNotRetainItsCaller()
             await manualRefreshAfterScheduledRunsOnlyOnce()
+            await manualRefreshWaitsForReplacement()
             try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
             try await clusteringStorageFailuresEndThePass()
@@ -250,6 +251,54 @@ enum AnalysisGenerationTests {
             await signals.hasFinished("scheduled")
         }
         check(await signals.invocationCount("collecting") == 2, "Exactly one scheduled and one manual collection run")
+        manager.stopBackgroundWork()
+        await scheduled.value
+        await manual.value
+        await db.close()
+    }
+
+    @MainActor
+    static func manualRefreshWaitsForReplacement() async {
+        let suite = testDefaultsSuite("news-refresh-replacement")
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            return check(false, "Isolated preferences can be created for a replacement")
+        }
+        defer { removeTestDefaults(suite) }
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.waitForStartup()
+        guard store.isReady else { return check(false, "An in-memory library opens for a replacement") }
+        let firstGate = OverviewGate()
+        let replacementGate = OverviewGate()
+        let signals = OverviewSignals()
+        let manager = FeedManager(
+            settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false,
+            fetchBatch: { _, _ in
+                await signals.invoke("collecting")
+                if await signals.invocationCount("collecting") == 1 {
+                    await firstGate.wait()
+                } else {
+                    await replacementGate.wait()
+                }
+                return []
+            },
+            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+        let scheduled = Task { await manager.fetchFeedsAsync(scheduled: true) }
+        await eventually("The scheduled collection starts") { await signals.invocationCount("collecting") == 1 }
+        let manual = Task {
+            await manager.fetchFeedsAsync()
+            await signals.finish("manual")
+        }
+        await eventually("The manual request joins the scheduled collection") {
+            manager.manualRefreshWaiters.count == 1
+        }
+        manager.removeFeed(url: "https://example.com/feed")
+        check(manager.manualRefreshWaiters.count == 1, "The manual waiter survives the subscription change")
+        await eventually("The replacement collection starts") { await signals.invocationCount("collecting") == 2 }
+        check(!(await signals.hasFinished("manual")), "The manual caller waits while the replacement is collecting")
+        await firstGate.release()
+        await replacementGate.release()
+        await eventually("The replacement releases the manual caller") { await signals.hasFinished("manual") }
         manager.stopBackgroundWork()
         await scheduled.value
         await manual.value
