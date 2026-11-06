@@ -91,6 +91,9 @@ enum NetworkTimelineTests {
 
         let batches = NetworkTimeline(now: { t0 })
         batches.record(path: wifi)
+        check(batches.pathChanges == 0, "the first path report is not a change")
+        batches.record(path: wifi)
+        check(batches.pathChanges == 0, "the same path again is not a change")
         let start = batches.pathChanges
         batches.record(path: vpn)
         batches.record(attempted: 5, failed: 5, takenForOffline: true, pathChangesAtStart: start)

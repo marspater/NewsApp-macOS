@@ -89,8 +89,9 @@ final class NetworkTimeline: Sendable {
     func record(path: PathState) {
         let date = now()
         state.withLock { state in
+            // The monitor's first callback only reports the current path, so it is no change.
+            if let previous = state.path, previous != path { state.pathChanges += 1 }
             state.path = path
-            state.pathChanges += 1
             Self.append(Entry(date: date, event: .path(path)), to: &state.entries)
         }
     }
