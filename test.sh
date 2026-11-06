@@ -112,20 +112,18 @@ prune_runner_state() {
     local runner="$1"
     rm -rf "$HOME/Library/Caches/$runner" "$HOME/Library/HTTPStorages/$runner" "$HOME/Library/Preferences/$runner.plist"
 }
-export -f prune_runner_state
 
-# Every run builds into its own directory and names its runners after it, so concurrent runs (another worktree's
+# Every run builds into its own directory and names its runner after it, so concurrent runs (another worktree's
 # suite, or the pre-commit hook beside a background run) never share a runner binary or its Library state, and an
-# interrupted run leaves neither runner copies nor their Library state behind.
+# interrupted run leaves no Library state behind.
 LOGS=$(mktemp -d "${TMPDIR:-/tmp}/news-test-jobs.XXXXXX")
 RUN_TAG="${LOGS##*.}"
 export LOGS RUN_TAG
-# This run's runner names: test_runner.<tag> and <job>.<tag>.runner (see prune_runner_state).
+# This run's runner name: test_runner.<tag> (see prune_runner_state).
 cleanup_run() {
     local library="$HOME/Library"
-    rm -rf "$library/Caches/test_runner.$RUN_TAG" "$library/Caches/"*".$RUN_TAG.runner" \
-        "$library/HTTPStorages/test_runner.$RUN_TAG" "$library/HTTPStorages/"*".$RUN_TAG.runner" \
-        "$library/Preferences/test_runner.$RUN_TAG.plist" "$library/Preferences/"*".$RUN_TAG.runner.plist" "$LOGS"
+    rm -rf "$library/Caches/test_runner.$RUN_TAG" "$library/HTTPStorages/test_runner.$RUN_TAG" \
+        "$library/Preferences/test_runner.$RUN_TAG.plist" "$LOGS"
 }
 trap cleanup_run EXIT
 trap 'exit 130' INT
@@ -184,24 +182,25 @@ else
     JOB_COUNT=$(wc -l < "$JOB_LIST" | tr -d ' ')
     echo "Running $JOB_COUNT test jobs, $JOBS at a time..."
     set +e
-    # Core ML compiles a model into a cache named after the executable, and two processes compiling the same model
-    # under one name race on the bundle rename (seen on CI), so every job runs its own copy of the runner, named
-    # after the job and this run.
+    # Core ML keeps its compiled models in a cache named after the executable, and loading the Neural Engine programs
+    # cold costs each process seconds (docs/audits/2026-11-07-shard-io.md), so every job runs this one binary and
+    # reuses that cache. Two processes compiling the same model under one name race on the bundle rename (seen on
+    # CI), so one process compiles the shared models first; a single job has nothing to race with and loads what it
+    # needs. Sharing the name also shares the name's standard defaults and URL storage across the pool's jobs.
+    if [[ "$JOB_COUNT" -gt 1 ]]; then
+        if ! LLVM_PROFILE_FILE="$LOGS/warm.profraw" "$RUNNER" --warm-models; then
+            echo "❌ Could not load the shared Core ML models before the pool." >&2
+            exit 1
+        fi
+    fi
     # shellcheck disable=SC2016 # the pool script expands its variables inside the worker, by design
     xargs -P "$JOBS" -L 1 bash -c '
         name="$0"
         start=$(date +%s)
-        copy="$LOGS/$name.$RUN_TAG.runner"
-        cp "$LOGS/test_runner.$RUN_TAG" "$copy"
         # An instrumented runner writes its profile here; set in the worker, so a space in the path survives xargs.
         if [[ -d "$LOGS/profiles" ]]; then export LLVM_PROFILE_FILE="$LOGS/profiles/%p.profraw"; fi
-        env "$@" "$copy" > "$LOGS/$name.log" 2>&1
+        env "$@" "$LOGS/test_runner.$RUN_TAG" > "$LOGS/$name.log" 2>&1
         status=$?
-        # Cleanup that fails marks the job failed, so a run never passes while runner state is left behind.
-        if ! rm -f "$copy" || ! prune_runner_state "$(basename "$copy")"; then
-            echo "❌ $name: could not remove the runner copy or its Library state" >> "$LOGS/$name.log"
-            [[ "$status" -eq 0 ]] && status=1
-        fi
         echo "$status" > "$LOGS/$name.status"
         if [[ "$status" -eq 0 ]]; then mark="✅"; else mark="❌"; fi
         # One finished job prints at a time (mkdir is the portable lock), so log blocks never interleave.
@@ -213,6 +212,11 @@ else
     ' < "$JOB_LIST"
     POOL_STATUS=$?
     set -e
+    # Cleanup that fails fails the run, so a run never passes while runner state is left behind.
+    if ! prune_runner_state "$(basename "$RUNNER")"; then
+        echo "❌ Could not remove the runner's Library state." >&2
+        exit 1
+    fi
     STATUS_COUNT=$(ls "$LOGS"/*.status 2>/dev/null | wc -l | tr -d ' ')
     FAILED=$(grep -L '^0$' "$LOGS"/*.status 2>/dev/null || true)
     if [[ -n "$FAILED" ]]; then

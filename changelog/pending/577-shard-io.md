@@ -1,0 +1,1 @@
+- Tests: the job pool in `./test.sh` compiles the shared Core ML models once and runs one runner binary, so no job pays a cold Neural Engine load. Forced pool on the arm64 development Mac: 35.6 s to 29.1 s, longest job 30 s to 18 s.

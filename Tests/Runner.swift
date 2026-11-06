@@ -21,6 +21,11 @@ import Foundation
 struct NewsRegressionRunner {
     /// Runs the selected atoms in the order the suites expect; `--parsing-regressions` stops after the parser checks.
     static func main() async {
+        // test.sh runs this once before its pool: it fills the executable's Core ML cache before processes share it.
+        if CommandLine.arguments.contains("--warm-models") {
+            guard await SentenceEmbedder.shared.isAvailable, await PairScorer.shared.isAvailable else { exit(1) }
+            return
+        }
         let atom = ProcessInfo.processInfo.environment["NEWS_TEST_ATOM"]
         /// Whether `file`'s tests run: every file without NEWS_TEST_ATOM, else the named one.
         func selected(_ file: String) -> Bool { atom == nil || atom == file }
