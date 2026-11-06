@@ -226,6 +226,7 @@ enum DiagnosticsExport {
         var notificationSettings: [String] = []
         var gatewayPort: UInt16?
         var resolverCancellations = 0
+        var gatewayTimes: [String: GatewayTimings.HostTimes] = [:]
         var networkEntries: [NetworkTimeline.Entry] = []
         var refreshBatches: [NetworkTimeline.Batch] = []
         var proxy: [String] = []
@@ -263,6 +264,7 @@ enum DiagnosticsExport {
             "network.txt": network(
                 gatewayPort: app.gatewayPort, resolverCancellations: app.resolverCancellations,
                 feedStatuses: app.feedStatuses, proxy: app.proxy, timeline: app.networkEntries, log: log),
+            "gateway-timing.txt": gatewayTiming(app.gatewayTimes, feedURLs: app.feedURLs),
             "process.txt": process(app.process, now: now),
             "spotlight-and-caches.txt": spotlightAndCaches(app, log: log),
         ]
@@ -541,6 +543,31 @@ enum DiagnosticsExport {
         return lines.joined(separator: "\n") + "\n"
     }
 
+    /// Gateway stage times this launch (#929). Subscriptions are named by host, as in `feeds.txt`; every other host
+    /// (story pages, images) is combined, because those hosts would show what was read.
+    static func gatewayTiming(_ hosts: [String: GatewayTimings.HostTimes], feedURLs: [String]) -> String {
+        func line(_ name: String, _ times: GatewayTimings.HostTimes) -> String {
+            let stages = GatewayStage.allCases.compactMap { stage -> String? in
+                guard let time = times[stage] else { return nil }
+                let mean = Int((time.mean * 1000).rounded())
+                let slowest = Int((time.slowest * 1000).rounded())
+                return "\(stage.rawValue) mean \(mean) ms, slowest \(slowest) ms, \(time.count) samples"
+            }
+            return "\(name): " + stages.joined(separator: "; ")
+        }
+        let feedHosts = Set(feedURLs.compactMap { URL(string: $0)?.host?.lowercased() })
+        var lines = ["TLS is not visible to the gateway; the first byte after connect stands in for it.", ""]
+        lines += hosts.filter { feedHosts.contains($0.key) }.sorted { $0.key < $1.key }.map { line($0.key, $0.value) }
+        let others = hosts.filter { !feedHosts.contains($0.key) }
+        var combined: GatewayTimings.HostTimes = [:]
+        for times in others.values {
+            for (stage, time) in times { combined[stage, default: GatewayTimings.Stage()].merge(time) }
+        }
+        if !others.isEmpty { lines.append(line("Other hosts, combined", combined)) }
+        if hosts.isEmpty { lines.append("No gateway requests this launch") }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     private static func timelineLine(_ entry: NetworkTimeline.Entry) -> String {
         let time = entry.date.formatted(.iso8601)
         switch entry.event {
@@ -675,6 +702,7 @@ enum DiagnosticsExport {
         }
         app.gatewayPort = await NetworkBoundaryProxy.shared.runningPort()
         app.resolverCancellations = ProxyResolver.cancellations.withLock { $0 }
+        app.gatewayTimes = GatewayTimings.shared.snapshot()
         app.networkEntries = NetworkTimeline.shared.entries
         app.refreshBatches = NetworkTimeline.shared.batches
         app.proxy = proxyLines((CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any]) ?? [:])

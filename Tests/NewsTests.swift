@@ -26119,7 +26119,7 @@ struct NewsTests {
         }
         for name in [
             "library.txt", "feeds.txt", "clustering.txt", "intelligence.txt", "notifications.txt", "images.txt",
-            "network.txt", "process.txt", "spotlight-and-caches.txt", "log.txt",
+            "network.txt", "gateway-timing.txt", "process.txt", "spotlight-and-caches.txt", "log.txt",
         ] {
             assertTrue(files[name] != nil, "The archive holds \(name)")
         }
