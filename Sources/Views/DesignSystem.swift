@@ -134,6 +134,10 @@ enum AppColor {
     static let unreadDot = Color.accentColor
     /// The block a citation jumped to, until the reader dismisses the citation.
     static let passageHighlight = Color.accentColor.opacity(0.12)
+    /// A passage the reader highlighted (V1 #711): a caution wash the primary text stays readable on.
+    static let noteHighlight = caution.opacity(0.28)
+    /// The dotted underline that goes with a highlight, so the state does not rest on color alone (DESIGN.md 11).
+    static let noteHighlightMark = Text.LineStyle(pattern: .dot, color: caution)
     /// The overview timeline's connecting line, stronger with Increase Contrast.
     static func timelineRail(for contrast: ColorSchemeContrast) -> Color {
         Color.accentColor.opacity(contrast == .increased ? 0.6 : 0.3)
@@ -227,6 +231,12 @@ enum AppLayout {
     static let unreadDotSize: CGFloat = 6.0
     /// Sidebar and reader popovers.
     static let popoverWidth: CGFloat = 280.0
+    /// Passage quote bars and reader callout indicators.
+    static let quoteBarWidth: CGFloat = 3.0
+    /// Collapsible inspector side panels.
+    static let inspectorMinimumWidth: CGFloat = 260.0
+    static let inspectorIdealWidth: CGFloat = 300.0
+    static let inspectorMaximumWidth: CGFloat = 360.0
     // Strokes: a Retina hairline at rest, the hover border and the keyboard focus ring (DESIGN.md 8.2).
     static let hairline: CGFloat = 0.5
     static let hoverStroke: CGFloat = 1.0
