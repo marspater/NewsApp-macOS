@@ -100,6 +100,7 @@ actor EnrichmentQueue {
     /// Publisher input hash each article was classified from this session (#820): a changed input, or a clear of
     /// derived data, makes the article eligible again.
     private var completedInputs: [String: String] = [:]
+    private var completedClassificationsThisSession = 0
     /// Only a bounded recent deduplication window is needed; the database keeps the durable classification.
     private static let completedInputLimit = 12_000
     private static let completedInputEvictionBatch = 3_000
@@ -302,7 +303,9 @@ actor EnrichmentQueue {
         for (reason, count) in cancelledCounts {
             counts["cancelled (\(reason))", default: 0] += count
         }
-        if !completedInputs.isEmpty { counts["classified this session"] = completedInputs.count }
+        if completedClassificationsThisSession > 0 {
+            counts["classified this session"] = completedClassificationsThisSession
+        }
         return counts
     }
 
@@ -315,6 +318,7 @@ actor EnrichmentQueue {
     /// story is eligible for classification again.
     func analysisCleared() {
         completedInputs.removeAll()
+        completedClassificationsThisSession = 0
         completedInputOrder.removeAll()
         cancelAll(reason: .superseded)
     }
@@ -483,6 +487,7 @@ actor EnrichmentQueue {
 
     /// Evicts old deduplication entries in batches to avoid indefinite session growth without O(n) work per result.
     private func recordCompletedInput(_ articleId: String, hash: String) {
+        completedClassificationsThisSession += 1
         // The same article may be reclassified after its publisher input changes.
         if completedInputs[articleId] != nil { completedInputOrder.removeAll { $0.id == articleId } }
         completedInputs[articleId] = hash
