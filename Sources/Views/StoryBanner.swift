@@ -224,7 +224,7 @@ final class StoryBannerPresenter {
         let image: CGImage
         do {
             image = try await DecodedImageCache.load(
-                url, using: { try await SecureHTTPClient.shared.fetchReaderImage(from: $0) })
+                url, using: { try await SecureHTTPClient.shared.fetchReaderImage(from: $0, maxPixelSize: $1) })
         } catch {
             // A dismissed banner cancels its photo; anything else names the stage, type and bytes, never the URL.
             if !ImageLoadFailure.isCancellation(error) {

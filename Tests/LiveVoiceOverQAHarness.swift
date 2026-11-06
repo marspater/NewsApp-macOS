@@ -634,7 +634,7 @@ final class LiveVoiceOverHost {
         let view = NSHostingView(
             rootView: HostRootView(state: state)
                 .defaultAppStorage(defaults)
-                .environment(\.readerImageLoader, { _ in image }))
+                .environment(\.readerImageLoader, { _, _ in image }))
         window.contentView = view
         view.layoutSubtreeIfNeeded()
         view.displayIfNeeded()

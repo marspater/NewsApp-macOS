@@ -58,7 +58,8 @@ actor SecureHTTPClient {
 
     private var session: URLSession?
     private var sessionPort: UInt16?
-    private let delegateCoordinator: SecureSessionDelegateCoordinator
+    /// Internal so a test can drive the redirect callback directly (#945).
+    let delegateCoordinator: SecureSessionDelegateCoordinator
     private let resolver: ProxyResolver
     /// Nil when a test supplies a fixed session configuration.
     private let gateway: NetworkBoundaryProxy?
@@ -66,26 +67,21 @@ actor SecureHTTPClient {
     private init() {
         let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
-        self.resolver = ProxyResolver(body: { IPAddressValidator.validateHost($0) })
+        self.resolver = ProxyResolver()
         self.gateway = .shared
     }
 
-    internal init(
-        configuration: URLSessionConfiguration,
-        resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }
-    ) {
-        let coordinator = SecureSessionDelegateCoordinator(resolver: resolver)
+    /// `resolver` keeps a test's synchronous DNS answers; nil resolves through the system.
+    internal init(configuration: URLSessionConfiguration, resolver: NetworkBoundaryProxy.Resolver? = nil) {
+        let coordinator = SecureSessionDelegateCoordinator()
         self.delegateCoordinator = coordinator
         self.resolver = ProxyResolver(body: resolver)
         self.gateway = nil
         self.session = URLSession(configuration: configuration, delegate: coordinator, delegateQueue: nil)
     }
 
-    internal init(
-        gateway: NetworkBoundaryProxy,
-        resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }
-    ) {
-        self.delegateCoordinator = SecureSessionDelegateCoordinator(resolver: resolver)
+    internal init(gateway: NetworkBoundaryProxy, resolver: NetworkBoundaryProxy.Resolver? = nil) {
+        self.delegateCoordinator = SecureSessionDelegateCoordinator()
         self.resolver = ProxyResolver(body: resolver)
         self.gateway = gateway
     }
@@ -146,17 +142,18 @@ actor SecureHTTPClient {
     }
 
     /// Decodes bounded thumbnails concurrently, away from SwiftUI's main actor and from this actor, so one large image
-    /// never holds up other cards or feed requests.
-    @concurrent nonisolated func fetchReaderImage(from url: URL) async throws -> CGImage {
+    /// never holds up other cards or feed requests. `maxPixelSize` bounds the longer side: the reader's 1600 by default,
+    /// less for cards (#591).
+    @concurrent nonisolated func fetchReaderImage(from url: URL, maxPixelSize: Int = 1600) async throws -> CGImage {
         let (data, response) = try await fetchImage(from: url)
         try Task.checkCancellation()
-        do { return try Self.decodeReaderImage(data) } catch {
+        do { return try Self.decodeReaderImage(data, maxPixelSize: maxPixelSize) } catch {
             throw ImageLoadFailure(
                 stage: .decode, contentType: response.mimeType, bytes: data.count, underlying: error as NSError)
         }
     }
 
-    nonisolated static func decodeReaderImage(_ data: Data) throws -> CGImage {
+    nonisolated static func decodeReaderImage(_ data: Data, maxPixelSize: Int = 1600) throws -> CGImage {
         guard
             let source = CGImageSourceCreateWithData(
                 data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
@@ -169,7 +166,7 @@ actor SecureHTTPClient {
                 [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 1600,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
                     kCGImageSourceShouldCacheImmediately: true,
                 ] as CFDictionary)
         else {
@@ -180,7 +177,7 @@ actor SecureHTTPClient {
 
     static let allowedPorts: Set<Int> = [80, 443, 8080, 8443]
 
-    /// Shared navigation/ingestion preflight. Blocking DNS work runs off this actor and off the UI actor.
+    /// Shared navigation/ingestion preflight. The DNS lookup is asynchronous, cancellable and bounded (#945).
     func validateDestination(_ url: URL, allowHTTP: Bool = false) async throws {
         // 1. Scheme & Port Validation
         guard let scheme = url.scheme?.lowercased() else {
@@ -296,13 +293,10 @@ actor SecureHTTPClient {
 
 // MARK: - Delegate Coordinator for Redirects and DNS Rebinding Detection
 
+/// Bounds redirects and refuses downgrades and non-web targets on the session's one serial delegate queue. It never
+/// resolves a name there (#945): the gateway resolves, validates and pins every connection, so a redirect to a
+/// private host still fails closed, and a slow lookup cannot stall every other request's callbacks.
 final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
-    private let resolver: NetworkBoundaryProxy.Resolver
-
-    init(resolver: @escaping NetworkBoundaryProxy.Resolver = { IPAddressValidator.validateHost($0) }) {
-        self.resolver = resolver
-        super.init()
-    }
     private struct TaskSecurityState {
         var redirectCount: Int = 0
         var initialScheme: String
@@ -355,13 +349,12 @@ final class SecureSessionDelegateCoordinator: NSObject, URLSessionTaskDelegate, 
             return
         }
 
-        // 4. Validate redirect target host and IP resolution
-        switch resolver(targetHost) {
-        case .allowed:
-            completionHandler(request)
-        case .blocked, .unresolvable:
+        // 4. Refuse names and literals the hostname guard refuses without DNS; the gateway validates the addresses.
+        if case .blocked = IPAddressValidator.hostnameGuard(targetHost).result {
             completionHandler(nil)
+            return
         }
+        completionHandler(request)
     }
 
     func urlSession(_: URLSession, task: URLSessionTask, didCompleteWithError _: Error?) {
