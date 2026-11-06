@@ -802,6 +802,7 @@ struct NewsTests {
             try testCapturedFingerprintReview()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
+            try await testFutureDatedItems()
             await testDatabaseEnginePersistence()
             await testFTS5SearchAndOperators()
             try await testUnchangedFTSRefresh()
@@ -855,6 +856,7 @@ struct NewsTests {
             ("testWorldTensionSmoothing", { testWorldTensionSmoothing() }),
             ("testWorldTensionState", { try await testWorldTensionState() }),
             ("testUndatedArticleOrdering", { try await testUndatedArticleOrdering() }),
+            ("testFutureDatedItems", { try await testFutureDatedItems() }),
             ("testReaderFigures", { try await testReaderFigures(fixtureRoot: fixtureRoot) }),
             ("testReaderExtractionFidelity", { testReaderExtractionFidelity(fixtureRoot: fixtureRoot) }),
             ("testReaderParsingRegressions", { await testReaderParsingRegressions() }),
@@ -1282,6 +1284,22 @@ struct NewsTests {
         }
         store.refreshLoadedHook = nil
         assertTrue(store.articles.contains { $0.id == late.id }, "A follow-up refresh publishes the stored story")
+
+        // An older refresh that finishes after a newer one published does not replace it (a prune or any second caller).
+        let newest = FeedArticle(
+            title: "Newest story", link: "https://example.org/newest", guid: "newest", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_200), source: "Publisher")
+        var interleaved = false
+        store.refreshLoadedHook = {
+            guard !interleaved else { return }
+            interleaved = true
+            _ = try? await db.upsertArticles([newest])
+            await store.refreshState()
+        }
+        await store.refreshState()
+        store.refreshLoadedHook = nil
+        assertTrue(
+            store.articles.contains { $0.id == newest.id }, "An older snapshot does not replace a newer refresh")
         await db.close()
     }
 
@@ -6937,7 +6955,7 @@ struct NewsTests {
     @MainActor
     static func testFeedHealth() async throws {
         print("  - Testing feed health: availability, freshness, text quality and persistence...")
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
         func health(_ configure: (inout FeedFetchState) -> Void) -> FeedHealth {
             var state = FeedFetchState(lastFetchedAt: now)
             configure(&state)
@@ -7126,6 +7144,90 @@ struct NewsTests {
         }
         assertEqual(manager.feedHealth[live]?.textQuality, .full, "Content stats survive a failure")
         manager.stopBackgroundWork()
+    }
+
+    /// #981: a feed date beyond clock skew is stored as unknown (ordered by ingestion time, pruned with its
+    /// neighbours) in every format; a few minutes ahead keeps its date.
+    static func testFutureDatedItems() async throws {
+        print("  - Testing future-dated feed items...")
+        // A fixed clock handed to every upsert keeps the test off the wall clock.
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let iso = ISO8601DateFormatter()
+        let soon = iso.string(from: now.addingTimeInterval(300))
+        let rss = """
+            <rss><channel><title>Wire</title>
+            <item><title>RSS future</title><link>https://example.com/rss-future</link><pubDate>Sat, 01 Jan 2050 00:00:00 GMT</pubDate></item>
+            <item><title>RSS skew</title><link>https://example.com/rss-skew</link><pubDate>\(iso.string(from: now.addingTimeInterval(300)))</pubDate></item>
+            </channel></rss>
+            """
+        let atom = """
+            <feed xmlns='http://www.w3.org/2005/Atom'><title>Wire</title>
+            <entry><id>atom-future</id><title>Atom future</title><link href='https://example.com/atom-future'/><published>2050-01-01T00:00:00Z</published></entry>
+            <entry><id>atom-skew</id><title>Atom skew</title><link href='https://example.com/atom-skew'/><published>\(soon)</published></entry>
+            </feed>
+            """
+        let json = """
+            {"version":"https://jsonfeed.org/version/1.1","title":"Wire","items":[
+            {"id":"json-future","url":"https://example.com/json-future","title":"JSON future","content_text":"Text","date_published":"2050-01-01T00:00:00Z"},
+            {"id":"json-skew","url":"https://example.com/json-skew","title":"JSON skew","content_text":"Text","date_published":"\(soon)"}]}
+            """
+        let articles =
+            FeedXMLParser(data: Data(rss.utf8), feedURL: "https://example.com/rss").parse()
+            + FeedXMLParser(data: Data(atom.utf8), feedURL: "https://example.com/atom").parse()
+            + (JSONFeedParser.parse(data: Data(json.utf8), feedURL: "https://example.com/json") ?? [])
+        assertEqual(articles.count, 6, "All three formats parse")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        try await db.upsertArticles(articles, now: now)
+        let stored = try await db.fetchArticles()
+        for format in ["RSS", "Atom", "JSON"] {
+            let future = stored.first { $0.title == "\(format) future" }
+            let skew = stored.first { $0.title == "\(format) skew" }
+            assertEqual(future?.pubDate, DateParser.unknownDate, "\(format): a date years ahead is stored as unknown")
+            assertTrue(
+                abs((future?.queryOrderValue ?? 0) - now.timeIntervalSince1970) < 60,
+                "\(format): the future-dated story lists by its ingestion time")
+            assertTrue(
+                abs((skew?.pubDate.timeIntervalSince1970 ?? 0) - now.timeIntervalSince1970 - 300) < 5,
+                "\(format): clock skew keeps the date")
+        }
+        let futureCard = await MainActor.run { stored.first { $0.title == "RSS future" }?.cardDateText() }
+        assertEqual(futureCard, "Date unavailable", "A future date never reads Just now")
+        try await db.upsertArticles(articles, now: now.addingTimeInterval(60))
+        let refreshed = try await db.fetchArticles()
+        assertEqual(
+            refreshed.first { $0.title == "RSS future" }?.queryOrderValue,
+            stored.first { $0.title == "RSS future" }?.queryOrderValue, "A refresh keeps the original ingestion time")
+        // A row stored with a future date before the clamp existed is repaired when its feed refreshes, even with
+        // retention off.
+        let stale = stored.first { $0.title == "RSS future" }!
+        _ = try await db.eventRows(
+            "UPDATE articles SET published_at = ? WHERE id = ?;", [.real(2_524_608_000), .text(stale.id)])
+        try await db.upsertArticles(articles, now: now.addingTimeInterval(120))
+        assertEqual(
+            try await db.fetchArticles().first { $0.title == "RSS future" }?.pubDate, DateParser.unknownDate,
+            "A refresh repairs a stored future date")
+        // A row stored before the clamp existed is returned to ingestion order by retention.
+        let legacy = stored.first { $0.title == "RSS skew" }!
+        _ = try await db.eventRows(
+            "UPDATE articles SET published_at = ? WHERE id = ?;", [.real(2_524_608_000), .text(legacy.id)])
+        for article in stored { try await db.markRead(articleId: article.id, isRead: true) }
+        assertEqual(
+            try await db.pruneOldArticles(keepReadDays: 30, now: now.addingTimeInterval(60 * 86400)), 6,
+            "Future-dated stories are pruned with their neighbours")
+        // Feed health ignores a clamped date, and a link-less item keeps the ID the parser gave it (its fingerprint
+        // would otherwise change with the date).
+        let linkless = FeedArticle(
+            title: "Wire brief", link: "", guid: nil, description: "Brief",
+            pubDate: Date(timeIntervalSince1970: 2_524_608_000),
+            source: "Wire")
+        let healthFeed = "https://example.com/health"
+        let inserted = try await db.upsertArticles(
+            [linkless], feedUrl: healthFeed, validators: FeedValidators(etag: nil, lastModified: nil), now: now)
+        assertTrue(inserted.contains(linkless.id), "A clamped link-less item keeps its parsed ID")
+        assertEqual(
+            try await db.feedFetchStates()[healthFeed]?.latestItemAt, nil, "A future date is not the newest item")
+        await db.close()
     }
 
     static func testUndatedArticleOrdering() async throws {
@@ -10283,12 +10385,12 @@ struct NewsTests {
         }
         let articles = [
             article("current", hours: 0), article("earlier", hours: -1),
-            article("old", hours: -EventStoryRelation.window / 3600 - 1), article("future", hours: 1),
+            article("old", hours: -EventStoryRelation.window / 3600 - 1), article("future", hours: 0.2),
             article("mixed-1", hours: -2), article("mixed-2", hours: -2, unrelated: true),
             article("mixed-3", hours: -2, unrelated: true),
             article("half-1", hours: -3), article("half-2", hours: -3, unrelated: true),
         ]
-        try await db.upsertArticles(articles)
+        try await db.upsertArticles(articles, now: now)
         let current = try await db.createEvent(memberArticleIDs: ["current"], at: now)
         let previous = try await db.createEvent(memberArticleIDs: ["earlier"], at: now.addingTimeInterval(-10 * 86400))
         _ = try await db.createEvent(memberArticleIDs: ["old"], at: now)
@@ -10349,7 +10451,7 @@ struct NewsTests {
         assertTrue(try await db.isSaved(articleId: "current"), "Lookup preserves saved state")
         assertTrue(
             try await EventStoryRelation.find(eventID: "missing", in: db).isEmpty, "Deleted events have no links")
-        try await db.upsertArticles([article("forward", hours: 0)])
+        try await db.upsertArticles([article("forward", hours: 0)], now: now)
         let forward = try await db.createEvent(memberArticleIDs: ["forward"], at: now)
         _ = try await db.mergeEvents(forward.id, into: current.id, at: now)
         assertEqual(
@@ -10358,7 +10460,7 @@ struct NewsTests {
         var extraIDs: [String] = []
         for i in 0..<5 {
             let id = "extra-\(i)"
-            try await db.upsertArticles([article(id, hours: -0.5)])
+            try await db.upsertArticles([article(id, hours: -0.5)], now: now)
             extraIDs.append(try await db.createEvent(memberArticleIDs: [id], at: now).id)
         }
         let capped = try await EventStoryRelation.find(eventID: current.id, in: db)
@@ -10370,7 +10472,7 @@ struct NewsTests {
         let undated = FeedArticle(
             storedID: "undated", title: articles[0].title, link: articles[0].link + "/undated", guid: "undated",
             description: articles[0].description, pubDate: DateParser.unknownDate, source: "Other publisher")
-        try await db.upsertArticles([undated])
+        try await db.upsertArticles([undated], now: now)
         _ = try await db.addArticles(["undated"], toEvent: current.id, at: now)
         assertTrue(
             try await EventStoryRelation.find(eventID: current.id, in: db).isEmpty,
@@ -10401,11 +10503,11 @@ struct NewsTests {
             description: "Volodymyr Zelenskyy congratulated football fans after the national team won a league match.",
             pubDate: now.addingTimeInterval(-3 * 3600), source: "Publisher near")
         let window = EventStoryRelation.window / 3600
-        try await copy.upsertArticles([articles[0], articles[1], near])
+        try await copy.upsertArticles([articles[0], articles[1], near], now: now)
         for (id, hours) in [
-            ("old-in", -2), ("old-out", -window - 2), ("continuing-in", -2), ("continuing-after", 1),
+            ("old-in", -2), ("old-out", -window - 2), ("continuing-in", -2), ("continuing-after", 0.2),
         ] {
-            try await copy.upsertArticles([article(id, hours: hours)])
+            try await copy.upsertArticles([article(id, hours: hours)], now: now)
         }
         _ = try await copy.createEvent(memberArticleIDs: ["current"], at: now)
         let linkedEvent = try await copy.createEvent(memberArticleIDs: ["earlier"], at: now)

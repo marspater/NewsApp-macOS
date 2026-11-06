@@ -2302,7 +2302,9 @@ actor DatabaseEngine {
             guid = coalesce(excluded.guid, articles.guid),
             canonical_url = CASE WHEN ?
                 THEN excluded.canonical_url ELSE articles.canonical_url END,
-            published_at = CASE WHEN excluded.published_at = ? THEN articles.published_at ELSE excluded.published_at END,
+            published_at = CASE WHEN excluded.published_at = ?16
+                THEN (CASE WHEN articles.published_at > ?13 + \(futureDateSkew) THEN excluded.published_at ELSE articles.published_at END)
+                ELSE excluded.published_at END,
             title = excluded.title,
             source = excluded.source,
             description = excluded.description,
@@ -2379,16 +2381,29 @@ actor DatabaseEngine {
         sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
     }
 
+    /// A feed date further ahead than this is a typo, a wrong-zone embargo or a hostile value, not clock skew (#981).
+    static let futureDateSkew: TimeInterval = 15 * 60
+
     /// `validators` accompany a fresh 200 response. They and the response's content stats are written in the same
     /// transaction as the articles, so a feed is only ever answered "not modified" for content that was durably ingested.
     @discardableResult
     func upsertArticles(
         _ articles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil,
-        preservingStoredContent: Bool = false
+        preservingStoredContent: Bool = false, now clock: Date = Date()
     ) throws -> Set<String> {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        // A date from the future would head every list and escape retention until it came due. Treat it as unknown:
+        // storage then orders it by ingestion time, a refresh keeps the stored date and feed health ignores it (#981).
+        let articles = articles.map { article -> FeedArticle in
+            guard article.pubDate.timeIntervalSince(clock) > Self.futureDateSkew else { return article }
+            var clamped = article
+            clamped.pubDate = DateParser.unknownDate
+            // A link-less, GUID-less item is identified by a fingerprint of its date; keep the ID the parser gave it.
+            if clamped.storedID == nil, clamped.id != article.id { clamped.storedID = article.id }
+            return clamped
         }
         guard !articles.isEmpty else {
             // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
@@ -2490,7 +2505,7 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(expiredStmt) }
         var insertedIDs = Set<String>()
-        let now = Date().timeIntervalSince1970
+        let now = clock.timeIntervalSince1970
 
         for article in articles {
             try Task.checkCancellation()
@@ -4008,6 +4023,13 @@ actor DatabaseEngine {
         defer {
             if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
+        // Rows stored before upserts clamped future dates (#981) return to ingestion-time order, so retention sees them.
+        try eventRows(
+            "UPDATE articles SET published_at = ? WHERE published_at > ?;",
+            [
+                .real(DateParser.unknownDate.timeIntervalSince1970),
+                .real(nowTimestamp + Self.futureDateSkew),
+            ])
         var changes = 0
         for (sql, step) in [(tombstones, "tombstones"), ("DELETE FROM articles WHERE id IN (\(doomed));", "pruning")] {
             var stmt: OpaquePointer?

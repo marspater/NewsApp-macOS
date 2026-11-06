@@ -166,7 +166,7 @@ enum StoryCorpus {
                     index += 1
                 }
                 if !batch.isEmpty {
-                    try await db.upsertArticles(batch)
+                    try await db.upsertArticles(batch, now: clock)
                     // Keep production's per-pass article limit in evaluation too.
                     let policy = policyFromEnvironment()
                     // NEWS_ENERGY=0 replays the rules-only pass of Low Power Mode (#534).
