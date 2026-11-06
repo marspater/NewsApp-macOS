@@ -6,17 +6,22 @@ for argument in "$@"; do
     if [[ "$argument" == "--performance-baseline" || "$argument" == "--search-memory" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" || "$argument" == "--library-holdout" ]]; then TEST_OPT_FLAGS=(-O); fi
 done
 
-script/design_lint.sh
-python3 script/evaluation/evaluate.py
-python3 script/evaluation/publisher_review.py
-python3 script/evaluation/publisher_dates.py
-python3 script/evaluation/overview_review.py
-python3 script/evaluation/importance_review.py
-python3 script/evaluation/relation_review.py
-python3 script/evaluation/catalog_review.py
-python3 script/evaluation/fit_pair_head.py
-python3 script/evaluation/calibrate_tension.py
-python3 script/training/pretrain_pairs.py --self-check
+# The plain run is the gate: it starts with the self-checks that need no Swift build. A run with arguments is one
+# targeted mode and runs only that (its callers already passed the plain run or are measuring), so it starts fast.
+if [[ $# -eq 0 ]]; then
+    script/design_lint.sh
+    script/check_test_registry.sh
+    python3 script/evaluation/evaluate.py
+    python3 script/evaluation/publisher_review.py
+    python3 script/evaluation/publisher_dates.py
+    python3 script/evaluation/overview_review.py
+    python3 script/evaluation/importance_review.py
+    python3 script/evaluation/relation_review.py
+    python3 script/evaluation/catalog_review.py
+    python3 script/evaluation/fit_pair_head.py
+    python3 script/evaluation/calibrate_tension.py
+    python3 script/training/pretrain_pairs.py --self-check
+fi
 
 # Content key of everything the Swift runner compiles or reads: the working tree (tracked and new files) without
 # docs, Markdown other than PRIVACY.md and the Python tooling checked above, plus toolchain, OS and NEWS_* settings.
