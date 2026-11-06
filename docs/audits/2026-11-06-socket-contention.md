@@ -19,4 +19,4 @@ The collision does not reproduce locally. It is specific to the loaded CI runner
 
 ## Acceptance left
 
-Three consecutive green CI runs on the macOS 26 job, and no `Address already in use` in the socket state line if it fails again.
+Three consecutive green runs of the GitHub macOS 26 test job with this lane in place. If a loopback test fails again, the job log carries a `socket state at the second failure:` line; it decides the next step. `Address already in use` with TIME_WAIT near the size of the ephemeral range means the runner exhausts its ports and the lane needs fewer connections per test; `Address already in use` with low counts means the collision is inside the gateway's listener bind, not between test processes, and the listener start is the next place to look; any other error is a new failure and is read on its own.
