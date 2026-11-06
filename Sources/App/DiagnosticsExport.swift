@@ -488,7 +488,7 @@ enum DiagnosticsExport {
         return [
             "Lookup rows: \(cell(row, 0)), with an image \(cell(row, 1)), refused or without one \(cell(row, 2)), checked in the last 24 hours \(cell(row, 3))",
             "Last lookup pass: \(lookup ?? "none finished this launch")",
-            "Decoded image cache: at most \(DecodedImageCache.countLimit) images and \(byteText(DecodedImageCache.costLimit)); NSCache does not report what it holds",
+            "Decoded image caches: full size at most \(DecodedImageCache.fullCountLimit) images and \(byteText(DecodedImageCache.fullCostLimit)), card size at most \(DecodedImageCache.cardCountLimit) images and \(byteText(DecodedImageCache.cardCostLimit)); NSCache does not report what they hold",
         ].joined(separator: "\n") + "\n"
     }
 
@@ -513,7 +513,7 @@ enum DiagnosticsExport {
         }
         var lines = [
             "Gateway: " + (gatewayPort.map { "listening on 127.0.0.1:\($0)" } ?? "not running"),
-            "Resolver: lookups cancelled before they ran \(resolverCancellations); lookups have no deadline of their own, the tunnel's 15 s handshake timeout bounds them",
+            "Resolver: lookups cancelled before they answered \(resolverCancellations); each lookup ends at its \(ProxyResolver.defaultDeadline.components.seconds) s deadline",
             "", "Feeds failing now, by kind",
         ]
         lines += list(failures)
