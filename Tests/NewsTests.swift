@@ -24062,6 +24062,9 @@ struct NewsTests {
                 date: start.addingTimeInterval(offset), category: category, level: level, message: message)
         }
         let model = LogWindowModel()
+        model.follows = false
+        model.clear()
+        assertTrue(model.follows, "Clear follows new lines again: an empty view has nothing to scroll back from")
         model.append([
             line(0, "Feeds", "Info", "Fetched 12 items"), line(1, "Database", "Error", "Integrity check failed"),
             line(2, "Feeds", "Error", "Fetch failed for news.example.com"),
@@ -27279,6 +27282,29 @@ struct NewsTests {
             return OverviewPerspectivesExtractor.extractPerspectives(
                 passages: [passage], articles: [article1], existingCitations: ["c_994b": citation]
             ).map(\.position)
+        }
+        let atLimit = "the council " + String(repeating: "a", count: 388)
+        assertEqual(
+            statements("Mayor Elena Rostova said that \(atLimit). Officials disputed it."),
+            [atLimit], "A complete 400-character statement is retained")
+        for attribution in [
+            "Mayor Elena Rostova said that", "Mayor Elena Rostova said", "According to Mayor Elena Rostova,",
+        ] {
+            for dot in ["Mr.", "Dr.", "U.S.", "8.9"] {
+                let overlong = "the council consulted \(dot) " + String(repeating: "residents ", count: 45)
+                assertTrue(
+                    statements("\(attribution) \(overlong).").isEmpty,
+                    "An overlong statement cannot backtrack to a nonterminal dot: \(attribution), \(dot)")
+            }
+        }
+        assertEqual(
+            statements("Mayor Elena Rostova said that the council consulted Mr. Smith about the £8.9bn plan."),
+            ["the council consulted Mr. Smith about the £8.9bn plan"],
+            "Honorifics and decimals remain inside a valid statement")
+        for ending in [".", "!", "?", "\n", ""] {
+            assertEqual(
+                statements("Mayor Elena Rostova said that the evacuation routes are open again\(ending)"),
+                ["the evacuation routes are open again"], "Valid sentence and passage endings are preserved")
         }
         assertEqual(
             statements("Mayor Elena Rostova said that the evacuation routes are open again! Officials disputed it."),

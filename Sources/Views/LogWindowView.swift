@@ -40,6 +40,8 @@ final class LogWindowModel: ObservableObject {
     @Published var level: String?
     @Published var category: String?
     @Published var search = ""
+    /// Follows new lines until the person scrolls up, and again once they scroll back to the end or clear the view.
+    @Published var follows = true
     private var readThrough = Date.distantPast
     private var nextID = 0
 
@@ -75,8 +77,11 @@ final class LogWindowModel: ObservableObject {
         if entries.count > Self.maximumEntries { entries.removeFirst(entries.count - Self.maximumEntries) }
     }
 
-    /// Hides what was shown so far; later lines keep arriving.
-    func clear() { entries.removeAll() }
+    /// Hides what was shown so far; later lines keep arriving. An empty view has nothing to scroll back from.
+    func clear() {
+        entries.removeAll()
+        follows = true
+    }
 
     func refresh() async {
         let start = readThrough
@@ -92,8 +97,6 @@ final class LogWindowModel: ObservableObject {
 
 struct LogWindowView: View {
     @StateObject private var model = LogWindowModel()
-    /// Follows new lines until the person scrolls up, and again once they scroll back to the end.
-    @State private var follows = true
 
     var body: some View {
         let visible = model.visible
@@ -113,12 +116,14 @@ struct LogWindowView: View {
             .onScrollGeometryChange(for: ScrollGeometry.self, of: { $0 }) { old, new in
                 // New lines grow the content; only the person's own scrolling decides whether the view follows.
                 guard old.contentSize == new.contentSize else { return }
-                follows = new.contentOffset.y + new.containerSize.height >= new.contentSize.height - AppSpacing.xs
+                model.follows = new.contentOffset.y + new.containerSize.height >= new.contentSize.height - AppSpacing.xs
             }
             .onChange(of: visible.last?.id) { _, last in
-                if follows, let last { proxy.scrollTo(last, anchor: .bottom) }
+                if model.follows, let last { proxy.scrollTo(last, anchor: .bottom) }
             }
         }
+        // Edit › Copy Log and Clear Log act on the Log window in front (DESIGN.md 5: every toolbar action has a command).
+        .focusedSceneObject(model)
         .overlay {
             if visible.isEmpty {
                 if model.search.isEmpty {
@@ -149,13 +154,9 @@ struct LogWindowView: View {
                 Button("Copy", systemImage: "doc.on.doc") { model.copyVisible() }
                     .help("Copy the visible lines")
                     .disabled(visible.isEmpty)
-                Button("Clear", systemImage: "eraser") {
-                    model.clear()
-                    // An empty view has nothing to scroll back from; the lines that follow are followed again.
-                    follows = true
-                }
-                .help("Hide the lines shown so far")
-                .disabled(model.entries.isEmpty)
+                Button("Clear", systemImage: "eraser") { model.clear() }
+                    .help("Hide the lines shown so far")
+                    .disabled(model.entries.isEmpty)
             }
         }
         .task {
