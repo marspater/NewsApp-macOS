@@ -315,7 +315,7 @@ private final class EditorialPassageIndex {
         let terms = Array(
             Set(
                 text.lowercased().components(separatedBy: .alphanumerics.inverted)
-                    .filter { !$0.isEmpty }.prefix(64))
+                    .filter { $0.count >= 3 && !EventFeatures.stopwords.contains($0) }.prefix(64))
         ).sorted()
         guard !terms.isEmpty else { return [] }
         let query = terms.map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }.joined(
