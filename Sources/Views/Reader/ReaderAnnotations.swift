@@ -99,12 +99,15 @@ struct NoteDraft: Identifiable {
     var quote: String { notes.map(\.selectedText).joined(separator: " … ") }
 }
 
-/// What the reader paints over its blocks: the reader's highlights.
+/// What the reader paints over its blocks: the reader's highlights and the sentences a publisher update added.
 struct ReaderOverlay {
     private(set) var highlights: [Int: [Range<Int>]] = [:]
+    /// The changes of a publisher update (V2 #712): tinted ranges, and retracted sentences the reader lists.
+    let changes: SentenceDiff.Overlay
 
     /// Paints each note's quote where it sits in `paragraphs` now; a quote the story no longer holds is not painted.
-    init(notes: [UserNote] = [], paragraphs: [String] = []) {
+    init(notes: [UserNote] = [], paragraphs: [String] = [], changes: SentenceDiff.Overlay = .init()) {
+        self.changes = changes
         for note in notes {
             if let spot = NoteAnchor.resolve(note, in: paragraphs) {
                 highlights[spot.index, default: []].append(spot.range)
@@ -114,6 +117,9 @@ struct ReaderOverlay {
 
     func styled(_ text: AttributedString, at index: Int) -> AttributedString {
         var text = text
+        for range in changes.added[index] ?? [] {
+            text.paint(range, AppColor.addedPassage, mark: AppColor.addedPassageMark)
+        }
         for range in highlights[index] ?? [] {
             text.paint(range, AppColor.noteHighlight, mark: AppColor.noteHighlightMark)
         }

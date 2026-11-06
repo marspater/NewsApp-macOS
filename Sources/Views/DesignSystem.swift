@@ -138,6 +138,10 @@ enum AppColor {
     static let noteHighlight = caution.opacity(0.28)
     /// The dotted underline that goes with a highlight, so the state does not rest on color alone (DESIGN.md 11).
     static let noteHighlightMark = Text.LineStyle(pattern: .dot, color: caution)
+    /// A sentence the publisher added in an update (V2 #712): a soft accent wash.
+    static let addedPassage = Color.accentColor.opacity(0.14)
+    /// The dashed underline that goes with it, so an added sentence does not rest on color alone (DESIGN.md 11).
+    static let addedPassageMark = Text.LineStyle(pattern: .dash, color: accent)
     /// The overview timeline's connecting line, stronger with Increase Contrast.
     static func timelineRail(for contrast: ColorSchemeContrast) -> Color {
         Color.accentColor.opacity(contrast == .increased ? 0.6 : 0.3)

@@ -766,11 +766,39 @@ struct PublisherContentRevision: Equatable, Sendable, Identifiable {
     let kind: Kind
     let changedFields: Int
     let inputHash: String
+    /// The text a publisher update replaced (V2 #712), kept for the reader's sentence diff; nil for other kinds, for
+    /// an update that replaced no text, for a text past `DatabaseEngine.maximumRevisionTextLength` and before schema 31.
+    var previousText: String? = nil
     var id: Int { version }
 
     var changeDescription: String {
         [(1, "Title"), (2, "Feed summary"), (4, "Article body")]
             .filter { changedFields & $0.0 != 0 }.map { $0.1 }.joined(separator: ", ")
+    }
+
+    /// The publisher updates a diff against `current` can show, newest first: those that kept the text they replaced
+    /// and that no extraction followed (an extraction changes what the text is: a summary becomes a body), and whose
+    /// replaced text is not a small part of the current one (a feed teaser that the page's body completed is not an
+    /// edit by the publisher).
+    // ponytail: "small part" is a fixed ratio (the current text is more than three times the old one plus 400
+    // characters); learn it from reviewed stories if teasers and real expansions keep being confused.
+    static func comparable(_ revisions: [PublisherContentRevision], current: String) -> [PublisherContentRevision] {
+        var comparable: [PublisherContentRevision] = []
+        var extracted = false
+        for revision in revisions.sorted(by: { $0.version > $1.version }) {
+            if revision.kind == .extraction { extracted = true }
+            guard revision.kind == .publisherUpdate, !extracted, let previous = revision.previousText,
+                current.count <= 3 * previous.count + 400
+            else { continue }
+            comparable.append(revision)
+        }
+        return comparable
+    }
+
+    /// The text a revision compares: the body, or the summary while the story has no body. SQLite derives the same
+    /// text for `previousText`.
+    static func text(description: String, content: String?) -> String {
+        content.flatMap { $0.isEmpty ? nil : $0 } ?? description
     }
 
     static func inputHash(title: String, description: String, content: String?) -> String {

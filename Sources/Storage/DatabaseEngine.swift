@@ -88,7 +88,9 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 30
+    static let schemaVersion = 31
+    /// The longest text a publisher update keeps of what it replaced (#712): a cut text would show invented changes.
+    static let maximumRevisionTextLength = 50_000
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
     static let busyTimeoutMilliseconds: Int32 = 5_000
 
@@ -1457,7 +1459,7 @@ actor DatabaseEngine {
                         input_text_hash TEXT NOT NULL,
                         PRIMARY KEY (article_id, version)
                     );
-                    INSERT OR IGNORE INTO publisher_content_revisions
+                    INSERT OR IGNORE INTO publisher_content_revisions (article_id, version, observed_at, kind, changed_fields, input_text_hash)
                     SELECT id, 1, \(Date().timeIntervalSince1970), 'snapshot', 0,
                            news_publisher_input(title, coalesce(description, ''), content) FROM articles;
                     -- Legacy generated results have no input provenance; keep publisher bodies and user state.
@@ -1467,7 +1469,7 @@ actor DatabaseEngine {
                     DROP TRIGGER IF EXISTS trg_publisher_content_insert;
                     CREATE TRIGGER trg_publisher_content_insert AFTER INSERT ON articles
                     BEGIN
-                        INSERT INTO publisher_content_revisions VALUES (new.id, 1, new.created_at, 'snapshot', 0,
+                        INSERT INTO publisher_content_revisions (article_id, version, observed_at, kind, changed_fields, input_text_hash) VALUES (new.id, 1, new.created_at, 'snapshot', 0,
                             news_publisher_input(new.title, coalesce(new.description, ''), new.content));
                     END;
                     DROP TRIGGER IF EXISTS trg_publisher_content_update;
@@ -1480,7 +1482,7 @@ actor DatabaseEngine {
                             WHERE article_id = new.id;
                         DELETE FROM event_overviews WHERE event_id IN (SELECT event_id FROM event_members WHERE article_id = new.id)
                             OR id IN (SELECT overview_id FROM event_overview_citations WHERE article_id = new.id);
-                        INSERT INTO publisher_content_revisions
+                        INSERT INTO publisher_content_revisions (article_id, version, observed_at, kind, changed_fields, input_text_hash)
                         SELECT new.id, coalesce(max(version), 0) + 1, new.updated_at,
                             CASE WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != ''
                                  THEN 'publisher_update' ELSE 'extraction' END,
@@ -1852,6 +1854,71 @@ actor DatabaseEngine {
                     """)
                 try Task.checkCancellation()
                 try setUserVersion(30)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                throw error
+            }
+        }
+        if version < 31 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // The text a publisher update replaced, for the reader's sentence diff (V2 #712): the body, or the
+                // summary while there is no body. Kept only for a publisher update that changed that text and only up
+                // to \(Self.maximumRevisionTextLength) characters; Clear Article Cache removes it. The v16 triggers
+                // are replaced by the same ones with the extra column.
+                let columns = try columnNames(of: "publisher_content_revisions")
+                if !columns.contains("previous_text") {
+                    try executeSimple("ALTER TABLE publisher_content_revisions ADD COLUMN previous_text TEXT;")
+                }
+                try executeSimple(
+                    """
+                    DROP TRIGGER IF EXISTS trg_publisher_content_insert;
+                    CREATE TRIGGER trg_publisher_content_insert AFTER INSERT ON articles
+                    BEGIN
+                        INSERT INTO publisher_content_revisions(article_id, version, observed_at, kind, changed_fields, input_text_hash)
+                        VALUES (new.id, 1, new.created_at, 'snapshot', 0,
+                            news_publisher_input(new.title, coalesce(new.description, ''), new.content));
+                    END;
+                    DROP TRIGGER IF EXISTS trg_publisher_content_update;
+                    CREATE TRIGGER trg_publisher_content_update AFTER UPDATE OF title, description, content ON articles
+                    WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR old.content IS NOT new.content
+                    BEGIN
+                        UPDATE article_enrichment SET summary = NULL, key_points = NULL, sentiment = NULL,
+                            entities = NULL, topics = NULL, category = NULL, confidence = NULL,
+                            model_identifier = NULL, analysis_version = NULL, input_content_version = NULL, input_text_hash = NULL
+                            WHERE article_id = new.id;
+                        DELETE FROM event_overviews WHERE event_id IN (SELECT event_id FROM event_members WHERE article_id = new.id)
+                            OR id IN (SELECT overview_id FROM event_overview_citations WHERE article_id = new.id);
+                        INSERT INTO publisher_content_revisions(article_id, version, observed_at, kind, changed_fields, input_text_hash, previous_text)
+                        SELECT new.id, coalesce(max(version), 0) + 1, new.updated_at,
+                            CASE WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != ''
+                                 THEN 'publisher_update' ELSE 'extraction' END,
+                            (old.title IS NOT new.title) + 2 * (old.description IS NOT new.description) + 4 * (old.content IS NOT new.content),
+                            news_publisher_input(new.title, coalesce(new.description, ''), new.content),
+                            CASE WHEN (old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != '')
+                                  AND OLDTEXT != NEWTEXT
+                                  AND length(OLDTEXT) BETWEEN 1 AND \(Self.maximumRevisionTextLength)
+                                 THEN OLDTEXT END
+                        FROM publisher_content_revisions WHERE article_id = new.id
+                        HAVING old.title IS NOT new.title OR old.description IS NOT new.description OR new.content IS NOT NULL;
+                        -- Keep compact metadata for the latest twenty observations.
+                        DELETE FROM publisher_content_revisions WHERE article_id = new.id AND version <
+                            (SELECT max(version) - 19 FROM publisher_content_revisions WHERE article_id = new.id);
+                    END;
+                    """.replacingOccurrences(
+                        of: "OLDTEXT",
+                        with:
+                            "(CASE WHEN coalesce(old.content, '') != '' THEN old.content ELSE coalesce(old.description, '') END)"
+                    )
+                    .replacingOccurrences(
+                        of: "NEWTEXT",
+                        with:
+                            "(CASE WHEN coalesce(new.content, '') != '' THEN new.content ELSE coalesce(new.description, '') END)"
+                    ))
+                try Task.checkCancellation()
+                try setUserVersion(31)
                 try commitTransaction()
             } catch {
                 loggedOptional("rollbackTransaction") { try rollbackTransaction() }
@@ -3589,7 +3656,7 @@ actor DatabaseEngine {
     func publisherContentRevisions(for articleID: String) throws -> [PublisherContentRevision] {
         let id = try resolvedArticleID(articleID)
         return try eventRows(
-            "SELECT version, observed_at, kind, changed_fields, input_text_hash FROM publisher_content_revisions WHERE article_id = ? ORDER BY version DESC LIMIT 20;",
+            "SELECT version, observed_at, kind, changed_fields, input_text_hash, previous_text FROM publisher_content_revisions WHERE article_id = ? ORDER BY version DESC LIMIT 20;",
             [.text(id)]
         ).compactMap { row in
             guard let version = row[0].flatMap(Int.init), let timestamp = row[1].flatMap(Double.init),
@@ -3598,7 +3665,7 @@ actor DatabaseEngine {
             else { return nil }
             return PublisherContentRevision(
                 version: version, observedAt: Date(timeIntervalSince1970: timestamp),
-                kind: kind, changedFields: fields, inputHash: hash)
+                kind: kind, changedFields: fields, inputHash: hash, previousText: row[5])
         }
     }
 
@@ -3977,6 +4044,9 @@ actor DatabaseEngine {
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
             )
+            try executeSimple(
+                "UPDATE publisher_content_revisions SET previous_text = NULL WHERE article_id NOT IN (\(Self.savedDocumentIDs));"
+            )
             try executeSimple("DELETE FROM article_enrichment WHERE article_id NOT IN (\(Self.savedDocumentIDs));")
             // Feed-provided bodies return only from an unconditional refresh.
             try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
@@ -3997,6 +4067,9 @@ actor DatabaseEngine {
             try deleteAnalysisRows()
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
+            )
+            try executeSimple(
+                "UPDATE publisher_content_revisions SET previous_text = NULL WHERE article_id NOT IN (\(Self.savedDocumentIDs));"
             )
             try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
             try commitTransaction()

@@ -1003,6 +1003,8 @@ struct NewsTests {
             ("testEnrichmentQueueCancelledJobsNotRetained", { await testEnrichmentQueueCancelledJobsNotRetained() }),
             ("testUserNotesStorageAndFTS", { try await testUserNotesStorageAndFTS() }),
             ("testNoteAnchoring", { testNoteAnchoring() }),
+            ("testSentenceDiffAndStoryEvolution", { testSentenceDiffAndStoryEvolution() }),
+            ("testPublisherRevisionTextStorage", { try await testPublisherRevisionTextStorage() }),
             ("testDesignSystemAndArticleFilter", { await testDesignSystemAndArticleFilter() }),
             ("testDistributionAndEntitlementsIntegrity", { await testDistributionAndEntitlementsIntegrity() }),
             ("testStrictSemVerAndReleaseSecurity", { await testStrictSemVerAndReleaseSecurity() }),
@@ -1542,7 +1544,7 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "30", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "31", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(
             value(copy, "SELECT count(*) FROM articles WHERE category IS NOT NULL;"), "0",
             "A library from before v22 keeps none of the classifier labels v22 wrote into the publisher column (#817)")
@@ -1620,7 +1622,7 @@ struct NewsTests {
         let shrinkPath = directory.appendingPathComponent("shrink.sqlite3").path
         let shrinkDB = DatabaseEngine(path: shrinkPath)
         try await shrinkDB.open()
-        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "30", "New database opens at schema v30")
+        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "31", "New database opens at schema v31")
         assertEqual(value(shrinkPath, "PRAGMA auto_vacuum;"), "2", "New database uses incremental auto_vacuum (2)")
 
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -2429,7 +2431,7 @@ struct NewsTests {
         let db = DatabaseEngine(path: workingCopy.path)
         try await db.open()
         assertEqual(
-            value(workingCopy.path, "PRAGMA user_version;"), "30",
+            value(workingCopy.path, "PRAGMA user_version;"), "31",
             "Fixture migrates cleanly to current schema v26 (#539)"
         )
         assertEqual(
@@ -8319,7 +8321,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "30", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "31", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -8574,7 +8576,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "30", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -10014,7 +10016,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "30", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -12755,7 +12757,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "30", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "31", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -12806,7 +12808,7 @@ struct NewsTests {
                 "UPDATE articles SET category = 'World' WHERE id = 'hint-classified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-publisher'; UPDATE articles SET category = 'World' WHERE id = 'hint-unclassified'; UPDATE articles SET category = 'Politics' WHERE id = 'hint-unrated'; PRAGMA user_version = 27;",
                 nil, nil, nil), SQLITE_OK, "Reconstruct a v27 library with a classifier category in the hint column")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "30", "The v27 library migrates to v28")
+        assertEqual(value("PRAGMA user_version;"), "31", "The v27 library migrates to v28")
         assertEqual(
             value("SELECT category FROM articles WHERE id = 'hint-classified';"), nil,
             "v28 clears a hint that holds the classifier's category")
@@ -13541,7 +13543,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "30", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -14588,7 +14590,8 @@ struct NewsTests {
         let beforePurge = try await db.publisherContentRevisions(for: companion.id)
         try await db.clearArticleCache()
         assertEqual(
-            try await db.publisherContentRevisions(for: companion.id), beforePurge,
+            try await db.publisherContentRevisions(for: companion.id).map(\.fingerprint),
+            beforePurge.map(\.fingerprint),
             "A local cache purge is not a publisher update")
         assertTrue(
             try await db.fetchArticles(id: article.id).first?.fullContent != nil,
@@ -14675,7 +14678,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "30", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -17854,7 +17857,7 @@ struct NewsTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
         try await database.open()
-        assertEqual(try await database.storedSchemaVersion(), 30, "The library migrates to schema version 30")
+        assertEqual(try await database.storedSchemaVersion(), 31, "The library migrates to the current schema")
 
         // Rows of the index itself: a listing joins the notes table and would hide a row a trigger left behind.
         func indexRows(_ word: String) async throws -> Int {
@@ -18023,6 +18026,236 @@ struct NewsTests {
         let painted = text.runs.filter { $0.backgroundColor != nil }.map { String(text[$0.range].characters) }
         assertEqual(
             painted, ["Officials said the bridge opens"], "Only the quote has a background; a stale range is ignored")
+    }
+
+    static func testSentenceDiffAndStoryEvolution() {
+        print("  - Testing the sentence diff on a multi-revision breaking story (#712)...")
+        let first =
+            "Two people were hurt when a bus hit a bridge rail on Monday. Police closed the road. "
+            + "The driver was taken to hospital."
+        let second =
+            "Two people were hurt when a bus hit a bridge rail on Monday.  Police closed the road. "
+            + "The driver, 54, was taken to hospital. A tow truck is on the way."
+        let third =
+            "Three people were hurt when a bus hit a bridge rail on Monday. Police closed the road. "
+            + "The driver, 54, was taken to hospital. The road reopened at 9 pm."
+
+        func kinds(_ before: String, _ after: String) -> [String] {
+            SentenceDiff.diff(before: before, after: after).map { item in
+                switch item.kind {
+                case .unchanged: "= \(item.text)"
+                case .added: "+ \(item.text)"
+                case .retracted: "- \(item.text)"
+                }
+            }
+        }
+        assertEqual(
+            kinds(first, second),
+            [
+                "= Two people were hurt when a bus hit a bridge rail on Monday.", "= Police closed the road.",
+                "- The driver was taken to hospital.", "+ The driver, 54, was taken to hospital.",
+                "+ A tow truck is on the way.",
+            ], "Extra spaces are not a change; a reworded sentence is one retracted and one added")
+        assertEqual(
+            kinds(second, third),
+            [
+                "- Two people were hurt when a bus hit a bridge rail on Monday.",
+                "+ Three people were hurt when a bus hit a bridge rail on Monday.", "= Police closed the road.",
+                "= The driver, 54, was taken to hospital.", "- A tow truck is on the way.",
+                "+ The road reopened at 9 pm.",
+            ], "The next revision is classified against the one before it")
+        assertEqual(
+            SentenceDiff.diff(before: first, after: first).filter { $0.kind != .unchanged }.count, 0, "Same text")
+        assertEqual(SentenceDiff.diff(before: "", after: second).filter { $0.kind == .added }.count, 4, "All new")
+        assertEqual(SentenceDiff.diff(before: second, after: "").filter { $0.kind == .retracted }.count, 4, "All gone")
+
+        // Blocks of the third revision, as the reader shows them: tinted ranges and the retracted lines' places.
+        let blocks = [
+            "Three people were hurt when a bus hit a bridge rail on Monday. Police closed the road.",
+            "",
+            "The driver, 54, was taken to hospital. The road reopened at 9 pm.",
+        ]
+        let overlay = SentenceDiff.overlay(before: second, after: third, blocks: blocks)
+        func slice(_ block: Int, _ range: Range<Int>) -> String {
+            String(Array(blocks[block])[range])
+        }
+        assertEqual(
+            overlay.added[0].map { $0.map { slice(0, $0) } },
+            ["Three people were hurt when a bus hit a bridge rail on Monday."], "A reworded sentence is tinted")
+        assertEqual(
+            overlay.added[2].map { $0.map { slice(2, $0) } }, ["The road reopened at 9 pm."],
+            "A new sentence is tinted")
+        assertEqual(overlay.added[1], nil, "A block without text is untouched")
+        assertEqual(
+            overlay.retracted[-1], ["Two people were hurt when a bus hit a bridge rail on Monday."],
+            "A sentence retracted before any kept one is listed before the first block")
+        assertEqual(
+            overlay.retracted[2], ["A tow truck is on the way."], "A retracted sentence follows the sentence before it")
+        assertTrue(
+            SentenceDiff.overlay(before: third, after: third, blocks: blocks).added.isEmpty, "No change, no tint")
+        assertTrue(SentenceDiff.overlay(before: third, after: third, blocks: blocks).isEmpty, "And nothing retracted")
+
+        // Duplicate sentences: only the added copy is tinted, and a retracted sentence follows its own neighbours.
+        let echo = "It rained. Police said. The road closed."
+        let echoBlocks = ["It rained. Police said. The road closed. Police said."]
+        let echoOverlay = SentenceDiff.overlay(before: echo, after: echo + " Police said.", blocks: echoBlocks)
+        assertEqual(echoOverlay.added[0], [41..<53], "The repeated sentence is tinted once, where it was added")
+        let removedEcho = SentenceDiff.overlay(before: echoBlocks[0], after: echo, blocks: [echo])
+        assertEqual(
+            removedEcho.retracted[0], ["Police said."], "The sentence removed at the end follows the last block")
+
+        // Past the pair budget only the shared head and tail are kept, and the middle is replaced as a whole: with
+        // the budget the two extra sentences would be the only changes.
+        let head = (0..<10).map { "Head \($0) stays." }
+        let tail = (0..<10).map { "Tail \($0) stays." }
+        let shared = (0..<2_100).map { "Shared sentence \($0) holds." }
+        let items = SentenceDiff.diff(
+            before: (head + shared + tail).joined(separator: " "),
+            after: (head + ["Extra sentence."] + shared + ["Closing sentence."] + tail).joined(separator: " "))
+        assertEqual(items.filter { $0.kind == .unchanged }.count, 20, "The shared head and tail survive a large diff")
+        assertEqual(items.filter { $0.kind == .added }.count, 2_102, "Past the budget the new middle is added whole")
+        assertEqual(items.filter { $0.kind == .retracted }.count, 2_100, "And the old middle is retracted whole")
+
+        // Which updates a story can be compared with.
+        func revision(_ version: Int, _ kind: PublisherContentRevision.Kind, _ previous: String?)
+            -> PublisherContentRevision
+        {
+            PublisherContentRevision(
+                version: version, observedAt: Date(), kind: kind, changedFields: 4, inputHash: "h\(version)",
+                previousText: previous)
+        }
+        let body = String(repeating: "x", count: 100)
+        assertEqual(
+            PublisherContentRevision.comparable(
+                [
+                    revision(3, .publisherUpdate, "older body"), revision(2, .publisherUpdate, "oldest"),
+                    revision(1, .snapshot, nil),
+                ], current: body
+            ).map(\.version), [3, 2], "Updates that kept their text are listed newest first")
+        assertEqual(
+            PublisherContentRevision.comparable(
+                [revision(2, .publisherUpdate, String(repeating: "t", count: 50)), revision(1, .snapshot, nil)],
+                current: String(repeating: "x", count: 2_000)
+            ).map(\.version), [], "A teaser that the page's body completed is not an edit")
+        assertEqual(
+            PublisherContentRevision.comparable(
+                [
+                    revision(4, .publisherUpdate, "body before"), revision(3, .extraction, nil),
+                    revision(2, .publisherUpdate, "summary before"), revision(1, .snapshot, nil),
+                ], current: body
+            ).map(\.version), [4], "An update before an extraction compares a summary with a body")
+        assertEqual(
+            PublisherContentRevision.comparable([revision(2, .publisherUpdate, nil)], current: body).count, 0,
+            "An update that kept no text has nothing to compare")
+
+        // The text a revision compares: the body, or the summary while there is no body.
+        assertEqual(PublisherContentRevision.text(description: "Summary", content: "Body"), "Body", "Body first")
+        assertEqual(PublisherContentRevision.text(description: "Summary", content: ""), "Summary", "Then the summary")
+        assertEqual(PublisherContentRevision.text(description: "Summary", content: nil), "Summary", "No body")
+    }
+
+    static func testPublisherRevisionTextStorage() async throws {
+        print("  - Testing the text kept for publisher updates, its limits and its migration (#712)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-revision-text-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        func execute(_ sql: String) {
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the revision fixture")
+            defer { sqlite3_close(handle) }
+            assertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, "Run \(sql.prefix(40))")
+        }
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let article = FeedArticle(
+            storedID: "evolving", title: "Bus hits bridge", link: "https://example.com/evolving", guid: "evolving",
+            description: "A bus hit a bridge.", pubDate: Date(), source: "Harbor News")
+        _ = try await db.upsertArticles([article])
+        let saved = FeedArticle(
+            storedID: "kept", title: "Kept story", link: "https://example.com/kept", guid: "kept",
+            description: "Kept summary.", pubDate: Date(), source: "Harbor News")
+        _ = try await db.upsertArticles([saved])
+        try await db.setSaved(articleId: saved.id, isSaved: true)
+
+        func revisions(_ id: String = "evolving") async throws -> [PublisherContentRevision] {
+            try await db.publisherContentRevisions(for: id)
+        }
+        assertEqual(try await revisions().first?.previousText, nil, "A first sight keeps no text")
+        let one = "The bus hit the rail on Monday. Police closed the road."
+        let two = one + " The driver was taken to hospital."
+        let three = "The bus hit the rail on Monday. The road reopened. The driver was taken to hospital."
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: one))
+        assertEqual(try await revisions().first?.kind, .extraction, "The first body is an extraction")
+        assertEqual(try await revisions().first?.previousText, nil, "An extraction keeps no text")
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: two))
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: three))
+        let chain = try await revisions().filter { $0.kind == .publisherUpdate }
+        assertEqual(chain.map(\.previousText), [two, one], "Each update keeps the text it replaced, newest first")
+
+        // A summary-only story compares summaries; a title-only change replaces no text.
+        let summaryOnly = FeedArticle(
+            storedID: "summary", title: "Summary story", link: "https://example.com/summary", guid: "summary",
+            description: "Before.", pubDate: Date(), source: "Harbor News")
+        _ = try await db.upsertArticles([summaryOnly])
+        let changed = FeedArticle(
+            storedID: "summary", title: "Summary story", link: summaryOnly.link, guid: "summary",
+            description: "After.", pubDate: summaryOnly.pubDate, source: "Harbor News")
+        _ = try await db.upsertArticles([changed])
+        assertEqual(
+            try await revisions("summary").first?.previousText, "Before.", "Summaries are compared without a body")
+        let retitled = FeedArticle(
+            storedID: "summary", title: "Summary story, updated", link: summaryOnly.link, guid: "summary",
+            description: "After.", pubDate: summaryOnly.pubDate, source: "Harbor News")
+        _ = try await db.upsertArticles([retitled])
+        let titleOnly = try await revisions("summary").first
+        assertEqual(titleOnly?.kind, .publisherUpdate, "A new headline is an update")
+        assertEqual(titleOnly?.previousText, nil, "But it replaced no text, so none is kept")
+
+        // A text too long to keep whole is not kept: a cut text would show invented changes.
+        let huge = String(repeating: "A long sentence about the bridge. ", count: 1_600)
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: huge))
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: huge + " More."))
+        let hugeRevisions = try await revisions()
+        assertEqual(hugeRevisions[1].previousText, three, "The update that replaced a short text keeps it")
+        assertEqual(hugeRevisions[0].previousText, nil, "An over-limit text is not kept")
+
+        // Clear Article Cache removes the kept text of stories whose bodies it clears, not of saved ones.
+        try await db.updateEnrichment(articleId: saved.id, update: .init(content: "Saved body one."))
+        try await db.updateEnrichment(articleId: saved.id, update: .init(content: "Saved body two."))
+        try await db.clearArticleCache()
+        assertTrue(
+            try await revisions().allSatisfy { $0.previousText == nil }, "A cache purge drops the text it kept")
+        assertEqual(try await revisions("kept").first?.previousText, "Saved body one.", "A saved story keeps its text")
+        await db.close()
+
+        // A library at schema 30 (no column, the v16 triggers) migrates: rows stay, new updates keep text.
+        execute(
+            """
+            DROP TRIGGER trg_publisher_content_insert; DROP TRIGGER trg_publisher_content_update;
+            ALTER TABLE publisher_content_revisions DROP COLUMN previous_text;
+            CREATE TRIGGER trg_publisher_content_insert AFTER INSERT ON articles BEGIN
+                INSERT INTO publisher_content_revisions VALUES (new.id, 1, new.created_at, 'snapshot', 0,
+                    news_publisher_input(new.title, coalesce(new.description, ''), new.content));
+            END;
+            PRAGMA user_version = 30;
+            """)
+        let migrated = DatabaseEngine(path: path)
+        try await migrated.open()
+        assertEqual(try await migrated.storedSchemaVersion(), 31, "A schema 30 library migrates to 31")
+        assertEqual(
+            try await migrated.publisherContentRevisions(for: article.id).count, hugeRevisions.count,
+            "Revisions survive the migration")
+        assertTrue(
+            try await migrated.publisherContentRevisions(for: article.id).allSatisfy { $0.previousText == nil },
+            "Earlier revisions have no text")
+        try await migrated.updateEnrichment(articleId: article.id, update: .init(content: three))
+        try await migrated.updateEnrichment(articleId: article.id, update: .init(content: two))
+        assertEqual(
+            try await migrated.publisherContentRevisions(for: article.id).first?.previousText, three,
+            "Updates after the migration keep the text they replace")
+        await migrated.close()
     }
 
     /// Runs on the main actor: resolving an AppKit-backed Color off the main thread waits on SwiftUI's main-thread
@@ -29765,5 +29998,12 @@ struct NewsTests {
             assertTrue(
                 footerBounds.maxY > 0 && footerBounds.maxY < height * 0.15, "The footer sits at the bottom of the page")
         }
+    }
+}
+
+extension PublisherContentRevision {
+    /// Everything but the kept text, which a cache purge removes.
+    fileprivate var fingerprint: String {
+        "\(version)|\(kind)|\(observedAt.timeIntervalSince1970)|\(changedFields)|\(inputHash)"
     }
 }
