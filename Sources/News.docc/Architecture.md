@@ -47,7 +47,7 @@ Stored article IDs never change when publisher metadata does. An article belongs
 - ``NotificationService``
 - ``AppContainer``
 
-### Storage
+### Library
 
 - ``DatabaseEngine``
 - ``ArticleStore``
