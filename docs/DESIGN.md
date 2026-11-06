@@ -97,7 +97,7 @@ The single design language for News on macOS. It applies to every change that ad
 - Transient confirmations (OPML imported, feed added) never insert rows into the list; use an alert, a toolbar status item or the masthead status line.
 - With panel collection on, the sidebar foot shows the World Tension assessment (degrees, band and status dot) in a `safeAreaInset`, not as a list row; it opens the World Tension sheet. Its status dot is static and uses the assessment band color. Animated illustrations belong only inside the World Tension sheet; each band has distinct motion, paused when inactive or Reduce Motion is on. The label denotes an AI assessment, not an objective probability of catastrophe.
 
-Predefined categories are selected in Settings → General; Suggested rows are not shown in navigation. Settings tabs share stable 720 × 560 content bounds and use native scrollable forms.
+Predefined categories are selected in Settings → General; Suggested rows are not shown in navigation. Settings tabs share stable 720 × 560 content bounds. A tab's own settings are a native scrollable form; comparing many items opens a sheet from that tab with a native sortable `Table` (Publisher Health, #715).
 
 ## 7. Search
 
@@ -349,6 +349,7 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 | Notice | `NoticeView` in `DesignSystem.swift` | Inline callouts in content |
 | Reading column | `ReadingColumn` in `DesignSystem.swift` | Measure and insets for reader and overview |
 | Empty states | `ContentUnavailableView` | All empty, error and no-result states |
+| Publisher Health | `PublisherHealthView.swift` | The per-feed health table in its Settings sheet; wording stays operational (section 17) |
 
 ## 19. Review checklist
 

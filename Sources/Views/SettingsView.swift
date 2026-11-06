@@ -88,6 +88,7 @@ struct SettingsView: View {
     @State private var pendingClear: StorageClear?
     @State private var pendingUnsubscribe: String?
     @State private var showsCatalog = false
+    @State private var showsPublisherHealth = false
     @State private var newMutedSource = ""
     @State private var newMutedTopic = ""
     @State private var muteCounts = MuteRuleCounts()
@@ -237,6 +238,15 @@ struct SettingsView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+
+                Button {
+                    showsPublisherHealth = true
+                } label: {
+                    Label("Publisher Health…", systemImage: "waveform.path.ecg")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("See how each feed responds, publishes and reads")
 
                 Button {
                     OPMLDialogs.importOPML { data in
@@ -412,6 +422,9 @@ struct SettingsView: View {
         .task { await feedManager.reloadFeedHealth() }
         .sheet(isPresented: $showsCatalog) {
             FeedCatalogView()
+        }
+        .sheet(isPresented: $showsPublisherHealth) {
+            PublisherHealthView()
         }
     }
 

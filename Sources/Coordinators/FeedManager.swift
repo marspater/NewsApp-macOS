@@ -344,6 +344,20 @@ class FeedManager: NSObject, ObservableObject {
         )
     }
 
+    /// One row per subscription for the Publisher Health inspector (#715). The database actor does the reading.
+    func publisherHealthRows(now: Date = Date()) async throws -> [PublisherHealthRow] {
+        let database = articleStore.database
+        let metrics = try await database.feedHealthMetrics(now: now)
+        let publishers = try await database.feedPublisherNames()
+        let states = try await database.feedFetchStates()
+        let empty = FeedHealthMetrics(FeedHealthObservations(), now: now)
+        return appSettings.feedURLs.map { url in
+            PublisherHealthRow(
+                feedURL: url, storedPublisher: publishers[url], metrics: metrics[url] ?? empty,
+                health: FeedHealth(states[url], now: now))
+        }
+    }
+
     // MARK: - Caching & Persistence
 
     func loadCachedArticles() {

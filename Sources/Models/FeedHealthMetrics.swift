@@ -92,3 +92,83 @@ struct FeedHealthMetrics: Equatable, Sendable {
         return ordered.reduce(ordered[0]) { $1.1 > $0.1 ? $1 : $0 }.0
     }
 }
+
+/// What the Publisher Health inspector suggests about a feed. These are about the feed's plumbing, never its reporting.
+enum FeedHealthRecommendation: String, CaseIterable, Sendable {
+    case notResponding = "Not responding"
+    case inactive = "Inactive for over 30 days"
+    case requiresWebView = "Requires Web View"
+}
+
+/// One feed's row in the Publisher Health table: its numbers, recommendations, display text and sort keys. Pure, so
+/// the wording and order need no view. Unknown values sort last in ascending order, after the feeds in most trouble.
+struct PublisherHealthRow: Identifiable, Equatable, Sendable {
+    static let unknownText = "—"
+    static let footnote =
+        FeedHealth.disclaimer
+        + " Request numbers build up with each refresh, and text results come from stories that have been opened."
+
+    /// The feed's URL.
+    let id: String
+    let name: String
+    let metrics: FeedHealthMetrics
+    let recommendations: [FeedHealthRecommendation]
+
+    init(feedURL: String, storedPublisher: String?, metrics: FeedHealthMetrics, health: FeedHealth?) {
+        id = feedURL
+        name = Self.name(feedURL: feedURL, storedPublisher: storedPublisher)
+        self.metrics = metrics
+        var suggestions: [FeedHealthRecommendation] = []
+        if case .failing = health?.availability { suggestions.append(.notResponding) }
+        if health?.freshness == .stale { suggestions.append(.inactive) }
+        if metrics.extractionClass == .paywall || metrics.extractionClass == .blocked {
+            suggestions.append(.requiresWebView)
+        }
+        recommendations = suggestions
+    }
+
+    /// The catalog's title tells a publisher's feeds apart; otherwise what its stories call it, then its host.
+    static func name(feedURL: String, storedPublisher: String?) -> String {
+        if let title = FeedCatalog.allFeeds.first(where: { $0.url == feedURL })?.title { return title }
+        if let storedPublisher, !storedPublisher.isEmpty { return storedPublisher }
+        return URL(string: feedURL)?.host ?? feedURL
+    }
+
+    var successSortKey: Double { metrics.successRate ?? .infinity }
+    var latencySortKey: Double { metrics.averageLatency ?? .infinity }
+    var frequencySortKey: Double { metrics.itemsPerDay ?? (metrics.successRate == nil ? .infinity : 0) }
+
+    /// Rounded down, so 100% means no failure.
+    var successText: String {
+        metrics.successRate.map { "\(Int(($0 * 100).rounded(.down)))%" } ?? Self.unknownText
+    }
+    var successSpoken: String {
+        metrics.successRate.map { "\(Int(($0 * 100).rounded(.down))) percent" } ?? Self.notMeasured
+    }
+    var latencyText: String { metrics.averageLatency.map { String(format: "%.1f s", $0) } ?? Self.unknownText }
+    var latencySpoken: String {
+        metrics.averageLatency.map { String(format: "%.1f seconds", $0) } ?? Self.notMeasured
+    }
+    var frequencyText: String {
+        guard let perDay = metrics.itemsPerDay else { return metrics.successRate == nil ? Self.unknownText : "0" }
+        if perDay < 0.1 { return "<0.1" }
+        return String(format: perDay >= 10 ? "%.0f" : "%.1f", perDay)
+    }
+    var frequencySpoken: String {
+        let text = frequencyText
+        if text == Self.unknownText { return Self.notMeasured }
+        return text == "<0.1" ? "Less than 0.1 stories a day" : "\(text) stories a day"
+    }
+    var extractionText: String {
+        switch metrics.extractionClass {
+        case .unknown: return "Unknown"
+        case .fullReader: return "Full reader"
+        case .teaser: return "Teaser"
+        case .paywall: return "Paywall"
+        case .blocked: return "Blocked"
+        }
+    }
+    var recommendationText: String { recommendations.map(\.rawValue).joined(separator: " · ") }
+
+    private static let notMeasured = "Not measured yet"
+}
