@@ -35,6 +35,7 @@ enum AnalysisGenerationTests {
             try await staleWritesAreRefused()
             try await queueForgetsRefusedAndClearedWork()
             await queuedOverviewsRespectCancellationAndSupersession()
+            await cancelledManualRefreshWaiterDoesNotRetainItsCaller()
             try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
             try await clusteringStorageFailuresEndThePass()
@@ -150,6 +151,52 @@ enum AnalysisGenerationTests {
         check(await signals.wasInvoked("replacement"), "The replacement runs after capacity opens")
         check(await queue.activeJobCount() == 0, "All overview worker slots are returned")
         check(await queue.queuedOverviewCount() == 0, "No queued overview generations are retained")
+    }
+
+    /// A manual refresh queued behind a scheduled collection must release its continuation on cancellation, even
+    /// when the scheduled network request is still blocked.
+    @MainActor
+    static func cancelledManualRefreshWaiterDoesNotRetainItsCaller() async {
+        let suite = "news-refresh-cancellation-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            return check(false, "Isolated preferences can be created")
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.waitForStartup()
+        guard store.isReady else {
+            return check(false, "An in-memory library opens for refresh cancellation")
+        }
+        let gate = OverviewGate()
+        let signals = OverviewSignals()
+        let manager = FeedManager(
+            settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false,
+            fetchBatch: { _, _ in
+                await signals.invoke("collecting")
+                await gate.wait()
+                return []
+            },
+            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+        let scheduled = Task { await manager.fetchFeedsAsync(scheduled: true) }
+        await eventually("The scheduled refresh enters collection") { await signals.wasInvoked("collecting") }
+        let manual = Task {
+            await manager.fetchFeedsAsync()
+            await signals.finish("manual")
+        }
+        await eventually("A manual refresh joins the scheduled one") { manager.manualRefreshWaiters.count == 1 }
+        manual.cancel()
+        await eventually("The cancelled manual waiter is removed", timeout: .seconds(5)) {
+            manager.manualRefreshWaiters.isEmpty
+        }
+        await eventually("The cancelled caller returns before collection finishes", timeout: .seconds(5)) {
+            await signals.hasFinished("manual")
+        }
+        manager.stopBackgroundWork()
+        await gate.release()
+        await scheduled.value
+        await manual.value
+        await db.close()
     }
 
     /// A clear that fails mid-transaction rolls back SQLite's half only if the side file and the generation have not
