@@ -312,6 +312,10 @@ struct NewsApp: App {
                 .keyboardShortcut(ReaderMode.webShortcut, modifiers: ReaderMode.webShortcutModifiers)
                 .disabled(readerActions == nil)
 
+                Button("Check for Updates") { readerActions?.checkForUpdates?() }
+                    .keyboardShortcut("r", modifiers: [.command, .option])
+                    .disabled(readerActions?.checkForUpdates == nil)
+
                 if let actions = readerActions {
                     Picker("Reading Mode", selection: actions.mode) {
                         if actions.hasOverview { Text("Overview").tag(ReaderMode.overview) }

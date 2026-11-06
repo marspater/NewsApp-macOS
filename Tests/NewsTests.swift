@@ -795,6 +795,7 @@ struct NewsTests {
             try await testFiniteBriefing()
             try await testPublisherContentProvenance()
             try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
+            try await testStoryCheckForUpdates(fixtureRoot: fixtureRoot)
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
             try await testMatcherRegressionCorpus()
             try await testStoryRegressionCorpus()
@@ -967,6 +968,7 @@ struct NewsTests {
             ("testBriefingBoardLayout", { testBriefingBoardLayout() }),
             ("testPublisherContentProvenance", { try await testPublisherContentProvenance() }),
             ("testRefreshClustersEvents", { try await testRefreshClustersEvents(fixtureRoot: fixtureRoot) }),
+            ("testStoryCheckForUpdates", { try await testStoryCheckForUpdates(fixtureRoot: fixtureRoot) }),
             ("testEventCorpusHarness", { try await testEventCorpusHarness(fixtureRoot: fixtureRoot) }),
             ("testMatcherRegressionCorpus", { try await testMatcherRegressionCorpus() }),
             ("testStoryRegressionCorpus", { try await testStoryRegressionCorpus() }),
@@ -1838,6 +1840,14 @@ struct NewsTests {
             store.operationError?.contains("read-only") == true
                 && store.operationError?.contains(store.databaseHealthNotice ?? "?") == true,
             "A manual refresh says why, with the library's own notice")
+        // Check for Updates (#992) refuses the same way and downloads nothing.
+        let check = await manager.checkForUpdates(storyOf: "readonly-story")
+        if case .refused(let reason) = check {
+            assertTrue(reason.contains(store.databaseHealthNotice ?? "?"), "Check for Updates names the library notice")
+        } else {
+            assertTrue(false, "Check for Updates is refused while read-only, got \(check)")
+        }
+        assertEqual(await fetches.batches.count, 0, "Check for Updates downloads nothing while read-only")
         await engine.close()
     }
 
@@ -13774,6 +13784,74 @@ struct NewsTests {
         await manager.waitForEventClustering()
         assertEqual(try await EventClusterer.run(in: db).processed, 0, "Refreshes leave nothing unmatched")
         manager.stopBackgroundWork()
+    }
+
+    /// #992: Check for Updates refreshes, waits for clustering and says whether reports joined the open story.
+    @MainActor
+    static func testStoryCheckForUpdates(fixtureRoot: URL) async throws {
+        print("  - Testing Check for Updates on a story's overview: one report joins, then none (#992)...")
+        final class Batches: @unchecked Sendable {
+            private let lock = NSLock()
+            private var results: [String: ([FeedArticle]?, FeedError?)] = [:]
+            func set(_ url: String, _ articles: [FeedArticle]?, _ error: FeedError? = nil) {
+                lock.lock()
+                results[url] = (articles, error)
+                lock.unlock()
+            }
+            func batch(_ urls: [String]) -> [FeedFetchResult] {
+                lock.lock()
+                defer { lock.unlock() }
+                return urls.map { ($0, results[$0]?.0 ?? [], results[$0]?.1, nil) }
+            }
+        }
+        let suite = testDefaultsSuite("test.story-check-for-updates")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feeds = ["https://8.8.8.8/one.xml", "https://8.8.4.4/two.xml"]
+        settings.feedURLs = feeds
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let control = EventControlSet.articles(now: Date(), root: fixtureRoot).filter {
+            $0.article.id.hasPrefix("quake")
+        }.map(\.article)
+        assertEqual(control.count, 3, "The quake controls are three reports of one event")
+        let batches = Batches()
+        batches.set(feeds[0], Array(control.prefix(2)))
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in batches.batch(urls) }, notifyBatch: { _, _ in }, imageFinder: .unavailable,
+            allowsBackgroundWork: { true })
+        defer { manager.stopBackgroundWork() }
+        await manager.fetchFeedsAsync()
+        await manager.waitForEventClustering()
+        let open = control[0].id
+
+        batches.set(feeds[1], Array(control.dropFirst(2)))
+        let joined = await manager.checkForUpdates(storyOf: open)
+        assertEqual(joined, .checked(newReports: 1, failedFeeds: 0, deferredMatching: false), "One report joins")
+        assertEqual(joined.statusText, "1 new report joined this story", "The status line counts the new report")
+
+        let unchanged = await manager.checkForUpdates(storyOf: open)
+        assertEqual(unchanged.statusText, "No new reports from your sources", "A refresh that adds none says so")
+
+        batches.set(feeds[1], nil, .httpStatus(503))
+        let partial = await manager.checkForUpdates(storyOf: open)
+        assertEqual(
+            partial.statusText, "No new reports from your sources · 1 feed could not be checked",
+            "A feed that failed is named, never hidden")
+        assertEqual(
+            FeedManager.StoryUpdateResult.checked(newReports: 0, failedFeeds: 0, deferredMatching: true).statusText,
+            "No new reports yet. Some story matching waits while the Mac saves energy or cools down",
+            "Deferred matching claims nothing and names no single cause")
+        assertEqual(
+            FeedManager.StoryUpdateResult.checked(newReports: 3, failedFeeds: 2, deferredMatching: true).statusText,
+            "3 new reports joined this story · 2 feeds could not be checked", "Counts are plural")
+        assertEqual(
+            FeedManager.StoryUpdateResult.refused("The library is read-only.").statusText,
+            "Refresh is off. The library is read-only.", "A refused refresh says why")
     }
 
     static func testDockBadgeCount() {
