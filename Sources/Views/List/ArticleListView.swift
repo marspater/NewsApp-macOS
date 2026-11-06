@@ -1510,7 +1510,7 @@ struct KeyboardShortcutsView: View {
             [
                 ("J or ↓", "Next story"),
                 ("K or ↑", "Previous story"),
-                ("Space or ⌘Y", "Quick Look preview"),
+                ("Space or ⌘Y", "Quick Look preview (⌘Y in the list)"),
                 ("↵", "Open focused story"),
                 ("Esc, ← or B", "Back to list"),
             ]
@@ -1529,6 +1529,9 @@ struct KeyboardShortcutsView: View {
                 ("⌘S", "Save or remove from Saved Stories (menu)"),
                 ("⌘O", "Open in browser (menu)"),
                 ("C", "Copy link"),
+                ("⌘Y", "Highlight the selected passage (in the reader)"),
+                ("⇧⌘Y", "Add a note to the selected passage"),
+                ("⌥⌘I", "Show or hide highlights and notes"),
                 ("⌘[ / ⌘]", "Web back and forward"),
                 ("⌘+ / ⌘− / ⌘0", "Bigger text, smaller text, actual size"),
             ]

@@ -681,4 +681,7 @@ final class ArticleStore: ObservableObject {
             return 0
         }
     }
+
+    /// Bumped by every change to the reader's notes (`ArticleStore+Notes.swift`).
+    @Published var userNotesRevision = 0
 }

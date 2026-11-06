@@ -90,7 +90,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 29
+    static let schemaVersion = 30
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
     static let busyTimeoutMilliseconds: Int32 = 5_000
 
@@ -1807,6 +1807,56 @@ actor DatabaseEngine {
                 try commitTransaction()
             } catch {
                 try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 30 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Private highlights and notes on a passage of a story (V1 #711). `seq` is the durable key of the
+                // external-content index: do not use the hidden rowid of this TEXT-keyed table, VACUUM may change it.
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_notes (
+                        seq INTEGER PRIMARY KEY,
+                        id TEXT NOT NULL UNIQUE,
+                        article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        paragraph_index INTEGER NOT NULL,
+                        char_start INTEGER NOT NULL,
+                        selected_text TEXT NOT NULL,
+                        quote_prefix TEXT NOT NULL,
+                        quote_suffix TEXT NOT NULL,
+                        note_body TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_user_notes_article ON user_notes(article_id, paragraph_index, char_start);
+                    CREATE INDEX IF NOT EXISTS idx_user_notes_created ON user_notes(created_at DESC);
+                    CREATE VIRTUAL TABLE IF NOT EXISTS user_notes_fts USING fts5(
+                        selected_text, note_body, content = 'user_notes', content_rowid = 'seq',
+                        tokenize = 'porter unicode61'
+                    );
+                    CREATE TRIGGER IF NOT EXISTS trg_user_notes_ai AFTER INSERT ON user_notes BEGIN
+                        INSERT INTO user_notes_fts(rowid, selected_text, note_body)
+                        VALUES (new.seq, new.selected_text, new.note_body);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS trg_user_notes_ad AFTER DELETE ON user_notes BEGIN
+                        INSERT INTO user_notes_fts(user_notes_fts, rowid, selected_text, note_body)
+                        VALUES ('delete', old.seq, old.selected_text, old.note_body);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS trg_user_notes_au AFTER UPDATE ON user_notes BEGIN
+                        INSERT INTO user_notes_fts(user_notes_fts, rowid, selected_text, note_body)
+                        VALUES ('delete', old.seq, old.selected_text, old.note_body);
+                        INSERT INTO user_notes_fts(rowid, selected_text, note_body)
+                        VALUES (new.seq, new.selected_text, new.note_body);
+                    END;
+                    """)
+                try Task.checkCancellation()
+                try setUserVersion(30)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -3992,7 +4042,7 @@ actor DatabaseEngine {
     // MARK: - Retention Policy & Pruning
 
     /// Prunes read articles older than `keepReadDays` and derived intelligence rows outside active windows (#536, #537).
-    /// Never prunes unread articles or saved stories.
+    /// Never prunes unread articles, saved stories or stories with a highlight or note (#711).
     @discardableResult
     func pruneOldArticles(keepReadDays: Int = 30, now: Date = Date()) throws -> Int {
         guard let db = db else {
@@ -4006,6 +4056,7 @@ actor DatabaseEngine {
             SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
             WHERE s.is_read = 1 AND s.is_saved = 0 AND \(Self.articleDateOrder) < ?1
                 AND \(Self.visibleArticle)
+                AND NOT EXISTS (SELECT 1 FROM user_notes n WHERE n.article_id = a.id)
                 AND NOT EXISTS (SELECT 1 FROM event_overview_citations c
                     WHERE c.article_id = a.id OR c.article_id IN (
                         SELECT duplicate_id FROM article_reconciliations WHERE survivor_id = a.id))
@@ -4842,7 +4893,8 @@ actor DatabaseEngine {
         URL(fileURLWithPath: dbPath + ".world-tension-v2.json")
     }
 
-    private func requireWritable() throws {
+    /// Throws when the library was opened read-only (a newer schema, or a failed pre-migration copy).
+    func requireWritable() throws {
         if isReadOnly { throw CocoaError(.fileWriteVolumeReadOnly) }
     }
 
