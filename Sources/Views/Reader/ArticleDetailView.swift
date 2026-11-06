@@ -317,7 +317,7 @@ struct ArticleDetailView: View {
                         .controlSize(.regular)
                     Text("Loading event overview…")
                         .font(AppTypography.body)
-                        .foregroundColor(AppColor.secondaryText)
+                        .foregroundStyle(AppColor.secondaryText)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .focusEffectDisabled(false)
@@ -866,7 +866,7 @@ struct ArticleDetailView: View {
             HStack(alignment: .top, spacing: AppSpacing.md) {
                 Rectangle()
                     .fill(AppColor.accent.opacity(Self.quoteBarOpacity(for: contrast)))
-                    .frame(width: 3)
+                    .frame(width: AppLayout.quoteBarWidth)
                     .accessibilityHidden(true)
                 Text(readerLinkedText(block, index: index, overlay: overlay))
                     .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
@@ -1047,10 +1047,10 @@ struct ArticleDetailView: View {
                     Spacer()
                     Image(systemName: "exclamationmark.triangle")
                         .imageScale(.large)
-                        .foregroundColor(AppColor.secondaryText)
+                        .foregroundStyle(AppColor.secondaryText)
                     Text("Invalid story link")
                         .font(AppTypography.headline)
-                        .foregroundColor(AppColor.secondaryText)
+                        .foregroundStyle(AppColor.secondaryText)
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1748,7 +1748,7 @@ struct ArticleDetailView: View {
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                    .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+                    .strokeBorder(AppColor.border(for: contrast), lineWidth: AppLayout.hairline)
             )
         }
     }
