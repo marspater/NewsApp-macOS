@@ -89,8 +89,9 @@ final class NetworkTimeline: Sendable {
     func record(path: PathState) {
         let date = now()
         state.withLock { state in
-            // The monitor's first callback only reports the current path, so it is no change.
-            if let previous = state.path, previous != path { state.pathChanges += 1 }
+            // The monitor's first callback only reports the current path. Every later one is a change, even when this
+            // summary reads the same: a route or gateway can move without changing the interface types.
+            if state.path != nil { state.pathChanges += 1 }
             state.path = path
             Self.append(Entry(date: date, event: .path(path)), to: &state.entries)
         }
