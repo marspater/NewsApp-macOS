@@ -828,20 +828,6 @@ struct ArticleDetailView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(block.kind == .heading ? .h2 : .h3)
                 .textSelection(.enabled)
-        case .quote:
-            HStack(alignment: .top, spacing: AppSpacing.md) {
-                Rectangle()
-                    .fill(AppColor.accent.opacity(Self.quoteBarOpacity(for: contrast)))
-                    .frame(width: 3)
-                    .accessibilityHidden(true)
-                Text(readerLinkedText(block, index: index, overlay: overlay))
-                    .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
-                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
-                    .textSelection(.enabled)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical, AppSpacing.xxs * readerTextScale)
-            .frame(maxWidth: .infinity, alignment: .leading)
         case .divider:
             Divider()
                 .opacity(Self.dividerOpacity(for: contrast))
@@ -849,28 +835,6 @@ struct ArticleDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, AppSpacing.sm * readerTextScale)
                 .accessibilityHidden(true)
-        case .listItem:
-            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
-                Text(block.ordinal.map { "\($0)." } ?? "•")
-                    .foregroundStyle(AppColor.secondaryText)
-                    // A bullet is decoration; an ordinal is read before the item.
-                    .accessibilityHidden(block.ordinal == nil)
-                // Not combined: the item is selectable text and may carry links (DESIGN.md 16).
-                Text(readerLinkedText(block, index: index, overlay: overlay)).textSelection(.enabled)
-            }
-            .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
-            .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
-            .padding(.leading, CGFloat(block.level ?? 0) * AppSpacing.lg * readerTextScale)
-        case .code:
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(readerLinkedText(block, index: index, overlay: overlay))
-                    .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(AppSpacing.md * readerTextScale)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
         case .standfirst:
             Text(readerLinkedText(block, index: index, overlay: overlay))
                 .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
@@ -878,17 +842,6 @@ struct ArticleDetailView: View {
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
-        case .pullQuote:
-            VStack(alignment: .leading, spacing: AppSpacing.sm * readerTextScale) {
-                Divider().opacity(Self.dividerOpacity(for: contrast))
-                Text(readerLinkedText(block, index: index, overlay: overlay))
-                    .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
-                    .foregroundStyle(AppColor.primaryText)
-                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
-                Divider().opacity(Self.dividerOpacity(for: contrast))
-            }
         case .table:
             ReaderTableView(
                 block: block,
@@ -920,6 +873,64 @@ struct ArticleDetailView: View {
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+        default:
+            readerWrappedBlock(block, index: index, overlay: overlay)
+        }
+    }
+
+    /// Quotes, list items and code: the block kinds whose layout wraps the text.
+    @ViewBuilder
+    private func readerWrappedBlock(_ block: ReaderBlock, index: Int, overlay: ReaderOverlay) -> some View {
+        switch block.kind {
+        case .quote:
+            HStack(alignment: .top, spacing: AppSpacing.md) {
+                Rectangle()
+                    .fill(AppColor.accent.opacity(Self.quoteBarOpacity(for: contrast)))
+                    .frame(width: 3)
+                    .accessibilityHidden(true)
+                Text(readerLinkedText(block, index: index, overlay: overlay))
+                    .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                    .textSelection(.enabled)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, AppSpacing.xxs * readerTextScale)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        case .listItem:
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+                Text(block.ordinal.map { "\($0)." } ?? "•")
+                    .foregroundStyle(AppColor.secondaryText)
+                    // A bullet is decoration; an ordinal is read before the item.
+                    .accessibilityHidden(block.ordinal == nil)
+                // Not combined: the item is selectable text and may carry links (DESIGN.md 16).
+                Text(readerLinkedText(block, index: index, overlay: overlay)).textSelection(.enabled)
+            }
+            .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
+            .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+            .padding(.leading, CGFloat(block.level ?? 0) * AppSpacing.lg * readerTextScale)
+        case .code:
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(readerLinkedText(block, index: index, overlay: overlay))
+                    .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(AppSpacing.md * readerTextScale)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
+        case .pullQuote:
+            VStack(alignment: .leading, spacing: AppSpacing.sm * readerTextScale) {
+                Divider().opacity(Self.dividerOpacity(for: contrast))
+                Text(readerLinkedText(block, index: index, overlay: overlay))
+                    .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
+                    .foregroundStyle(AppColor.primaryText)
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                Divider().opacity(Self.dividerOpacity(for: contrast))
+            }
+        default:
+            EmptyView()
         }
     }
 
