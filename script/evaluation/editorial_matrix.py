@@ -91,6 +91,7 @@ def validate_fixture(
         raise RuntimeError(f"Unexpected article fixture: count={article_count}, scenarios={scenario_counts}")
     if len(event_meta) != 50 or passage_count != 5000:
         raise RuntimeError("The labelled event/passage fixture is incomplete")
+    validate_passage_controls(db)
     if ranking_count != 5000 or impression_count < 50000:
         raise RuntimeError("The ranking/impression fixture is incomplete")
     if db.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
@@ -121,6 +122,17 @@ def validate_fixture(
         "impression_count": impression_count,
     }
 
+
+def validate_passage_controls(db: sqlite3.Connection) -> None:
+    """Required control coverage is fixed independently of the labels being measured."""
+    classes = dict(db.execute("SELECT expected_class,count(*) FROM passages GROUP BY expected_class"))
+    routes = dict(db.execute("SELECT expected_lexical_match,count(*) FROM passages GROUP BY expected_lexical_match"))
+    if classes != {"repetition": 2900, "potentially_new": 1400, "semantic_fallback": 700}:
+        raise RuntimeError("Required passage-class controls changed")
+    if routes != {0: 750, 1: 4250}:
+        raise RuntimeError("Required historical routing controls changed")
+
+
 def database_summary(
     db: sqlite3.Connection,
     args: argparse.Namespace,
@@ -148,38 +160,43 @@ def database_summary(
         "sqlite_file_bytes": db_path.stat().st_size,
     }
 
+def git_directory(root: Path) -> Path:
+    """Return the Git directory of a checkout or linked worktree."""
+    marker = root / ".git"
+    if not marker.is_file():
+        return marker
+    pointer = marker.read_text(encoding="utf-8").strip()
+    if not pointer.startswith("gitdir: "):
+        raise RuntimeError("Invalid Git worktree marker")
+    return (marker.parent / pointer.removeprefix("gitdir: ")).resolve()
+
+def resolve_git_reference(git_dir: Path, reference: str) -> str:
+    """Read a symbolic reference from the common Git directory, loose before packed."""
+    if not reference.startswith("refs/") or ".." in Path(reference).parts:
+        raise RuntimeError("Invalid Git HEAD reference")
+    common_marker = git_dir / "commondir"
+    common = (
+        (git_dir / common_marker.read_text(encoding="utf-8").strip()).resolve()
+        if common_marker.exists() else git_dir
+    )
+    loose = common / reference
+    if loose.is_file():
+        return loose.read_text(encoding="utf-8").strip()
+    packed = common / "packed-refs"
+    matches = [
+        line.split(" ", 1)[0] for line in packed.read_text(encoding="utf-8").splitlines()
+        if line.endswith(" " + reference)
+    ] if packed.exists() else []
+    if len(matches) != 1:
+        raise RuntimeError("Cannot resolve Git HEAD")
+    return matches[0]
+
 def git_revision(root: Path | None = None) -> str:
     """Read this checkout's HEAD, including linked worktrees and packed references."""
-    marker = (root or Path(__file__).resolve().parents[2]) / ".git"
-    if marker.is_file():
-        pointer = marker.read_text(encoding="utf-8").strip()
-        if not pointer.startswith("gitdir: "):
-            raise RuntimeError("Invalid Git worktree marker")
-        git_dir = (marker.parent / pointer.removeprefix("gitdir: ")).resolve()
-    else:
-        git_dir = marker
+    git_dir = git_directory(root or Path(__file__).resolve().parents[2])
     head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
     if head.startswith("ref: "):
-        reference = head.removeprefix("ref: ")
-        if not reference.startswith("refs/") or ".." in Path(reference).parts:
-            raise RuntimeError("Invalid Git HEAD reference")
-        common_marker = git_dir / "commondir"
-        common = (
-            (git_dir / common_marker.read_text(encoding="utf-8").strip()).resolve()
-            if common_marker.exists() else git_dir
-        )
-        loose = common / reference
-        if loose.is_file():
-            head = loose.read_text(encoding="utf-8").strip()
-        else:
-            packed = common / "packed-refs"
-            matches = [
-                line.split(" ", 1)[0] for line in packed.read_text(encoding="utf-8").splitlines()
-                if line.endswith(" " + reference)
-            ] if packed.exists() else []
-            if len(matches) != 1:
-                raise RuntimeError("Cannot resolve Git HEAD")
-            head = matches[0]
+        head = resolve_git_reference(git_dir, head.removeprefix("ref: "))
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
         raise RuntimeError("Invalid Git revision")
     return head
@@ -328,7 +345,9 @@ def run_phase_zero(args: argparse.Namespace, db_path: Path, output_path: Path) -
         fixture = validate_fixture(db, event_meta)
         matrix = build_matrix(db, args, db_path, event_meta, timings, fixture)
         db.commit()
-        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        busy, _, _ = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if busy:
+            raise RuntimeError("SQLite checkpoint was blocked; database size is incomplete")
         matrix["database"]["sqlite_file_bytes"] = db_path.stat().st_size
         write_report(output_path, matrix, db_path, args, fixture)
     finally:

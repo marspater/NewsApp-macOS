@@ -16,6 +16,9 @@ import Foundation
 
 struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var queryOrderValue: Double? = nil
+    /// When News stored the story, from a query that orders by date (not a search score). Only read for a story with no
+    /// publication date, whose order value is that moment.
+    var ingestedAt: Date? = nil
     // Database identity survives corrected publisher GUIDs and URLs. Absent in legacy JSON.
     var storedID: String? = nil
     // Present on incoming subscription articles; absent in legacy caches.
@@ -30,7 +33,7 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     let link: String
     let guid: String?
     let description: String
-    let pubDate: Date
+    var pubDate: Date
     let source: String
     var imageUrl: String?
     var aiSummary: String?
@@ -55,25 +58,42 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         PublisherContentRevision.inputHash(title: title, description: description, content: fullContent)
     }
 
-    /// The full publication date for the reader and accessibility labels ("October 10, 2026" in English).
+    /// When News first stored a story that has no publication date, or nil for a dated story or one loaded without it.
+    private var ingestionDate: Date? { pubDate == DateParser.unknownDate ? ingestedAt : nil }
+
+    /// The full publication date for the reader ("October 10, 2026" in English); an undated story shows when it was
+    /// added instead.
     var publicationDateText: String {
-        pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .long, time: .omitted)
+        if let ingestionDate { return "Added " + ingestionDate.formatted(date: .long, time: .omitted) }
+        return pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .long, time: .omitted)
+    }
+
+    /// The date as accessibility labels say it: "published …", "added …" for an undated story, or the missing date.
+    var dateAccessibilityText: String {
+        if let ingestionDate { return "added " + ingestionDate.formatted(date: .long, time: .omitted) }
+        return pubDate == DateParser.unknownDate ? "publication date unavailable" : "published " + publicationDateText
     }
 
     /// The short date cards show (DESIGN.md 8.2): relative within a day ("2 hr. ago"), then month and day, with the
-    /// year only for earlier years.
+    /// year only for earlier years. An undated story shows "Added" and the same format for when it was stored.
     @MainActor
     func cardDateText(now: Date = Date(), calendar: Calendar = .current) -> String {
+        if let ingestionDate { return "Added " + Self.shortDateText(ingestionDate, now: now, calendar: calendar) }
         guard pubDate != DateParser.unknownDate else { return "Date unavailable" }
-        let age = now.timeIntervalSince(pubDate)
+        return Self.shortDateText(pubDate, now: now, calendar: calendar)
+    }
+
+    @MainActor
+    private static func shortDateText(_ date: Date, now: Date, calendar: Calendar) -> String {
+        let age = now.timeIntervalSince(date)
         if age < 60 { return "Just now" }
         if age < 24 * 60 * 60 {
-            return Self.cardRelativeFormatter.localizedString(for: pubDate, relativeTo: now)
+            return cardRelativeFormatter.localizedString(for: date, relativeTo: now)
         }
-        if calendar.component(.year, from: pubDate) == calendar.component(.year, from: now) {
-            return pubDate.formatted(.dateTime.month(.abbreviated).day())
+        if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
+            return date.formatted(.dateTime.month(.abbreviated).day())
         }
-        return pubDate.formatted(.dateTime.year().month(.abbreviated).day())
+        return date.formatted(.dateTime.year().month(.abbreviated).day())
     }
 
     ///One formatter for every card: cards made one each per render, which showed in scrolling (#778).
@@ -743,8 +763,15 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
         return components?.url ?? url
     }
 
-    static func usable(url: String, width: Int? = nil, height: Int? = nil) -> Bool {
-        guard ContentExtractionPipeline.readerImageURL(url, baseURL: nil) != nil,
+    /// An SVG is a site mark or icon, never a story photo, and the image loader cannot draw it: a card with one
+    /// stays blank and, with a feed image set, never reaches the page lookup that finds the real picture (#995).
+    /// A feed can also declare the type (`image/svg+xml`) for a URL with no extension.
+    static func isVectorArtwork(_ url: String, type: String? = nil) -> Bool {
+        type?.lowercased().contains("svg") == true || URL(string: url)?.pathExtension.lowercased() == "svg"
+    }
+
+    static func usable(url: String, width: Int? = nil, height: Int? = nil, type: String? = nil) -> Bool {
+        guard !isVectorArtwork(url, type: type), ContentExtractionPipeline.readerImageURL(url, baseURL: nil) != nil,
             width.map({ $0 >= 80 && $0 <= 16_384 }) ?? true,
             height.map({ $0 >= 80 && $0 <= 16_384 }) ?? true
         else { return false }
@@ -766,11 +793,41 @@ struct PublisherContentRevision: Equatable, Sendable, Identifiable {
     let kind: Kind
     let changedFields: Int
     let inputHash: String
+    /// The text a publisher update replaced (V2 #712), kept for the reader's sentence diff; nil for other kinds, for
+    /// an update that replaced no text, for a text past `DatabaseEngine.maximumRevisionTextLength` and before schema 31.
+    var previousText: String? = nil
     var id: Int { version }
 
     var changeDescription: String {
         [(1, "Title"), (2, "Feed summary"), (4, "Article body")]
             .filter { changedFields & $0.0 != 0 }.map { $0.1 }.joined(separator: ", ")
+    }
+
+    // ponytail: "small part" is a fixed ratio (the current text is more than three times the old one plus 400
+    // characters); learn it from reviewed stories if teasers and real expansions keep being confused.
+    /// The publisher updates a diff against `current` can show, newest first: those that kept the text they replaced
+    /// and that no extraction followed (an extraction changes what the text is: a summary becomes a body), and whose
+    /// replaced text is not a small part of the current one (a feed teaser that the page's body completed is not an
+    /// edit by the publisher).
+    static func comparable(_ revisions: [PublisherContentRevision], current: String) -> [PublisherContentRevision] {
+        var comparable: [PublisherContentRevision] = []
+        var extracted = false
+        // UTF-8 length is constant time for a Swift string; the ratio is approximate anyway.
+        let size = current.utf8.count
+        for revision in revisions.sorted(by: { $0.version > $1.version }) {
+            if revision.kind == .extraction { extracted = true }
+            guard revision.kind == .publisherUpdate, !extracted, let previous = revision.previousText,
+                size <= 3 * previous.utf8.count + 400
+            else { continue }
+            comparable.append(revision)
+        }
+        return comparable
+    }
+
+    /// The text a revision compares: the body, or the summary while the story has no body. SQLite derives the same
+    /// text for `previousText`.
+    static func text(description: String, content: String?) -> String {
+        content.flatMap { $0.isEmpty ? nil : $0 } ?? description
     }
 
     static func inputHash(title: String, description: String, content: String?) -> String {

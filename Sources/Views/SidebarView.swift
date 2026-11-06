@@ -189,6 +189,7 @@ struct SidebarView: View {
             topicRow(
                 title: "Saved Stories", icon: "bookmark", badge: savedStories.savedArticles.count)
             topicRow(title: "History", icon: "clock")
+            topicRow(title: NotesHighlightsView.topic, icon: "highlighter")
         }
     }
 

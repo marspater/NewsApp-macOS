@@ -282,8 +282,10 @@ struct NewsApp: App {
                 Button("Quick Look") {
                     NotificationCenter.default.post(name: .quickLookCommand, object: nil)
                 }
-                .keyboardShortcut("y", modifiers: .command)
-                .disabled(listActions == nil)
+                // ⌘Y highlights the selection while a story is open (Edit › Highlight Selection); a disabled item
+                // still holds its key, so Quick Look gives ⌘Y up there.
+                .keyboardShortcut(readerActions == nil ? KeyboardShortcut("y", modifiers: .command) : nil)
+                .disabled(listActions == nil || readerActions != nil)
 
                 if let story = selectedStory, let url = URL(string: story.link) {
                     ShareLink(item: url, subject: Text(story.title)) { Text("Share Story") }
@@ -327,8 +329,11 @@ struct NewsApp: App {
                 .modifier(SystemSettingsOverrideModifier())
         }
         // The commands builder takes ten entries under Xcode 26's SDK, which CI compiles with; the Log window's
-        // commands go in a second call rather than an eleventh entry.
-        .commands { LogWindowCommands() }
+        // commands, and the reader's annotation commands, go in a second call rather than an eleventh entry.
+        .commands {
+            LogWindowCommands()
+            AnnotationCommands()
+        }
         .windowResizability(.contentSize)
 
         // Development builds only (#1005): Help › Show Log opens it; it has no Window menu item and is not restored.

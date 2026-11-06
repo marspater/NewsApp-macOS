@@ -39,7 +39,8 @@ actor DatabaseEngine {
     private var countsCache:
         (changes: ChangeToken, scope: [String], muting: MuteRules, value: (unread: Int, saved: Int, total: Int))?
     private var mutedCountCache: (changes: ChangeToken?, counts: [MutedCountKey: Int]) = (nil, [:])
-    /// The last search's query vector, so its pages and counts rank and count the same stories (#708).
+    /// The last free-text search's query vector, a cache so paging does not embed the text again (#708). Counts take
+    /// their vector from the caller: this slot is shared by every window's search (#985).
     var searchEmbedding: (text: String, vector: [Float])?
     /// This connection's writes (`sqlite3_total_changes`) and other connections' commits (`PRAGMA data_version`).
     private struct ChangeToken: Equatable {
@@ -62,6 +63,7 @@ actor DatabaseEngine {
         let isRead: Bool?
         let isSaved: Bool?
         let search: String?
+        let hasVector: Bool
         let muting: MuteRules
         let scope: [String]
     }
@@ -88,7 +90,9 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 29
+    static let schemaVersion = 31
+    /// The longest text a publisher update keeps of what it replaced (#712): a cut text would show invented changes.
+    static let maximumRevisionTextLength = 50_000
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
     static let busyTimeoutMilliseconds: Int32 = 5_000
 
@@ -1457,7 +1461,7 @@ actor DatabaseEngine {
                         input_text_hash TEXT NOT NULL,
                         PRIMARY KEY (article_id, version)
                     );
-                    INSERT OR IGNORE INTO publisher_content_revisions
+                    INSERT OR IGNORE INTO publisher_content_revisions (article_id, version, observed_at, kind, changed_fields, input_text_hash)
                     SELECT id, 1, \(Date().timeIntervalSince1970), 'snapshot', 0,
                            news_publisher_input(title, coalesce(description, ''), content) FROM articles;
                     -- Legacy generated results have no input provenance; keep publisher bodies and user state.
@@ -1467,7 +1471,7 @@ actor DatabaseEngine {
                     DROP TRIGGER IF EXISTS trg_publisher_content_insert;
                     CREATE TRIGGER trg_publisher_content_insert AFTER INSERT ON articles
                     BEGIN
-                        INSERT INTO publisher_content_revisions VALUES (new.id, 1, new.created_at, 'snapshot', 0,
+                        INSERT INTO publisher_content_revisions (article_id, version, observed_at, kind, changed_fields, input_text_hash) VALUES (new.id, 1, new.created_at, 'snapshot', 0,
                             news_publisher_input(new.title, coalesce(new.description, ''), new.content));
                     END;
                     DROP TRIGGER IF EXISTS trg_publisher_content_update;
@@ -1480,7 +1484,7 @@ actor DatabaseEngine {
                             WHERE article_id = new.id;
                         DELETE FROM event_overviews WHERE event_id IN (SELECT event_id FROM event_members WHERE article_id = new.id)
                             OR id IN (SELECT overview_id FROM event_overview_citations WHERE article_id = new.id);
-                        INSERT INTO publisher_content_revisions
+                        INSERT INTO publisher_content_revisions (article_id, version, observed_at, kind, changed_fields, input_text_hash)
                         SELECT new.id, coalesce(max(version), 0) + 1, new.updated_at,
                             CASE WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != ''
                                  THEN 'publisher_update' ELSE 'extraction' END,
@@ -1805,6 +1809,121 @@ actor DatabaseEngine {
                 try commitTransaction()
             } catch {
                 try? rollbackTransaction()
+                throw error
+            }
+        }
+        if version < 30 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Private highlights and notes on a passage of a story (V1 #711). `seq` is the durable key of the
+                // external-content index: do not use the hidden rowid of this TEXT-keyed table, VACUUM may change it.
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS user_notes (
+                        seq INTEGER PRIMARY KEY,
+                        id TEXT NOT NULL UNIQUE,
+                        article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        paragraph_index INTEGER NOT NULL,
+                        char_start INTEGER NOT NULL,
+                        selected_text TEXT NOT NULL,
+                        quote_prefix TEXT NOT NULL,
+                        quote_suffix TEXT NOT NULL,
+                        note_body TEXT NOT NULL,
+                        created_at REAL NOT NULL,
+                        updated_at REAL NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_user_notes_article ON user_notes(article_id, paragraph_index, char_start);
+                    CREATE INDEX IF NOT EXISTS idx_user_notes_created ON user_notes(created_at DESC);
+                    CREATE VIRTUAL TABLE IF NOT EXISTS user_notes_fts USING fts5(
+                        selected_text, note_body, content = 'user_notes', content_rowid = 'seq',
+                        tokenize = 'porter unicode61'
+                    );
+                    CREATE TRIGGER IF NOT EXISTS trg_user_notes_ai AFTER INSERT ON user_notes BEGIN
+                        INSERT INTO user_notes_fts(rowid, selected_text, note_body)
+                        VALUES (new.seq, new.selected_text, new.note_body);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS trg_user_notes_ad AFTER DELETE ON user_notes BEGIN
+                        INSERT INTO user_notes_fts(user_notes_fts, rowid, selected_text, note_body)
+                        VALUES ('delete', old.seq, old.selected_text, old.note_body);
+                    END;
+                    CREATE TRIGGER IF NOT EXISTS trg_user_notes_au AFTER UPDATE ON user_notes BEGIN
+                        INSERT INTO user_notes_fts(user_notes_fts, rowid, selected_text, note_body)
+                        VALUES ('delete', old.seq, old.selected_text, old.note_body);
+                        INSERT INTO user_notes_fts(rowid, selected_text, note_body)
+                        VALUES (new.seq, new.selected_text, new.note_body);
+                    END;
+                    """)
+                try Task.checkCancellation()
+                try setUserVersion(30)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                throw error
+            }
+        }
+        if version < 31 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // The text a publisher update replaced, for the reader's sentence diff (V2 #712): the body, or the
+                // summary while there is no body. Kept only for a publisher update that changed that text and only up
+                // to \(Self.maximumRevisionTextLength) characters; Clear Article Cache removes it. The v16 triggers
+                // are replaced by the same ones with the extra column.
+                let columns = try columnNames(of: "publisher_content_revisions")
+                if !columns.contains("previous_text") {
+                    try executeSimple("ALTER TABLE publisher_content_revisions ADD COLUMN previous_text TEXT;")
+                }
+                try executeSimple(
+                    """
+                    DROP TRIGGER IF EXISTS trg_publisher_content_insert;
+                    CREATE TRIGGER trg_publisher_content_insert AFTER INSERT ON articles
+                    BEGIN
+                        INSERT INTO publisher_content_revisions(article_id, version, observed_at, kind, changed_fields, input_text_hash)
+                        VALUES (new.id, 1, new.created_at, 'snapshot', 0,
+                            news_publisher_input(new.title, coalesce(new.description, ''), new.content));
+                    END;
+                    DROP TRIGGER IF EXISTS trg_publisher_content_update;
+                    CREATE TRIGGER trg_publisher_content_update AFTER UPDATE OF title, description, content ON articles
+                    WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR old.content IS NOT new.content
+                    BEGIN
+                        UPDATE article_enrichment SET summary = NULL, key_points = NULL, sentiment = NULL,
+                            entities = NULL, topics = NULL, category = NULL, confidence = NULL,
+                            model_identifier = NULL, analysis_version = NULL, input_content_version = NULL, input_text_hash = NULL
+                            WHERE article_id = new.id;
+                        DELETE FROM event_overviews WHERE event_id IN (SELECT event_id FROM event_members WHERE article_id = new.id)
+                            OR id IN (SELECT overview_id FROM event_overview_citations WHERE article_id = new.id);
+                        INSERT INTO publisher_content_revisions(article_id, version, observed_at, kind, changed_fields, input_text_hash, previous_text)
+                        SELECT new.id, coalesce(max(version), 0) + 1, new.updated_at,
+                            CASE WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != ''
+                                 THEN 'publisher_update' ELSE 'extraction' END,
+                            (old.title IS NOT new.title) + 2 * (old.description IS NOT new.description) + 4 * (old.content IS NOT new.content),
+                            news_publisher_input(new.title, coalesce(new.description, ''), new.content),
+                            CASE WHEN (old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != '')
+                                  AND OLDTEXT != NEWTEXT
+                                  AND length(OLDTEXT) BETWEEN 1 AND \(Self.maximumRevisionTextLength)
+                                 THEN OLDTEXT END
+                        FROM publisher_content_revisions WHERE article_id = new.id
+                        HAVING old.title IS NOT new.title OR old.description IS NOT new.description OR new.content IS NOT NULL;
+                        -- Keep compact metadata for the latest twenty observations.
+                        DELETE FROM publisher_content_revisions WHERE article_id = new.id AND version <
+                            (SELECT max(version) - 19 FROM publisher_content_revisions WHERE article_id = new.id);
+                    END;
+                    """.replacingOccurrences(
+                        of: "OLDTEXT",
+                        with:
+                            "(CASE WHEN coalesce(old.content, '') != '' THEN old.content ELSE coalesce(old.description, '') END)"
+                    )
+                    .replacingOccurrences(
+                        of: "NEWTEXT",
+                        with:
+                            "(CASE WHEN coalesce(new.content, '') != '' THEN new.content ELSE coalesce(new.description, '') END)"
+                    ))
+                try Task.checkCancellation()
+                try setUserVersion(31)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
                 throw error
             }
         }
@@ -2302,7 +2421,9 @@ actor DatabaseEngine {
             guid = coalesce(excluded.guid, articles.guid),
             canonical_url = CASE WHEN ?
                 THEN excluded.canonical_url ELSE articles.canonical_url END,
-            published_at = CASE WHEN excluded.published_at = ? THEN articles.published_at ELSE excluded.published_at END,
+            published_at = CASE WHEN excluded.published_at = ?16
+                THEN (CASE WHEN articles.published_at > ?13 + \(futureDateSkew) THEN excluded.published_at ELSE articles.published_at END)
+                ELSE excluded.published_at END,
             title = excluded.title,
             source = excluded.source,
             description = excluded.description,
@@ -2379,16 +2500,29 @@ actor DatabaseEngine {
         sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
     }
 
+    /// A feed date further ahead than this is a typo, a wrong-zone embargo or a hostile value, not clock skew (#981).
+    static let futureDateSkew: TimeInterval = 15 * 60
+
     /// `validators` accompany a fresh 200 response. They and the response's content stats are written in the same
     /// transaction as the articles, so a feed is only ever answered "not modified" for content that was durably ingested.
     @discardableResult
     func upsertArticles(
         _ articles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil,
-        preservingStoredContent: Bool = false
+        preservingStoredContent: Bool = false, now clock: Date = Date()
     ) throws -> Set<String> {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        // A date from the future would head every list and escape retention until it came due. Treat it as unknown:
+        // storage then orders it by ingestion time, a refresh keeps the stored date and feed health ignores it (#981).
+        let articles = articles.map { article -> FeedArticle in
+            guard article.pubDate.timeIntervalSince(clock) > Self.futureDateSkew else { return article }
+            var clamped = article
+            clamped.pubDate = DateParser.unknownDate
+            // A link-less, GUID-less item is identified by a fingerprint of its date; keep the ID the parser gave it.
+            if clamped.storedID == nil, clamped.id != article.id { clamped.storedID = article.id }
+            return clamped
         }
         guard !articles.isEmpty else {
             // An emptied feed still answered 200: its validators (possibly none, clearing the old ones) and stats
@@ -2490,7 +2624,7 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(expiredStmt) }
         var insertedIDs = Set<String>()
-        let now = Date().timeIntervalSince1970
+        let now = clock.timeIntervalSince1970
 
         for article in articles {
             try Task.checkCancellation()
@@ -2972,9 +3106,9 @@ actor DatabaseEngine {
 
     // MARK: - Article Queries
 
-    func executeQueryArticles(sql: String, params: [QueryParameter], prepareErrorMessage: String) throws
-        -> [FeedArticle]
-    {
+    func executeQueryArticles(
+        sql: String, params: [QueryParameter], prepareErrorMessage: String, orderIsDate: Bool = true
+    ) throws -> [FeedArticle] {
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
@@ -2997,10 +3131,16 @@ actor DatabaseEngine {
             try Task.checkCancellation()
             if var article = parseArticleRow(stmt) {
                 if columnCount > 18 {
-                    article.queryOrderValue = sqlite3_column_double(stmt, 18)
+                    let order = sqlite3_column_double(stmt, 18)
+                    article.queryOrderValue = order
+                    // A ranked search's order value is its score; it selects `created_at` as column 20 instead.
+                    if orderIsDate { article.ingestedAt = Date(timeIntervalSince1970: order) }
                 }
                 if columnCount > 19, let snip = sqlite3_column_text(stmt, 19) {
                     article.searchSnippet = String(cString: snip)
+                }
+                if !orderIsDate, columnCount > 20 {
+                    article.ingestedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 20))
                 }
                 results.append(article)
             }
@@ -3539,7 +3679,7 @@ actor DatabaseEngine {
     func publisherContentRevisions(for articleID: String) throws -> [PublisherContentRevision] {
         let id = try resolvedArticleID(articleID)
         return try eventRows(
-            "SELECT version, observed_at, kind, changed_fields, input_text_hash FROM publisher_content_revisions WHERE article_id = ? ORDER BY version DESC LIMIT 20;",
+            "SELECT version, observed_at, kind, changed_fields, input_text_hash, previous_text FROM publisher_content_revisions WHERE article_id = ? ORDER BY version DESC LIMIT 20;",
             [.text(id)]
         ).compactMap { row in
             guard let version = row[0].flatMap(Int.init), let timestamp = row[1].flatMap(Double.init),
@@ -3548,7 +3688,7 @@ actor DatabaseEngine {
             else { return nil }
             return PublisherContentRevision(
                 version: version, observedAt: Date(timeIntervalSince1970: timestamp),
-                kind: kind, changedFields: fields, inputHash: hash)
+                kind: kind, changedFields: fields, inputHash: hash, previousText: row[5])
         }
     }
 
@@ -3900,14 +4040,14 @@ actor DatabaseEngine {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        try finishAnalysisClear()
         logger.info("Cleared all article enrichment data.")
     }
 
-    /// Everything Clear Analysis removes, for the caller's open transaction (#811). The generation bump goes with
-    /// it, so every clear of derived data refuses the writes still in flight (#844).
+    /// The SQL half of Clear Analysis, for the caller's open transaction (#811). The caller runs
+    /// `finishAnalysisClear()` after its commit: the tension side file and the in-memory generation sit outside
+    /// SQLite's rollback, so a clear that fails leaves both as they were (#984).
     private func deleteAnalysisRows() throws {
-        analysisGeneration &+= 1
-        try clearWorldTensionHistory()
         try executeSimple("DELETE FROM article_enrichment;")
         try clearEventOverviews()
         // Sitrep lines restate overview highlights, so they go with the overviews.
@@ -3917,15 +4057,26 @@ actor DatabaseEngine {
         try executeSimple("UPDATE pair_assessments SET features = NULL;")
     }
 
+    /// After a committed clear: bump the generation, so every clear of derived data refuses the writes still in
+    /// flight (#844), then rewrite the World Tension history. The generation moves first, so a failed rewrite
+    /// cannot leave stale work writable; the clear is repeatable.
+    private func finishAnalysisClear() throws {
+        analysisGeneration &+= 1
+        try clearWorldTensionHistory()
+    }
+
     /// Clears persisted article body text from local storage.
     /// Preserves subscriptions, saved stories, and read history markers.
     func clearArticleCache() throws {
+        try requireWritable()
         repeatedImageCache = [:]
         try beginTransaction()
         do {
-            analysisGeneration &+= 1
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
+            )
+            try executeSimple(
+                "UPDATE publisher_content_revisions SET previous_text = NULL WHERE article_id NOT IN (\(Self.savedDocumentIDs));"
             )
             try executeSimple("DELETE FROM article_enrichment WHERE article_id NOT IN (\(Self.savedDocumentIDs));")
             // Feed-provided bodies return only from an unconditional refresh.
@@ -3935,6 +4086,7 @@ actor DatabaseEngine {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        analysisGeneration &+= 1
     }
 
     /// Clears replaceable data; article headers, read history and saved bodies are user data.
@@ -3948,18 +4100,22 @@ actor DatabaseEngine {
             try executeSimple(
                 "UPDATE articles SET content = NULL, reader_document = NULL WHERE id NOT IN (\(Self.savedDocumentIDs));"
             )
+            try executeSimple(
+                "UPDATE publisher_content_revisions SET previous_text = NULL WHERE article_id NOT IN (\(Self.savedDocumentIDs));"
+            )
             try executeSimple("UPDATE feeds SET etag = NULL, last_modified = NULL;")
             try commitTransaction()
         } catch {
             loggedOptional("rollbackTransaction") { try rollbackTransaction() }
             throw error
         }
+        try finishAnalysisClear()
     }
 
     // MARK: - Retention Policy & Pruning
 
     /// Prunes read articles older than `keepReadDays` and derived intelligence rows outside active windows (#536, #537).
-    /// Never prunes unread articles or saved stories.
+    /// Never prunes unread articles, saved stories or stories with a highlight or note (#711).
     @discardableResult
     func pruneOldArticles(keepReadDays: Int = 30, now: Date = Date()) throws -> Int {
         guard let db = db else {
@@ -3973,6 +4129,7 @@ actor DatabaseEngine {
             SELECT a.id FROM articles a JOIN article_state s ON s.article_id = a.id
             WHERE s.is_read = 1 AND s.is_saved = 0 AND \(Self.articleDateOrder) < ?1
                 AND \(Self.visibleArticle)
+                AND NOT EXISTS (SELECT 1 FROM user_notes n WHERE n.article_id = a.id)
                 AND NOT EXISTS (SELECT 1 FROM event_overview_citations c
                     WHERE c.article_id = a.id OR c.article_id IN (
                         SELECT duplicate_id FROM article_reconciliations WHERE survivor_id = a.id))
@@ -3998,6 +4155,13 @@ actor DatabaseEngine {
         defer {
             if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
+        // Rows stored before upserts clamped future dates (#981) return to ingestion-time order, so retention sees them.
+        try eventRows(
+            "UPDATE articles SET published_at = ? WHERE published_at > ?;",
+            [
+                .real(DateParser.unknownDate.timeIntervalSince1970),
+                .real(nowTimestamp + Self.futureDateSkew),
+            ])
         var changes = 0
         for (sql, step) in [(tombstones, "tombstones"), ("DELETE FROM articles WHERE id IN (\(doomed));", "pruning")] {
             var stmt: OpaquePointer?
@@ -4126,6 +4290,7 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         search: String? = nil,
+        searchVector: [Float]? = nil,
         muting: MuteRules
     ) throws -> Int {
         guard !muting.isEmpty, db != nil else { return 0 }
@@ -4135,12 +4300,13 @@ actor DatabaseEngine {
         if changes == nil || mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
         let key = MutedCountKey(
             section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
-            muting: muting,
+            hasVector: searchVector != nil, muting: muting,
             scope: collectionOnlyFeedURLs)
         if let known = mutedCountCache.counts[key] { return known }
         let count = try listAggregates(
             "count(*)", section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
-            filter: " AND " + Self.mutedArticle, filterParameters: Self.mutingParameters(muting))[0]
+            searchVector: searchVector, filter: " AND " + Self.mutedArticle,
+            filterParameters: Self.mutingParameters(muting))[0]
         guard changes != nil else { return count }
         if mutedCountCache.counts.count >= 32 { mutedCountCache.counts = [:] }
         mutedCountCache.counts[key] = count
@@ -4156,6 +4322,7 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         search: String? = nil,
+        searchVector: [Float]? = nil,
         muting: MuteRules = MuteRules()
     ) throws -> (stories: Int, events: Int) {
         let totals = try listAggregates(
@@ -4167,6 +4334,7 @@ actor DatabaseEngine {
                      WHERE \(Self.visibleArticle) GROUP BY 1) g ON g.story = coalesce(e.story_id, e.id)
                 """,
             section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
+            searchVector: searchVector,
             filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
             filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))
         return (totals[0], totals[1])
@@ -4176,7 +4344,7 @@ actor DatabaseEngine {
     /// `filter`.
     private func listAggregates(
         _ columns: String, joins: String = "", section: String?, smartBinder: SmartBinder? = nil, isRead: Bool?,
-        isSaved: Bool?, search: String?,
+        isSaved: Bool?, search: String?, searchVector: [Float]?,
         filter: String, filterParameters: [QueryParameter]
     ) throws -> [Int] {
         guard let db = db else {
@@ -4194,7 +4362,7 @@ actor DatabaseEngine {
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         } else {
-            let conditions = searchConditions(ArticleFilterQuery.parse(searchText))
+            let conditions = searchConditions(ArticleFilterQuery.parse(searchText), vector: searchVector)
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         }
@@ -4798,7 +4966,8 @@ actor DatabaseEngine {
         URL(fileURLWithPath: dbPath + ".world-tension-v2.json")
     }
 
-    private func requireWritable() throws {
+    /// Throws when the library was opened read-only (a newer schema, or a failed pre-migration copy).
+    func requireWritable() throws {
         if isReadOnly { throw CocoaError(.fileWriteVolumeReadOnly) }
     }
 

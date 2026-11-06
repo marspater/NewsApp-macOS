@@ -32,7 +32,8 @@ extension DatabaseEngine {
         limit: Int = 100,
         after: ArticleQueryCursor? = nil,
         muting: MuteRules = MuteRules(),
-        queryEmbedding: [Float]? = nil
+        queryEmbedding: [Float]? = nil,
+        vectorResolved: Bool = false
     ) async throws -> [FeedArticle] {
         guard db != nil else {
             throw NSError(
@@ -49,43 +50,53 @@ extension DatabaseEngine {
                     sql: sql, params: params, prepareErrorMessage: "Failed to prepare operator search query"))
         }
 
-        // Pages and counts of one search reuse its vector instead of embedding the text again.
-        let text = parsed.terms.joined(separator: " ")
-        if let queryEmbedding {
-            searchEmbedding = (text, queryEmbedding)
-        } else if parsed.phraseTermIndices.isEmpty, searchEmbedding?.text != text,
-            await SentenceEmbedder.shared.isAvailable
-        {
-            try Task.checkCancellation()
-            let vector = await SentenceEmbedder.shared.embed(text)
-            try Task.checkCancellation()
-            searchEmbedding = vector.map { (text, $0) }
-        }
+        // The page's own vector ranks it; callers hand the same vector to the counts (`searchQueryVector`). A caller
+        // that already asked for it (`vectorResolved`) keeps a nil answer, so a retry cannot rank what the counts did not.
+        var vector = queryEmbedding
+        if vector == nil, !vectorResolved { vector = try await searchQueryVector(for: trimmed) }
         let (sql, params) = hybridSearchQuery(
-            parsed: parsed, muting: muting, after: after, limit: limit, embedding: searchVector(for: parsed))
+            parsed: parsed, muting: muting, after: after, limit: limit,
+            embedding: Self.usableVector(vector, for: parsed))
         return try curateImages(
-            in: executeQueryArticles(sql: sql, params: params, prepareErrorMessage: "Failed to prepare search query"))
+            in: executeQueryArticles(
+                sql: sql, params: params, prepareErrorMessage: "Failed to prepare search query", orderIsDate: false))
     }
 
-    /// The stored query vector for this search's text, when it has the model's dimension. A quoted phrase (an entity
-    /// tag, #930) asks for those exact words, so it gets none and stays lexical.
-    private func searchVector(for parsed: ArticleFilterQuery) -> [Float]? {
-        guard parsed.phraseTermIndices.isEmpty, let searchEmbedding,
-            searchEmbedding.text == parsed.terms.joined(separator: " "),
-            searchEmbedding.vector.count == SentenceEmbedder.vectorDimension
+    /// The vector a free-text search ranks and counts with, or nil when it stays lexical: operators only, a quoted
+    /// phrase (an entity tag, #930, asks for those exact words) or no embedder. The last text's vector is kept so
+    /// paging does not embed it again; it is only a cache, so concurrent searches cannot change what a caller holds.
+    /// A search passes its vector to `searchArticles`, `mutedArticleCount` and `listTotals`, so all three agree (#985).
+    func searchQueryVector(for query: String) async throws -> [Float]? {
+        let parsed = ArticleFilterQuery.parse(query.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !parsed.terms.isEmpty, parsed.phraseTermIndices.isEmpty else { return nil }
+        let text = parsed.terms.joined(separator: " ")
+        if let searchEmbedding, searchEmbedding.text == text { return searchEmbedding.vector }
+        guard await SentenceEmbedder.shared.isAvailable else { return nil }
+        try Task.checkCancellation()
+        let vector = await SentenceEmbedder.shared.embed(text)
+        try Task.checkCancellation()
+        searchEmbedding = vector.map { (text, $0) }
+        return vector
+    }
+
+    /// The vector when it has the model's dimension and the search is not a quoted phrase.
+    private static func usableVector(_ vector: [Float]?, for parsed: ArticleFilterQuery) -> [Float]? {
+        guard parsed.phraseTermIndices.isEmpty, let vector, vector.count == SentenceEmbedder.vectorDimension
         else { return nil }
-        return searchEmbedding.vector
+        return vector
     }
 
     /// The stories a search lists, as conditions on `a` for counts (#782): FTS5 matches, plus the semantic matches
     /// when the search has a query vector, under the operators.
-    func searchConditions(_ parsed: ArticleFilterQuery) -> (sql: String, params: [QueryParameter]) {
+    func searchConditions(_ parsed: ArticleFilterQuery, vector: [Float]? = nil) -> (
+        sql: String, params: [QueryParameter]
+    ) {
         let operators = operatorConditions(parsed)
         guard !parsed.terms.isEmpty else { return operators }
         var match =
             "a.id IN (SELECT f.article_id FROM article_fts_rows f JOIN articles_fts fts ON fts.rowid = f.fts_rowid WHERE articles_fts MATCH ?)"
         var params: [QueryParameter] = [("text", Self.ftsMatchExpression(parsed))]
-        if let vector = searchVector(for: parsed) {
+        if let vector = Self.usableVector(vector, for: parsed) {
             match +=
                 " OR a.id IN (SELECT article_id FROM article_embeddings WHERE model_version = ? AND news_cosine(vector, ?) >= ?)"
             params += [
@@ -152,7 +163,7 @@ extension DatabaseEngine {
 
     private static let storyJoins =
         "JOIN article_state s ON s.article_id = a.id LEFT JOIN article_enrichment ae ON ae.article_id = a.id"
-    /// The columns `parseArticleRow` reads; a search adds its order value (column 18) and the snippet (19).
+    /// The columns `parseArticleRow` reads; a search adds its order value (column 18), the snippet (19) and, for a ranked search, `created_at` (20).
     private static let articleColumns = """
         a.id, a.guid, a.canonical_url, a.title, a.description, a.content, a.published_at, a.source, a.image_url,
         coalesce(ae.category, a.category), ae.summary, ae.content_fetched, s.is_read, s.is_saved, ae.key_points,
@@ -204,7 +215,8 @@ extension DatabaseEngine {
                 )
             )
             SELECT \(Self.articleColumns), page.score,
-                CASE WHEN instr(sn.summary, char(2)) > 0 THEN sn.summary WHEN instr(sn.body, char(2)) > 0 THEN sn.body END
+                CASE WHEN instr(sn.summary, char(2)) > 0 THEN sn.summary WHEN instr(sn.body, char(2)) > 0 THEN sn.body END,
+                a.created_at
             FROM page JOIN articles a ON a.id = page.id \(Self.storyJoins)
             LEFT JOIN article_fts_rows f ON page.lexical AND f.article_id = a.id
             LEFT JOIN snippets sn ON sn.fts_rowid = f.fts_rowid

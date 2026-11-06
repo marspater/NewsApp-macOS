@@ -237,6 +237,9 @@ struct MainView: View {
             ZStack {
                 AppColor.background
 
+                // The list stays in the hierarchy under Notes & Highlights: it answers Refresh Feeds and the menu bar's
+                // commands. The notes cover it and take its place for the keyboard and VoiceOver.
+                let showsNotes = selectedTopic == NotesHighlightsView.topic && searchState.archiveQuery.isEmpty
                 ArticleListView(
                     selectedTopic: $selectedTopic,
                     searchText: searchBinding,
@@ -253,6 +256,14 @@ struct MainView: View {
                 .environmentObject(savedStories)
                 .environmentObject(searchState)
                 .environment(\.articleSearchState, searchState)
+                .disabled(showsNotes)
+                .accessibilityHidden(showsNotes)
+
+                if showsNotes {
+                    // Opens the story through the same request a notification uses.
+                    NotesHighlightsView { articleStore.pendingNavigation = .init(articleID: $0, link: "") }
+                        .environmentObject(articleStore)
+                }
             }
             .navigationDestination(for: FeedArticleWrap.self) { wrap in
                 detailDestination(for: wrap)

@@ -284,7 +284,7 @@ def validate_retrieval(db: sqlite3.Connection, evaluations: dict) -> str:
     return "content_derived_historical_fts_routes_and_exact_fallback_queue"
 
 
-def validate_momentum(db: sqlite3.Connection, evaluations: dict) -> str:
+def validate_momentum(evaluations: dict) -> str:
     """Check publication replay invariance and wire independence."""
     momentum = evaluations["momentum"]
     if not momentum["publication_replay_invariant_to_fetch_order"] or not momentum["publication_replay_invariant_to_duplicate_ingestion"]:
@@ -295,7 +295,7 @@ def validate_momentum(db: sqlite3.Connection, evaluations: dict) -> str:
     return "publication_time_wire_deduplication_and_replay_invariance"
 
 
-def validate_ranking(db: sqlite3.Connection, evaluations: dict) -> str:
+def validate_ranking(evaluations: dict) -> str:
     """Check every ranking candidate-set size."""
     if len(evaluations["ranking"]["candidate_count_per_query"]) != 10 or any(
         count != 500 for count in evaluations["ranking"]["candidate_count_per_query"].values()
@@ -331,7 +331,7 @@ def validate_impressions(db: sqlite3.Connection, evaluations: dict) -> str:
     return "render_scroll_action_chronology_rewards_neutral_and_repeated_impressions"
 
 
-def validate_discovery(db: sqlite3.Connection, evaluations: dict) -> str:
+def validate_discovery(db: sqlite3.Connection) -> str:
     """Check each reader's adjacent, underexposed discovery share."""
     per_user = db.execute(
         "SELECT user_id,count(*),sum(slot_type='discovery') FROM recommendation_judgements GROUP BY user_id"
@@ -353,8 +353,8 @@ def validate_evaluation(db: sqlite3.Connection, evaluations: dict) -> list[str]:
     """Fail on incorrect deterministic controls; acceptance of real editorial quality is separate."""
     return [
         validate_retrieval(db, evaluations),
-        validate_momentum(db, evaluations),
-        validate_ranking(db, evaluations),
+        validate_momentum(evaluations),
+        validate_ranking(evaluations),
         validate_impressions(db, evaluations),
-        validate_discovery(db, evaluations),
+        validate_discovery(db),
     ]

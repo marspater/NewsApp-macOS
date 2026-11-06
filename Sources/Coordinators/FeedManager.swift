@@ -770,7 +770,9 @@ class FeedManager: NSObject, ObservableObject {
 
         // Publish one coherent snapshot per collection, including any committed prefix if it was cancelled.
         await articleStore.refreshState()
-        allParsed.sort { $0.pubDate > $1.pubDate }
+        // A future date (#981) must not put a story first in the notification order.
+        let sortClock = Date()
+        allParsed.sort { min($0.pubDate, sortClock) > min($1.pubDate, sortClock) }
 
         // Stories a cancelled run had committed come first; the next run sees them as existing rows.
         var notifiedIDs = Set<String>()
