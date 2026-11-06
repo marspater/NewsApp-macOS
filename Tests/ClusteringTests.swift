@@ -74,7 +74,7 @@ extension NewsTests {
             ("testPairCalibration", { try await testPairCalibration() }),
             ("testCapturedFingerprintReview", { try testCapturedFingerprintReview() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     @MainActor

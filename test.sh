@@ -150,37 +150,32 @@ if [[ $# -gt 0 ]]; then
     prune_runner_state "$(basename "$RUNNER")"
     if [[ "$RUNNER_STATUS" -ne 0 ]]; then exit "$RUNNER_STATUS"; fi
 else
-    # The plain run is one job pool over the one runner binary: every test file is its own process,
-    # Tests/NewsTests.swift is split into NEWS_TEST_SHARDS processes plus one for its slow tests (see NEWS_TEST_SHARD
-    # in that file), and the headless harness suites (no window, no Screen Recording: Story Overview sections
-    # including Industry Impact (Epic T), reader accessibility and tension calibration) run as atoms of the same
-    # binary instead of compiling three more. NEWS_TEST_JOBS bounds how many run at once. Each job's output is
-    # printed whole once it ends, so logs never interleave; a failed job's log is printed again at the end.
-    SHARDS="${NEWS_TEST_SHARDS:-4}"
+    # The plain run is one job pool over the one runner binary: every test atom is its own process, and the headless
+    # harness suites (no window, no Screen Recording: Story Overview sections including Industry Impact (Epic T), reader
+    # accessibility and tension calibration) run as atoms of the same binary instead of compiling three more.
+    # SocketTests keeps the loopback tests serial in its one process. NEWS_TEST_JOBS bounds how many run at once. Each
+    # job's output is printed whole once it ends, so logs never interleave; a failed job's log is printed again at the end.
     CORES=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
-    JOBS="${NEWS_TEST_JOBS:-$(( SHARDS + 2 < CORES ? SHARDS + 2 : CORES ))}"
-    for setting in "NEWS_TEST_SHARDS=$SHARDS" "NEWS_TEST_JOBS=$JOBS"; do
-        if ! [[ "${setting#*=}" =~ ^[1-9][0-9]?$ ]]; then
-            echo "❌ $setting must be a whole number from 1 to 99." >&2
-            exit 2
-        fi
-    done
+    JOBS="${NEWS_TEST_JOBS:-$(( 6 < CORES ? 6 : CORES ))}"
+    if ! [[ "$JOBS" =~ ^[1-9][0-9]?$ ]]; then
+        echo "❌ NEWS_TEST_JOBS=$JOBS must be a whole number from 1 to 99." >&2
+        exit 2
+    fi
     JOB_LIST="$LOGS/jobs"
     : > "$JOB_LIST"
     # A job is a name and the environment its copy of the runner gets.
     job() { printf '%s\t%s\n' "$1" "$2" >> "$JOB_LIST"; }
     ATOMS="${ONLY_ATOMS:-$(script/test_atoms.sh)}"
-    # Longest first, so the pool ends evenly.
-    if grep -qx 'Tests/NewsTests\.swift' <<< "$ATOMS"; then
-        job "NewsTests-slow" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=slow"
-        job "NewsTests-sockets" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=sockets"
-        for ((i = 0; i < SHARDS; i++)); do
-            job "NewsTests-$i-of-$SHARDS" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=$i/$SHARDS"
-        done
-    fi
-    grep -v '^Tests/NewsTests\.swift$' <<< "$ATOMS" | while read -r atom; do
-        job "$(basename "$atom" .swift)" "NEWS_TEST_ATOM=$atom"
+    # Longest first, so the pool ends evenly (times in docs/audits/2026-11-07-newstests-split.md); the rest follow.
+    LONGEST="ActiveWorkCancellation Socket Clustering UserInterface Storage Intelligence Migration Lifecycle"
+    for name in $LONGEST; do
+        atom="Tests/${name}Tests.swift"
+        if grep -qxF "$atom" <<< "$ATOMS"; then job "${name}Tests" "NEWS_TEST_ATOM=$atom"; fi
     done
+    while read -r atom; do
+        name=$(basename "$atom" .swift)
+        grep -qw "${name%Tests}" <<< "$LONGEST" || job "$name" "NEWS_TEST_ATOM=$atom"
+    done <<< "$ATOMS"
     JOB_COUNT=$(wc -l < "$JOB_LIST" | tr -d ' ')
     echo "Running $JOB_COUNT test jobs, $JOBS at a time..."
     set +e

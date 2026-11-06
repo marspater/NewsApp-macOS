@@ -82,7 +82,7 @@ extension NewsTests {
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     @MainActor

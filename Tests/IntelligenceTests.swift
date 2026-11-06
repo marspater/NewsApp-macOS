@@ -124,7 +124,7 @@ extension NewsTests {
             ("testPureOperatorSearchRemainsLexical", { try await testPureOperatorSearchRemainsLexical() }),
             ("testSearchExcerpts", { try await testSearchExcerpts() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     /// Methodology v3 (#585): the shown reading is the 7-day weighted average of accepted assessments plus momentum;

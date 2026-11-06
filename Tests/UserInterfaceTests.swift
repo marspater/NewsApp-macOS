@@ -61,23 +61,7 @@ extension NewsTests {
             ("testCardImagePrefetchFirstPaint", { await testCardImagePrefetchFirstPaint() }),
             ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
-        try await runSharded(tests)
-    }
-
-    static func mockHTTPClient(configuration: URLSessionConfiguration) -> SecureHTTPClient {
-        // URLProtocol supplies bytes; fixture DNS must also stay independent of the network.
-        SecureHTTPClient(
-            configuration: configuration,
-            resolver: { host in
-                IPAddressValidator.validateHost(
-                    host,
-                    resolver: { fixtureHost in
-                        ["example.com", "example.org", "api.github.com", "reader.invalid", "8.8.8.8", "8.8.4.4"]
-                            .contains(fixtureHost)
-                            ? .allowed(ips: ["8.8.8.8"])
-                            : .unresolvable(reason: "No configured mock DNS address")
-                    })
-            })
+        try await runSuite(tests)
     }
 
     @MainActor

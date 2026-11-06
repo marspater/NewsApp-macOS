@@ -61,7 +61,7 @@ extension NewsTests {
             ("testContentQualityValidation", { await testContentQualityValidation() }),
             ("testExtractionOutcomeDiagnostics", { await testExtractionOutcomeDiagnostics() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     @MainActor

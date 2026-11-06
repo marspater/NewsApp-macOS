@@ -50,7 +50,7 @@ extension NewsTests {
             ("testRealLibraryMigrationFixture", { try await testRealLibraryMigrationFixture() }),
             ("testMigrationCoordinatorAtomicity", { try await testMigrationCoordinatorAtomicity() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     static func testFTSRowIDMigration() async throws {
