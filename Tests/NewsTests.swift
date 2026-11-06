@@ -17119,6 +17119,18 @@ struct NewsTests {
         return lines.count - 1
     }
 
+    /// One clustering pass's stages (#691), in seconds; matching is what the fragment merge and story pass leave of the total.
+    static func stageLine(_ stages: EventClusteringStages) -> String {
+        func value(_ seconds: Double) -> String { String(format: "%.2f", seconds) }
+        let matching = stages.total - stages.fragmentMerge - stages.storyPass
+        return "total \(value(stages.total)) s = matching \(value(matching)) + fragment merge "
+            + "\(value(stages.fragmentMerge)) + story pass \(value(stages.storyPass)); across them: features "
+            + "\(value(stages.features)), embeddings \(value(stages.embeddings)) (\(stages.embeddedRows) rows), rules "
+            + "\(value(stages.ruleAssessment)), pair model \(value(stages.pairModel)) (\(stages.pairModelCalls) calls), "
+            + "writes \(value(stages.writes)), candidate search \(value(stages.candidateSearch)), event reads "
+            + "\(value(stages.eventReads)), match commits \(value(stages.matchCommits))"
+    }
+
     /// The admission verdict of a matched pair the clustering kept apart (#737, `NEWS_EVENT_DIAGNOSE=1`, local console
     /// only): each article's event, and whether the article would enter the other's event as that event stands now, with
     /// the rules that refuse it and the cross-pairs behind them. Assessed like the clusterer's own pass, so a verdict
@@ -17283,6 +17295,10 @@ struct NewsTests {
         ] {
             try await db.eventRows("DELETE FROM \(table);")
         }
+        // NEWS_HOLDOUT_COLD=1 (#691) also drops the stored signals and vectors, as a clear or a version bump of them does.
+        if ProcessInfo.processInfo.environment["NEWS_HOLDOUT_COLD"] == "1" {
+            for table in ["article_features", "article_embeddings"] { try await db.eventRows("DELETE FROM \(table);") }
+        }
         // NEWS_HOLDOUT_NOW=<epoch> pins the clock to when the holdout was drawn, for a copy taken later (#688).
         let pinned = ProcessInfo.processInfo.environment["NEWS_HOLDOUT_NOW"].flatMap { TimeInterval($0) }
             .map { Date(timeIntervalSince1970: $0) }
@@ -17303,9 +17319,12 @@ struct NewsTests {
             total.joined += report.joined
             total.created += report.created
             total.merged += report.merged
+            total.stages.add(report.stages)
+            print("    pass \(passes): processed \(report.processed), \(stageLine(report.stages))")
             if report.processed == 0 || passes >= 20 { break }
         } while true
         let elapsed = Date().timeIntervalSince(started)
+        print("    stages: \(stageLine(total.stages))")
         let memberships = try await db.eventIDs(
             forArticles: pairs.flatMap { [$0.a, $0.b] } + verdicts.flatMap { [$0.a, $0.b] })
         var verdictFailures: [String] = []
@@ -25794,6 +25813,11 @@ struct NewsTests {
 
     static func testDiagnosticsClustering() async throws {
         print("  - Testing the diagnostics clustering writer (#1006)...")
+        var stages = EventClusteringStages(total: 2, pairModelCalls: 3)
+        stages.add(EventClusteringStages(total: 1, candidateSearch: 0.5, pairModelCalls: 4))
+        assertEqual(stages.total, 3, "A run's stage seconds add up over its passes (#691)")
+        assertEqual(stages.candidateSearch, 0.5, "Candidate search adds up over passes")
+        assertEqual(stages.pairModelCalls, 7, "Pair-model calls add up over passes")
         var report = EventClusteringReport()
         report.processed = 4
         report.deferred = 1
