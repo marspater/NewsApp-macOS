@@ -797,6 +797,7 @@ struct ArticleDetailView: View {
         overlay.styled(readerText(block, baseURL: URL(string: currentArticle.link)), at: index)
     }
 
+    /// One rendered block of the story: figures, headings, dividers and paragraphs here, the other kinds below.
     @ViewBuilder
     private func readerBlock(_ block: ReaderBlock, index: Int, isLead: Bool, overlay: ReaderOverlay) -> some View {
         switch block.kind {
@@ -1050,6 +1051,7 @@ struct ArticleDetailView: View {
         blocks.map { Self.annotatableKinds.contains($0.kind) ? $0.text : "" }
     }
 
+    /// The highlights (and, with the diff shown, the changes) to paint over the rendered blocks.
     private func readerOverlay(for blocks: [ReaderBlock]) -> ReaderOverlay {
         ReaderOverlay(notes: articleNotes, paragraphs: anchorTexts(blocks))
     }
@@ -1084,11 +1086,13 @@ struct ArticleDetailView: View {
         Task { await articleStore.saveNotes(notes) }
     }
 
+    /// Highlights the selected passages, or beeps when there is nothing new to highlight.
     private func highlightSelection() {
         guard let notes = notesForSelection() else { return }
         if notes.isEmpty { NSSound.beep() } else { add(notes) }
     }
 
+    /// Opens the note composer for the selected passages.
     private func beginNote() {
         guard let notes = notesForSelection() else { return }
         // A passage that is highlighted already takes its note in the inspector.
