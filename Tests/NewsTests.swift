@@ -1072,6 +1072,7 @@ struct NewsTests {
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
+            ("testCardImagePrefetchFirstPaint", { await testCardImagePrefetchFirstPaint() }),
             (
                 "testHybridSearchSemanticRetrievalAndSnippets",
                 { try await testHybridSearchSemanticRetrievalAndSnippets() }
@@ -27943,17 +27944,185 @@ struct NewsTests {
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 
+    /// A loader whose completions wait in a queue until the test releases them, oldest first (#591).
+    @MainActor final class QueuedImageLoader {
+        private struct Waiting {
+            let id: UUID
+            let url: URL
+            let continuation: CheckedContinuation<CGImage, Error>
+        }
+        let honorsCancellation: Bool
+        private(set) var requests: [URL] = []
+        /// The pixel bound each request asked for, in request order.
+        private(set) var pixelBounds: [Int] = []
+        private var queue: [Waiting] = []
+        private let image: CGImage = {
+            CGContext(
+                data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                .makeImage()!
+        }()
+        var queued: Int { queue.count }
+
+        init(honorsCancellation: Bool = true) { self.honorsCancellation = honorsCancellation }
+
+        var loader: @Sendable (URL, Int) async throws -> CGImage {
+            { url, maxPixels in try await self.enqueue(url, maxPixels: maxPixels) }
+        }
+
+        private func enqueue(_ url: URL, maxPixels: Int) async throws -> CGImage {
+            requests.append(url)
+            pixelBounds.append(maxPixels)
+            let id = UUID()
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    queue.append(Waiting(id: id, url: url, continuation: continuation))
+                }
+            } onCancel: {
+                Task { @MainActor in self.cancel(id) }
+            }
+        }
+
+        private func cancel(_ id: UUID) {
+            guard honorsCancellation, let index = queue.firstIndex(where: { $0.id == id }) else { return }
+            queue.remove(at: index).continuation.resume(throwing: CancellationError())
+        }
+
+        /// Completes the `count` oldest waiting loads.
+        func release(_ count: Int) {
+            let released = queue.prefix(count)
+            queue.removeFirst(released.count)
+            for waiting in released { waiting.continuation.resume(returning: image) }
+        }
+
+        /// Waits until the loads that released ones lead to have reached the queue: no change across ten 1 ms polls.
+        func settle() async {
+            var last = (-1, -1)
+            var stable = 0
+            while stable < 10 {
+                try? await Task.sleep(for: .milliseconds(1))
+                let now = (requests.count, queue.count)
+                stable = now == last ? stable + 1 : 0
+                last = now
+            }
+        }
+    }
+
+    /// #591: scrolling 200 cards shows at most 5% placeholders at first paint when prefetch decodes each card's own
+    /// image ahead of it, and nothing else is fetched; a decode that finished is kept though its only waiter cancelled.
+    @MainActor static func testCardImagePrefetchFirstPaint() async {
+        print("  - Testing card image prefetch and placeholders at first paint...")
+        DecodedImageCache.clear()
+        defer {
+            DecodedImageCache.cardFirstPaints = nil
+            DecodedImageCache.clear()
+        }
+
+        // This loader ignores cancellation, so it finishes after the shared task was cancelled.
+        let stubborn = QueuedImageLoader(honorsCancellation: false)
+        let keptURL = URL(string: "https://cards.example/kept/\(UUID().uuidString).jpg")!
+        let waiter = Task { @MainActor in _ = try? await DecodedImageCache.load(keptURL, using: stubborn.loader) }
+        await eventually("The stubborn load is queued before its waiter cancels") { @MainActor in
+            stubborn.requests.count == 1 && stubborn.queued == 1
+        }
+        let shared = DecodedImageCache.sharedLoad(for: keptURL)
+        assertTrue(shared != nil, "The stubborn load is shared under its URL")
+        waiter.cancel()
+        // The last waiter's cancellation cancels the shared task on the main actor; release only after it has.
+        await eventually("The shared load is cancelled while its decode is still queued") { @MainActor in
+            shared?.task.isCancelled == true && stubborn.queued == 1
+        }
+        stubborn.release(1)
+        _ = await waiter.value
+        await stubborn.settle()
+        assertTrue(DecodedImageCache.cached(keptURL) != nil, "A finished decode is kept after its waiter cancelled")
+
+        // 200 cards: every fifth an event of three reports with an image each, every tenth without an image.
+        let now = Date()
+        var articles: [FeedArticle] = []
+        var events: [EventFeedSummary] = []
+        for index in 0..<200 {
+            let members = (0..<(index % 5 == 0 ? 3 : 1)).map { member in
+                FeedArticle(
+                    title: "Prefetch story \(index) report \(member)",
+                    link: "https://news.example/\(index)/\(member)", guid: "prefetch-\(index)-\(member)",
+                    description: "Summary", pubDate: now.addingTimeInterval(-Double(index * 10 + member)),
+                    source: "Publisher \(member)",
+                    imageUrl: index % 10 == 9 ? nil : "https://cards.example/\(index)/\(member).jpg")
+            }
+            articles += members
+            if members.count > 1 {
+                events.append(
+                    EventFeedSummary(
+                        eventID: "prefetch-event-\(index)", membershipVersion: 1, seenVersion: nil,
+                        members: members.map {
+                            EventFeedMember(
+                                articleID: $0.id, source: $0.source, title: $0.title, date: $0.pubDate,
+                                joinedVersion: 1, isRead: false, isSaved: false)
+                        }))
+            }
+        }
+        let entries = FeedSnapshot(articles: articles, events: events).entries(.events)
+        assertEqual(entries.count, 200, "The seeded list has 200 cards")
+        let cardURLs = Set(entries.compactMap(\.cardImageURL))
+        assertEqual(cardURLs.count, 180, "180 cards show an image of their own")
+
+        // Each card appears (ArticleRemoteImage.init asks the cache), moves the prefetch window, and two queued
+        // loads complete before the next card appears.
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else {
+            print("    skipped: Low Power Mode turns prefetch off")
+            return
+        }
+        let probe = QueuedImageLoader()
+        let prefetch = CardImagePrefetch()
+        DecodedImageCache.cardFirstPaints = (0, 0)
+        let initial = Task { @MainActor in
+            await CardImagePrefetch.first(
+                CardImagePrefetch.initialURLs(entries), leadAtFullSize: false, using: probe.loader)
+        }
+        await probe.settle()
+        for (index, entry) in entries.enumerated() {
+            if let url = entry.cardImageURL { _ = ArticleRemoteImage(url: url, size: .card) { _ in EmptyView() } }
+            prefetch.ahead(of: index, in: entries, using: probe.loader)
+            await probe.settle()
+            probe.release(2)
+            await probe.settle()
+        }
+        let counts = DecodedImageCache.cardFirstPaints ?? (0, 0)
+        assertEqual(counts.placeholders + counts.images, 180, "Every card with an image is counted once")
+        print("    card placeholders at first paint: \(counts.placeholders) of 180")
+        assertTrue(
+            Double(counts.placeholders) <= 0.05 * 180, "At most 5% of cards show a placeholder at first paint")
+        let others = Set(probe.requests).subtracting(cardURLs)
+        assertTrue(others.isEmpty, "Only the images cards show are fetched (\(others.count) others)")
+        assertTrue(
+            !probe.pixelBounds.isEmpty && probe.pixelBounds.allSatisfy { $0 == DecodedImageCache.Size.card.maxPixels },
+            "Without a lead, every card prefetch decodes at card size, never at the reader's bound")
+        assertEqual(stubborn.pixelBounds, [DecodedImageCache.Size.full.maxPixels], "A plain load decodes at full size")
+        prefetch.reset()
+        initial.cancel()
+        while probe.queued > 0 {
+            probe.release(probe.queued)
+            await probe.settle()
+        }
+        _ = await initial.value
+    }
+
     static func testMemoryLeakMitigationsAndErrorHandling() async throws {
         print("  - Testing Resource Leak Mitigations & Error Resilience...")
 
         // 1. DecodedImageCache bounds and clear
         await MainActor.run {
             DecodedImageCache.clear()
-            assertEqual(DecodedImageCache.images.countLimit, 500, "DecodedImageCache must bound max image count")
+            assertEqual(DecodedImageCache.images.countLimit, 24, "The full-size cache bounds its image count")
+            assertEqual(DecodedImageCache.cardImages.countLimit, 90, "The card cache bounds its image count")
+            assertEqual(
+                DecodedImageCache.images.totalCostLimit + DecodedImageCache.cardImages.totalCostLimit,
+                192 * 1024 * 1024, "Card and full-size caches together keep the 192 MB ceiling")
         }
 
         // Test that clear() cancels pending tasks and prevents insertion
-        let slowLoader: @Sendable (URL) async throws -> CGImage = { _ in
+        let slowLoader: @Sendable (URL, Int) async throws -> CGImage = { _, _ in
             try await Task.sleep(for: .milliseconds(500))
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             let ctx = CGContext(
@@ -27986,8 +28155,8 @@ struct NewsTests {
             var cancelled: Int { lock.withLock { cancelledCount } }
             func recordStart() { lock.withLock { startedCount += 1 } }
             func recordCancel() { lock.withLock { cancelledCount += 1 } }
-            var loader: @Sendable (URL) async throws -> CGImage {
-                { [self] _ in
+            var loader: @Sendable (URL, Int) async throws -> CGImage {
+                { [self] _, _ in
                     recordStart()
                     do { try await Task.sleep(for: .seconds(30)) } catch {
                         recordCancel()

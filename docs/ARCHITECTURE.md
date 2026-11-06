@@ -240,7 +240,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - OPML import (#928): ≤5 MB, full-input entity and DTD attribute-list scans (including UTF-16/32), parser callbacks, depth 64 and ≤20,000 outlines. Entity and attribute-list declarations are rejected before Foundation can expand or supply DTD defaults. A refused file names the guard in the alert and changes no subscription or section.
 
-- Image requests honor HTTP freshness/no-store after destination validation; decoded images live in a session-only `NSCache`.
+- Image requests honor HTTP freshness/no-store after destination validation; decoded images live in session-only `NSCache`s: cards at 840 px (128 MB, 90 images), the reader, lead card, Briefing hero and banners at 1600 px (64 MB, 24 images). A shared decode is stored once it finishes, even when every card waiting for it has gone; the last waiter cancelling stops an unfinished download. Lists prefetch each card's own image (`FeedEntry.cardImageURL`) for the first 30 cards and a 30-card window around the scroll position (#591).
 
 </details>
 
