@@ -205,7 +205,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - v9 reconciliation needs an exact document URL plus substantial matching publisher body. Originals stay stored; lists/search/counts hide them; old IDs resolve to the survivor with unioned read/save state. `includingOriginals` retrieves them.
 
-- Undated articles keep the `Date.distantPast` sentinel; ordering, paging and retention fall back to ingestion time. Upserts keep known values when incoming metadata is invalid.
+- Undated articles keep the `Date.distantPast` sentinel; ordering, paging and retention fall back to ingestion time. A feed date more than 15 minutes ahead of the ingestion clock is stored as that sentinel too (#981); the daily prune resets stored rows beyond it. Upserts keep known values when incoming metadata is invalid.
 
 - v15 FTS joins and triggers use `article_fts_rows` keys, never the hidden rowid (safe across `VACUUM`). v12 triggers skip identical refreshes.
 

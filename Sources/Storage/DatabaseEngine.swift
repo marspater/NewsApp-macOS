@@ -2379,12 +2379,15 @@ actor DatabaseEngine {
         sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
     }
 
+    /// A feed date further ahead than this is a typo, a wrong-zone embargo or a hostile value, not clock skew (#981).
+    static let futureDateSkew: TimeInterval = 15 * 60
+
     /// `validators` accompany a fresh 200 response. They and the response's content stats are written in the same
     /// transaction as the articles, so a feed is only ever answered "not modified" for content that was durably ingested.
     @discardableResult
     func upsertArticles(
         _ articles: [FeedArticle], feedUrl: String? = nil, validators: FeedValidators? = nil,
-        preservingStoredContent: Bool = false
+        preservingStoredContent: Bool = false, now clock: Date = Date()
     ) throws -> Set<String> {
         guard let db = db else {
             throw NSError(
@@ -2490,10 +2493,15 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(expiredStmt) }
         var insertedIDs = Set<String>()
-        let now = Date().timeIntervalSince1970
+        let now = clock.timeIntervalSince1970
 
-        for article in articles {
+        for var article in articles {
             try Task.checkCancellation()
+            // A date from the future would head every list and escape retention until it came due. Treat it as
+            // unknown: storage then orders it by ingestion time, and a refresh keeps the stored date (#981).
+            if article.pubDate.timeIntervalSince1970 > now + Self.futureDateSkew {
+                article.pubDate = DateParser.unknownDate
+            }
             let identityFeedURL = feedUrl ?? article.identityFeedURL
             let id: String
             do {
@@ -3998,6 +4006,13 @@ actor DatabaseEngine {
         defer {
             if sqlite3_get_autocommit(db) == 0 { loggedOptional("rollbackTransaction") { try rollbackTransaction() } }
         }
+        // Rows stored before upserts clamped future dates (#981) return to ingestion-time order, so retention sees them.
+        try eventRows(
+            "UPDATE articles SET published_at = ? WHERE published_at > ?;",
+            [
+                .real(DateParser.unknownDate.timeIntervalSince1970),
+                .real(Date().timeIntervalSince1970 + Self.futureDateSkew),
+            ])
         var changes = 0
         for (sql, step) in [(tombstones, "tombstones"), ("DELETE FROM articles WHERE id IN (\(doomed));", "pruning")] {
             var stmt: OpaquePointer?
