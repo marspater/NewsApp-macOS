@@ -4312,8 +4312,9 @@ struct NewsTests {
         assertEqual(first.dateAccessibilityText, "publication date unavailable", "No date, no claim of publication")
         // An undated story with an ingestion time shows when it was added (#1037).
         var storedLate = first
-        storedLate.queryOrderValue = Date().addingTimeInterval(-2 * 3600).timeIntervalSince1970
-        let addedText = storedLate.cardDateText()
+        let clock = Date(timeIntervalSince1970: 1_800_000_000)
+        storedLate.queryOrderValue = clock.addingTimeInterval(-2 * 3600).timeIntervalSince1970
+        let addedText = storedLate.cardDateText(now: clock)
         assertTrue(
             addedText.hasPrefix("Added ") && addedText.contains("2 hr"),
             "A card shows when an undated story was added (\(addedText))")
