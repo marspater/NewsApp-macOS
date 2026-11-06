@@ -10,3 +10,7 @@ reviews:
       enabled: false
     unit_tests:
       enabled: false
+  # Quoted: a bare off is a YAML boolean, and this enum takes the string.
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
