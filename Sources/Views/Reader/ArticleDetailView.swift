@@ -54,7 +54,8 @@ struct ArticleDetailView: View {
     @State private var noteDraft: NoteDraft?
     @State private var showsChanges = false
     @State private var changesSinceVersion: Int?
-    @State private var changeOverlay = SentenceDiff.Overlay()
+    /// The diff overlay with the `changesTaskID` it was worked out for; it is used only while that still holds.
+    @State private var changeOverlay = (key: "", overlay: SentenceDiff.Overlay())
     @State private var revealedBlock: Int?
     @Namespace private var storyParagraphs
 
@@ -224,7 +225,7 @@ struct ArticleDetailView: View {
                 noteDraft = nil
                 showsChanges = false
                 changesSinceVersion = nil
-                changeOverlay = SentenceDiff.Overlay()
+                changeOverlay = ("", SentenceDiff.Overlay())
             }
             .onChange(of: currentArticle.publisherInputHash) { _, _ in
                 analysis = nil
@@ -1065,7 +1066,8 @@ struct ArticleDetailView: View {
 
     private func readerOverlay(for blocks: [ReaderBlock]) -> ReaderOverlay {
         ReaderOverlay(
-            notes: articleNotes, paragraphs: anchorTexts(blocks), changes: showsChanges ? changeOverlay : .init())
+            notes: articleNotes, paragraphs: anchorTexts(blocks),
+            changes: showsChanges && changeOverlay.key == changesTaskID ? changeOverlay.overlay : .init())
     }
 
     // MARK: - Story Evolution (V2 #712)
@@ -1098,9 +1100,10 @@ struct ArticleDetailView: View {
 
     private func updateChangeOverlay() async {
         guard showsChanges, isStoryReady, let before = changesBase?.previousText else {
-            changeOverlay = SentenceDiff.Overlay()
+            changeOverlay = ("", SentenceDiff.Overlay())
             return
         }
+        let key = changesTaskID
         let after = PublisherContentRevision.text(
             description: currentArticle.description, content: currentArticle.fullContent)
         let blocks = anchorTexts(renderedBlocks)
@@ -1113,7 +1116,7 @@ struct ArticleDetailView: View {
             work.cancel()
         }
         guard !Task.isCancelled else { return }
-        changeOverlay = overlay
+        changeOverlay = (key, overlay)
     }
 
     /// "Updated (N revisions)" beside the date: toggles the sentence diff; with several updates the menu picks the
