@@ -2302,7 +2302,9 @@ actor DatabaseEngine {
             guid = coalesce(excluded.guid, articles.guid),
             canonical_url = CASE WHEN ?
                 THEN excluded.canonical_url ELSE articles.canonical_url END,
-            published_at = CASE WHEN excluded.published_at = ? THEN articles.published_at ELSE excluded.published_at END,
+            published_at = CASE WHEN excluded.published_at = ?16
+                THEN (CASE WHEN articles.published_at > ?13 + \(futureDateSkew) THEN excluded.published_at ELSE articles.published_at END)
+                ELSE excluded.published_at END,
             title = excluded.title,
             source = excluded.source,
             description = excluded.description,

@@ -7180,6 +7180,15 @@ struct NewsTests {
         assertEqual(
             refreshed.first { $0.title == "RSS future" }?.queryOrderValue,
             stored.first { $0.title == "RSS future" }?.queryOrderValue, "A refresh keeps the original ingestion time")
+        // A row stored with a future date before the clamp existed is repaired when its feed refreshes, even with
+        // retention off.
+        let stale = stored.first { $0.title == "RSS future" }!
+        _ = try await db.eventRows(
+            "UPDATE articles SET published_at = ? WHERE id = ?;", [.real(2_524_608_000), .text(stale.id)])
+        try await db.upsertArticles(articles)
+        assertEqual(
+            try await db.fetchArticles().first { $0.title == "RSS future" }?.pubDate, DateParser.unknownDate,
+            "A refresh repairs a stored future date")
         // A row stored before the clamp existed is returned to ingestion order by retention.
         let legacy = stored.first { $0.title == "RSS skew" }!
         _ = try await db.eventRows(
