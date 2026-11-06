@@ -175,9 +175,12 @@ enum NotificationAttachmentTests {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         testWindow.isReleasedWhenClosed = false
-        testWindow.orderFront(nil)
-        precondition(StoryBannerPresenter.openWindow() != nil, "A visible window is detected as open")
-        precondition(StoryBannerPresenter.shared.present(banner), "Banner presents when a window is open")
+        // Nothing is ordered on screen: the headless suite opens no window or banner panel on the desktop (#991).
+        precondition(StoryBannerPresenter.openWindow() == initialWindow, "A window never ordered in is not open")
+        let presenter = StoryBannerPresenter.shared
+        if initialWindow == nil { precondition(!presenter.present(banner), "No window on screen, no app-drawn banner") }
+        presenter.isHeadless = true
+        precondition(presenter.present(banner), "Banner presents when a window is open")
 
         // Notification handlers
         NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: NSWindow())
