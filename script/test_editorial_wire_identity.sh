@@ -4,9 +4,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 LIBRARY="${1:?Usage: script/test_editorial_wire_identity.sh LIBRARY_COPY [OUTPUT_DIR]}"
-case "$(cd "$(dirname "$LIBRARY")" && pwd -P)" in
-    */Library/Containers/*) echo "Refusing a live library; pass a copy: $LIBRARY" >&2; exit 1 ;;
-esac
+if [[ "$(cd "$(dirname "$LIBRARY")" && pwd -P)" == */Library/Containers/* ]]; then
+    echo "Refusing a live library; pass a copy: $LIBRARY" >&2
+    exit 1
+fi
 OUTPUT="${2:-$(mktemp -d "${TMPDIR:-/tmp}/news-wire-identity-results.XXXXXX")}"
 mkdir -p "$OUTPUT"
 chmod 700 "$OUTPUT"
