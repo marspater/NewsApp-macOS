@@ -172,6 +172,15 @@ def database_summary(
         "sqlite_file_bytes": db_path.stat().st_size,
     }
 
+PHASE_ZERO_LIMITATIONS = [
+    "Synthetic controls test fixture routing and metric calculations; they are not manually adjudicated language-quality labels.",
+    "Net-new fact precision, full MACD accuracy, MMR semantic diversity and EWMA vector update cost remain pending later phases and real holdouts.",
+    "The volume-floor sweep counts distinct wire groups; it is not a MACD result or a selected production threshold.",
+    "The ranking baseline sorts source-Elo metadata; it is not MMR and does not use vectors.",
+    "Recommendation relevance and discovery use synthetic topic labels and an 85/15 exposure fixture; they do not represent a trained reader profile.",
+    "ANE spin-up and ANE/CPU power telemetry require a separate Apple-silicon hardware run after Phase 0 is accepted.",
+]
+
 def build_matrix(
     db: sqlite3.Connection,
     args: argparse.Namespace,
@@ -215,14 +224,7 @@ def build_matrix(
             "production_database_migrations": 0,
             "production_consumers_changed": 0,
         },
-        "limitations": [
-            "Synthetic controls test fixture routing and metric calculations; they are not manually adjudicated language-quality labels.",
-            "Net-new fact precision, full MACD accuracy, MMR semantic diversity and EWMA vector update cost remain pending later phases and real holdouts.",
-            "The volume-floor sweep counts distinct wire groups; it is not a MACD result or a selected production threshold.",
-            "The ranking baseline sorts source-Elo metadata; it is not MMR and does not use vectors.",
-            "Recommendation relevance and discovery use synthetic topic labels and an 85/15 exposure fixture; they do not represent a trained reader profile.",
-            "ANE spin-up and ANE/CPU power telemetry require a separate Apple-silicon hardware run after Phase 0 is accepted.",
-        ],
+        "limitations": PHASE_ZERO_LIMITATIONS,
     }
 
 def write_report(
