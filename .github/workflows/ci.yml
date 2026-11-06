@@ -88,6 +88,7 @@ jobs:
 
       - name: Run Phase 0 Editorial Matrix
         run: |
+          python3 -m unittest script.evaluation.test_editorial_review
           python3 -m script.evaluation.editorial_matrix \
             --database "$RUNNER_TEMP/editorial-phase0.sqlite3" \
             --output "$RUNNER_TEMP/editorial-matrix.json"

@@ -106,12 +106,12 @@ def validate_novelty_gate(
     novelty: dict,
 ) -> dict[str, object]:
     """Fail the Phase 0 gate when lexical retrieval or fallback persistence regresses."""
-    expected_lexical = db.execute(
-        "SELECT count(*) FROM passages WHERE expected_class!='semantic_fallback'"
-    ).fetchone()[0]
-    expected_fallback = db.execute(
-        "SELECT count(*) FROM passages WHERE expected_class='semantic_fallback'"
-    ).fetchone()[0]
+    classes = dict(db.execute("SELECT expected_class,count(*) FROM passages GROUP BY expected_class"))
+    required_classes = {"repetition": 2900, "potentially_new": 1400, "semantic_fallback": 700}
+    if classes != required_classes:
+        raise RuntimeError(f"Unexpected novelty control classes: {classes}")
+    expected_lexical = required_classes["repetition"] + required_classes["potentially_new"]
+    expected_fallback = required_classes["semantic_fallback"]
     actual = {
         "labelled_passages": novelty["labelled_passages"],
         "lexical_recall": novelty["lexical_candidate_recall_on_controlled_corpus"],
@@ -128,8 +128,6 @@ def validate_novelty_gate(
         "fallback_persisted": expected_fallback,
         "fallback_route_rate": 1.0,
     }
-    if expected_lexical + expected_fallback != 5000:
-        raise RuntimeError("The labelled lexical/fallback passage controls are incomplete")
     failures = {
         key: {"expected": expected[key], "actual": actual[key]}
         for key in expected
@@ -185,6 +183,13 @@ def build_matrix(
     """Assemble the reproducible quality and performance matrix for Phase 0."""
     novelty = editorial_metrics.eval_novelty(db, event_meta)
     gate_validation = validate_novelty_gate(db, novelty)
+    momentum = editorial_metrics.eval_momentum(db)
+    ranking = editorial_metrics.eval_ranking(db)
+    personalization = editorial_metrics.eval_personalization(db, editorial_fixtures.TOPICS)
+    db.commit()
+    busy, _, _ = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+    if busy:
+        raise RuntimeError("SQLite checkpoint was blocked; database size is incomplete")
     return {
         "schema_version": 1,
         "generated_at": dt.datetime.now(editorial_fixtures.UTC).isoformat(timespec="seconds"),
@@ -194,9 +199,9 @@ def build_matrix(
         "phase_zero_gate_validation": gate_validation,
         "database": database_summary(db, args, db_path, timings, fixture),
         "novelty_extraction": novelty,
-        "momentum": editorial_metrics.eval_momentum(db),
-        "ranking": editorial_metrics.eval_ranking(db),
-        "personalization": editorial_metrics.eval_personalization(db, editorial_fixtures.TOPICS),
+        "momentum": momentum,
+        "ranking": ranking,
+        "personalization": personalization,
         "hardware": {
             "ane_spin_up_ms": None,
             "ane_cpu_power_draw": None,
@@ -251,7 +256,6 @@ def run_phase_zero(args: argparse.Namespace, db_path: Path, output_path: Path) -
         db.execute("PRAGMA busy_timeout=5000")
         event_meta, timings = seed_phase_zero(db, rng)
         fixture = validate_fixture(db, event_meta)
-        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         matrix = build_matrix(db, args, db_path, event_meta, timings, fixture)
         write_report(output_path, matrix, db_path, args, fixture)
     finally:
