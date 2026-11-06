@@ -234,7 +234,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - New-story notifications use IDs inserted by a committed transaction, skip muted stories, and resolve via SQLite by stable ID once storage is ready. Clustering runs first, so the reports of one event notify once, through the report that scores highest. Full mode sorts each story or event into a priority, starred or normal lane with its own limits, recorded in side tables so they hold across refreshes and relaunches (`docs/notifications.md`).
 
-- All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it.
+- All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it. Names resolve through `ProxyResolver` over `DNSLookup` (dns_sd, asynchronous and cancellable, a 5 s deadline per lookup, the configured address families with a 100 ms grace for the second to end) in the preflight and in the gateway; the redirect delegate applies only the DNS-free hostname guard. The gateway connects with Happy Eyeballs (`SOCKSTunnel`: interleaved families, 250 ms attempt delay, at most three attempts in flight) to validated numeric addresses (#945).
 
 - Feed XML: depth 64, 500 items, entity declarations rejected (64 KiB prolog scan + callbacks), FeedKit gets reserialized DTD-free items ≤512 KiB and never fetches URLs. JSON feeds ≤10 MiB, trimmed to 500 items.
 
