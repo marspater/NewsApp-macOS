@@ -22,6 +22,40 @@ import UserNotifications
 
 enum NotificationAttachmentTests {
     static func run() {
+        // A lead recorded as a page URL (#1010) is tried first, then the other reader candidates, then the feed image;
+        // a candidate the reader rejects (a logo, an SVG) and a repeat of the lead are left out.
+        do {
+            let page = "https://news.example/story/675"
+            let document = ReaderDocument(
+                blocks: [ReaderBlock(kind: .paragraph, text: "Publisher prose")],
+                images: [
+                    ReaderImageCandidate(url: page, origin: .body, width: 1672, height: 941),
+                    ReaderImageCandidate(url: "https://news.example/logo.png", origin: .body),
+                    ReaderImageCandidate(url: "https://news.example/tiny.png", origin: .body, width: 1, height: 1),
+                    ReaderImageCandidate(
+                        url: "https://news.example/second.jpg", origin: .body, width: 800, height: 600),
+                    ReaderImageCandidate(url: "https://news.example/photo.png?w=1672", origin: .feed),
+                ], leadImageURL: page)
+            let article = FeedArticle(
+                title: "Story", link: "https://news.example/story", guid: "story", description: "", pubDate: Date(),
+                source: "News", imageUrl: "https://news.example/photo.png?w=1672", fullContent: "Publisher prose",
+                readerDocument: document)
+            let urls = FeedArticle.attachmentImages(for: article).map(\.absoluteString)
+            precondition(
+                urls == [page, "https://news.example/second.jpg", "https://news.example/photo.png?w=1672"],
+                "Attachment candidates must run lead, other usable candidates, feed image; got \(urls)")
+            let tinyFeed = FeedArticle(
+                title: "Story", link: "https://news.example/tiny", guid: "tiny", description: "", pubDate: Date(),
+                source: "News", imageUrl: "https://news.example/tiny.png", readerDocument: document)
+            precondition(
+                !FeedArticle.attachmentImages(for: tinyFeed).contains { $0.absoluteString.hasSuffix("tiny.png") },
+                "A feed image with known tiny dimensions must not become a fallback")
+            let bare = FeedArticle(
+                title: "Story", link: "https://news.example/bare", guid: "bare", description: "", pubDate: Date(),
+                source: "News")
+            precondition(FeedArticle.attachmentImages(for: bare).isEmpty, "No image means no candidates")
+        }
+
         // Valid 1x1 WebP: accepted by ImageIO, rejected when attached directly as .webp (UNErrorDomain 101).
         let webp = Data(base64Encoded: "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")!
         do {
