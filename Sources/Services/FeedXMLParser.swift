@@ -728,9 +728,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         // Avoid repeated compilation of regex per parsed item
         guard let regex = Self.imageRegex else { return nil }
         let range = NSRange(html.startIndex..., in: html)
-        guard let match = regex.firstMatch(in: html, range: range),
-            let captureRange = Range(match.range(at: 1), in: html)
-        else { return nil }
-        return String(html[captureRange])
+        // The first picture that is not vector artwork (a site mark, not a story photo).
+        return regex.matches(in: html, range: range).lazy
+            .compactMap { Range($0.range(at: 1), in: html).map { String(html[$0]) } }
+            .first { !ReaderImageCandidate.isVectorArtwork($0) }
     }
 }
