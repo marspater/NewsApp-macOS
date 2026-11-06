@@ -146,8 +146,10 @@ extension AttributedString {
 /// The popover that takes the text of a note on the passages the reader selected.
 struct NoteComposerView: View {
     let quote: String
-    var onSave: (String) -> Void
+    /// Saves the note; the popover stays open, with the text, until this returns true.
+    var onSave: (String) async -> Bool
     @State private var text = ""
+    @State private var isSaving = false
     @FocusState private var focused: Bool
     @Environment(\.dismiss) private var dismiss
 
@@ -166,11 +168,15 @@ struct NoteComposerView: View {
                 Button("Cancel", role: .cancel) { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Button("Save") {
-                    onSave(text)
-                    dismiss()
+                    isSaving = true
+                    Task {
+                        if await onSave(text) { dismiss() }
+                        isSaving = false
+                    }
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .buttonStyle(.borderedProminent)
+                .disabled(isSaving)
             }
         }
         .padding(AppSpacing.md)

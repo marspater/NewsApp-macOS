@@ -20,7 +20,8 @@ struct AnnotationsInspectorView: View {
     /// Notes whose quoted words are no longer in the story's text.
     let lostIDs: Set<String>
     var onReveal: (UserNote) -> Void
-    var onSave: (UserNote) -> Void
+    /// Saves an edited note; the editor stays open until this returns true.
+    var onSave: (UserNote) async -> Bool
     var onDelete: (String) -> Void
 
     @State private var editingID: String?
@@ -113,8 +114,7 @@ struct AnnotationsInspectorView: View {
                 var edited = note
                 edited.noteBody = draft
                 edited.updatedAt = Date()
-                onSave(edited)
-                editingID = nil
+                Task { if await onSave(edited) { editingID = nil } }
             }
             .keyboardShortcut(.return, modifiers: .command)
         }
