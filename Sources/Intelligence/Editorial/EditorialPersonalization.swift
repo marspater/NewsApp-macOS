@@ -191,6 +191,7 @@ actor EditorialPersonalization {
             CREATE TABLE metadata(singleton INTEGER PRIMARY KEY CHECK(singleton=1), model TEXT NOT NULL, last_reward REAL);
             CREATE TABLE impressions(id TEXT PRIMARY KEY, article TEXT NOT NULL, topic TEXT NOT NULL,
                 vector BLOB, rendered REAL NOT NULL, skip REAL, click REAL, save REAL);
+            CREATE INDEX impressions_rendered ON impressions(rendered);
             CREATE TABLE profile(singleton INTEGER PRIMARY KEY CHECK(singleton=1), vector BLOB, updated REAL, model TEXT NOT NULL);
             """
         guard sqlite3_exec(db, schema, nil, nil, nil) == SQLITE_OK else { throw PersonalizationError.sqlite }
