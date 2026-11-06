@@ -34,7 +34,8 @@ struct AnnotationCommands: Commands {
             Button("Highlight Selection") {
                 NotificationCenter.default.post(name: .highlightSelectionCommand, object: nil)
             }
-            .keyboardShortcut("y", modifiers: .command)
+            // Quick Look owns ⌘Y in the list: a disabled item still holds its key, so each side gives it up in turn.
+            .keyboardShortcut(readerActions == nil ? nil : KeyboardShortcut("y", modifiers: .command))
             .disabled(!isReading)
             Button("Add Note to Selection…") { NotificationCenter.default.post(name: .addNoteCommand, object: nil) }
                 .keyboardShortcut("y", modifiers: [.command, .shift])

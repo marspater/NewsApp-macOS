@@ -559,6 +559,7 @@ struct TagView: View {
             if let systemImage {
                 Image(systemName: systemImage)
                     .imageScale(.small)
+                    .accessibilityHidden(true)
             }
             Text(title)
         }
