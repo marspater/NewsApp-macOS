@@ -326,13 +326,17 @@ enum DiagnosticsExport {
                 at: folder, includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey])) ?? [])
             .filter { $0.lastPathComponent.contains("-before-v") }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        // Only the app-written suffix is reported: the name before it is whatever the reader called the file.
+        func suffix(_ copy: URL) -> String {
+            "before-v" + (copy.lastPathComponent.components(separatedBy: "-before-v").last ?? "")
+        }
         lines += ["", "Pre-migration copies (the migration history this library keeps): \(copies.count)"]
         for copy in copies {
             let size = (try? copy.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? nil
-            lines.append("\(copy.lastPathComponent): \(size.map(byteText) ?? "unknown size")")
+            lines.append("\(suffix(copy)): \(size.map(byteText) ?? "unknown size")")
         }
         lines.append(
-            "Last backup: \(copies.last?.lastPathComponent ?? "none beside the library"); Back Up Library copies go where the reader saves them and are not tracked"
+            "Last backup: \(copies.last.map(suffix) ?? "none beside the library"); Back Up Library copies go where the reader saves them and are not tracked"
         )
         return lines.joined(separator: "\n") + "\n"
     }
