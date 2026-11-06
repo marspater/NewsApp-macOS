@@ -47,6 +47,7 @@ enum EditorialNoveltyTests {
 
     static func run() async {
         do {
+            routeMismatchReporting()
             try await routesAndCitations()
             try await historicalBoundaries()
             try await cacheAndEnergy()
@@ -61,6 +62,16 @@ enum EditorialNoveltyTests {
         }
         print("Finished \(checks) editorial novelty checks with \(failures) failures.")
         if failures > 0 { exit(1) }
+    }
+
+    static func routeMismatchReporting() {
+        var counts = OutcomeCounts()
+        counts.recordRoute(.noAnchoredSentence, expected: "fallback", id: "mismatch")
+        counts.recordRoute(.repetition, expected: "repetition", id: "match")
+        check(counts.routeMismatchIDs == ["mismatch"], "route mismatches retain the case ID")
+        check(
+            counts.predictedRoutes["unanchored"] == 1 && counts.predictedRoutes["repetition"] == 1,
+            "predicted routes are counted separately")
     }
 
     static func routesAndCitations() async throws {
@@ -223,6 +234,21 @@ extension EditorialNoveltyTests {
         var falseNegative = 0
         var deferred = 0
         var latency: [Double] = []
+        var predictedRoutes: [String: Int] = [:]
+        var routeMismatchIDs: [String] = []
+
+        mutating func recordRoute(_ result: EditorialNoveltyResult, expected: String, id: String) {
+            let route: String
+            switch result {
+            case .novel: route = "novel"
+            case .repetition: route = "repetition"
+            case .noAnchoredSentence: route = "unanchored"
+            case .lowPrioritySemanticFallback: route = "fallback"
+            case .deferred: route = "deferred"
+            }
+            predictedRoutes[route, default: 0] += 1
+            if route != expected { routeMismatchIDs.append(id) }
+        }
 
         var report: [String: Any] {
             let proposed = truePositive + falsePositive
@@ -231,7 +257,8 @@ extension EditorialNoveltyTests {
                 "precision": proposed == 0 ? NSNull() : Double(truePositive) / Double(proposed),
                 "recall": truePositive + falseNegative == 0
                     ? NSNull() : Double(truePositive) / Double(truePositive + falseNegative),
-                "deferred": deferred, "latency_ms": latency,
+                "deferred": deferred, "predicted_routes": predictedRoutes, "route_mismatch_ids": routeMismatchIDs,
+                "latency_ms": latency,
             ]
         }
     }
@@ -247,6 +274,7 @@ extension EditorialNoveltyTests {
                     inputHash: ArticleIdentity.sha256Hex(item.incoming.text), membershipHash: item.eventID,
                     analysisVersion: 1))
             counts.latency.append((ProcessInfo.processInfo.systemUptime - started) * 1000)
+            counts.recordRoute(result, expected: item.expected, id: item.id)
             if case .novel(let selection) = result {
                 guard item.incoming.text.contains(selection.sentence), selection.citation.quote == selection.sentence
                 else {

@@ -77,6 +77,12 @@ enum EditorialNoveltyResult: Sendable {
     case novel(EditorialNoveltySelection)
 }
 
+struct EditorialNoveltyStats: Sendable {
+    let cacheHits: Int
+    let cacheMisses: Int
+    let entries: Int
+}
+
 /// An isolated experiment: extracts cited source sentences without asserting their truth.
 actor EditorialNovelty {
     typealias EmbeddingProvider = @Sendable ([String]) async -> [[Float]?]
@@ -102,8 +108,8 @@ actor EditorialNovelty {
         self.allowsEnergy = allowsEnergy
     }
 
-    func stats() -> (cacheHits: Int, cacheMisses: Int, entries: Int) {
-        (cacheHits, cacheMisses, cache.count)
+    func stats() -> EditorialNoveltyStats {
+        .init(cacheHits: cacheHits, cacheMisses: cacheMisses, entries: cache.count)
     }
 
     func clearCache() {
@@ -124,15 +130,7 @@ actor EditorialNovelty {
             candidate.publishedAt <= candidate.observedAt,
             coreEntities.count <= 64, coreEntities.allSatisfy({ $0.utf8.count <= 1024 })
         else { return .deferred }
-        let eligible = baseline.filter {
-            $0.eventID == candidate.eventID && $0.passage.articleID != candidate.passage.articleID
-                && $0.passage.id != candidate.passage.id && $0.publishedAt <= candidate.publishedAt
-                && $0.publishedAt <= $0.observedAt
-                && $0.observedAt <= candidate.observedAt && $0.passage.text.utf8.count <= 65_536
-        }.sorted {
-            if $0.publishedAt != $1.publishedAt { return $0.publishedAt > $1.publishedAt }
-            return $0.passage.id < $1.passage.id
-        }.prefix(policy.maxPassages)
+        let eligible = historicalBaseline(baseline, candidate: candidate)
         let index = try EditorialPassageIndex(passages: Array(eligible))
         let matches = try index.matches(candidate.passage.text, limit: policy.maxCandidates)
         guard !matches.isEmpty else { return .lowPrioritySemanticFallback }
@@ -144,13 +142,62 @@ actor EditorialNovelty {
         let texts = Array(sentences) + matches.map { $0.passage.text }
         guard allowsEnergy() else { return .deferred }
         let capturedGeneration = generation
-        guard let vectors = try await embeddings(texts, generation: capturedGeneration) else { return .deferred }
+        guard let vectors = try await embeddings(texts, generation: capturedGeneration) else {
+            return .deferred
+        }
         try Task.checkCancellation()
         guard generation == capturedGeneration, allowsEnergy() else { return .deferred }
+        guard
+            let (sentence, distance) = selectSentence(
+                Array(sentences), matches: matches, vectors: vectors)
+        else {
+            return .repetition
+        }
+        return selection(candidate: candidate, sentence: sentence, distance: distance, stamp: stamp)
+    }
+
+    /// Preserve the source passage and its citation when returning a selected sentence.
+    private func selection(
+        candidate: EditorialPassage, sentence: String, distance: Double, stamp: EditorialNoveltyStamp
+    ) -> EditorialNoveltyResult {
+        let passage = candidate.passage
+        var source = candidate.source ?? OverviewSourceMetadata()
+        if source.publishedAt == nil { source.publishedAt = candidate.publishedAt }
+        let citation = OverviewCitation(
+            id: ArticleIdentity.sha256Hex(passage.id + "\n" + sentence), articleID: passage.articleID,
+            passageID: passage.id, passageFingerprint: passage.fingerprint, quote: sentence,
+            source: source
+        )
+        return .novel(
+            .init(sentence: sentence, citation: citation, stamp: stamp, semanticDistance: distance))
+    }
+
+    /// Keep only bounded, already observed evidence from this event, newest publication first.
+    private func historicalBaseline(_ baseline: [EditorialPassage], candidate: EditorialPassage)
+        -> [EditorialPassage]
+    {
+        Array(
+            baseline.filter {
+                $0.eventID == candidate.eventID && $0.passage.articleID != candidate.passage.articleID
+                    && $0.passage.id != candidate.passage.id && $0.publishedAt <= candidate.publishedAt
+                    && $0.publishedAt <= $0.observedAt
+                    && $0.observedAt <= candidate.observedAt && $0.passage.text.utf8.count <= 65_536
+            }.sorted {
+                if $0.publishedAt != $1.publishedAt { return $0.publishedAt > $1.publishedAt }
+                return $0.passage.id < $1.passage.id
+            }.prefix(policy.maxPassages))
+    }
+
+    /// Choose the most distant anchored sentence that does not satisfy the repetition rule.
+    private func selectSentence(
+        _ sentences: [String], matches: [EditorialPassage], vectors: [[Float]]
+    ) -> (String, Double)? {
         let baselineVectors = Array(vectors.dropFirst(sentences.count))
         var best: (String, Double)?
         for (offset, sentence) in sentences.enumerated() {
-            let similarities = baselineVectors.map { SentenceEmbedder.cosineSimilarity(vectors[offset], $0) }
+            let similarities = baselineVectors.map {
+                SentenceEmbedder.cosineSimilarity(vectors[offset], $0)
+            }
             let maximum = similarities.max() ?? 1
             let repeated = zip(matches, similarities).contains {
                 $0.1 >= policy.repeatSimilarity
@@ -160,20 +207,13 @@ actor EditorialNovelty {
             let distance = 1 - min(1, max(-1, maximum))
             if best == nil || distance > best!.1 { best = (sentence, distance) }
         }
-        guard let (sentence, distance) = best else { return .repetition }
-        let passage = candidate.passage
-        var source = candidate.source ?? OverviewSourceMetadata()
-        if source.publishedAt == nil { source.publishedAt = candidate.publishedAt }
-        let citation = OverviewCitation(
-            id: ArticleIdentity.sha256Hex(passage.id + "\n" + sentence), articleID: passage.articleID,
-            passageID: passage.id, passageFingerprint: passage.fingerprint, quote: sentence,
-            source: source
-        )
-        return .novel(.init(sentence: sentence, citation: citation, stamp: stamp, semanticDistance: distance))
+        return best
     }
 
     private func embeddings(_ texts: [String], generation captured: UInt64) async throws -> [[Float]]? {
-        let keys = texts.map { ArticleIdentity.sha256Hex("editorial-normalized-v1\n" + modelVersion + "\n" + $0) }
+        let keys = texts.map {
+            ArticleIdentity.sha256Hex("editorial-normalized-v1\n" + modelVersion + "\n" + $0)
+        }
         var seen = Set<String>()
         let missing = texts.indices.filter { cache[keys[$0]] == nil && seen.insert(keys[$0]).inserted }
         // Hits count requested positions already cached; misses count unique uncached text keys.
@@ -185,7 +225,9 @@ actor EditorialNovelty {
             guard allowsEnergy() else { return nil }
             let values = await embeddingProvider(missing.map { texts[$0] })
             try Task.checkCancellation()
-            guard generation == captured, allowsEnergy(), values.count == missing.count else { return nil }
+            guard generation == captured, allowsEnergy(), values.count == missing.count else {
+                return nil
+            }
             for (index, value) in zip(missing, values) {
                 guard let value, value.count == 384, value.allSatisfy(\.isFinite) else { return nil }
                 let norm = sqrt(value.reduce(0.0) { $0 + Double($1) * Double($1) })
@@ -199,7 +241,8 @@ actor EditorialNovelty {
                 }
             }
         }
-        return keys.compactMap { resolved[$0] }.count == keys.count ? keys.compactMap { resolved[$0] } : nil
+        return keys.compactMap { resolved[$0] }.count == keys.count
+            ? keys.compactMap { resolved[$0] } : nil
     }
 
     private static func words(_ text: String) -> [String] {
@@ -220,7 +263,8 @@ actor EditorialNovelty {
     private static func lexicalOverlap(_ sentence: String, _ passage: String) -> Double {
         let sentenceWords = Set(words(sentence))
         guard !sentenceWords.isEmpty else { return 0 }
-        return Double(sentenceWords.intersection(Set(words(passage))).count) / Double(sentenceWords.count)
+        return Double(sentenceWords.intersection(Set(words(passage))).count)
+            / Double(sentenceWords.count)
     }
 }
 
@@ -240,7 +284,8 @@ private final class EditorialPassageIndex {
         do {
             guard
                 sqlite3_exec(
-                    database, "CREATE VIRTUAL TABLE passages USING fts5(text, tokenize='porter unicode61')", nil, nil,
+                    database, "CREATE VIRTUAL TABLE passages USING fts5(text, tokenize='porter unicode61')",
+                    nil, nil,
                     nil) == SQLITE_OK
             else {
                 throw IndexError.sqlite
@@ -248,7 +293,8 @@ private final class EditorialPassageIndex {
             for (offset, passage) in passages.enumerated() {
                 var statement: OpaquePointer?
                 guard
-                    sqlite3_prepare_v2(database, "INSERT INTO passages(rowid,text) VALUES(?,?)", -1, &statement, nil)
+                    sqlite3_prepare_v2(
+                        database, "INSERT INTO passages(rowid,text) VALUES(?,?)", -1, &statement, nil)
                         == SQLITE_OK
                 else { throw IndexError.sqlite }
                 defer { sqlite3_finalize(statement) }
@@ -277,7 +323,9 @@ private final class EditorialPassageIndex {
         var statement: OpaquePointer?
         guard
             sqlite3_prepare_v2(
-                database, "SELECT rowid FROM passages WHERE passages MATCH ? ORDER BY bm25(passages),rowid LIMIT ?", -1,
+                database,
+                "SELECT rowid FROM passages WHERE passages MATCH ? ORDER BY bm25(passages),rowid LIMIT ?",
+                -1,
                 &statement, nil) == SQLITE_OK
         else { throw IndexError.sqlite }
         defer { sqlite3_finalize(statement) }

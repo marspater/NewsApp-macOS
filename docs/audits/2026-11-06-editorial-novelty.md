@@ -31,3 +31,9 @@ The script builds the Release `NewsTestRunner` target through `News.xcodeproj`, 
 The corpus contains fictional authored controls, with paired scenario templates across splits. Events and actors are disjoint, but this is narrow smoke coverage rather than a generalization holdout. Independent label review noted two ambiguous holdout repetition controls. Expected labels are used only for scoring and tune selection, never retrieval, embedding or candidate selection. Any deferred tune or holdout inference aborts evaluation instead of receiving credit as a negative outcome.
 
 Production novelty quality, ANE/CPU power, ANE-specific spin-up and consumer integration remain unestablished. Thresholds above are experimental measurements, not shipping defaults. This report does not enable an overview, notification or Lead consumer.
+
+## Review follow-up
+
+Route-aware reporting now preserves predicted route counts and mismatched case IDs separately from binary novelty precision/recall. The unchanged holdout still yields 5 TP / 0 FP / 3 FN, but six route labels differ: three missed new-fact cases and three lexical-fallback controls that reach the unanchored route through shared generic words. Frozen labels were not changed to improve the result. This is an additional open routing-quality gate, not a perfect four-way classifier.
+
+All 24 deterministic novelty checks passed after helper extraction and named cache statistics. The updated source SHA-256 is `e6a51d9ce3aacd45bb150a48706e2a77f759b65890b6c1eec3f366bfe141fb24`; model version and corpus remain unchanged.
