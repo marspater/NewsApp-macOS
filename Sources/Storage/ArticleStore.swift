@@ -667,6 +667,16 @@ final class ArticleStore: ObservableObject {
         await refreshState()
     }
 
+    /// Remembers why a story's page refused its text, for feed health (#715). Losing this costs one sample, so a failed
+    /// write is only logged.
+    func recordReaderBarrier(_ barrier: ReaderBarrier, articleID: String) async {
+        do {
+            try await database.recordReaderBarrier(barrier, articleID: articleID)
+        } catch {
+            logger.error("Could not record a reader barrier: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Retention Pruning
 
     @discardableResult

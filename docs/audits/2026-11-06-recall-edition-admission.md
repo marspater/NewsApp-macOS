@@ -24,6 +24,8 @@ Same as the strip audit: `~/news-eval/holdout-2026-11-03/library-holdout-2026-11
 
 The baseline and g + strip rows reproduce the strip audit, so the diagnose and the knob's off path change nothing.
 
+The strip's body filter was narrowed to calls to action after the first runs, in two steps. Both strip rows were run again on the final filter (1b963ae) and came out identical. The knob-alone row does not read the strip, and the regressions were not rerun on it.
+
 `--matcher-regressions` and `--story-regressions` are identical under defaults, the knob alone and g + strip + knob: matcher precision 1.000 (TP 24, FP 0), recall 0.923 (FN 2), no false pair; story regressions 18 event pairs and 26 story pairs, known gaps 3 event and 7 story, nothing unexpected.
 
 ### The one pair the knob moves

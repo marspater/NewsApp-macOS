@@ -1853,6 +1853,10 @@ struct ArticleDetailView: View {
             case .networkError(let reason):
                 self.contentState = .fallback(reason: "Network error: \(reason)")
             }
+            // After the state: a busy database must not delay the message, and the story may change during the write.
+            if let barrier = ReaderBarrier(extraction.outcome) {
+                await articleStore.recordReaderBarrier(barrier, articleID: targetId)
+            }
         }
     }
 
