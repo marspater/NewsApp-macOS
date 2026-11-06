@@ -1000,6 +1000,7 @@ struct NewsTests {
             ("testContentExtractionPipelineDeep", { await testContentExtractionPipelineDeep() }),
             ("testExtractionURLRejection", { await testExtractionURLRejection() }),
             ("testEnrichmentQueueSchedulingAndPromotion", { await testEnrichmentQueueSchedulingAndPromotion() }),
+            ("testEnrichmentQueueCancelledJobsNotRetained", { await testEnrichmentQueueCancelledJobsNotRetained() }),
             ("testDesignSystemAndArticleFilter", { await testDesignSystemAndArticleFilter() }),
             ("testDistributionAndEntitlementsIntegrity", { await testDistributionAndEntitlementsIntegrity() }),
             ("testStrictSemVerAndReleaseSecurity", { await testStrictSemVerAndReleaseSecurity() }),
@@ -17725,15 +17726,16 @@ struct NewsTests {
 
         // 4. Cancel articleB
         await queue.cancel(articleId: articleB.id, reason: .user)
-        let stateB = await queue.state(for: articleB.id)
-        assertEqual(stateB, .cancelled(.user), "Article B should be in cancelled state")
+        assertFalse(await queue.retainsJob(for: articleB.id), "Article B is evicted from jobs on cancel (#986)")
+        assertEqual(await queue.state(for: articleB.id), nil, "Article B state is nil after eviction (#986)")
 
         // 5. Cancel all
         await queue.cancelAll(reason: .superseded)
+        assertFalse(await queue.retainsJob(for: articleA.id), "Article A is evicted from jobs on cancelAll (#986)")
         let stateA = await queue.state(for: articleA.id)
         assertTrue(
-            stateA == .cancelled(.superseded) || stateA == .completed,
-            "Article A is superseded unless it already finished")
+            stateA == nil || stateA == .completed,
+            "Article A is evicted unless it already finished (#986)")
         for _ in 0..<10 {
             await queue.enqueue(article: articleA, priority: .background)
             await queue.cancelAll(reason: .superseded)
@@ -17786,6 +17788,60 @@ struct NewsTests {
 
         // Empty snapshot handling does not crash or create jobs
         await queue.enqueue(articles: [], priority: .background, allowHTTP: false)
+    }
+
+    static func testEnrichmentQueueCancelledJobsNotRetained() async {
+        print("  - Testing EnrichmentQueue does not retain cancelled jobs or payloads (#986)...")
+        let database = DatabaseEngine(path: ":memory:")
+        do { try await database.open() } catch { return assertTrue(false, "The queue test database opens") }
+        let store = await ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
+        let queue = EnrichmentQueue(store: store)
+
+        let hold = OpenGate()
+        for index in 0..<3 {
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "hold-\(index)") {
+                    await hold.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("Held generations fill the queue") { await queue.activeJobCount() == 3 }
+
+        let articles = (0..<5).map { index in
+            FeedArticle(
+                title: "Headline \(index)",
+                link: "https://example.com/\(index)",
+                guid: "leak-\(index)",
+                description: "Summary \(index)",
+                pubDate: Date(),
+                source: "Source",
+                fullContent: "Very long body text for article \(index)"
+            )
+        }
+        await queue.enqueue(articles: articles, priority: .background)
+        for article in articles {
+            assertTrue(await queue.retainsJob(for: article.id), "Queued article is initially retained")
+        }
+
+        await queue.cancelAll(reason: .superseded)
+
+        for article in articles {
+            assertFalse(
+                await queue.retainsJob(for: article.id),
+                "Cancelled job \(article.id) is evicted from EnrichmentQueue.jobs so FeedArticle is not retained (#986)"
+            )
+        }
+        assertEqual(
+            await queue.stateCounts()["cancelled (superseded)"], 5,
+            "Diagnostics still count the cancelled jobs without holding them (#986)")
+
+        // An article enqueued again after the cancel is a new job and stays retained until it runs.
+        await queue.enqueue(articles: [articles[0]], priority: .background)
+        assertTrue(await queue.retainsJob(for: articles[0].id), "A re-enqueued article is retained again (#986)")
+        await queue.cancel(articleId: articles[0].id, reason: .user)
+        assertFalse(await queue.retainsJob(for: articles[0].id), "Cancelling one article evicts its job (#986)")
+        await hold.open()
     }
 
     /// Runs on the main actor: resolving an AppKit-backed Color off the main thread waits on SwiftUI's main-thread
