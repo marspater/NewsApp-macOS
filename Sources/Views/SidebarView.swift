@@ -72,6 +72,44 @@ struct SidebarView: View {
             userSectionsSection
         }
         .focused($isListFocused)
+        // One presenter for the list: a modifier on a `Section` applies to every row, so sheets and dialogs there
+        // opened once per row and closed one after another (#1004).
+        .confirmationDialog(
+            "Remove the section “\(pendingSectionRemoval ?? "")”?",
+            isPresented: Binding(
+                get: { pendingSectionRemoval != nil }, set: { if !$0 { pendingSectionRemoval = nil } }),
+            presenting: pendingSectionRemoval
+        ) { section in
+            Button("Remove Section", role: .destructive) { feedManager.removeSection(section) }
+        } message: { _ in
+            Text("Stories stay in your library; only the sidebar entry goes.")
+        }
+        .confirmationDialog(
+            "Remove the smart binder “\(pendingBinderRemoval?.name ?? "")”?",
+            isPresented: Binding(
+                get: { pendingBinderRemoval != nil }, set: { if !$0 { pendingBinderRemoval = nil } }),
+            presenting: pendingBinderRemoval
+        ) { binder in
+            Button("Remove Smart Binder", role: .destructive) {
+                if selectedTopic == binder.sidebarTag {
+                    selectedTopic = "Today"
+                }
+                appSettings.removeSmartBinder(binder)
+            }
+        } message: { _ in
+            Text("Stories stay in your library; only the virtual section goes.")
+        }
+        .sheet(item: $editingSmartBinder) { binder in
+            SmartBinderSheet(binder: binder)
+                .environmentObject(appSettings)
+        }
+        .sheet(isPresented: $isNewSmartBinderSheetPresented) {
+            SmartBinderSheet()
+                .environmentObject(appSettings)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newSmartBinderCommand)) { _ in
+            isNewSmartBinderSheetPresented = true
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if showsTensionReading {
                 VStack(spacing: 0) {
@@ -206,42 +244,6 @@ struct SidebarView: View {
                 .help("New Smart Binder")
                 .accessibilityLabel("New Smart Binder")
             }
-        }
-        .confirmationDialog(
-            "Remove the section “\(pendingSectionRemoval ?? "")”?",
-            isPresented: Binding(
-                get: { pendingSectionRemoval != nil }, set: { if !$0 { pendingSectionRemoval = nil } }),
-            presenting: pendingSectionRemoval
-        ) { section in
-            Button("Remove Section", role: .destructive) { feedManager.removeSection(section) }
-        } message: { _ in
-            Text("Stories stay in your library; only the sidebar entry goes.")
-        }
-        .confirmationDialog(
-            "Remove the smart binder “\(pendingBinderRemoval?.name ?? "")”?",
-            isPresented: Binding(
-                get: { pendingBinderRemoval != nil }, set: { if !$0 { pendingBinderRemoval = nil } }),
-            presenting: pendingBinderRemoval
-        ) { binder in
-            Button("Remove Smart Binder", role: .destructive) {
-                if selectedTopic == binder.sidebarTag {
-                    selectedTopic = "Today"
-                }
-                appSettings.removeSmartBinder(binder)
-            }
-        } message: { _ in
-            Text("Stories stay in your library; only the virtual section goes.")
-        }
-        .sheet(item: $editingSmartBinder) { binder in
-            SmartBinderSheet(binder: binder)
-                .environmentObject(appSettings)
-        }
-        .sheet(isPresented: $isNewSmartBinderSheetPresented) {
-            SmartBinderSheet()
-                .environmentObject(appSettings)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .newSmartBinderCommand)) { _ in
-            isNewSmartBinderSheetPresented = true
         }
     }
 

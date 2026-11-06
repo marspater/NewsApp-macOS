@@ -5,7 +5,6 @@ set -euo pipefail
 # first story card and process memory. The bundle is rebuilt under a separate identifier, so its sandbox
 # container, database and preferences are distinct from the installed app; the real library is never opened.
 cd "$(dirname "$0")/.."
-ROOT=$(pwd)
 BUNDLE_ID="com.marspater.news.launchcheck"
 CONTAINER="$HOME/Library/Containers/$BUNDLE_ID/Data"
 LIBRARY_DIR="$CONTAINER/Library/Application Support/com.marspater.news"
@@ -26,10 +25,8 @@ trap cleanup EXIT
 # Feeds point at a reserved .invalid host, so a refresh fails locally; notifications and AI stay off.
 LAUNCH_ARGS=(-saved_feed_urls '("https://launch.invalid/feed.xml")' -notifications_enabled NO -ai_enabled NO)
 
-rsync -a --exclude .git --exclude .antigravity --exclude .claude --exclude .build --exclude '*.app' "$ROOT/" "$STAGE/src/"
-sed -i '' "s|<string>com.marspater.news</string>|<string>$BUNDLE_ID</string>|" "$STAGE/src/build.sh"
-(cd "$STAGE/src" && ./build.sh >/dev/null)
-APP="$STAGE/src/News.app"
+APP="$STAGE/News.app"
+NEWS_BUNDLE_ID="$BUNDLE_ID" NEWS_APP_DIR="$APP" ./build.sh >/dev/null
 [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist") == "$BUNDLE_ID" ]]
 EXECUTABLE="$APP/Contents/MacOS/News"
 

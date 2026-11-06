@@ -54,11 +54,7 @@ enum LeadStoryPresentation {
     static func firstEligibleID(in entries: [FeedEntry], selectedTopic: String?, isSearching: Bool) -> String? {
         let location = selectedTopic ?? "Today"
         guard !isSearching, location == "Today" || location == "Briefing" else { return nil }
-        for entry in entries {
-            let articles = [entry.representative] + entry.visibleArticles.filter { $0.id != entry.representative.id }
-            if FeedArticle.bestCardImage(in: articles) != nil { return entry.id }
-        }
-        return nil
+        return entries.first { $0.cardImageURL != nil }?.id
     }
 }
 
@@ -111,19 +107,18 @@ struct ArticleListView: View {
     @MainActor static var hasSettledLaunch = false
     @State private var isSettled = ArticleListView.hasSettledLaunch
 
-    private var initialPrefetchURLs: [URL] {
-        buffer.displayed.articles.prefix(30).compactMap {
-            $0.imageUrl.flatMap(URL.init(string:))
-        }
-    }
+    private var initialPrefetchURLs: [URL] { CardImagePrefetch.initialURLs(entries) }
 
-    static func prefetchStart(visibleIndex: Int, currentStart: Int) -> Int {
-        if visibleIndex < currentStart || visibleIndex >= currentStart + 18 { return max(0, visibleIndex - 6) }
-        return currentStart
+    /// Whether the first card with an image is the full-size lead story (macOS 26). Only Today shows it at full
+    /// size: the Briefing picks its hero by publisher count, and the hero decodes its own image on demand.
+    private var showsLeadImage: Bool {
+        guard #available(macOS 26, *), !isBriefing else { return false }
+        return LeadStoryPresentation.firstEligibleID(
+            in: entries, selectedTopic: selectedTopic, isSearching: isSearching) != nil
     }
 
     private func prefetchAhead(of id: String) {
-        groupedEntries.prefetchAhead(of: id, in: buffer.displayed.articles, using: imageLoader)
+        groupedEntries.prefetchAhead(of: id, using: imageLoader)
     }
     @State private var buffer = FeedUpdateBuffer()
     @State private var pageRequest = 0
@@ -308,7 +303,7 @@ struct ArticleListView: View {
         .toolbar(removing: .title)
         .task(id: initialPrefetchURLs) {
             guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
-            await DecodedImageCache.prefetch(initialPrefetchURLs, using: imageLoader)
+            await CardImagePrefetch.first(initialPrefetchURLs, leadAtFullSize: showsLeadImage, using: imageLoader)
         }
         .task(id: taskQueryReloadKey) {
             await performQueryReload()
@@ -320,12 +315,11 @@ struct ArticleListView: View {
     /// in one transition, and only then starts the launch refresh and the catch-up clustering with its image lookup.
     private func settleLaunch() async {
         guard !Self.hasSettledLaunch, articleStore.isReady, !isLoadingPage else { return }
-        let urls = entries.prefix(12).compactMap {
-            FeedArticle.bestCardImage(in: [$0.representative] + $0.visibleArticles)
-        }
+        let urls = entries.prefix(12).compactMap(\.cardImageURL)
+        let leadAtFullSize = showsLeadImage
         let loader = imageLoader
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await DecodedImageCache.prefetch(urls, using: loader) }
+            group.addTask { await CardImagePrefetch.first(urls, leadAtFullSize: leadAtFullSize, using: loader) }
             group.addTask { try? await Task.sleep(for: .seconds(1)) }
             await group.next()
             group.cancelAll()
@@ -1471,47 +1465,30 @@ private final class GroupedEntries {
     private var snapshot: FeedSnapshot?
     private var mode: FeedGroupingMode?
     private var cached: [FeedEntry] = []
+    /// Position of each entry in `cached`, by entry ID (the card's representative story).
     private var indexByID: [String: Int] = [:]
-    private var prefetchStart = 0
-    private var prefetchTask: Task<Void, Never>?
+    private let imagePrefetch = CardImagePrefetch()
 
     func entries(of snapshot: FeedSnapshot, mode: FeedGroupingMode) -> [FeedEntry] {
         if snapshot != self.snapshot || mode != self.mode {
             cached = snapshot.entries(mode)
-            if snapshot.articles != self.snapshot?.articles {
-                var map: [String: Int] = [:]
-                map.reserveCapacity(snapshot.articles.count)
-                for (index, article) in snapshot.articles.enumerated() where map[article.id] == nil {
-                    map[article.id] = index
-                }
-                indexByID = map
+            var map: [String: Int] = [:]
+            map.reserveCapacity(cached.count)
+            for (index, entry) in cached.enumerated() where map[entry.id] == nil {
+                map[entry.id] = index
             }
+            indexByID = map
             self.snapshot = snapshot
             self.mode = mode
         }
         return cached
     }
 
-    func resetPrefetch() {
-        prefetchStart = 0
-        prefetchTask?.cancel()
-        prefetchTask = nil
-    }
+    func resetPrefetch() { imagePrefetch.reset() }
 
-    func prefetchAhead(
-        of id: String, in articles: [FeedArticle],
-        using loader: @escaping @Sendable (URL) async throws -> CGImage
-    ) {
-        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
-        guard let index = indexByID[id] ?? articles.firstIndex(where: { $0.id == id }) else { return }
-        let nextStart = ArticleListView.prefetchStart(visibleIndex: index, currentStart: prefetchStart)
-        guard nextStart != prefetchStart else { return }
-        prefetchStart = nextStart
-        let urls = articles.dropFirst(nextStart).prefix(30).compactMap { $0.imageUrl.flatMap(URL.init(string:)) }
-        prefetchTask?.cancel()
-        prefetchTask = Task {
-            await DecodedImageCache.prefetch(urls, using: loader)
-        }
+    func prefetchAhead(of id: String, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage) {
+        guard let index = indexByID[id] else { return }
+        imagePrefetch.ahead(of: index, in: cached, using: loader)
     }
 }
 
@@ -1539,6 +1516,7 @@ struct KeyboardShortcutsView: View {
                 ("E", "Show or hide event coverage"),
                 ("W", "Next reading mode: Overview, Story, Web"),
                 ("⇧⌘R", "Switch between Story and Web"),
+                ("⌥⌘R", "Check this story for new reports"),
                 ("⇧⌘U", "Mark as read or unread (menu)"),
                 ("⌘S", "Save or remove from Saved Stories (menu)"),
                 ("⌘O", "Open in browser (menu)"),

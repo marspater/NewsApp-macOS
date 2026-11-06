@@ -23,7 +23,7 @@ import SwiftUI
 /// a story open. It reports store and FeedManager publications, main-thread CPU time and the time to draw a scrolled
 /// frame. With `NEWS_NATIVE_BODY_COUNTS=1` the script compiles a staged copy of the sources that ticks `BodyCount` in
 /// each counted view body, the list's page fetch and the reader's revision query, and the report adds those counts.
-/// Run with `NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/ListInvalidationBaseline.swift
+/// Run with `NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/Harness/ListInvalidationBaseline.swift
 /// script/native_performance_baseline.sh DIR`; `NEWS_INVALIDATION_GRID=1` measures the grid layout instead of the list.
 @MainActor
 enum BodyCount {
@@ -134,7 +134,7 @@ struct ListInvalidationBaseline {
             .environmentObject(container.readManager)
             .environmentObject(container.savedStories)
             .defaultAppStorage(defaults)
-            .environment(\.readerImageLoader) { _ in try OfflineImage.make() }
+            .environment(\.readerImageLoader) { _, _ in try OfflineImage.make() }
         let view = NSHostingView(rootView: root)
         view.frame = NSRect(x: 0, y: 0, width: 1100, height: 800)
 

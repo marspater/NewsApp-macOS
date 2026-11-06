@@ -19,5 +19,6 @@ fi
 # 2. Run full test regressions (./test.sh skips the Swift runner when the same inputs already passed).
 # Git exports these to hooks; SwiftPM's dependency checkout in a fresh worktree then reads the wrong repository.
 # Only the tests drop them: format.sh must stage into the index this commit uses (a temporary one for `commit -a`).
-env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE ./test.sh
+# NEWS_TEST_FORCE is dropped too: a suite that just passed is never run twice by the hook.
+env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u NEWS_TEST_FORCE ./test.sh
 echo "✅ All tests passed. Proceeding with commit."

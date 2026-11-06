@@ -12,17 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import Foundation
-
+/// The app's entry point, in a file of its own: the test runner and the harness apps compile every other file under
+/// Sources/ with their own @main (News.xcodeproj excludes this one from those targets).
 @main
-struct TensionCalibrationRunner {
-    static func main() async {
-        do {
-            try await TensionCalibrationTests.runAllTests()
-            print("✅ All tension calibration tests passed successfully!")
-        } catch {
-            print("❌ Tension calibration tests failed: \(error)")
-            exit(1)
-        }
+enum NewsMain {
+    /// Starts the SwiftUI app.
+    static func main() {
+        NewsApp.main()
     }
 }

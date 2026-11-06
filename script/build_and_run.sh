@@ -27,14 +27,7 @@ else
     # checkout keeps its News.app and is never matched by the process lookups below. The container-migration plist
     # stays out so the first launch can't move a pre-sandbox library into the development container.
     APP="$PWD/News Dev.app"
-    BUILD_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/news-dev-build.XXXXXX")
-    trap 'rm -f "$BUILD_SCRIPT"' EXIT
-    # The last sed program matches build.sh's literal ${APP_NAME}; nothing in it should expand.
-    # shellcheck disable=SC2016
-    sed -e "s|<string>com.marspater.news</string>|<string>$BUNDLE_ID</string>|" \
-        -e "s|^cp container-migration.plist |cp |" \
-        -e 's|^APP_DIR="${APP_NAME}.app"$|APP_DIR="News Dev.app"|' build.sh >"$BUILD_SCRIPT"
-    bash "$BUILD_SCRIPT"
+    NEWS_BUNDLE_ID="$BUNDLE_ID" NEWS_APP_DIR="$APP" NEWS_OMIT_RESOURCES=container-migration.plist ./build.sh
 fi
 BUILT_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")
 if [[ "$BUILT_ID" != "$BUNDLE_ID" ]]; then

@@ -255,6 +255,8 @@ enum EventClusterer {
                 if let probability = modelScores[key] ?? nil, probability >= cutoff(probability) {
                     pair = EventMatcher.modelConfirmed(pair, policy: matchPolicy)
                 }
+                pair = EventMatcher.applyingBorderlineFloor(
+                    pair, probability: modelScores[key] ?? nil, policy: matchPolicy)
             }
             if matchPolicy.samePublisherRequiresMatch, !pair.isMatch, !a.source.isEmpty, a.source == b.source {
                 pair.isCompatible = false
@@ -841,7 +843,13 @@ enum EventClusterer {
             for a in first {
                 for b in second where inclusions[a.id]?.contains(b.id) != true {
                     let pair = try await ruled(a, b)
-                    if pair.conflict != nil || (pair.sharedSpecificAnchors < 1 && !EventMatcher.needsPairModel(pair)) {
+                    // Under the veto threshold (#737, evaluation) an outvotable conflict is counted with the rest below.
+                    let outvotable = pair.conflict.map {
+                        matchPolicy.vetoThreshold && EventMatcher.outvotable.contains($0)
+                    }
+                    if (pair.conflict != nil && outvotable != true)
+                        || (pair.sharedSpecificAnchors < 1 && !EventMatcher.needsPairModel(pair))
+                    {
                         return false
                     }
                 }
@@ -853,7 +861,8 @@ enum EventClusterer {
                     pairs.append(try await assessed(a, b))
                 }
             }
-            guard pairs.allSatisfy({ $0.conflict == nil && ($0.sharedSpecificAnchors >= 1 || $0.modelConfirmed) })
+            guard !EventMatcher.conflictsBlock(pairs, policy: matchPolicy),
+                pairs.allSatisfy({ $0.sharedSpecificAnchors >= 1 || $0.modelConfirmed })
             else {
                 return false
             }

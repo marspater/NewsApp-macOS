@@ -292,7 +292,7 @@ struct BriefingPriorityData: Equatable, Sendable {
             .compactMap { quote($0.0, citationIDs: $0.1, in: overview, links: links) }.first
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         Self(cards: [
             Card(

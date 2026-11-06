@@ -68,8 +68,7 @@ enum StoryQuickLookRenderer {
             publisher: article.publisherName,
             dateText: article.publicationDateText,
             excerpt: makeExcerpt(for: article),
-            image: imageURLs.lazy.compactMap { $0 }.compactMap { DecodedImageCache.images.object(forKey: $0 as NSURL) }
-                .first
+            image: imageURLs.lazy.compactMap { $0 }.compactMap { DecodedImageCache.cached($0, size: .card) }.first
         )
     }
 

@@ -78,9 +78,9 @@ if [ -n "$LCOV_PATH" ] && [ $# -gt 0 ]; then
     fi
     xcrun llvm-profdata merge -sparse "${PROFILES[@]}" -o "$WORK/coverage.profdata" || exit 1
     mkdir -p "$(dirname "$LCOV_PATH")"
-    # Report repository sources only: drop the staged test copies and the SwiftPM dependency checkouts.
+    # Report repository sources only: drop the SwiftPM dependency checkouts.
     xcrun llvm-cov export -format=lcov -instr-profile "$WORK/coverage.profdata" "$RUNNER" \
-        -ignore-filename-regex='news-tests\.|/\.build/' > "$LCOV_PATH" || exit 1
+        -ignore-filename-regex='/SourcePackages/' > "$LCOV_PATH" || exit 1
 fi
 
 exit $STATUS

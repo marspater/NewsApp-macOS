@@ -95,7 +95,7 @@ struct BriefingForwardWatchData: Equatable, Sendable {
         return make(found)
     }
 
-    /// Sample data for `Tests/OverviewCaptures.swift`.
+    /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         make([
             Candidate(

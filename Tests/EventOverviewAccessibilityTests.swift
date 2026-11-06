@@ -19,16 +19,6 @@ import AppKit
 import Foundation
 import SwiftUI
 
-// Defined in NewsApp.swift, which this standalone runner does not compile; the reader's command modifier uses them.
-extension Notification.Name {
-    static let nextArticleCommand = Notification.Name("nextArticleCommand")
-    static let prevArticleCommand = Notification.Name("prevArticleCommand")
-    static let toggleReadCommand = Notification.Name("toggleReadCommand")
-    static let toggleSaveCommand = Notification.Name("toggleSaveCommand")
-    static let openInBrowserCommand = Notification.Name("openInBrowserCommand")
-}
-
-@main
 @MainActor
 struct EventOverviewAccessibilityTests {
     static var testsRun = 0
@@ -1653,6 +1643,11 @@ extension EventOverviewAccessibilityTests {
                 participant: "  Council \n", position: "  Supported the plan. \n", source: nil, citations: [citation]),
             "Council. Supported the plan. Source: Fixture News",
             "Perspective trims text and falls back to citation source")
+        assertEqual(
+            EventOverviewReaderView.perspectiveAccessibilityLabel(
+                participant: "the officers", position: "The officers said they took statements.", source: "via Wire"),
+            "The officers said they took statements. via Wire",
+            "A statement led by its speaker names the participant once")
         assertEqual(
             EventOverviewReaderView.industryImpactAccessibilityLabel(
                 industry: "Energy", implication: "  Costs rose. \n", citations: [unknownCitation]),

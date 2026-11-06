@@ -46,10 +46,11 @@ import UserNotifications
                         let attributes: [String: Any] = [
                             "category": entry.category, loggedAtKey: entry.date.timeIntervalSince1970,
                         ]
+                        let message = DiagnosticsExport.redacted(entry)
                         if entry.level == .fault {
-                            SentrySDK.logger.fatal(redacted(entry), attributes: attributes)
+                            SentrySDK.logger.fatal(message, attributes: attributes)
                         } else {
-                            SentrySDK.logger.error(redacted(entry), attributes: attributes)
+                            SentrySDK.logger.error(message, attributes: attributes)
                         }
                     }
                     since = newest
@@ -67,20 +68,6 @@ import UserNotifications
             }
             return log
         }
-
-        /// Read in-process, the unified log returns private values in clear (feed URLs can carry tokens), so they are
-        /// redacted here as the system log would: only `.public` values and unannotated numbers are sent.
-        static func redacted(_ entry: OSLogEntryLog) -> String {
-            entry.components.map { component in
-                guard !component.placeholder.isEmpty else { return component.formatSubstring }
-                let numbers: [OSLogMessageComponent.ArgumentCategory] = [.double, .int64, .uInt64]
-                let number = numbers.contains(component.argumentCategory)
-                let shown =
-                    component.placeholder.contains("public") || (number && !component.placeholder.contains("private"))
-                let value = number ? component.argumentNumberValue?.stringValue : component.argumentStringValue
-                return component.formatSubstring + (shown ? value ?? "" : "<private>")
-            }.joined()
-        }
     }
 #endif
 
@@ -97,7 +84,6 @@ extension Notification.Name {
     static let newSmartBinderCommand = Notification.Name("newSmartBinderCommand")
 }
 
-@main
 struct NewsApp: App {
     @FocusedValue(\.archiveSearch) private var archiveSearch
     @FocusedValue(\.selectedStory) private var selectedStory
@@ -312,6 +298,10 @@ struct NewsApp: App {
                 .keyboardShortcut(ReaderMode.webShortcut, modifiers: ReaderMode.webShortcutModifiers)
                 .disabled(readerActions == nil)
 
+                Button("Check for Updates") { readerActions?.checkForUpdates?() }
+                    .keyboardShortcut("r", modifiers: [.command, .option])
+                    .disabled(readerActions?.checkForUpdates == nil)
+
                 if let actions = readerActions {
                     Picker("Reading Mode", selection: actions.mode) {
                         if actions.hasOverview { Text("Overview").tag(ReaderMode.overview) }
@@ -336,7 +326,22 @@ struct NewsApp: App {
                 .preferredColorScheme(themeManager.appearance.colorScheme)
                 .modifier(SystemSettingsOverrideModifier())
         }
+        // The commands builder takes ten entries under Xcode 26's SDK, which CI compiles with; the Log window's
+        // commands go in a second call rather than an eleventh entry.
+        .commands { LogWindowCommands() }
         .windowResizability(.contentSize)
+
+        // Development builds only (#1005): Help › Show Log opens it; it has no Window menu item and is not restored.
+        Window("Log", id: LogWindowModel.windowID) {
+            if LogWindowModel.isAvailable {
+                LogWindowView()
+                    .preferredColorScheme(themeManager.appearance.colorScheme)
+                    .modifier(SystemSettingsOverrideModifier())
+            }
+        }
+        .defaultSize(width: 900, height: 560)
+        .commandsRemoved()
+        .restorationBehavior(.disabled)
 
         Settings {
             SettingsView()
@@ -448,6 +453,23 @@ struct ListViewCommands: Commands {
     }
 }
 
+/// Edit › Copy Log and Clear Log for the development Log window in front (#1005); absent in release builds.
+struct LogWindowCommands: Commands {
+    @FocusedObject private var log: LogWindowModel?
+
+    var body: some Commands {
+        CommandGroup(after: .pasteboard) {
+            if LogWindowModel.isAvailable {
+                Divider()
+                Button("Copy Log") { log?.copyVisible() }
+                    .disabled(log?.visible.isEmpty ?? true)
+                Button("Clear Log") { log?.clear() }
+                    .disabled(log?.entries.isEmpty ?? true)
+            }
+        }
+    }
+}
+
 struct FileCommands: Commands {
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
@@ -476,10 +498,8 @@ struct KeyboardShortcutsCommands: Commands {
                 openWindow(id: Self.windowID)
             }
             Button("Show Sample Notification") {
-                // The newest story with a photo, posted through the real path: in front, the app draws its banner.
-                let stories = ArticleStore.shared.articles
-                guard let story = stories.first(where: { FeedArticle.bestCardImage(in: [$0]) != nil }) ?? stories.first
-                else { return }
+                // A random story with a photo, posted through the real path: in front, the app draws its banner.
+                guard let story = NotificationService.sampleStory(from: ArticleStore.shared.articles) else { return }
                 Task {
                     await NotificationService.shared.postSample(story) {
                         await MainActor.run {
@@ -492,6 +512,10 @@ struct KeyboardShortcutsCommands: Commands {
                 DiagnosticsExport.run(
                     settings: AppSettings.shared, feedManager: AppContainer.shared.feedManager,
                     articleStore: ArticleStore.shared)
+            }
+            if LogWindowModel.isAvailable {
+                Button("Show Log") { openWindow(id: LogWindowModel.windowID) }
+                    .keyboardShortcut("l", modifiers: [.command, .option])
             }
             if updateChecker.updateAvailable {
                 Divider()

@@ -58,11 +58,39 @@ struct ReaderCommandActions: Equatable {
     let copyLink: () -> Void
     let webBack: (() -> Void)?
     let webForward: (() -> Void)?
+    /// Check for Updates on the open overview (#992); nil while no overview shows or a check runs.
+    var checkForUpdates: (() -> Void)? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.mode.wrappedValue == rhs.mode.wrappedValue && lhs.textScale.wrappedValue == rhs.textScale.wrappedValue
             && lhs.hasOverview == rhs.hasOverview && (lhs.reload == nil) == (rhs.reload == nil)
             && (lhs.webBack == nil) == (rhs.webBack == nil) && (lhs.webForward == nil) == (rhs.webForward == nil)
+            && (lhs.checkForUpdates == nil) == (rhs.checkForUpdates == nil)
+    }
+}
+
+/// The overview's Check for Updates status line (#992, DESIGN.md 17): what the check found and nothing more.
+extension FeedManager.StoryUpdateResult {
+    static let checkingText = "Checking your feeds…"
+
+    var statusText: String {
+        switch self {
+        case .refused(let reason):
+            return "Refresh is off. \(reason)"
+        case .checked(let newReports, let failedFeeds, let deferredMatching):
+            var text: String
+            if newReports > 0 {
+                text = "\(newReports) new \(newReports == 1 ? "report" : "reports") joined this story"
+            } else if deferredMatching {
+                text = "No new reports yet. Some story matching waits while the Mac saves energy or cools down"
+            } else {
+                text = "No new reports from your sources"
+            }
+            if failedFeeds > 0 {
+                text += " · \(failedFeeds) \(failedFeeds == 1 ? "feed" : "feeds") could not be checked"
+            }
+            return text
+        }
     }
 }
 

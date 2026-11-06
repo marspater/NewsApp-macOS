@@ -42,15 +42,21 @@ enum NewsSignposts {
         guard !firstCardReported else { return }
         firstCardReported = true
         launch.emitEvent("FirstCard")
-        var info = kinfo_proc()
-        var size = MemoryLayout<kinfo_proc>.stride
-        var mib = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
-        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return }
-        let start = info.kp_proc.p_un.__p_starttime
-        let elapsed = Date().timeIntervalSince1970 - (Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
+        guard let start = processStart() else { return }
+        let elapsed = Date().timeIntervalSince(start)
         launchLog.notice(
             "First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public)"
         )
+    }
+
+    /// When this process started, from the kernel.
+    static func processStart() -> Date? {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return nil }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
     }
 
     /// Begins a signpost interval and returns the state token.

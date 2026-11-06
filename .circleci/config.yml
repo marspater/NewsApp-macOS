@@ -46,7 +46,7 @@ jobs:
           command: circleci testsuite run "unit tests"
       - run:
           name: "Verify publisher excerpts"
-          command: NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
+          command: NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
       - run:
           name: "Verify Swift Package Manager build"
           command: swift build --force-resolved-versions --target News
@@ -54,6 +54,7 @@ jobs:
           key: swiftpm-macos-xcode27-{{ checksum "Package.resolved" }}
           paths:
             - .build
+            - build/DerivedData/SourcePackages
             - ~/Library/Caches/org.swift.swiftpm
 
   deploy-marker:
