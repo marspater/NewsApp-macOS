@@ -34,6 +34,7 @@ enum AnalysisGenerationTests {
         do {
             try await staleWritesAreRefused()
             try await queueForgetsRefusedAndClearedWork()
+            await queuedOverviewsRespectCancellationAndSupersession()
             try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
             try await clusteringStorageFailuresEndThePass()
@@ -62,6 +63,93 @@ enum AnalysisGenerationTests {
             try? await Task.sleep(for: .milliseconds(50))
         }
         check(await condition(), message)
+    }
+
+    private actor OverviewGate {
+        private var released = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            guard !released else { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func release() {
+            released = true
+            let pending = waiters
+            waiters.removeAll()
+            for waiter in pending { waiter.resume() }
+        }
+    }
+
+    private actor OverviewSignals {
+        private var finished: Set<String> = []
+        private var invoked: Set<String> = []
+
+        func finish(_ name: String) { finished.insert(name) }
+        func invoke(_ name: String) { invoked.insert(name) }
+        func hasFinished(_ name: String) -> Bool { finished.contains(name) }
+        func wasInvoked(_ name: String) -> Bool { invoked.contains(name) }
+    }
+
+    /// A pending overview owns its generation before capacity is available. Closing or replacing it must not leave
+    /// a zombie job that eventually runs when one of the three worker slots opens.
+    static func queuedOverviewsRespectCancellationAndSupersession() async {
+        let queue = EnrichmentQueue()
+        let gate = OverviewGate()
+        let signals = OverviewSignals()
+        let holding = (0..<3).map { index in
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "holding-\(index)") {
+                    await gate.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("The three worker slots are occupied") { await queue.activeJobCount() == 3 }
+
+        let stale = Task {
+            _ = await queue.scheduleOverviewGeneration(eventID: "replaced") {
+                await signals.invoke("stale")
+                return nil
+            }
+            await signals.finish("stale")
+        }
+        await eventually("The old overview waits for capacity") { await queue.queuedOverviewCount() == 1 }
+
+        let replacement = Task {
+            _ = await queue.scheduleOverviewGeneration(eventID: "replaced") {
+                await signals.invoke("replacement")
+                return nil
+            }
+        }
+        await eventually("The superseded waiter completes without taking a worker slot", timeout: .seconds(5)) {
+            await signals.hasFinished("stale")
+        }
+
+        let cancelled = Task {
+            _ = await queue.scheduleOverviewGeneration(eventID: "cancelled") {
+                await signals.invoke("cancelled")
+                return nil
+            }
+            await signals.finish("cancelled")
+        }
+        await eventually("The cancellation target waits for capacity") { await queue.queuedOverviewCount() == 2 }
+        await queue.cancelOverview(eventID: "cancelled")
+        await eventually("Explicit cancellation releases the waiter before capacity opens", timeout: .seconds(5)) {
+            await signals.hasFinished("cancelled")
+        }
+        check(!(await signals.wasInvoked("stale")), "A superseded queued operation never executes")
+        check(!(await signals.wasInvoked("cancelled")), "An explicitly cancelled queued operation never executes")
+
+        await gate.release()
+        for task in holding { await task.value }
+        await stale.value
+        await cancelled.value
+        await replacement.value
+        check(await signals.wasInvoked("replacement"), "The replacement runs after capacity opens")
+        check(await queue.activeJobCount() == 0, "All overview worker slots are returned")
+        check(await queue.queuedOverviewCount() == 0, "No queued overview generations are retained")
     }
 
     /// A clear that fails mid-transaction rolls back SQLite's half only if the side file and the generation have not
