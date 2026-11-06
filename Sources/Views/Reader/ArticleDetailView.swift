@@ -1095,11 +1095,15 @@ struct ArticleDetailView: View {
         if notes.isEmpty { showsAnnotationsInspector = true } else { noteDraft = NoteDraft(notes: notes) }
     }
 
-    private func saveNote(_ draft: NoteDraft, body: String) {
+    /// Saves the note the composer collected; false, with the composer left open and its text kept, when the library
+    /// refused it.
+    private func saveNote(_ draft: NoteDraft, body: String) async -> Bool {
         var notes = draft.notes
         notes[0].noteBody = body
-        showsAnnotationsInspector = true
-        add(notes)
+        articleNotes += notes
+        let saved = await articleStore.saveNotes(notes)
+        if saved { showsAnnotationsInspector = true }
+        return saved
     }
 
     private var annotationsInspector: some View {
@@ -1112,7 +1116,7 @@ struct ArticleDetailView: View {
             notes: articleNotes,
             lostIDs: ready ? Set(articleNotes.filter { NoteAnchor.resolve($0, in: texts) == nil }.map(\.id)) : [],
             onReveal: { note in revealedBlock = NoteAnchor.resolve(note, in: texts)?.index },
-            onSave: { note in Task { await articleStore.saveNotes([note]) } },
+            onSave: { note in await articleStore.saveNotes([note]) },
             onDelete: { id in Task { await articleStore.deleteNote(id: id) } }
         )
         .inspectorColumnWidth(
@@ -1178,7 +1182,7 @@ struct ArticleDetailView: View {
                 }
                 .help("Add a private note to the selected passage (⇧⌘Y)")
                 .popover(item: $noteDraft) { draft in
-                    NoteComposerView(quote: draft.quote) { saveNote(draft, body: $0) }
+                    NoteComposerView(quote: draft.quote) { await saveNote(draft, body: $0) }
                 }
                 Button {
                     showsAnnotationsInspector.toggle()
