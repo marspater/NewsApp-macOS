@@ -57,7 +57,7 @@ enum FeedError: LocalizedError, Equatable, Sendable {
             return "Security Block: Host '\(host)' rejected (\(reason))."
         case .substitutedAnswer(let host, .sinkhole):
             return
-                "A DNS filter on this network answered 0.0.0.0 for '\(host)'. Turn off the VPN's threat protection or content blocking for News, then Refresh."
+                "A DNS filter on this network answered with a blocked placeholder address instead of the real one for '\(host)'. Turn off the VPN's threat protection or content blocking for News, then Refresh."
         case .substitutedAnswer(_, .fakeIP):
             return
                 "This VPN or proxy answers every name from a fake-IP range, which News cannot verify. Switch it to a mode that returns real addresses, or turn it off, then Refresh."
