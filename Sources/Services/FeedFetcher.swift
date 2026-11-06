@@ -112,10 +112,11 @@ actor FeedFetcher {
                 due.append(url)
             }
         }
-        let attempted = await fetchWindowed(
+        let (attempted, latencies) = await fetchWindowed(
             due, allowHTTP: allowHTTP, validators: stored.compactMapValues(\.validators))
         if let state, !Task.isCancelled {
-            await recordOutcomes(attempted.filter { $0.error.map(\.isScheduledPause) != true }, in: state)
+            await recordOutcomes(
+                attempted.filter { $0.error.map(\.isScheduledPause) != true }, latencies: latencies, in: state)
         }
         return results + attempted
     }
@@ -123,11 +124,12 @@ actor FeedFetcher {
     /// At most `maximumConcurrentFeeds` requests overall and `maximumConcurrentFeedsPerHost` per host. A host that
     /// answered 429/503 is left alone until its wait ends, including feeds queued behind the one that was refused.
     private func fetchWindowed(_ urls: [String], allowHTTP: Bool, validators: [String: FeedValidators]) async
-        -> [FeedFetchResult]
+        -> (results: [FeedFetchResult], latencies: [String: TimeInterval])
     {
-        await withTaskGroup(of: FeedFetchResult.self) { group in
+        await withTaskGroup(of: (FeedFetchResult, TimeInterval).self) { group in
             var queue = urls
             var results = [FeedFetchResult]()
+            var latencies = [String: TimeInterval]()
             var active = [String: Int]()
             var running = 0
 
@@ -142,7 +144,7 @@ actor FeedFetcher {
                 return queue.remove(at: index)
             }
 
-            func schedule(url: String, in group: inout TaskGroup<FeedFetchResult>) {
+            func schedule(url: String, in group: inout TaskGroup<(FeedFetchResult, TimeInterval)>) {
                 let host = Self.host(url)
                 if let until = hostCooldowns[host], until > now() {
                     results.append((url, nil, .retryScheduled(until: until), nil))
@@ -151,10 +153,14 @@ actor FeedFetcher {
                 active[host, default: 0] += 1
                 running += 1
                 let known = validators[url]
-                group.addTask { await self.fetchSingleFeed(urlString: url, allowHTTP: allowHTTP, validators: known) }
+                group.addTask {
+                    let started = ProcessInfo.processInfo.systemUptime
+                    let result = await self.fetchSingleFeed(urlString: url, allowHTTP: allowHTTP, validators: known)
+                    return (result, ProcessInfo.processInfo.systemUptime - started)
+                }
             }
 
-            func launchEligible(_ group: inout TaskGroup<FeedFetchResult>) {
+            func launchEligible(_ group: inout TaskGroup<(FeedFetchResult, TimeInterval)>) {
                 while running < Self.maximumConcurrentFeeds, !Task.isCancelled,
                     let url = dequeueNextEligible()
                 {
@@ -163,7 +169,8 @@ actor FeedFetcher {
             }
 
             launchEligible(&group)
-            for await result in group {
+            for await (result, latency) in group {
+                latencies[result.urlString] = latency
                 let host = Self.host(result.urlString)
                 active[host, default: 1] -= 1
                 running -= 1
@@ -176,7 +183,7 @@ actor FeedFetcher {
                 results.append(result)
                 launchEligible(&group)
             }
-            return results
+            return (results, latencies)
         }
     }
 
@@ -189,7 +196,9 @@ actor FeedFetcher {
         [retryAt, hostCooldowns[Self.host(url)]].compactMap { $0 }.max().flatMap { $0 > now ? $0 : nil }
     }
 
-    private func recordOutcomes(_ attempted: [FeedFetchResult], in state: DatabaseEngine) async {
+    private func recordOutcomes(
+        _ attempted: [FeedFetchResult], latencies: [String: TimeInterval], in state: DatabaseEngine
+    ) async {
         // Every request failing to connect means this device is probably offline; that says nothing about the feeds.
         let offline = !attempted.isEmpty && attempted.allSatisfy { $0.error?.isConnectivity == true }
         let at = now()
@@ -199,8 +208,10 @@ actor FeedFetcher {
                     guard !offline, !error.isLocalRejection else { continue }
                     try await state.recordFeedFailure(
                         result.urlString, kind: error.failureKind, retryAfter: error.retryAfter, at: at)
+                    try await state.recordFeedSample(result.urlString, latency: nil)
                 } else {
                     try await state.recordFeedSuccess(result.urlString, at: at)
+                    try await state.recordFeedSample(result.urlString, latency: latencies[result.urlString] ?? 0)
                 }
             } catch {
                 logger.error("Could not record feed fetch outcome: \(error.localizedDescription)")

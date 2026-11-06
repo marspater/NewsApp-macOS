@@ -90,7 +90,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 32
+    static let schemaVersion = 33
     /// The longest text a publisher update keeps of what it replaced (#712): a cut text would show invented changes.
     static let maximumRevisionTextLength = 50_000
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
@@ -1937,6 +1937,28 @@ actor DatabaseEngine {
                     try executeSimple("ALTER TABLE feeds ADD COLUMN last_failure_kind TEXT;")
                 }
                 try setUserVersion(32)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                throw error
+            }
+        }
+        if version < 33 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // Per-feed request counters and why the reader was refused a story's text (#715). History starts
+                // here; nothing earlier recorded either.
+                for (column, type) in [
+                    ("fetch_attempts", "INTEGER NOT NULL DEFAULT 0"), ("fetch_successes", "INTEGER NOT NULL DEFAULT 0"),
+                    ("fetch_latency_total", "REAL NOT NULL DEFAULT 0"),
+                ] where try !columnNames(of: "feeds").contains(column) {
+                    try executeSimple("ALTER TABLE feeds ADD COLUMN \(column) \(type);")
+                }
+                if try !columnNames(of: "articles").contains("reader_barrier") {
+                    try executeSimple("ALTER TABLE articles ADD COLUMN reader_barrier TEXT;")
+                }
+                try setUserVersion(33)
                 try commitTransaction()
             } catch {
                 loggedOptional("rollbackTransaction") { try rollbackTransaction() }

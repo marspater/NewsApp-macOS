@@ -1791,6 +1791,9 @@ struct ArticleDetailView: View {
                 allowHTTP: allowInsecure
             )
             guard !Task.isCancelled, activeArticle.id == targetId else { return }
+            if let barrier = ReaderBarrier(extraction.outcome) {
+                await articleStore.recordReaderBarrier(barrier, articleID: targetId)
+            }
 
             switch extraction.outcome {
             case .success(let content, let imageUrl, let extractedDocument):

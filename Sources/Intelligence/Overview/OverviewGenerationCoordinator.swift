@@ -351,6 +351,7 @@ actor OverviewGenerationCoordinator {
         guard let extractText, await acquireExtractionSlot() else { return false }
         let outcome = await extractText(article.link)
         await releaseExtractionSlot()
+        if let barrier = ReaderBarrier(outcome) { await store.recordReaderBarrier(barrier, articleID: article.id) }
         guard !Task.isCancelled, case .success(let content, let imageUrl, let document) = outcome,
             content.count > article.description.count, !ArticleContentRedactor.redactAndSplit(content).isEmpty
         else { return false }
