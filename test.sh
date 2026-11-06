@@ -20,13 +20,29 @@ python3 script/training/pretrain_pairs.py --self-check
 
 # Content key of everything the Swift runner compiles or reads: the working tree (tracked and new files) without
 # docs, Markdown other than PRIVACY.md and the Python tooling checked above, plus toolchain, OS and NEWS_* settings.
+# A coverage report written inside the tree is an output: it leaves the key, by its path relative to the tree so
+# an absolute path is excluded too and nothing else is. A tracked file is never an output.
+KEY_EXCLUDES=()
+if [[ -n "${NEWS_TEST_COVERAGE:-}" ]]; then
+    REPORT_PATH=$(python3 -c 'import os, sys; print(os.path.relpath(os.path.abspath(sys.argv[1]), sys.argv[2]))' \
+        "$NEWS_TEST_COVERAGE" "$(git rev-parse --show-toplevel)")
+    if [[ "$REPORT_PATH" != ../* ]]; then
+        if git ls-files --error-unmatch -- "$REPORT_PATH" > /dev/null 2>&1; then
+            echo "❌ NEWS_TEST_COVERAGE names a tracked file ($REPORT_PATH); write the report elsewhere." >&2
+            exit 2
+        fi
+        KEY_EXCLUDES=(":(exclude)$REPORT_PATH")
+    fi
+fi
 runner_inputs_key() {
     local index
     index=$(mktemp "${TMPDIR:-/tmp}/news-test-index.XXXXXX")
     cp "$(git rev-parse --git-path index)" "$index"
     GIT_INDEX_FILE="$index" git add -A
     {
-        GIT_INDEX_FILE="$index" git ls-files -s -- . ':!docs' ':!script/evaluation' ':!script/training' ':!*.md'
+        # A coverage report written inside the tree is an output, not an input.
+        GIT_INDEX_FILE="$index" git ls-files -s -- . ':!docs' ':!script/evaluation' ':!script/training' ':!*.md' \
+            "${KEY_EXCLUDES[@]}"
         GIT_INDEX_FILE="$index" git ls-files -s -- PRIVACY.md
         swiftc --version 2>&1
         sw_vers -buildVersion
@@ -39,12 +55,32 @@ runner_inputs_key() {
 
 # A plain run skips compiling and running the Swift tests when the same inputs already passed on this machine.
 # NEWS_TEST_FORCE=1 runs them anyway; runs with arguments (baselines, live checks) are never skipped.
+copy_coverage() {
+    local source="$1" destination="$2" temporary
+    mkdir -p "$(dirname "$destination")" || return 1
+    temporary=$(mktemp "${destination}.tmp.XXXXXX") || return 1
+    if cp "$source" "$temporary" && mv -f "$temporary" "$destination"; then
+        return 0
+    fi
+    rm -f "$temporary"
+    return 1
+}
+
 PASS_STAMP=""
 if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/dev/null); then
     PASS_STAMP="${TMPDIR:-/tmp}/news-test-passes/$KEY"
-    if [ -f "$PASS_STAMP" ]; then
-        echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
-        exit 0
+    # A coverage run skips only with the report these inputs produced (kept beside the stamp); a run whose export
+    # failed, or whose report came from other inputs, runs again.
+    if [[ -f "$PASS_STAMP" ]]; then
+        if [[ -z "${NEWS_TEST_COVERAGE:-}" ]]; then
+            echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
+            exit 0
+        elif [[ -f "$PASS_STAMP.lcov" ]] && copy_coverage "$PASS_STAMP.lcov" "$NEWS_TEST_COVERAGE"; then
+            echo "Coverage written to $NEWS_TEST_COVERAGE (from the earlier run with these inputs)"
+            echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
+            exit 0
+        fi
+        # No report for these inputs, or it could not be copied: the run produces it.
     fi
 fi
 
@@ -74,7 +110,14 @@ trap cleanup_run EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 RUNNER="$LOGS/test_runner.$RUN_TAG"
-script/build_test_runner.sh "$RUNNER" "${TEST_OPT_FLAGS[@]}"
+# NEWS_TEST_COVERAGE=PATH makes the plain run write an LCOV report of itself: the one runner is built instrumented,
+# every job keeps its own profile, and the profiles merge once the pool passed. One run, gate and coverage (#577).
+COVERAGE_FLAGS=()
+if [[ -n "${NEWS_TEST_COVERAGE:-}" && $# -eq 0 ]]; then
+    COVERAGE_FLAGS=(-profile-generate -profile-coverage-mapping)
+    mkdir -p "$LOGS/profiles"
+fi
+script/build_test_runner.sh "$RUNNER" "${TEST_OPT_FLAGS[@]}" "${COVERAGE_FLAGS[@]}"
 
 if [[ $# -gt 0 ]]; then
     # A run with arguments is a single targeted mode.
@@ -126,6 +169,8 @@ else
         start=$(date +%s)
         copy="$LOGS/$name.$RUN_TAG.runner"
         cp "$LOGS/test_runner.$RUN_TAG" "$copy"
+        # An instrumented runner writes its profile here; set in the worker, so a space in the path survives xargs.
+        if [[ -d "$LOGS/profiles" ]]; then export LLVM_PROFILE_FILE="$LOGS/profiles/%p.profraw"; fi
         env "$@" "$copy" > "$LOGS/$name.log" 2>&1
         status=$?
         # Cleanup that fails marks the job failed, so a run never passes while runner state is left behind.
@@ -156,6 +201,19 @@ else
     if [[ -n "$FAILED" || "$STATUS_COUNT" -ne "$JOB_COUNT" || "$POOL_STATUS" -ne 0 ]]; then
         echo "❌ $STATUS_COUNT of $JOB_COUNT test jobs finished; the pool exited $POOL_STATUS." >&2
         exit 1
+    fi
+    if [[ ${#COVERAGE_FLAGS[@]} -gt 0 ]]; then
+        # The tests are the gate and have passed; a failed export leaves no partial report and does not fail the run.
+        if script/coverage_export.sh "$LOGS/profiles" "$RUNNER" "$NEWS_TEST_COVERAGE"; then
+            echo "Coverage written to $NEWS_TEST_COVERAGE"
+            # The copy beside the stamp lands whole or not at all; without it the next run exports again.
+            if [[ -n "$PASS_STAMP" ]] && ! copy_coverage "$NEWS_TEST_COVERAGE" "$PASS_STAMP.lcov"; then
+                echo "⚠️ Could not keep the coverage report beside the pass stamp; the next run exports it again." >&2
+            fi
+        else
+            rm -f "$NEWS_TEST_COVERAGE"
+            echo "⚠️ Coverage export failed; the tests passed." >&2
+        fi
     fi
 fi
 
