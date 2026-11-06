@@ -5255,38 +5255,41 @@ struct NewsTests {
         assertEqual(stored?.lastFailureKind, nil, "A success clears the kind")
         assertEqual(try await kind(certificate), .tls, "A certificate failure stays until it succeeds")
 
-        // A manual refresh that arrives during a scheduled one runs when that one ends.
+        // A manual refresh that arrives during a scheduled one runs when that one ends, even if its caller is cancelled.
         let retrying = "https://8.8.8.8/retrying.xml"
-        try await db.recordFeedFailure(retrying, kind: .transport, retryAfter: nil, at: clock.now)
         let racingSuite = testDefaultsSuite("test.failure-kinds-racing")
         defer { removeTestDefaults(racingSuite) }
         let racingSettings = AppSettings(defaults: UserDefaults(suiteName: racingSuite)!)
         racingSettings.feedURLs = [retrying, healthy]
         racingSettings.aiEnabled = false
-        let entered = SocketObservation()
-        let released = SocketObservation()
-        let racing = FeedManager(
-            settings: racingSettings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, allowHTTP in
-                entered.recordText("entered")
-                while released.count == 0 { try? await Task.sleep(for: .milliseconds(5)) }
-                return await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db)
-            },
-            notifyBatch: { _, _ in }, now: { clock.now })
-        defer { racing.stopBackgroundWork() }
-        requests = []
-        let scheduledRun = Task { await racing.fetchFeedsAsync(scheduled: true) }
-        await eventually("The scheduled refresh is collecting") { entered.count == 1 }
-        let manualRun = Task { await racing.fetchFeedsAsync() }
-        await eventually("The manual refresh waits for the scheduled one") { !racing.manualRefreshWaiters.isEmpty }
-        released.recordText("released")
-        await manualRun.value
-        assertEqual(
-            requests.sorted(), [retrying, healthy, healthy].sorted(),
-            "The manual caller returns only after the refresh that retries the feed")
-        assertEqual(try await kind(retrying), nil, "The manual refresh that waited leaves the feed healthy")
-        await scheduledRun.value
-        assertTrue(racing.manualRefreshWaiters.isEmpty, "The request runs once")
+        for cancelsScheduledCaller in [false, true] {
+            try await db.recordFeedFailure(retrying, kind: .transport, retryAfter: nil, at: clock.now)
+            let entered = SocketObservation()
+            let released = SocketObservation()
+            let racing = FeedManager(
+                settings: racingSettings, store: store, schedulesRefresh: false,
+                fetchBatch: { urls, allowHTTP in
+                    entered.recordText("entered")
+                    while released.count == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+                    return await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db)
+                },
+                notifyBatch: { _, _ in }, now: { clock.now })
+            defer { racing.stopBackgroundWork() }
+            requests = []
+            let scheduledRun = Task { await racing.fetchFeedsAsync(scheduled: true) }
+            await eventually("The scheduled refresh is collecting") { entered.count == 1 }
+            let manualRun = Task { await racing.fetchFeedsAsync() }
+            await eventually("The manual refresh waits for the scheduled one") { !racing.manualRefreshWaiters.isEmpty }
+            if cancelsScheduledCaller { scheduledRun.cancel() }
+            released.recordText("released")
+            await manualRun.value
+            assertEqual(
+                requests.sorted(), [retrying, healthy, healthy].sorted(),
+                "The manual caller returns only after the refresh that retries the feed (\(cancelsScheduledCaller))")
+            assertEqual(try await kind(retrying), nil, "The manual refresh that waited leaves the feed healthy")
+            await scheduledRun.value
+            assertTrue(racing.manualRefreshWaiters.isEmpty, "The request runs once")
+        }
 
         // Stopping during the scheduled refresh resumes the caller waiting behind it, with no refresh after it.
         let cancelledEntered = SocketObservation()

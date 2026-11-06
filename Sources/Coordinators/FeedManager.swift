@@ -592,9 +592,9 @@ class FeedManager: NSObject, ObservableObject {
         clusterEventsInBackground()
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
-        guard !Task.isCancelled, !isStopped else { return }
-        await notifyAndEnrich(newArticles)
-        if !manualWaiters.isEmpty { await fetchFeedsAsync() }
+        if !Task.isCancelled, !isStopped { await notifyAndEnrich(newArticles) }
+        // In a task of its own: cancelling this caller, a scheduled refresh, does not cancel the reader's request.
+        if !manualWaiters.isEmpty { await Task { [weak self] in await self?.fetchFeedsAsync() }.value }
     }
 
     /// What Check for Updates found for an open story (#992).
