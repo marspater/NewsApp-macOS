@@ -1,0 +1,1 @@
+- `./test.sh --changed` runs only the test atoms that cover the changed Swift files, and the commit hook now runs that instead of the whole suite; the plain run stays the gate (#577).

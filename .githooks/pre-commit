@@ -16,9 +16,11 @@ if [ -x "./script/format.sh" ]; then
     ./script/format.sh --staged
 fi
 
-# 2. Run full test regressions (./test.sh skips the Swift runner when the same inputs already passed).
+# 2. Run the test atoms that cover the staged files (script/changed_atoms.sh; the whole suite when the change
+# reaches past Sources/ and Tests/). ./test.sh still skips the Swift runner when the same inputs already passed the
+# plain run. The design lint and the Python self-checks stay in the plain run and CI.
 # Git exports these to hooks; SwiftPM's dependency checkout in a fresh worktree then reads the wrong repository.
 # Only the tests drop them: format.sh must stage into the index this commit uses (a temporary one for `commit -a`).
 # NEWS_TEST_FORCE is dropped too: a suite that just passed is never run twice by the hook.
-env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u NEWS_TEST_FORCE ./test.sh
+env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u NEWS_TEST_FORCE ./test.sh --changed
 echo "✅ All tests passed. Proceeding with commit."

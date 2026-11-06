@@ -1,6 +1,21 @@
 #!/bin/bash
 set -e
 
+# ./test.sh --changed runs only the atoms that cover the changed Swift files (script/changed_atoms.sh), the commit
+# hook's run. It skips the self-checks like every targeted mode and never writes the pass stamp; the plain run stays
+# the full gate.
+ONLY_ATOMS=""
+MODE="full"
+if [[ "${1:-}" == "--changed" ]]; then
+    MODE="changed"
+    shift
+    ONLY_ATOMS=$(script/changed_atoms.sh)
+    if [[ -z "$ONLY_ATOMS" ]]; then
+        echo "✅ SUCCESS: no changed file has tests to run."
+        exit 0
+    fi
+fi
+
 TEST_OPT_FLAGS=()
 for argument in "$@"; do
     if [[ "$argument" == "--performance-baseline" || "$argument" == "--search-memory" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" || "$argument" == "--library-holdout" ]]; then TEST_OPT_FLAGS=(-O); fi
@@ -8,7 +23,7 @@ done
 
 # The plain run is the gate: it starts with the self-checks that need no Swift build. A run with arguments is one
 # targeted mode and runs only that (its callers already passed the plain run or are measuring), so it starts fast.
-if [[ $# -eq 0 ]]; then
+if [[ $# -eq 0 && "$MODE" == "full" ]]; then
     script/design_lint.sh
     script/check_test_registry.sh
     python3 script/evaluation/evaluate.py
@@ -110,12 +125,15 @@ else
     : > "$JOB_LIST"
     # A job is a name and the environment its copy of the runner gets.
     job() { printf '%s\t%s\n' "$1" "$2" >> "$JOB_LIST"; }
+    ATOMS="${ONLY_ATOMS:-$(script/test_atoms.sh)}"
     # Longest first, so the pool ends evenly.
-    job "NewsTests-slow" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=slow"
-    for ((i = 0; i < SHARDS; i++)); do
-        job "NewsTests-$i-of-$SHARDS" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=$i/$SHARDS"
-    done
-    script/test_atoms.sh | grep -v '^Tests/NewsTests\.swift$' | while read -r atom; do
+    if grep -qx 'Tests/NewsTests\.swift' <<< "$ATOMS"; then
+        job "NewsTests-slow" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=slow"
+        for ((i = 0; i < SHARDS; i++)); do
+            job "NewsTests-$i-of-$SHARDS" "NEWS_TEST_ATOM=Tests/NewsTests.swift NEWS_TEST_SHARD=$i/$SHARDS"
+        done
+    fi
+    grep -v '^Tests/NewsTests\.swift$' <<< "$ATOMS" | while read -r atom; do
         job "$(basename "$atom" .swift)" "NEWS_TEST_ATOM=$atom"
     done
     JOB_COUNT=$(wc -l < "$JOB_LIST" | tr -d ' ')
@@ -163,7 +181,7 @@ else
     fi
 fi
 
-if [ -n "$PASS_STAMP" ]; then
+if [ -n "$PASS_STAMP" ] && [ "$MODE" == "full" ]; then
     mkdir -p "$(dirname "$PASS_STAMP")"
     touch "$PASS_STAMP"
 fi

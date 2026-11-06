@@ -15,7 +15,8 @@ Before tagging a release, run the [release checklist](docs/RELEASE_CHECKLIST.md)
 The current release simplification uses existing #102 labeled tune/English holdout regression inputs; the #409 comparison requires its original private replay export. Importance and overview review commands below remain opt-in historical audit tools, not new release requirements. Developing-story links (#314) ship in event overviews; their collector stays disabled, and the review commands below re-measure wrong links on a private library copy. See [the accepted plan](docs/plans/2026-10-17-release-simplification.md).
 
 ```sh
-./test.sh                         # Full regressions, including parser-to-embedding/clustering integration; also run by the commit hook
+./test.sh                         # Full regressions, including parser-to-embedding/clustering integration; the gate before a PR
+./test.sh --changed               # Only the test atoms that cover the changed Swift files (staged, else working tree); what the commit hook runs
 script/test_event_overview_accessibility.sh # Story Overview sections, Industry Impact included (Epic T); headless; the same runner job a plain ./test.sh runs (NEWS_TEST_ATOM=Tests/EventOverviewAccessibilityTests.swift), as it does script/test_reader_accessibility.sh and script/test_tension_calibration.sh
 NEWS_TEST_FORCE=1 ./test.sh       # A plain ./test.sh skips the Swift runner and the three headless runners when the same inputs already passed all of them on this machine (the stamp is written after the last one); this reruns them
 NEWS_TEST_SHARDS=2 NEWS_TEST_JOBS=3 ./test.sh # A plain run is a job pool: each Tests/*.swift file is its own process, Tests/NewsTests.swift is split into NEWS_TEST_SHARDS processes (default 4) and NEWS_TEST_JOBS bounds how many jobs run at once (default shards + 2); NEWS_TEST_TIMING=1 prints each NewsTests duration
