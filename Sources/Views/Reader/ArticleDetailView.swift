@@ -1499,6 +1499,8 @@ struct ArticleDetailView: View {
         let allowInsecure = appSettings.allowInsecureHTTP
         let targetId = currentArticle.id
         let expectedInputHash = currentArticle.publisherInputHash
+        // A clear of derived data while the page loads refuses the body write (#982).
+        let analysisGeneration = await articleStore.database.analysisGeneration
 
         guard !Task.isCancelled else { return }
         contentState = .loading
@@ -1531,7 +1533,8 @@ struct ArticleDetailView: View {
                     image: imageUrl,
                     readerDocument: document,
                     identityEvidence: extraction.evidence,
-                    expectedInputHash: expectedInputHash
+                    expectedInputHash: expectedInputHash,
+                    expectedGeneration: analysisGeneration
                 )
                 guard !Task.isCancelled, activeArticle.id == targetId else { return }
                 guard saved else {

@@ -39,6 +39,7 @@ enum AnalysisGenerationTests {
             try await clusteringStorageFailuresEndThePass()
             try await failedClearChangesNothing()
             try await clearThatCommitsStillResetsTheSession()
+            try await bodyWritesAreRefusedAfterAClear()
         } catch {
             check(false, "Unexpected error: \(error)")
         }
@@ -149,6 +150,37 @@ enum AnalysisGenerationTests {
         check(await db.analysisGeneration == 1, "The committed clear moved the generation")
         check(resets == 1, "The session resets although the rewrite failed")
         check(store.analysisGeneration == 1, "The store publishes the moved generation")
+        await db.close()
+    }
+
+    /// The reader's page fetch writes the body through the store with the generation it started under (#982): a clear
+    /// of the article cache while the page loads leaves no body, reader document or enrichment row behind.
+    @MainActor
+    static func bodyWritesAreRefusedAfterAClear() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        let story = article("body-1")
+        try await db.upsertArticles([story])
+        guard let stored = try await db.fetchArticles(limit: 1, id: story.id).first else {
+            return check(false, "The story is stored")
+        }
+        let document = ReaderDocument(blocks: [ReaderBlock(kind: .paragraph, text: "Publisher text.")])
+        let started = await db.analysisGeneration
+        try await store.clearArticleCache()
+        let refused = await store.updateEnrichment(
+            id: stored.id, content: "Publisher text.", readerDocument: document,
+            expectedInputHash: stored.publisherInputHash, expectedGeneration: started)
+        check(refused == false, "A body fetched before Clear Article Cache is refused")
+        let after = try await db.fetchArticles(limit: 1, id: stored.id).first
+        check(after?.fullContent == nil && after?.readerDocument == nil, "and no body or reader document is written")
+        check(
+            try await db.eventRows("SELECT count(*) FROM article_enrichment;").first?.first == "0",
+            "and no enrichment row comes back")
+        let written = await store.updateEnrichment(
+            id: stored.id, content: "Publisher text.", readerDocument: document,
+            expectedInputHash: stored.publisherInputHash, expectedGeneration: await db.analysisGeneration)
+        check(written, "A fetch started after the clear writes its body")
         await db.close()
     }
 
