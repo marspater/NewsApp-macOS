@@ -68,10 +68,12 @@ class FeedManager: NSObject, ObservableObject {
     /// Collection only: fetch, ingest and publish. Resolves to the newly stored articles.
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
+    private var pendingReplacementRunID: UUID?
     private var runningRefreshIsScheduled = false
-    /// Callers that asked for a manual refresh while a scheduled one was collecting: one more refresh runs after it,
-    /// and they resume when that ends (#927).
-    private(set) var manualRefreshWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Manual callers wait for the scheduled collection they actually joined, not an older run's completion.
+    /// One follow-up manual collection serves that run's callers; cancelled callers can leave immediately (#927).
+    private(set) var manualRefreshWaiters:
+        [UUID: (scheduledRunID: UUID, continuation: CheckedContinuation<Void, Never>)] = [:]
     private var enrichmentTask: Task<Void, Never>?
     private var overviewWarmupTask: Task<Void, Never>?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
@@ -96,6 +98,9 @@ class FeedManager: NSObject, ObservableObject {
     private var lastPruneAt: Date?
     /// When the latest refresh published its stories; shown in the list header.
     @Published private(set) var lastRefreshCompletedAt: Date?
+    /// Advances when a refresh ends without completing: a cancelled fetch may still have recorded feed samples, so
+    /// the Publisher Health sheet reloads on it. `lastRefreshCompletedAt` stays limited to completed refreshes (#715).
+    @Published private(set) var cancelledRefreshCount = 0
     private let wakeRefreshDelay: Duration
     private let now: () -> Date
 
@@ -217,7 +222,7 @@ class FeedManager: NSObject, ObservableObject {
 
     private func subscribe(url: String) -> String? {
         guard let added = appSettings.addFeed(url: url) else { return nil }
-        cancelRefresh()
+        cancelRefresh(preserveManualWaiters: true)
         feedStatuses[added] = .idle
         return added
     }
@@ -227,7 +232,7 @@ class FeedManager: NSObject, ObservableObject {
     func addCatalogFeeds(_ feeds: [CatalogFeed]) -> Int {
         let added = appSettings.addCatalogFeeds(feeds)
         guard added > 0 else { return 0 }
-        cancelRefresh()
+        cancelRefresh(preserveManualWaiters: true)
         fetchFeeds()
         return added
     }
@@ -242,7 +247,7 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     func removeFeed(url: String) {
-        cancelRefresh()
+        cancelRefresh(preserveManualWaiters: true)
         appSettings.removeFeed(url: url)
         let key = AppSettings.feedKey(url)
         for stored in feedStatuses.keys where AppSettings.feedKey(stored) == key {
@@ -267,7 +272,7 @@ class FeedManager: NSObject, ObservableObject {
         }
         let count = appSettings.importFeeds(from: opmlData)
         if count > 0 {
-            cancelRefresh()
+            cancelRefresh(preserveManualWaiters: true)
             fetchFeeds()
         }
         return count
@@ -342,6 +347,20 @@ class FeedManager: NSObject, ObservableObject {
         feedHealth = Dictionary(
             appSettings.feedURLs.map { ($0, FeedHealth(states[$0], now: now)) }, uniquingKeysWith: { first, _ in first }
         )
+    }
+
+    /// One row per subscription for the Publisher Health inspector (#715). The database actor does the reading.
+    func publisherHealthRows(now: Date = Date()) async throws -> [PublisherHealthRow] {
+        let database = articleStore.database
+        let metrics = try await database.feedHealthMetrics(now: now)
+        let publishers = try await database.feedPublisherNames()
+        let states = try await database.feedFetchStates()
+        let empty = FeedHealthMetrics(FeedHealthObservations(), now: now)
+        return appSettings.feedURLs.map { url in
+            PublisherHealthRow(
+                feedURL: url, storedPublisher: publishers[url], metrics: metrics[url] ?? empty,
+                health: FeedHealth(states[url], now: now))
+        }
     }
 
     // MARK: - Caching & Persistence
@@ -453,12 +472,20 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
-    private func cancelRefresh() {
+    private func cancelRefresh(preserveManualWaiters: Bool = false) {
         refreshTask?.cancel()
         refreshTask = nil
         refreshRunID = nil
-        for waiter in manualRefreshWaiters { waiter.resume() }
-        manualRefreshWaiters = []
+        if preserveManualWaiters && !manualRefreshWaiters.isEmpty {
+            let replacementID = pendingReplacementRunID ?? UUID()
+            pendingReplacementRunID = replacementID
+            for id in manualRefreshWaiters.keys {
+                manualRefreshWaiters[id]?.scheduledRunID = replacementID
+            }
+        } else {
+            pendingReplacementRunID = nil
+            resumeAllManualRefreshWaiters()
+        }
         // The waiting caller returns without finishing the run, so the loading state ends here.
         for (url, status) in feedStatuses where status == .loading { feedStatuses[url] = .idle }
         isAnyFeedLoading = false
@@ -544,6 +571,39 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
+    /// A cancelled caller must not remain retained by a long-running scheduled refresh.
+    private func waitForManualRefresh(after scheduledRunID: UUID) async {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                guard !Task.isCancelled, !isStopped else {
+                    continuation.resume()
+                    return
+                }
+                manualRefreshWaiters[id] = (scheduledRunID, continuation)
+            }
+        } onCancel: {
+            Task { @MainActor [self] in resumeManualRefreshWaiter(id) }
+        }
+    }
+
+    private func resumeManualRefreshWaiter(_ id: UUID) {
+        manualRefreshWaiters.removeValue(forKey: id)?.continuation.resume()
+    }
+
+    private func resumeManualRefreshWaiters(for runID: UUID) {
+        let ids = manualRefreshWaiters.compactMap { id, waiter in
+            waiter.scheduledRunID == runID ? id : nil
+        }
+        for id in ids { resumeManualRefreshWaiter(id) }
+    }
+
+    private func resumeAllManualRefreshWaiters() {
+        let waiters = Array(manualRefreshWaiters.values)
+        manualRefreshWaiters.removeAll()
+        for waiter in waiters { waiter.continuation.resume() }
+    }
+
     /// Returns once new articles are collected, published and rated. Notification banners and background
     /// classification then run on their own: banners post minutes apart, so no caller waits for them.
     ///
@@ -551,17 +611,24 @@ class FeedManager: NSObject, ObservableObject {
     /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
     func fetchFeedsAsync(scheduled: Bool = false) async {
         guard !isStopped else { return }
-        if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
+        if await refusesCollectionWhileReadOnly(manual: !scheduled) {
+            if let replacementID = pendingReplacementRunID {
+                pendingReplacementRunID = nil
+                resumeManualRefreshWaiters(for: replacementID)
+            }
+            return
+        }
         if let refreshTask {
-            if !scheduled, runningRefreshIsScheduled {
+            if !scheduled, runningRefreshIsScheduled, let scheduledRunID = refreshRunID {
                 // A scheduled refresh keeps connectivity backoff, so this request is answered by a refresh after it.
-                await withCheckedContinuation { manualRefreshWaiters.append($0) }
+                await waitForManualRefresh(after: scheduledRunID)
             } else {
                 _ = await refreshTask.value
             }
             return
         }
-        let runID = UUID()
+        let runID = pendingReplacementRunID ?? UUID()
+        pendingReplacementRunID = nil
         refreshRunID = runID
         runningRefreshIsScheduled = scheduled
         let task = Task<[FeedArticle], Never> { [weak self] in
@@ -574,6 +641,7 @@ class FeedManager: NSObject, ObservableObject {
         guard refreshRunID == runID else {
             // Cancelled between the pipeline's return and this resumption: the next run notifies these.
             pendingNotificationArticles.append(contentsOf: newArticles)
+            cancelledRefreshCount += 1
             return
         }
         refreshTask = nil
@@ -582,10 +650,8 @@ class FeedManager: NSObject, ObservableObject {
         lastRefreshCompletedAt = now()
         refreshInterruptedBySleep = false
 
-        // Taken here so that stopping now drops the request, and resumes its callers, instead of leaving it for later.
-        let manualWaiters = manualRefreshWaiters
-        manualRefreshWaiters = []
-        defer { for waiter in manualWaiters { waiter.resume() } }
+        // Keep this run's waiters cancellable during its follow-up; never resume another run's callers.
+        defer { resumeManualRefreshWaiters(for: runID) }
 
         guard !isStopped else { return }
         await pruneIfDue()
@@ -594,7 +660,9 @@ class FeedManager: NSObject, ObservableObject {
         await waitForEventClustering()
         if !Task.isCancelled, !isStopped { await notifyAndEnrich(newArticles) }
         // In a task of its own: cancelling this caller, a scheduled refresh, does not cancel the reader's request.
-        if !manualWaiters.isEmpty { await Task { [weak self] in await self?.fetchFeedsAsync() }.value }
+        if scheduled, manualRefreshWaiters.values.contains(where: { $0.scheduledRunID == runID }) {
+            await Task { [weak self] in await self?.fetchFeedsAsync() }.value
+        }
     }
 
     /// What Check for Updates found for an open story (#992).
@@ -666,56 +734,85 @@ class FeedManager: NSObject, ObservableObject {
     /// stories, and writes nothing but its own tables.
     /// The reading interests notification triage ranks by; a Reset Reading Interests ignores earlier history.
     nonisolated static func triageInterests(database: DatabaseEngine, now: Date, resetAt: Date?) async -> Set<String> {
-        NotificationService.topInterests((try? await database.briefingInterests(now: now, resetAt: resetAt)) ?? [:])
+        do {
+            return NotificationService.topInterests(try await database.briefingInterests(now: now, resetAt: resetAt))
+        } catch {
+            if !(error is CancellationError) {
+                NewsSignposts.feedsLog.error(
+                    "Could not load reading interests for notification triage: \(error.localizedDescription)"
+                )
+            }
+            return []
+        }
     }
 
     private func deliverNotifications(_ notifiable: [FeedArticle]) async {
         let database = articleStore.database
         var delivery = NotificationDelivery(mode: appSettings.notificationMode)
         var storyIDs = notifiable.map(\.id)
-        if delivery.mode == .full {
-            let posted = now()
-            delivery.now = posted
-            delivery.ledger = (try? await database.notificationLedger(now: posted)) ?? NotificationLedger()
-            delivery.starredFeedURLs = appSettings.starredFeedURLs
-            // Pending starred stories start at the latest of the feed's last starred banner, its star time and a day
-            // ago, so starring a feed never brings up its backlog.
-            var since: [String: Date] = [:]
-            for feed in delivery.starredFeedURLs {
-                since[feed] = max(
-                    delivery.ledger.lastStarred[feed] ?? .distantPast,
-                    min(appSettings.starredFeedTimes[feed] ?? posted, posted), posted.addingTimeInterval(-86400))
+        do {
+            if delivery.mode == .full {
+                let posted = now()
+                delivery.now = posted
+                delivery.ledger = try await database.notificationLedger(now: posted)
+                delivery.starredFeedURLs = appSettings.starredFeedURLs
+                // Do not replay the starred backlog when a subscription is first starred.
+                var since: [String: Date] = [:]
+                for feed in delivery.starredFeedURLs {
+                    since[feed] = max(
+                        delivery.ledger.lastStarred[feed] ?? .distantPast,
+                        min(appSettings.starredFeedTimes[feed] ?? posted, posted), posted.addingTimeInterval(-86400))
+                }
+                delivery.starredPending = try await database.feedStories(since: since, muting: appSettings.muteRules)
+                storyIDs += delivery.starredPending.values.flatMap { $0.map(\.id) }
+                delivery.interests = await Self.triageInterests(
+                    database: database, now: posted, resetAt: appSettings.readingInterestsResetDate)
+                delivery.continues = { [weak self] in
+                    await self?.allowsFullBanners() ?? false
+                }
+                delivery.record = { [weak self] banner in
+                    // A banner is counted only after its bookkeeping write succeeds.
+                    let at = banner.lane == .starred ? posted : (await self?.currentDate() ?? posted)
+                    do {
+                        try await database.recordNotification(banner, at: at)
+                        await self?.markNotified(banner.stories)
+                    } catch {
+                        if !(error is CancellationError) {
+                            NewsSignposts.feedsLog.error(
+                                "Could not record delivered notification: \(error.localizedDescription)"
+                            )
+                        }
+                    }
+                }
+                delivery.queue = { waiting in
+                    do {
+                        try await database.queuePriority(waiting, at: posted)
+                    } catch {
+                        if !(error is CancellationError) {
+                            NewsSignposts.feedsLog.error(
+                                "Could not queue priority notifications: \(error.localizedDescription)"
+                            )
+                        }
+                    }
+                }
             }
-            delivery.starredPending =
-                (try? await database.feedStories(since: since, muting: appSettings.muteRules)) ?? [:]
-            storyIDs += delivery.starredPending.values.flatMap { $0.map(\.id) }
-            delivery.interests = await Self.triageInterests(
-                database: database, now: posted, resetAt: appSettings.readingInterestsResetDate)
-            delivery.continues = { [weak self] in
-                await self?.allowsFullBanners() ?? false
-            }
-            delivery.record = { [weak self] banner in
-                // Banners post minutes apart: a priority or normal banner is recorded when it posts, so its rolling
-                // window measures from the banner the reader saw. A starred banner is recorded at the pass start,
-                // the cutoff its pending stories were read at, so a starred story that arrives while the banner
-                // waits is still pending for the next one.
-                let at = banner.lane == .starred ? posted : (await self?.currentDate() ?? posted)
-                try? await database.recordNotification(banner, at: at)
-                await self?.markNotified(banner.stories)
-            }
-            delivery.queue = { waiting in
-                try? await database.queuePriority(waiting, at: posted)
-            }
-        }
-        delivery.events = (try? await database.eventIDs(forArticles: storyIDs)) ?? [:]
-        delivery.stories =
-            (try? await database.storyIDs(
+            // Losing membership or ledger reads must not turn an already-announced event into a fresh banner.
+            delivery.events = try await database.eventIDs(forArticles: storyIDs)
+            delivery.stories = try await database.storyIDs(
                 forEvents: Set(delivery.events.values).union(delivery.ledger.announced.keys)
-                    .union(delivery.ledger.priorityQueue.map(\.event)))) ?? [:]
-        if delivery.mode == .full {
-            let events = Set(delivery.events.values)
-            delivery.publishers = (try? await database.eventPublisherCounts(events)) ?? [:]
-            delivery.leadTitles = (try? await database.eventLeadTitles(events)) ?? [:]
+                    .union(delivery.ledger.priorityQueue.map(\.event)))
+            if delivery.mode == .full {
+                let events = Set(delivery.events.values)
+                delivery.publishers = try await database.eventPublisherCounts(events)
+                delivery.leadTitles = try await database.eventLeadTitles(events)
+            }
+        } catch {
+            if !(error is CancellationError) {
+                logger.error(
+                    "Could not prepare notification delivery; skipping this pass: \(error.localizedDescription)"
+                )
+            }
+            return
         }
         guard !Task.isCancelled, !isStopped else { return }
         await notifyBatch(notifiable, delivery)

@@ -1,0 +1,2 @@
+- Cancelling a manual refresh waiting behind scheduled collection now releases its caller immediately; its follow-up runs only once, and other scheduled runs cannot resume its waiter. Queued story overviews cannot run after being superseded or cancelled; the enrichment queue also bounds its in-memory classification deduplication history.
+- Notification delivery stops when cancelled and logs database failures instead of silently treating failed ledger, event, or priority reads and writes as empty results.

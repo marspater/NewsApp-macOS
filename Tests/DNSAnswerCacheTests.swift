@@ -125,6 +125,22 @@ enum DNSAnswerCacheTests {
         check(cancelledResult == .unresolvable(reason: "Cancelled"), "cancellation wins over a stored answer")
     }
 
+    static func checkCachedResultsAppearInTimeline() async {
+        let fixture = Fixture()
+        let timeline = NetworkTimeline()
+        let resolver = ProxyResolver(
+            lookup: { _ in
+                fixture.lookups.withLock { $0 += 1 }
+                return .allowed(ips: ["1.1.1.1"])
+            }, cache: fixture.cache(), timeline: timeline)
+        _ = await resolver.resolve("example.com")
+        _ = await resolver.resolve("example.com")
+        check(fixture.lookupCount == 1, "a cached answer avoids a second lookup")
+        check(
+            timeline.entries.last?.event == .resolver(outcome: "allowed", count: 2),
+            "the network timeline records both fresh and cached answers")
+    }
+
     static func checkBound() {
         let fixture = Fixture()
         let cache = fixture.cache(capacity: 3)
@@ -163,6 +179,7 @@ enum DNSAnswerCacheTests {
     static func run() async {
         await checkLifetime()
         await checkOnlyAllowed()
+        await checkCachedResultsAppearInTimeline()
         checkBound()
         await checkTestResolversStayUncached()
         print("Finished \(checks) DNS answer cache checks with \(failures) failures.")

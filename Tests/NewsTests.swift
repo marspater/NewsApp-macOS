@@ -5117,6 +5117,25 @@ struct NewsTests {
         assertEqual(
             FeedFailureKind.allCases.filter(\.isConnectivity), [.dns, .transport, .timeout],
             "Only an unanswered lookup, a lost path and a timeout count as connectivity")
+        assertEqual(
+            FeedFailureKind.liftedByManualRefresh, [.dns, .transport, .timeout, .dnsFiltered, .fakeIP],
+            "A manual refresh also lifts a filtered or fake-IP answer (#929)")
+        for (reason, kind) in [
+            ("IPv4 current network (0.0.0.0/8)", IPAddressValidator.AnswerSubstitution.sinkhole),
+            ("IPv6 unspecified address (::)", .sinkhole),
+            ("IPv4-mapped IPv6 (IPv4 current network (0.0.0.0/8))", .sinkhole),
+            ("IPv4 benchmarking network", .fakeIP),
+        ] {
+            assertEqual(IPAddressValidator.substitution(in: reason), kind, "\(reason) names its substitution")
+        }
+        for reason in [
+            "RFC 1918 private network (10.0.0.0/8)", "IPv6 loopback (::1)", "Multicast address (224.0.0.0/4)",
+        ] {
+            assertEqual(IPAddressValidator.substitution(in: reason), nil, "\(reason) is a plain block")
+        }
+        assertTrue(
+            !FeedError.substitutedAnswer(host: "x", kind: .sinkhole).isLocalRejection,
+            "A substituted answer is recorded, so diagnostics show it")
         let urlErrors: [(URLError.Code, FeedFailureKind)] = [
             (.timedOut, .timeout), (.cannotFindHost, .dns), (.dnsLookupFailed, .dns),
             (.badURL, .transport), (.notConnectedToInternet, .transport), (.networkConnectionLost, .transport),
@@ -5135,6 +5154,8 @@ struct NewsTests {
         let feedErrors: [(FeedError, FeedFailureKind)] = [
             (.malformedURL("x"), .policy), (.insecureScheme("http"), .policy), (.blockedPort(22), .policy),
             (.blockedHost(host: "x", reason: "y"), .policy),
+            (.substitutedAnswer(host: "x", kind: .sinkhole), .dnsFiltered),
+            (.substitutedAnswer(host: "x", kind: .fakeIP), .fakeIP),
             (.redirectBlocked(from: "a", to: "b", reason: "c"), .policy),
             (.dnsRebindingDetected(host: "x", ip: "y"), .policy), (.responseTooLarge(bytes: 2, maxAllowed: 1), .policy),
             (.tooManyRedirects(6), .http), (.httpStatus(500), .http), (.serverBusy(status: 429, retryAfter: 60), .http),
@@ -5175,6 +5196,45 @@ struct NewsTests {
             now: { clock.now }
         ).fetchAllFeeds(urls: [silent], state: db)
         assertEqual(try await db.feedFetchStates()[silent], nil, "A batch whose lookups go unanswered blames no feed")
+
+        // A fake-IP tunnel answers every name from 198.18.0.0/15 (#929): recorded with its own kind, never taken for
+        // offline, and lifted by a manual refresh once the reader has changed the network.
+        let tunnelled = "https://tunnel.example/feed.xml"
+        _ = await FeedFetcher(
+            client: SecureHTTPClient(
+                configuration: mockConfig, resolver: { _ in .blocked(reason: "IPv4 benchmarking network") }),
+            now: { clock.now }
+        ).fetchAllFeeds(urls: [tunnelled], state: db)
+        assertEqual(try await kind(tunnelled), .fakeIP, "A fake-IP answer is recorded as such")
+        assertTrue(
+            try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 > clock.now } == true,
+            "A fake-IP answer backs the feed off until the network changes")
+        try await db.clearConnectivityBackoff(at: clock.now)
+        assertTrue(
+            try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 <= clock.now } == true,
+            "A manual refresh lifts a fake-IP backoff")
+
+        // A blocked literal address involves no DNS answer, so it stays a plain block, never a filtered or fake-IP one.
+        for literal in ["198.18.0.1", "198.18.0.1.", "0.0.0.0", "[::]"] {
+            // No injected resolver: the system path guards literal addresses before any lookup.
+            let client = SecureHTTPClient(configuration: mockConfig)
+            do {
+                try await client.validateDestination(URL(string: "https://\(literal)/feed.xml")!)
+                assertTrue(false, "\(literal) is blocked")
+            } catch let error as FeedError {
+                if case .blockedHost = error {} else { assertTrue(false, "\(literal) is a plain block, got \(error)") }
+            }
+        }
+        // A name whose answer is a sinkhole is the substituted answer, and its text names no single address.
+        do {
+            try await SecureHTTPClient(
+                configuration: mockConfig, resolver: { _ in .blocked(reason: "IPv6 unspecified address (::)") }
+            ).validateDestination(URL(string: "https://filtered.example/feed.xml")!)
+            assertTrue(false, "A sinkhole answer is blocked")
+        } catch let error as FeedError {
+            assertEqual(error.failureKind, .dnsFiltered, "A sinkhole answer for a name is the filtered kind")
+            assertFalse(error.errorDescription?.contains("0.0.0.0") ?? true, "The text names no single address")
+        }
 
         // One feed of each kind, in one batch so the batch is not offline.
         let lost = "https://8.8.8.8/lost.xml"
@@ -5391,6 +5451,10 @@ struct NewsTests {
                 resolver: { _ in gatewayAnswer },
                 // Port 1 on loopback refuses at once: an upstream that cannot be reached.
                 connector: { _, _ in NWConnection(host: "127.0.0.1", port: 1, using: .tcp) })
+            assertTrue(NetworkBoundaryProxy.directParameters.preferNoProxies, "Upstream asks for no proxy (#929)")
+            assertTrue(NetworkBoundaryProxy.permitsUpstream(proxyConfigured: false), "A direct connection may relay")
+            assertTrue(!NetworkBoundaryProxy.permitsUpstream(proxyConfigured: true), "A proxied connection is refused")
+            assertTrue(!NetworkBoundaryProxy.permitsUpstream(proxyConfigured: nil), "A missing report is refused")
             let client = SecureHTTPClient(gateway: gateway, resolver: { _ in publicAddress })
             let result = await FeedFetcher(client: client).fetchSingleFeed(urlString: "https://example.com/feed.xml")
             await gateway.stop()
@@ -10693,6 +10757,32 @@ struct NewsTests {
         assertEqual(
             candidates.first { $0.articleID == "active" }?.eventID, active.id, "Candidates carry their active event")
         assertEqual(candidates.first { $0.articleID == "recent" }?.eventID, nil, "Unclustered candidates have no event")
+
+        // One language per row within a pass (#572): the first reading stands, and stored signals come before the recognizer.
+        var pass: [String: EventCandidateLanguage] = [:]
+        let first = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &pass)
+        assertEqual(first, candidates, "The pass's language map changes no candidate")
+        assertEqual(pass["german"]?.language, "de", "The pass keeps a row's recognized language")
+        let germanText = EventCandidateFinder.languageText(title: "Erdbeben erschüttert Lviv", description: german)
+        pass["german"] = EventCandidateLanguage(textHash: germanText.hashValue, language: "en")
+        let reread = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &pass)
+        assertTrue(reread.contains { $0.articleID == "german" }, "A row is not recognized again in one pass")
+        pass["german"] = EventCandidateLanguage(textHash: "an earlier edit of the row".hashValue, language: "en")
+        let edited = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &pass)
+        assertFalse(edited.contains { $0.articleID == "german" }, "A row edited since it was read is read again")
+        assertEqual(pass["german"]?.language, "de", "The new text replaces the old reading")
+        var signals = EventFeatures(title: "Erdbeben erschüttert Lviv", description: german, date: now)
+        signals.language = "en"
+        try await db.upsertArticleFeatures(
+            ["german": signals], version: EventFeatures.storageVersion - 1, at: now)
+        var stale: [String: EventCandidateLanguage] = [:]
+        let staleRead = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &stale)
+        assertFalse(staleRead.contains { $0.articleID == "german" }, "Signals of an older version are not read")
+        try await db.upsertArticleFeatures(["german": signals], version: EventFeatures.storageVersion, at: now)
+        var fresh: [String: EventCandidateLanguage] = [:]
+        let storedRead = try await EventCandidateFinder.candidates(for: target, in: db, now: now, languages: &fresh)
+        assertTrue(storedRead.contains { $0.articleID == "german" }, "A row's stored language comes first")
+        try await db.eventRows("DELETE FROM article_features;")
 
         try await db.upsertArticles(
             (0..<30).map { article("bulk-\($0)", "Lviv earthquake update \($0)", english, hoursAgo: 1) })
@@ -17119,6 +17209,18 @@ struct NewsTests {
         return lines.count - 1
     }
 
+    /// One clustering pass's stages (#691), in seconds; matching is what the fragment merge and story pass leave of the total.
+    static func stageLine(_ stages: EventClusteringStages) -> String {
+        func value(_ seconds: Double) -> String { String(format: "%.2f", seconds) }
+        let matching = stages.total - stages.fragmentMerge - stages.storyPass
+        return "total \(value(stages.total)) s = matching \(value(matching)) + fragment merge "
+            + "\(value(stages.fragmentMerge)) + story pass \(value(stages.storyPass)); across them: features "
+            + "\(value(stages.features)), embeddings \(value(stages.embeddings)) (\(stages.embeddedRows) rows), rules "
+            + "\(value(stages.ruleAssessment)), pair model \(value(stages.pairModel)) (\(stages.pairModelCalls) calls), "
+            + "writes \(value(stages.writes)), candidate search \(value(stages.candidateSearch)), event reads "
+            + "\(value(stages.eventReads)), match commits \(value(stages.matchCommits))"
+    }
+
     /// The admission verdict of a matched pair the clustering kept apart (#737, `NEWS_EVENT_DIAGNOSE=1`, local console
     /// only): each article's event, and whether the article would enter the other's event as that event stands now, with
     /// the rules that refuse it and the cross-pairs behind them. Assessed like the clusterer's own pass, so a verdict
@@ -17283,6 +17385,10 @@ struct NewsTests {
         ] {
             try await db.eventRows("DELETE FROM \(table);")
         }
+        // NEWS_HOLDOUT_COLD=1 (#691) also drops the stored signals and vectors, as a clear or a version bump of them does.
+        if ProcessInfo.processInfo.environment["NEWS_HOLDOUT_COLD"] == "1" {
+            for table in ["article_features", "article_embeddings"] { try await db.eventRows("DELETE FROM \(table);") }
+        }
         // NEWS_HOLDOUT_NOW=<epoch> pins the clock to when the holdout was drawn, for a copy taken later (#688).
         let pinned = ProcessInfo.processInfo.environment["NEWS_HOLDOUT_NOW"].flatMap { TimeInterval($0) }
             .map { Date(timeIntervalSince1970: $0) }
@@ -17303,9 +17409,12 @@ struct NewsTests {
             total.joined += report.joined
             total.created += report.created
             total.merged += report.merged
+            total.stages.add(report.stages)
+            print("    pass \(passes): processed \(report.processed), \(stageLine(report.stages))")
             if report.processed == 0 || passes >= 20 { break }
         } while true
         let elapsed = Date().timeIntervalSince(started)
+        print("    stages: \(stageLine(total.stages))")
         let memberships = try await db.eventIDs(
             forArticles: pairs.flatMap { [$0.a, $0.b] } + verdicts.flatMap { [$0.a, $0.b] })
         var verdictFailures: [String] = []
@@ -25794,6 +25903,11 @@ struct NewsTests {
 
     static func testDiagnosticsClustering() async throws {
         print("  - Testing the diagnostics clustering writer (#1006)...")
+        var stages = EventClusteringStages(total: 2, pairModelCalls: 3)
+        stages.add(EventClusteringStages(total: 1, candidateSearch: 0.5, pairModelCalls: 4))
+        assertEqual(stages.total, 3, "A run's stage seconds add up over its passes (#691)")
+        assertEqual(stages.candidateSearch, 0.5, "Candidate search adds up over passes")
+        assertEqual(stages.pairModelCalls, 7, "Pair-model calls add up over passes")
         var report = EventClusteringReport()
         report.processed = 4
         report.deferred = 1

@@ -34,6 +34,10 @@ enum AnalysisGenerationTests {
         do {
             try await staleWritesAreRefused()
             try await queueForgetsRefusedAndClearedWork()
+            await queuedOverviewsRespectCancellationAndSupersession()
+            await cancelledManualRefreshWaiterDoesNotRetainItsCaller()
+            await manualRefreshAfterScheduledRunsOnlyOnce()
+            await manualRefreshWaitsForReplacement()
             try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
             try await clusteringStorageFailuresEndThePass()
@@ -62,6 +66,243 @@ enum AnalysisGenerationTests {
             try? await Task.sleep(for: .milliseconds(50))
         }
         check(await condition(), message)
+    }
+
+    private actor OverviewGate {
+        private var released = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            guard !released else { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func release() {
+            released = true
+            let pending = waiters
+            waiters.removeAll()
+            for waiter in pending { waiter.resume() }
+        }
+    }
+
+    private actor OverviewSignals {
+        private var finished: Set<String> = []
+        private var invoked: Set<String> = []
+        private var invocationCounts: [String: Int] = [:]
+
+        func finish(_ name: String) { finished.insert(name) }
+        func invoke(_ name: String) {
+            invoked.insert(name)
+            invocationCounts[name, default: 0] += 1
+        }
+        func hasFinished(_ name: String) -> Bool { finished.contains(name) }
+        func wasInvoked(_ name: String) -> Bool { invoked.contains(name) }
+        func invocationCount(_ name: String) -> Int { invocationCounts[name, default: 0] }
+    }
+
+    /// A pending overview owns its generation before capacity is available. Closing or replacing it must not leave
+    /// a zombie job that eventually runs when one of the three worker slots opens.
+    static func queuedOverviewsRespectCancellationAndSupersession() async {
+        let queue = EnrichmentQueue()
+        let gate = OverviewGate()
+        let signals = OverviewSignals()
+        let holding = (0..<3).map { index in
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "holding-\(index)") {
+                    await gate.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("The three worker slots are occupied") { await queue.activeJobCount() == 3 }
+
+        let stale = Task {
+            _ = await queue.scheduleOverviewGeneration(eventID: "replaced") {
+                await signals.invoke("stale")
+                return nil
+            }
+            await signals.finish("stale")
+        }
+        await eventually("The old overview waits for capacity") { await queue.queuedOverviewCount() == 1 }
+
+        let replacement = Task {
+            _ = await queue.scheduleOverviewGeneration(eventID: "replaced") {
+                await signals.invoke("replacement")
+                return nil
+            }
+        }
+        await eventually("The superseded waiter completes without taking a worker slot", timeout: .seconds(5)) {
+            await signals.hasFinished("stale")
+        }
+
+        let cancelled = Task {
+            _ = await queue.scheduleOverviewGeneration(eventID: "cancelled") {
+                await signals.invoke("cancelled")
+                return nil
+            }
+            await signals.finish("cancelled")
+        }
+        await eventually("The cancellation target waits for capacity") { await queue.queuedOverviewCount() == 2 }
+        await queue.cancelOverview(eventID: "cancelled")
+        await eventually("Explicit cancellation releases the waiter before capacity opens", timeout: .seconds(5)) {
+            await signals.hasFinished("cancelled")
+        }
+        check(!(await signals.wasInvoked("stale")), "A superseded queued operation never executes")
+        check(!(await signals.wasInvoked("cancelled")), "An explicitly cancelled queued operation never executes")
+
+        await gate.release()
+        for task in holding { await task.value }
+        await stale.value
+        await cancelled.value
+        await replacement.value
+        check(await signals.wasInvoked("replacement"), "The replacement runs after capacity opens")
+        check(await queue.activeJobCount() == 0, "All overview worker slots are returned")
+        check(await queue.queuedOverviewCount() == 0, "No queued overview generations are retained")
+    }
+
+    /// A manual refresh queued behind a scheduled collection must release its continuation on cancellation, even
+    /// when the scheduled network request is still blocked.
+    @MainActor
+    static func cancelledManualRefreshWaiterDoesNotRetainItsCaller() async {
+        let suite = "news-refresh-cancellation-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            return check(false, "Isolated preferences can be created")
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.waitForStartup()
+        guard store.isReady else {
+            return check(false, "An in-memory library opens for refresh cancellation")
+        }
+        let gate = OverviewGate()
+        let signals = OverviewSignals()
+        let manager = FeedManager(
+            settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false,
+            fetchBatch: { _, _ in
+                await signals.invoke("collecting")
+                await gate.wait()
+                return []
+            },
+            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+        let scheduled = Task { await manager.fetchFeedsAsync(scheduled: true) }
+        await eventually("The scheduled refresh enters collection") { await signals.wasInvoked("collecting") }
+        let manual = Task {
+            await manager.fetchFeedsAsync()
+            await signals.finish("manual")
+        }
+        await eventually("A manual refresh joins the scheduled one") { manager.manualRefreshWaiters.count == 1 }
+        manual.cancel()
+        await eventually("The cancelled manual waiter is removed", timeout: .seconds(5)) {
+            manager.manualRefreshWaiters.isEmpty
+        }
+        await eventually("The cancelled caller returns before collection finishes", timeout: .seconds(5)) {
+            await signals.hasFinished("manual")
+        }
+        manager.stopBackgroundWork()
+        await gate.release()
+        await scheduled.value
+        await manual.value
+        await db.close()
+    }
+
+    /// A manual request behind scheduled collection must run exactly once and complete, not chain another
+    /// follow-up forever while its continuation remains registered.
+    @MainActor
+    static func manualRefreshAfterScheduledRunsOnlyOnce() async {
+        let suite = "news-refresh-followup-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            return check(false, "Isolated preferences can be created for a manual follow-up")
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.waitForStartup()
+        guard store.isReady else {
+            return check(false, "An in-memory library opens for the manual follow-up")
+        }
+        let gate = OverviewGate()
+        let signals = OverviewSignals()
+        let manager = FeedManager(
+            settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false,
+            fetchBatch: { _, _ in
+                await signals.invoke("collecting")
+                await gate.wait()
+                return []
+            },
+            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+        let scheduled = Task {
+            await manager.fetchFeedsAsync(scheduled: true)
+            await signals.finish("scheduled")
+        }
+        await eventually("The scheduled collection starts") { await signals.invocationCount("collecting") == 1 }
+        let manual = Task {
+            await manager.fetchFeedsAsync()
+            await signals.finish("manual")
+        }
+        await eventually("The manual request waits for scheduled collection") {
+            manager.manualRefreshWaiters.count == 1
+        }
+        await gate.release()
+        await eventually("The manual follow-up finishes without recursively refreshing", timeout: .seconds(10)) {
+            await signals.hasFinished("manual")
+        }
+        await eventually("The scheduled caller finishes after the manual follow-up", timeout: .seconds(10)) {
+            await signals.hasFinished("scheduled")
+        }
+        check(await signals.invocationCount("collecting") == 2, "Exactly one scheduled and one manual collection run")
+        manager.stopBackgroundWork()
+        await scheduled.value
+        await manual.value
+        await db.close()
+    }
+
+    @MainActor
+    static func manualRefreshWaitsForReplacement() async {
+        let suite = testDefaultsSuite("news-refresh-replacement")
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            return check(false, "Isolated preferences can be created for a replacement")
+        }
+        defer { removeTestDefaults(suite) }
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.waitForStartup()
+        guard store.isReady else { return check(false, "An in-memory library opens for a replacement") }
+        let firstGate = OverviewGate()
+        let replacementGate = OverviewGate()
+        let signals = OverviewSignals()
+        let manager = FeedManager(
+            settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false,
+            fetchBatch: { _, _ in
+                await signals.invoke("collecting")
+                if await signals.invocationCount("collecting") == 1 {
+                    await firstGate.wait()
+                } else {
+                    await replacementGate.wait()
+                }
+                return []
+            },
+            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+        let scheduled = Task { await manager.fetchFeedsAsync(scheduled: true) }
+        await eventually("The scheduled collection starts") { await signals.invocationCount("collecting") == 1 }
+        let manual = Task {
+            await manager.fetchFeedsAsync()
+            await signals.finish("manual")
+        }
+        await eventually("The manual request joins the scheduled collection") {
+            manager.manualRefreshWaiters.count == 1
+        }
+        manager.removeFeed(url: "https://example.com/feed")
+        check(manager.manualRefreshWaiters.count == 1, "The manual waiter survives the subscription change")
+        await eventually("The replacement collection starts") { await signals.invocationCount("collecting") == 2 }
+        check(!(await signals.hasFinished("manual")), "The manual caller waits while the replacement is collecting")
+        await firstGate.release()
+        await replacementGate.release()
+        await eventually("The replacement releases the manual caller") { await signals.hasFinished("manual") }
+        manager.stopBackgroundWork()
+        await scheduled.value
+        await manual.value
+        await db.close()
     }
 
     /// A clear that fails mid-transaction rolls back SQLite's half only if the side file and the generation have not

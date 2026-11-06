@@ -3,7 +3,7 @@ set -e
 
 TEST_OPT_FLAGS=()
 for argument in "$@"; do
-    if [[ "$argument" == "--performance-baseline" || "$argument" == "--search-memory" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" ]]; then TEST_OPT_FLAGS=(-O); fi
+    if [[ "$argument" == "--performance-baseline" || "$argument" == "--search-memory" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" || "$argument" == "--library-holdout" ]]; then TEST_OPT_FLAGS=(-O); fi
 done
 
 script/design_lint.sh
