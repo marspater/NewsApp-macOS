@@ -5214,6 +5214,28 @@ struct NewsTests {
             try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 <= clock.now } == true,
             "A manual refresh lifts a fake-IP backoff")
 
+        // A blocked literal address involves no DNS answer, so it stays a plain block, never a filtered or fake-IP one.
+        for literal in ["198.18.0.1", "0.0.0.0", "[::]"] {
+            // No injected resolver: the system path guards literal addresses before any lookup.
+            let client = SecureHTTPClient(configuration: mockConfig)
+            do {
+                try await client.validateDestination(URL(string: "https://\(literal)/feed.xml")!)
+                assertTrue(false, "\(literal) is blocked")
+            } catch let error as FeedError {
+                if case .blockedHost = error {} else { assertTrue(false, "\(literal) is a plain block, got \(error)") }
+            }
+        }
+        // A name whose answer is a sinkhole is the substituted answer, and its text names no single address.
+        do {
+            try await SecureHTTPClient(
+                configuration: mockConfig, resolver: { _ in .blocked(reason: "IPv6 unspecified address (::)") }
+            ).validateDestination(URL(string: "https://filtered.example/feed.xml")!)
+            assertTrue(false, "A sinkhole answer is blocked")
+        } catch let error as FeedError {
+            assertEqual(error.failureKind, .dnsFiltered, "A sinkhole answer for a name is the filtered kind")
+            assertFalse(error.errorDescription?.contains("0.0.0.0") ?? true, "The text names no single address")
+        }
+
         // One feed of each kind, in one batch so the batch is not offline.
         let lost = "https://8.8.8.8/lost.xml"
         let certificate = "https://8.8.8.8/certificate.xml"
