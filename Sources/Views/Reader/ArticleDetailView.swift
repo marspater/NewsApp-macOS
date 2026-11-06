@@ -144,6 +144,10 @@ struct ArticleDetailView: View {
         return idx + 1 < allArticles.count
     }
 
+    private var knowledgeExportActions: KnowledgeExportActions {
+        KnowledgeExportUI.actions(articles: [currentArticle], title: currentArticle.title, store: articleStore)
+    }
+
     private var readerCommandActions: ReaderCommandActions {
         ReaderCommandActions(
             mode: readerModeBinding, textScale: readerTextScaleBinding,
@@ -165,6 +169,7 @@ struct ArticleDetailView: View {
             .toolbar { readerToolbar }
             .focusedSceneValue(\.selectedStory, currentArticle)
             .focusedSceneValue(\.readerActions, readerCommandActions)
+            .focusedSceneValue(\.knowledgeExport, knowledgeExportActions)
             .focusable()
             .focusEffectDisabled()
             .focused($isViewFocused)
@@ -1349,6 +1354,8 @@ struct ArticleDetailView: View {
                     systemImage: isSaved ? "bookmark.fill" : "bookmark")
             }
             .help(isSaved ? "Remove from saved stories (S)" : "Save story (S)")
+
+            KnowledgeExportMenu(actions: knowledgeExportActions)
 
             if let url = URL(string: currentArticle.link) {
                 ShareLink(item: url, subject: Text(currentArticle.title)) {

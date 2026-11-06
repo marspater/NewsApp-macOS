@@ -88,6 +88,7 @@ struct NewsApp: App {
     @FocusedValue(\.archiveSearch) private var archiveSearch
     @FocusedValue(\.selectedStory) private var selectedStory
     @FocusedValue(\.readerActions) private var readerActions
+    @FocusedValue(\.knowledgeExport) private var knowledgeExport
     @FocusedValue(\.listActions) private var listActions
     @FocusedValue(\.addFeedSubscription) private var addFeedSubscription
     @Environment(\.openWindow) private var openWindow
@@ -190,6 +191,12 @@ struct NewsApp: App {
                 }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
                 Divider()
+                Menu("Export Story or Briefing") {
+                    Button("Export as Markdown…") { knowledgeExport?.markdown() }
+                    Button("Compile to EPUB…") { knowledgeExport?.epub() }
+                    Button("Add to Apple Notes…") { knowledgeExport?.notes() }
+                }
+                .disabled(knowledgeExport == nil)
                 Menu("Export Saved Stories") {
                     Button("JSON…") { exportStories(saved: true, markdown: false) }
                     Button("Markdown…") { exportStories(saved: true, markdown: true) }
