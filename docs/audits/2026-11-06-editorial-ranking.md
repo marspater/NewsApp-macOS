@@ -1,6 +1,6 @@
 # Editorial ranking experiment — 6 November 2026
 
-Status: gated algorithm experiment for #999, stacked on #998. No consumer is enabled. Lead integration remains with Epic Z.
+Status: gated algorithm experiment for #999, stacked on momentum PR #1031 for issue #998. No consumer is enabled. Lead integration remains with Epic Z.
 
 The pure selector accepts at most 500 already-formed stories, normalized 384-dimensional vectors with matching model provenance, publication dates and optional preference scores. It returns up to 50 stable story IDs. Equal source weights are represented in the supplied relevance; there is no source-trust score. MMR subtracts the maximum nonnegative cosine similarity to any selected story, multiplied by continuous publication-gap decay. Missing vectors carry zero similarity penalty. Stable IDs resolve ties. Cancellation is checked between bounded selections. Parameters are explicit experimental inputs, not shipping defaults; optional preference weight defaults to zero.
 
