@@ -38,8 +38,9 @@ def export(database: Path, output: Path) -> None:
         stream.write("\n")
 
 
-def fetch_feeds(database: Path, directory: Path) -> None:
-    """Fetch the copy's own subscribed feeds once into `directory`; a feed that fails is reported and skipped."""
+def fetch_feeds(database: Path, output: Path) -> None:
+    """Fetch the copy's own subscribed feeds once into a new `feeds` folder beside `output`; a failed feed is skipped."""
+    directory = output.expanduser().resolve().with_name("feeds")
     connection = sqlite3.connect("file:" + quote(str(database.resolve())) + "?mode=ro", uri=True)
     try:
         urls = [row[0] for row in connection.execute("SELECT url FROM feeds ORDER BY url")]
@@ -65,11 +66,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--feeds-directory", type=Path)
+    parser.add_argument("--fetch-feeds", action="store_true")
     args = parser.parse_args()
     export(args.database, args.output)
-    if args.feeds_directory:
-        fetch_feeds(args.database, args.feeds_directory)
+    if args.fetch_feeds:
+        fetch_feeds(args.database, args.output)
 
 
 if __name__ == "__main__":

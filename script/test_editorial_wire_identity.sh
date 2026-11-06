@@ -17,8 +17,7 @@ chmod 700 "$OUTPUT"
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-wire-identity-build.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 if [[ "${NEWS_WIRE_IDENTITY_FETCH_FEEDS:-}" == 1 ]]; then
-    python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json" \
-        --feeds-directory "$STAGE/feeds"
+    python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json" --fetch-feeds
     export NEWS_WIRE_IDENTITY_FEEDS="$STAGE/feeds"
 else
     python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json"

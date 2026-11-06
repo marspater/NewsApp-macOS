@@ -93,9 +93,10 @@ enum EditorialWireIdentityEvaluation {
         ]
     }
 
-    /// Replays every event; with `assumeOwn`, also counts each unknown row as its publisher's own report, the
-    /// independence-by-default policy this mapping refuses, to show what that policy would change.
-    static func replays(_ rows: [Row], assumeOwn: Bool) throws -> [String: Any] {
+    /// Replays every event; `adjust` can restate a row's report to show what a policy the mapping refuses would change.
+    static func replays(
+        _ rows: [Row], adjust: (Row, MomentumReport) -> MomentumReport = { $1 }
+    ) throws -> [String: Any] {
         let events = Dictionary(grouping: rows.filter { $0.eventID != nil }, by: { $0.eventID ?? "" })
         var raw = 0
         var outsideWindow = 0
@@ -105,8 +106,9 @@ enum EditorialWireIdentityEvaluation {
         var accelerating = 0
         var multiReport = 0
         for (eventID, members) in events {
+            let byID = Dictionary(uniqueKeysWithValues: members.map { ($0.articleID, $0) })
             let reports = EditorialWireIdentity.momentumReports(eventID: eventID, members: members.map(\.article))
-                .map { assumeOwn ? assumed($0) : $0 }
+                .map { report in byID[report.articleID].map { adjust($0, report) } ?? report }
             guard let through = members.map({ Date(timeIntervalSince1970: $0.fetchedAt) }).max() else { continue }
             let summary = try EditorialMomentum.replay(
                 reports: reports, eventID: eventID, windowStart: through.addingTimeInterval(-172_800), through: through,
@@ -145,7 +147,9 @@ enum EditorialWireIdentityEvaluation {
     private static func share(_ part: Int, _ whole: Int) -> Double { whole == 0 ? 0 : Double(part) / Double(whole) }
 
     /// Every feed in a fetched snapshot through the production parser: authors by stored link, and fill rates.
-    static func feedSnapshot(directory: URL) throws -> (authors: [String: String], report: [String: Any]) {
+    static func feedSnapshot(
+        directory: URL
+    ) throws -> (authors: [String: String], namedPublishers: Set<String>, report: [String: Any]) {
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "xml" }.sorted { $0.path < $1.path }
         var authors: [String: String] = [:]
@@ -155,25 +159,28 @@ enum EditorialWireIdentityEvaluation {
             let items = FeedXMLParser(data: try Data(contentsOf: file)).parse()
             if items.isEmpty { unreadable += 1 }
             for item in items {
-                var counts = byPublisher[item.publisherName, default: [0, 0, 0]]
+                var counts = byPublisher[item.publisherName, default: [0, 0, 0, 0]]
                 counts[0] += 1
                 if let author = item.author {
                     authors[item.normalizedLink] = author
                     counts[1] += 1
                     if !EditorialWireIdentity.bylineAgencies(author).isEmpty { counts[2] += 1 }
+                    if namedPerson(author, publisher: item.publisherName) { counts[3] += 1 }
                 }
                 byPublisher[item.publisherName] = counts
             }
         }
-        let total = byPublisher.values.reduce(into: [0, 0, 0]) { sum, counts in
+        let total = byPublisher.values.reduce(into: [0, 0, 0, 0]) { sum, counts in
             for index in sum.indices { sum[index] += counts[index] }
         }
+        let namedPublishers = byPublisher.filter { Double($0.value[3]) >= namedPublisherShare * Double($0.value[0]) }
         return (
-            authors,
+            authors, Set(namedPublishers.keys),
             [
                 "feeds": files.count, "feeds_without_items": unreadable, "items": total[0],
                 "items_with_author": total[1], "items_with_agency_author": total[2],
-                "by_publisher_items_authored_agency": byPublisher,
+                "items_with_named_person": total[3], "publishers_mostly_named": namedPublishers.keys.sorted(),
+                "by_publisher_items_authored_agency_named": byPublisher,
             ]
         )
     }
@@ -215,8 +222,88 @@ enum EditorialWireIdentityEvaluation {
         ]
     }
 
-    /// The same measures with today's feed authors laid over the rows those feeds still serve.
-    static func measured(_ rows: [Row], authors: [String: String], since: Double) throws -> [String: Any] {
+    /// A publisher counts as naming its reporters in the steady-state estimate when this share of its feed items does.
+    static let namedPublisherShare = 0.8
+    private static let deskWords: Set<String> = [
+        "agencies", "agency", "desk", "editorial", "editors", "news", "newsroom", "press", "redaction", "rédaction",
+        "report", "reports", "staff", "team", "wires",
+    ]
+
+    /// Whether a feed author reads as a person rather than a desk, the outlet or an agency: at least two words starting
+    /// with a capital, no digit, no desk word, not the publisher's name. For the estimate only; the mapping never reads it.
+    /// ponytail: a word filter, so an odd desk label passes; replace it if this policy ever ships.
+    static func namedPerson(_ author: String, publisher: String) -> Bool {
+        var name = author
+        if name.contains("@") {
+            // RSS "address (Name)": a bare address names nobody.
+            guard let open = name.firstIndex(of: "("), name.hasSuffix(")") else { return false }
+            name = String(name[name.index(after: open)...].dropLast())
+        }
+        if name.hasPrefix("By ") { name = String(name.dropFirst(3)) }
+        let words = name.split { $0.isWhitespace || $0 == "," }.map(String.init)
+        guard words.count >= 2, words[0].first?.isUppercase == true, !name.contains(where: \.isNumber),
+            deskWords.isDisjoint(with: words.map { $0.lowercased() }),
+            EditorialWireIdentity.bylineAgencies(name).isEmpty
+        else { return false }
+        return !name.lowercased().contains(publisher.lowercased())
+    }
+
+    /// Coverage if a row with a named author counted as its publisher's own report, and how often such rows are in fact
+    /// copies: a named row in a group crossing outlets disproves the assumption for that row.
+    static func namedCoverage(_ rows: [Row], isNamed: (Row) -> Bool) -> [String: Any] {
+        var named = 0
+        var known = 0
+        var namedInCopies = 0
+        var gained = 0
+        var gainedByBasis: [String: Int] = [:]
+        var gainedByPublisher: [String: Int] = [:]
+        for members in Dictionary(grouping: rows, by: { $0.eventID ?? "single:\($0.articleID)" }).values {
+            let byID = Dictionary(uniqueKeysWithValues: members.map { ($0.articleID, $0) })
+            let identities = EditorialWireIdentity.identities(event: members.map(\.article))
+            var outlets: [String: Set<String>] = [:]
+            for identity in identities {
+                guard let wire = identity.wireGroupID, let row = byID[identity.articleID] else { continue }
+                outlets[wire, default: []].insert(row.publisher)
+            }
+            for identity in identities {
+                guard let row = byID[identity.articleID] else { continue }
+                if identity.wireGroupID != nil { known += 1 }
+                guard isNamed(row) else { continue }
+                named += 1
+                if let wire = identity.wireGroupID {
+                    if outlets[wire, default: []].count > 1 { namedInCopies += 1 }
+                } else {
+                    gained += 1
+                    gainedByBasis[identity.basis.rawValue, default: 0] += 1
+                    gainedByPublisher[row.publisher, default: 0] += 1
+                }
+            }
+        }
+        return [
+            "articles": rows.count, "rows_named": named, "named_rows_in_copies_across_outlets": namedInCopies,
+            "unknown_rows_gaining_identity": gained, "gained_by_basis": gainedByBasis,
+            "gained_by_publisher": gainedByPublisher, "known_wire_group_share_before": share(known, rows.count),
+            "known_wire_group_share_after": share(known + gained, rows.count),
+        ]
+    }
+
+    /// One named-author scenario: coverage over both scopes and the replay, with named unknown rows as own reports.
+    static func namedEstimate(_ rows: [Row], since: Double, isNamed: (Row) -> Bool) throws -> [String: Any] {
+        let members = rows.filter { $0.eventID != nil }
+        return [
+            "recent_72h": namedCoverage(rows.filter { min($0.publishedAt, $0.fetchedAt) >= since }, isNamed: isNamed),
+            "event_members": namedCoverage(members, isNamed: isNamed),
+            "replay": try replays(members) { row, report in
+                report.wireGroupID == nil && isNamed(row) ? assumed(report) : report
+            },
+        ]
+    }
+
+    /// The same measures with today's feed authors laid over the rows those feeds still serve, and the named-author
+    /// estimates: rows that have an author now, and a steady state where publishers that mostly name people always did.
+    static func measured(
+        _ rows: [Row], authors: [String: String], namedPublishers: Set<String>, since: Double
+    ) throws -> [String: Any] {
         let authored = rows.map { row -> Row in
             var row = row
             row.author = row.author ?? authors[row.canonicalURL]
@@ -226,7 +313,13 @@ enum EditorialWireIdentityEvaluation {
         return [
             "library": coverage(authored), "event_members": coverage(members),
             "recent_72h": coverage(authored.filter { min($0.publishedAt, $0.fetchedAt) >= since }),
-            "replay": try replays(members, assumeOwn: false),
+            "replay": try replays(members),
+            "named_author_rows_with_author_now": try namedEstimate(authored, since: since) {
+                $0.author.map { [publisher = $0.publisher] in namedPerson($0, publisher: publisher) } ?? false
+            },
+            "named_author_steady_state": try namedEstimate(authored, since: since) { row in
+                row.author.map { namedPerson($0, publisher: row.publisher) } ?? namedPublishers.contains(row.publisher)
+            },
         ]
     }
 
@@ -243,8 +336,8 @@ enum EditorialWireIdentityEvaluation {
             "library": coverage(fixture.articles), "recent_72h": coverage(recent), "event_members": coverage(members),
             "event_members_textContainment_0_4": coverage(members, textContainment: 0.4),
             "momentum_configuration": EditorialMomentumEvaluation.fields(configuration),
-            "replay": try replays(members, assumeOwn: false),
-            "replay_if_unknown_counted_as_own": try replays(members, assumeOwn: true),
+            "replay": try replays(members),
+            "replay_if_unknown_counted_as_own": try replays(members) { _, report in assumed(report) },
             "members_stamped_after_storage_clamped": members.filter { $0.publishedAt > $0.fetchedAt }.count,
             "members_undated_left_out": members.filter {
                 Date(timeIntervalSince1970: $0.publishedAt) == DateParser.unknownDate
@@ -261,7 +354,8 @@ enum EditorialWireIdentityEvaluation {
             let snapshot = try feedSnapshot(directory: URL(fileURLWithPath: feeds))
             report["feed_snapshot"] = snapshot.report
             report["with_feed_authors"] = try measured(
-                fixture.articles, authors: snapshot.authors, since: latest - 259_200)
+                fixture.articles, authors: snapshot.authors, namedPublishers: snapshot.namedPublishers,
+                since: latest - 259_200)
         }
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(
             to: output, options: .withoutOverwriting)

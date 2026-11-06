@@ -4,7 +4,7 @@
 
 `EditorialMomentum` can now be fed real rows: all 336 events of a copied library replay without an error. The feed is not yet good enough to accept momentum on real news. On the same copy, 73% of the rows in the replay window have unknown identity, because the library stores neither a byline nor, for most articles, body text. Only 32 of the 336 events have two or more independent reports, and only 3 reach the volume and origin floors.
 
-Nothing in the app reads the mapping, and it adds no user-visible behaviour. A later slice stored the feed's author field to fill the byline gap; on one feed sample that did not raise coverage, as measured below.
+Nothing in the app reads the mapping, and it adds no user-visible behaviour. A later slice stored the feed's author field to fill the byline gap. On one feed sample that added no agency credits; the named reporters it holds are estimated below.
 
 ## Contract
 
@@ -59,7 +59,7 @@ Lowering the containment floor to 0.4 adds 6 groups and 14 rows, and known wire 
 
 ## Why rows are unknown
 
-- **No byline was stored.** No `credited` row exists on this copy, which predates `articles.author`. The only credit found is the France 24 trailer naming several agencies. Storing the field does not change this much; see below.
+- **No byline was stored.** No `credited` row exists on this copy, which predates `articles.author`. The only credit found is the France 24 trailer naming several agencies. Storing the field adds almost no agency credits; see below.
 - **Most articles have no body.** 424 of 2,830 articles (15%) have stored full text. Unknown rows in the last 72 hours fall hardest on BBC News (99), 9to5Mac (75), Arab News (57), The Hindu (57) and The Guardian (53).
 - **Silence is weak evidence.** `fullText` is an assumption, not a finding: wire copy with no credit in its body reads as the publisher's own report unless a sibling in the event carries the same text. Its share of the known rows is therefore an upper bound on independence.
 
@@ -67,21 +67,43 @@ Lowering the containment floor to 0.4 adds 6 groups and 14 rows, and known wire 
 
 `articles.author` (schema v33) now stores the RSS `author` or `dc:creator`, or the Atom author names, bounded to 300 characters. A refresh with no author keeps the stored one, and an author change is not a publisher revision. `media:credit` stays out: on The Guardian it credits photos. JSON Feed authors are not read. Nothing displays the field, and a story loaded for reading does not carry it. Any exact agency name in the field makes the article `credited`.
 
-**It does not move coverage on this sample.** One fetch of 33 of the library's 34 feeds on 6 November, through the production parser:
+**Agency credits do not move coverage on this sample.** One fetch of 33 of the library's 34 feeds on 6 November, through the production parser:
 
 | Measure | Value |
 |---|---|
 | Feed items | 1,066 |
 | With an author | 566 (53%) |
-| Naming an agency | 4 (0.4%): Dawn 3 of 24, The Guardian 1 of 171 |
-| Library rows those feeds still serve, with an author | 352 of 2,830 (300 of 926 in the last 72 hours; 103 of 893 event members) |
+| Naming an agency | 5 (0.5%): Dawn 4 of 24, The Guardian 1 of 171 |
+| Library rows those feeds still serve, with an author | 346 of 2,830 (295 of 926 in the last 72 hours; 100 of 893 event members) |
 | Those rows naming an agency | 0 |
 | Known wire group, last 72 hours | 26.2%, unchanged |
 | Unknown replay rows | 72.9%, unchanged |
 
-The four agency items are newer than the library copy's last fetch, so no stored row gained a credit. BBC News, Arab News, The Hindu, CNA, Euronews, Al Jazeera, CNBC and Deutsche Welle expose no author, so the agency-copy groups around Arab News, CNA and The Hindu keep no named origin. This is one fetch: it shows the rate is low, not exactly how low, and rows only gain authors once a build with v33 refreshes feeds that still serve them.
+The agency items are newer than the library copy's last fetch, so no stored row gained a credit. BBC News, Arab News, The Hindu, CNA, Euronews, Al Jazeera, CNBC and Deutsche Welle expose no author, so the agency-copy groups around Arab News, CNA and The Hindu keep no named origin. An earlier fetch the same day found 4 agency items; one fetch shows the rate is low, not exactly how low. Rows only gain authors once a build with v33 refreshes feeds that still serve them.
 
-**The author field holds a different signal.** Most authors are named reporters. 193 of the 683 unknown rows in the last 72 hours (28%) and 64 of the 639 unknown event members (10%) have an author naming no agency. Treating a named person as evidence of the publisher's own report could lift those rows, but the field also holds desk labels such as `FRANCE24`, `News Desk` and `POLITICO Staff`, so those counts are an upper bound. The mapping does not use this; it would be a new policy needing its own check.
+## Named-author estimate
+
+The author field mostly holds people: 486 of the 566 authors pass a filter for a person's name (at least two words, a leading capital, no digit, no desk word, not the publisher or an agency). This estimate asks what would change if an unknown row with such an author counted as its publisher's own report. **The mapping and the app do not do this**; only the opt-in evaluation does.
+
+| Measure | Mapping as built | Rows with an author now | Steady state |
+|---|---|---|---|
+| Known wire group, last 72 hours | 26.2% | 44.0% | 49.8% |
+| Known wire group, event members | 28.4% | 34.7% | 45.4% |
+| Unknown replay rows | 72.9% | 68.3% | 58.6% |
+| Independent reports | 177 | 214 | 293 |
+| Events with two or more reports | 32 | 47 | 79 |
+| Events reaching both floors, and accelerating | 3 | 5 | 7 |
+
+"Rows with an author now" only uses rows today's feeds still serve. "Steady state" also treats every stored row without an author as named when its publisher named a person on at least 80% of today's items, approximating a library that had stored authors all along: 9to5Mac, Ars Technica, Hackaday, MacRumors, Quanta Magazine, Science News, TechCrunch, The Guardian, The Verge and Wired. It is an estimate of a state no library is in.
+
+**What limits it:**
+
+- **The gain is not in world news.** 9to5Mac, Wired and The Guardian supply 135 of the 164 rows gained in the last 72 hours. BBC News, Arab News, The Hindu, CNA, Al Jazeera and Euronews gain nothing because their feeds name nobody, so they stay unknown under any author policy.
+- **A name is not proof.** 8 of the 93 event members with a named author (9%) sit in a verbatim copy group across outlets. That is a floor: only copies with a sibling carrying the same text can be seen, and a rewrite under a reporter's name cannot.
+- **No labels.** The extra accelerating events are not validated bursts, so this measures coverage, not whether momentum gets better.
+- **The filter is a word list.** An unusual desk label passes it. Twelve authored non-person shapes are pinned in the atom, but it has not been checked against the full field.
+
+So a named author is a much stronger lever than an agency credit, and still leaves most world-news rows unknown. Adopting it would be a policy change needing labelled burst and quiet windows first.
 
 ## Reproduction
 
@@ -91,7 +113,7 @@ sqlite3 /private/tmp/wire-identity/news.sqlite3 "pragma journal_mode=delete"
 NEWS_WIRE_IDENTITY_FETCH_FEEDS=1 bash script/test_editorial_wire_identity.sh /private/tmp/wire-identity/news.sqlite3 /private/tmp/wire-identity/results
 ```
 
-The script refuses a path inside an app container and refuses to overwrite a report. It reviews the upgrade on a second private copy. The fetch variable is optional and contacts the copy's subscribed feeds once. The regression atom is `Tests/EditorialWireIdentityTests.swift`, 52 checks on fictional authored cases, and runs under `./test.sh`.
+The script refuses a path inside an app container and refuses to overwrite a report. It reviews the upgrade on a second private copy. The fetch variable is optional and contacts the copy's subscribed feeds once. The regression atom is `Tests/EditorialWireIdentityTests.swift`, 79 checks on fictional authored cases, and runs under `./test.sh`.
 
 ## Migration review
 
@@ -102,7 +124,7 @@ A private copy at schema v29, the version the installed library is on, opened th
 - `./test.sh` passed in full, including the 27 Debug atom checks. `script/format.sh --check` passed.
 - The script ran end to end on the copy through the Xcode Release runner; its report matched a Debug runner's on the same copy. It refused the live container path.
 - An isolated arm64 ad-hoc app build passed. The app was not installed or launched.
-- The author slice repeated these on its own branch: 52 atom checks, including parser, storage and v32 upgrade cases.
+- The author slice repeated these on its own branch: 79 atom checks, including parser, storage, v32 upgrade and named-author estimate cases.
 
 ## Limits
 

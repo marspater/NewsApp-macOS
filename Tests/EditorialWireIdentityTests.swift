@@ -336,6 +336,58 @@ enum EditorialWireIdentityTests {
         check(copies.contains { $0.contains("-before-v32-") }, "the upgrade keeps a v32 copy to roll back to")
     }
 
+    static func checkNamedAuthorEstimate() throws {
+        for (author, expected) in [
+            ("Jane Doe", true), ("none@none.com (Jane Doe)", true), ("editorial@outlet.example (Jane Doe)", true),
+            ("By Jane Doe and Joe Bloggs", true), ("Jane Doe Diplomatic editor", true), ("Jane Doe in Paris", true),
+            ("Émile Zola", true), ("Emiliano de Pablos", true), ("none@none.com (News Desk)", false),
+            ("editorial@outlet.example", false), ("FRANCE24", false), ("FRANCE 24", false), ("Becroll", false),
+            ("By Outlet Staff", false), ("Guardian staff and agencies", false), ("HQ Web Team", false),
+            ("Rédaction Outlet", false), ("Outlet Reporter", false), ("Reuters", false), ("Jane Doe, Reuters", false),
+        ] {
+            check(
+                EditorialWireIdentityEvaluation.namedPerson(author, publisher: "Outlet") == expected,
+                "named author filter on \(author)")
+        }
+        func row(_ id: String, publisher: String, title: String? = nil, author: String?)
+            -> EditorialWireIdentityEvaluation.Row
+        {
+            EditorialWireIdentityEvaluation.Row(
+                articleID: id, eventID: "event", publisher: publisher,
+                title: title ?? "Distinct headline number \(id) here today", description: "Short blurb.", content: nil,
+                publishedAt: epoch.timeIntervalSince1970 + 10, fetchedAt: epoch.timeIntervalSince1970 + 20,
+                canonicalURL: "https://example.com/\(id)", author: author)
+        }
+        let copied = "Strikes kill three people in the city, medics say"
+        let rows = [
+            row("a", publisher: "First", author: "Jane Doe"),
+            row("b", publisher: "Second", author: "News Desk"),
+            row("c", publisher: "Third", title: copied, author: "Joe Bloggs"),
+            row("d", publisher: "Fourth", title: copied, author: "Ann Lee"),
+            row("e", publisher: "Fifth", author: nil),
+        ]
+        func isNamed(_ row: EditorialWireIdentityEvaluation.Row) -> Bool {
+            row.author.map { EditorialWireIdentityEvaluation.namedPerson($0, publisher: row.publisher) } ?? false
+        }
+        let coverage = EditorialWireIdentityEvaluation.namedCoverage(rows, isNamed: isNamed)
+        check(coverage["rows_named"] as? Int == 3, "the estimate counts rows with a person's name")
+        check(coverage["unknown_rows_gaining_identity"] as? Int == 1, "only an unknown named row gains identity")
+        check(
+            coverage["named_rows_in_copies_across_outlets"] as? Int == 2,
+            "named rows in a copy group across outlets count against the assumption")
+        check(
+            abs((coverage["known_wire_group_share_after"] as? Double ?? 0) - 0.6) < 1e-9,
+            "the estimate's share adds the gained row")
+        let baseline = try EditorialWireIdentityEvaluation.replays(rows)
+        let estimate = try EditorialWireIdentityEvaluation.namedEstimate(rows, since: 0, isNamed: isNamed)
+        let replayed = estimate["replay"] as? [String: Any]
+        check(baseline["independent_reports"] as? Int == 1, "the replay itself leaves named blurbs unknown")
+        check(replayed?["independent_reports"] as? Int == 2, "the estimate's replay counts the named blurb")
+        check(
+            EditorialWireIdentity.identities(event: rows.map(\.article)).first?.basis == .insufficient,
+            "the estimate does not change the mapping")
+    }
+
     static func run() async {
         do {
             try checkWireStories()
@@ -346,6 +398,7 @@ enum EditorialWireIdentityTests {
             try checkAuthorCredits()
             checkParsedAuthors()
             try await checkStoredAuthors()
+            try checkNamedAuthorEstimate()
             if let input = ProcessInfo.processInfo.environment["NEWS_WIRE_IDENTITY_INPUT"],
                 let output = ProcessInfo.processInfo.environment["NEWS_WIRE_IDENTITY_OUTPUT"]
             {
