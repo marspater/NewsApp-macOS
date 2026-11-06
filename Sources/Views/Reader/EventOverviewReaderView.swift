@@ -383,7 +383,9 @@ struct EventOverviewReaderView: View {
         let pPart = participant.trimmingCharacters(in: .whitespacesAndNewlines)
         let pPosTrimmed = position.trimmingCharacters(in: .whitespacesAndNewlines)
         let pPos = pPosTrimmed.hasSuffix(".") ? String(pPosTrimmed.dropLast()) : pPosTrimmed
-        var parts = [pPart, pPos]
+        // A displayed statement led by its speaker ("The officers said they…") already names the participant (#994).
+        let namesSpeaker = pPos.lowercased().hasPrefix(pPart.lowercased() + " said ")
+        var parts = namesSpeaker ? [pPos] : [pPart, pPos]
         if let source, !source.isEmpty {
             parts.append(source)
         } else {
@@ -1245,12 +1247,14 @@ struct EventOverviewReaderView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .textSelection(.enabled)
 
-            Text(Self.cleanDisplayPosition(perspective.position))
-                .font(bodyFont)
-                .lineSpacing(bodyLineSpacing)
-                .foregroundStyle(AppColor.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            Text(
+                OverviewComposer.displayStatement(participant: perspective.participant, position: perspective.position)
+            )
+            .font(bodyFont)
+            .lineSpacing(bodyLineSpacing)
+            .foregroundStyle(AppColor.primaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
 
             let hasSource = source != nil && !source!.isEmpty
             let hasCitations = !citations.isEmpty
@@ -1304,7 +1308,8 @@ struct EventOverviewReaderView: View {
         .accessibilityLabel(
             Self.perspectiveAccessibilityLabel(
                 participant: perspective.participant,
-                position: Self.cleanDisplayPosition(perspective.position),
+                position: OverviewComposer.displayStatement(
+                    participant: perspective.participant, position: perspective.position),
                 source: source,
                 citations: citations
             )
