@@ -994,12 +994,8 @@ enum EventMatcher {
             masksAbsoluteConflict: masksAbsolute)
     }
 
-    /// The pair model's input for one side of a pair (#626): "gap 14 hours; same publisher. " and then the matching
-    /// text. The prefix is the same on both sides, plain words only, and says "unknown" where the data has no gap or
-    /// publisher (the public pretraining sets), so the model learns what the words mean from the library rows.
-    /// `wordpiece.pair_prefix` in `script/training` writes the same prefix for the training rows.
     /// The newsletter edition's title and body for the pair model (#737): a trailing ` | <series>` suffix of one to six
-    /// words without a digit marks the edition; its sign-up line and the first paragraph's "Plus …" teaser are dropped.
+    /// words without a digit marks the edition; its sign-up call to action and the first paragraph's "Plus …" teaser are dropped.
     /// Any other text returns unchanged.
     static func newsletterStripped(title: String, description: String) -> (title: String, description: String) {
         guard let separator = newsletterSeparator(in: title) else { return (title, description) }
@@ -1039,9 +1035,16 @@ enum EventMatcher {
         return policy.pairModelPrefix ? pairModelInput(text, gap: gap, samePublisher: samePublisher) : text
     }
 
-    private static let newsletterBoilerplate = try! NSRegularExpression(
-        pattern: "(?i)\\b(sign up|subscribe|newsletter|in your inbox)\\b")
+    /// A call to action, not any mention: "A newsletter leaked records" is the reported event.
+    private static let newsletterBoilerplate =
+        (try? NSRegularExpression(
+            pattern: "(?i)\\bin your inbox\\b|^(sign up|subscribe)\\b|\\b(sign up|subscribe) (here|now|today)\\b"))
+        ?? NSRegularExpression()
 
+    /// The pair model's input for one side of a pair (#626): "gap 14 hours; same publisher. " and then the matching
+    /// text. The prefix is the same on both sides, plain words only, and says "unknown" where the data has no gap or
+    /// publisher (the public pretraining sets), so the model learns what the words mean from the library rows.
+    /// `wordpiece.pair_prefix` in `script/training` writes the same prefix for the training rows.
     static func pairModelInput(_ text: String, gap: TimeInterval?, samePublisher: Bool?) -> String {
         let hours = gap.map { "gap \(Int(($0 / 3600).rounded())) hours" } ?? "gap unknown"
         let publisher =
