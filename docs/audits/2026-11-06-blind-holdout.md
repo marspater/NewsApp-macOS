@@ -1,6 +1,6 @@
 # Blind acceptance holdout (#737, 6 November 2026)
 
-Route 3, stage 0. The 3 November holdout has been read many times, so it becomes the development set. A new set is held for one read, for acceptance, at the end. Its acceptance as a gate is still Mars's decision: v1 was not accepted, and v2 has `same` pairs too few for a strong strict-recall reading.
+Route 3, stage 0. The 3 November holdout has been read many times, so it becomes the development set. A new set is held for one read, for acceptance, at the end. Mars did not accept v1; the decision on v2 is at the end of this audit.
 
 ## Recipe
 
@@ -37,4 +37,10 @@ The set is less than fully blind:
 
 ## Limits
 
-With 16 `same` pairs, one pair moves strict recall by about 6 points. Story recall has 59 true pairs. All pairs come from one library and one three-day window. A top-up would be a later draw sealed beside v2, never a relabel.
+With 16 `same` pairs, one pair moves strict recall by about 6 points. Story recall has 59 true pairs. All pairs come from one library and one three-day window. 
+## Decision on the gate (Mars)
+
+- v2 stays sealed and unchanged as its own cohort. It is topped up by a later, independent draw (v3) before it serves as the final acceptance gate.
+- v3 comes from a later library snapshot and excludes every article and pair already used for development (the 3 November set), Stage 1 training or v2. Its sampling method and labels are frozen before anyone looks at Stage 1 results, and it is never used for tuning.
+- At acceptance, v2 and v3 are reported separately and combined, with counts and confidence intervals. If v3 uses different sampling proportions, the report keeps the strata rather than treating the combined score as the live feed.
+- If no independent draw is ready at acceptance, v2 may serve as the gate with its 16 `same` pairs stated explicitly. A one-pair recall change is never decisive evidence of an improvement.
