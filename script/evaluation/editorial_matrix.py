@@ -91,6 +91,7 @@ def validate_fixture(
         raise RuntimeError(f"Unexpected article fixture: count={article_count}, scenarios={scenario_counts}")
     if len(event_meta) != 50 or passage_count != 5000:
         raise RuntimeError("The labelled event/passage fixture is incomplete")
+    validate_passage_controls(db)
     if ranking_count != 5000 or impression_count < 50000:
         raise RuntimeError("The ranking/impression fixture is incomplete")
     if db.execute("PRAGMA integrity_check").fetchall() != [("ok",)]:
@@ -120,6 +121,17 @@ def validate_fixture(
         "ranking_count": ranking_count,
         "impression_count": impression_count,
     }
+
+
+def validate_passage_controls(db: sqlite3.Connection) -> None:
+    """Required control coverage is fixed independently of the labels being measured."""
+    classes = dict(db.execute("SELECT expected_class,count(*) FROM passages GROUP BY expected_class"))
+    routes = dict(db.execute("SELECT expected_lexical_match,count(*) FROM passages GROUP BY expected_lexical_match"))
+    if classes != {"repetition": 2900, "potentially_new": 1400, "semantic_fallback": 700}:
+        raise RuntimeError("Required passage-class controls changed")
+    if routes != {0: 750, 1: 4250}:
+        raise RuntimeError("Required historical routing controls changed")
+
 
 def database_summary(
     db: sqlite3.Connection,
@@ -333,7 +345,9 @@ def run_phase_zero(args: argparse.Namespace, db_path: Path, output_path: Path) -
         fixture = validate_fixture(db, event_meta)
         matrix = build_matrix(db, args, db_path, event_meta, timings, fixture)
         db.commit()
-        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        busy, _, _ = db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+        if busy:
+            raise RuntimeError("SQLite checkpoint was blocked; database size is incomplete")
         matrix["database"]["sqlite_file_bytes"] = db_path.stat().st_size
         write_report(output_path, matrix, db_path, args, fixture)
     finally:
