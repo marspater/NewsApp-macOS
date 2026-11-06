@@ -16,14 +16,19 @@ def export(database: Path, output: Path) -> None:
         raise SystemExit(f"Refusing to overwrite an existing input file: {output}")
     connection = sqlite3.connect("file:" + quote(str(database.resolve())) + "?mode=ro", uri=True)
     try:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(articles)")}
+        author = "a.author" if "author" in columns else "NULL"
         rows = connection.execute(
             "SELECT a.id, coalesce(e.merged_into, m.event_id), a.source, a.title, coalesce(a.description, ''), "
-            "a.content, a.published_at, a.created_at FROM articles a "
+            f"a.content, a.published_at, a.created_at, a.canonical_url, {author} FROM articles a "
             "LEFT JOIN event_members m ON m.article_id = a.id LEFT JOIN events e ON e.id = m.event_id ORDER BY a.id"
         ).fetchall()
     finally:
         connection.close()
-    fields = ("articleID", "eventID", "publisher", "title", "description", "content", "publishedAt", "fetchedAt")
+    fields = (
+        "articleID", "eventID", "publisher", "title", "description", "content", "publishedAt", "fetchedAt",
+        "canonicalURL", "author",
+    )
     descriptor = os.open(output, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
         json.dump({"basis": "copied_library", "articles": [dict(zip(fields, row)) for row in rows]}, stream)

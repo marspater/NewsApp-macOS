@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import SQLite3
 
 /// Authored wire-identity cases, all fictional, and their effect on the momentum replay.
 enum EditorialWireIdentityTests {
@@ -35,12 +36,12 @@ enum EditorialWireIdentityTests {
 
     static func article(
         _ id: String, publisher: String = "Outlet", title: String? = nil, description: String = "Short blurb.",
-        content: String? = nil, published: Double = 10, fetched: Double = 20
+        content: String? = nil, published: Double = 10, fetched: Double = 20, author: String? = nil
     ) -> WireIdentityArticle {
         WireIdentityArticle(
             articleID: id, publisher: publisher, title: title ?? "Distinct headline number \(id) here today",
             description: description, content: content, publishedAt: epoch.addingTimeInterval(published),
-            fetchedAt: epoch.addingTimeInterval(fetched))
+            fetchedAt: epoch.addingTimeInterval(fetched), author: author)
     }
 
     static func replay(_ members: [WireIdentityArticle]) throws -> MomentumSummary {
@@ -214,6 +215,179 @@ enum EditorialWireIdentityTests {
         check(EditorialWireIdentity.momentumReports(eventID: "event", members: [undated]).isEmpty, "undated stays out")
     }
 
+    static func checkAuthorCredits() throws {
+        let blurb = identities([article("a", author: "none@none.com (Reuters)")])["a"]
+        check(
+            blurb?.wireGroupID == "wire:reuters" && blurb?.originPublisherID == "agency:reuters"
+                && blurb?.basis == .credited, "an agency in the author field credits even a feed blurb")
+        let copies = identities([
+            article("a", publisher: "First", title: "Strikes kill three people in the city, medics say", author: "AFP"),
+            article("b", publisher: "Second", title: "Strikes kill three people in the city, medics say"),
+        ])
+        check(copies["b"]?.originPublisherID == "agency:afp", "an author credit reaches the article's copies")
+        let two = identities([article("a", author: "Reuters and Agence France-Presse")])["a"]
+        check(two?.basis == .multipleCredits && two?.originPublisherID == nil, "two agencies leave the origin unknown")
+        let person = identities([article("a", author: "Jane Doe")])["a"]
+        check(person?.basis == .insufficient, "a person's name says nothing about a blurb's wire")
+        let mapped = identities([article("a", content: prose("one"), author: "Jane Doe")])["a"]
+        check(mapped?.originPublisherID == "publisher:outlet", "a person's name changes nothing on full text")
+        check(EditorialWireIdentity.bylineAgencies("Cap News Desk").isEmpty, "agency letters inside words do not count")
+    }
+
+    static func checkParsedAuthors() {
+        let rss = """
+            <?xml version="1.0"?><rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"
+            xmlns:media="http://search.yahoo.com/mrss/"><channel><title>Outlet</title>
+            <item><title>One</title><link>https://example.com/1</link><author>none@none.com (Reuters)</author></item>
+            <item><title>Two</title><link>https://example.com/2</link><dc:creator>Jane &amp;amp; Joe</dc:creator>
+            <media:credit>AFP</media:credit></item>
+            <item><title>Three</title><link>https://example.com/3</link><media:credit>AFP</media:credit></item>
+            <item><title>Four</title><link>https://example.com/4</link><dc:creator>   </dc:creator></item>
+            <item><title>Five</title><link>https://example.com/5</link><author>\(String(repeating: "x", count: 500))</author></item>
+            </channel></rss>
+            """
+        let items = FeedXMLParser(data: Data(rss.utf8)).parse()
+        check(items.count == 5, "the authored RSS parses")
+        if items.count == 5 {
+            check(items[0].author == "none@none.com (Reuters)", "RSS author is kept")
+            check(items[1].author == "Jane & Joe", "dc:creator is kept and decoded")
+            check(items[2].author == nil, "a media credit is a photo credit, not a byline")
+            check(items[3].author == nil, "a blank author is none")
+            check(items[4].author?.count == 300, "a hostile author is bounded")
+        }
+        let atom = """
+            <?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Outlet</title>
+            <entry><title>One</title><id>tag:one</id><link href="https://example.com/a"/>
+            <author><name>Agence France-Presse</name><uri>https://example.com</uri></author>
+            <author><name>Jane Doe</name></author></entry></feed>
+            """
+        check(
+            FeedXMLParser(data: Data(atom.utf8)).parse().first?.author == "Agence France-Presse, Jane Doe",
+            "Atom author names are kept, without their addresses")
+        let untitled = """
+            <?xml version="1.0"?><rss version="2.0"><channel><item><guid isPermaLink="false">x</guid><title>One</title>
+            <author>AFP</author></item></channel></rss>
+            """
+        let named = FeedXMLParser(data: Data(untitled.utf8), feedURL: "https://www.example.com/rss").parse().first
+        check(named?.source == "Example" && named?.author == "AFP", "naming a source afterwards keeps the author")
+    }
+
+    static func checkStoredAuthors() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-author-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        func value(_ sql: String) -> String? {
+            var handle: OpaquePointer?
+            var statement: OpaquePointer?
+            guard sqlite3_open(path, &handle) == SQLITE_OK else { return nil }
+            defer { sqlite3_close(handle) }
+            guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
+            return sqlite3_column_text(statement, 0).map { String(cString: $0) }
+        }
+        func story(author: String?) -> FeedArticle {
+            FeedArticle(
+                storedID: "one", title: "Headline", link: "https://example.com/one", guid: "one", description: "Blurb",
+                pubDate: epoch, source: "Outlet", author: author)
+        }
+        let seed = DatabaseEngine(path: path)
+        try await seed.open()
+        try await seed.upsertArticles([story(author: "AFP")])
+        check(value("SELECT author FROM articles") == "AFP", "a parsed author is stored")
+        let revisions = value("SELECT count(*) FROM publisher_content_revisions")
+        try await seed.upsertArticles([story(author: nil)])
+        check(value("SELECT author FROM articles") == "AFP", "a refresh with no author keeps the stored one")
+        try await seed.upsertArticles([story(author: "Reuters")])
+        check(value("SELECT author FROM articles") == "Reuters", "a refresh with an author updates it")
+        check(
+            value("SELECT count(*) FROM publisher_content_revisions") == revisions,
+            "an author change is not a publisher content revision")
+        let loaded = try await seed.fetchArticles()
+        check(
+            loaded.first?.title == "Headline" && loaded.first?.author == nil, "a loaded story does not carry the author"
+        )
+        let stored = value("SELECT id FROM articles") ?? ""
+        try await seed.markRead(articleId: stored, isRead: true)
+        try await seed.setSaved(articleId: stored, isSaved: true)
+        await seed.close()
+
+        var handle: OpaquePointer?
+        check(sqlite3_open(path, &handle) == SQLITE_OK, "open the library to take it back to v32")
+        check(
+            sqlite3_exec(
+                handle,
+                "PRAGMA legacy_alter_table=ON; ALTER TABLE articles DROP COLUMN author; PRAGMA user_version=32;",
+                nil, nil, nil) == SQLITE_OK, "take the library back to v32")
+        sqlite3_close(handle)
+        let upgraded = DatabaseEngine(path: path)
+        try await upgraded.open()
+        await upgraded.close()
+        check(value("PRAGMA user_version") == String(DatabaseEngine.schemaVersion), "a v32 library upgrades")
+        check(
+            value("SELECT title FROM articles WHERE author IS NULL") == "Headline",
+            "an upgraded library keeps its stories, with no author yet")
+        check(
+            value("SELECT is_read || is_saved FROM article_state") == "11",
+            "an upgraded library keeps read and saved state")
+        let copies = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+        check(copies.contains { $0.contains("-before-v32-") }, "the upgrade keeps a v32 copy to roll back to")
+    }
+
+    static func checkNamedAuthorEstimate() throws {
+        for (author, expected) in [
+            ("Jane Doe", true), ("none@none.com (Jane Doe)", true), ("editorial@outlet.example (Jane Doe)", true),
+            ("By Jane Doe and Joe Bloggs", true), ("Jane Doe Diplomatic editor", true), ("Jane Doe in Paris", true),
+            ("Émile Zola", true), ("Emiliano de Pablos", true), ("none@none.com (News Desk)", false),
+            ("editorial@outlet.example", false), ("FRANCE24", false), ("FRANCE 24", false), ("Becroll", false),
+            ("By Outlet Staff", false), ("Guardian staff and agencies", false), ("HQ Web Team", false),
+            ("Rédaction Outlet", false), ("Outlet Reporter", false), ("Reuters", false), ("Jane Doe, Reuters", false),
+        ] {
+            check(
+                EditorialWireIdentityEvaluation.namedPerson(author, publisher: "Outlet") == expected,
+                "named author filter on \(author)")
+        }
+        func row(_ id: String, publisher: String, title: String? = nil, author: String?)
+            -> EditorialWireIdentityEvaluation.Row
+        {
+            EditorialWireIdentityEvaluation.Row(
+                articleID: id, eventID: "event", publisher: publisher,
+                title: title ?? "Distinct headline number \(id) here today", description: "Short blurb.", content: nil,
+                publishedAt: epoch.timeIntervalSince1970 + 10, fetchedAt: epoch.timeIntervalSince1970 + 20,
+                canonicalURL: "https://example.com/\(id)", author: author)
+        }
+        let copied = "Strikes kill three people in the city, medics say"
+        let rows = [
+            row("a", publisher: "First", author: "Jane Doe"),
+            row("b", publisher: "Second", author: "News Desk"),
+            row("c", publisher: "Third", title: copied, author: "Joe Bloggs"),
+            row("d", publisher: "Fourth", title: copied, author: "Ann Lee"),
+            row("e", publisher: "Fifth", author: nil),
+        ]
+        func isNamed(_ row: EditorialWireIdentityEvaluation.Row) -> Bool {
+            row.author.map { EditorialWireIdentityEvaluation.namedPerson($0, publisher: row.publisher) } ?? false
+        }
+        let coverage = EditorialWireIdentityEvaluation.namedCoverage(rows, isNamed: isNamed)
+        check(coverage["rows_named"] as? Int == 3, "the estimate counts rows with a person's name")
+        check(coverage["unknown_rows_gaining_identity"] as? Int == 1, "only an unknown named row gains identity")
+        check(
+            coverage["named_rows_in_copies_across_outlets"] as? Int == 2,
+            "named rows in a copy group across outlets count against the assumption")
+        check(
+            abs((coverage["known_wire_group_share_after"] as? Double ?? 0) - 0.6) < 1e-9,
+            "the estimate's share adds the gained row")
+        let baseline = try EditorialWireIdentityEvaluation.replays(rows)
+        let estimate = try EditorialWireIdentityEvaluation.namedEstimate(rows, since: 0, isNamed: isNamed)
+        let replayed = estimate["replay"] as? [String: Any]
+        check(baseline["independent_reports"] as? Int == 1, "the replay itself leaves named blurbs unknown")
+        check(replayed?["independent_reports"] as? Int == 2, "the estimate's replay counts the named blurb")
+        check(
+            EditorialWireIdentity.identities(event: rows.map(\.article)).first?.basis == .insufficient,
+            "the estimate does not change the mapping")
+    }
+
     static func run() async {
         do {
             try checkWireStories()
@@ -221,10 +395,14 @@ enum EditorialWireIdentityTests {
             try checkUnknowns()
             try checkCopies()
             try checkReplayFeed()
+            try checkAuthorCredits()
+            checkParsedAuthors()
+            try await checkStoredAuthors()
+            try checkNamedAuthorEstimate()
             if let input = ProcessInfo.processInfo.environment["NEWS_WIRE_IDENTITY_INPUT"],
                 let output = ProcessInfo.processInfo.environment["NEWS_WIRE_IDENTITY_OUTPUT"]
             {
-                try EditorialWireIdentityEvaluation.run(
+                try await EditorialWireIdentityEvaluation.run(
                     input: URL(fileURLWithPath: input), output: URL(fileURLWithPath: output))
             }
         } catch { check(false, "Unexpected error: \(error)") }

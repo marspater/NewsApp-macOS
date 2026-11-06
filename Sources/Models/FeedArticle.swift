@@ -49,6 +49,9 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     /// `SearchExcerpt.matchStart` and `matchEnd`. Nil on semantic-only matches and on matches in the headline only
     /// (#708).
     var searchSnippet: String? = nil
+    /// The feed's author field, as a feed item carried it. Stored for wire identity (#998), not loaded with a story, and
+    /// nothing shows it.
+    var author: String? = nil
 
     /// `searchSnippet` as text runs, or nil when there is none or it marks no match.
     var searchExcerpt: SearchExcerpt? { searchSnippet.flatMap(SearchExcerpt.init) }
