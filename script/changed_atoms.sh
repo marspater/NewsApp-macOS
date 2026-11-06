@@ -21,6 +21,9 @@ else
         case "$file" in *.md | docs/*) ;; *) exec script/test_atoms.sh ;; esac
     done <<< "$deleted"
     changed=$(git diff "${diff_args[@]}" --no-renames --name-only)
+    if [[ "${diff_args[0]}" == HEAD ]]; then
+        changed+=$'\n'"$(git ls-files --others --exclude-standard)"
+    fi
 fi
 atoms=$(script/test_atoms.sh)
 selected=""
