@@ -134,7 +134,7 @@ struct MainView: View {
                 )
             )
             .onSubmit(of: .search) { searchState.recordHistory(query: archiveQuery) }
-            .frame(minWidth: 900, minHeight: 600)
+            .frame(minWidth: AppLayout.mainWindowMinimumWidth, minHeight: AppLayout.mainWindowMinimumHeight)
             .onAppear(perform: handleAppear)
             .onDrop(of: [.fileURL], isTargeted: $isWindowDropTargeted) { providers in
                 handleWindowOPMLDrop(providers: providers)
@@ -577,7 +577,7 @@ struct MainView: View {
         HStack(spacing: AppSpacing.sm) {
             Image(systemName: operatorIcon(for: option.token))
                 .foregroundStyle(AppColor.accentText)
-                .frame(width: 16)
+                .frame(width: AppLayout.searchSuggestionIconWidth)
                 .accessibilityHidden(true)
             ZStack(alignment: .leading) {
                 Text(Self.longestSearchOperator).hidden().accessibilityHidden(true)
@@ -653,7 +653,7 @@ private struct ArchiveSearchToolbar<Suggestions: View>: ViewModifier {
             .focusedSceneValue(\.archiveSearch, FocusedCommandAction(perform: presentSearch))
             .background(
                 CompactArchiveSearch(expanded: searchPresented || !archiveQuery.isEmpty, animates: !reduceMotion)
-                    .frame(width: 0, height: 0)
+                    .frame(width: .zero, height: .zero)
             )
     }
 }

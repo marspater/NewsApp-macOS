@@ -39,6 +39,8 @@ enum AppColor {
 
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
     static var accent: Color { Color.accentColor }
+    /// A quiet identity mark in the Feed Catalog, not a selection or status color.
+    static var publisherMonogramBackground: Color { accent.opacity(0.12) }
     /// The accent for text: the system accent is one color in every appearance, which gave 4.2:1 on the dark page
     /// background. This keeps the person's accent choice, a little darker in light and lighter in dark, so text in it
     /// stays above 4.5:1 (#754). Fills, strokes and symbols keep `accent`.
@@ -187,6 +189,8 @@ enum AppColor {
 enum AppLayout {
     static let settingsPaneWidth: CGFloat = 720
     static let settingsPaneHeight: CGFloat = 560
+    static let mainWindowMinimumWidth: CGFloat = 900
+    static let mainWindowMinimumHeight: CGFloat = 600
     static let archiveSearchWidth: CGFloat = 300
     static let archiveSearchCollapsedWidth: CGFloat = 36
     static let tensionIllustrationSize: CGFloat = 88
@@ -205,6 +209,12 @@ enum AppLayout {
     static let progressBarHeight: CGFloat = 2
     static let catalogSheetWidth: CGFloat = 720
     static let catalogSheetMinHeight: CGFloat = 560
+    static let publisherHealthSheetWidth: CGFloat = 720
+    static let publisherHealthSheetMinHeight: CGFloat = 560
+    static let publisherHealthFeedColumnMinWidth: CGFloat = 150
+    static let publisherHealthNumberColumnWidth: CGFloat = 68
+    static let publisherHealthTextColumnWidth: CGFloat = 72
+    static let publisherHealthRecommendationColumnMinWidth: CGFloat = 192
     static let smartBinderSheetWidth: CGFloat = 520
     static let smartBinderSheetHeight: CGFloat = 600
     static let iconButtonSize: CGFloat = 28
@@ -235,6 +245,9 @@ enum AppLayout {
     static let unreadDotSize: CGFloat = 6.0
     /// Sidebar and reader popovers.
     static let popoverWidth: CGFloat = 280.0
+    static let keyboardShortcutsPopoverWidth: CGFloat = 380
+    static let searchSuggestionIconWidth: CGFloat = 16
+    static let publisherMonogramSize: CGFloat = 32
     /// Passage quote bars and reader callout indicators.
     static let quoteBarWidth: CGFloat = 3.0
     /// Collapsible inspector side panels.

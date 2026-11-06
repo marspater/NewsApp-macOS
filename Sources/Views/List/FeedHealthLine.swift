@@ -25,11 +25,11 @@ struct FeedHealthLine: View {
             if health.needsAttention {
                 // Text stays in the secondary color for contrast; the icon carries the warning.
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(AppColor.warning)
+                    .foregroundStyle(AppColor.warning)
                     .accessibilityHidden(true)
             }
             Text(summary)
-                .foregroundColor(AppColor.secondaryText)
+                .foregroundStyle(AppColor.secondaryText)
                 .lineLimit(2)
         }
         .font(AppTypography.caption)

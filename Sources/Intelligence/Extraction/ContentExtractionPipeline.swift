@@ -1090,6 +1090,10 @@ final class ContentExtractionPipeline: Sendable {
             case .blockedHost(let h, let reason):
                 logger.warning("[Extraction] Host \(h, privacy: .public) blocked: \(reason, privacy: .public)")
                 return (.securityBlocked(reason: "Blocked host: \(reason)"), nil)
+            case .substitutedAnswer(let h, let kind):
+                logger.warning(
+                    "[Extraction] Host \(h, privacy: .public) answered by \(kind.rawValue, privacy: .public)")
+                return (.networkError(reason: error.errorDescription ?? kind.rawValue), nil)
             case .insecureScheme(let s):
                 logger.warning("[Extraction] Insecure scheme rejected: \(s, privacy: .public)")
                 return (.securityBlocked(reason: "Insecure scheme: \(s)"), nil)

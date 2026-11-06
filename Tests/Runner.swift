@@ -46,6 +46,7 @@ struct NewsRegressionRunner {
             if selected("Tests/EditorialNoveltyTests.swift") { await EditorialNoveltyTests.run() }
             if selected("Tests/EditorialMomentumTests.swift") { await EditorialMomentumTests.run() }
             if selected("Tests/GatewayTimingsTests.swift") { await GatewayTimingsTests.run() }
+            if selected("Tests/NetworkTimelineTests.swift") { await NetworkTimelineTests.run() }
             if selected("Tests/EditorialWireIdentityTests.swift") { await EditorialWireIdentityTests.run() }
             if selected("Tests/FeedHealthMetricsTests.swift") { await FeedHealthMetricsTests.run() }
             if selected("Tests/EditorialRankingTests.swift") { await EditorialRankingTests.run() }

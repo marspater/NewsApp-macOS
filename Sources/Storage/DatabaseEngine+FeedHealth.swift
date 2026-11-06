@@ -44,6 +44,20 @@ extension DatabaseEngine {
             "UPDATE articles SET reader_barrier = ? WHERE id = ?;", [.text(barrier.rawValue), .text(articleID)])
     }
 
+    /// The publisher each feed's stored stories name, for feeds the catalog does not title.
+    func feedPublisherNames() throws -> [String: String] {
+        let rows = try eventRows(
+            """
+            SELECT af.feed_url, max(a.source) FROM article_feeds af
+            JOIN articles a ON a.id = af.article_id GROUP BY af.feed_url;
+            """)
+        var names: [String: String] = [:]
+        for row in rows {
+            if let url = row[0], let name = row[1] { names[url] = name }
+        }
+        return names
+    }
+
     /// The inspector's numbers for every stored feed. It scans the feed's stories, so call it from a task, not a
     /// view body; the actor keeps it off the main thread.
     func feedHealthMetrics(now: Date) throws -> [String: FeedHealthMetrics] {

@@ -222,9 +222,102 @@ enum FeedHealthMetricsTests {
         await db.close()
     }
 
+    static func checkRows() async throws {
+        func row(
+            _ observed: FeedHealthObservations, state: FeedFetchState? = nil, url: String = "https://x.example/feed",
+            publisher: String? = "X"
+        ) -> PublisherHealthRow {
+            PublisherHealthRow(
+                feedURL: url, storedPublisher: publisher, metrics: FeedHealthMetrics(observed, now: now),
+                health: FeedHealth(state, now: now))
+        }
+        let fresh = row(FeedHealthObservations())
+        check(
+            fresh.successText == "—" && fresh.latencyText == "—" && fresh.frequencyText == "—"
+                && fresh.extractionText == "Unknown" && fresh.recommendations.isEmpty, "a new feed claims nothing")
+        check(fresh.successSpoken == "Not measured yet", "VoiceOver hears unknown in words")
+        let busy = row(
+            FeedHealthObservations(
+                attempts: 200, successes: 199, latencyTotal: 199 * 0.94, recentItems: 300,
+                oldestRecentItem: now - 20 * day, fullReader: 4))
+        check(busy.successText == "99%" && busy.successSpoken == "99 percent", "99.5% does not round up to perfect")
+        check(busy.latencyText == "0.9 s" && busy.latencySpoken == "0.9 seconds", "latency has one decimal")
+        check(
+            busy.frequencyText == "15" && busy.frequencySpoken == "15 stories a day",
+            "a busy feed reads in whole stories")
+        check(busy.extractionText == "Full reader", "the text column names the class")
+        let quiet = row(FeedHealthObservations(attempts: 1, successes: 1, latencyTotal: 1))
+        check(
+            quiet.frequencyText == "0" && quiet.frequencySortKey == 0, "a checked feed with no stories publishes zero")
+        let rare = row(
+            FeedHealthObservations(attempts: 1, successes: 1, recentItems: 1, oldestRecentItem: now - 29 * day))
+        check(
+            rare.frequencyText == "<0.1" && rare.frequencySpoken == "Less than 0.1 stories a day",
+            "rare stays above zero")
+
+        var failing = FeedFetchState()
+        failing.failures = 2
+        failing.lastFetchedAt = now - day
+        failing.latestItemAt = now - 40 * day
+        let paywalled = row(FeedHealthObservations(subscriberOnly: 3), state: failing)
+        check(
+            paywalled.recommendations == [.notResponding, .inactive, .requiresWebView], "recommendations keep one order"
+        )
+        check(
+            paywalled.recommendationText == "Not responding · Inactive for over 30 days · Requires Web View",
+            "recommendations read in the issue's words")
+        check(
+            row(FeedHealthObservations(blocked: 3)).recommendations == [.requiresWebView],
+            "a blocked feed needs the Web View too")
+        check(row(FeedHealthObservations(subscriberOnly: 2)).recommendations.isEmpty, "too few barriers say nothing")
+        var recent = FeedFetchState()
+        recent.latestItemAt = now - 29 * day
+        check(row(FeedHealthObservations(), state: recent).recommendations.isEmpty, "29 quiet days is not inactive")
+
+        let bad = row(FeedHealthObservations(attempts: 4, successes: 1))
+        let good = row(FeedHealthObservations(attempts: 4, successes: 4))
+        check(
+            [fresh, good, bad].sorted(using: PublisherHealthSort(.success)).map(\.successText) == [
+                "25%", "100%", "—",
+            ],
+            "the default order leads with trouble and leaves unknowns last")
+        check(
+            [fresh, good, bad].sorted(using: PublisherHealthSort(.success, order: .reverse)).map(\.successText) == [
+                "100%", "25%", "—",
+            ],
+            "a descending order leads with the best and still leaves unknowns last")
+        check(
+            [fresh, quiet, busy].sorted(using: PublisherHealthSort(.frequency, order: .reverse)).map(\.frequencyText)
+                == ["15", "0", "—"],
+            "a measured zero frequency stays a zero, below every measured rate and above an unknown one")
+        check(
+            [fresh, busy, quiet].sorted(using: PublisherHealthSort(.latency, order: .reverse)).map(\.latencyText)
+                == ["1.0 s", "0.9 s", "—"],
+            "descending latency also leaves unknowns last")
+
+        let catalogFeed = FeedCatalog.allFeeds[0]
+        check(
+            PublisherHealthRow.name(feedURL: catalogFeed.url, storedPublisher: "Other") == catalogFeed.title,
+            "the catalog's title tells a publisher's feeds apart")
+        check(
+            PublisherHealthRow.name(feedURL: "https://x.example/f", storedPublisher: "Stored") == "Stored",
+            "stored name")
+        check(
+            PublisherHealthRow.name(feedURL: "https://x.example/f", storedPublisher: nil) == "x.example",
+            "the host last")
+        check(PublisherHealthRow.footnote.hasPrefix(FeedHealth.disclaimer), "the footnote keeps the health disclaimer")
+
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        try await db.upsertArticles([story("named")], feedUrl: "https://x.example/f", now: now)
+        check(try await db.feedPublisherNames()["https://x.example/f"] == "Outlet", "stored publisher names are read")
+        await db.close()
+    }
+
     static func run() async {
         do {
             checkArithmetic()
+            try await checkRows()
             try await checkStorage()
             try await checkRefresh()
         } catch { check(false, "Unexpected error: \(error)") }

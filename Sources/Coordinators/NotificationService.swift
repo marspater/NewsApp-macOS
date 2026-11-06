@@ -386,10 +386,15 @@ final class NotificationService: Sendable {
             var pending: [String: [(article: FeedArticle, score: Double)]] = [:]
             for (feed, articles) in delivery.starredPending { pending[feed] = await Self.scored(articles) }
             let plan = Self.plan(new: await Self.scored(newArticles), pending: pending, delivery: delivery)
+            guard !Task.isCancelled else { return }
             if !plan.queued.isEmpty { await delivery.queue(plan.queued) }
             for (index, banner) in plan.banners.enumerated() {
                 if index > 0 {
-                    try? await Task.sleep(for: spacing)
+                    do {
+                        try await Task.sleep(for: spacing)
+                    } catch {
+                        break  // A cancelled pass must not continue posting old banners.
+                    }
                     guard await delivery.continues() else { break }
                 }
                 guard !Task.isCancelled else { break }

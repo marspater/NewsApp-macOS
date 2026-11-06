@@ -227,6 +227,8 @@ enum DiagnosticsExport {
         var gatewayPort: UInt16?
         var resolverCancellations = 0
         var gatewayTimes: [String: GatewayTimings.HostTimes] = [:]
+        var networkEntries: [NetworkTimeline.Entry] = []
+        var refreshBatches: [NetworkTimeline.Batch] = []
         var proxy: [String] = []
         var process = ProcessSnapshot()
         var savedStories = 0
@@ -256,10 +258,12 @@ enum DiagnosticsExport {
             do { return try await body() } catch { return "\(name): not readable (\(error.localizedDescription))\n" }
         }
         var files = [
-            "feeds.txt": feeds(feedURLs: app.feedURLs, states: app.feedStates, statuses: app.feedStatuses, now: now),
+            "feeds.txt": feeds(
+                feedURLs: app.feedURLs, states: app.feedStates, statuses: app.feedStatuses, batches: app.refreshBatches,
+                now: now),
             "network.txt": network(
                 gatewayPort: app.gatewayPort, resolverCancellations: app.resolverCancellations,
-                feedStatuses: app.feedStatuses, proxy: app.proxy, log: log),
+                feedStatuses: app.feedStatuses, proxy: app.proxy, timeline: app.networkEntries, log: log),
             "gateway-timing.txt": gatewayTiming(app.gatewayTimes, feedURLs: app.feedURLs),
             "process.txt": process(app.process, now: now),
             "spotlight-and-caches.txt": spotlightAndCaches(app, log: log),
@@ -346,10 +350,12 @@ enum DiagnosticsExport {
 
     /// Feeds: per subscription, by host and position, what the last fetch left.
     static func feeds(
-        feedURLs: [String], states: [String: FeedFetchState]?, statuses: [String: String], now: Date
+        feedURLs: [String], states: [String: FeedFetchState]?, statuses: [String: String],
+        batches: [NetworkTimeline.Batch] = [], now: Date
     ) -> String {
         func time(_ date: Date?) -> String { date?.formatted(.iso8601) ?? "never" }
         var lines = ["Subscriptions: \(feedURLs.count)", "Response sizes are not recorded.", ""]
+        lines += ["Refresh batches this launch"] + (batches.isEmpty ? ["none"] : batches.map(\.description)) + [""]
         for (index, url) in feedURLs.enumerated() {
             let host = URL(string: url)?.host ?? "unreadable feed address"
             guard let states else {
@@ -368,7 +374,11 @@ enum DiagnosticsExport {
                     + "validators \(validators.isEmpty ? "none" : validators.joined(separator: " and ")), "
                     + "items \(state.itemCount), full text \(state.fullTextItems) of \(state.itemCount), "
                     + "newest item \(time(state.latestItemAt)), "
-                    + "last failure \(state.lastFailureKind?.rawValue ?? "none")")
+                    + "last failure \(state.lastFailureKind?.rawValue ?? "none"), "
+                    + "last recorded failure "
+                    + (state.lastFailureAt.map { "\(time($0)) (\(state.lastFailureDetail ?? "no detail"))" }
+                        ?? "time not recorded")
+            )
         }
         return lines.joined(separator: "\n") + "\n"
     }
@@ -505,7 +515,7 @@ enum DiagnosticsExport {
     /// launch, and the system proxy and VPN state the app can see.
     static func network(
         gatewayPort: UInt16?, resolverCancellations: Int, feedStatuses: [String: String], proxy: [String],
-        log: [LogLine]
+        timeline: [NetworkTimeline.Entry] = [], log: [LogLine]
     ) -> String {
         var failures: [String: Int] = [:]
         for status in feedStatuses.values where status != "idle" && status != "loading" {
@@ -528,6 +538,8 @@ enum DiagnosticsExport {
         lines += list(failures)
         lines += ["", "Gateway upstream connects this launch, by outcome"] + list(upstream)
         lines += ["", "System proxy and VPN"] + (proxy.isEmpty ? ["none reported"] : proxy)
+        lines += ["", "Network path and resolver timeline this launch, newest last"]
+        lines += timeline.isEmpty ? ["none"] : timeline.map(timelineLine)
         return lines.joined(separator: "\n") + "\n"
     }
 
@@ -554,6 +566,14 @@ enum DiagnosticsExport {
         if !others.isEmpty { lines.append(line("Other hosts, combined", combined)) }
         if hosts.isEmpty { lines.append("No gateway requests this launch") }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static func timelineLine(_ entry: NetworkTimeline.Entry) -> String {
+        let time = entry.date.formatted(.iso8601)
+        switch entry.event {
+        case .path(let path): return "\(time) path: \(path.description)"
+        case .resolver(let outcome, let count): return "\(time) resolver: \(outcome) × \(count)"
+        }
     }
 
     /// The system proxy flags and the scoped interfaces a VPN adds (utun, ipsec, ppp), from the proxy settings dictionary.
@@ -683,6 +703,8 @@ enum DiagnosticsExport {
         app.gatewayPort = await NetworkBoundaryProxy.shared.runningPort()
         app.resolverCancellations = ProxyResolver.cancellations.withLock { $0 }
         app.gatewayTimes = GatewayTimings.shared.snapshot()
+        app.networkEntries = NetworkTimeline.shared.entries
+        app.refreshBatches = NetworkTimeline.shared.batches
         app.proxy = proxyLines((CFNetworkCopySystemProxySettings()?.takeRetainedValue() as? [String: Any]) ?? [:])
         let workspace = NSWorkspace.shared
         app.process = processSnapshot(

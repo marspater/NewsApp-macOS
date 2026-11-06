@@ -36,7 +36,7 @@ jobs:
       - run:
           name: "Ensure permissions"
           command: chmod +x test.sh build.sh build_release.sh script/build_test_runner.sh script/ci_testsuite.sh
-      # Same paths and key scheme as the GitHub Actions cache. The release job (deploy-marker) stays uncached.
+      # Same paths and key scheme as the GitHub Actions cache. The release marker job (deploy-marker) builds nothing.
       - restore_cache:
           keys:
             - swiftpm-macos-xcode27-{{ checksum "Package.resolved" }}
@@ -57,6 +57,8 @@ jobs:
             - build/DerivedData/SourcePackages
             - ~/Library/Caches/org.swift.swiftpm
 
+  # Records a deployment of main in CircleCI's release tracking once test-macos passed. It builds nothing: the
+  # arm64 verification build already runs on Codemagic and in GitHub's build job (audit item A5, 6 November 2026).
   deploy-marker:
     macos:
       xcode: "27.0"
@@ -70,9 +72,6 @@ jobs:
               --component-name="NewsApp-macOS" \
               --target-version="$CIRCLE_SHA1"
             circleci run release update news-app --status=running
-      - run:
-          name: "Build release artifact"
-          command: ./build_release.sh
       - run:
           name: "Mark deployment SUCCESS"
           command: circleci run release update news-app --status=SUCCESS
