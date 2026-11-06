@@ -18001,6 +18001,16 @@ struct NewsTests {
         assertEqual(
             NoteAnchor.resolve(note, in: shifted)?.range, 25 + 10..<56 + 10, "Offsets inside a block are found again")
 
+        // A look-alike that moved into the stored position does not keep the note: the context decides.
+        let before = ["Officials: the bridge opens in May.", "Crews said the bridge opens soon."]
+        let second = NoteAnchor.note(
+            articleID: "a", paragraphs: before, index: 1, start: 11, quote: "the bridge opens")
+        assertEqual(NoteAnchor.resolve(second, in: before)?.index, 1, "Unchanged text keeps the stored place")
+        let swapped = [before[1], before[0]]
+        assertEqual(
+            NoteAnchor.resolve(second, in: swapped)?.index, 0,
+            "The quote follows its context when another occurrence takes its place")
+
         // Without any context left the nearest block wins, and a quote that is gone is lost.
         let bare = UserNote(
             articleID: "a", paragraphIndex: 3, charStart: 0, selectedText: "bridge opens", prefix: "", suffix: "")
