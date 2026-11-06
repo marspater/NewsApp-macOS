@@ -122,6 +122,86 @@ actor NetworkBoundaryProxy {
     }
 }
 
+/// Validated DNS answers, so a request's preflight and its gateway tunnel resolve a host once rather than twice (#929).
+/// Only `.allowed` answers are kept: a blocked or missing answer asks again every time, so a filter switched off is
+/// noticed at once, while one switched on can take up to `timeToLive` to show. Entries live in memory only.
+/// ponytail: two concurrent misses for one host both query; share the lookup if that ever shows in the timers.
+final class DNSAnswerCache: Sendable {
+    /// Production's one cache, emptied whenever the network path changes: a VPN or a new network may answer differently.
+    static let shared: DNSAnswerCache = {
+        let cache = DNSAnswerCache()
+        cache.pathMonitor.pathUpdateHandler = { [weak cache] _ in cache?.clear() }
+        cache.pathMonitor.start(queue: DispatchQueue(label: "com.marspater.news.dns-path"))
+        return cache
+    }()
+    static let defaultTimeToLive: Duration = .seconds(60)
+    static let defaultCapacity = 256
+
+    private struct Entry {
+        let addresses: [String]
+        let expires: ContinuousClock.Instant
+    }
+    private let entries = OSAllocatedUnfairLock(initialState: [String: Entry]())
+    private let pathMonitor = NWPathMonitor()
+    private let timeToLive: Duration
+    private let capacity: Int
+    private let now: @Sendable () -> ContinuousClock.Instant
+
+    init(
+        timeToLive: Duration = defaultTimeToLive, capacity: Int = defaultCapacity,
+        now: @escaping @Sendable () -> ContinuousClock.Instant = { .now }
+    ) {
+        self.timeToLive = timeToLive
+        self.capacity = capacity
+        self.now = now
+    }
+
+    deinit { pathMonitor.cancel() }
+
+    private static func key(_ host: String) -> String {
+        var name = host.lowercased()
+        if name.hasSuffix(".") { name.removeLast() }
+        return name
+    }
+
+    func answer(for host: String) -> IPAddressValidator.ValidationResult? {
+        let key = Self.key(host)
+        let time = now()
+        return entries.withLock { entries in
+            guard let entry = entries[key] else { return nil }
+            guard entry.expires > time else {
+                entries[key] = nil
+                return nil
+            }
+            return .allowed(ips: entry.addresses)
+        }
+    }
+
+    /// Keeps `.allowed` answers with at least one address and ignores every other result. A full cache drops expired
+    /// entries, then the one closest to expiring.
+    func store(_ result: IPAddressValidator.ValidationResult, for host: String) {
+        guard capacity > 0, case .allowed(let addresses) = result, !addresses.isEmpty else { return }
+        let key = Self.key(host)
+        let time = now()
+        let entry = Entry(addresses: addresses, expires: time.advanced(by: timeToLive))
+        entries.withLock { entries in
+            if entries[key] == nil, entries.count >= capacity {
+                entries = entries.filter { $0.value.expires > time }
+                if entries.count >= capacity,
+                    let oldest = entries.min(by: { $0.value.expires < $1.value.expires })?.key
+                {
+                    entries[oldest] = nil
+                }
+            }
+            entries[key] = entry
+        }
+    }
+
+    func clear() { entries.withLock { $0.removeAll() } }
+
+    var count: Int { entries.withLock(\.count) }
+}
+
 /// Resolves and validates one host for the gateway and the preflight (#945). The system lookup is asynchronous and
 /// cancellable, so no thread or worker is held, and every lookup ends inside `deadline`: cancelling the caller
 /// resumes it at once and cancels the native query.
@@ -133,9 +213,11 @@ final class ProxyResolver: Sendable {
     static let cancellations = OSAllocatedUnfairLock(initialState: 0)
     private let lookup: Lookup
     private let deadline: Duration
+    private let cache: DNSAnswerCache?
 
-    /// `body` keeps a test's synchronous answers; production resolves through `DNSLookup`.
+    /// `body` keeps a test's synchronous answers, uncached; production resolves through `DNSLookup` and shares one cache.
     init(body: NetworkBoundaryProxy.Resolver? = nil, deadline: Duration = defaultDeadline) {
+        cache = body == nil ? .shared : nil
         if let body {
             self.lookup = { body($0) }
         } else {
@@ -148,9 +230,10 @@ final class ProxyResolver: Sendable {
         self.deadline = deadline
     }
 
-    init(lookup: @escaping Lookup, deadline: Duration = defaultDeadline) {
+    init(lookup: @escaping Lookup, deadline: Duration = defaultDeadline, cache: DNSAnswerCache? = nil) {
         self.lookup = lookup
         self.deadline = deadline
+        self.cache = cache
     }
 
     func resolve(_ host: String) async -> IPAddressValidator.ValidationResult {
@@ -158,6 +241,7 @@ final class ProxyResolver: Sendable {
             Self.cancellations.withLock { $0 += 1 }
             return .unresolvable(reason: "Cancelled")
         }
+        if let cached = cache?.answer(for: host) { return cached }
         let lookup = lookup
         let deadline = deadline
         return await withTaskGroup(of: IPAddressValidator.ValidationResult.self) { group in
@@ -175,6 +259,7 @@ final class ProxyResolver: Sendable {
             if Task.isCancelled, first == .unresolvable(reason: "Cancelled") {
                 Self.cancellations.withLock { $0 += 1 }
             }
+            cache?.store(first, for: host)
             return first
         }
     }
