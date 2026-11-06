@@ -58,7 +58,8 @@ extension DatabaseEngine {
             parsed: parsed, muting: muting, after: after, limit: limit,
             embedding: Self.usableVector(vector, for: parsed))
         return try curateImages(
-            in: executeQueryArticles(sql: sql, params: params, prepareErrorMessage: "Failed to prepare search query"))
+            in: executeQueryArticles(
+                sql: sql, params: params, prepareErrorMessage: "Failed to prepare search query", orderIsDate: false))
     }
 
     /// The vector a free-text search ranks and counts with, or nil when it stays lexical: operators only, a quoted
@@ -162,7 +163,7 @@ extension DatabaseEngine {
 
     private static let storyJoins =
         "JOIN article_state s ON s.article_id = a.id LEFT JOIN article_enrichment ae ON ae.article_id = a.id"
-    /// The columns `parseArticleRow` reads; a search adds its order value (column 18) and the snippet (19).
+    /// The columns `parseArticleRow` reads; a search adds its order value (column 18), the snippet (19) and, for a ranked search, `created_at` (20).
     private static let articleColumns = """
         a.id, a.guid, a.canonical_url, a.title, a.description, a.content, a.published_at, a.source, a.image_url,
         coalesce(ae.category, a.category), ae.summary, ae.content_fetched, s.is_read, s.is_saved, ae.key_points,
@@ -214,7 +215,8 @@ extension DatabaseEngine {
                 )
             )
             SELECT \(Self.articleColumns), page.score,
-                CASE WHEN instr(sn.summary, char(2)) > 0 THEN sn.summary WHEN instr(sn.body, char(2)) > 0 THEN sn.body END
+                CASE WHEN instr(sn.summary, char(2)) > 0 THEN sn.summary WHEN instr(sn.body, char(2)) > 0 THEN sn.body END,
+                a.created_at
             FROM page JOIN articles a ON a.id = page.id \(Self.storyJoins)
             LEFT JOIN article_fts_rows f ON page.lexical AND f.article_id = a.id
             LEFT JOIN snippets sn ON sn.fts_rowid = f.fts_rowid

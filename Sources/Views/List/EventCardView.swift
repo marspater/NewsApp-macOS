@@ -263,7 +263,7 @@ private struct EventSourceRow: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(article.title), from \(source), published \(article.publicationDateText). \(isRead ? "Read" : "Unread")\(isSaved ? ", saved in your library" : "")."
+            "\(article.title), from \(source), \(article.dateAccessibilityText). \(isRead ? "Read" : "Unread")\(isSaved ? ", saved in your library" : "")."
         )
         .accessibilityAddTraits(.isButton)
         .accessibilityActions {

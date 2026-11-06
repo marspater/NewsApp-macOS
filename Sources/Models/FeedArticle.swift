@@ -16,6 +16,9 @@ import Foundation
 
 struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     var queryOrderValue: Double? = nil
+    /// When News stored the story, from a query that orders by date (not a search score). Only read for a story with no
+    /// publication date, whose order value is that moment.
+    var ingestedAt: Date? = nil
     // Database identity survives corrected publisher GUIDs and URLs. Absent in legacy JSON.
     var storedID: String? = nil
     // Present on incoming subscription articles; absent in legacy caches.
@@ -55,25 +58,42 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
         PublisherContentRevision.inputHash(title: title, description: description, content: fullContent)
     }
 
-    /// The full publication date for the reader and accessibility labels ("October 10, 2026" in English).
+    /// When News first stored a story that has no publication date, or nil for a dated story or one loaded without it.
+    private var ingestionDate: Date? { pubDate == DateParser.unknownDate ? ingestedAt : nil }
+
+    /// The full publication date for the reader ("October 10, 2026" in English); an undated story shows when it was
+    /// added instead.
     var publicationDateText: String {
-        pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .long, time: .omitted)
+        if let ingestionDate { return "Added " + ingestionDate.formatted(date: .long, time: .omitted) }
+        return pubDate == DateParser.unknownDate ? "Date unavailable" : pubDate.formatted(date: .long, time: .omitted)
+    }
+
+    /// The date as accessibility labels say it: "published …", "added …" for an undated story, or the missing date.
+    var dateAccessibilityText: String {
+        if let ingestionDate { return "added " + ingestionDate.formatted(date: .long, time: .omitted) }
+        return pubDate == DateParser.unknownDate ? "publication date unavailable" : "published " + publicationDateText
     }
 
     /// The short date cards show (DESIGN.md 8.2): relative within a day ("2 hr. ago"), then month and day, with the
-    /// year only for earlier years.
+    /// year only for earlier years. An undated story shows "Added" and the same format for when it was stored.
     @MainActor
     func cardDateText(now: Date = Date(), calendar: Calendar = .current) -> String {
+        if let ingestionDate { return "Added " + Self.shortDateText(ingestionDate, now: now, calendar: calendar) }
         guard pubDate != DateParser.unknownDate else { return "Date unavailable" }
-        let age = now.timeIntervalSince(pubDate)
+        return Self.shortDateText(pubDate, now: now, calendar: calendar)
+    }
+
+    @MainActor
+    private static func shortDateText(_ date: Date, now: Date, calendar: Calendar) -> String {
+        let age = now.timeIntervalSince(date)
         if age < 60 { return "Just now" }
         if age < 24 * 60 * 60 {
-            return Self.cardRelativeFormatter.localizedString(for: pubDate, relativeTo: now)
+            return cardRelativeFormatter.localizedString(for: date, relativeTo: now)
         }
-        if calendar.component(.year, from: pubDate) == calendar.component(.year, from: now) {
-            return pubDate.formatted(.dateTime.month(.abbreviated).day())
+        if calendar.component(.year, from: date) == calendar.component(.year, from: now) {
+            return date.formatted(.dateTime.month(.abbreviated).day())
         }
-        return pubDate.formatted(.dateTime.year().month(.abbreviated).day())
+        return date.formatted(.dateTime.year().month(.abbreviated).day())
     }
 
     ///One formatter for every card: cards made one each per render, which showed in scrolling (#778).

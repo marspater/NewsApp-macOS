@@ -4309,6 +4309,41 @@ struct NewsTests {
         assertEqual(first.pubDate, DateParser.unknownDate, "Undated XML stories do not become breaking news")
         assertEqual(first.publicationDateText, "Date unavailable", "Unknown dates have an honest display label")
         assertEqual(first.cardDateText(), "Date unavailable", "Cards keep the honest unknown-date label")
+        assertEqual(first.dateAccessibilityText, "publication date unavailable", "No date, no claim of publication")
+        // An undated story with an ingestion time shows when it was added (#1037).
+        var storedLate = first
+        let clock = Date(timeIntervalSince1970: 1_800_000_000)
+        storedLate.ingestedAt = clock.addingTimeInterval(-2 * 3600)
+        // The same short date a dated story shows for that moment, so the test holds under any locale and OS wording.
+        let twoHoursAgo = FeedArticle(
+            title: "Dated", link: "https://example.com/two-hours", guid: nil, description: "",
+            pubDate: clock.addingTimeInterval(-2 * 3600), source: "Publisher")
+        assertEqual(
+            storedLate.cardDateText(now: clock), "Added " + twoHoursAgo.cardDateText(now: clock),
+            "A card shows when an undated story was added")
+        assertTrue(storedLate.publicationDateText.hasPrefix("Added "), "The reader shows the added date")
+        assertTrue(storedLate.dateAccessibilityText.hasPrefix("added "), "Accessibility says added, not published")
+        var dated = FeedArticle(
+            title: "Dated", link: "https://example.com/dated", guid: nil, description: "",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Publisher")
+        dated.ingestedAt = storedLate.ingestedAt
+        assertTrue(dated.dateAccessibilityText.hasPrefix("published "), "A dated story is still published")
+        assertFalse(dated.cardDateText().hasPrefix("Added"), "A dated story ignores the ingestion time")
+        // Loaded from the database an undated story carries its ingestion time; a search result carries a score instead (#1037).
+        let undatedDB = DatabaseEngine(path: ":memory:")
+        try await undatedDB.open()
+        let undatedStory = FeedArticle(
+            title: "Zeppelin harbour inspection", link: "https://example.com/zeppelin", guid: "zeppelin",
+            description: "", pubDate: DateParser.unknownDate, source: "Publisher")
+        try await undatedDB.upsertArticles([undatedStory])
+        let listed = try await undatedDB.fetchArticles().first
+        assertTrue(listed?.ingestedAt != nil, "A listed undated story carries when it was stored")
+        let found = try await undatedDB.searchArticles(query: "zeppelin").first
+        assertEqual(found?.id, listed?.id, "The search finds the undated story")
+        assertTrue((found?.queryOrderValue ?? 1_000) < 1, "A search keeps its score as the order value")
+        assertTrue(found?.ingestedAt != nil, "A search result still carries when the story was stored")
+        assertEqual(found?.ingestedAt, listed?.ingestedAt, "The stored time is not the score")
+        await undatedDB.close()
         do {
             let now = Date(timeIntervalSince1970: 1_700_000_000)
             func story(ageInSeconds age: TimeInterval) -> FeedArticle {
@@ -7193,7 +7228,7 @@ struct NewsTests {
                 "\(format): clock skew keeps the date")
         }
         let futureCard = await MainActor.run { stored.first { $0.title == "RSS future" }?.cardDateText() }
-        assertEqual(futureCard, "Date unavailable", "A future date never reads Just now")
+        assertTrue(futureCard?.hasPrefix("Added ") == true, "A future date shows when the story was added (#1037)")
         try await db.upsertArticles(articles, now: now.addingTimeInterval(60))
         let refreshed = try await db.fetchArticles()
         assertEqual(
