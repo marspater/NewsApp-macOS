@@ -72,6 +72,8 @@ actor OverviewGenerationCoordinator {
     static let maxConcurrentExtractions = 2
     /// Running page fetches by article ID; overlapping requests join them instead of fetching again.
     private var extractionTasks: [String: Task<Void, Never>] = [:]
+    /// Counts clears of derived data (#982): a warm-up that began before one starts no fetches after it.
+    private var clearCount = 0
     /// Article ID plus publisher input of fetches that failed or timed out; not retried this session.
     // ponytail: grows with articles seen in one session; prune by age if sessions get long.
     private var failedExtractions: Set<String> = []
@@ -259,6 +261,7 @@ actor OverviewGenerationCoordinator {
         _ articles: [FeedArticle], excluding excluded: Set<String>, store: ArticleStore
     ) async -> [FeedArticle] {
         guard extractText != nil else { return articles }
+        let clearsAtStart = clearCount
         // The generation these fetches start under; a clear of derived data before they land refuses their writes.
         let generation = await store.database.analysisGeneration
         let candidates = Set(
@@ -272,6 +275,9 @@ actor OverviewGenerationCoordinator {
                 && !failedExtractions.contains($0.id + $0.publisherInputHash)
         }.prefix(Self.maxEvidenceFetches)
         guard !missing.isEmpty else { return current }
+        // A clear that ran during the awaits above already reset this coordinator; fetches started now would carry
+        // the old generation, be refused and be remembered as failed.
+        guard clearsAtStart == clearCount else { return current }
         for article in missing { startExtraction(of: article, store: store, generation: generation) }
         while !Task.isCancelled, missing.contains(where: { extractionTasks[$0.id] != nil }) {
             try? await Task.sleep(for: .milliseconds(50))
@@ -540,6 +546,7 @@ actor OverviewGenerationCoordinator {
     /// A clear of derived data ran (#805): in-flight results are refused by the store, the memory cache would
     /// otherwise serve cleared overviews, and page fetches stop instead of writing cleared bodies back (#982).
     func analysisCleared() {
+        clearCount &+= 1
         for (_, running) in extractionTasks { running.cancel() }
         extractionTasks.removeAll()
         cancelAll()
