@@ -208,7 +208,9 @@ actor SecureHTTPClient {
             break
         case .blocked(let reason):
             // A literal address was never answered by DNS, so no filter or tunnel substituted it.
-            if IPAddressValidator.checkLiteralIP(host) == nil, let kind = IPAddressValidator.substitution(in: reason) {
+            if IPAddressValidator.checkLiteralIP(IPAddressValidator.hostnameGuard(host).host) == nil,
+                let kind = IPAddressValidator.substitution(in: reason)
+            {
                 throw FeedError.substitutedAnswer(host: host, kind: kind)
             }
             throw FeedError.blockedHost(host: host, reason: reason)

@@ -5215,7 +5215,7 @@ struct NewsTests {
             "A manual refresh lifts a fake-IP backoff")
 
         // A blocked literal address involves no DNS answer, so it stays a plain block, never a filtered or fake-IP one.
-        for literal in ["198.18.0.1", "0.0.0.0", "[::]"] {
+        for literal in ["198.18.0.1", "198.18.0.1.", "0.0.0.0", "[::]"] {
             // No injected resolver: the system path guards literal addresses before any lookup.
             let client = SecureHTTPClient(configuration: mockConfig)
             do {
