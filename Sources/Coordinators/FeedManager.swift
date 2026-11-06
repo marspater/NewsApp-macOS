@@ -543,11 +543,6 @@ class FeedManager: NSObject, ObservableObject {
         }
     }
 
-    /// Returns once new articles are collected, published and rated. Notification banners and background
-    /// classification then run on their own: banners post minutes apart, so no caller waits for them.
-    ///
-    /// A read-only library (a notice is set) cannot store anything, so nothing is downloaded. A scheduled refresh
-    /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
     /// A cancelled caller must not remain retained by a long-running scheduled refresh.
     private func waitForManualRefresh() async {
         let id = UUID()
@@ -574,6 +569,11 @@ class FeedManager: NSObject, ObservableObject {
         for waiter in waiters { waiter.resume() }
     }
 
+    /// Returns once new articles are collected, published and rated. Notification banners and background
+    /// classification then run on their own: banners post minutes apart, so no caller waits for them.
+    ///
+    /// A read-only library (a notice is set) cannot store anything, so nothing is downloaded. A scheduled refresh
+    /// skips quietly; a manual one says why once, in the alert where the user sees it (#787).
     func fetchFeedsAsync(scheduled: Bool = false) async {
         guard !isStopped else { return }
         if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
