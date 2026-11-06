@@ -601,8 +601,9 @@ struct OverviewPerspectivesExtractor: Sendable {
         // followed by a capital or the end ("…shouted “Stop.” Officials…") ends the sentence: it is not taken whole, so
         // the statement stops inside it and the unbalanced quote is rejected, as before.
         let sentenceEnd = #"(?:(?<![.!?][”"])|(?!\s+\p{Lu}|\s*$))"#
+        // The endpoint must reject the same nonterminal dots as the body, even when the length cap forces backtracking.
         let statementTail =
-            #"(?:“[^”\n]{1,120}”\#(sentenceEnd)|"[^"\n]{1,120}"\#(sentenceEnd)|[^.!?\n]|\#(nonTerminalDot)){15,400}(?=[.!?\n]|$)"#
+            #"(?:“[^”\n]{1,120}”\#(sentenceEnd)|"[^"\n]{1,120}"\#(sentenceEnd)|[^.!?\n]|\#(nonTerminalDot)){15,400}(?!\#(nonTerminalDot))(?=[.!?\n]|$)"#
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         // A statement runs to the end of its sentence (up to 400 characters) or there is no match: a plain length
         // cap cut "…an appointee of Mr. Tusk's predecessor…" to "…appointee of Mr" (#994).
