@@ -100,21 +100,21 @@ enum GatewayTimingsTests {
             connector: { _, _ in NWConnection(host: "127.0.0.1", port: port, using: .tcp) })
         let (client, reply) = try await NewsTests.socksConnect(proxy, host: host)
         check(reply[1] == 0, "the tunnel connects")
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            client.send(
-                content: Data("ping".utf8),
-                completion: .contentProcessed { _ in
-                    client.receive(minimumIncompleteLength: 1, maximumLength: 16) { _, _, _, _ in
-                        continuation.resume()
-                    }
-                })
+        // The helpers time out and cancel the connection, so a missing echo fails the check instead of waiting
+        // for the relay's idle timeout.
+        defer { client.cancel() }
+        do {
+            try await NewsTests.socketSend(client, Data("ping".utf8))
+            let echo = try await NewsTests.socketRead(client, count: 4)
+            check(echo == Data("ping".utf8), "the tunnel echoes the request")
+        } catch {
+            check(false, "the tunnel echo failed: \(error)")
         }
         // The first byte is recorded on the tunnel's queue before it is forwarded, so it has landed by now.
         let times = GatewayTimings.shared.snapshot()[host]
         check(times?[.dns]?.count == 1, "the tunnel records its DNS wait")
         check(times?[.connect]?.count == 1, "the tunnel records its connect")
         check(times?[.firstByte]?.count == 1, "the tunnel records the first byte back")
-        client.cancel()
         await proxy.stop()
     }
 
