@@ -785,10 +785,12 @@ struct PublisherContentRevision: Equatable, Sendable, Identifiable {
     static func comparable(_ revisions: [PublisherContentRevision], current: String) -> [PublisherContentRevision] {
         var comparable: [PublisherContentRevision] = []
         var extracted = false
+        // UTF-8 length is constant time for a Swift string; the ratio is approximate anyway.
+        let size = current.utf8.count
         for revision in revisions.sorted(by: { $0.version > $1.version }) {
             if revision.kind == .extraction { extracted = true }
             guard revision.kind == .publisherUpdate, !extracted, let previous = revision.previousText,
-                current.count <= 3 * previous.count + 400
+                size <= 3 * previous.utf8.count + 400
             else { continue }
             comparable.append(revision)
         }

@@ -127,7 +127,10 @@ enum SentenceDiff {
         for item in items {
             if item.kind == .retracted {
                 overlay.retracted[last, default: []].append(item.text)
-            } else if let spot = shown[cursor...].firstIndex(where: { $0.key == key(item.text) }) {
+                continue
+            }
+            let target = key(item.text)
+            if let spot = shown[cursor...].firstIndex(where: { $0.key == target }) {
                 if item.kind == .added { overlay.added[shown[spot].block, default: []].append(shown[spot].range) }
                 last = shown[spot].block
                 cursor = spot + 1

@@ -18239,6 +18239,26 @@ struct NewsTests {
                 INSERT INTO publisher_content_revisions VALUES (new.id, 1, new.created_at, 'snapshot', 0,
                     news_publisher_input(new.title, coalesce(new.description, ''), new.content));
             END;
+            CREATE TRIGGER trg_publisher_content_update AFTER UPDATE OF title, description, content ON articles
+            WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR old.content IS NOT new.content
+            BEGIN
+                UPDATE article_enrichment SET summary = NULL, key_points = NULL, sentiment = NULL,
+                    entities = NULL, topics = NULL, category = NULL, confidence = NULL,
+                    model_identifier = NULL, analysis_version = NULL, input_content_version = NULL, input_text_hash = NULL
+                    WHERE article_id = new.id;
+                DELETE FROM event_overviews WHERE event_id IN (SELECT event_id FROM event_members WHERE article_id = new.id)
+                    OR id IN (SELECT overview_id FROM event_overview_citations WHERE article_id = new.id);
+                INSERT INTO publisher_content_revisions
+                SELECT new.id, coalesce(max(version), 0) + 1, new.updated_at,
+                    CASE WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != ''
+                         THEN 'publisher_update' ELSE 'extraction' END,
+                    (old.title IS NOT new.title) + 2 * (old.description IS NOT new.description) + 4 * (old.content IS NOT new.content),
+                    news_publisher_input(new.title, coalesce(new.description, ''), new.content)
+                FROM publisher_content_revisions WHERE article_id = new.id
+                HAVING old.title IS NOT new.title OR old.description IS NOT new.description OR new.content IS NOT NULL;
+                DELETE FROM publisher_content_revisions WHERE article_id = new.id AND version <
+                    (SELECT max(version) - 19 FROM publisher_content_revisions WHERE article_id = new.id);
+            END;
             PRAGMA user_version = 30;
             """)
         let migrated = DatabaseEngine(path: path)

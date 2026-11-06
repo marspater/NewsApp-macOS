@@ -1076,7 +1076,8 @@ struct ArticleDetailView: View {
 
     /// The update the story is compared with: the story as it was before it, the newest unless the reader chose.
     private var changesBase: PublisherContentRevision? {
-        comparableUpdates.first { $0.version == changesSinceVersion } ?? comparableUpdates.first
+        let updates = comparableUpdates
+        return updates.first { $0.version == changesSinceVersion } ?? updates.first
     }
 
     private var changesTaskID: String {
@@ -1110,17 +1111,21 @@ struct ArticleDetailView: View {
     /// story it is compared with. Added sentences are tinted and removed ones listed struck through, in place.
     @ViewBuilder
     private var revisionPill: some View {
-        if isStoryReady, !comparableUpdates.isEmpty {
-            let count = comparableUpdates.count
+        let updates = comparableUpdates
+        if isStoryReady, !updates.isEmpty {
+            let count = updates.count
             Text("·")
                 .foregroundStyle(secondaryText)
+                .accessibilityHidden(true)
             Menu {
-                ForEach(comparableUpdates) { update in
+                ForEach(updates) { update in
                     Button {
                         changesSinceVersion = update.version
                         showsChanges = true
                     } label: {
-                        Text("Changes since \(update.observedAt.formatted(date: .abbreviated, time: .shortened))")
+                        Text(
+                            "Compare with the story before \(update.observedAt.formatted(date: .abbreviated, time: .shortened))"
+                        )
                     }
                 }
                 if showsChanges {
