@@ -374,7 +374,8 @@ enum DiagnosticsExport {
                     + "newest item \(time(state.latestItemAt)), "
                     + "last failure \(state.lastFailureKind?.rawValue ?? "none"), "
                     + "last recorded failure "
-                    + (state.lastFailureAt.map { "\(time($0)) (\(state.lastFailureDetail ?? "no detail"))" } ?? "never")
+                    + (state.lastFailureAt.map { "\(time($0)) (\(state.lastFailureDetail ?? "no detail"))" }
+                        ?? "time not recorded")
             )
         }
         return lines.joined(separator: "\n") + "\n"

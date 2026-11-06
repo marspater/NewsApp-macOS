@@ -138,7 +138,9 @@ final class NetworkTimeline: Sendable {
             switch reason {
             case "Timed out": return "unresolvable timeout"
             case "Cancelled": return "cancelled"
-            default: return reason.hasPrefix("dns ") ? "unresolvable \(reason)" : "unresolvable"
+            default:
+                // Only "dns <code>" passes: other reasons can be system text naming a host.
+                return reason.wholeMatch(of: /dns -?\d+/) != nil ? "unresolvable \(reason)" : "unresolvable"
             }
         }
     }

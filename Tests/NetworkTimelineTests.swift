@@ -84,6 +84,7 @@ enum NetworkTimelineTests {
             (.unresolvable(reason: "Timed out"), "unresolvable timeout"),
             (.unresolvable(reason: "Cancelled"), "cancelled"),
             (.unresolvable(reason: "dns -65568"), "unresolvable dns -65568"),
+            (.unresolvable(reason: "dns lookup failed for secret.example"), "unresolvable"),
         ] {
             check(NetworkTimeline.outcomeClass(result) == outcome, "outcome class \(outcome)")
         }
@@ -176,7 +177,7 @@ enum NetworkTimelineTests {
             feedURLs: [bad, good], states: states, statuses: [:], batches: offline.batches, now: t0)
         check(text.contains("taken for offline"), "feeds.txt prints the batch")
         check(text.contains("(http, http 503)"), "feeds.txt prints the cause")
-        check(text.contains("last recorded failure never"), "feeds.txt says when a feed never failed")
+        check(text.contains("last recorded failure time not recorded"), "feeds.txt does not claim a feed never failed")
         check(!text.contains("/bad.xml"), "feeds.txt keeps to hosts")
         await db.close()
     }
