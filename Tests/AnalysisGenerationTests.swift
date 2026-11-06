@@ -36,6 +36,7 @@ enum AnalysisGenerationTests {
             try await queueForgetsRefusedAndClearedWork()
             await queuedOverviewsRespectCancellationAndSupersession()
             await cancelledManualRefreshWaiterDoesNotRetainItsCaller()
+            await manualRefreshAfterScheduledRunsOnlyOnce()
             try await backgroundNeverSupersedesTheVisibleEvent()
             try await notificationBookkeepingIsAtomic()
             try await clusteringStorageFailuresEndThePass()
@@ -86,11 +87,16 @@ enum AnalysisGenerationTests {
     private actor OverviewSignals {
         private var finished: Set<String> = []
         private var invoked: Set<String> = []
+        private var invocationCounts: [String: Int] = [:]
 
         func finish(_ name: String) { finished.insert(name) }
-        func invoke(_ name: String) { invoked.insert(name) }
+        func invoke(_ name: String) {
+            invoked.insert(name)
+            invocationCounts[name, default: 0] += 1
+        }
         func hasFinished(_ name: String) -> Bool { finished.contains(name) }
         func wasInvoked(_ name: String) -> Bool { invoked.contains(name) }
+        func invocationCount(_ name: String) -> Int { invocationCounts[name, default: 0] }
     }
 
     /// A pending overview owns its generation before capacity is available. Closing or replacing it must not leave
@@ -194,6 +200,57 @@ enum AnalysisGenerationTests {
         }
         manager.stopBackgroundWork()
         await gate.release()
+        await scheduled.value
+        await manual.value
+        await db.close()
+    }
+
+    /// A manual request behind scheduled collection must run exactly once and complete, not chain another
+    /// follow-up forever while its continuation remains registered.
+    @MainActor
+    static func manualRefreshAfterScheduledRunsOnlyOnce() async {
+        let suite = "news-refresh-followup-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            return check(false, "Isolated preferences can be created for a manual follow-up")
+        }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.waitForStartup()
+        guard store.isReady else {
+            return check(false, "An in-memory library opens for the manual follow-up")
+        }
+        let gate = OverviewGate()
+        let signals = OverviewSignals()
+        let manager = FeedManager(
+            settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false,
+            fetchBatch: { _, _ in
+                await signals.invoke("collecting")
+                await gate.wait()
+                return []
+            },
+            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+        let scheduled = Task {
+            await manager.fetchFeedsAsync(scheduled: true)
+            await signals.finish("scheduled")
+        }
+        await eventually("The scheduled collection starts") { await signals.invocationCount("collecting") == 1 }
+        let manual = Task {
+            await manager.fetchFeedsAsync()
+            await signals.finish("manual")
+        }
+        await eventually("The manual request waits for scheduled collection") {
+            manager.manualRefreshWaiters.count == 1
+        }
+        await gate.release()
+        await eventually("The manual follow-up finishes without recursively refreshing", timeout: .seconds(10)) {
+            await signals.hasFinished("manual")
+        }
+        await eventually("The scheduled caller finishes after the manual follow-up", timeout: .seconds(10)) {
+            await signals.hasFinished("scheduled")
+        }
+        check(await signals.invocationCount("collecting") == 2, "Exactly one scheduled and one manual collection run")
+        manager.stopBackgroundWork()
         await scheduled.value
         await manual.value
         await db.close()

@@ -69,9 +69,10 @@ class FeedManager: NSObject, ObservableObject {
     private var refreshTask: Task<[FeedArticle], Never>?
     private var refreshRunID: UUID?
     private var runningRefreshIsScheduled = false
-    /// Callers that asked for a manual refresh while a scheduled one was collecting: one more refresh runs after it,
-    /// and they resume when that ends (#927).
-    private(set) var manualRefreshWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
+    /// Manual callers wait for the scheduled collection they actually joined, not an older run's completion.
+    /// One follow-up manual collection serves that run's callers; cancelled callers can leave immediately (#927).
+    private(set) var manualRefreshWaiters:
+        [UUID: (scheduledRunID: UUID, continuation: CheckedContinuation<Void, Never>)] = [:]
     private var enrichmentTask: Task<Void, Never>?
     private var overviewWarmupTask: Task<Void, Never>?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
@@ -544,7 +545,7 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     /// A cancelled caller must not remain retained by a long-running scheduled refresh.
-    private func waitForManualRefresh() async {
+    private func waitForManualRefresh(after scheduledRunID: UUID) async {
         let id = UUID()
         await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
@@ -552,7 +553,7 @@ class FeedManager: NSObject, ObservableObject {
                     continuation.resume()
                     return
                 }
-                manualRefreshWaiters[id] = continuation
+                manualRefreshWaiters[id] = (scheduledRunID, continuation)
             }
         } onCancel: {
             Task { @MainActor [self] in resumeManualRefreshWaiter(id) }
@@ -560,13 +561,20 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     private func resumeManualRefreshWaiter(_ id: UUID) {
-        manualRefreshWaiters.removeValue(forKey: id)?.resume()
+        manualRefreshWaiters.removeValue(forKey: id)?.continuation.resume()
+    }
+
+    private func resumeManualRefreshWaiters(for runID: UUID) {
+        let ids = manualRefreshWaiters.compactMap { id, waiter in
+            waiter.scheduledRunID == runID ? id : nil
+        }
+        for id in ids { resumeManualRefreshWaiter(id) }
     }
 
     private func resumeAllManualRefreshWaiters() {
         let waiters = Array(manualRefreshWaiters.values)
         manualRefreshWaiters.removeAll()
-        for waiter in waiters { waiter.resume() }
+        for waiter in waiters { waiter.continuation.resume() }
     }
 
     /// Returns once new articles are collected, published and rated. Notification banners and background
@@ -578,9 +586,9 @@ class FeedManager: NSObject, ObservableObject {
         guard !isStopped else { return }
         if await refusesCollectionWhileReadOnly(manual: !scheduled) { return }
         if let refreshTask {
-            if !scheduled, runningRefreshIsScheduled {
+            if !scheduled, runningRefreshIsScheduled, let scheduledRunID = refreshRunID {
                 // A scheduled refresh keeps connectivity backoff, so this request is answered by a refresh after it.
-                await waitForManualRefresh()
+                await waitForManualRefresh(after: scheduledRunID)
             } else {
                 _ = await refreshTask.value
             }
@@ -607,8 +615,8 @@ class FeedManager: NSObject, ObservableObject {
         lastRefreshCompletedAt = now()
         refreshInterruptedBySleep = false
 
-        // Keep waiters registered during the follow-up manual run, so each cancelled caller can leave promptly.
-        defer { resumeAllManualRefreshWaiters() }
+        // Keep this run's waiters cancellable during its follow-up; never resume another run's callers.
+        defer { resumeManualRefreshWaiters(for: runID) }
 
         guard !isStopped else { return }
         await pruneIfDue()
@@ -617,7 +625,9 @@ class FeedManager: NSObject, ObservableObject {
         await waitForEventClustering()
         if !Task.isCancelled, !isStopped { await notifyAndEnrich(newArticles) }
         // In a task of its own: cancelling this caller, a scheduled refresh, does not cancel the reader's request.
-        if !manualRefreshWaiters.isEmpty { await Task { [weak self] in await self?.fetchFeedsAsync() }.value }
+        if scheduled, manualRefreshWaiters.values.contains(where: { $0.scheduledRunID == runID }) {
+            await Task { [weak self] in await self?.fetchFeedsAsync() }.value
+        }
     }
 
     /// What Check for Updates found for an open story (#992).
