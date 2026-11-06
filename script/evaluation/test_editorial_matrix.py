@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
 import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from script.evaluation import editorial_fixtures, editorial_matrix
