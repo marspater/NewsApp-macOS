@@ -18,7 +18,7 @@ import Foundation
 /// W3C text-quote selector): the paragraph index and offsets are only a hint, so the note survives a re-extraction that
 /// moves or rewrites paragraphs around the quoted words.
 struct UserNote: Identifiable, Sendable, Equatable {
-    let id: String
+    var id = UUID().uuidString
     let articleID: String
     /// Where the quote sat when it was made: the block index in the reader and the character offset in that block.
     var paragraphIndex: Int
@@ -27,33 +27,9 @@ struct UserNote: Identifiable, Sendable, Equatable {
     /// Up to `NoteAnchor.contextLength` characters on each side of the quote in its block.
     let prefix: String
     let suffix: String
-    var noteBody: String
-    let createdAt: Date
-    var updatedAt: Date
-
-    init(
-        id: String = UUID().uuidString,
-        articleID: String,
-        paragraphIndex: Int,
-        charStart: Int,
-        selectedText: String,
-        prefix: String,
-        suffix: String,
-        noteBody: String = "",
-        createdAt: Date = Date(),
-        updatedAt: Date = Date()
-    ) {
-        self.id = id
-        self.articleID = articleID
-        self.paragraphIndex = paragraphIndex
-        self.charStart = charStart
-        self.selectedText = selectedText
-        self.prefix = prefix
-        self.suffix = suffix
-        self.noteBody = noteBody
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-    }
+    var noteBody = ""
+    var createdAt = Date()
+    var updatedAt = Date()
 
     /// A highlight with no note text is just a highlight.
     var hasBody: Bool { !noteBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
