@@ -813,6 +813,9 @@ struct EventPairAssessment: Sendable, Equatable {
     var neuralEligible = true
     /// No shared anchor, but a cosine high enough for the pair model to be asked (#582).
     var anchorlessModelCandidate = false
+    /// Under the veto threshold (#737): a `places` conflict that also has a headline-places or different-act conflict
+    /// behind it, which the event veto may not outvote. The conflict stays `places`, so story links still see it.
+    var masksAbsoluteConflict = false
 }
 
 enum EventMatcher {
@@ -931,7 +934,7 @@ enum EventMatcher {
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
         var conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap, sameSeries: sameSeries)
-        if conflict == .places, policy.vetoThreshold, let absolute = headlineOrActConflict(a, b) { conflict = absolute }
+        let masksAbsolute = conflict == .places && policy.vetoThreshold && headlineOrActConflict(a, b) != nil
         let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).union(crossSpecific).count
         let sharedEvidence =
             sharedKeywords
@@ -976,7 +979,8 @@ enum EventMatcher {
             score: max(score, embeddingSimilarity ?? 0.0), what: what, entity: entity, sharedAnchors: sharedAnchors,
             sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
             isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity,
-            neuralEligible: neuralEligible, anchorlessModelCandidate: anchorlessCandidate)
+            neuralEligible: neuralEligible, anchorlessModelCandidate: anchorlessCandidate,
+            masksAbsoluteConflict: masksAbsolute)
     }
 
     /// The pair model's input for one side of a pair (#626): "gap 14 hours; same publisher. " and then the matching
@@ -1064,7 +1068,10 @@ enum EventMatcher {
     /// (`vetoMinimum`, `vetoShare`, #737) a `semanticDivergence` or `places` conflict only when enough pairs raise one.
     static func conflictsBlock(_ pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Bool {
         guard policy.vetoThreshold else { return pairs.contains { $0.conflict != nil } }
-        if pairs.contains(where: { $0.conflict.map { !outvotable.contains($0) } ?? false }) { return true }
+        if pairs.contains(where: { $0.masksAbsoluteConflict || $0.conflict.map { !outvotable.contains($0) } ?? false })
+        {
+            return true
+        }
         let vetoes = pairs.filter { $0.conflict != nil }.count
         return policy.vetoMinimum.map { vetoes >= $0 } == true
             || policy.vetoShare.map { Double(vetoes) / Double(max(pairs.count, 1)) > $0 } == true

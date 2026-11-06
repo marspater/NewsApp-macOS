@@ -77,6 +77,20 @@ actor OverviewGenerationCoordinator {
     private var failedExtractions: Set<String> = []
     private var activeExtractions = 0
 
+    /// Work in flight and this session's failures, for the diagnostics export (#1006).
+    struct Counts: Sendable, Equatable {
+        var inFlight = 0
+        var extractions = 0
+        var failedExtractions = 0
+        var cached = 0
+    }
+
+    func counts() -> Counts {
+        Counts(
+            inFlight: inFlightTasks.count, extractions: activeExtractions, failedExtractions: failedExtractions.count,
+            cached: memoryCache.count)
+    }
+
     init(
         store: ArticleStore? = nil, queue: EnrichmentQueue = .shared,
         allowsEnergy: (@Sendable () async -> Bool)? = nil,

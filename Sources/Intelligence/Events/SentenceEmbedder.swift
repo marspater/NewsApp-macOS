@@ -167,7 +167,7 @@ final class BertWordPieceTokenizer: Sendable {
 }
 
 /// A bundled resource: the app's `Models` folder, the package bundle, then the checkout (test runners).
-private func bundledModelResource(_ name: String, _ ext: String) -> URL {
+func bundledModelResource(_ name: String, _ ext: String) -> URL {
     #if SWIFT_PACKAGE
         let moduleURL =
             Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "Resources/CoreML")

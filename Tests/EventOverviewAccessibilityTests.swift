@@ -1644,6 +1644,11 @@ extension EventOverviewAccessibilityTests {
             "Council. Supported the plan. Source: Fixture News",
             "Perspective trims text and falls back to citation source")
         assertEqual(
+            EventOverviewReaderView.perspectiveAccessibilityLabel(
+                participant: "the officers", position: "The officers said they took statements.", source: "via Wire"),
+            "The officers said they took statements. via Wire",
+            "A statement led by its speaker names the participant once")
+        assertEqual(
             EventOverviewReaderView.industryImpactAccessibilityLabel(
                 industry: "Energy", implication: "  Costs rose. \n", citations: [unknownCitation]),
             "Energy: Costs rose.", "Unknown sources do not create empty source announcements")

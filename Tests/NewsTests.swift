@@ -26,6 +26,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
+import dnssd
 
 #if canImport(FoundationModels)
     import FoundationModels
@@ -793,6 +794,7 @@ struct NewsTests {
             try await testFiniteBriefing()
             try await testPublisherContentProvenance()
             try await testRefreshClustersEvents(fixtureRoot: fixtureRoot)
+            try await testStoryCheckForUpdates(fixtureRoot: fixtureRoot)
             try await testEventCorpusHarness(fixtureRoot: fixtureRoot)
             try await testMatcherRegressionCorpus()
             try await testStoryRegressionCorpus()
@@ -965,6 +967,7 @@ struct NewsTests {
             ("testBriefingBoardLayout", { testBriefingBoardLayout() }),
             ("testPublisherContentProvenance", { try await testPublisherContentProvenance() }),
             ("testRefreshClustersEvents", { try await testRefreshClustersEvents(fixtureRoot: fixtureRoot) }),
+            ("testStoryCheckForUpdates", { try await testStoryCheckForUpdates(fixtureRoot: fixtureRoot) }),
             ("testEventCorpusHarness", { try await testEventCorpusHarness(fixtureRoot: fixtureRoot) }),
             ("testMatcherRegressionCorpus", { try await testMatcherRegressionCorpus() }),
             ("testStoryRegressionCorpus", { try await testStoryRegressionCorpus() }),
@@ -1016,6 +1019,10 @@ struct NewsTests {
             ("testSocketNetworkBoundary", { try await rerunningLoopbackFlake(testSocketNetworkBoundary) }),
             ("testTransportCancellation", { try await rerunningLoopbackFlake(testTransportCancellation) }),
             ("testProxyWaitingClassification", { await testProxyWaitingClassification() }),
+            ("testResolverLifecycle", { await testResolverLifecycle() }),
+            ("testLookupFailsClosedAcrossFamilies", { testLookupFailsClosedAcrossFamilies() }),
+            ("testRedirectDelegateDoesNoDNS", { await testRedirectDelegateDoesNoDNS() }),
+            ("testGatewayAddressFallback", { try await rerunningLoopbackFlake(testGatewayAddressFallback) }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
             ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
             ("testRetentionPruneAfterRefresh", { try await testRetentionPruneAfterRefresh() }),
@@ -1063,9 +1070,23 @@ struct NewsTests {
             ("testExtractionOutcomeDiagnostics", { await testExtractionOutcomeDiagnostics() }),
             ("testCanonicalClassificationDisambiguation", { await testCanonicalClassificationDisambiguation() }),
             ("testDiagnosticsExport", { try await testDiagnosticsExport() }),
+            ("testLogWindowModel", { await testLogWindowModel() }),
+            ("testDiagnosticsLibrary", { try await testDiagnosticsLibrary() }),
+            ("testDiagnosticsFeeds", { await testDiagnosticsFeeds() }),
+            ("testDiagnosticsClustering", { try await testDiagnosticsClustering() }),
+            ("testDiagnosticsIntelligence", { try await testDiagnosticsIntelligence() }),
+            ("testDiagnosticsNotifications", { try await testDiagnosticsNotifications() }),
+            ("testDiagnosticsImages", { try await testDiagnosticsImages() }),
+            ("testDiagnosticsNetwork", { await testDiagnosticsNetwork() }),
+            ("testDiagnosticsProcess", { await testDiagnosticsProcess() }),
+            ("testDiagnosticsLogFiles", { await testDiagnosticsLogFiles() }),
+            ("testDiagnosticsSpotlightAndCaches", { await testDiagnosticsSpotlightAndCaches() }),
+            ("testDiagnosticsSections", { try await testDiagnosticsSections() }),
             ("testAppContainerWiring", { await testAppContainerWiring() }),
             ("testReadManagerReconciliationCache", { try await testReadManagerReconciliationCache() }),
             ("testMemoryLeakMitigationsAndErrorHandling", { try await testMemoryLeakMitigationsAndErrorHandling() }),
+            ("testOverviewSourcesFollowTheSentence", { testOverviewSourcesFollowTheSentence() }),
+            ("testCardImagePrefetchFirstPaint", { await testCardImagePrefetchFirstPaint() }),
             (
                 "testHybridSearchSemanticRetrievalAndSnippets",
                 { try await testHybridSearchSemanticRetrievalAndSnippets() }
@@ -1830,6 +1851,14 @@ struct NewsTests {
             store.operationError?.contains("read-only") == true
                 && store.operationError?.contains(store.databaseHealthNotice ?? "?") == true,
             "A manual refresh says why, with the library's own notice")
+        // Check for Updates (#992) refuses the same way and downloads nothing.
+        let check = await manager.checkForUpdates(storyOf: "readonly-story")
+        if case .refused(let reason) = check {
+            assertTrue(reason.contains(store.databaseHealthNotice ?? "?"), "Check for Updates names the library notice")
+        } else {
+            assertTrue(false, "Check for Updates is refused while read-only, got \(check)")
+        }
+        assertEqual(await fetches.batches.count, 0, "Check for Updates downloads nothing while read-only")
         await engine.close()
     }
 
@@ -2526,6 +2555,18 @@ struct NewsTests {
         func record(_ name: String, from start: Double) {
             measurements[name, default: []].append((ProcessInfo.processInfo.systemUptime - start) * 1000)
         }
+        // Diagnostics reports (#1006) on the 10,000-story library: every state writer plus the log and the redaction.
+        // The app snapshot and the zip that Help › Export Diagnostics adds are not part of this time.
+        let exportStart = ProcessInfo.processInfo.systemUptime
+        let exportLog = try DiagnosticsExport.logLines(since: .distantPast)
+        let exportSections = await DiagnosticsExport.sectionFiles(
+            db, app: DiagnosticsExport.AppSnapshot(feedURLs: settings.feedURLs), log: exportLog, now: clusterNow)
+        let exportFiles = DiagnosticsExport.files(
+            summary: "News diagnostics\n", sections: exportSections, log: exportLog, titles: archive.map(\.title))
+        record("diagnosticsExport", from: exportStart)
+        print(
+            "Diagnostics reports (no snapshot or zip): \(exportFiles.count) files in \(measurements["diagnosticsExport"]?.last ?? 0) ms"
+        )
         let coldStart = ProcessInfo.processInfo.systemUptime
         assertTrue(await store.refreshState(), "Baseline snapshot hydrates")
         record("snapshot_first_500_ms", from: coldStart)
@@ -2984,8 +3025,8 @@ struct NewsTests {
         task.cancel()
 
         // Redirect safety state is keyed per task object, not by task identifier across sessions (#808). The
-        // injected resolver keeps the allowed redirect off the network.
-        let keyed = SecureSessionDelegateCoordinator(resolver: { _ in .allowed(ips: ["93.184.216.34"]) })
+        // delegate resolves nothing (#945), so the allowed redirect stays off the network.
+        let keyed = SecureSessionDelegateCoordinator()
         let sessionConfig = URLSessionConfiguration.ephemeral
         let sessionA = URLSession(configuration: sessionConfig)
         let sessionB = URLSession(configuration: sessionConfig)
@@ -10894,9 +10935,13 @@ struct NewsTests {
         (lyonBlaze.places, lyonBlaze.titlePlaces) = (["@FR", "lyon"], ["@FR", "lyon"])
         (kyivBlaze.titleSpecificAnchors, lyonBlaze.titleSpecificAnchors) = ([], [])
         assertEqual(EventMatcher.assess(kyivBlaze, lyonBlaze).conflict, .places, "Disjoint countries are a places veto")
-        assertEqual(
-            EventMatcher.assess(kyivBlaze, lyonBlaze, policy: vetoMinimum).conflict, .headlinePlaces,
-            "Under the veto threshold the headline places conflict behind it is kept")
+        let maskedPlaces = EventMatcher.assess(kyivBlaze, lyonBlaze, policy: vetoMinimum)
+        assertTrue(
+            maskedPlaces.conflict == .places && maskedPlaces.masksAbsoluteConflict,
+            "Under the veto threshold the conflict stays places, so story links keep the veto, and is marked absolute")
+        assertTrue(
+            EventMatcher.conflictsBlock([pair, pair, pair, maskedPlaces], policy: vetoMinimum),
+            "A places veto with a headline conflict behind it is not outvoted")
         var weekday = diverging
         weekday.conflict = .weekday
         assertTrue(
@@ -13834,6 +13879,74 @@ struct NewsTests {
         await manager.waitForEventClustering()
         assertEqual(try await EventClusterer.run(in: db).processed, 0, "Refreshes leave nothing unmatched")
         manager.stopBackgroundWork()
+    }
+
+    /// #992: Check for Updates refreshes, waits for clustering and says whether reports joined the open story.
+    @MainActor
+    static func testStoryCheckForUpdates(fixtureRoot: URL) async throws {
+        print("  - Testing Check for Updates on a story's overview: one report joins, then none (#992)...")
+        final class Batches: @unchecked Sendable {
+            private let lock = NSLock()
+            private var results: [String: ([FeedArticle]?, FeedError?)] = [:]
+            func set(_ url: String, _ articles: [FeedArticle]?, _ error: FeedError? = nil) {
+                lock.lock()
+                results[url] = (articles, error)
+                lock.unlock()
+            }
+            func batch(_ urls: [String]) -> [FeedFetchResult] {
+                lock.lock()
+                defer { lock.unlock() }
+                return urls.map { ($0, results[$0]?.0 ?? [], results[$0]?.1, nil) }
+            }
+        }
+        let suite = testDefaultsSuite("test.story-check-for-updates")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let settings = AppSettings(defaults: defaults)
+        let feeds = ["https://8.8.8.8/one.xml", "https://8.8.4.4/two.xml"]
+        settings.feedURLs = feeds
+        settings.aiEnabled = false
+        settings.notificationsEnabled = false
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let control = EventControlSet.articles(now: Date(), root: fixtureRoot).filter {
+            $0.article.id.hasPrefix("quake")
+        }.map(\.article)
+        assertEqual(control.count, 3, "The quake controls are three reports of one event")
+        let batches = Batches()
+        batches.set(feeds[0], Array(control.prefix(2)))
+        let manager = FeedManager(
+            settings: settings, store: store, schedulesRefresh: false,
+            fetchBatch: { urls, _ in batches.batch(urls) }, notifyBatch: { _, _ in }, imageFinder: .unavailable,
+            allowsBackgroundWork: { true })
+        defer { manager.stopBackgroundWork() }
+        await manager.fetchFeedsAsync()
+        await manager.waitForEventClustering()
+        let open = control[0].id
+
+        batches.set(feeds[1], Array(control.dropFirst(2)))
+        let joined = await manager.checkForUpdates(storyOf: open)
+        assertEqual(joined, .checked(newReports: 1, failedFeeds: 0, deferredMatching: false), "One report joins")
+        assertEqual(joined.statusText, "1 new report joined this story", "The status line counts the new report")
+
+        let unchanged = await manager.checkForUpdates(storyOf: open)
+        assertEqual(unchanged.statusText, "No new reports from your sources", "A refresh that adds none says so")
+
+        batches.set(feeds[1], nil, .httpStatus(503))
+        let partial = await manager.checkForUpdates(storyOf: open)
+        assertEqual(
+            partial.statusText, "No new reports from your sources · 1 feed could not be checked",
+            "A feed that failed is named, never hidden")
+        assertEqual(
+            FeedManager.StoryUpdateResult.checked(newReports: 0, failedFeeds: 0, deferredMatching: true).statusText,
+            "No new reports yet. Some story matching waits while the Mac saves energy or cools down",
+            "Deferred matching claims nothing and names no single cause")
+        assertEqual(
+            FeedManager.StoryUpdateResult.checked(newReports: 3, failedFeeds: 2, deferredMatching: true).statusText,
+            "3 new reports joined this story · 2 feeds could not be checked", "Counts are plural")
+        assertEqual(
+            FeedManager.StoryUpdateResult.refused("The library is read-only.").statusText,
+            "Refresh is off. The library is read-only.", "A refused refresh says why")
     }
 
     static func testDockBadgeCount() {
@@ -19984,6 +20097,264 @@ struct NewsTests {
             "A non-POSIX waiting error is waited out")
     }
 
+    static func testLookupFailsClosedAcrossFamilies() {
+        print("  - Testing the lookup: a blocked address in the slower family still refuses the host (#945)...")
+        let v4 = Int32(AF_INET)
+        let v6 = Int32(AF_INET6)
+        let noRecord = DNSServiceErrorType(kDNSServiceErr_NoSuchRecord)
+        // The first family ends with a public address; the host is not allowed until the other family has answered,
+        // so a blocked address arriving later, after any grace a stagger would have given, still fails it closed.
+        var late = DNSAnswer()
+        assertEqual(
+            late.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"), nil,
+            "One family's end does not answer while the other is still owed")
+        assertEqual(
+            late.received(family: v6, moreComing: false, error: 0, blocked: "Private address", address: nil),
+            .blocked(reason: "Private address"), "A blocked address after the first family ended fails the host closed")
+        // One batch carrying both families answers when its flag clears, in arrival order.
+        var batch = DNSAnswer()
+        assertEqual(
+            batch.received(family: v6, moreComing: true, error: 0, blocked: nil, address: "2606:2800:21f:cb07::1"), nil,
+            "More coming keeps the batch open")
+        assertEqual(
+            batch.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"),
+            .allowed(ips: ["2606:2800:21f:cb07::1", "93.184.216.34"]), "Both families in one batch answer at its end")
+        // A family without records ends at once; the host answers when the other has ended too.
+        var v4Only = DNSAnswer()
+        assertEqual(
+            v4Only.received(family: v6, moreComing: false, error: noRecord, blocked: nil, address: nil), nil,
+            "No IPv6 record alone does not answer")
+        assertEqual(
+            v4Only.received(family: v4, moreComing: false, error: 0, blocked: nil, address: "93.184.216.34"),
+            .allowed(ips: ["93.184.216.34"]), "The host answers once both families ended")
+        var none = DNSAnswer()
+        _ = none.received(family: v6, moreComing: true, error: noRecord, blocked: nil, address: nil)
+        assertEqual(
+            none.received(family: v4, moreComing: false, error: noRecord, blocked: nil, address: nil),
+            .unresolvable(reason: "No valid addresses resolved"), "No record in either family is unresolvable")
+    }
+
+    static func testResolverLifecycle() async {
+        print("  - Testing the resolver: bounded lookups, prompt cancellation, no worker to exhaust (#945)...")
+        let hang: ProxyResolver.Lookup = { _ in
+            try? await Task.sleep(for: .seconds(600))
+            return .unresolvable(reason: "Cancelled")
+        }
+        // A resolver that never answers ends inside the deadline.
+        let started = ContinuousClock.now
+        let timedOut = await ProxyResolver(lookup: hang, deadline: .milliseconds(200)).resolve("slow.invalid")
+        assertEqual(timedOut, .unresolvable(reason: "Timed out"), "An unanswered lookup ends at the deadline")
+        assertTrue(ContinuousClock.now - started < .seconds(5), "The deadline is the bound, not the system's")
+        // Cancelling the caller resumes it at once and leaves no pending work behind. The lookup signals that it is
+        // in flight, so the cancellation reaches a started lookup, not one still queued.
+        let lookupStarted = SocketObservation()
+        let resolver = ProxyResolver(
+            lookup: { host in
+                lookupStarted.recordText("started")
+                return await hang(host)
+            }, deadline: .seconds(600))
+        let cancelled = Task { await resolver.resolve("slow.invalid") }
+        await eventually("The lookup is in flight before it is cancelled") { lookupStarted.count == 1 }
+        let cancelledAt = ContinuousClock.now
+        cancelled.cancel()
+        assertEqual(await cancelled.value, .unresolvable(reason: "Cancelled"), "A cancelled lookup says so")
+        assertTrue(ContinuousClock.now - cancelledAt < .seconds(5), "Cancellation resumes the caller at once")
+        // Hung lookups do not occupy anything other lookups wait for.
+        let mixed = ProxyResolver(
+            lookup: { host in
+                if host.hasPrefix("hang") { return await hang(host) }
+                return .allowed(ips: ["93.184.216.34"])
+            }, deadline: .seconds(600))
+        let hung = (0..<12).map { index in Task { await mixed.resolve("hang-\(index).invalid") } }
+        let quick = await mixed.resolve("quick.invalid")
+        assertEqual(quick, .allowed(ips: ["93.184.216.34"]), "A lookup behind twelve hung ones still resolves")
+        for task in hung { task.cancel() }
+        for task in hung { _ = await task.value }
+        // The production path answers names and literals the hostname guard decides without any DNS.
+        let production = ProxyResolver(deadline: .seconds(600))
+        for host in ["localhost", "127.0.0.1", "printer.local", "intranet", "[::1]"] {
+            if case .blocked = await production.resolve(host) { continue }
+            assertTrue(false, "\(host) is refused by the hostname guard before DNS")
+        }
+        assertEqual(
+            await production.resolve("93.184.216.34"), .allowed(ips: ["93.184.216.34"]),
+            "A public literal is its own answer")
+        if ProcessInfo.processInfo.environment["NEWS_LIVE_READER_CHECK"] == "1" {
+            if case .allowed(let ips) = await production.resolve("example.com") {
+                assertTrue(!ips.isEmpty, "The system lookup answers a public name with its addresses")
+            } else {
+                assertTrue(false, "The system lookup resolves a public name")
+            }
+            if case .blocked = await production.resolve("localtest.me") {
+            } else {
+                assertTrue(false, "A name answering with a private address is refused by the system lookup")
+            }
+        }
+        assertEqual(
+            NetworkBoundaryProxy.interleaved(["2606:4700::1111", "2606:4700::1001", "1.1.1.1", "1.0.0.1"]),
+            ["2606:4700::1111", "1.1.1.1", "2606:4700::1001", "1.0.0.1"], "Address families take turns")
+        assertEqual(
+            NetworkBoundaryProxy.interleaved(["1.1.1.1", "2606:4700::1111"]), ["1.1.1.1", "2606:4700::1111"],
+            "The first answer's family leads")
+    }
+
+    /// A redirect does no DNS on the session's serial delegate queue (#945): with a resolver that hangs, redirects
+    /// for two tasks still complete at once, and the resolver is never consulted.
+    static func testRedirectDelegateDoesNoDNS() async {
+        print("  - Testing that redirects never wait on a slow resolver on the delegate queue (#945)...")
+        let lookups = SocketObservation()
+        let client = SecureHTTPClient(
+            configuration: .ephemeral,
+            resolver: { host in
+                lookups.recordText(host)
+                _ = DispatchSemaphore(value: 0).wait(timeout: .now() + 600)
+                return .unresolvable(reason: "Timed out")
+            })
+        let coordinator = client.delegateCoordinator
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let first = session.dataTask(with: URL(string: "https://example.com/first")!)
+        let started = ContinuousClock.now
+        let followed = await redirect(coordinator, session, first, to: "https://slow.invalid/next")
+        assertEqual(followed?.url?.absoluteString, "https://slow.invalid/next", "The redirect is followed")
+        assertTrue(ContinuousClock.now - started < .seconds(1), "The redirect completes without waiting on DNS")
+        let tasks = ["a", "b"].map { session.dataTask(with: URL(string: "https://example.com/\($0)")!) }
+        let concurrentStart = ContinuousClock.now
+        let results = await withTaskGroup(of: String?.self) { group in
+            for (index, task) in tasks.enumerated() {
+                group.addTask {
+                    await redirect(coordinator, session, task, to: "https://slow.invalid/\(index)")?.url?.absoluteString
+                }
+            }
+            return await group.reduce(into: []) { $0.append($1) }
+        }
+        assertEqual(
+            Set(results.compactMap { $0 }), ["https://slow.invalid/0", "https://slow.invalid/1"],
+            "Both tasks' redirects are followed")
+        assertTrue(
+            ContinuousClock.now - concurrentStart < .seconds(1), "Neither task's callback waits behind the other's")
+        assertEqual(lookups.count, 0, "The redirect path never reaches the resolver")
+        for task in [first] + tasks { task.cancel() }
+    }
+
+    static func redirect(
+        _ coordinator: SecureSessionDelegateCoordinator, _ session: URLSession, _ task: URLSessionTask,
+        to target: String
+    ) async -> URLRequest? {
+        let response = HTTPURLResponse(
+            url: task.originalRequest!.url!, statusCode: 302, httpVersion: "HTTP/1.1",
+            headerFields: ["Location": target])!
+        return await withCheckedContinuation { continuation in
+            coordinator.urlSession(
+                session, task: task, willPerformHTTPRedirection: response,
+                newRequest: URLRequest(url: URL(string: target)!)
+            ) { continuation.resume(returning: $0) }
+        }
+    }
+
+    /// A first address that never connects (a broken IPv6 route) falls back to the second well inside the
+    /// handshake timeout (#945).
+    @MainActor
+    static func testGatewayAddressFallback() async throws {
+        print("  - Testing the gateway's address fallback: a dead first address yields to the second (#945)...")
+        // The dead address connects through a SOCKS proxy that accepts and never answers, so the attempt stays
+        // in preparation the way an unanswered SYN does.
+        let silent = try NWListener(using: .tcp, on: .any)
+        let silentQueue = DispatchQueue(label: "test.fallback.silent")
+        let held = SocketObservation()
+        let heldClosed = SocketObservation()
+        silent.newConnectionHandler = { connection in
+            held.recordText("held")
+            connection.start(queue: silentQueue)
+            recordClose(connection, closed: heldClosed)
+        }
+        let upstream = try NWListener(using: .tcp, on: .any)
+        let upstreamQueue = DispatchQueue(label: "test.fallback.upstream")
+        upstream.newConnectionHandler = { connection in
+            connection.start(queue: upstreamQueue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { data, _, _, _ in
+                connection.send(content: data, completion: .contentProcessed { _ in })
+            }
+        }
+        for listener in [silent, upstream] {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let once = SocketObservation()
+                listener.stateUpdateHandler = { state in
+                    if case .ready = state, once.claim() { continuation.resume() }
+                    if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
+                }
+                listener.start(queue: listener === silent ? silentQueue : upstreamQueue)
+            }
+        }
+        defer {
+            silent.cancel()
+            upstream.cancel()
+        }
+        let observed = SocketObservation()
+        let silentPort = silent.port!
+        let upstreamPort = upstream.port!
+        @Sendable func silentConnection(_ host: NWEndpoint.Host, _ port: NWEndpoint.Port) -> NWConnection {
+            let parameters = NWParameters.tcp
+            let context = NWParameters.PrivacyContext(description: "test.fallback.silent")
+            context.proxyConfigurations = [
+                ProxyConfiguration(socksv5Proxy: .hostPort(host: "127.0.0.1", port: silentPort))
+            ]
+            parameters.setPrivacyContext(context)
+            return NWConnection(host: host, port: port, using: parameters)
+        }
+        let proxy = NetworkBoundaryProxy(
+            resolver: { _ in .allowed(ips: ["2606:4700::1111", "93.184.216.34"]) },
+            connector: { host, port in
+                observed.record(host)
+                if case .ipv6 = host { return silentConnection(host, port) }
+                return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
+            })
+        let started = ContinuousClock.now
+        let (client, reply) = try await socksConnect(proxy, host: "dual.invalid")
+        let elapsed = ContinuousClock.now - started
+        assertEqual(reply[1], 0, "The second address connects while the first is still waiting")
+        assertTrue(elapsed < .seconds(5), "The fallback takes about a quarter second, not the handshake timeout")
+        assertEqual(
+            observed.hosts, ["2606:4700::1111", "93.184.216.34"], "IPv6 was tried first, IPv4 after the delay")
+        assertEqual(held.count, 1, "The dead attempt reached the silent proxy exactly once")
+        try await socketSend(client, Data("fallback".utf8))
+        assertEqual(try await socketRead(client, count: 8), Data("fallback".utf8), "The tunnel relays over the winner")
+        // Before the client closes: only the winner's selection, not the tunnel's shutdown, may close the loser.
+        await eventually("The losing attempt is cancelled once the winner connects") { heldClosed.count == 1 }
+        client.cancel()
+        await proxy.stop()
+
+        // Three stalled attempts fill every slot; the fourth address still starts a stagger later, retiring the
+        // oldest, instead of waiting for the handshake timeout.
+        let tried = SocketObservation()
+        let crowded = NetworkBoundaryProxy(
+            resolver: { _ in .allowed(ips: ["93.184.216.1", "93.184.216.2", "93.184.216.3", "93.184.216.4"]) },
+            connector: { host, port in
+                tried.record(host)
+                guard String(describing: host) == "93.184.216.4" else { return silentConnection(host, port) }
+                return NWConnection(host: "127.0.0.1", port: upstreamPort, using: .tcp)
+            })
+        let crowdedStart = ContinuousClock.now
+        let (crowdedClient, crowdedReply) = try await socksConnect(crowded, host: "crowded.invalid")
+        assertEqual(crowdedReply[1], 0, "The fourth address connects while three attempts stall")
+        assertTrue(ContinuousClock.now - crowdedStart < .seconds(5), "Stalled attempts do not hold the fourth address")
+        assertEqual(tried.hosts.count, 4, "Each address was tried once")
+        crowdedClient.cancel()
+        await crowded.stop()
+    }
+
+    /// Reads until the peer closes, then records the close: EOF or an error both mean the attempt was torn down.
+    static func recordClose(_ connection: NWConnection, closed: SocketObservation) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 32768) { _, _, eof, error in
+            if eof || error != nil {
+                closed.recordText("closed")
+                connection.cancel()
+            } else {
+                recordClose(connection, closed: closed)
+            }
+        }
+    }
+
     @MainActor
     static func testTransportCancellation() async throws {
         print("  - Testing refresh shutdown over real HTTP/SOCKS sockets...")
@@ -22581,6 +22952,51 @@ struct NewsTests {
         } catch {
             assertTrue(false, "Notification delivery storage failed: \(error)")
         }
+
+        // Settings › Notifications › Send Test Notification (#926): a random story with a photo, and a status line
+        // that names the reason nothing showed.
+        let plain = FeedArticle(
+            title: "No photo", link: "https://example.com/plain", guid: "sample-plain", description: "Summary",
+            pubDate: Date(), source: "Publisher")
+        let photo = FeedArticle(
+            title: "Photo", link: "https://example.com/photo", guid: "sample-photo", description: "Summary",
+            pubDate: Date(), source: "Publisher", imageUrl: "https://example.com/photo.jpg")
+        var generator = SystemRandomNumberGenerator()
+        for _ in 0..<10 {
+            assertEqual(
+                NotificationService.sampleStory(from: [plain, photo, plain], using: &generator)?.id, photo.id,
+                "The test banner prefers a story with a photo")
+        }
+        assertEqual(
+            NotificationService.sampleStory(from: [plain], using: &generator)?.id, plain.id,
+            "Without any photo, any story serves as the test banner")
+        assertTrue(NotificationService.sampleStory(from: []) == nil, "No stories, no test banner")
+        func status(
+            _ outcome: NotificationService.PostOutcome, authorization: UNAuthorizationStatus = .authorized,
+            alert: UNNotificationSetting = .enabled, style: UNAlertStyle = .banner,
+            previews: UNShowPreviewsSetting = .always
+        ) -> String {
+            NotificationService.sampleStatus(
+                outcome, authorization: authorization, alert: alert, style: style, previews: previews)
+        }
+        assertTrue(status(.halted).hasPrefix("Not sent:"), "A halted test names the mode setting")
+        assertTrue(
+            status(.failed(domain: UNErrorDomain, code: UNError.Code.notificationsNotAllowed.rawValue))
+                .contains("not allowed"), "A refused post names the permission")
+        assertTrue(
+            status(.failed(domain: "Other", code: 7)).contains("Other 7"), "Any other refusal shows domain and code")
+        assertTrue(
+            status(.posted, authorization: .denied).contains("turned off"), "Denied permission is named after a post")
+        assertTrue(
+            status(.posted, authorization: .notDetermined).contains("not asked"),
+            "Permission not yet asked is named after a post")
+        assertTrue(status(.posted, style: .none).contains("None"), "Alert style None is named")
+        assertTrue(status(.posted, alert: .disabled).contains("alerts for News are off"), "Alerts off is named")
+        assertTrue(status(.posted, previews: .never).contains("story hidden"), "Hidden previews are named")
+        assertTrue(
+            status(.posted, style: .alert, previews: .never).contains("story hidden"),
+            "Hidden previews are named for the Alerts style too")
+        assertTrue(status(.posted).hasPrefix("Sent."), "A plain success says so")
     }
 
     /// #790: a banner for a report outside any event records the report itself. When another outlet's report later
@@ -23999,18 +24415,286 @@ struct NewsTests {
             names.contains("News Diagnostics/summary.txt") && names.contains("News Diagnostics/log.txt"),
             "The zip holds the summary and the log: \(names)")
 
-        // This process's own entries are readable from the unified log, as the app's are.
+        // This process's own entries are readable from the unified log, as the app's are; private values stay redacted.
         let marker = "diagnostics-check-\(UUID().uuidString)"
-        NewsSignposts.launchLog.notice("\(marker, privacy: .public)")
+        let secret = "https://feeds.example/private?token=\(UUID().uuidString)"
+        NewsSignposts.launchLog.notice("\(marker, privacy: .public) \(secret)")
         // The unified log may store the entry a moment later; poll briefly instead of reading once.
         let deadline = ContinuousClock.now + .seconds(5)
         var found = false
         while !found && ContinuousClock.now < deadline {
             let own = try DiagnosticsExport.currentLaunchLog()
-            found = own.contains { $0.message == marker && $0.category == "Launch" }
+            found = own.contains { $0.message == "\(marker) <private>" && $0.category == "Launch" }
             if !found { try await Task.sleep(for: .milliseconds(100)) }
         }
         assertTrue(found, "The export reads this launch's log")
+    }
+
+    @MainActor
+    static func testLogWindowModel() async {
+        print("  - Testing the development Log window's filters and gate (#1005)...")
+        assertTrue(LogWindowModel.isAvailable(bundleIdentifier: "com.marspater.news.dev"), "make run shows the Log")
+        assertTrue(!LogWindowModel.isAvailable(bundleIdentifier: "com.marspater.news"), "A release build has no Log")
+        assertTrue(!LogWindowModel.isAvailable(bundleIdentifier: nil), "No bundle id, no Log")
+        let start = Date(timeIntervalSince1970: 1_790_000_000)
+        func line(_ offset: TimeInterval, _ category: String, _ level: String, _ message: String)
+            -> DiagnosticsExport.LogLine
+        {
+            DiagnosticsExport.LogLine(
+                date: start.addingTimeInterval(offset), category: category, level: level, message: message)
+        }
+        let model = LogWindowModel()
+        model.follows = false
+        model.clear()
+        assertTrue(model.follows, "Clear follows new lines again: an empty view has nothing to scroll back from")
+        model.append([
+            line(0, "Feeds", "Info", "Fetched 12 items"), line(1, "Database", "Error", "Integrity check failed"),
+            line(2, "Feeds", "Error", "Fetch failed for news.example.com"),
+        ])
+        // A reread from the last line's time returns it again; only newer lines are added.
+        model.append([
+            line(2, "Feeds", "Error", "Fetch failed for news.example.com"), line(3, "Launch", "Notice", "Ready"),
+        ])
+        assertEqual(model.entries.count, 4, "Rereads add only newer lines")
+        assertEqual(model.visible.map(\.line.message).last, "Ready", "Newest last")
+        assertEqual(model.categories, ["Database", "Feeds", "Launch"], "Categories come from the entries")
+        model.level = "Error"
+        assertEqual(model.visible.count, 2, "Level filter")
+        model.category = "Feeds"
+        assertEqual(model.visible.map(\.line.message), ["Fetch failed for news.example.com"], "Level and category")
+        model.level = nil
+        model.search = "FETCHED"
+        assertEqual(model.visible.map(\.line.message), ["Fetched 12 items"], "Search ignores case")
+        model.category = nil
+        model.search = "database"
+        assertEqual(model.visible.count, 1, "Search matches the category too")
+        assertTrue(model.visibleText.hasSuffix("Error Database: Integrity check failed"), "Copy holds visible lines")
+        model.search = ""
+        model.clear()
+        assertTrue(model.visible.isEmpty, "Clear hides what was shown")
+        model.append([line(1, "Feeds", "Info", "Old"), line(4, "Feeds", "Info", "After clear")])
+        assertEqual(model.visible.map(\.line.message), ["After clear"], "Lines shown before Clear stay hidden")
+    }
+
+    /// A seeded in-memory library for the diagnostics writers (#1006): two stories, one matched by an older matcher.
+    static func diagnosticsLibrary() async throws -> DatabaseEngine {
+        let database = DatabaseEngine(path: ":memory:")
+        try await database.open()
+        let stories = (0..<2).map { index in
+            FeedArticle(
+                title: "Minister resigns over leaked budget memo \(index)",
+                link: "https://news.example.com/world/memo-\(index)", guid: "memo-\(index)", description: "Memo",
+                pubDate: Date(timeIntervalSince1970: 1_790_000_000 + Double(index)), source: "Example")
+        }
+        try await database.upsertArticles(stories)
+        try await database.markEventMatchProcessed([stories[0].id], matcherVersion: EventMatcher.version)
+        try await database.markEventMatchProcessed([stories[1].id], matcherVersion: EventMatcher.version - 1)
+        return database
+    }
+
+    static func testDiagnosticsLibrary() async throws {
+        print("  - Testing the diagnostics library writer (#1006)...")
+        let text = try await DiagnosticsExport.library(try await diagnosticsLibrary())
+        assertTrue(
+            text.contains("Schema version: \(DatabaseEngine.schemaVersion)"), "Library names its schema: \(text)")
+        assertTrue(text.contains("Integrity check: ok"), "Library runs the integrity check")
+        assertTrue(text.contains("\narticles: 2\n"), "Library counts rows per table")
+        assertTrue(text.contains("Oldest story: 2026-09-21T14:13:20Z"), "Library names the oldest story's date")
+        assertTrue(!text.contains("Minister"), "Library carries no story text")
+    }
+
+    static func testDiagnosticsFeeds() async {
+        print("  - Testing the diagnostics feeds writer (#1006)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let url = "https://feeds.example.org/private/world.xml?token=1"
+        var state = FeedFetchState(failures: 2)
+        state.validators = FeedValidators(etag: "\"abc\"", lastModified: nil)
+        state.retryAt = now.addingTimeInterval(600)
+        state.itemCount = 12
+        state.fullTextItems = 3
+        let text = DiagnosticsExport.feeds(
+            feedURLs: [url, "https://other.example/rss"], states: [url: state],
+            statuses: [url: DiagnosticsExport.failureKind(.httpStatus(503))], now: now)
+        assertTrue(
+            text.contains("1. feeds.example.org: status httpStatus 503, last fetch never, failures 2"),
+            "Feeds list status and failures by host: \(text)")
+        assertTrue(text.contains("validators ETag, items 12, full text 3 of 12"), "Feeds list validators and items")
+        assertTrue(text.contains("2. other.example: status idle"), "Every subscription is listed")
+        assertTrue(!text.contains("/private/") && !text.contains("token"), "Feeds keep only the host")
+        assertTrue(
+            DiagnosticsExport.feeds(feedURLs: [url], states: nil, statuses: [:], now: now)
+                .contains("1. feeds.example.org: status idle, fetch state unreadable"),
+            "An unreadable library is named, not reported as empty states")
+        assertEqual(
+            DiagnosticsExport.failureKind(.network("https://x.example/a failed")), "network",
+            "A failure kind carries no payload")
+    }
+
+    static func testDiagnosticsClustering() async throws {
+        print("  - Testing the diagnostics clustering writer (#1006)...")
+        var report = EventClusteringReport()
+        report.processed = 4
+        report.deferred = 1
+        let pass = FeedManager.ClusteringPass(
+            report: report, seconds: 0.25, finishedAt: Date(timeIntervalSince1970: 1_790_000_000))
+        let text = try await DiagnosticsExport.clustering(
+            try await diagnosticsLibrary(), lastPass: pass, embedderAvailable: true, pairModelAvailable: false)
+        assertTrue(text.contains("Matcher version: \(EventMatcher.version)"), "Clustering names the matcher: \(text)")
+        assertTrue(text.contains("older matcher): 1"), "Clustering counts stories pending a match")
+        assertTrue(text.contains("version \(SentenceEmbedder.modelVersion), available"), "Embedder state")
+        assertTrue(
+            text.contains("Pair model: matcher version \(EventMatcher.version), unavailable"), "Pair model state")
+        assertTrue(text.contains("0.25 s, processed 4") && text.contains("deferred 1"), "The last pass and deferrals")
+    }
+
+    static func testDiagnosticsIntelligence() async throws {
+        print("  - Testing the diagnostics intelligence writer (#1006)...")
+        let overviews = OverviewGenerationCoordinator.Counts(
+            inFlight: 1, extractions: 2, failedExtractions: 3, cached: 4)
+        let text = try await DiagnosticsExport.intelligence(
+            try await diagnosticsLibrary(), foundationModels: "available", queue: ["queued": 5, "running": 1],
+            overviews: overviews)
+        assertTrue(text.contains("Foundation Models: available"), "Intelligence names model availability: \(text)")
+        assertTrue(text.contains("Enrichment queue: queued 5, running 1"), "The queue by state")
+        assertTrue(
+            text.contains(#/Enrichment rows: 2, enriched \d+, with a summary \d+/#), "Stored enrichment counts: \(text)"
+        )
+        assertTrue(
+            text.contains("in flight: 1, page fetches running 2, failed this launch 3, held in memory 4"),
+            "Overview work in flight")
+        let counts = await EnrichmentQueue().stateCounts()
+        assertTrue(counts.isEmpty, "A new queue holds nothing")
+    }
+
+    static func testDiagnosticsNotifications() async throws {
+        print("  - Testing the diagnostics notifications writer (#1006)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let database = try await diagnosticsLibrary()
+        let clock = now.timeIntervalSince1970
+        try await database.eventRows(
+            "INSERT INTO notification_deliveries(lane, grouped, feed_url, story_count, delivered_at) VALUES (0, 0, NULL, 1, ?), (2, 1, NULL, 3, ?), (0, 0, NULL, 1, ?);",
+            [.real(clock - 60), .real(clock - 120), .real(clock - 2 * 86400)])
+        let log = [
+            DiagnosticsExport.LogLine(
+                date: now, category: "StoryBanner", level: "Notice", message: "posted <private> route=appBanner"),
+            DiagnosticsExport.LogLine(
+                date: now, category: "StoryBanner", level: "Notice",
+                message: "posted <private> route=notificationCenter"),
+            DiagnosticsExport.LogLine(
+                date: now, category: "NotificationService", level: "Error",
+                message: "Failed to schedule full notification '<private>': domain=UNErrorDomain code=1 Not allowed"),
+        ]
+        let text = try await DiagnosticsExport.notifications(
+            database, settings: ["Authorization: authorized"], log: log, now: now)
+        assertTrue(text.contains("Authorization: authorized"), "Notifications list the settings: \(text)")
+        assertTrue(text.contains("normal: 1, 1") && text.contains("priority, grouped: 1, 3"), "The last 24 h by lane")
+        assertTrue(
+            text.contains("appBanner: 1") && text.contains("notificationCenter: 1")
+                && text.contains("refused UNErrorDomain 1: 1"), "Routes and refusals")
+    }
+
+    static func testDiagnosticsImages() async throws {
+        print("  - Testing the diagnostics images writer (#1006)...")
+        let now = Date()
+        let database = try await diagnosticsLibrary()
+        let ids = try await database.eventRows("SELECT id FROM articles ORDER BY id;").compactMap { $0[0] }
+        try await database.recordStoryImage(ids[0], imageURL: "https://img.example/a.jpg", at: now)
+        try await database.recordStoryImage(ids[1], imageURL: nil, at: now)
+        var lookup = StoryCurator.Report()
+        lookup.imagesFound = 1
+        lookup.imagesChecked = 2
+        let text = try await DiagnosticsExport.images(database, lastLookup: lookup, now: now)
+        assertTrue(
+            text.contains("Lookup rows: 2, with an image 1, refused or without one 1, checked in the last 24 hours 2"),
+            "Images count the lookup table: \(text)")
+        assertTrue(text.contains("found 1, checked 2 of a budget of \(StoryCurator.imageBudget)"), "The last pass")
+        assertTrue(
+            text.contains("full size at most \(DecodedImageCache.fullCountLimit) images")
+                && text.contains("card size at most \(DecodedImageCache.cardCountLimit) images"),
+            "The decoded caches' limits")
+    }
+
+    static func testDiagnosticsNetwork() async {
+        print("  - Testing the diagnostics network writer (#1006)...")
+        let log = [
+            DiagnosticsExport.LogLine(
+                date: Date(), category: "NetworkBoundaryProxy", level: "Error",
+                message: "Upstream connect to port 443 refused: posix ECONNREFUSED"),
+            DiagnosticsExport.LogLine(
+                date: Date(), category: "NetworkBoundaryProxy", level: "Error",
+                message: "Upstream connect to port 443 refused: posix ECONNREFUSED"),
+        ]
+        let text = DiagnosticsExport.network(
+            gatewayPort: 50_123, resolverCancellations: 2,
+            feedStatuses: ["https://a.example/rss": "timeout", "https://b.example/rss": "timeout", "c": "idle"],
+            proxy: DiagnosticsExport.proxyLines(["HTTPSEnable": 1, "__SCOPED__": ["utun3": [:], "en0": [:]]]), log: log)
+        assertTrue(text.contains("listening on 127.0.0.1:50123"), "Network names the gateway: \(text)")
+        assertTrue(text.contains("cancelled before they answered 2"), "Resolver cancellations")
+        assertTrue(text.contains("timeout: 2"), "Feed failures by kind")
+        assertTrue(text.contains("refused posix ECONNREFUSED: 2"), "Upstream outcomes from the log")
+        assertTrue(text.contains("HTTPS proxy: on") && text.contains("VPN interfaces: utun3"), "Proxy and VPN state")
+        assertTrue(!text.contains("en0"), "Only tunnel interfaces are listed")
+    }
+
+    static func testDiagnosticsProcess() async {
+        print("  - Testing the diagnostics process writer (#1006)...")
+        let snapshot = DiagnosticsExport.processSnapshot(
+            displayScale: 2, reduceMotion: true, increaseContrast: false, voiceOver: false)
+        assertTrue(snapshot.footprintBytes ?? 0 > 0, "The process reads its memory footprint")
+        assertTrue(snapshot.launchedAt != nil, "The process reads its start time")
+        let text = DiagnosticsExport.process(snapshot, now: Date())
+        assertTrue(text.contains("Display scale: 2.0"), "Process names the display scale: \(text)")
+        assertTrue(text.contains("Reduce Motion: on, Increase Contrast: off, VoiceOver: off"), "Accessibility")
+        assertTrue(text.contains("Thermal state: ") && text.contains("Locale: "), "Energy and locale")
+    }
+
+    static func testDiagnosticsLogFiles() async {
+        print("  - Testing the diagnostics log files (#1006)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let log = [
+            DiagnosticsExport.LogLine(date: now, category: "Feeds", level: "Info", message: "one"),
+            DiagnosticsExport.LogLine(date: now, category: "Database", level: "Error", message: "two"),
+            DiagnosticsExport.LogLine(date: now, category: "Feeds", level: "Info", message: "three"),
+        ]
+        let files = DiagnosticsExport.logFiles(log)
+        assertEqual(files.keys.sorted(), ["log-Database.txt", "log-Feeds.txt", "log.txt"], "One file per category")
+        assertEqual(files["log-Feeds.txt"]?.components(separatedBy: "\n").count, 3, "A category file holds its lines")
+        assertEqual(files["log.txt"]?.components(separatedBy: "\n").count, 4, "The combined file holds every line")
+    }
+
+    static func testDiagnosticsSpotlightAndCaches() async {
+        print("  - Testing the diagnostics Spotlight and caches writer (#1006)...")
+        var app = DiagnosticsExport.AppSnapshot()
+        app.savedStories = 3
+        app.spotlightAvailable = true
+        app.urlCache = (memory: 1024, disk: 2048, memoryCapacity: 4096, diskCapacity: 8192)
+        let log = [
+            DiagnosticsExport.LogLine(
+                date: Date(timeIntervalSince1970: 1_790_000_000), category: "CacheManager", level: "Info",
+                message: "Cleared HTTP network cache.")
+        ]
+        let text = DiagnosticsExport.spotlightAndCaches(app, log: log)
+        assertTrue(text.contains("indexing available, saved stories to index 3"), "Spotlight state: \(text)")
+        assertTrue(text.contains("URL cache: memory 1 KB of 4 KB"), "URL cache use")
+        assertTrue(text.contains("2026-09-21T14:13:20Z Cleared HTTP network cache."), "Clear commands run")
+    }
+
+    static func testDiagnosticsSections() async throws {
+        print("  - Testing the diagnostics archive's file list (#1006)...")
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        let sections = await DiagnosticsExport.sectionFiles(
+            try await diagnosticsLibrary(), app: DiagnosticsExport.AppSnapshot(), log: [], now: now)
+        let files = DiagnosticsExport.files(summary: "News diagnostics\n", sections: sections, log: [], titles: [])
+        let summary = files["summary.txt"] ?? ""
+        for name in files.keys {
+            assertTrue(summary.contains("\n\(name)\n") || summary.hasSuffix("\n\(name)\n"), "summary.txt lists \(name)")
+        }
+        for name in [
+            "library.txt", "feeds.txt", "clustering.txt", "intelligence.txt", "notifications.txt", "images.txt",
+            "network.txt", "process.txt", "spotlight-and-caches.txt", "log.txt",
+        ] {
+            assertTrue(files[name] != nil, "The archive holds \(name)")
+        }
     }
 
     @MainActor
@@ -26845,6 +27529,27 @@ struct NewsTests {
         }
     }
 
+    /// #993: the sources of a highlight or perspective follow its sentence as linked runs inside one text.
+    static func testOverviewSourcesFollowTheSentence() {
+        print("  - Testing that overview sources follow the sentence as inline links (#993)...")
+        let text = EventOverviewReaderView.sourcedAttributedString(
+            "Routes are open.", sources: [(id: "c_1", label: "The Hindu"), (id: "c_2", label: "The Guardian")],
+            scale: 1, contrast: .standard)
+        let plain = String(text.characters)
+        assertTrue(plain.hasPrefix("Routes are open. "), "The sentence comes first, unchanged")
+        assertTrue(plain.contains("\u{00A0}The Hindu\u{00A0}"), "Each source is a padded run after the sentence")
+        assertTrue(
+            plain.range(of: "The Hindu")!.lowerBound < plain.range(of: "The Guardian")!.lowerBound,
+            "Sources keep citation order")
+        let links = text.runs.compactMap(\.link)
+        assertEqual(
+            links.map(\.absoluteString), ["news-citation://cite/c_1", "news-citation://cite/c_2"],
+            "Each source run links to its citation; the sentence itself is not a link")
+        assertTrue(text.runs.first?.link == nil, "The sentence run carries no link")
+        let bare = EventOverviewReaderView.sourcedAttributedString("Alone.", sources: [], scale: 1, contrast: .standard)
+        assertEqual(String(bare.characters), "Alone.", "No source, no run")
+    }
+
     static func testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: String = "example.com") async throws
     {
         print("=== Testing Attributed Perspectives of Participants and Publishers (Issue #144) ===")
@@ -26940,6 +27645,99 @@ struct NewsTests {
                 quote: "seismic sensors recorded increased tremor activity throughout the caldera"
             ),
         ]
+
+        // #994: a statement runs to the end of its sentence, however long, and an honorific's full stop does not end
+        // it; the display leads a lower-case clause with its speaker and closes every statement.
+        let tribunal =
+            "Late on Friday (October 30, 2026), the Constitutional Tribunal said its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court."
+        let tribunalPassage = EvidencePassage(id: "pass_994", articleID: "art_persp_1", text: tribunal, ordinal: 3)
+        let tribunalCitation = OverviewCitation(
+            id: "c_994", articleID: "art_persp_1", passageID: "pass_994",
+            passageFingerprint: tribunalPassage.fingerprint,
+            quote: tribunal)
+        let tribunalPerspectives = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: [tribunalPassage], articles: [article1], existingCitations: ["c_994": tribunalCitation])
+        assertEqual(tribunalPerspectives.count, 1, "The tribunal's statement is one perspective")
+        assertEqual(
+            tribunalPerspectives.first?.position,
+            "its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court",
+            "The statement runs past 200 characters to the end of its sentence, through the honorific")
+        // An exclamation or question mark ends an unquoted statement too; one inside a quoted phrase does not.
+        func statements(_ text: String) -> [String] {
+            let passage = EvidencePassage(id: "pass_994b", articleID: "art_persp_1", text: text, ordinal: 4)
+            let citation = OverviewCitation(
+                id: "c_994b", articleID: "art_persp_1", passageID: "pass_994b",
+                passageFingerprint: passage.fingerprint, quote: text)
+            return OverviewPerspectivesExtractor.extractPerspectives(
+                passages: [passage], articles: [article1], existingCitations: ["c_994b": citation]
+            ).map(\.position)
+        }
+        let atLimit = "the council " + String(repeating: "a", count: 388)
+        assertEqual(
+            statements("Mayor Elena Rostova said that \(atLimit). Officials disputed it."),
+            [atLimit], "A complete 400-character statement is retained")
+        for attribution in [
+            "Mayor Elena Rostova said that", "Mayor Elena Rostova said", "According to Mayor Elena Rostova,",
+        ] {
+            for dot in ["Mr.", "Dr.", "U.S.", "8.9"] {
+                let overlong = "the council consulted \(dot) " + String(repeating: "residents ", count: 45)
+                assertTrue(
+                    statements("\(attribution) \(overlong).").isEmpty,
+                    "An overlong statement cannot backtrack to a nonterminal dot: \(attribution), \(dot)")
+            }
+        }
+        assertEqual(
+            statements("Mayor Elena Rostova said that the council consulted Mr. Smith about the £8.9bn plan."),
+            ["the council consulted Mr. Smith about the £8.9bn plan"],
+            "Honorifics and decimals remain inside a valid statement")
+        for ending in [".", "!", "?", "\n", ""] {
+            assertEqual(
+                statements("Mayor Elena Rostova said that the evacuation routes are open again\(ending)"),
+                ["the evacuation routes are open again"], "Valid sentence and passage endings are preserved")
+        }
+        assertEqual(
+            statements("Mayor Elena Rostova said that the evacuation routes are open again! Officials disputed it."),
+            ["the evacuation routes are open again"], "An exclamation mark ends the statement")
+        assertEqual(
+            statements("Mayor Elena Rostova said that residents asked if the routes were open? Officials disputed it."),
+            ["residents asked if the routes were open"], "A question mark ends the statement")
+        assertEqual(
+            statements("Mayor Elena Rostova said that the council answered “Never!” and closed the session."),
+            ["the council answered “Never!” and closed the session"], "A quoted exclamation stays inside the statement")
+        assertTrue(
+            !statements("Mayor Elena Rostova said that demonstrators shouted “Stop.” Officials rejected the claim.")
+                .contains { $0.contains("Officials") }, "A quote that ends its sentence ends the statement")
+        assertEqual(
+            OverviewComposer.displayStatement(
+                participant: "Constitutional Tribunal", position: tribunalPerspectives.first?.position ?? ""),
+            "Constitutional Tribunal said its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court.",
+            "A lower-case clause is led by its speaker and closed with a full stop")
+        assertEqual(
+            OverviewComposer.displayStatement(
+                participant: "the officers",
+                position:
+                    "they have since taken more than 340 witness statements - including from Brand's former employers, his ex-colleagues and associates"
+            ),
+            "The officers said they have since taken more than 340 witness statements - including from Brand's former employers, his ex-colleagues and associates.",
+            "The speaker's first letter is capitalised")
+        assertEqual(
+            OverviewComposer.displayStatement(participant: "the mayor", position: "“we will rebuild the bridge”"),
+            "The mayor said “we will rebuild the bridge.”", "A quotation opening in lower case is led by its speaker")
+        assertEqual(
+            OverviewComposer.displayStatement(participant: "the mayor", position: "“we will rebuild the bridge,”"),
+            "The mayor said “we will rebuild the bridge.”", "A comma inside the closing quote becomes the full stop")
+        assertEqual(
+            OverviewComposer.displayStatement(
+                participant: "Presiding Judge Joel Bennathan",
+                position: "Brand would face a \"significant custodial term\""),
+            "Brand would face a \"significant custodial term.\"", "The full stop goes inside a closing quotation mark")
+        assertEqual(
+            OverviewComposer.displayStatement(
+                participant: "Mayor Elena Rostova", position: "The routes are open,"),
+            "The routes are open.", "A capitalised statement keeps its words and loses a trailing comma")
+        assertEqual(
+            OverviewComposer.displayStatement(participant: "A", position: "“We will win”"),
+            "“We will win.”", "A typographic quotation closes after the full stop")
 
         // 1. Extraction: extractPerspectives correctly extracts attributed positions
         let perspectives = OverviewPerspectivesExtractor.extractPerspectives(
@@ -27749,17 +28547,185 @@ struct NewsTests {
         assertFalse(sentimentEvidence.isEmpty, "OverviewEvidenceSections with sentiment is not empty")
     }
 
+    /// A loader whose completions wait in a queue until the test releases them, oldest first (#591).
+    @MainActor final class QueuedImageLoader {
+        private struct Waiting {
+            let id: UUID
+            let url: URL
+            let continuation: CheckedContinuation<CGImage, Error>
+        }
+        let honorsCancellation: Bool
+        private(set) var requests: [URL] = []
+        /// The pixel bound each request asked for, in request order.
+        private(set) var pixelBounds: [Int] = []
+        private var queue: [Waiting] = []
+        private let image: CGImage = {
+            CGContext(
+                data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 8,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                .makeImage()!
+        }()
+        var queued: Int { queue.count }
+
+        init(honorsCancellation: Bool = true) { self.honorsCancellation = honorsCancellation }
+
+        var loader: @Sendable (URL, Int) async throws -> CGImage {
+            { url, maxPixels in try await self.enqueue(url, maxPixels: maxPixels) }
+        }
+
+        private func enqueue(_ url: URL, maxPixels: Int) async throws -> CGImage {
+            requests.append(url)
+            pixelBounds.append(maxPixels)
+            let id = UUID()
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { continuation in
+                    queue.append(Waiting(id: id, url: url, continuation: continuation))
+                }
+            } onCancel: {
+                Task { @MainActor in self.cancel(id) }
+            }
+        }
+
+        private func cancel(_ id: UUID) {
+            guard honorsCancellation, let index = queue.firstIndex(where: { $0.id == id }) else { return }
+            queue.remove(at: index).continuation.resume(throwing: CancellationError())
+        }
+
+        /// Completes the `count` oldest waiting loads.
+        func release(_ count: Int) {
+            let released = queue.prefix(count)
+            queue.removeFirst(released.count)
+            for waiting in released { waiting.continuation.resume(returning: image) }
+        }
+
+        /// Waits until the loads that released ones lead to have reached the queue: no change across ten 1 ms polls.
+        func settle() async {
+            var last = (-1, -1)
+            var stable = 0
+            while stable < 10 {
+                try? await Task.sleep(for: .milliseconds(1))
+                let now = (requests.count, queue.count)
+                stable = now == last ? stable + 1 : 0
+                last = now
+            }
+        }
+    }
+
+    /// #591: scrolling 200 cards shows at most 5% placeholders at first paint when prefetch decodes each card's own
+    /// image ahead of it, and nothing else is fetched; a decode that finished is kept though its only waiter cancelled.
+    @MainActor static func testCardImagePrefetchFirstPaint() async {
+        print("  - Testing card image prefetch and placeholders at first paint...")
+        DecodedImageCache.clear()
+        defer {
+            DecodedImageCache.cardFirstPaints = nil
+            DecodedImageCache.clear()
+        }
+
+        // This loader ignores cancellation, so it finishes after the shared task was cancelled.
+        let stubborn = QueuedImageLoader(honorsCancellation: false)
+        let keptURL = URL(string: "https://cards.example/kept/\(UUID().uuidString).jpg")!
+        let waiter = Task { @MainActor in _ = try? await DecodedImageCache.load(keptURL, using: stubborn.loader) }
+        await eventually("The stubborn load is queued before its waiter cancels") { @MainActor in
+            stubborn.requests.count == 1 && stubborn.queued == 1
+        }
+        let shared = DecodedImageCache.sharedLoad(for: keptURL)
+        assertTrue(shared != nil, "The stubborn load is shared under its URL")
+        waiter.cancel()
+        // The last waiter's cancellation cancels the shared task on the main actor; release only after it has.
+        await eventually("The shared load is cancelled while its decode is still queued") { @MainActor in
+            shared?.task.isCancelled == true && stubborn.queued == 1
+        }
+        stubborn.release(1)
+        _ = await waiter.value
+        await stubborn.settle()
+        assertTrue(DecodedImageCache.cached(keptURL) != nil, "A finished decode is kept after its waiter cancelled")
+
+        // 200 cards: every fifth an event of three reports with an image each, every tenth without an image.
+        let now = Date()
+        var articles: [FeedArticle] = []
+        var events: [EventFeedSummary] = []
+        for index in 0..<200 {
+            let members = (0..<(index % 5 == 0 ? 3 : 1)).map { member in
+                FeedArticle(
+                    title: "Prefetch story \(index) report \(member)",
+                    link: "https://news.example/\(index)/\(member)", guid: "prefetch-\(index)-\(member)",
+                    description: "Summary", pubDate: now.addingTimeInterval(-Double(index * 10 + member)),
+                    source: "Publisher \(member)",
+                    imageUrl: index % 10 == 9 ? nil : "https://cards.example/\(index)/\(member).jpg")
+            }
+            articles += members
+            if members.count > 1 {
+                events.append(
+                    EventFeedSummary(
+                        eventID: "prefetch-event-\(index)", membershipVersion: 1, seenVersion: nil,
+                        members: members.map {
+                            EventFeedMember(
+                                articleID: $0.id, source: $0.source, title: $0.title, date: $0.pubDate,
+                                joinedVersion: 1, isRead: false, isSaved: false)
+                        }))
+            }
+        }
+        let entries = FeedSnapshot(articles: articles, events: events).entries(.events)
+        assertEqual(entries.count, 200, "The seeded list has 200 cards")
+        let cardURLs = Set(entries.compactMap(\.cardImageURL))
+        assertEqual(cardURLs.count, 180, "180 cards show an image of their own")
+
+        // Each card appears (ArticleRemoteImage.init asks the cache), moves the prefetch window, and two queued
+        // loads complete before the next card appears.
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else {
+            print("    skipped: Low Power Mode turns prefetch off")
+            return
+        }
+        let probe = QueuedImageLoader()
+        let prefetch = CardImagePrefetch()
+        DecodedImageCache.cardFirstPaints = (0, 0)
+        let initial = Task { @MainActor in
+            await CardImagePrefetch.first(
+                CardImagePrefetch.initialURLs(entries), leadAtFullSize: false, using: probe.loader)
+        }
+        await probe.settle()
+        for (index, entry) in entries.enumerated() {
+            if let url = entry.cardImageURL { _ = ArticleRemoteImage(url: url, size: .card) { _ in EmptyView() } }
+            prefetch.ahead(of: index, in: entries, using: probe.loader)
+            await probe.settle()
+            probe.release(2)
+            await probe.settle()
+        }
+        let counts = DecodedImageCache.cardFirstPaints ?? (0, 0)
+        assertEqual(counts.placeholders + counts.images, 180, "Every card with an image is counted once")
+        print("    card placeholders at first paint: \(counts.placeholders) of 180")
+        assertTrue(
+            Double(counts.placeholders) <= 0.05 * 180, "At most 5% of cards show a placeholder at first paint")
+        let others = Set(probe.requests).subtracting(cardURLs)
+        assertTrue(others.isEmpty, "Only the images cards show are fetched (\(others.count) others)")
+        assertTrue(
+            !probe.pixelBounds.isEmpty && probe.pixelBounds.allSatisfy { $0 == DecodedImageCache.Size.card.maxPixels },
+            "Without a lead, every card prefetch decodes at card size, never at the reader's bound")
+        assertEqual(stubborn.pixelBounds, [DecodedImageCache.Size.full.maxPixels], "A plain load decodes at full size")
+        prefetch.reset()
+        initial.cancel()
+        while probe.queued > 0 {
+            probe.release(probe.queued)
+            await probe.settle()
+        }
+        _ = await initial.value
+    }
+
     static func testMemoryLeakMitigationsAndErrorHandling() async throws {
         print("  - Testing Resource Leak Mitigations & Error Resilience...")
 
         // 1. DecodedImageCache bounds and clear
         await MainActor.run {
             DecodedImageCache.clear()
-            assertEqual(DecodedImageCache.images.countLimit, 500, "DecodedImageCache must bound max image count")
+            assertEqual(DecodedImageCache.images.countLimit, 24, "The full-size cache bounds its image count")
+            assertEqual(DecodedImageCache.cardImages.countLimit, 90, "The card cache bounds its image count")
+            assertEqual(
+                DecodedImageCache.images.totalCostLimit + DecodedImageCache.cardImages.totalCostLimit,
+                192 * 1024 * 1024, "Card and full-size caches together keep the 192 MB ceiling")
         }
 
         // Test that clear() cancels pending tasks and prevents insertion
-        let slowLoader: @Sendable (URL) async throws -> CGImage = { _ in
+        let slowLoader: @Sendable (URL, Int) async throws -> CGImage = { _, _ in
             try await Task.sleep(for: .milliseconds(500))
             let colorSpace = CGColorSpaceCreateDeviceRGB()
             let ctx = CGContext(
@@ -27792,8 +28758,8 @@ struct NewsTests {
             var cancelled: Int { lock.withLock { cancelledCount } }
             func recordStart() { lock.withLock { startedCount += 1 } }
             func recordCancel() { lock.withLock { cancelledCount += 1 } }
-            var loader: @Sendable (URL) async throws -> CGImage {
-                { [self] _ in
+            var loader: @Sendable (URL, Int) async throws -> CGImage {
+                { [self] _, _ in
                     recordStart()
                     do { try await Task.sleep(for: .seconds(30)) } catch {
                         recordCancel()

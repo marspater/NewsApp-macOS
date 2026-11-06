@@ -80,14 +80,14 @@ struct NativeUIQAChecks {
         testSecondaryWindowAndSheetChrome()
         await testReadingColumnBounds()
         await testUnscoredTensionWithHistory()
-        let forwardStart = ArticleListView.prefetchStart(visibleIndex: 100, currentStart: 0)
+        let forwardStart = CardImagePrefetch.windowStart(visibleIndex: 100, currentStart: 0)
         assertTrue(
             forwardStart > 0 && forwardStart <= 100 && forwardStart + 30 > 100,
             "Prefetch drops distant earlier cards and covers the visible card")
-        let backwardStart = ArticleListView.prefetchStart(visibleIndex: 10, currentStart: forwardStart)
+        let backwardStart = CardImagePrefetch.windowStart(visibleIndex: 10, currentStart: forwardStart)
         assertTrue(backwardStart <= 10 && backwardStart + 30 > 10, "Scrolling backward warms nearby images again")
         assertEqual(
-            ArticleListView.prefetchStart(visibleIndex: 12, currentStart: backwardStart), backwardStart,
+            CardImagePrefetch.windowStart(visibleIndex: 12, currentStart: backwardStart), backwardStart,
             "Cards already inside the window do not restart prefetch")
         assertEqual(
             ArticleListView.headerMaxWidth(isBriefing: true, gridLayout: false), AppLayout.briefingMaxWidth,
@@ -330,7 +330,7 @@ struct NativeUIQAChecks {
             ArticleRemoteImage(url: url) { phase in
                 let _ = rendered.append((url, phase.image != nil))
                 Text(phase.image == nil ? "Waiting" : "Ready")
-            }.environment(\.readerImageLoader) { url in await probe.load(url) }
+            }.environment(\.readerImageLoader) { url, _ in await probe.load(url) }
         }
         let host = NSHostingView(rootView: AnyView(fixture(first)))
         let window = NSWindow(
@@ -353,7 +353,7 @@ struct NativeUIQAChecks {
             "A newly mounted card renders its cached image")
         assertEqual(probe.requests.filter { $0 == first }.count, 1, "A cached mount performs no second load or decode")
         let warmup = Task {
-            await DecodedImageCache.prefetch([first, second], using: { url in await probe.load(url) })
+            await DecodedImageCache.prefetch([first, second], using: { url, _ in await probe.load(url) })
         }
         assertTrue(await waitUntil { probe.pending != nil }, "The next image starts loading before its card mounts")
         rendered.removeAll()
@@ -383,7 +383,7 @@ struct NativeUIQAChecks {
         func fixture() -> some View {
             ArticleRemoteImage(url: url) { phase in
                 Text(phase.image == nil ? "Waiting" : "Ready")
-            }.environment(\.readerImageLoader) { _ in
+            }.environment(\.readerImageLoader) { _, _ in
                 calls += 1
                 if calls == 1 {
                     throw URLError(.cancelled)
@@ -424,7 +424,7 @@ struct NativeUIQAChecks {
         let host = NSHostingView(
             rootView: EventOverviewReaderView(
                 overview: overview, memberArticles: [], onSelectArticle: { _ in }, onSelectCitation: { _, _ in }
-            ).environment(\.readerImageLoader) { url in await probe.load(url) })
+            ).environment(\.readerImageLoader) { url, _ in await probe.load(url) })
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 900),
             styleMask: [.titled], backing: .buffered, defer: false)
@@ -465,7 +465,7 @@ struct NativeUIQAChecks {
             }
             .frame(width: 300)
             .frame(maxHeight: .infinity, alignment: .top)
-            .environment(\.readerImageLoader) { _ in tall }
+            .environment(\.readerImageLoader) { _, _ in tall }
             .environmentObject(settings).environmentObject(ReadManager(articleStore: store))
             .environmentObject(SavedStoriesManager(articleStore: store)))
         let window = NSWindow(

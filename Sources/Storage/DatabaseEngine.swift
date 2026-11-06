@@ -31,7 +31,7 @@ actor DatabaseEngine {
         get { connection.handle }
         set { connection.handle = newValue }
     }
-    private let dbPath: String
+    let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var collectionOnlyFeedURLs: [String] = []
     /// The last library counts, valid while no write has happened since: `sqlite3_total_changes` moves on every write,
