@@ -49,9 +49,14 @@ struct FeedValidators: Equatable, Sendable {
 /// relaunch, a feed that a network change backed off from one that a server or a certificate did (#927).
 enum FeedFailureKind: String, CaseIterable, Sendable {
     case dns, noSuchHost, transport, timeout, tls, http, policy, parse, unknown
+    /// A VPN's or resolver's filter answered a sinkhole address, or a fake-IP tunnel answered for the name (#929).
+    case dnsFiltered, fakeIP
 
     /// The kinds that say something about the path to the publisher and nothing about the feed.
     static let connectivity: [FeedFailureKind] = [.dns, .transport, .timeout]
+    /// What a manual refresh lifts: connectivity, and a filtered or substituted answer the reader may have fixed by
+    /// changing the network. A whole batch of filtered answers is still recorded, so the kind reaches diagnostics.
+    static let liftedByManualRefresh: [FeedFailureKind] = connectivity + [.dnsFiltered, .fakeIP]
 
     var isConnectivity: Bool { Self.connectivity.contains(self) }
 }
@@ -71,6 +76,10 @@ struct FeedFetchState: Equatable, Sendable {
     var latestItemAt: Date?
     var itemCount = 0
     var fullTextItems = 0
+    /// When the last recorded failure happened and its cause (`FeedError.failureDetail`). Both outlast a later success
+    /// so an export can still show what happened; nil for a failure recorded before schema 35.
+    var lastFailureAt: Date?
+    var lastFailureDetail: String?
 }
 
 /// What one fresh response carried, for health reporting.
@@ -216,6 +225,8 @@ extension FeedError {
         case .malformedURL, .insecureScheme, .blockedPort, .blockedHost, .redirectBlocked, .dnsRebindingDetected,
             .responseTooLarge:
             return .policy
+        case .substitutedAnswer(_, .sinkhole): return .dnsFiltered
+        case .substitutedAnswer(_, .fakeIP): return .fakeIP
         case .tooManyRedirects, .httpStatus, .serverBusy: return .http
         case .unsupportedFormat, .parseFailed: return .parse
         case .network: return .transport
@@ -259,6 +270,23 @@ extension FeedError {
         default:
             self = .unclassified(message)
         }
+    }
+
+    /// A short cause for diagnostics: the kind, then the status, resolver outcome or `URLError` code when there is one.
+    /// Built from fixed words and numbers, so it never carries a URL, a host, an address or story text.
+    func failureDetail(urlErrorCode: Int? = nil) -> String {
+        var parts = [failureKind.rawValue]
+        switch self {
+        case .httpStatus(let status), .serverBusy(let status, _): parts.append("http \(status)")
+        case .dnsUnanswered(_, let reason):
+            let outcome = NetworkTimeline.outcomeClass(.unresolvable(reason: reason))
+            parts.append(outcome)
+        case .substitutedAnswer(_, let kind): parts.append(kind.rawValue)
+        case .blockedHost, .redirectBlocked, .dnsRebindingDetected: parts.append("blocked")
+        default: break
+        }
+        if let urlErrorCode { parts.append("URLError \(urlErrorCode)") }
+        return parts.joined(separator: ", ")
     }
 
     /// A feed skipped without a request because its wait has not ended.

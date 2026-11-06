@@ -142,7 +142,7 @@ struct SidebarView: View {
         }
         .overlay(
             RoundedRectangle(cornerRadius: AppRadius.control)
-                .stroke(isDropTargeted ? AppColor.accent : Color.clear, lineWidth: 1.5)
+                .stroke(isDropTargeted ? AppColor.accent : Color.clear, lineWidth: AppLayout.focusStroke)
                 .padding(AppSpacing.xxs)
                 .animation(reduceMotion ? nil : AppMotion.hover, value: isDropTargeted)
         )
@@ -270,7 +270,7 @@ struct SidebarView: View {
 
             TextField("Feed URL", text: $newFeedURL)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 280)
+                .frame(width: AppLayout.popoverWidth)
                 .onSubmit(addFromPopover)
 
             HStack {

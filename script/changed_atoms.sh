@@ -15,12 +15,12 @@ else
     else
         diff_args=(--cached)
     fi
-    deleted=$(git diff "${diff_args[@]}" --no-renames --name-only --diff-filter=D)
+    deleted=$(git -c core.quotePath=false diff "${diff_args[@]}" --no-renames --name-only --diff-filter=D)
     while IFS= read -r file; do
         [[ -z "$file" ]] && continue
         case "$file" in *.md | docs/*) ;; *) exec script/test_atoms.sh ;; esac
     done <<< "$deleted"
-    changed=$(git diff "${diff_args[@]}" --no-renames --name-only)
+    changed=$(git -c core.quotePath=false diff "${diff_args[@]}" --no-renames --name-only)
     if [[ "${diff_args[0]}" == HEAD ]]; then
         changed+=$'\n'"$(git -c core.quotePath=false ls-files --others --exclude-standard)"
     fi

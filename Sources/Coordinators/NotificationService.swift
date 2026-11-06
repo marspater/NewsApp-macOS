@@ -386,10 +386,15 @@ final class NotificationService: Sendable {
             var pending: [String: [(article: FeedArticle, score: Double)]] = [:]
             for (feed, articles) in delivery.starredPending { pending[feed] = await Self.scored(articles) }
             let plan = Self.plan(new: await Self.scored(newArticles), pending: pending, delivery: delivery)
+            guard !Task.isCancelled else { return }
             if !plan.queued.isEmpty { await delivery.queue(plan.queued) }
             for (index, banner) in plan.banners.enumerated() {
                 if index > 0 {
-                    try? await Task.sleep(for: spacing)
+                    do {
+                        try await Task.sleep(for: spacing)
+                    } catch {
+                        break  // A cancelled pass must not continue posting old banners.
+                    }
                     guard await delivery.continues() else { break }
                 }
                 guard !Task.isCancelled else { break }
@@ -567,12 +572,14 @@ final class NotificationService: Sendable {
             content.categoryIdentifier = NotificationActionIdentifier.category
             // No image request once the reader has left Full mode (PRIVACY.md): asked right before the download.
             guard await continues(), !Task.isCancelled else { return .halted }
-            if let imageUrl = FeedArticle.bestCardImage(in: [article]),
-                let attachment = await downloadNotificationAttachment(from: imageUrl)
-            {
+            // The lead, then the other candidates (#1010): a lead that decodes as a page is not the only photo.
+            for imageUrl in FeedArticle.attachmentImages(for: article).prefix(3) {
+                guard await continues(), !Task.isCancelled else { return .halted }
+                guard let attachment = await downloadNotificationAttachment(from: imageUrl) else { continue }
                 content.attachments = [attachment]
                 // The app-drawn banner loads the photo again through the reader's image cache.
                 content.userInfo["imageURL"] = imageUrl.absoluteString
+                break
             }
             identifier = sampleIdentifier ?? Self.notificationIdentifier(for: article)
         } else {

@@ -359,24 +359,33 @@ struct NewsTests {
 
     /// Tests that take longer than a whole shard; NEWS_TEST_SHARD=slow runs only these, in their own process.
     static let slowTests: Set<String> = ["testActiveWorkCancellation"]
+    /// The loopback socket tests. They share the machine's ephemeral ports and 4-tuples with every parallel process
+    /// and collided on CI (EADDRINUSE twice in one run, 6 November 2026; docs/audits/2026-11-06-socket-contention.md);
+    /// NEWS_TEST_SHARD=sockets runs only these, one after another in their own process, beside the other lanes.
+    static let socketTests: Set<String> = [
+        "testGatewayRejectionIsTransport", "testSocketNetworkBoundary", "testTransportCancellation",
+        "testGatewayAddressFallback",
+    ]
 
-    /// NEWS_TEST_SHARD="i/n" runs every n-th test from the i-th (0-based) that is not slow, "slow" the slow ones;
-    /// test.sh runs the shards as separate processes, so each test keeps the process-wide state it expects.
-    /// NEWS_TEST_TIMING=1 prints each duration.
+    /// NEWS_TEST_SHARD="i/n" runs every n-th test from the i-th (0-based) that is neither slow nor a socket test,
+    /// "slow" the slow ones and "sockets" the socket ones; test.sh runs the lanes as separate processes, so each test
+    /// keeps the process-wide state it expects. NEWS_TEST_TIMING=1 prints each duration.
     static func shardIncludes(_ index: Int, name: String) -> Bool {
         guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"] else { return true }
         if spec == "slow" { return slowTests.contains(name) }
+        if spec == "sockets" { return socketTests.contains(name) }
         let parts = spec.split(separator: "/").compactMap { Int($0) }
-        return !slowTests.contains(name) && index % parts[1] == parts[0]
+        return !slowTests.contains(name) && !socketTests.contains(name) && index % parts[1] == parts[0]
     }
 
     /// A malformed or out-of-range shard would run nothing and pass; it stops the process instead.
     static func validateShard() {
-        guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"], spec != "slow" else { return }
+        guard let spec = ProcessInfo.processInfo.environment["NEWS_TEST_SHARD"], spec != "slow", spec != "sockets"
+        else { return }
         let parts = spec.split(separator: "/", omittingEmptySubsequences: false).map { Int($0) }
         guard parts.count == 2, let shard = parts[0], let count = parts[1], count > 0, (0..<count).contains(shard)
         else {
-            print("❌ NEWS_TEST_SHARD must be \"slow\" or i/n with 0 <= i < n, not \"\(spec)\"")
+            print("❌ NEWS_TEST_SHARD must be \"slow\", \"sockets\" or i/n with 0 <= i < n, not \"\(spec)\"")
             exit(2)
         }
     }
@@ -5117,6 +5126,25 @@ struct NewsTests {
         assertEqual(
             FeedFailureKind.allCases.filter(\.isConnectivity), [.dns, .transport, .timeout],
             "Only an unanswered lookup, a lost path and a timeout count as connectivity")
+        assertEqual(
+            FeedFailureKind.liftedByManualRefresh, [.dns, .transport, .timeout, .dnsFiltered, .fakeIP],
+            "A manual refresh also lifts a filtered or fake-IP answer (#929)")
+        for (reason, kind) in [
+            ("IPv4 current network (0.0.0.0/8)", IPAddressValidator.AnswerSubstitution.sinkhole),
+            ("IPv6 unspecified address (::)", .sinkhole),
+            ("IPv4-mapped IPv6 (IPv4 current network (0.0.0.0/8))", .sinkhole),
+            ("IPv4 benchmarking network", .fakeIP),
+        ] {
+            assertEqual(IPAddressValidator.substitution(in: reason), kind, "\(reason) names its substitution")
+        }
+        for reason in [
+            "RFC 1918 private network (10.0.0.0/8)", "IPv6 loopback (::1)", "Multicast address (224.0.0.0/4)",
+        ] {
+            assertEqual(IPAddressValidator.substitution(in: reason), nil, "\(reason) is a plain block")
+        }
+        assertTrue(
+            !FeedError.substitutedAnswer(host: "x", kind: .sinkhole).isLocalRejection,
+            "A substituted answer is recorded, so diagnostics show it")
         let urlErrors: [(URLError.Code, FeedFailureKind)] = [
             (.timedOut, .timeout), (.cannotFindHost, .dns), (.dnsLookupFailed, .dns),
             (.badURL, .transport), (.notConnectedToInternet, .transport), (.networkConnectionLost, .transport),
@@ -5135,6 +5163,8 @@ struct NewsTests {
         let feedErrors: [(FeedError, FeedFailureKind)] = [
             (.malformedURL("x"), .policy), (.insecureScheme("http"), .policy), (.blockedPort(22), .policy),
             (.blockedHost(host: "x", reason: "y"), .policy),
+            (.substitutedAnswer(host: "x", kind: .sinkhole), .dnsFiltered),
+            (.substitutedAnswer(host: "x", kind: .fakeIP), .fakeIP),
             (.redirectBlocked(from: "a", to: "b", reason: "c"), .policy),
             (.dnsRebindingDetected(host: "x", ip: "y"), .policy), (.responseTooLarge(bytes: 2, maxAllowed: 1), .policy),
             (.tooManyRedirects(6), .http), (.httpStatus(500), .http), (.serverBusy(status: 429, retryAfter: 60), .http),
@@ -5175,6 +5205,45 @@ struct NewsTests {
             now: { clock.now }
         ).fetchAllFeeds(urls: [silent], state: db)
         assertEqual(try await db.feedFetchStates()[silent], nil, "A batch whose lookups go unanswered blames no feed")
+
+        // A fake-IP tunnel answers every name from 198.18.0.0/15 (#929): recorded with its own kind, never taken for
+        // offline, and lifted by a manual refresh once the reader has changed the network.
+        let tunnelled = "https://tunnel.example/feed.xml"
+        _ = await FeedFetcher(
+            client: SecureHTTPClient(
+                configuration: mockConfig, resolver: { _ in .blocked(reason: "IPv4 benchmarking network") }),
+            now: { clock.now }
+        ).fetchAllFeeds(urls: [tunnelled], state: db)
+        assertEqual(try await kind(tunnelled), .fakeIP, "A fake-IP answer is recorded as such")
+        assertTrue(
+            try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 > clock.now } == true,
+            "A fake-IP answer backs the feed off until the network changes")
+        try await db.clearConnectivityBackoff(at: clock.now)
+        assertTrue(
+            try await db.feedFetchStates()[tunnelled]?.retryAt.map { $0 <= clock.now } == true,
+            "A manual refresh lifts a fake-IP backoff")
+
+        // A blocked literal address involves no DNS answer, so it stays a plain block, never a filtered or fake-IP one.
+        for literal in ["198.18.0.1", "198.18.0.1.", "0.0.0.0", "[::]"] {
+            // No injected resolver: the system path guards literal addresses before any lookup.
+            let client = SecureHTTPClient(configuration: mockConfig)
+            do {
+                try await client.validateDestination(URL(string: "https://\(literal)/feed.xml")!)
+                assertTrue(false, "\(literal) is blocked")
+            } catch let error as FeedError {
+                if case .blockedHost = error {} else { assertTrue(false, "\(literal) is a plain block, got \(error)") }
+            }
+        }
+        // A name whose answer is a sinkhole is the substituted answer, and its text names no single address.
+        do {
+            try await SecureHTTPClient(
+                configuration: mockConfig, resolver: { _ in .blocked(reason: "IPv6 unspecified address (::)") }
+            ).validateDestination(URL(string: "https://filtered.example/feed.xml")!)
+            assertTrue(false, "A sinkhole answer is blocked")
+        } catch let error as FeedError {
+            assertEqual(error.failureKind, .dnsFiltered, "A sinkhole answer for a name is the filtered kind")
+            assertFalse(error.errorDescription?.contains("0.0.0.0") ?? true, "The text names no single address")
+        }
 
         // One feed of each kind, in one batch so the batch is not offline.
         let lost = "https://8.8.8.8/lost.xml"
@@ -5391,6 +5460,10 @@ struct NewsTests {
                 resolver: { _ in gatewayAnswer },
                 // Port 1 on loopback refuses at once: an upstream that cannot be reached.
                 connector: { _, _ in NWConnection(host: "127.0.0.1", port: 1, using: .tcp) })
+            assertTrue(NetworkBoundaryProxy.directParameters.preferNoProxies, "Upstream asks for no proxy (#929)")
+            assertTrue(NetworkBoundaryProxy.permitsUpstream(proxyConfigured: false), "A direct connection may relay")
+            assertTrue(!NetworkBoundaryProxy.permitsUpstream(proxyConfigured: true), "A proxied connection is refused")
+            assertTrue(!NetworkBoundaryProxy.permitsUpstream(proxyConfigured: nil), "A missing report is refused")
             let client = SecureHTTPClient(gateway: gateway, resolver: { _ in publicAddress })
             let result = await FeedFetcher(client: client).fetchSingleFeed(urlString: "https://example.com/feed.xml")
             await gateway.stop()
@@ -21994,8 +22067,51 @@ struct NewsTests {
             try await test()
         } catch let error where error is LoopbackTimeout || error as? NWError == .posix(.EADDRINUSE) {
             print("  ↻ Loopback transport error under load (\(error)); running the socket test once more")
-            try await test()
+            do { try await test() } catch {
+                // The second failure carries the error and the socket state, so a CI log can say what collided.
+                print("  socket state at the second failure (\(error)): \(loopbackSocketSummary())")
+                throw error
+            }
         }
+    }
+
+    /// TIME_WAIT counts (all, loopback rows, and the distinct loopback local ports inside the ephemeral range),
+    /// loopback LISTEN/ESTABLISHED counts and the ephemeral port range, from netstat and sysctl.
+    static func loopbackSocketSummary() -> String {
+        func run(_ path: String, _ arguments: [String]) -> String {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = arguments
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = FileHandle.nullDevice
+            guard (try? process.run()) != nil else { return "" }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            return String(decoding: data, as: UTF8.self)
+        }
+        let sockets = run("/usr/sbin/netstat", ["-an", "-p", "tcp"]).split(separator: "\n")
+        let timeWait = sockets.filter { $0.contains("TIME_WAIT") }.count
+        let loopback = sockets.filter { $0.contains("127.0.0.1") }
+        let loopbackTimeWait = loopback.filter { $0.contains("TIME_WAIT") }
+        let bounds = run("/usr/sbin/sysctl", ["-n", "net.inet.ip.portrange.first", "net.inet.ip.portrange.last"])
+            .split(separator: "\n").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        let ephemeral = bounds.count == 2 && bounds[0] <= bounds[1] ? bounds[0]...bounds[1] : 49152...65535
+        // netstat columns: Proto Recv-Q Send-Q Local-Address Foreign-Address State; the local port follows the last
+        // dot. Only ports inside the ephemeral range count towards exhaustion.
+        let localPorts = Set(
+            loopbackTimeWait.compactMap { line -> Int? in
+                let columns = line.split(separator: " ", omittingEmptySubsequences: true)
+                guard columns.count > 3, let port = columns[3].split(separator: ".").last.flatMap({ Int($0) }),
+                    ephemeral.contains(port)
+                else { return nil }
+                return port
+            })
+        let range = "\(ephemeral.lowerBound)-\(ephemeral.upperBound)"
+        return
+            "TIME_WAIT \(timeWait) (loopback \(loopbackTimeWait.count), \(localPorts.count) distinct ephemeral local ports), "
+            + "loopback LISTEN \(loopback.filter { $0.contains("LISTEN") }.count), "
+            + "loopback ESTABLISHED \(loopback.filter { $0.contains("ESTABLISHED") }.count), ephemeral ports \(range)"
     }
 
     static func testSocketNetworkBoundary() async throws {
