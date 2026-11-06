@@ -148,38 +148,43 @@ def database_summary(
         "sqlite_file_bytes": db_path.stat().st_size,
     }
 
+def git_directory(root: Path) -> Path:
+    """Return the Git directory of a checkout or linked worktree."""
+    marker = root / ".git"
+    if not marker.is_file():
+        return marker
+    pointer = marker.read_text(encoding="utf-8").strip()
+    if not pointer.startswith("gitdir: "):
+        raise RuntimeError("Invalid Git worktree marker")
+    return (marker.parent / pointer.removeprefix("gitdir: ")).resolve()
+
+def resolve_git_reference(git_dir: Path, reference: str) -> str:
+    """Read a symbolic reference from the common Git directory, loose before packed."""
+    if not reference.startswith("refs/") or ".." in Path(reference).parts:
+        raise RuntimeError("Invalid Git HEAD reference")
+    common_marker = git_dir / "commondir"
+    common = (
+        (git_dir / common_marker.read_text(encoding="utf-8").strip()).resolve()
+        if common_marker.exists() else git_dir
+    )
+    loose = common / reference
+    if loose.is_file():
+        return loose.read_text(encoding="utf-8").strip()
+    packed = common / "packed-refs"
+    matches = [
+        line.split(" ", 1)[0] for line in packed.read_text(encoding="utf-8").splitlines()
+        if line.endswith(" " + reference)
+    ] if packed.exists() else []
+    if len(matches) != 1:
+        raise RuntimeError("Cannot resolve Git HEAD")
+    return matches[0]
+
 def git_revision(root: Path | None = None) -> str:
     """Read this checkout's HEAD, including linked worktrees and packed references."""
-    marker = (root or Path(__file__).resolve().parents[2]) / ".git"
-    if marker.is_file():
-        pointer = marker.read_text(encoding="utf-8").strip()
-        if not pointer.startswith("gitdir: "):
-            raise RuntimeError("Invalid Git worktree marker")
-        git_dir = (marker.parent / pointer.removeprefix("gitdir: ")).resolve()
-    else:
-        git_dir = marker
+    git_dir = git_directory(root or Path(__file__).resolve().parents[2])
     head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
     if head.startswith("ref: "):
-        reference = head.removeprefix("ref: ")
-        if not reference.startswith("refs/") or ".." in Path(reference).parts:
-            raise RuntimeError("Invalid Git HEAD reference")
-        common_marker = git_dir / "commondir"
-        common = (
-            (git_dir / common_marker.read_text(encoding="utf-8").strip()).resolve()
-            if common_marker.exists() else git_dir
-        )
-        loose = common / reference
-        if loose.is_file():
-            head = loose.read_text(encoding="utf-8").strip()
-        else:
-            packed = common / "packed-refs"
-            matches = [
-                line.split(" ", 1)[0] for line in packed.read_text(encoding="utf-8").splitlines()
-                if line.endswith(" " + reference)
-            ] if packed.exists() else []
-            if len(matches) != 1:
-                raise RuntimeError("Cannot resolve Git HEAD")
-            head = matches[0]
+        head = resolve_git_reference(git_dir, head.removeprefix("ref: "))
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
         raise RuntimeError("Invalid Git revision")
     return head
