@@ -1284,6 +1284,22 @@ struct NewsTests {
         }
         store.refreshLoadedHook = nil
         assertTrue(store.articles.contains { $0.id == late.id }, "A follow-up refresh publishes the stored story")
+
+        // An older refresh that finishes after a newer one published does not replace it (a prune or any second caller).
+        let newest = FeedArticle(
+            title: "Newest story", link: "https://example.org/newest", guid: "newest", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_200), source: "Publisher")
+        var interleaved = false
+        store.refreshLoadedHook = {
+            guard !interleaved else { return }
+            interleaved = true
+            _ = try? await db.upsertArticles([newest])
+            await store.refreshState()
+        }
+        await store.refreshState()
+        store.refreshLoadedHook = nil
+        assertTrue(
+            store.articles.contains { $0.id == newest.id }, "An older snapshot does not replace a newer refresh")
         await db.close()
     }
 
