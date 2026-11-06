@@ -135,6 +135,59 @@ actor NetworkBoundaryProxy {
     }
 }
 
+/// What the gateway can time for a request (#929). TLS runs end to end inside the tunnel, so its handshake is not
+/// visible here: the first byte back after connecting stands in for it.
+enum GatewayStage: String, CaseIterable, Sendable {
+    case dns = "DNS wait"
+    case connect = "connect"
+    case firstByte = "first byte after connect"
+}
+
+/// Per-host stage times for the diagnostics export, in memory for this launch only. Reading hosts are not a thing to
+/// keep: past `capacity` hosts, further ones fold into one unnamed entry, and the export names subscriptions alone.
+final class GatewayTimings: Sendable {
+    struct Stage: Equatable, Sendable {
+        private(set) var count = 0
+        private(set) var total: TimeInterval = 0
+        private(set) var slowest: TimeInterval = 0
+        var mean: TimeInterval { count == 0 ? 0 : total / Double(count) }
+
+        mutating func add(_ seconds: TimeInterval) {
+            count += 1
+            total += seconds
+            slowest = max(slowest, seconds)
+        }
+
+        mutating func merge(_ other: Stage) {
+            count += other.count
+            total += other.total
+            slowest = max(slowest, other.slowest)
+        }
+    }
+    typealias HostTimes = [GatewayStage: Stage]
+
+    static let shared = GatewayTimings()
+    static let defaultCapacity = 256
+    /// The entry for hosts past the capacity; no host name is empty.
+    static let overflowHost = ""
+
+    private let hosts = OSAllocatedUnfairLock(initialState: [String: HostTimes]())
+    private let capacity: Int
+
+    init(capacity: Int = defaultCapacity) { self.capacity = capacity }
+
+    func record(_ stage: GatewayStage, seconds: TimeInterval, host: String) {
+        let name = host.lowercased()
+        let capacity = capacity
+        hosts.withLock { hosts in
+            let key = hosts[name] != nil || hosts.count < capacity ? name : Self.overflowHost
+            hosts[key, default: [:]][stage, default: Stage()].add(max(0, seconds))
+        }
+    }
+
+    func snapshot() -> [String: HostTimes] { hosts.withLock { $0 } }
+}
+
 /// Validated DNS answers, so a request's preflight and its gateway tunnel resolve a host once rather than twice (#929).
 /// Only `.allowed` answers are kept: a blocked or missing answer asks again every time, so a filter switched off is
 /// noticed at once, while one switched on can take up to `timeToLive` to show. Entries live in memory only.
@@ -514,6 +567,10 @@ private final class SOCKSTunnel: @unchecked Sendable {
     private var addresses: ArraySlice<String> = []
     private var port: UInt16 = 0
     private var nextAttempt: DispatchWorkItem?
+    /// The requested host and the marks its stage times are measured from.
+    private var timedHost = ""
+    private var connectStarted: TimeInterval?
+    private var connectedAt: TimeInterval?
     /// RFC 8305: the next address starts when the one before has not connected within this delay.
     static let attemptDelay: DispatchTimeInterval = .milliseconds(250)
     /// Attempts in flight per tunnel; a further address retires the oldest, so stalled attempts cannot hold every slot.
@@ -655,11 +712,15 @@ private final class SOCKSTunnel: @unchecked Sendable {
 
     private func resolve(host: String, port: UInt16) {
         let resolver = self.resolver
+        let started = ProcessInfo.processInfo.systemUptime
+        timedHost = host
         resolving = Task.detached { [weak self] in
             let result = await resolver.resolve(host)
             guard !Task.isCancelled else { return }
+            let waited = ProcessInfo.processInfo.systemUptime - started
             self?.queue.async { [weak self] in
                 guard let self, !self.finished else { return }
+                GatewayTimings.shared.record(.dns, seconds: waited, host: host)
                 guard case .allowed(let addresses) = result, !addresses.isEmpty,
                     addresses.allSatisfy(Self.isPublicAddress)
                 else {
@@ -677,6 +738,7 @@ private final class SOCKSTunnel: @unchecked Sendable {
     private func connect(addresses: [String], port: UInt16) {
         self.addresses = NetworkBoundaryProxy.interleaved(addresses)[...]
         self.port = port
+        connectStarted = ProcessInfo.processInfo.systemUptime
         startNextAttempt()
     }
 
@@ -721,6 +783,11 @@ private final class SOCKSTunnel: @unchecked Sendable {
         switch state {
         case .ready:
             upstream = connection
+            let now = ProcessInfo.processInfo.systemUptime
+            if let connectStarted {
+                GatewayTimings.shared.record(.connect, seconds: now - connectStarted, host: timedHost)
+            }
+            connectedAt = now
             nextAttempt?.cancel()
             nextAttempt = nil
             for other in attempts where other !== connection {
@@ -780,6 +847,11 @@ private final class SOCKSTunnel: @unchecked Sendable {
                 return
             }
             self.touch()
+            if source === self.upstream, let connectedAt = self.connectedAt, data?.isEmpty == false {
+                self.connectedAt = nil
+                GatewayTimings.shared.record(
+                    .firstByte, seconds: ProcessInfo.processInfo.systemUptime - connectedAt, host: self.timedHost)
+            }
             destination.send(
                 content: data, contentContext: eof ? .finalMessage : .defaultMessage,
                 completion: .contentProcessed { [weak self] error in
