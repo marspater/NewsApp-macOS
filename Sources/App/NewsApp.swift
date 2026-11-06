@@ -282,8 +282,9 @@ struct NewsApp: App {
                 Button("Quick Look") {
                     NotificationCenter.default.post(name: .quickLookCommand, object: nil)
                 }
-                .keyboardShortcut("y", modifiers: .command)
-                // ⌘Y highlights the selection while a story is open (Edit › Highlight Selection).
+                // ⌘Y highlights the selection while a story is open (Edit › Highlight Selection); a disabled item
+                // still holds its key, so Quick Look gives ⌘Y up there.
+                .keyboardShortcut(readerActions == nil ? KeyboardShortcut("y", modifiers: .command) : nil)
                 .disabled(listActions == nil || readerActions != nil)
 
                 if let story = selectedStory, let url = URL(string: story.link) {

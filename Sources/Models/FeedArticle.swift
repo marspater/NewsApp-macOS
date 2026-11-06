@@ -763,8 +763,15 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
         return components?.url ?? url
     }
 
-    static func usable(url: String, width: Int? = nil, height: Int? = nil) -> Bool {
-        guard ContentExtractionPipeline.readerImageURL(url, baseURL: nil) != nil,
+    /// An SVG is a site mark or icon, never a story photo, and the image loader cannot draw it: a card with one
+    /// stays blank and, with a feed image set, never reaches the page lookup that finds the real picture (#995).
+    /// A feed can also declare the type (`image/svg+xml`) for a URL with no extension.
+    static func isVectorArtwork(_ url: String, type: String? = nil) -> Bool {
+        type?.lowercased().contains("svg") == true || URL(string: url)?.pathExtension.lowercased() == "svg"
+    }
+
+    static func usable(url: String, width: Int? = nil, height: Int? = nil, type: String? = nil) -> Bool {
+        guard !isVectorArtwork(url, type: type), ContentExtractionPipeline.readerImageURL(url, baseURL: nil) != nil,
             width.map({ $0 >= 80 && $0 <= 16_384 }) ?? true,
             height.map({ $0 >= 80 && $0 <= 16_384 }) ?? true
         else { return false }
