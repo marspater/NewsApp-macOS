@@ -323,6 +323,11 @@ actor EnrichmentQueue {
         activeCount
     }
 
+    /// Overview requests that own an event but have not acquired a worker slot.
+    func queuedOverviewCount() -> Int {
+        overviewGenerations.count - overviewTasks.count
+    }
+
     func retainsJob(for articleId: String) -> Bool {
         jobs[articleId] != nil
     }
@@ -478,6 +483,8 @@ actor EnrichmentQueue {
 
     /// Evicts old deduplication entries in batches to avoid indefinite session growth without O(n) work per result.
     private func recordCompletedInput(_ articleId: String, hash: String) {
+        // The same article may be reclassified after its publisher input changes.
+        if completedInputs[articleId] != nil { completedInputOrder.removeAll { $0.id == articleId } }
         completedInputs[articleId] = hash
         completedInputOrder.append((articleId, hash))
         if completedInputOrder.count > Self.completedInputLimit {
