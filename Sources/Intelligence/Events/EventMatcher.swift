@@ -214,7 +214,7 @@ extension EventFeatures {
         "nine": "9", "ten": "10", "eleven": "11", "twelve": "12", "dozen": "12", "twenty": "20", "hundred": "100",
     ]
     /// News boilerplate and honorifics: frequent across unrelated stories, so they are not evidence.
-    private static let stopwords: Set<String> = [
+    static let stopwords: Set<String> = [
         "say", "said", "says", "tell", "told", "report", "reported", "reports", "according", "accord", "people",
         "person",
         "official", "officials", "news", "year", "years", "day", "days", "time", "times", "week", "weeks", "month",

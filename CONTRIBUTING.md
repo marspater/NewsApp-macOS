@@ -59,6 +59,7 @@ make run                             # Build and launch "News Dev.app" as com.ma
 ./test.sh --search-memory         # Opt-in: process footprint over 500 searches of a 5,000-story library through the embedder, pages and counts; fails above 6 MiB growth (#708; NEWS_SEARCH_MEMORY_BLOCKS, NEWS_SEARCH_MEMORY_LIMIT_MB)
 python3 -m unittest discover -s script/evaluation -p 'test_editorial*.py' # Editorial metric, historical retrieval and failure controls
 bash script/test_editorial_evaluation.sh --output "$(mktemp -d)/editorial-matrix.json" # Phase 0 prerequisite: seeded 5,000-article SQLite corpus and asserted routing/ranking/impression controls; no Core ML or vDSP invocations. Fixture validation does not constitute review acceptance or production-quality evidence.
+bash script/test_editorial_novelty.sh Tests/Fixtures/editorial/novelty-smoke.json /private/tmp/new-novelty-results # Opt-in shipped-model novelty smoke experiment through the Xcode Release runner; fictional authored labels, no production consumer.
 ./test.sh --transport-cancellation # Optimized refresh shutdown over controlled HTTP/SOCKS sockets
 ./test.sh --publisher-cancellation # Opt-in, live: refresh and stop the twelve panel feeds over real HTTPS
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)

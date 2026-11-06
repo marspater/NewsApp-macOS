@@ -1,0 +1,1250 @@
+[
+  {
+    "id": "tune-01",
+    "split": "tune",
+    "eventID": "tune-event-01",
+    "coreEntities": [
+      "Aster Transit"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-01-passage-a",
+        "articleID": "tune-event-01-wire-a",
+        "text": "Aster Transit suspended the eastern tram line after a cable fault at Willow Square.",
+        "publishedAt": 1793491200,
+        "observedAt": 1793491260
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-01-passage-b",
+      "articleID": "tune-event-01-wire-b",
+      "text": "A cable fault at Willow Square led Aster Transit to halt services on the eastern tram line.",
+      "publishedAt": 1793493000,
+      "observedAt": 1793493060
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same suspension, cause and location; a paraphrase adds no fact."
+  },
+  {
+    "id": "tune-02",
+    "split": "tune",
+    "eventID": "tune-event-02",
+    "coreEntities": [
+      "Mira Chen"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-02-passage-a",
+        "articleID": "tune-event-02-wire-a",
+        "text": "Mira Chen said the Harbor archive would reopen on Monday after roof repairs.",
+        "publishedAt": 1793498400,
+        "observedAt": 1793498460
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-02-passage-b",
+      "articleID": "tune-event-02-wire-b",
+      "text": "The Harbor archive is to reopen on Monday following roof repairs, Mira Chen said.",
+      "publishedAt": 1793500200,
+      "observedAt": 1793500260
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same attributed reopening announcement."
+  },
+  {
+    "id": "tune-03",
+    "split": "tune",
+    "eventID": "tune-event-03",
+    "coreEntities": [
+      "Northbank Water"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-03-passage-a",
+        "articleID": "tune-event-03-wire-a",
+        "text": "Northbank Water advised residents to boil tap water until laboratory tests were complete.",
+        "publishedAt": 1793505600,
+        "observedAt": 1793505660
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-03-passage-b",
+      "articleID": "tune-event-03-wire-b",
+      "text": "Residents should boil their tap water while laboratory tests continue, Northbank Water advised.",
+      "publishedAt": 1793507400,
+      "observedAt": 1793507460
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same precaution; no claim that tests have finished."
+  },
+  {
+    "id": "tune-04",
+    "split": "tune",
+    "eventID": "tune-event-04",
+    "coreEntities": [
+      "Oriole Labs"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-04-passage-a",
+        "articleID": "tune-event-04-wire-a",
+        "text": "Oriole Labs recalled batch R17 of its home sensor because the battery could overheat.",
+        "publishedAt": 1793512800,
+        "observedAt": 1793512860
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-04-passage-b",
+      "articleID": "tune-event-04-wire-b",
+      "text": "Batch R17 home sensors were recalled by Oriole Labs over a possible overheating battery.",
+      "publishedAt": 1793514600,
+      "observedAt": 1793514660
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same recall and uncertainty, using different wording."
+  },
+  {
+    "id": "tune-05",
+    "split": "tune",
+    "eventID": "tune-event-05",
+    "coreEntities": [
+      "Elian Park"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-05-passage-a",
+        "articleID": "tune-event-05-wire-a",
+        "text": "Elian Park denied that the museum had agreed to sell its mineral collection.",
+        "publishedAt": 1793520000,
+        "observedAt": 1793520060
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-05-passage-b",
+      "articleID": "tune-event-05-wire-b",
+      "text": "The museum had not agreed to sell the mineral collection, according to Elian Park.",
+      "publishedAt": 1793521800,
+      "observedAt": 1793521860
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Preserves the denial and its attribution."
+  },
+  {
+    "id": "tune-06",
+    "split": "tune",
+    "eventID": "tune-event-06",
+    "coreEntities": [
+      "Redwood Council"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-06-passage-a",
+        "articleID": "tune-event-06-wire-a",
+        "text": "Redwood Council approved a six-month pilot of late-night library opening.",
+        "publishedAt": 1793527200,
+        "observedAt": 1793527260
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-06-passage-b",
+      "articleID": "tune-event-06-wire-b",
+      "text": "A pilot extending library opening into the evening for six months won approval from Redwood Council.",
+      "publishedAt": 1793529000,
+      "observedAt": 1793529060
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Equivalent duration and approved pilot."
+  },
+  {
+    "id": "tune-07",
+    "split": "tune",
+    "eventID": "tune-event-07",
+    "coreEntities": [
+      "Cobalt Port"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-07-passage-a",
+        "articleID": "tune-event-07-wire-a",
+        "text": "Cobalt Port reported that three cargo berths remained closed during a safety inspection.",
+        "publishedAt": 1793534400,
+        "observedAt": 1793534460
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-07-passage-b",
+      "articleID": "tune-event-07-wire-b",
+      "text": "Three cargo berths were still shut for a safety inspection, Cobalt Port reported.",
+      "publishedAt": 1793536200,
+      "observedAt": 1793536260
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same count and continuing closure."
+  },
+  {
+    "id": "tune-08",
+    "split": "tune",
+    "eventID": "tune-event-08",
+    "coreEntities": [
+      "Sable Observatory"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-08-passage-a",
+        "articleID": "tune-event-08-wire-a",
+        "text": "Sable Observatory said cloud cover prevented the scheduled meteor camera test.",
+        "publishedAt": 1793541600,
+        "observedAt": 1793541660
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-08-passage-b",
+      "articleID": "tune-event-08-wire-b",
+      "text": "The planned meteor camera test could not proceed because of clouds, Sable Observatory said.",
+      "publishedAt": 1793543400,
+      "observedAt": 1793543460
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same canceled test, not a later observation."
+  },
+  {
+    "id": "tune-09",
+    "split": "tune",
+    "eventID": "tune-event-09",
+    "coreEntities": [
+      "Linden Rescue"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-09-passage-a",
+        "articleID": "tune-event-09-wire-a",
+        "text": "Linden Rescue said two hikers were missing after a landslide near Pine Ridge.",
+        "publishedAt": 1793548800,
+        "observedAt": 1793548860
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-09-passage-b",
+      "articleID": "tune-event-09-wire-b",
+      "text": "Linden Rescue said a third hiker was now missing after the landslide near Pine Ridge.",
+      "publishedAt": 1793550600,
+      "observedAt": 1793550660
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. Changed attributed missing-person count; novelty does not establish the report as true."
+  },
+  {
+    "id": "tune-10",
+    "split": "tune",
+    "eventID": "tune-event-10",
+    "coreEntities": [
+      "Juniper Rail"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-10-passage-a",
+        "articleID": "tune-event-10-wire-a",
+        "text": "Juniper Rail closed the west platform at Meadow Station after a signal failure.",
+        "publishedAt": 1793556000,
+        "observedAt": 1793556060
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-10-passage-b",
+      "articleID": "tune-event-10-wire-b",
+      "text": "Juniper Rail also closed the east platform at Meadow Station while the signal failure was investigated.",
+      "publishedAt": 1793557800,
+      "observedAt": 1793557860
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. Additional closure in the same station incident."
+  },
+  {
+    "id": "tune-11",
+    "split": "tune",
+    "eventID": "tune-event-11",
+    "coreEntities": [
+      "Nera Sol"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-11-passage-a",
+        "articleID": "tune-event-11-wire-a",
+        "text": "Nera Sol said the district court would hear the bridge permit appeal on Friday.",
+        "publishedAt": 1793563200,
+        "observedAt": 1793563260
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-11-passage-b",
+      "articleID": "tune-event-11-wire-b",
+      "text": "Nera Sol said the district court postponed the bridge permit appeal until Tuesday.",
+      "publishedAt": 1793565000,
+      "observedAt": 1793565060
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New scheduling action with the same appeal."
+  },
+  {
+    "id": "tune-12",
+    "split": "tune",
+    "eventID": "tune-event-12",
+    "coreEntities": [
+      "Silverfen Health"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-12-passage-a",
+        "articleID": "tune-event-12-wire-a",
+        "text": "Silverfen Health said nine patients were being tested after the cafeteria illness report.",
+        "publishedAt": 1793570400,
+        "observedAt": 1793570460
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-12-passage-b",
+      "articleID": "tune-event-12-wire-b",
+      "text": "Silverfen Health said laboratory results linked the cafeteria illness report to a contaminated water cooler.",
+      "publishedAt": 1793572200,
+      "observedAt": 1793572260
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New attributed cause beyond the earlier testing."
+  },
+  {
+    "id": "tune-13",
+    "split": "tune",
+    "eventID": "tune-event-13",
+    "coreEntities": [
+      "Tamarind Energy"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-13-passage-a",
+        "articleID": "tune-event-13-wire-a",
+        "text": "Tamarind Energy halted the Beacon turbine after a coolant leak was detected.",
+        "publishedAt": 1793577600,
+        "observedAt": 1793577660
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-13-passage-b",
+      "articleID": "tune-event-13-wire-b",
+      "text": "Tamarind Energy resumed operation of the Beacon turbine after replacing the leaking coolant valve.",
+      "publishedAt": 1793579400,
+      "observedAt": 1793579460
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New repair and restart action."
+  },
+  {
+    "id": "tune-14",
+    "split": "tune",
+    "eventID": "tune-event-14",
+    "coreEntities": [
+      "Oren Vale"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-14-passage-a",
+        "articleID": "tune-event-14-wire-a",
+        "text": "Oren Vale said investigators were examining smoke damage in the Marlow theater lobby.",
+        "publishedAt": 1793584800,
+        "observedAt": 1793584860
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-14-passage-b",
+      "articleID": "tune-event-14-wire-b",
+      "text": "Oren Vale said investigators also found smoke damage in the Marlow theater costume workshop.",
+      "publishedAt": 1793586600,
+      "observedAt": 1793586660
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New affected location within the same fire investigation."
+  },
+  {
+    "id": "tune-15",
+    "split": "tune",
+    "eventID": "tune-event-15",
+    "coreEntities": [
+      "Peregrine Foods"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-15-passage-a",
+        "articleID": "tune-event-15-wire-a",
+        "text": "Peregrine Foods recalled a soup lot while inspectors checked an undeclared ingredient complaint.",
+        "publishedAt": 1793592000,
+        "observedAt": 1793592060
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-15-passage-b",
+      "articleID": "tune-event-15-wire-b",
+      "text": "Peregrine Foods said the recalled soup lot contained sesame, which was absent from its ingredient label.",
+      "publishedAt": 1793593800,
+      "observedAt": 1793593860
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New specific ingredient claim, retaining attribution."
+  },
+  {
+    "id": "tune-16",
+    "split": "tune",
+    "eventID": "tune-event-16",
+    "coreEntities": [
+      "Birch Coast Guard"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-16-passage-a",
+        "articleID": "tune-event-16-wire-a",
+        "text": "Birch Coast Guard said a fishing vessel had lost propulsion off Coral Head.",
+        "publishedAt": 1793599200,
+        "observedAt": 1793599260
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-16-passage-b",
+      "articleID": "tune-event-16-wire-b",
+      "text": "Birch Coast Guard said a tug had reached the disabled fishing vessel off Coral Head and begun towing it.",
+      "publishedAt": 1793601000,
+      "observedAt": 1793601060
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New rescue progress within the incident."
+  },
+  {
+    "id": "tune-17",
+    "split": "tune",
+    "eventID": "tune-event-17",
+    "coreEntities": [
+      "Kestrel Works"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-17-passage-a",
+        "articleID": "tune-event-17-wire-a",
+        "text": "Kestrel Works paused assembly at the river factory after a transformer fire.",
+        "publishedAt": 1793606400,
+        "observedAt": 1793606460
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-17-passage-b",
+      "articleID": "tune-event-17-wire-b",
+      "text": "Astronomers mapped a distant icy moon using ultraviolet observations.",
+      "publishedAt": 1793608200,
+      "observedAt": 1793608260
+    },
+    "expected": "fallback",
+    "note": "Fictional authored control. Unrelated vocabulary and subject; no historical lexical candidate should be available."
+  },
+  {
+    "id": "tune-18",
+    "split": "tune",
+    "eventID": "tune-event-18",
+    "coreEntities": [
+      "Dalia Moss"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-18-passage-a",
+        "articleID": "tune-event-18-wire-a",
+        "text": "Dalia Moss opened a council inquiry into repairs at the old stone bridge.",
+        "publishedAt": 1793613600,
+        "observedAt": 1793613660
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-18-passage-b",
+      "articleID": "tune-event-18-wire-b",
+      "text": "Bakers unveiled a saffron pastry recipe during a neighborhood tasting.",
+      "publishedAt": 1793615400,
+      "observedAt": 1793615460
+    },
+    "expected": "fallback",
+    "note": "Fictional authored control. Unrelated food report with no event actor or topical overlap."
+  },
+  {
+    "id": "tune-19",
+    "split": "tune",
+    "eventID": "tune-event-19",
+    "coreEntities": [
+      "Maple Ferry"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-19-passage-a",
+        "articleID": "tune-event-19-wire-a",
+        "text": "Maple Ferry canceled the dawn crossing after damage to its harbor ramp.",
+        "publishedAt": 1793620800,
+        "observedAt": 1793620860
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-19-passage-b",
+      "articleID": "tune-event-19-wire-b",
+      "text": "Volcanologists measured sulfur emissions beside an alpine crater.",
+      "publishedAt": 1793622600,
+      "observedAt": 1793622660
+    },
+    "expected": "fallback",
+    "note": "Fictional authored control. No lexical link to the ferry incident."
+  },
+  {
+    "id": "tune-20",
+    "split": "tune",
+    "eventID": "tune-event-20",
+    "coreEntities": [
+      "Vireo College"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-20-passage-a",
+        "articleID": "tune-event-20-wire-a",
+        "text": "Vireo College delayed its chemistry examination after a sprinkler malfunction.",
+        "publishedAt": 1793628000,
+        "observedAt": 1793628060
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-20-passage-b",
+      "articleID": "tune-event-20-wire-b",
+      "text": "Chess grandmasters negotiated a draw following a marathon endgame.",
+      "publishedAt": 1793629800,
+      "observedAt": 1793629860
+    },
+    "expected": "fallback",
+    "note": "Fictional authored control. Unrelated sporting report; low-priority fallback rather than novelty."
+  },
+  {
+    "id": "tune-21",
+    "split": "tune",
+    "eventID": "tune-event-21",
+    "coreEntities": [
+      "Amber Housing"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-21-passage-a",
+        "articleID": "tune-event-21-wire-a",
+        "text": "Amber Housing said the flood response at Cedar Court remained under review.",
+        "publishedAt": 1793635200,
+        "observedAt": 1793635260
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-21-passage-b",
+      "articleID": "tune-event-21-wire-b",
+      "text": "The flood response at Cedar Court remained under review. No spokesperson could comment.",
+      "publishedAt": 1793637000,
+      "observedAt": 1793637060
+    },
+    "expected": "unanchored",
+    "note": "Fictional authored control. Shares the event wording but has no core actor; it must not yield an anchored novelty bullet."
+  },
+  {
+    "id": "tune-22",
+    "split": "tune",
+    "eventID": "tune-event-22",
+    "coreEntities": [
+      "Iris Shipping"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-22-passage-a",
+        "articleID": "tune-event-22-wire-a",
+        "text": "Iris Shipping said repairs to the damaged loading crane were expected to take two days.",
+        "publishedAt": 1793642400,
+        "observedAt": 1793642460
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-22-passage-b",
+      "articleID": "tune-event-22-wire-b",
+      "text": "Repairs to the damaged loading crane were expected to take two days. Further details were unavailable.",
+      "publishedAt": 1793644200,
+      "observedAt": 1793644260
+    },
+    "expected": "unanchored",
+    "note": "Fictional authored control. Event vocabulary is present, but the incoming sentence lacks the named core entity."
+  },
+  {
+    "id": "tune-23",
+    "split": "tune",
+    "eventID": "tune-event-23",
+    "coreEntities": [
+      "Luca Fern"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-23-passage-a",
+        "articleID": "tune-event-23-wire-a",
+        "text": "Luca Fern said a damaged roof forced the conservatory concert to move indoors.",
+        "publishedAt": 1793649600,
+        "observedAt": 1793649660
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-23-passage-b",
+      "articleID": "tune-event-23-wire-b",
+      "text": "The damaged roof forced the conservatory concert to move indoors. The organizer declined to comment.",
+      "publishedAt": 1793651400,
+      "observedAt": 1793651460
+    },
+    "expected": "unanchored",
+    "note": "Fictional authored control. Boilerplate and repeated context without the core actor."
+  },
+  {
+    "id": "tune-24",
+    "split": "tune",
+    "eventID": "tune-event-24",
+    "coreEntities": [
+      "Crescent Parks"
+    ],
+    "baseline": [
+      {
+        "id": "tune-event-24-passage-a",
+        "articleID": "tune-event-24-wire-a",
+        "text": "Crescent Parks said the woodland path was closed for removal of a fallen oak.",
+        "publishedAt": 1793656800,
+        "observedAt": 1793656860
+      }
+    ],
+    "incoming": {
+      "id": "tune-event-24-passage-b",
+      "articleID": "tune-event-24-wire-b",
+      "text": "The woodland path was closed for removal of a fallen oak. Visitors were asked to remain patient.",
+      "publishedAt": 1793658600,
+      "observedAt": 1793658660
+    },
+    "expected": "unanchored",
+    "note": "Fictional authored control. No named event actor supports a candidate sentence."
+  },
+  {
+    "id": "holdout-01",
+    "split": "holdout",
+    "eventID": "holdout-event-01",
+    "coreEntities": [
+      "Selene Ferries"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-01-passage-a",
+        "articleID": "holdout-event-01-wire-a",
+        "text": "Selene Ferries suspended the island service because high winds made docking unsafe.",
+        "publishedAt": 1794096000,
+        "observedAt": 1794096060
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-01-passage-b",
+      "articleID": "holdout-event-01-wire-b",
+      "text": "High winds and unsafe docking conditions prompted Selene Ferries to suspend its island service.",
+      "publishedAt": 1794097800,
+      "observedAt": 1794097860
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same service suspension and cause."
+  },
+  {
+    "id": "holdout-02",
+    "split": "holdout",
+    "eventID": "holdout-event-02",
+    "coreEntities": [
+      "Corin Hale"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-02-passage-a",
+        "articleID": "holdout-event-02-wire-a",
+        "text": "Corin Hale said the damaged clock tower would remain fenced off through Thursday.",
+        "publishedAt": 1794103200,
+        "observedAt": 1794103260
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-02-passage-b",
+      "articleID": "holdout-event-02-wire-b",
+      "text": "The fence around the damaged clock tower will stay until Thursday, Corin Hale said.",
+      "publishedAt": 1794105000,
+      "observedAt": 1794105060
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Equivalent attributed safety restriction."
+  },
+  {
+    "id": "holdout-03",
+    "split": "holdout",
+    "eventID": "holdout-event-03",
+    "coreEntities": [
+      "Bluecrest Clinic"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-03-passage-a",
+        "articleID": "holdout-event-03-wire-a",
+        "text": "Bluecrest Clinic said appointments were being moved after a burst pipe flooded its reception area.",
+        "publishedAt": 1794110400,
+        "observedAt": 1794110460
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-03-passage-b",
+      "articleID": "holdout-event-03-wire-b",
+      "text": "A burst pipe in reception led Bluecrest Clinic to relocate appointments.",
+      "publishedAt": 1794112200,
+      "observedAt": 1794112260
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same relocation and flooding cause."
+  },
+  {
+    "id": "holdout-04",
+    "split": "holdout",
+    "eventID": "holdout-event-04",
+    "coreEntities": [
+      "Alder Systems"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-04-passage-a",
+        "articleID": "holdout-event-04-wire-a",
+        "text": "Alder Systems withdrew its charging dock after tests showed a cable could become hot.",
+        "publishedAt": 1794117600,
+        "observedAt": 1794117660
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-04-passage-b",
+      "articleID": "holdout-event-04-wire-b",
+      "text": "The charging dock was withdrawn by Alder Systems because tests found a possible hot cable.",
+      "publishedAt": 1794119400,
+      "observedAt": 1794119460
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same withdrawal with the same qualified risk."
+  },
+  {
+    "id": "holdout-05",
+    "split": "holdout",
+    "eventID": "holdout-event-05",
+    "coreEntities": [
+      "Tessa Rowan"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-05-passage-a",
+        "articleID": "holdout-event-05-wire-a",
+        "text": "Tessa Rowan said the committee had not decided whether to extend the river dredging contract.",
+        "publishedAt": 1794124800,
+        "observedAt": 1794124860
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-05-passage-b",
+      "articleID": "holdout-event-05-wire-b",
+      "text": "No decision had been made on extending the river dredging contract, Tessa Rowan said.",
+      "publishedAt": 1794126600,
+      "observedAt": 1794126660
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Preserves the absence of a decision."
+  },
+  {
+    "id": "holdout-06",
+    "split": "holdout",
+    "eventID": "holdout-event-06",
+    "coreEntities": [
+      "Opal Library"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-06-passage-a",
+        "articleID": "holdout-event-06-wire-a",
+        "text": "Opal Library approved a three-month trial of Sunday opening.",
+        "publishedAt": 1794132000,
+        "observedAt": 1794132060
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-06-passage-b",
+      "articleID": "holdout-event-06-wire-b",
+      "text": "A Sunday-opening trial lasting three months was approved by Opal Library.",
+      "publishedAt": 1794133800,
+      "observedAt": 1794133860
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same trial, duration and approval."
+  },
+  {
+    "id": "holdout-07",
+    "split": "holdout",
+    "eventID": "holdout-event-07",
+    "coreEntities": [
+      "Bracken Airport"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-07-passage-a",
+        "articleID": "holdout-event-07-wire-a",
+        "text": "Bracken Airport said one runway remained closed while crews removed debris.",
+        "publishedAt": 1794139200,
+        "observedAt": 1794139260
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-07-passage-b",
+      "articleID": "holdout-event-07-wire-b",
+      "text": "Crews were removing debris from the still-closed runway, Bracken Airport said.",
+      "publishedAt": 1794141000,
+      "observedAt": 1794141060
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same continuing runway closure; no added reopening."
+  },
+  {
+    "id": "holdout-08",
+    "split": "holdout",
+    "eventID": "holdout-event-08",
+    "coreEntities": [
+      "Lyra Research"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-08-passage-a",
+        "articleID": "holdout-event-08-wire-a",
+        "text": "Lyra Research postponed the ocean drone launch because waves exceeded its safety limit.",
+        "publishedAt": 1794146400,
+        "observedAt": 1794146460
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-08-passage-b",
+      "articleID": "holdout-event-08-wire-b",
+      "text": "Waves above the safety limit caused Lyra Research to delay launching the ocean drone.",
+      "publishedAt": 1794148200,
+      "observedAt": 1794148260
+    },
+    "expected": "repetition",
+    "note": "Fictional authored control. Same delayed launch and weather condition."
+  },
+  {
+    "id": "holdout-09",
+    "split": "holdout",
+    "eventID": "holdout-event-09",
+    "coreEntities": [
+      "Cedar Rescue"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-09-passage-a",
+        "articleID": "holdout-event-09-wire-a",
+        "text": "Cedar Rescue said four climbers were stranded on the Frost Peak trail.",
+        "publishedAt": 1794153600,
+        "observedAt": 1794153660
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-09-passage-b",
+      "articleID": "holdout-event-09-wire-b",
+      "text": "Cedar Rescue said two of the four climbers stranded on the Frost Peak trail had been brought to shelter.",
+      "publishedAt": 1794155400,
+      "observedAt": 1794155460
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New rescue outcome with the original count preserved."
+  },
+  {
+    "id": "holdout-10",
+    "split": "holdout",
+    "eventID": "holdout-event-10",
+    "coreEntities": [
+      "Halcyon Metro"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-10-passage-a",
+        "articleID": "holdout-event-10-wire-a",
+        "text": "Halcyon Metro closed the south entrance at Quarry Station after a burst main.",
+        "publishedAt": 1794160800,
+        "observedAt": 1794160860
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-10-passage-b",
+      "articleID": "holdout-event-10-wire-b",
+      "text": "Halcyon Metro closed the north entrance at Quarry Station as floodwater from the burst main spread.",
+      "publishedAt": 1794162600,
+      "observedAt": 1794162660
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. Additional entrance and spread of the same incident."
+  },
+  {
+    "id": "holdout-11",
+    "split": "holdout",
+    "eventID": "holdout-event-11",
+    "coreEntities": [
+      "Vera Finch"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-11-passage-a",
+        "articleID": "holdout-event-11-wire-a",
+        "text": "Vera Finch said the appeal hearing over the canal project was scheduled for Wednesday.",
+        "publishedAt": 1794168000,
+        "observedAt": 1794168060
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-11-passage-b",
+      "articleID": "holdout-event-11-wire-b",
+      "text": "Vera Finch said the appeal hearing over the canal project would be open to the public by video link.",
+      "publishedAt": 1794169800,
+      "observedAt": 1794169860
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New access arrangement, not a restatement of the hearing date."
+  },
+  {
+    "id": "holdout-12",
+    "split": "holdout",
+    "eventID": "holdout-event-12",
+    "coreEntities": [
+      "Mossbank Health"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-12-passage-a",
+        "articleID": "holdout-event-12-wire-a",
+        "text": "Mossbank Health said inspectors were investigating six reports of illness at the depot canteen.",
+        "publishedAt": 1794175200,
+        "observedAt": 1794175260
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-12-passage-b",
+      "articleID": "holdout-event-12-wire-b",
+      "text": "Mossbank Health said investigators found the depot canteen refrigerator had failed overnight.",
+      "publishedAt": 1794177000,
+      "observedAt": 1794177060
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New attributed equipment finding in the same investigation."
+  },
+  {
+    "id": "holdout-13",
+    "split": "holdout",
+    "eventID": "holdout-event-13",
+    "coreEntities": [
+      "Thistle Power"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-13-passage-a",
+        "articleID": "holdout-event-13-wire-a",
+        "text": "Thistle Power stopped the North Reach generator after a vibration alarm.",
+        "publishedAt": 1794182400,
+        "observedAt": 1794182460
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-13-passage-b",
+      "articleID": "holdout-event-13-wire-b",
+      "text": "Thistle Power said a cracked bearing caused the North Reach generator vibration alarm.",
+      "publishedAt": 1794184200,
+      "observedAt": 1794184260
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New specific cause, attributed to the operator."
+  },
+  {
+    "id": "holdout-14",
+    "split": "holdout",
+    "eventID": "holdout-event-14",
+    "coreEntities": [
+      "Arden Pike"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-14-passage-a",
+        "articleID": "holdout-event-14-wire-a",
+        "text": "Arden Pike said inspectors had found water damage in the gallery basement.",
+        "publishedAt": 1794189600,
+        "observedAt": 1794189660
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-14-passage-b",
+      "articleID": "holdout-event-14-wire-b",
+      "text": "Arden Pike said water damage had also reached the gallery ground-floor archive.",
+      "publishedAt": 1794191400,
+      "observedAt": 1794191460
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New affected area in the same building event."
+  },
+  {
+    "id": "holdout-15",
+    "split": "holdout",
+    "eventID": "holdout-event-15",
+    "coreEntities": [
+      "Raven Foods"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-15-passage-a",
+        "articleID": "holdout-event-15-wire-a",
+        "text": "Raven Foods recalled a biscuit lot after receiving a labeling complaint.",
+        "publishedAt": 1794196800,
+        "observedAt": 1794196860
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-15-passage-b",
+      "articleID": "holdout-event-15-wire-b",
+      "text": "Raven Foods said the recalled biscuit lot contained milk despite being labeled dairy-free.",
+      "publishedAt": 1794198600,
+      "observedAt": 1794198660
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New ingredient/label discrepancy as an attributed claim."
+  },
+  {
+    "id": "holdout-16",
+    "split": "holdout",
+    "eventID": "holdout-event-16",
+    "coreEntities": [
+      "Estuary Patrol"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-16-passage-a",
+        "articleID": "holdout-event-16-wire-a",
+        "text": "Estuary Patrol said a passenger launch was drifting after losing engine power near Reed Bay.",
+        "publishedAt": 1794204000,
+        "observedAt": 1794204060
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-16-passage-b",
+      "articleID": "holdout-event-16-wire-b",
+      "text": "Estuary Patrol said all passengers had transferred from the drifting launch to a rescue boat near Reed Bay.",
+      "publishedAt": 1794205800,
+      "observedAt": 1794205860
+    },
+    "expected": "novel",
+    "note": "Fictional authored control. New evacuation development; no independent verification claim."
+  },
+  {
+    "id": "holdout-17",
+    "split": "holdout",
+    "eventID": "holdout-event-17",
+    "coreEntities": [
+      "Cairn Engineering"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-17-passage-a",
+        "articleID": "holdout-event-17-wire-a",
+        "text": "Cairn Engineering suspended work on the quarry conveyor after a motor fire.",
+        "publishedAt": 1794211200,
+        "observedAt": 1794211260
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-17-passage-b",
+      "articleID": "holdout-event-17-wire-b",
+      "text": "Gardeners cultivated violet orchids beneath a transparent greenhouse canopy.",
+      "publishedAt": 1794213000,
+      "observedAt": 1794213060
+    },
+    "expected": "fallback",
+    "note": "Fictional authored control. Unrelated horticulture text with no lexical event connection."
+  },
+  {
+    "id": "holdout-18",
+    "split": "holdout",
+    "eventID": "holdout-event-18",
+    "coreEntities": [
+      "Noa Reed"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-18-passage-a",
+        "articleID": "holdout-event-18-wire-a",
+        "text": "Noa Reed announced an inquiry into delays at the municipal tunnel project.",
+        "publishedAt": 1794218400,
+        "observedAt": 1794218460
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-18-passage-b",
+      "articleID": "holdout-event-18-wire-b",
+      "text": "Pianists rehearsed a baroque sonata ahead of an acoustic recital.",
+      "publishedAt": 1794220200,
+      "observedAt": 1794220260
+    },
+    "expected": "fallback",
+    "note": "Fictional authored control. Unrelated musical performance report."
+  },
+  {
+    "id": "holdout-19",
+    "split": "holdout",
+    "eventID": "holdout-event-19",
+    "coreEntities": [
+      "Elm Shuttle"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-19-passage-a",
+        "articleID": "holdout-event-19-wire-a",
+        "text": "Elm Shuttle canceled the early airport bus after a steering fault.",
+        "publishedAt": 1794225600,
+        "observedAt": 1794225660
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-19-passage-b",
+      "articleID": "holdout-event-19-wire-b",
+      "text": "Paleontologists catalogued fossilized shells inside limestone caverns.",
+      "publishedAt": 1794227400,
+      "observedAt": 1794227460
+    },
+    "expected": "fallback",
+    "note": "Fictional authored control. No shared actor or transport-incident vocabulary."
+  },
+  {
+    "id": "holdout-20",
+    "split": "holdout",
+    "eventID": "holdout-event-20",
+    "coreEntities": [
+      "Meridian School"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-20-passage-a",
+        "articleID": "holdout-event-20-wire-a",
+        "text": "Meridian School postponed the physics competition after a ceiling leak.",
+        "publishedAt": 1794232800,
+        "observedAt": 1794232860
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-20-passage-b",
+      "articleID": "holdout-event-20-wire-b",
+      "text": "Cyclists celebrated a sprint victory beside a mountain reservoir.",
+      "publishedAt": 1794234600,
+      "observedAt": 1794234660
+    },
+    "expected": "fallback",
+    "note": "Fictional authored control. Unrelated race report, not an event update."
+  },
+  {
+    "id": "holdout-21",
+    "split": "holdout",
+    "eventID": "holdout-event-21",
+    "coreEntities": [
+      "Aurora Homes"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-21-passage-a",
+        "articleID": "holdout-event-21-wire-a",
+        "text": "Aurora Homes said the evacuation review at Brook Court was still underway.",
+        "publishedAt": 1794240000,
+        "observedAt": 1794240060
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-21-passage-b",
+      "articleID": "holdout-event-21-wire-b",
+      "text": "The evacuation review at Brook Court was still underway. A representative declined to comment.",
+      "publishedAt": 1794241800,
+      "observedAt": 1794241860
+    },
+    "expected": "unanchored",
+    "note": "Fictional authored control. Event language without the named core entity."
+  },
+  {
+    "id": "holdout-22",
+    "split": "holdout",
+    "eventID": "holdout-event-22",
+    "coreEntities": [
+      "Finch Logistics"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-22-passage-a",
+        "articleID": "holdout-event-22-wire-a",
+        "text": "Finch Logistics said repairs to the broken warehouse door would finish on Saturday.",
+        "publishedAt": 1794247200,
+        "observedAt": 1794247260
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-22-passage-b",
+      "articleID": "holdout-event-22-wire-b",
+      "text": "Repairs to the broken warehouse door would finish on Saturday. No further update was available.",
+      "publishedAt": 1794249000,
+      "observedAt": 1794249060
+    },
+    "expected": "unanchored",
+    "note": "Fictional authored control. Unanchored repeated context and boilerplate."
+  },
+  {
+    "id": "holdout-23",
+    "split": "holdout",
+    "eventID": "holdout-event-23",
+    "coreEntities": [
+      "Milo Ash"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-23-passage-a",
+        "articleID": "holdout-event-23-wire-a",
+        "text": "Milo Ash said a power fault forced the planetarium lecture to move outside.",
+        "publishedAt": 1794254400,
+        "observedAt": 1794254460
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-23-passage-b",
+      "articleID": "holdout-event-23-wire-b",
+      "text": "A power fault forced the planetarium lecture to move outside. Officials offered no additional detail.",
+      "publishedAt": 1794256200,
+      "observedAt": 1794256260
+    },
+    "expected": "unanchored",
+    "note": "Fictional authored control. Core actor is absent from the incoming text."
+  },
+  {
+    "id": "holdout-24",
+    "split": "holdout",
+    "eventID": "holdout-event-24",
+    "coreEntities": [
+      "Willow Gardens"
+    ],
+    "baseline": [
+      {
+        "id": "holdout-event-24-passage-a",
+        "articleID": "holdout-event-24-wire-a",
+        "text": "Willow Gardens said the lakeside footbridge was shut while workers replaced a rotten beam.",
+        "publishedAt": 1794261600,
+        "observedAt": 1794261660
+      }
+    ],
+    "incoming": {
+      "id": "holdout-event-24-passage-b",
+      "articleID": "holdout-event-24-wire-b",
+      "text": "The lakeside footbridge was shut while workers replaced a rotten beam. Guests were thanked for their patience.",
+      "publishedAt": 1794263400,
+      "observedAt": 1794263460
+    },
+    "expected": "unanchored",
+    "note": "Fictional authored control. No named core actor for entity anchoring."
+  }
+]
