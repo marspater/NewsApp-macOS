@@ -46,6 +46,17 @@ runner_inputs_key() {
 
 # A plain run skips compiling and running the Swift tests when the same inputs already passed on this machine.
 # NEWS_TEST_FORCE=1 runs them anyway; runs with arguments (baselines, live checks) are never skipped.
+copy_coverage() {
+    local source="$1" destination="$2" temporary
+    mkdir -p "$(dirname "$destination")" || return 1
+    temporary=$(mktemp "${destination}.tmp.XXXXXX") || return 1
+    if cp "$source" "$temporary" && mv -f "$temporary" "$destination"; then
+        return 0
+    fi
+    rm -f "$temporary"
+    return 1
+}
+
 PASS_STAMP=""
 if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/dev/null); then
     PASS_STAMP="${TMPDIR:-/tmp}/news-test-passes/$KEY"
@@ -53,8 +64,11 @@ if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/d
     # failed, or whose report came from other inputs, runs again.
     if [ -f "$PASS_STAMP" ] && { [ -z "${NEWS_TEST_COVERAGE:-}" ] || [ -f "$PASS_STAMP.lcov" ]; }; then
         if [ -n "${NEWS_TEST_COVERAGE:-}" ]; then
-            mkdir -p "$(dirname "$NEWS_TEST_COVERAGE")" && cp "$PASS_STAMP.lcov" "$NEWS_TEST_COVERAGE"
-            echo "Coverage written to $NEWS_TEST_COVERAGE (from the earlier run with these inputs)"
+            if copy_coverage "$PASS_STAMP.lcov" "$NEWS_TEST_COVERAGE"; then
+                echo "Coverage written to $NEWS_TEST_COVERAGE (from the earlier run with these inputs)"
+            else
+                echo "⚠️ Could not copy cached coverage; the tests passed." >&2
+            fi
         fi
         echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
         exit 0
@@ -182,7 +196,9 @@ else
         # The tests are the gate and have passed; a failed export leaves no partial report and does not fail the run.
         if script/coverage_export.sh "$LOGS/profiles" "$RUNNER" "$NEWS_TEST_COVERAGE"; then
             echo "Coverage written to $NEWS_TEST_COVERAGE"
-            if [ -n "$PASS_STAMP" ]; then mkdir -p "$(dirname "$PASS_STAMP")" && cp "$NEWS_TEST_COVERAGE" "$PASS_STAMP.lcov"; fi
+            if [ -n "$PASS_STAMP" ] && ! copy_coverage "$NEWS_TEST_COVERAGE" "$PASS_STAMP.lcov"; then
+                echo "⚠️ Could not cache coverage; the tests passed." >&2
+            fi
         else
             rm -f "$NEWS_TEST_COVERAGE"
             echo "⚠️ Coverage export failed; the tests passed." >&2
