@@ -75,6 +75,39 @@ enum EditorialMomentum {
         let publication: Date
     }
 
+    /// The timeline reports arrived so far and those still inside the trailing volume window.
+    private struct ArrivalWindow {
+        let timeline: [IndependentReport]
+        var arrivalEnd: Int
+        var recentStart: Int
+        var recentOrigins: [String: Int] = [:]
+
+        var recentCount: Int { arrivalEnd - recentStart }
+
+        /// Admits reports published before `end`, or also at `end` when `inclusive`; returns how many arrived.
+        mutating func admit(until end: Date, inclusive: Bool) -> Int {
+            let first = arrivalEnd
+            while arrivalEnd < timeline.count
+                && (timeline[arrivalEnd].publication < end
+                    || (inclusive && timeline[arrivalEnd].publication == end))
+            {
+                recentOrigins[timeline[arrivalEnd].origin, default: 0] += 1
+                arrivalEnd += 1
+            }
+            return arrivalEnd - first
+        }
+
+        /// Drops reports published before `cutoff` from the trailing window.
+        mutating func evict(before cutoff: Date) {
+            while recentStart < arrivalEnd && timeline[recentStart].publication < cutoff {
+                let origin = timeline[recentStart].origin
+                recentOrigins[origin, default: 0] -= 1
+                if recentOrigins[origin] == 0 { recentOrigins.removeValue(forKey: origin) }
+                recentStart += 1
+            }
+        }
+    }
+
     static func replay(
         reports: [MomentumReport], eventID: String, windowStart: Date, through: Date,
         configuration: MomentumConfiguration
@@ -85,60 +118,9 @@ enum EditorialMomentum {
         let duration = through.timeIntervalSince(windowStart)
         let bucketCount = max(1, Int(ceil(duration / configuration.bucketSeconds)))
         guard bucketCount <= 10_000 else { throw MomentumError.inputLimit }
-        var points: [MomentumPoint] = []
-        var short = 0.0
-        var long = 0.0
-        var signal = 0.0
-        var previousHistogram = 0.0
-        var arrivalEnd = timeline.firstIndex { $0.publication >= windowStart } ?? timeline.count
-        var recentStartIndex = arrivalEnd
-        var recentOrigins: [String: Int] = [:]
-        for bucket in 0..<bucketCount {
-            try Task.checkCancellation()
-            let start = windowStart.addingTimeInterval(Double(bucket) * configuration.bucketSeconds)
-            let end = min(through, start.addingTimeInterval(configuration.bucketSeconds))
-            let last = bucket == bucketCount - 1
-            let arrivalStart = arrivalEnd
-            while arrivalEnd < timeline.count
-                && (timeline[arrivalEnd].publication < end
-                    || (last && timeline[arrivalEnd].publication == end))
-            {
-                recentOrigins[timeline[arrivalEnd].origin, default: 0] += 1
-                arrivalEnd += 1
-            }
-            let elapsed = end.timeIntervalSince(start)
-            // Reports per configured nominal bucket; a partial final bucket is scaled to the same unit.
-            let rate =
-                elapsed > 0 ? Double(arrivalEnd - arrivalStart) / elapsed * configuration.bucketSeconds : 0
-            guard rate.isFinite else { throw MomentumError.invalidConfiguration }
-            short += alpha(elapsed, configuration.shortHalfLife) * (rate - short)
-            long += alpha(elapsed, configuration.longHalfLife) * (rate - long)
-            let macd = short - long
-            signal += alpha(elapsed, configuration.signalHalfLife) * (macd - signal)
-            let histogram = macd - signal
-            let recentStart = max(windowStart, end.addingTimeInterval(-configuration.volumeWindow))
-            while recentStartIndex < arrivalEnd && timeline[recentStartIndex].publication < recentStart {
-                let origin = timeline[recentStartIndex].origin
-                recentOrigins[origin, default: 0] -= 1
-                if recentOrigins[origin] == 0 { recentOrigins.removeValue(forKey: origin) }
-                recentStartIndex += 1
-            }
-            let recentCount = arrivalEnd - recentStartIndex
-            let origins = recentOrigins.count
-            let floorMet =
-                recentCount >= configuration.minimumIndependentReports
-                && origins >= configuration.minimumOriginPublishers
-            // Equality is neutral: deceleration requires a strictly positive-to-negative adjacent crossover.
-            let state: MomentumState =
-                previousHistogram > 0 && histogram < 0
-                ? .decelerating : (histogram > 0 && floorMet ? .accelerating : .quiet)
-            points.append(
-                .init(
-                    bucketEnd: end, independentCount: recentCount, originCount: origins,
-                    shortEMA: short, longEMA: long, macd: macd, signal: signal, histogram: histogram,
-                    state: state))
-            previousHistogram = histogram
-        }
+        let points = try bucketPoints(
+            timeline, bucketCount: bucketCount, windowStart: windowStart, through: through,
+            configuration: configuration)
         let windowRows = relevant.filter {
             $0.publishedAt >= windowStart && $0.publishedAt <= through && $0.fetchedAt <= through
         }
@@ -158,6 +140,51 @@ enum EditorialMomentum {
             delayedFetchRows: windowRows.filter {
                 $0.fetchedAt.timeIntervalSince($0.publishedAt) > configuration.bucketSeconds
             }.count)
+    }
+
+    private static func bucketPoints(
+        _ timeline: [IndependentReport], bucketCount: Int, windowStart: Date, through: Date,
+        configuration: MomentumConfiguration
+    ) throws -> [MomentumPoint] {
+        var points: [MomentumPoint] = []
+        var short = 0.0
+        var long = 0.0
+        var signal = 0.0
+        var previousHistogram = 0.0
+        let firstInWindow = timeline.firstIndex { $0.publication >= windowStart } ?? timeline.count
+        var arrivals = ArrivalWindow(timeline: timeline, arrivalEnd: firstInWindow, recentStart: firstInWindow)
+        for bucket in 0..<bucketCount {
+            try Task.checkCancellation()
+            let start = windowStart.addingTimeInterval(Double(bucket) * configuration.bucketSeconds)
+            let end = min(through, start.addingTimeInterval(configuration.bucketSeconds))
+            let arrived = arrivals.admit(until: end, inclusive: bucket == bucketCount - 1)
+            let elapsed = end.timeIntervalSince(start)
+            // Reports per configured nominal bucket; a partial final bucket is scaled to the same unit.
+            let rate = elapsed > 0 ? Double(arrived) / elapsed * configuration.bucketSeconds : 0
+            guard rate.isFinite else { throw MomentumError.invalidConfiguration }
+            short += alpha(elapsed, configuration.shortHalfLife) * (rate - short)
+            long += alpha(elapsed, configuration.longHalfLife) * (rate - long)
+            let macd = short - long
+            signal += alpha(elapsed, configuration.signalHalfLife) * (macd - signal)
+            let histogram = macd - signal
+            arrivals.evict(before: max(windowStart, end.addingTimeInterval(-configuration.volumeWindow)))
+            let floorMet =
+                arrivals.recentCount >= configuration.minimumIndependentReports
+                && arrivals.recentOrigins.count >= configuration.minimumOriginPublishers
+            points.append(
+                .init(
+                    bucketEnd: end, independentCount: arrivals.recentCount, originCount: arrivals.recentOrigins.count,
+                    shortEMA: short, longEMA: long, macd: macd, signal: signal, histogram: histogram,
+                    state: classify(previous: previousHistogram, histogram: histogram, floorMet: floorMet)))
+            previousHistogram = histogram
+        }
+        return points
+    }
+
+    /// Equality is neutral: deceleration requires a strictly positive-to-negative adjacent crossover.
+    private static func classify(previous: Double, histogram: Double, floorMet: Bool) -> MomentumState {
+        if previous > 0 && histogram < 0 { return .decelerating }
+        return histogram > 0 && floorMet ? .accelerating : .quiet
     }
 
     private static func validate(

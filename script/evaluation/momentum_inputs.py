@@ -11,6 +11,9 @@ from urllib.parse import quote
 
 def export(database: Path, output: Path) -> None:
     """Read only the supplied fixture and create a new private, deterministic input file."""
+    output = output.expanduser().resolve()
+    if output.exists():
+        raise SystemExit(f"Refusing to overwrite an existing momentum input file: {output}")
     connection = sqlite3.connect("file:" + quote(str(database.resolve())) + "?mode=ro", uri=True)
     try:
         cases = []
