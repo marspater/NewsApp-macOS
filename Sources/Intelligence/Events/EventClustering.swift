@@ -261,6 +261,10 @@ enum EventClusterer {
             if matchPolicy.samePublisherRequiresMatch, !pair.isMatch, !a.source.isEmpty, a.source == b.source {
                 pair.isCompatible = false
             }
+            if matchPolicy.editionAdmission {
+                pair.rowIsEdition = EventMatcher.isNewsletterEdition(title: a.title)
+                pair.memberIsEdition = EventMatcher.isNewsletterEdition(title: b.title)
+            }
             // The matcher's own verdict is recorded; a reader's inclusion only overrides it here.
             let key = a.id < b.id ? a.id + "\n" + b.id : b.id + "\n" + a.id
             record(a, b, pair, probability: modelScores[key] ?? nil)
@@ -838,10 +842,17 @@ enum EventClusterer {
                 let exclusions = fragmentExclusions[member.id] ?? []
                 if first.contains(where: { exclusions.contains($0.id) }) { return false }
             }
+            // An edition neither vetoes nor carries a merge (#737, `editionAdmission`): its host's other reports decide.
+            func reports(_ rows: [EventMatchRow]) -> [EventMatchRow] {
+                guard matchPolicy.editionAdmission else { return rows }
+                let kept = rows.filter { !EventMatcher.isNewsletterEdition(title: $0.title) }
+                return kept.isEmpty ? rows : kept
+            }
+            let (left, right) = (reports(first), reports(second))
             // The rules settle most pairs of fragments: a conflict, or a pair without a shared specific anchor that
             // the pair model may not rescue, refuses the merge before the model is asked about anything.
-            for a in first {
-                for b in second where inclusions[a.id]?.contains(b.id) != true {
+            for a in left {
+                for b in right where inclusions[a.id]?.contains(b.id) != true {
                     let pair = try await ruled(a, b)
                     // Under the veto threshold (#737, evaluation) an outvotable conflict is counted with the rest below.
                     let outvotable = pair.conflict.map {
@@ -855,8 +866,8 @@ enum EventClusterer {
                 }
             }
             var pairs: [EventPairAssessment] = []
-            for a in first {
-                for b in second {
+            for a in left {
+                for b in right {
                     try Task.checkCancellation()
                     pairs.append(try await assessed(a, b))
                 }

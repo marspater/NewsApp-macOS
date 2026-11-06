@@ -275,6 +275,7 @@ enum StoryCorpus {
             policy.borderlineNames = value
         }
         if environment["NEWS_PAIR_STRIP_NEWSLETTER"] == "1" { policy.pairModelStripsNewsletter = true }
+        if environment["NEWS_EDITION_ADMISSION"] == "1" { policy.editionAdmission = true }
         // The semantic veto and rescue cutoffs (#628), swept when the sentence encoder changes.
         if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init), value.isFinite {
             policy.semanticVetoThreshold = value

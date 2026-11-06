@@ -8225,6 +8225,13 @@ struct NewsTests {
         assertEqual(
             reported.description, "A newsletter leaked 40,000 records, police said.",
             "A paragraph that reports on a newsletter stays; only the calls to action go")
+        let inbox = EventMatcher.newsletterStripped(
+            title: "Hackers strike | First Thing",
+            description: "Leaked files were found in your inbox, police said.\nGet First Thing in your inbox\n"
+                + "Don’t already get First Thing in your inbox?")
+        assertEqual(
+            inbox.description, "Leaked files were found in your inbox, police said.",
+            "A paragraph that reports an inbox event stays; only the inbox calls to action go")
         var stripPolicy = EventMatchPolicy.standard
         stripPolicy.pairModelStripsNewsletter = true
         assertEqual(
@@ -8243,6 +8250,9 @@ struct NewsTests {
         assertEqual(plain.description, "Sign up here", "Without a suffix the body is left alone")
         let scored = EventMatcher.newsletterStripped(title: "Lakers beat Celtics | 102-99", description: "")
         assertEqual(scored.title, "Lakers beat Celtics | 102-99", "A suffix with digits is not a series")
+        assertTrue(EventMatcher.isNewsletterEdition(title: "Stevens defects | First Thing"), "A suffix is an edition")
+        assertFalse(EventMatcher.isNewsletterEdition(title: "Lakers beat Celtics | 102-99"), "Digits are no series")
+        assertFalse(EventMatcher.isNewsletterEdition(title: "Binance CEO replenishes assets"), "No suffix, no edition")
     }
 
     /// One publisher, one headline, two GUIDs and two URLs within hours: one story (#583). A recurring headline a day
@@ -11411,6 +11421,41 @@ struct NewsTests {
         assertTrue(
             EventMatcher.eventScore(pairs: [pair, pair, diverging], policy: vetoShare) != nil,
             "One veto in three is not more than a 0.34 share")
+        // Edition-aware admission (#737, evaluation): an edition enters through its matched pair, its other items raising
+        // no veto, and does not count toward the two-thirds rule of other reports.
+        var editionPolicy = EventMatchPolicy.standard
+        editionPolicy.editionAdmission = true
+        var editionMatch = pair
+        editionMatch.rowIsEdition = true
+        var editionItem = diverging
+        editionItem.rowIsEdition = true
+        assertTrue(
+            EventMatcher.eventScore(pairs: [editionMatch, editionItem, editionItem]) == nil,
+            "An edition's other items veto by default")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [editionMatch, editionItem, editionItem], policy: editionPolicy) != nil,
+            "An edition joins through its matched pair")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [editionItem, editionItem], policy: editionPolicy) == nil,
+            "An edition without a matched pair stays out")
+        var editionMember = diverging
+        editionMember.memberIsEdition = true
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, editionMember]) == nil, "An edition member vetoes by default")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, editionMember], policy: editionPolicy) != nil,
+            "An edition member does not count against a report")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [editionMember], policy: editionPolicy) == nil,
+            "A member that is only an edition still has to match")
+        var matchedEdition = pair
+        matchedEdition.memberIsEdition = true
+        assertTrue(
+            EventMatcher.eventScore(pairs: [matchedEdition, diverging], policy: editionPolicy) == nil,
+            "A match with the edition alone carries no report into its host")
+        assertFalse(
+            EventMatcher.forced(editionMember, policy: editionPolicy).memberIsEdition,
+            "A reader's inclusion with an edition keeps counting")
         var placed = diverging
         placed.conflict = .places
         assertTrue(
@@ -17074,6 +17119,128 @@ struct NewsTests {
         return lines.count - 1
     }
 
+    /// The admission verdict of a matched pair the clustering kept apart (#737, `NEWS_EVENT_DIAGNOSE=1`, local console
+    /// only): each article's event, and whether the article would enter the other's event as that event stands now, with
+    /// the rules that refuse it and the cross-pairs behind them. Assessed like the clusterer's own pass, so a verdict
+    /// describes the final membership; the greedy pass may have refused against fewer members.
+    static func printAdmissionVerdict(
+        _ a: String, _ b: String, memberships: [String: String], in db: DatabaseEngine, policy: EventMatchPolicy,
+        calibration: PairCalibration?, titles: [String: String]
+    ) async throws {
+        var eventMembers: [String: [EventMatchRow]] = [:]
+        for id in [memberships[a], memberships[b]].compactMap({ $0 }) where eventMembers[id] == nil {
+            eventMembers[id] = try await db.eventMatchMembers(eventID: id)?.members ?? []
+        }
+        let rows = try await db.eventMatchRows(articleIDs: [a, b])
+        let everyRow = rows + eventMembers.values.flatMap { $0 }
+        let ids = Array(Set(everyRow.map(\.id)))
+        let stored = try await db.fetchArticleFeatures(articleIDs: ids, version: EventFeatures.storageVersion)
+        let vectors = try await db.fetchArticleEmbeddings(articleIDs: ids, modelVersion: SentenceEmbedder.modelVersion)
+        func features(_ row: EventMatchRow) -> EventFeatures {
+            var value =
+                stored[row.id] ?? EventFeatures(title: row.title, description: row.description, date: row.date)
+            value.date = row.date
+            return value
+        }
+        let probability =
+            StoryCorpus.pairProbabilityFromEnvironment()
+            ?? { @Sendable a, b in await PairScorer.shared.probability(a, b) }
+        func assessed(_ a: EventMatchRow, _ b: EventMatchRow) async -> (pair: EventPairAssessment, model: Double?) {
+            let cosine = vectors[a.id].flatMap { left in
+                vectors[b.id].map { SentenceEmbedder.cosineSimilarity(left, $0) }
+            }
+            let samePublisher = !a.source.isEmpty && a.source == b.source
+            var pair = EventMatcher.assess(
+                features(a), features(b), policy: policy, embeddingSimilarity: cosine, samePublisher: samePublisher)
+            var model: Double?
+            if EventMatcher.needsPairModel(pair) {
+                let gap: TimeInterval? = policy.pairModelPrefix ? abs(a.date.timeIntervalSince(b.date)) : nil
+                let known = policy.pairModelPrefix && !a.source.isEmpty && !b.source.isEmpty
+                model = await probability(
+                    EventMatcher.pairModelText(
+                        title: a.title, description: a.description, gap: gap,
+                        samePublisher: known ? samePublisher : nil, policy: policy),
+                    EventMatcher.pairModelText(
+                        title: b.title, description: b.description, gap: gap,
+                        samePublisher: known ? samePublisher : nil, policy: policy))
+                let cutoff =
+                    calibration?.cutoff(
+                        policy.pairModelThreshold,
+                        PairCalibration.features(
+                            pairModel: model ?? 0, cosine: pair.embeddingCosine,
+                            sharedSpecific: pair.sharedSpecificAnchors,
+                            gapHours: abs(a.date.timeIntervalSince(b.date)) / 3600,
+                            sameAct: pair.conflict != .differentAct)) ?? policy.pairModelThreshold
+                if let model, model >= cutoff { pair = EventMatcher.modelConfirmed(pair, policy: policy) }
+                pair = EventMatcher.applyingBorderlineFloor(pair, probability: model, policy: policy)
+            }
+            if policy.samePublisherRequiresMatch, !pair.isMatch, samePublisher { pair.isCompatible = false }
+            if policy.editionAdmission {
+                pair.rowIsEdition = EventMatcher.isNewsletterEdition(title: a.title)
+                pair.memberIsEdition = EventMatcher.isNewsletterEdition(title: b.title)
+            }
+            return (pair, model)
+        }
+        for (label, id, other) in [("a", a, b), ("b", b, a)] {
+            guard let row = rows.first(where: { $0.id == id }) else { continue }
+            let event = memberships[id]
+            let size = event.flatMap { eventMembers[$0]?.count } ?? 0
+            print("        \(label) in \(event ?? "no event") (\(size) members)")
+            guard let target = memberships[other], let members = eventMembers[target] else {
+                print("        \(label) into the other's event: the other holds no event")
+                continue
+            }
+            var assessments: [(member: EventMatchRow, pair: EventPairAssessment, model: Double?)] = []
+            for member in members.sorted(by: { ($0.date, $0.id) < ($1.date, $1.id) }) {
+                let (pair, model) = await assessed(row, member)
+                assessments.append((member, pair, model))
+            }
+            let pairs = assessments.map(\.pair)
+            let score = EventMatcher.eventScore(pairs: pairs, policy: policy)
+            let failures = admissionFailures(pairs, policy: policy)
+            print(
+                "        \(label) into the other's event: "
+                    + (score.map { "admitted, score \(String(format: "%.2f", $0))" }
+                        ?? "refused: \(failures.joined(separator: "; "))"))
+            // ponytail: the first twelve refusing cross-pairs; the counts above cover a larger event.
+            let refusing = assessments.filter { !$0.pair.isCompatible || $0.pair.conflict != nil }
+            for item in refusing.prefix(12) {
+                let pair = item.pair
+                print(
+                    "          x \(titles[item.member.id] ?? item.member.id)\n"
+                        + "            \(pair.conflict?.rawValue ?? "no conflict") match=\(pair.isMatch ? 1 : 0) "
+                        + "compatible=\(pair.isCompatible ? 1 : 0) specific=\(pair.sharedSpecificAnchors) "
+                        + "score=\(String(format: "%.2f", pair.score)) "
+                        + "cosine=\(pair.embeddingCosine.map { String(format: "%.2f", $0) } ?? "-") "
+                        + "model=\(item.model.map { String(format: "%.3f", $0) } ?? "-")")
+            }
+            if refusing.count > 12 { print("          … \(refusing.count - 12) more refusing cross-pairs") }
+        }
+    }
+
+    /// The rules of `EventMatcher.eventScore(pairs:policy:)` a set of cross-pairs fails, in words.
+    static func admissionFailures(_ allPairs: [EventPairAssessment], policy: EventMatchPolicy) -> [String] {
+        var failures: [String] = []
+        if allPairs.count >= policy.maximumEventSize { failures.append("event full") }
+        let pairs = EventMatcher.admissionPairs(allPairs, policy: policy)
+        if EventMatcher.conflictsBlock(pairs, policy: policy) {
+            let conflicts = Dictionary(grouping: pairs.compactMap(\.conflict), by: \.rawValue).mapValues(\.count)
+            let named = conflicts.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+            failures.append("veto \(pairs.filter { $0.conflict != nil }.count)/\(pairs.count) (\(named))")
+        }
+        let nameless = pairs.filter { $0.sharedSpecificAnchors < 1 && !$0.modelConfirmed }.count
+        if nameless > 0 { failures.append("no shared name \(nameless)/\(pairs.count)") }
+        if !pairs.contains(where: \.isMatch) { failures.append("no matched pair") }
+        let required = Int((Double(pairs.count) * policy.compatibleShare).rounded(.up))
+        let compatible = pairs.filter(\.isCompatible).count
+        if compatible < required { failures.append("two-thirds \(compatible)/\(pairs.count), needs \(required)") }
+        let mean = pairs.isEmpty ? 0 : pairs.map(\.score).reduce(0, +) / Double(pairs.count)
+        if mean < policy.eventScore {
+            failures.append("mean \(String(format: "%.2f", mean)) below \(policy.eventScore)")
+        }
+        return failures
+    }
+
     /// The library holdout (#579): `NEWS_LIBRARY_HOLDOUT` is a JSON array of `{"a", "b", "label"}` with article ids of
     /// `NEWS_SNAPSHOT_DB` and labels `same`, `related` or `different`. A temporary copy of the library is re-clustered
     /// from scratch inside the active window (events, memberships, match state, pair decisions and corrections removed;
@@ -17167,7 +17334,7 @@ struct NewsTests {
                 if let id = row[0] { titles[id] = row[1] ?? "" }
             }
         }
-        for pair in pairs {
+        for (pairNumber, pair) in pairs.enumerated() {
             let linked = memberships[pair.a] != nil && memberships[pair.a] == memberships[pair.b]
             byLabel[pair.label, default: (0, 0)].total += 1
             if linked { byLabel[pair.label, default: (0, 0)].linked += 1 }
@@ -17194,6 +17361,12 @@ struct NewsTests {
                     "      \(linked ? "WRONG LINK" : "MISSED") [\(pair.label)] \(titles[pair.a] ?? pair.a) || "
                         + "\(titles[pair.b] ?? pair.b)\n        decision \(decision?[0] ?? "none") \(decision?[1] ?? "") "
                         + "\(decision?[2] ?? "")")
+                if !linked, decision?[0] == "match" {
+                    print("        pair \(pairNumber) a \(pair.a) b \(pair.b)")
+                    try await printAdmissionVerdict(
+                        pair.a, pair.b, memberships: memberships, in: db, policy: policy,
+                        calibration: PairCalibration.fit(calibrationRows), titles: titles)
+                }
             }
         }
         let precision = truePairs + falsePairs == 0 ? 0 : Double(truePairs) / Double(truePairs + falsePairs)
