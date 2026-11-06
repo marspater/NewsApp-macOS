@@ -32,10 +32,9 @@ import Testing
         #expect(metrics.averageLatency == 0.5)
     }
 
-    /// The runner's atom, unchanged. It exits the process on a failure, so xctest reports a crash for now; porting its
-    /// assertions one by one is #1070's step 2.
+    /// Run the existing atom without terminating the native test process on failure.
     @Test func existingAtomPasses() async {
-        await FeedHealthMetricsTests.run()
+        await FeedHealthMetricsTests.run(exitOnFailure: false)
         #expect(FeedHealthMetricsTests.failures == 0)
     }
 }
