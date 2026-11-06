@@ -4922,6 +4922,7 @@ actor DatabaseEngine {
         URL(fileURLWithPath: dbPath + ".world-tension-v2.json")
     }
 
+    /// Throws when the library was opened read-only (a newer schema, or a failed pre-migration copy).
     func requireWritable() throws {
         if isReadOnly { throw CocoaError(.fileWriteVolumeReadOnly) }
     }

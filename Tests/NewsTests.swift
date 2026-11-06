@@ -17849,6 +17849,7 @@ struct NewsTests {
         await hold.open()
     }
 
+    /// Highlights and notes: storage, FTS5, VACUUM, retention, cascade and the store's revision counter (#711).
     @MainActor static func testUserNotesStorageAndFTS() async throws {
         print("  - Testing highlights and notes: storage, FTS5, VACUUM, retention and cascade (#711)...")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -17860,6 +17861,7 @@ struct NewsTests {
         assertEqual(try await database.storedSchemaVersion(), 31, "The library migrates to the current schema")
 
         // Rows of the index itself: a listing joins the notes table and would hide a row a trigger left behind.
+        /// How many index rows match the word.
         func indexRows(_ word: String) async throws -> Int {
             Int(
                 try await database.eventRows(
@@ -17867,6 +17869,7 @@ struct NewsTests {
                 )
                 .first?.first.flatMap { $0 } ?? "") ?? -1
         }
+        /// Runs FTS5's integrity check of the note index against the notes.
         func checkIndex(_ moment: String) async throws {
             do {
                 try await database.eventRows(
@@ -17882,6 +17885,7 @@ struct NewsTests {
             description: "A chip with fault-tolerant qubits", pubDate: old, source: "Quantum Review")
         _ = try await database.upsertArticles([first, second])
         let paragraphs = ["The lab replicates zero resistance at ambient pressure.", "Reviewers want a second lab."]
+        /// A note on `quote` in the fixture paragraphs.
         func note(_ article: FeedArticle, _ index: Int, _ start: Int, _ quote: String, body: String = "") -> UserNote {
             NoteAnchor.note(
                 articleID: article.id, paragraphs: paragraphs, index: index, start: start, quote: quote, body: body)
@@ -17961,6 +17965,7 @@ struct NewsTests {
         try await checkIndex("after the cascade")
     }
 
+    /// Placing selections, finding a note again after re-extraction, and painting its range (#711).
     static func testNoteAnchoring() {
         print("  - Testing highlight anchoring across re-extraction and selections (#711)...")
         let story = [
