@@ -39,7 +39,8 @@ actor DatabaseEngine {
     private var countsCache:
         (changes: ChangeToken, scope: [String], muting: MuteRules, value: (unread: Int, saved: Int, total: Int))?
     private var mutedCountCache: (changes: ChangeToken?, counts: [MutedCountKey: Int]) = (nil, [:])
-    /// The last search's query vector, so its pages and counts rank and count the same stories (#708).
+    /// The last free-text search's query vector, a cache so paging does not embed the text again (#708). Counts take
+    /// their vector from the caller: this slot is shared by every window's search (#985).
     var searchEmbedding: (text: String, vector: [Float])?
     /// This connection's writes (`sqlite3_total_changes`) and other connections' commits (`PRAGMA data_version`).
     private struct ChangeToken: Equatable {
@@ -62,6 +63,7 @@ actor DatabaseEngine {
         let isRead: Bool?
         let isSaved: Bool?
         let search: String?
+        let hasVector: Bool
         let muting: MuteRules
         let scope: [String]
     }
@@ -4146,6 +4148,7 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         search: String? = nil,
+        searchVector: [Float]? = nil,
         muting: MuteRules
     ) throws -> Int {
         guard !muting.isEmpty, db != nil else { return 0 }
@@ -4155,12 +4158,13 @@ actor DatabaseEngine {
         if changes == nil || mutedCountCache.changes != changes { mutedCountCache = (changes, [:]) }
         let key = MutedCountKey(
             section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
-            muting: muting,
+            hasVector: searchVector != nil, muting: muting,
             scope: collectionOnlyFeedURLs)
         if let known = mutedCountCache.counts[key] { return known }
         let count = try listAggregates(
             "count(*)", section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
-            filter: " AND " + Self.mutedArticle, filterParameters: Self.mutingParameters(muting))[0]
+            searchVector: searchVector, filter: " AND " + Self.mutedArticle,
+            filterParameters: Self.mutingParameters(muting))[0]
         guard changes != nil else { return count }
         if mutedCountCache.counts.count >= 32 { mutedCountCache.counts = [:] }
         mutedCountCache.counts[key] = count
@@ -4176,6 +4180,7 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         search: String? = nil,
+        searchVector: [Float]? = nil,
         muting: MuteRules = MuteRules()
     ) throws -> (stories: Int, events: Int) {
         let totals = try listAggregates(
@@ -4187,6 +4192,7 @@ actor DatabaseEngine {
                      WHERE \(Self.visibleArticle) GROUP BY 1) g ON g.story = coalesce(e.story_id, e.id)
                 """,
             section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
+            searchVector: searchVector,
             filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
             filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))
         return (totals[0], totals[1])
@@ -4196,7 +4202,7 @@ actor DatabaseEngine {
     /// `filter`.
     private func listAggregates(
         _ columns: String, joins: String = "", section: String?, smartBinder: SmartBinder? = nil, isRead: Bool?,
-        isSaved: Bool?, search: String?,
+        isSaved: Bool?, search: String?, searchVector: [Float]?,
         filter: String, filterParameters: [QueryParameter]
     ) throws -> [Int] {
         guard let db = db else {
@@ -4214,7 +4220,7 @@ actor DatabaseEngine {
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         } else {
-            let conditions = searchConditions(ArticleFilterQuery.parse(searchText))
+            let conditions = searchConditions(ArticleFilterQuery.parse(searchText), vector: searchVector)
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         }

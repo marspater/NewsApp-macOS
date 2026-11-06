@@ -49,43 +49,51 @@ extension DatabaseEngine {
                     sql: sql, params: params, prepareErrorMessage: "Failed to prepare operator search query"))
         }
 
-        // Pages and counts of one search reuse its vector instead of embedding the text again.
-        let text = parsed.terms.joined(separator: " ")
-        if let queryEmbedding {
-            searchEmbedding = (text, queryEmbedding)
-        } else if parsed.phraseTermIndices.isEmpty, searchEmbedding?.text != text,
-            await SentenceEmbedder.shared.isAvailable
-        {
-            try Task.checkCancellation()
-            let vector = await SentenceEmbedder.shared.embed(text)
-            try Task.checkCancellation()
-            searchEmbedding = vector.map { (text, $0) }
-        }
+        // The page's own vector ranks it; callers hand the same vector to the counts (`searchQueryVector`).
+        var vector = queryEmbedding
+        if vector == nil { vector = try await searchQueryVector(for: trimmed) }
         let (sql, params) = hybridSearchQuery(
-            parsed: parsed, muting: muting, after: after, limit: limit, embedding: searchVector(for: parsed))
+            parsed: parsed, muting: muting, after: after, limit: limit,
+            embedding: Self.usableVector(vector, for: parsed))
         return try curateImages(
             in: executeQueryArticles(sql: sql, params: params, prepareErrorMessage: "Failed to prepare search query"))
     }
 
-    /// The stored query vector for this search's text, when it has the model's dimension. A quoted phrase (an entity
-    /// tag, #930) asks for those exact words, so it gets none and stays lexical.
-    private func searchVector(for parsed: ArticleFilterQuery) -> [Float]? {
-        guard parsed.phraseTermIndices.isEmpty, let searchEmbedding,
-            searchEmbedding.text == parsed.terms.joined(separator: " "),
-            searchEmbedding.vector.count == SentenceEmbedder.vectorDimension
+    /// The vector a free-text search ranks and counts with, or nil when it stays lexical: operators only, a quoted
+    /// phrase (an entity tag, #930, asks for those exact words) or no embedder. The last text's vector is kept so
+    /// paging does not embed it again; it is only a cache, so concurrent searches cannot change what a caller holds.
+    /// A search passes its vector to `searchArticles`, `mutedArticleCount` and `listTotals`, so all three agree (#985).
+    func searchQueryVector(for query: String) async throws -> [Float]? {
+        let parsed = ArticleFilterQuery.parse(query.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !parsed.terms.isEmpty, parsed.phraseTermIndices.isEmpty else { return nil }
+        let text = parsed.terms.joined(separator: " ")
+        if let searchEmbedding, searchEmbedding.text == text { return searchEmbedding.vector }
+        guard await SentenceEmbedder.shared.isAvailable else { return nil }
+        try Task.checkCancellation()
+        let vector = await SentenceEmbedder.shared.embed(text)
+        try Task.checkCancellation()
+        searchEmbedding = vector.map { (text, $0) }
+        return vector
+    }
+
+    /// The vector when it has the model's dimension and the search is not a quoted phrase.
+    private static func usableVector(_ vector: [Float]?, for parsed: ArticleFilterQuery) -> [Float]? {
+        guard parsed.phraseTermIndices.isEmpty, let vector, vector.count == SentenceEmbedder.vectorDimension
         else { return nil }
-        return searchEmbedding.vector
+        return vector
     }
 
     /// The stories a search lists, as conditions on `a` for counts (#782): FTS5 matches, plus the semantic matches
     /// when the search has a query vector, under the operators.
-    func searchConditions(_ parsed: ArticleFilterQuery) -> (sql: String, params: [QueryParameter]) {
+    func searchConditions(_ parsed: ArticleFilterQuery, vector: [Float]? = nil) -> (
+        sql: String, params: [QueryParameter]
+    ) {
         let operators = operatorConditions(parsed)
         guard !parsed.terms.isEmpty else { return operators }
         var match =
             "a.id IN (SELECT f.article_id FROM article_fts_rows f JOIN articles_fts fts ON fts.rowid = f.fts_rowid WHERE articles_fts MATCH ?)"
         var params: [QueryParameter] = [("text", Self.ftsMatchExpression(parsed))]
-        if let vector = searchVector(for: parsed) {
+        if let vector = Self.usableVector(vector, for: parsed) {
             match +=
                 " OR a.id IN (SELECT article_id FROM article_embeddings WHERE model_version = ? AND news_cosine(vector, ?) >= ?)"
             params += [
