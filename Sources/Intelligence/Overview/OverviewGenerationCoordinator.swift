@@ -72,6 +72,8 @@ actor OverviewGenerationCoordinator {
     static let maxConcurrentExtractions = 2
     /// Running page fetches by article ID; overlapping requests join them instead of fetching again.
     private var extractionTasks: [String: Task<Void, Never>] = [:]
+    /// Counts clears of derived data (#982): a warm-up that began before one starts no fetches after it.
+    private var clearCount = 0
     /// Article ID plus publisher input of fetches that failed or timed out; not retried this session.
     // ponytail: grows with articles seen in one session; prune by age if sessions get long.
     private var failedExtractions: Set<String> = []
@@ -259,6 +261,9 @@ actor OverviewGenerationCoordinator {
         _ articles: [FeedArticle], excluding excluded: Set<String>, store: ArticleStore
     ) async -> [FeedArticle] {
         guard extractText != nil else { return articles }
+        let clearsAtStart = clearCount
+        // The generation these fetches start under; a clear of derived data before they land refuses their writes.
+        let generation = await store.database.analysisGeneration
         let candidates = Set(
             OverviewRepresentativeSelector().selectRepresentatives(from: articles).map(\.id).filter {
                 !excluded.contains($0)
@@ -270,7 +275,10 @@ actor OverviewGenerationCoordinator {
                 && !failedExtractions.contains($0.id + $0.publisherInputHash)
         }.prefix(Self.maxEvidenceFetches)
         guard !missing.isEmpty else { return current }
-        for article in missing { startExtraction(of: article, store: store) }
+        // A clear that ran during the awaits above already reset this coordinator; fetches started now would carry
+        // the old generation, be refused and be remembered as failed.
+        guard clearsAtStart == clearCount else { return current }
+        for article in missing { startExtraction(of: article, store: store, generation: generation) }
         while !Task.isCancelled, missing.contains(where: { extractionTasks[$0.id] != nil }) {
             try? await Task.sleep(for: .milliseconds(50))
         }
@@ -297,12 +305,17 @@ actor OverviewGenerationCoordinator {
     }
 
     /// Starts a fetch that stores accepted text and finishes by the deadline, unless one is already running.
-    private func startExtraction(of article: FeedArticle, store: ArticleStore) {
+    private func startExtraction(of article: FeedArticle, store: ArticleStore, generation: Int) {
         guard extractionTasks[article.id] == nil else { return }
         let deadline = extractionDeadline
         let task = Task {
-            let work = Task { await self.extractAndStore(article, store: store) }
-            let stored = await Self.result(of: work, cancellingAt: deadline)
+            let work = Task { await self.extractAndStore(article, store: store, generation: generation) }
+            // Cancelling the fetch (a clear of derived data, #982) cancels the work too, which then never stores.
+            let stored = await withTaskCancellationHandler {
+                await Self.result(of: work, cancellingAt: deadline)
+            } onCancel: {
+                work.cancel()
+            }
             self.finishExtraction(article, stored: stored)
         }
         extractionTasks[article.id] = task
@@ -331,8 +344,10 @@ actor OverviewGenerationCoordinator {
     }
 
     /// Fetches the page and stores its text only if extraction passed its quality checks, the fetch was not cut off
-    /// by the deadline, and the publisher input is unchanged.
-    private nonisolated func extractAndStore(_ article: FeedArticle, store: ArticleStore) async -> Bool {
+    /// by the deadline, the publisher input is unchanged and no clear of derived data ran since `generation` (#982).
+    private nonisolated func extractAndStore(_ article: FeedArticle, store: ArticleStore, generation: Int) async
+        -> Bool
+    {
         guard let extractText, await acquireExtractionSlot() else { return false }
         let outcome = await extractText(article.link)
         await releaseExtractionSlot()
@@ -341,7 +356,7 @@ actor OverviewGenerationCoordinator {
         else { return false }
         return await store.updateEnrichment(
             id: article.id, content: content, image: imageUrl, readerDocument: document,
-            expectedInputHash: article.publisherInputHash)
+            expectedInputHash: article.publisherInputHash, expectedGeneration: generation)
     }
 
     /// Waits for one of the shared extraction slots; false if cancelled while waiting.
@@ -359,6 +374,8 @@ actor OverviewGenerationCoordinator {
     }
 
     private func finishExtraction(_ article: FeedArticle, stored: Bool) {
+        // Cancelled by a clear: `analysisCleared()` already dropped the entry, and a fetch started since owns the slot.
+        guard !Task.isCancelled else { return }
         extractionTasks[article.id] = nil
         if !stored {
             if failedExtractions.count >= 1000 { failedExtractions.removeAll() }
@@ -526,9 +543,12 @@ actor OverviewGenerationCoordinator {
         priority != .background || eventID != visibleEventID
     }
 
-    /// Clear AI Analysis ran (#805): in-flight results are refused by the store, and the memory cache would
-    /// otherwise serve cleared overviews.
+    /// A clear of derived data ran (#805): in-flight results are refused by the store, the memory cache would
+    /// otherwise serve cleared overviews, and page fetches stop instead of writing cleared bodies back (#982).
     func analysisCleared() {
+        clearCount &+= 1
+        for (_, running) in extractionTasks { running.cancel() }
+        extractionTasks.removeAll()
         cancelAll()
         clearCache()
     }

@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -59,6 +61,24 @@ class MatrixValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "neutral"):
             editorial_matrix.validate_fixture(self.db, self.meta)
 
+    def test_lost_fallback_controls_cannot_lower_the_gate(self) -> None:
+        """Relabelling half the fallback controls preserves totals but must fail coverage."""
+        self.db.execute(
+            "UPDATE passages SET expected_class='repetition' WHERE id IN "
+            "(SELECT id FROM passages WHERE expected_class='semantic_fallback' LIMIT 350)"
+        )
+        with self.assertRaisesRegex(RuntimeError, "passage-class"):
+            editorial_matrix.validate_fixture(self.db, self.meta)
+
+    def test_lost_historical_misses_cannot_lower_the_gate(self) -> None:
+        """A coherent route-label change still cannot remove required negative controls."""
+        self.db.execute(
+            "UPDATE passages SET expected_lexical_match=1 WHERE id IN "
+            "(SELECT id FROM passages WHERE expected_lexical_match=0 LIMIT 100)"
+        )
+        with self.assertRaisesRegex(RuntimeError, "historical routing"):
+            editorial_matrix.validate_fixture(self.db, self.meta)
+
     def test_logical_hash_excludes_storage_layout(self) -> None:
         """Identical logical data has identical fixture and label hashes."""
         original = editorial_matrix.provenance(self.db)
@@ -107,6 +127,18 @@ class OutputProtectionTests(unittest.TestCase):
             args = argparse.Namespace(database=path, output=path)
             with self.assertRaises(SystemExit):
                 editorial_matrix.prepare_paths(args)
+
+    def test_retained_size_includes_fallback_writes(self) -> None:
+        """The reported database size includes committed queue growth after checkpoint."""
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "fixture.sqlite3"
+            output = Path(directory) / "report.json"
+            args = argparse.Namespace(database=database, output=output, seed=20261105)
+            editorial_matrix.run_phase_zero(args, database, output)
+            report = json.loads(output.read_text())
+            self.assertEqual(report["database"]["sqlite_file_bytes"], database.stat().st_size)
+            with closing(sqlite3.connect(database)) as connection:
+                self.assertEqual(connection.execute("SELECT count(*) FROM semantic_fallback_queue").fetchone()[0], 750)
 
 
 class GitRevisionTests(unittest.TestCase):

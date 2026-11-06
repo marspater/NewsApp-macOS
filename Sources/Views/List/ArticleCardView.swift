@@ -427,10 +427,10 @@ struct ArticleCardView<Footer: View>: View {
     private var accessibilityDescription: String {
         let readState = isRead ? "Read" : "Unread"
         let savedState = isSaved ? ", saved in your library" : ""
-        let dateFormatted = article.publicationDateText
+        let dateFormatted = article.dateAccessibilityText
         let excerpt = article.searchExcerpt.map { " Matching text: \($0.plainText)" } ?? ""
         return
-            "\(article.title), from \(displaySource), published \(dateFormatted). \(readState)\(savedState).\(excerpt)"
+            "\(article.title), from \(displaySource), \(dateFormatted). \(readState)\(savedState).\(excerpt)"
     }
 }
 

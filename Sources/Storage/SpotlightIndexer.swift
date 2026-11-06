@@ -25,7 +25,7 @@ protocol SpotlightIndexing: Sendable {
 }
 
 /// Local-only CoreSpotlight indexer for saved stories.
-/// Indexes title, publisher, summary, and publication date under `"com.marspater.news.saved-stories"`.
+/// Indexes title, publisher, publisher description, and publication date under `"com.marspater.news.saved-stories"`.
 struct SystemSpotlightIndexer: SpotlightIndexing, Sendable {
     static let shared = SystemSpotlightIndexer()
     static let domainIdentifier = "com.marspater.news.saved-stories"
@@ -40,8 +40,9 @@ struct SystemSpotlightIndexer: SpotlightIndexing, Sendable {
         if !publisher.isEmpty {
             attributeSet.publishers = [publisher]
         }
-        let summaryText = (article.aiSummary ?? article.description).trimmingCharacters(in: .whitespacesAndNewlines)
-        attributeSet.contentDescription = summaryText
+        // The publisher's description only: generated summaries stay out of the system index, so Clear AI Analysis
+        // has nothing to leave behind in Spotlight (#983).
+        attributeSet.contentDescription = article.description.trimmingCharacters(in: .whitespacesAndNewlines)
         if article.pubDate != DateParser.unknownDate {
             attributeSet.contentCreationDate = article.pubDate
         }
