@@ -16,11 +16,22 @@ chmod 700 "$OUTPUT"
 [[ ! -e "$OUTPUT/wire-identity.json" ]] || { echo "Refusing to overwrite $OUTPUT/wire-identity.json" >&2; exit 1; }
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-wire-identity-build.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
+python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json"
 if [[ "${NEWS_WIRE_IDENTITY_FETCH_FEEDS:-}" == 1 ]]; then
-    python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json" --fetch-feeds
+    mkdir -m 700 "$STAGE/feeds"
     export NEWS_WIRE_IDENTITY_FEEDS="$STAGE/feeds"
-else
-    python3 -m script.evaluation.wire_identity_inputs --database "$LIBRARY" --output "$STAGE/inputs.json"
+    index=0
+    fetched=0
+    while IFS= read -r url; do
+        index=$((index + 1))
+        if curl -fsSL --proto '=http,https' --proto-redir '=http,https' --max-time 20 --max-filesize 16777216 \
+            -A Mozilla/5.0 -o "$STAGE/feeds/$index.xml" -- "$url"; then
+            fetched=$((fetched + 1))
+        else
+            rm -f "$STAGE/feeds/$index.xml"
+        fi
+    done < <(sqlite3 -readonly "$LIBRARY" "SELECT url FROM feeds ORDER BY url")
+    echo "Fetched $fetched of $index feeds"
 fi
 mkdir -m 700 "$STAGE/migration"
 cp "$LIBRARY" "$STAGE/migration/news.sqlite3"

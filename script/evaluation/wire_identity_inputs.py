@@ -5,11 +5,8 @@ import argparse
 import json
 import os
 import sqlite3
-import urllib.request
 from pathlib import Path
-from urllib.parse import quote, urlsplit
-
-FEED_LIMIT = 16 * 1024 * 1024
+from urllib.parse import quote
 
 
 def export(database: Path, output: Path) -> None:
@@ -38,39 +35,13 @@ def export(database: Path, output: Path) -> None:
         stream.write("\n")
 
 
-def fetch_feeds(database: Path, output: Path) -> None:
-    """Fetch the copy's own subscribed feeds once into a new `feeds` folder beside `output`; a failed feed is skipped."""
-    directory = output.expanduser().resolve().with_name("feeds")
-    connection = sqlite3.connect("file:" + quote(str(database.resolve())) + "?mode=ro", uri=True)
-    try:
-        urls = [row[0] for row in connection.execute("SELECT url FROM feeds ORDER BY url")]
-    finally:
-        connection.close()
-    directory.mkdir(mode=0o700, parents=True, exist_ok=False)
-    failed = 0
-    for index, url in enumerate(urls):
-        if urlsplit(url).scheme not in ("http", "https"):
-            failed += 1
-            continue
-        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                (directory / f"{index}.xml").write_bytes(response.read(FEED_LIMIT))
-        except OSError:
-            failed += 1
-    print(f"Fetched {len(urls) - failed} of {len(urls)} feeds")
-
-
 def main() -> None:
     """Parse library copy and output paths."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--fetch-feeds", action="store_true")
     args = parser.parse_args()
     export(args.database, args.output)
-    if args.fetch_feeds:
-        fetch_feeds(args.database, args.output)
 
 
 if __name__ == "__main__":
