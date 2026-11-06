@@ -52,6 +52,10 @@ struct ArticleDetailView: View {
     @State private var showsAnnotationsInspector = false
     @State private var articleNotes: [UserNote] = []
     @State private var noteDraft: NoteDraft?
+    @State private var showsChanges = false
+    @State private var changesSinceVersion: Int?
+    /// The diff overlay with the `changesTaskID` it was worked out for; it is used only while that still holds.
+    @State private var changeOverlay = (key: "", overlay: SentenceDiff.Overlay())
     @State private var revealedBlock: Int?
     @Namespace private var storyParagraphs
 
@@ -187,6 +191,7 @@ struct ArticleDetailView: View {
                     onToggleInspector: { showsAnnotationsInspector.toggle() })
             )
             .inspector(isPresented: $showsAnnotationsInspector) { annotationsInspector }
+            .task(id: changesTaskID) { await updateChangeOverlay() }
             .task(id: "\(activeArticle.id):\(articleStore.userNotesRevision)") {
                 let id = activeArticle.id
                 let notes = await articleStore.notes(for: id)
@@ -218,6 +223,9 @@ struct ArticleDetailView: View {
                 storyUpdateStatus = nil
                 articleNotes = []
                 noteDraft = nil
+                showsChanges = false
+                changesSinceVersion = nil
+                changeOverlay = ("", SentenceDiff.Overlay())
             }
             .onChange(of: currentArticle.publisherInputHash) { _, _ in
                 analysis = nil
@@ -412,35 +420,39 @@ struct ArticleDetailView: View {
                         }
                     }
 
-                    // Eyebrow: Source, Date, Reading Time
+                    // Eyebrow: Source, Date, Reading Time, and the revision pill of an updated story
                     HStack(spacing: AppSpacing.eyebrowGap) {
-                        EyebrowText(displaySource)
+                        HStack(spacing: AppSpacing.eyebrowGap) {
+                            EyebrowText(displaySource)
 
-                        Text("·")
-                            .foregroundStyle(secondaryText)
-
-                        Text(currentArticle.publicationDateText)
-                            .font(AppTypography.label)
-                            .foregroundStyle(AppColor.secondaryText)
-                            .monospacedDigit()
-
-                        if let readingTimeEstimate {
                             Text("·")
                                 .foregroundStyle(secondaryText)
 
-                            Text(readingTimeEstimate)
+                            Text(currentArticle.publicationDateText)
                                 .font(AppTypography.label)
                                 .foregroundStyle(AppColor.secondaryText)
                                 .monospacedDigit()
+
+                            if let readingTimeEstimate {
+                                Text("·")
+                                    .foregroundStyle(secondaryText)
+
+                                Text(readingTimeEstimate)
+                                    .font(AppTypography.label)
+                                    .foregroundStyle(AppColor.secondaryText)
+                                    .monospacedDigit()
+                            }
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            Self.sourceLineAccessibilityLabel(
+                                source: displaySource,
+                                publicationDateText: currentArticle.publicationDateText,
+                                readingTimeEstimate: readingTimeEstimate ?? ""
+                            ))
+
+                        revisionPill
                     }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(
-                        Self.sourceLineAccessibilityLabel(
-                            source: displaySource,
-                            publicationDateText: currentArticle.publicationDateText,
-                            readingTimeEstimate: readingTimeEstimate ?? ""
-                        ))
 
                     // Headline
                     Text(currentArticle.title)
@@ -763,6 +775,7 @@ struct ArticleDetailView: View {
             // Positions are stable within the immutable, article-keyed reader document.
             let highlighted = highlightedBlockIndex
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
+                if index == 0 { retractedLines(overlay.changes.retracted[-1]) }
                 readerBlock(block, index: index, isLead: index == leadIndex, overlay: overlay)
                     .padding(.horizontal, index == highlighted ? AppSpacing.xs : 0)
                     .padding(.vertical, index == highlighted ? AppSpacing.xxs : 0)
@@ -778,6 +791,7 @@ struct ArticleDetailView: View {
                             scale: readerTextScale)
                     )
                     .accessibilityLinkedGroup(id: currentArticle.id, in: storyParagraphs)
+                retractedLines(overlay.changes.retracted[index])
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1053,7 +1067,116 @@ struct ArticleDetailView: View {
 
     /// The highlights (and, with the diff shown, the changes) to paint over the rendered blocks.
     private func readerOverlay(for blocks: [ReaderBlock]) -> ReaderOverlay {
-        ReaderOverlay(notes: articleNotes, paragraphs: anchorTexts(blocks))
+        ReaderOverlay(
+            notes: articleNotes, paragraphs: anchorTexts(blocks),
+            changes: showsChanges && changeOverlay.key == changesTaskID ? changeOverlay.overlay : .init())
+    }
+
+    // MARK: - Story Evolution (V2 #712)
+
+    private var isStoryReady: Bool {
+        if case .ready = contentState { return true }
+        return false
+    }
+
+    /// Publisher updates the story can be compared with, newest first.
+    private var comparableUpdates: [PublisherContentRevision] {
+        PublisherContentRevision.comparable(
+            publisherRevisions,
+            current: PublisherContentRevision.text(
+                description: currentArticle.description, content: currentArticle.fullContent))
+    }
+
+    /// The update the story is compared with: the story as it was before it, the newest unless the reader chose.
+    private var changesBase: PublisherContentRevision? {
+        let updates = comparableUpdates
+        return updates.first { $0.version == changesSinceVersion } ?? updates.first
+    }
+
+    private var changesTaskID: String {
+        // The blocks' text is part of the key only while the diff shows: it decides where the changes sit.
+        let blocks = showsChanges ? renderedBlocks.map(\.text).hashValue : 0
+        return
+            "\(showsChanges && isStoryReady):\(changesBase?.version ?? 0):\(currentArticle.publisherInputHash):\(blocks)"
+    }
+
+    /// Works out the diff overlay off the main actor and keeps it with the comparison it belongs to.
+    private func updateChangeOverlay() async {
+        guard showsChanges, isStoryReady, let before = changesBase?.previousText else {
+            changeOverlay = ("", SentenceDiff.Overlay())
+            return
+        }
+        let key = changesTaskID
+        let after = PublisherContentRevision.text(
+            description: currentArticle.description, content: currentArticle.fullContent)
+        let blocks = anchorTexts(renderedBlocks)
+        let work = Task.detached(priority: .userInitiated) {
+            SentenceDiff.overlay(before: before, after: after, blocks: blocks)
+        }
+        let overlay = await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
+        guard !Task.isCancelled else { return }
+        changeOverlay = (key, overlay)
+    }
+
+    /// "Updated (N revisions)" beside the date: toggles the sentence diff; with several updates the menu picks the
+    /// story it is compared with. Added sentences are tinted and removed ones listed struck through, in place.
+    @ViewBuilder
+    private var revisionPill: some View {
+        let updates = comparableUpdates
+        if isStoryReady, !updates.isEmpty {
+            let count = updates.count
+            Text("·")
+                .foregroundStyle(secondaryText)
+                .accessibilityHidden(true)
+            Menu {
+                ForEach(updates) { update in
+                    Button {
+                        changesSinceVersion = update.version
+                        showsChanges = true
+                    } label: {
+                        Text(
+                            "Compare with the story before \(update.observedAt.formatted(date: .abbreviated, time: .shortened))"
+                        )
+                    }
+                }
+                if showsChanges {
+                    Divider()
+                    Button("Hide Changes") { showsChanges = false }
+                }
+            } label: {
+                TagView(
+                    title: count == 1 ? "Updated (1 revision)" : "Updated (\(count) revisions)",
+                    systemImage: "clock.arrow.circlepath",
+                    tint: showsChanges ? AppColor.accent : AppColor.secondaryText, font: AppTypography.label)
+            } primaryAction: {
+                showsChanges.toggle()
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .fixedSize()
+            .help(showsChanges ? "Hide what the publisher changed" : "Show what the publisher changed")
+            .accessibilityValue(showsChanges ? "Showing changes" : "Changes hidden")
+            .accessibilityHint("Shows added sentences marked and removed sentences struck through")
+        }
+    }
+
+    /// Sentences a publisher update removed, struck through after the block that held the sentence before them.
+    @ViewBuilder
+    private func retractedLines(_ sentences: [String]?) -> some View {
+        ForEach(Array((sentences ?? []).enumerated()), id: \.offset) { _, sentence in
+            Text(sentence)
+                .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
+                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                .strikethrough()
+                .foregroundStyle(AppColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, AppSpacing.xs)
+                .accessibilityLabel("Removed by the publisher: \(sentence)")
+        }
     }
 
     /// One note for each passage of the reader's selection that is not highlighted yet; nil, with a beep, when
