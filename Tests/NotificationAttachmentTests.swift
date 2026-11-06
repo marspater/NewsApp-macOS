@@ -31,6 +31,7 @@ enum NotificationAttachmentTests {
                 images: [
                     ReaderImageCandidate(url: page, origin: .body, width: 1672, height: 941),
                     ReaderImageCandidate(url: "https://news.example/logo.png", origin: .body),
+                    ReaderImageCandidate(url: "https://news.example/tiny.png", origin: .body, width: 1, height: 1),
                     ReaderImageCandidate(
                         url: "https://news.example/second.jpg", origin: .body, width: 800, height: 600),
                     ReaderImageCandidate(url: "https://news.example/photo.png?w=1672", origin: .feed),
@@ -43,6 +44,12 @@ enum NotificationAttachmentTests {
             precondition(
                 urls == [page, "https://news.example/second.jpg", "https://news.example/photo.png?w=1672"],
                 "Attachment candidates must run lead, other usable candidates, feed image; got \(urls)")
+            let tinyFeed = FeedArticle(
+                title: "Story", link: "https://news.example/tiny", guid: "tiny", description: "", pubDate: Date(),
+                source: "News", imageUrl: "https://news.example/tiny.png", readerDocument: document)
+            precondition(
+                !FeedArticle.attachmentImages(for: tinyFeed).contains { $0.absoluteString.hasSuffix("tiny.png") },
+                "A feed image with known tiny dimensions must not become a fallback")
             let bare = FeedArticle(
                 title: "Story", link: "https://news.example/bare", guid: "bare", description: "", pubDate: Date(),
                 source: "News")

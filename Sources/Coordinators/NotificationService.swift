@@ -569,6 +569,7 @@ final class NotificationService: Sendable {
             guard await continues(), !Task.isCancelled else { return .halted }
             // The lead, then the other candidates (#1010): a lead that decodes as a page is not the only photo.
             for imageUrl in FeedArticle.attachmentImages(for: article).prefix(3) {
+                guard await continues(), !Task.isCancelled else { return .halted }
                 guard let attachment = await downloadNotificationAttachment(from: imageUrl) else { continue }
                 content.attachments = [attachment]
                 // The app-drawn banner loads the photo again through the reader's image cache.

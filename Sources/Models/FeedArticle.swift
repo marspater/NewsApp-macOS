@@ -156,7 +156,11 @@ struct FeedArticle: Identifiable, Codable, Hashable, Sendable {
     static func attachmentImages(for article: FeedArticle) -> [URL] {
         var urls = rankedCardImages(in: [article]).map(\.url)
         let others = (article.readerDocument?.images ?? []).map(\.url) + [article.imageUrl].compactMap { $0 }
-        for raw in others where ReaderImageCandidate.usable(url: raw) {
+        for raw in others {
+            let metadata = article.readerDocument?.images?.first { $0.url == raw }
+            guard ReaderImageCandidate.usable(url: raw, width: metadata?.width, height: metadata?.height) else {
+                continue
+            }
             if let url = URL(string: raw), !urls.contains(url) { urls.append(url) }
         }
         return urls
