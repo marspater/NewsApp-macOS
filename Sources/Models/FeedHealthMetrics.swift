@@ -33,9 +33,10 @@ enum ReaderBarrier: String, Sendable {
 
 /// What the library has stored about one feed, as `DatabaseEngine.feedHealthMetrics(now:)` reads it.
 struct FeedHealthObservations: Equatable, Sendable {
-    var attempts = 0
-    var successes = 0
-    /// Seconds spent on successful requests; attempts, successes and this total are halved together as they age.
+    /// Weighted, not whole, counts: aging halves attempts, successes and latency together, so rates and means hold.
+    var attempts = 0.0
+    var successes = 0.0
+    /// Seconds spent on successful requests.
     var latencyTotal: TimeInterval = 0
     /// Stories published inside `FeedHealthMetrics.frequencyWindow`, and the oldest of them.
     var recentItems = 0
@@ -68,8 +69,8 @@ struct FeedHealthMetrics: Equatable, Sendable {
     let fullReaderShare: Double?
 
     init(_ observed: FeedHealthObservations, now: Date) {
-        successRate = observed.attempts > 0 ? Double(observed.successes) / Double(observed.attempts) : nil
-        averageLatency = observed.successes > 0 ? observed.latencyTotal / Double(observed.successes) : nil
+        successRate = observed.attempts > 0 ? observed.successes / observed.attempts : nil
+        averageLatency = observed.successes > 0 ? observed.latencyTotal / observed.successes : nil
         if observed.recentItems > 0, let oldest = observed.oldestRecentItem {
             let days = max(1, now.timeIntervalSince(oldest) / (24 * 60 * 60))
             itemsPerDay = Double(observed.recentItems) / days

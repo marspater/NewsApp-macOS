@@ -1791,9 +1791,6 @@ struct ArticleDetailView: View {
                 allowHTTP: allowInsecure
             )
             guard !Task.isCancelled, activeArticle.id == targetId else { return }
-            if let barrier = ReaderBarrier(extraction.outcome) {
-                await articleStore.recordReaderBarrier(barrier, articleID: targetId)
-            }
 
             switch extraction.outcome {
             case .success(let content, let imageUrl, let extractedDocument):
@@ -1848,6 +1845,10 @@ struct ArticleDetailView: View {
                 self.contentState = .fallback(reason: "Could not extract story body: \(reason)")
             case .networkError(let reason):
                 self.contentState = .fallback(reason: "Network error: \(reason)")
+            }
+            // After the state: a busy database must not delay the message, and the story may change during the write.
+            if let barrier = ReaderBarrier(extraction.outcome) {
+                await articleStore.recordReaderBarrier(barrier, articleID: targetId)
             }
         }
     }

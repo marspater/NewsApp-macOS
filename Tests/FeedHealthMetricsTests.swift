@@ -122,6 +122,30 @@ enum FeedHealthMetricsTests {
         check(rate > 0.45 && rate < 0.55, "halving keeps the rate")
         check(abs((metrics?.averageLatency ?? 0) - 1) < 0.1, "halving keeps the latency")
 
+        // One success among many failures keeps its weight through a halving.
+        let sparse = "https://example.com/sparse.xml"
+        try await reopened.recordFeedSuccess(sparse, at: now)
+        try await reopened.recordFeedSample(sparse, latency: 1)
+        for _ in 0..<(DatabaseEngine.feedSampleWindow - 1) {
+            try await reopened.recordFeedSample(sparse, latency: nil)
+        }
+        try await reopened.recordFeedSample(sparse, latency: 1)
+        let sparseLatency = try await reopened.feedHealthMetrics(now: now)[sparse]?.averageLatency
+        check(sparseLatency == 1, "a success after a halving does not inflate the mean")
+
+        // A reconciled duplicate keeps its feed link but is not a second story.
+        let merged = "https://example.com/merged.xml"
+        try await reopened.upsertArticles(
+            [story("survivor", complete: true), story("duplicate", complete: true)], feedUrl: merged, now: now)
+        let mergedStories = try await reopened.eventRows(
+            "SELECT id FROM articles WHERE canonical_url LIKE '%/survivor' OR canonical_url LIKE '%/duplicate' ORDER BY canonical_url DESC;"
+        )
+        try await reopened.eventRows(
+            "INSERT INTO article_reconciliations VALUES (?, ?, 'https://example.com/survivor', 'fingerprint');",
+            [.text(mergedStories[1][0] ?? ""), .text(mergedStories[0][0] ?? "")])
+        let mergedMetrics = try await reopened.feedHealthMetrics(now: now)[merged]
+        check(mergedMetrics?.assessedStories == 1, "a reconciled duplicate does not count twice")
+
         // A malformed stored document costs that story its class, not the whole query.
         await reopened.close()
         func execute(_ sql: String) {
@@ -188,7 +212,7 @@ enum FeedHealthMetricsTests {
         metrics = try await db.feedHealthMetrics(now: now)
         check(metrics[bad]?.successRate == 0, "a paused feed stays at its count")
         let attempts = try await db.eventRows("SELECT fetch_attempts FROM feeds WHERE url = ?;", [.text(bad)])
-        check(attempts.first?.first == "1", "a skipped request is not an attempt")
+        check(Double(attempts.first?.first.flatMap { $0 } ?? "") == 1, "a skipped request is not an attempt")
 
         MockURLProtocol.requestHandler = { _ in throw URLError(.notConnectedToInternet) }
         let offline = FeedFetcher(client: NewsTests.mockHTTPClient(configuration: config), now: { now })

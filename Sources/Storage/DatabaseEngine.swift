@@ -1966,7 +1966,7 @@ actor DatabaseEngine {
                 // Per-feed request counters and why the reader was refused a story's text (#715). History starts
                 // here; nothing earlier recorded either.
                 for (column, type) in [
-                    ("fetch_attempts", "INTEGER NOT NULL DEFAULT 0"), ("fetch_successes", "INTEGER NOT NULL DEFAULT 0"),
+                    ("fetch_attempts", "REAL NOT NULL DEFAULT 0"), ("fetch_successes", "REAL NOT NULL DEFAULT 0"),
                     ("fetch_latency_total", "REAL NOT NULL DEFAULT 0"),
                 ] where try !columnNames(of: "feeds").contains(column) {
                     try executeSimple("ALTER TABLE feeds ADD COLUMN \(column) \(type);")

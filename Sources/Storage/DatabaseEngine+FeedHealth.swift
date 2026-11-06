@@ -28,11 +28,11 @@ extension DatabaseEngine {
                 """
                 UPDATE feeds SET fetch_attempts = fetch_attempts + 1, fetch_successes = fetch_successes + ?,
                     fetch_latency_total = fetch_latency_total + ? WHERE url = ?;
-                """, [.integer(latency == nil ? 0 : 1), .real(max(0, latency ?? 0)), .text(feedURL)])
+                """, [.real(latency == nil ? 0 : 1), .real(max(0, latency ?? 0)), .text(feedURL)])
             try eventRows(
                 """
-                UPDATE feeds SET fetch_attempts = fetch_attempts / 2, fetch_successes = fetch_successes / 2,
-                    fetch_latency_total = fetch_latency_total / 2 WHERE url = ? AND fetch_attempts >= ?;
+                UPDATE feeds SET fetch_attempts = fetch_attempts / 2.0, fetch_successes = fetch_successes / 2.0,
+                    fetch_latency_total = fetch_latency_total / 2.0 WHERE url = ? AND fetch_attempts >= ?;
                 """, [.text(feedURL), .integer(Self.feedSampleWindow)])
         }
     }
@@ -51,7 +51,7 @@ extension DatabaseEngine {
         for row in try eventRows("SELECT url, fetch_attempts, fetch_successes, fetch_latency_total FROM feeds;") {
             guard let url = row[0] else { continue }
             observed[url] = FeedHealthObservations(
-                attempts: Int(row[1] ?? "") ?? 0, successes: Int(row[2] ?? "") ?? 0,
+                attempts: Double(row[1] ?? "") ?? 0, successes: Double(row[2] ?? "") ?? 0,
                 latencyTotal: Double(row[3] ?? "") ?? 0)
         }
         let cutoff = now.addingTimeInterval(-FeedHealthMetrics.frequencyWindow).timeIntervalSince1970
@@ -69,6 +69,7 @@ extension DatabaseEngine {
                     SELECT *, CASE WHEN json_valid(reader_document)
                         THEN json_extract(reader_document, '$.isComplete') END AS complete FROM articles
                 ) a ON a.id = af.article_id
+                WHERE \(Self.visibleArticle)
             ) GROUP BY feed_url;
             """, [.real(cutoff)])
         for row in rows {
