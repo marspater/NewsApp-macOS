@@ -2564,6 +2564,9 @@ struct NewsTests {
         let prose = (1...20).map {
             "Researchers in London compared observation \($0) with the published evidence and documented the results."
         }.joined(separator: " ")
+        // Past wall-clock dates: an upsert stores a future feed date as unknown (#981), which would empty the candidate
+        // window below and leave the refreshed stories undated, behind the archive (#1043).
+        let clusterNow = Date()
         func article(_ index: Int) -> FeedArticle {
             let image = "https://baseline.example/media/publisher-\(index % 20).jpg"
             let document = ReaderDocument(
@@ -2573,13 +2576,10 @@ struct NewsTests {
             return FeedArticle(
                 title: "Research report \(index)", link: "https://baseline.example/article/\(index)",
                 guid: "baseline-\(index)", description: "Research evidence",
-                pubDate: Date(timeIntervalSince1970: 1_800_000_000 + Double(index)),
+                pubDate: clusterNow.addingTimeInterval(Double(index) - 10_250),
                 source: "Publisher \(index % 20)", imageUrl: image, fullContent: prose, readerDocument: document)
         }
         let archive = (0..<10_000).map(article)
-        let clusterNow = Date(timeIntervalSince1970: 1_800_010_250)
-        // The archive is dated by its own clock: against the wall clock its dates are in the future, and an upsert
-        // stores a future feed date as unknown (#981), which would empty the candidate window below (#1043).
         try await db.upsertArticles(archive, now: clusterNow)
         // Steady-state archive, rather than a first-launch clustering backlog competing with refresh.
         try await db.markEventMatchProcessed(archive.map(\.id), matcherVersion: EventMatcher.version, at: clusterNow)
@@ -2604,6 +2604,7 @@ struct NewsTests {
         record("snapshot_first_500_ms", from: coldStart)
         assertEqual(store.articles.count, 500, "Baseline keeps the real snapshot limit")
         let batches = (0..<5).map { offset in (0..<50).map { article(10_000 + offset * 50 + $0) } }
+        let freshGUIDs = Set(batches.flatMap { $0.compactMap(\.guid) })
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in
@@ -2614,6 +2615,8 @@ struct NewsTests {
             await manager.fetchFeedsAsync()
             record("refresh_5_mocked_feeds_ms", from: start)
             assertEqual(manager.articles.count, 500, "Refresh publishes the bounded snapshot")
+            assertTrue(
+                freshGUIDs.isSubset(of: Set(manager.articles.compactMap(\.guid))), "Refresh publishes the new stories")
             await manager.waitForEventClustering()
         }
         assertEqual(try await db.counts().total, 10_250, "Repeated refreshes keep one row per document")
