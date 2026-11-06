@@ -119,6 +119,8 @@ NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/Harness/ListInvalidationBase
 ./script/launch_baseline.sh
 ```
 
+Re-clustering budget (#691), from scratch on a library copy with a Release runner on an idle Mac: 48 s per 1,000 recent rows with stored signals and vectors, 72 s without them. See `docs/audits/2026-11-06-recluster-stages.md`.
+
 ## 8. Privacy manifest and documentation consistency
 
 - Automated: `testDistributionAndEntitlementsIntegrity` (part of `./test.sh`) checks `PrivacyInfo.xcprivacy`, the
