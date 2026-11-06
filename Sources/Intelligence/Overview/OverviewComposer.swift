@@ -93,7 +93,10 @@ public struct OverviewComposer: Sendable {
             statement = statement.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         guard let first = statement.first else { return statement }
-        if first.isLowercase {
+        // A quotation that opens on a lower-case word ("“we will rebuild,” …") is reported speech too.
+        let opensLowercase =
+            first.isLowercase || ("“\"".contains(first) && statement.dropFirst().first?.isLowercase == true)
+        if opensLowercase {
             let speaker = participant.trimmingCharacters(in: .whitespacesAndNewlines)
             statement = "\(speaker.prefix(1).uppercased())\(speaker.dropFirst()) said \(statement)"
         }
