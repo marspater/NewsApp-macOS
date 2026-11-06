@@ -822,33 +822,6 @@ struct ArticleDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, AppSpacing.sm * readerTextScale)
                 .accessibilityHidden(true)
-        case .standfirst:
-            Text(readerLinkedText(block, index: index, overlay: overlay))
-                .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
-                .foregroundStyle(AppColor.secondaryText)
-                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-        case .table:
-            ReaderTableView(
-                block: block,
-                font: AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale * 0.9))
-        case .embed:
-            NoticeView {
-                HStack(spacing: AppSpacing.sm) {
-                    Label(
-                        Self.embedTitle(for: block),
-                        systemImage: Self.isTableNotice(block) ? "tablecells" : "text.bubble"
-                    )
-                    .font(AppTypography.callout)
-                    .foregroundStyle(AppColor.secondaryText)
-                    Spacer()
-                    Button("Open Web View", systemImage: "globe") { viewMode = .web }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("Open web view (W)")
-                }
-            }
         case .paragraph:
             Text(readerLinkedText(block, index: index, overlay: overlay))
                 .font(
@@ -865,7 +838,7 @@ struct ArticleDetailView: View {
         }
     }
 
-    /// Quotes, list items and code: the block kinds whose layout wraps the text.
+    /// Quotes, list items, code and standfirsts: the block kinds whose layout wraps the text.
     @ViewBuilder
     private func readerWrappedBlock(_ block: ReaderBlock, index: Int, overlay: ReaderOverlay) -> some View {
         switch block.kind {
@@ -905,6 +878,22 @@ struct ArticleDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
+        case .standfirst:
+            Text(readerLinkedText(block, index: index, overlay: overlay))
+                .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
+                .foregroundStyle(AppColor.secondaryText)
+                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        default:
+            readerBoxedBlock(block, index: index, overlay: overlay)
+        }
+    }
+
+    /// Pull quotes, tables and embeds: the block kinds that are boxed or set apart from the text.
+    @ViewBuilder
+    private func readerBoxedBlock(_ block: ReaderBlock, index: Int, overlay: ReaderOverlay) -> some View {
+        switch block.kind {
         case .pullQuote:
             VStack(alignment: .leading, spacing: AppSpacing.sm * readerTextScale) {
                 Divider().opacity(Self.dividerOpacity(for: contrast))
@@ -915,6 +904,26 @@ struct ArticleDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                 Divider().opacity(Self.dividerOpacity(for: contrast))
+            }
+        case .table:
+            ReaderTableView(
+                block: block,
+                font: AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale * 0.9))
+        case .embed:
+            NoticeView {
+                HStack(spacing: AppSpacing.sm) {
+                    Label(
+                        Self.embedTitle(for: block),
+                        systemImage: Self.isTableNotice(block) ? "tablecells" : "text.bubble"
+                    )
+                    .font(AppTypography.callout)
+                    .foregroundStyle(AppColor.secondaryText)
+                    Spacer()
+                    Button("Open Web View", systemImage: "globe") { viewMode = .web }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .help("Open web view (W)")
+                }
             }
         default:
             EmptyView()
