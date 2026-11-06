@@ -180,6 +180,7 @@ enum NotificationAttachmentTests {
         let presenter = StoryBannerPresenter.shared
         if initialWindow == nil { precondition(!presenter.present(banner), "No window on screen, no app-drawn banner") }
         presenter.isHeadless = true
+        defer { presenter.isHeadless = false }
         precondition(presenter.present(banner), "Banner presents when a window is open")
 
         // Notification handlers
