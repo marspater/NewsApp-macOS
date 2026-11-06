@@ -5451,6 +5451,7 @@ struct NewsTests {
                 resolver: { _ in gatewayAnswer },
                 // Port 1 on loopback refuses at once: an upstream that cannot be reached.
                 connector: { _, _ in NWConnection(host: "127.0.0.1", port: 1, using: .tcp) })
+            assertTrue(NetworkBoundaryProxy.directParameters.preferNoProxies, "Upstream asks for no proxy (#929)")
             let client = SecureHTTPClient(gateway: gateway, resolver: { _ in publicAddress })
             let result = await FeedFetcher(client: client).fetchSingleFeed(urlString: "https://example.com/feed.xml")
             await gateway.stop()
