@@ -457,7 +457,7 @@ class FeedManager: NSObject, ObservableObject {
         refreshTask?.cancel()
         refreshTask = nil
         refreshRunID = nil
-        manualRefreshWaiters.forEach { $0.resume() }
+        for waiter in manualRefreshWaiters { waiter.resume() }
         manualRefreshWaiters = []
         // The waiting caller returns without finishing the run, so the loading state ends here.
         for (url, status) in feedStatuses where status == .loading { feedStatuses[url] = .idle }
@@ -585,7 +585,7 @@ class FeedManager: NSObject, ObservableObject {
         // Taken here so that stopping now drops the request, and resumes its callers, instead of leaving it for later.
         let manualWaiters = manualRefreshWaiters
         manualRefreshWaiters = []
-        defer { manualWaiters.forEach { $0.resume() } }
+        defer { for waiter in manualWaiters { waiter.resume() } }
 
         guard !isStopped else { return }
         await pruneIfDue()
