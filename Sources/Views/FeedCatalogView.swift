@@ -239,8 +239,8 @@ struct FeedCatalogView: View {
 
     private func publisherMonogram(_ feed: CatalogFeed) -> some View {
         Circle()
-            .fill(AppColor.accent.opacity(0.12))
-            .frame(width: 32, height: 32)
+            .fill(AppColor.publisherMonogramBackground)
+            .frame(width: AppLayout.publisherMonogramSize, height: AppLayout.publisherMonogramSize)
             .overlay(
                 Text(String(feed.publisher.prefix(1)))
                     .textCase(.uppercase)

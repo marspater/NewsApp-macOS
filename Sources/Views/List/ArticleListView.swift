@@ -1585,7 +1585,7 @@ struct KeyboardShortcutsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380)
+        .frame(width: AppLayout.keyboardShortcutsPopoverWidth)
         .fixedSize(horizontal: false, vertical: true)
     }
 }

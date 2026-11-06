@@ -206,7 +206,7 @@ struct ReaderFigureView: View {
                 .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                        .strokeBorder(AppColor.border(for: contrast), lineWidth: 0.5)
+                        .strokeBorder(AppColor.border(for: contrast), lineWidth: AppLayout.hairline)
                 )
                 .frame(maxWidth: .infinity)
             }
@@ -308,7 +308,7 @@ struct ToolbarLoadingBubble: View {
                 .accessibilityHidden(true)
             Text("Loading event overview…")
                 .font(AppTypography.caption)
-                .foregroundColor(AppColor.secondaryText)
+                .foregroundStyle(AppColor.secondaryText)
                 .accessibilityLabel("Loading event overview")
         }
         .padding(.horizontal, AppSpacing.sm)
