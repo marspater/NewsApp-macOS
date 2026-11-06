@@ -30,3 +30,5 @@ The script creates and validates an isolated Phase 0 database, exports event-dis
 ## Remaining gate
 
 The fixture validates routing, mathematics and controlled burst shapes, not editorial accuracy on real news. Production insert/update latency, live warmup policy, independent-origin evidence and consumer integration remain unestablished. Release experiment timing is not claimed from this Debug run. Existing Briefing, Lead and notification behavior remains in effect.
+
+Independent-origin evidence on real rows is measured in [the wire identity audit](2026-11-06-editorial-wire-identity.md).

@@ -90,7 +90,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 33
+    static let schemaVersion = 34
     /// The longest text a publisher update keeps of what it replaced (#712): a cut text would show invented changes.
     static let maximumRevisionTextLength = 50_000
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
@@ -1947,6 +1947,22 @@ actor DatabaseEngine {
             try beginTransaction()
             do {
                 try Task.checkCancellation()
+                // The feed's author field, for wire identity (#998). A story stored before this has none until its
+                // feed serves it again.
+                if try !columnNames(of: "articles").contains("author") {
+                    try executeSimple("ALTER TABLE articles ADD COLUMN author TEXT;")
+                }
+                try setUserVersion(33)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                throw error
+            }
+        }
+        if version < 34 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
                 // Per-feed request counters and why the reader was refused a story's text (#715). History starts
                 // here; nothing earlier recorded either.
                 for (column, type) in [
@@ -1958,7 +1974,7 @@ actor DatabaseEngine {
                 if try !columnNames(of: "articles").contains("reader_barrier") {
                     try executeSimple("ALTER TABLE articles ADD COLUMN reader_barrier TEXT;")
                 }
-                try setUserVersion(33)
+                try setUserVersion(34)
                 try commitTransaction()
             } catch {
                 loggedOptional("rollbackTransaction") { try rollbackTransaction() }
@@ -2453,11 +2469,12 @@ actor DatabaseEngine {
         INSERT INTO articles (
             id, guid, canonical_url, title, description, content,
             published_at, source, image_url, category, feed_url,
-            created_at, updated_at, reader_document
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            created_at, updated_at, reader_document, author
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?18)
         ON CONFLICT(id) DO UPDATE SET
             guid = coalesce(excluded.guid, articles.guid),
-            canonical_url = CASE WHEN ?
+            author = coalesce(excluded.author, articles.author),
+            canonical_url = CASE WHEN ?15
                 THEN excluded.canonical_url ELSE articles.canonical_url END,
             published_at = CASE WHEN excluded.published_at = ?16
                 THEN (CASE WHEN articles.published_at > ?13 + \(futureDateSkew) THEN excluded.published_at ELSE articles.published_at END)
@@ -2536,6 +2553,11 @@ actor DatabaseEngine {
         sqlite3_bind_int(artStmt, 15, values.validLink ? 1 : 0)
         sqlite3_bind_double(artStmt, 16, DateParser.unknownDate.timeIntervalSince1970)
         sqlite3_bind_int(artStmt, 17, article.readerDocument?.hasPublisherText == true ? 1 : 0)
+        if let author = article.author {
+            sqlite3_bind_text(artStmt, 18, author, -1, Self.sqliteTransient)
+        } else {
+            sqlite3_bind_null(artStmt, 18)
+        }
     }
 
     /// A feed date further ahead than this is a typo, a wrong-zone embargo or a hostile value, not clock skew (#981).

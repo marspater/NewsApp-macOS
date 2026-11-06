@@ -179,7 +179,8 @@ timeline
         v31 : publisher_content_revisions.previous_text (#712)
     section Feeds and search, continued
         v32 : feeds.last_failure_kind (#927)
-        v33 : feed request counters, articles.reader_barrier (#715)
+        v33 : articles.author (#998)
+        v34 : feed request counters, articles.reader_barrier (#715)
 ```
 
 ## Invariants

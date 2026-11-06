@@ -131,11 +131,11 @@ enum FeedHealthMetricsTests {
             check(sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK, "fixture: \(sql)")
         }
         execute("UPDATE articles SET reader_document = 'not json' WHERE canonical_url LIKE '%/plain';")
-        try await migrateFromV32(path: path, execute: execute, feed: feed)
+        try await migrateFromV33(path: path, execute: execute, feed: feed)
     }
 
-    /// A v32 library upgrades with its feeds and stories, and the new counters start at zero.
-    static func migrateFromV32(path: String, execute: (String) -> Void, feed: String) async throws {
+    /// A v33 library upgrades with its feeds and stories, and the new counters start at zero.
+    static func migrateFromV33(path: String, execute: (String) -> Void, feed: String) async throws {
         execute(
             """
             PRAGMA legacy_alter_table=ON;
@@ -143,16 +143,16 @@ enum FeedHealthMetricsTests {
             ALTER TABLE feeds DROP COLUMN fetch_attempts;
             ALTER TABLE feeds DROP COLUMN fetch_successes;
             ALTER TABLE feeds DROP COLUMN fetch_latency_total;
-            PRAGMA user_version=32;
+            PRAGMA user_version=33;
             """)
         let upgraded = DatabaseEngine(path: path)
         try await upgraded.open()
         let metrics = try await upgraded.feedHealthMetrics(now: now)[feed]
         check(metrics?.successRate == nil, "upgraded counters start empty")
         check(metrics?.assessedStories == 5, "upgraded stories keep their documents and lose only barriers")
-        check(try await upgraded.storedSchemaVersion() == DatabaseEngine.schemaVersion, "a v32 library upgrades")
+        check(try await upgraded.storedSchemaVersion() == DatabaseEngine.schemaVersion, "a v33 library upgrades")
         let files = try FileManager.default.contentsOfDirectory(atPath: (path as NSString).deletingLastPathComponent)
-        check(files.contains { $0.contains("-before-v32-") }, "the upgrade keeps a rollback copy")
+        check(files.contains { $0.contains("-before-v33-") }, "the upgrade keeps a rollback copy")
         await upgraded.close()
     }
 
