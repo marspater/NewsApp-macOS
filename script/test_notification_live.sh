@@ -9,7 +9,7 @@ OUTPUT=$(cd "$OUTPUT" && pwd)
 STAGE=$(mktemp -d "${TMPDIR:-/tmp}/news-notification-build.XXXXXX")
 trap 'rm -rf "$STAGE"' EXIT
 # The installed app's identifier, so the existing notification authorization applies.
-NEWS_HARNESS=Tests/Harness/NativeNotificationQA.swift NEWS_BUNDLE_ID=com.marspater.news \
+NEWS_HARNESS=Tests/Harness/NativeNotificationQA.swift NEWS_HARNESS_SANDBOX=1 NEWS_BUNDLE_ID=com.marspater.news \
     NEWS_APP_DIR="$STAGE/NewsHarness.app" ./build.sh > "$OUTPUT/build.log" 2>&1
 codesign --verify --deep --strict "$STAGE/NewsHarness.app"
 "$STAGE/NewsHarness.app/Contents/MacOS/NewsHarness" > "$OUTPUT/runtime.log" 2>&1

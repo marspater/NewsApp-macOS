@@ -19,7 +19,7 @@ for flag in "$@"; do
 done
 SETTINGS=()
 if [[ ${#FLAGS[@]} -gt 0 ]]; then SETTINGS+=(OTHER_SWIFT_FLAGS="\$(inherited) ${FLAGS[*]}"); fi
-case " ${FLAGS[*]} " in *" -profile-generate "*) SETTINGS+=(OTHER_LDFLAGS='$(inherited) -fprofile-instr-generate') ;; esac
+case " ${FLAGS[*]} " in *" -profile-generate "*) SETTINGS+=(OTHER_LDFLAGS="\$(inherited) -fprofile-instr-generate") ;; esac
 
 echo "Compiling tests for macOS ${TARGET_MACOS:-15.0} ($(uname -m), $CONFIGURATION)..."
 source script/xcode_build.sh

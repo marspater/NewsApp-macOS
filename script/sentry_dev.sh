@@ -27,7 +27,8 @@ if [[ -n "$SENTRY_DSN" ]]; then
         rm -rf "$SENTRY_EXTRACT" "${SENTRY_DIR}/Sentry.xcframework.zip"
     fi
     SENTRY_SLICE=$(find "${SENTRY_DIR}/Sentry.xcframework" -maxdepth 1 -type d -name 'macos-*' | head -1)
-    NEWS_SENTRY_SETTINGS=(SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) NEWS_SENTRY'
-        FRAMEWORK_SEARCH_PATHS="\$(inherited) $SENTRY_SLICE" OTHER_LDFLAGS='$(inherited) -framework Sentry -lc++ -lz')
+    # $(inherited) is for xcodebuild, not the shell.
+    NEWS_SENTRY_SETTINGS=(SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) NEWS_SENTRY"
+        FRAMEWORK_SEARCH_PATHS="\$(inherited) $SENTRY_SLICE" OTHER_LDFLAGS="\$(inherited) -framework Sentry -lc++ -lz")
     echo "Linking Sentry ${SENTRY_VERSION} (dev build)" >&2
 fi

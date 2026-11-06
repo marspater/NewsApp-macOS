@@ -29,9 +29,9 @@ News is a native, local-first RSS, Atom, and JSON Feed reader built with SwiftUI
 
 Three targets, each with a shared scheme of the same name, over the synchronized `Sources/` folder (no per-file project entries):
 
-1. **`News`** (app): every file under `Sources/`, `Info.plist`, `News.entitlements`, `Assets/AppIcon.icon`, `container-migration.plist`, `PrivacyInfo.xcprivacy` and the `Sources/Resources/CoreML` folder; App Intents metadata is extracted by Xcode. The scheme runs, profiles and archives it. Debug builds use the development identifier `com.marspater.news.dev`, so a run from Xcode never opens the real library; Release builds use `com.marspater.news`.
+1. **`News`** (app): every file under `Sources/`, `Info.plist`, `News.entitlements`, `Assets/AppIcon.icon`, `container-migration.plist`, `PrivacyInfo.xcprivacy` and the `Sources/Resources/CoreML` folder; App Intents metadata is extracted by Xcode. The scheme runs, profiles and archives it. Debug builds use the development identifier `com.marspater.news.dev` and leave `container-migration.plist` out, so a run from Xcode neither opens nor moves the real library; Release builds use `com.marspater.news`.
 2. **`NewsTestRunner`** (command-line tool): `Sources/` without `App/Main.swift` plus every `Tests/*.swift` outside `Harness/` and `Fixtures/`; `Tests/Runner.swift` is its entry point and `NEWS_TEST_ATOM` selects one file's tests. Swift 5 language mode, as the suites are written.
-3. **`NewsHarness`** (app): the app's files without `App/Main.swift` plus `Tests/TestDefaults.swift` and the entry file(s) `NEWS_HARNESS` names under `Tests/Harness/` (`INCLUDED_SOURCE_FILE_NAMES`); the QA and baseline scripts build it through `build.sh`.
+3. **`NewsHarness`** (app): the app's files without `App/Main.swift` and `container-migration.plist`, plus `Tests/TestDefaults.swift` and the entry file(s) `NEWS_HARNESS` names under `Tests/Harness/` (`INCLUDED_SOURCE_FILE_NAMES`); the QA and baseline scripts build it through `build.sh`. Unsandboxed, so a harness writes its evidence where its script says; `NEWS_HARNESS_SANDBOX=1` signs it with `News.entitlements` for the modes that reuse the production sandbox (the reading workload, the notification QA).
 
 ### 2.2 Build Settings
 
@@ -46,8 +46,8 @@ SWIFT_OPTIMIZATION_LEVEL[config=Release] = -O
 SWIFT_COMPILATION_MODE[config=Release] = singlefile   // build_release.sh overrides wholemodule
 CODE_SIGN_IDENTITY = -            // ad hoc; a Developer ID or App Store identity goes on the command line
 CODE_SIGN_STYLE = Manual
-ENABLE_HARDENED_RUNTIME = YES     // NO for the tool
-CODE_SIGN_ENTITLEMENTS = News.entitlements
+ENABLE_HARDENED_RUNTIME = YES     // NO for the tool and the harness app
+CODE_SIGN_ENTITLEMENTS = News.entitlements   // the app; a harness only with NEWS_HARNESS_SANDBOX=1
 ENABLE_USER_SCRIPT_SANDBOXING = YES
 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 GENERATE_INFOPLIST_FILE = NO

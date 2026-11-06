@@ -19,8 +19,10 @@ import Foundation
 /// from the selected(...) calls below.
 @main
 struct NewsRegressionRunner {
+    /// Runs the selected atoms in the order the suites expect; `--parsing-regressions` stops after the parser checks.
     static func main() async {
         let atom = ProcessInfo.processInfo.environment["NEWS_TEST_ATOM"]
+        /// Whether `file`'s tests run: every file without NEWS_TEST_ATOM, else the named one.
         func selected(_ file: String) -> Bool { atom == nil || atom == file }
         if selected("Tests/FeedKitSwiftSoupTests.swift") { FeedKitSwiftSoupTests.run() }
         if !CommandLine.arguments.contains("--parsing-regressions") {

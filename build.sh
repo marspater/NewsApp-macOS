@@ -6,6 +6,8 @@
 #   NEWS_HARNESS            Tests/Harness/<Entry>.swift (space-separated for several): builds the NewsHarness app,
 #                           every file under Sources/ except the app's entry point plus these and
 #                           Tests/TestDefaults.swift
+#   NEWS_HARNESS_SANDBOX=1  signs the harness app with News.entitlements and the hardened runtime, as the app is; by
+#                           default a harness is unsandboxed and can write its evidence where its script says
 #   NEWS_OMIT_RESOURCES     resource file names left out of the bundle (build_and_run.sh: container-migration.plist)
 #   NEWS_WHOLE_MODULE=1     whole-module optimization (build_release.sh); the default is -O per file, incremental
 #   SENTRY_DSN, .sentry-dsn links Sentry crash reporting (script/sentry_dev.sh); NEWS_SENTRY_DISABLED=1 forces it off
@@ -23,11 +25,15 @@ if [[ -n "${NEWS_HARNESS:-}" ]]; then
     TARGET=NewsHarness
     APP_DIR="${NEWS_APP_DIR:-NewsHarness.app}"
     SETTINGS+=(NEWS_HARNESS="$NEWS_HARNESS")
+    if [[ "${NEWS_HARNESS_SANDBOX:-0}" == 1 ]]; then
+        SETTINGS+=(CODE_SIGN_ENTITLEMENTS=News.entitlements ENABLE_HARDENED_RUNTIME=YES)
+    fi
 fi
 if [[ "${NEWS_WHOLE_MODULE:-0}" == 1 ]]; then SETTINGS+=(SWIFT_COMPILATION_MODE=wholemodule); fi
-# The project keeps Tests/* out of the harness app (INCLUDED_SOURCE_FILE_NAMES adds the entry back), so an override
-# restates it.
-if [[ -n "${NEWS_OMIT_RESOURCES:-}" ]]; then SETTINGS+=(EXCLUDED_SOURCE_FILE_NAMES="Tests/* Tests/Harness/* $NEWS_OMIT_RESOURCES"); fi
+# The project keeps Tests/* (and, for a harness, the migration plist) out of the bundle, so an override restates it.
+if [[ -n "${NEWS_OMIT_RESOURCES:-}" ]]; then
+    SETTINGS+=(EXCLUDED_SOURCE_FILE_NAMES="Tests/* Tests/Harness/* ${NEWS_HARNESS:+container-migration.plist} $NEWS_OMIT_RESOURCES")
+fi
 
 echo "Building ${TARGET} ${NEWS_VERSION} (${NEWS_BUILD}) for macOS ${TARGET_MACOS:-15.0} (arm64)..."
 news_xcodebuild "$TARGET" Release "${SETTINGS[@]}"

@@ -26,7 +26,7 @@ assert source.count(needle) == 1
 source = source.replace(needle, needle + '            NotificationCenter.default.post(name: Notification.Name("workloadWebFinished"), object: nil)\n')
 path.write_text(source)
 PY_WEB
-    (cd "$STAGE/src" && NEWS_HARNESS=Tests/Harness/NativeReadingMemory.swift \
+    (cd "$STAGE/src" && NEWS_HARNESS=Tests/Harness/NativeReadingMemory.swift NEWS_HARNESS_SANDBOX=1 \
         NEWS_BUNDLE_ID=com.marspater.news.workloadcheck ./build.sh > "$OUTPUT/build.log" 2>&1)
     APP="$STAGE/src/NewsHarness.app"
     codesign --verify --deep --strict "$APP"

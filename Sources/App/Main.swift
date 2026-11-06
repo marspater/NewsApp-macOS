@@ -16,6 +16,7 @@
 /// Sources/ with their own @main (News.xcodeproj excludes this one from those targets).
 @main
 enum NewsMain {
+    /// Starts the SwiftUI app.
     static func main() {
         NewsApp.main()
     }
