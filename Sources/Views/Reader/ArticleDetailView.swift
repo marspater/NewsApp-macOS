@@ -49,6 +49,14 @@ struct ArticleDetailView: View {
     @State private var reloadGeneration = 0
     @State private var showsReadingOptions = false
     @State private var textScaleOverride: CGFloat?
+    @State private var showsAnnotationsInspector = false
+    @State private var articleNotes: [UserNote] = []
+    @State private var noteDraft: NoteDraft?
+    @State private var showsChanges = false
+    @State private var changesSinceVersion: Int?
+    /// The diff overlay with the `changesTaskID` it was worked out for; it is used only while that still holds.
+    @State private var changeOverlay = (key: "", overlay: SentenceDiff.Overlay())
+    @State private var revealedBlock: Int?
     @Namespace private var storyParagraphs
 
     private var readerTextScale: CGFloat {
@@ -177,6 +185,19 @@ struct ArticleDetailView: View {
                     onOpenInBrowser: openInBrowser
                 )
             )
+            .modifier(
+                ReaderAnnotationCommands(
+                    onHighlight: highlightSelection, onAddNote: beginNote,
+                    onToggleInspector: { showsAnnotationsInspector.toggle() })
+            )
+            .inspector(isPresented: $showsAnnotationsInspector) { annotationsInspector }
+            .task(id: changesTaskID) { await updateChangeOverlay() }
+            .task(id: "\(activeArticle.id):\(articleStore.userNotesRevision)") {
+                let id = activeArticle.id
+                let notes = await articleStore.notes(for: id)
+                guard !Task.isCancelled, activeArticle.id == id else { return }
+                articleNotes = notes
+            }
             // Publisher-input changes invalidate the stored overview; request it again from current inputs.
             .task(id: "\(activeArticle.id):\(currentArticle.publisherInputHash)") {
                 await loadEventOverviewForActiveArticle()
@@ -200,6 +221,11 @@ struct ArticleDetailView: View {
             .onChange(of: activeArticle.id) { _, _ in
                 publisherUpdatesExpanded = false
                 storyUpdateStatus = nil
+                articleNotes = []
+                noteDraft = nil
+                showsChanges = false
+                changesSinceVersion = nil
+                changeOverlay = ("", SentenceDiff.Overlay())
             }
             .onChange(of: currentArticle.publisherInputHash) { _, _ in
                 analysis = nil
@@ -328,6 +354,14 @@ struct ArticleDetailView: View {
                         }
                     }
                 }
+                // Show in Story from the Annotations inspector.
+                .onChange(of: revealedBlock) { _, index in
+                    guard let index else { return }
+                    revealedBlock = nil
+                    withAnimation(reduceMotion ? nil : AppMotion.navigation) {
+                        proxy.scrollTo(Self.readerBlockID(index), anchor: .center)
+                    }
+                }
         }
     }
 
@@ -386,35 +420,39 @@ struct ArticleDetailView: View {
                         }
                     }
 
-                    // Eyebrow: Source, Date, Reading Time
+                    // Eyebrow: Source, Date, Reading Time, and the revision pill of an updated story
                     HStack(spacing: AppSpacing.eyebrowGap) {
-                        EyebrowText(displaySource)
+                        HStack(spacing: AppSpacing.eyebrowGap) {
+                            EyebrowText(displaySource)
 
-                        Text("·")
-                            .foregroundStyle(secondaryText)
-
-                        Text(currentArticle.publicationDateText)
-                            .font(AppTypography.label)
-                            .foregroundStyle(AppColor.secondaryText)
-                            .monospacedDigit()
-
-                        if let readingTimeEstimate {
                             Text("·")
                                 .foregroundStyle(secondaryText)
 
-                            Text(readingTimeEstimate)
+                            Text(currentArticle.publicationDateText)
                                 .font(AppTypography.label)
                                 .foregroundStyle(AppColor.secondaryText)
                                 .monospacedDigit()
+
+                            if let readingTimeEstimate {
+                                Text("·")
+                                    .foregroundStyle(secondaryText)
+
+                                Text(readingTimeEstimate)
+                                    .font(AppTypography.label)
+                                    .foregroundStyle(AppColor.secondaryText)
+                                    .monospacedDigit()
+                            }
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            Self.sourceLineAccessibilityLabel(
+                                source: displaySource,
+                                publicationDateText: currentArticle.publicationDateText,
+                                readingTimeEstimate: readingTimeEstimate ?? ""
+                            ))
+
+                        revisionPill
                     }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(
-                        Self.sourceLineAccessibilityLabel(
-                            source: displaySource,
-                            publicationDateText: currentArticle.publicationDateText,
-                            readingTimeEstimate: readingTimeEstimate ?? ""
-                        ))
 
                     // Headline
                     Text(currentArticle.title)
@@ -728,6 +766,7 @@ struct ArticleDetailView: View {
 
     private var articleContentParagraphs: some View {
         let blocks = renderedBlocks
+        let overlay = readerOverlay(for: blocks)
         // A shown feed standfirst or a page standfirst already leads the story in the lead size.
         let leadIndex =
             standfirstText == nil && !blocks.contains { $0.kind == .standfirst }
@@ -736,7 +775,8 @@ struct ArticleDetailView: View {
             // Positions are stable within the immutable, article-keyed reader document.
             let highlighted = highlightedBlockIndex
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
-                readerBlock(block, isLead: index == leadIndex)
+                if index == 0 { retractedLines(overlay.changes.retracted[-1]) }
+                readerBlock(block, index: index, isLead: index == leadIndex, overlay: overlay)
                     .padding(.horizontal, index == highlighted ? AppSpacing.xs : 0)
                     .padding(.vertical, index == highlighted ? AppSpacing.xxs : 0)
                     .background(
@@ -751,6 +791,7 @@ struct ArticleDetailView: View {
                             scale: readerTextScale)
                     )
                     .accessibilityLinkedGroup(id: currentArticle.id, in: storyParagraphs)
+                retractedLines(overlay.changes.retracted[index])
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -766,19 +807,20 @@ struct ArticleDetailView: View {
     }
 
     /// Legacy documents stored relative links; the story URL resolves them.
-    private func readerLinkedText(_ block: ReaderBlock) -> AttributedString {
-        readerText(block, baseURL: URL(string: currentArticle.link))
+    private func readerLinkedText(_ block: ReaderBlock, index: Int, overlay: ReaderOverlay) -> AttributedString {
+        overlay.styled(readerText(block, baseURL: URL(string: currentArticle.link)), at: index)
     }
 
+    /// One rendered block of the story: figures, headings, dividers and paragraphs here, the other kinds below.
     @ViewBuilder
-    private func readerBlock(_ block: ReaderBlock, isLead: Bool) -> some View {
+    private func readerBlock(_ block: ReaderBlock, index: Int, isLead: Bool, overlay: ReaderOverlay) -> some View {
         switch block.kind {
         case .figure:
             if let imageURL = block.imageURL, let url = URL(string: imageURL) {
                 ReaderFigureView(block: block, url: url, textScale: readerTextScale)
             }
         case .heading, .subheading:
-            Text(readerLinkedText(block))
+            Text(readerLinkedText(block, index: index, overlay: overlay))
                 .font(
                     AppTypography.readerHeadingFont(
                         level: block.kind == .heading ? 2 : 3, theme: themeManager.articleTheme, scale: readerTextScale)
@@ -788,20 +830,6 @@ struct ArticleDetailView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(block.kind == .heading ? .h2 : .h3)
                 .textSelection(.enabled)
-        case .quote:
-            HStack(alignment: .top, spacing: AppSpacing.md) {
-                Rectangle()
-                    .fill(AppColor.accent.opacity(Self.quoteBarOpacity(for: contrast)))
-                    .frame(width: 3)
-                    .accessibilityHidden(true)
-                Text(readerLinkedText(block))
-                    .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
-                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
-                    .textSelection(.enabled)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical, AppSpacing.xxs * readerTextScale)
-            .frame(maxWidth: .infinity, alignment: .leading)
         case .divider:
             Divider()
                 .opacity(Self.dividerOpacity(for: contrast))
@@ -809,6 +837,40 @@ struct ArticleDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, AppSpacing.sm * readerTextScale)
                 .accessibilityHidden(true)
+        case .paragraph:
+            Text(readerLinkedText(block, index: index, overlay: overlay))
+                .font(
+                    isLead
+                        ? AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale)
+                        : AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale)
+                )
+                .foregroundStyle(AppColor.primaryText)
+                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        default:
+            readerWrappedBlock(block, index: index, overlay: overlay)
+        }
+    }
+
+    /// Quotes, list items, code and standfirsts: the block kinds whose layout wraps the text.
+    @ViewBuilder
+    private func readerWrappedBlock(_ block: ReaderBlock, index: Int, overlay: ReaderOverlay) -> some View {
+        switch block.kind {
+        case .quote:
+            HStack(alignment: .top, spacing: AppSpacing.md) {
+                Rectangle()
+                    .fill(AppColor.accent.opacity(Self.quoteBarOpacity(for: contrast)))
+                    .frame(width: 3)
+                    .accessibilityHidden(true)
+                Text(readerLinkedText(block, index: index, overlay: overlay))
+                    .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
+                    .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                    .textSelection(.enabled)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, AppSpacing.xxs * readerTextScale)
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .listItem:
             HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
                 Text(block.ordinal.map { "\($0)." } ?? "•")
@@ -816,14 +878,14 @@ struct ArticleDetailView: View {
                     // A bullet is decoration; an ordinal is read before the item.
                     .accessibilityHidden(block.ordinal == nil)
                 // Not combined: the item is selectable text and may carry links (DESIGN.md 16).
-                Text(readerLinkedText(block)).textSelection(.enabled)
+                Text(readerLinkedText(block, index: index, overlay: overlay)).textSelection(.enabled)
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
             .padding(.leading, CGFloat(block.level ?? 0) * AppSpacing.lg * readerTextScale)
         case .code:
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(readerLinkedText(block))
+                Text(readerLinkedText(block, index: index, overlay: overlay))
                     .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
                     .textSelection(.enabled)
                     .fixedSize(horizontal: true, vertical: false)
@@ -832,16 +894,25 @@ struct ArticleDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(AppColor.surface, in: RoundedRectangle(cornerRadius: AppRadius.control, style: .continuous))
         case .standfirst:
-            Text(readerLinkedText(block))
+            Text(readerLinkedText(block, index: index, overlay: overlay))
                 .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
                 .foregroundStyle(AppColor.secondaryText)
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+        default:
+            readerBoxedBlock(block, index: index, overlay: overlay)
+        }
+    }
+
+    /// Pull quotes, tables and embeds: the block kinds that are boxed or set apart from the text.
+    @ViewBuilder
+    private func readerBoxedBlock(_ block: ReaderBlock, index: Int, overlay: ReaderOverlay) -> some View {
+        switch block.kind {
         case .pullQuote:
             VStack(alignment: .leading, spacing: AppSpacing.sm * readerTextScale) {
                 Divider().opacity(Self.dividerOpacity(for: contrast))
-                Text(readerLinkedText(block))
+                Text(readerLinkedText(block, index: index, overlay: overlay))
                     .font(AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale).italic())
                     .foregroundStyle(AppColor.primaryText)
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
@@ -869,17 +940,8 @@ struct ArticleDetailView: View {
                         .help("Open web view (W)")
                 }
             }
-        case .paragraph:
-            Text(readerLinkedText(block))
-                .font(
-                    isLead
-                        ? AppTypography.leadFont(for: themeManager.articleTheme, scale: readerTextScale)
-                        : AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale)
-                )
-                .foregroundStyle(AppColor.primaryText)
-                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+        default:
+            EmptyView()
         }
     }
 
@@ -992,6 +1054,203 @@ struct ArticleDetailView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    // MARK: - Highlights and Notes (V1 #711)
+
+    private static let annotatableKinds: Set<ReaderBlock.Kind> = [
+        .paragraph, .standfirst, .quote, .pullQuote, .listItem, .heading, .subheading,
+    ]
+
+    /// The text of each rendered block a highlight can sit in, empty for the others, so indices match the blocks.
+    private func anchorTexts(_ blocks: [ReaderBlock]) -> [String] {
+        blocks.map { Self.annotatableKinds.contains($0.kind) ? $0.text : "" }
+    }
+
+    /// The highlights (and, with the diff shown, the changes) to paint over the rendered blocks.
+    private func readerOverlay(for blocks: [ReaderBlock]) -> ReaderOverlay {
+        ReaderOverlay(
+            notes: articleNotes, paragraphs: anchorTexts(blocks),
+            changes: showsChanges && changeOverlay.key == changesTaskID ? changeOverlay.overlay : .init())
+    }
+
+    // MARK: - Story Evolution (V2 #712)
+
+    private var isStoryReady: Bool {
+        if case .ready = contentState { return true }
+        return false
+    }
+
+    /// Publisher updates the story can be compared with, newest first.
+    private var comparableUpdates: [PublisherContentRevision] {
+        PublisherContentRevision.comparable(
+            publisherRevisions,
+            current: PublisherContentRevision.text(
+                description: currentArticle.description, content: currentArticle.fullContent))
+    }
+
+    /// The update the story is compared with: the story as it was before it, the newest unless the reader chose.
+    private var changesBase: PublisherContentRevision? {
+        let updates = comparableUpdates
+        return updates.first { $0.version == changesSinceVersion } ?? updates.first
+    }
+
+    private var changesTaskID: String {
+        // The blocks' text is part of the key only while the diff shows: it decides where the changes sit.
+        let blocks = showsChanges ? renderedBlocks.map(\.text).hashValue : 0
+        return
+            "\(showsChanges && isStoryReady):\(changesBase?.version ?? 0):\(currentArticle.publisherInputHash):\(blocks)"
+    }
+
+    /// Works out the diff overlay off the main actor and keeps it with the comparison it belongs to.
+    private func updateChangeOverlay() async {
+        guard showsChanges, isStoryReady, let before = changesBase?.previousText else {
+            changeOverlay = ("", SentenceDiff.Overlay())
+            return
+        }
+        let key = changesTaskID
+        let after = PublisherContentRevision.text(
+            description: currentArticle.description, content: currentArticle.fullContent)
+        let blocks = anchorTexts(renderedBlocks)
+        let work = Task.detached(priority: .userInitiated) {
+            SentenceDiff.overlay(before: before, after: after, blocks: blocks)
+        }
+        let overlay = await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
+        guard !Task.isCancelled else { return }
+        changeOverlay = (key, overlay)
+    }
+
+    /// "Updated (N revisions)" beside the date: toggles the sentence diff; with several updates the menu picks the
+    /// story it is compared with. Added sentences are tinted and removed ones listed struck through, in place.
+    @ViewBuilder
+    private var revisionPill: some View {
+        let updates = comparableUpdates
+        if isStoryReady, !updates.isEmpty {
+            let count = updates.count
+            Text("·")
+                .foregroundStyle(secondaryText)
+                .accessibilityHidden(true)
+            Menu {
+                ForEach(updates) { update in
+                    Button {
+                        changesSinceVersion = update.version
+                        showsChanges = true
+                    } label: {
+                        Text(
+                            "Compare with the story before \(update.observedAt.formatted(date: .abbreviated, time: .shortened))"
+                        )
+                    }
+                }
+                if showsChanges {
+                    Divider()
+                    Button("Hide Changes") { showsChanges = false }
+                }
+            } label: {
+                TagView(
+                    title: count == 1 ? "Updated (1 revision)" : "Updated (\(count) revisions)",
+                    systemImage: "clock.arrow.circlepath",
+                    tint: showsChanges ? AppColor.accent : AppColor.secondaryText, font: AppTypography.label)
+            } primaryAction: {
+                showsChanges.toggle()
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .fixedSize()
+            .help(showsChanges ? "Hide what the publisher changed" : "Show what the publisher changed")
+            .accessibilityValue(showsChanges ? "Showing changes" : "Changes hidden")
+            .accessibilityHint("Shows added sentences marked and removed sentences struck through")
+        }
+    }
+
+    /// Sentences a publisher update removed, struck through after the block that held the sentence before them.
+    @ViewBuilder
+    private func retractedLines(_ sentences: [String]?) -> some View {
+        ForEach(Array((sentences ?? []).enumerated()), id: \.offset) { _, sentence in
+            Text(sentence)
+                .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
+                .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
+                .strikethrough()
+                .foregroundStyle(AppColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, AppSpacing.xs)
+                .accessibilityLabel("Removed by the publisher: \(sentence)")
+        }
+    }
+
+    /// One note for each passage of the reader's selection that is not highlighted yet; nil, with a beep, when
+    /// nothing in the story's text is selected.
+    private func notesForSelection() -> [UserNote]? {
+        let texts = anchorTexts(renderedBlocks)
+        let taken = articleNotes.compactMap { NoteAnchor.resolve($0, in: texts) }.map {
+            (index: $0.index, range: $0.range)
+        }
+        guard readerModeBinding.wrappedValue == .story, case .ready = contentState,
+            let selection = ReaderSelection.current(),
+            let places = NoteAnchor.place(selection: selection, in: texts, taken: taken)
+        else {
+            NSSound.beep()
+            return nil
+        }
+        return places.compactMap { place in
+            let range = place.start..<place.start + place.quote.count
+            guard !taken.contains(where: { $0.index == place.index && $0.range == range }) else { return nil }
+            return NoteAnchor.note(
+                articleID: activeArticle.id, paragraphs: texts, index: place.index, start: place.start,
+                quote: place.quote)
+        }
+    }
+
+    /// Shows new notes at once, so a second command sees them; the store reloads them when the save lands, and they
+    /// disappear again if it failed.
+    private func add(_ notes: [UserNote]) {
+        articleNotes += notes
+        Task { await articleStore.saveNotes(notes) }
+    }
+
+    /// Highlights the selected passages, or beeps when there is nothing new to highlight.
+    private func highlightSelection() {
+        guard let notes = notesForSelection() else { return }
+        if notes.isEmpty { NSSound.beep() } else { add(notes) }
+    }
+
+    /// Opens the note composer for the selected passages.
+    private func beginNote() {
+        guard let notes = notesForSelection() else { return }
+        // A passage that is highlighted already takes its note in the inspector.
+        if notes.isEmpty { showsAnnotationsInspector = true } else { noteDraft = NoteDraft(notes: notes) }
+    }
+
+    /// Saves the note the composer collected; false, with the composer left open and its text kept, when the library
+    /// refused it.
+    private func saveNote(_ draft: NoteDraft, body: String) async -> Bool {
+        var notes = draft.notes
+        notes[0].noteBody = body
+        articleNotes += notes
+        let saved = await articleStore.saveNotes(notes)
+        if saved { showsAnnotationsInspector = true }
+        return saved
+    }
+
+    private var annotationsInspector: some View {
+        let texts = anchorTexts(renderedBlocks)
+        let ready: Bool = {
+            if case .ready = contentState { return true }
+            return false
+        }()
+        return AnnotationsInspectorView(
+            notes: articleNotes,
+            lostIDs: ready ? Set(articleNotes.filter { NoteAnchor.resolve($0, in: texts) == nil }.map(\.id)) : [],
+            onReveal: { note in revealedBlock = NoteAnchor.resolve(note, in: texts)?.index },
+            onSave: { note in await articleStore.saveNotes([note]) },
+            onDelete: { id in Task { await articleStore.deleteNote(id: id) } }
+        )
+        .inspectorColumnWidth(
+            min: AppLayout.inspectorMinimumWidth, ideal: AppLayout.inspectorIdealWidth,
+            max: AppLayout.inspectorMaximumWidth)
+    }
+
     // MARK: - Native Reader Toolbar
 
     @ToolbarContentBuilder
@@ -1037,6 +1296,27 @@ struct ArticleDetailView: View {
 
             if isOverviewLoading && currentOverview == nil {
                 ToolbarLoadingBubble()
+            }
+        }
+        if readerModeBinding.wrappedValue == .story {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button(action: highlightSelection) {
+                    Label("Highlight", systemImage: "highlighter")
+                }
+                .help("Highlight the selected passage (⌘Y)")
+                Button(action: beginNote) {
+                    Label("Add Note", systemImage: "note.text.badge.plus")
+                }
+                .help("Add a private note to the selected passage (⇧⌘Y)")
+                .popover(item: $noteDraft) { draft in
+                    NoteComposerView(quote: draft.quote) { await saveNote(draft, body: $0) }
+                }
+                Button {
+                    showsAnnotationsInspector.toggle()
+                } label: {
+                    Label("Annotations", systemImage: "sidebar.trailing")
+                }
+                .help("Show or hide highlights and notes (⌥⌘I)")
             }
         }
         ToolbarItemGroup(placement: .primaryAction) {
@@ -1499,6 +1779,8 @@ struct ArticleDetailView: View {
         let allowInsecure = appSettings.allowInsecureHTTP
         let targetId = currentArticle.id
         let expectedInputHash = currentArticle.publisherInputHash
+        // A clear of derived data while the page loads refuses the body write (#982).
+        let analysisGeneration = await articleStore.database.analysisGeneration
 
         guard !Task.isCancelled else { return }
         contentState = .loading
@@ -1531,7 +1813,8 @@ struct ArticleDetailView: View {
                     image: imageUrl,
                     readerDocument: document,
                     identityEvidence: extraction.evidence,
-                    expectedInputHash: expectedInputHash
+                    expectedInputHash: expectedInputHash,
+                    expectedGeneration: analysisGeneration
                 )
                 guard !Task.isCancelled, activeArticle.id == targetId else { return }
                 guard saved else {

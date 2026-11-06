@@ -802,6 +802,7 @@ struct NewsTests {
             try testCapturedFingerprintReview()
             try await testAuditPersistenceAndRoutingRegressions(fixtureRoot: fixtureRoot)
             try await testUndatedArticleOrdering()
+            try await testFutureDatedItems()
             await testDatabaseEnginePersistence()
             await testFTS5SearchAndOperators()
             try await testUnchangedFTSRefresh()
@@ -855,6 +856,7 @@ struct NewsTests {
             ("testWorldTensionSmoothing", { testWorldTensionSmoothing() }),
             ("testWorldTensionState", { try await testWorldTensionState() }),
             ("testUndatedArticleOrdering", { try await testUndatedArticleOrdering() }),
+            ("testFutureDatedItems", { try await testFutureDatedItems() }),
             ("testReaderFigures", { try await testReaderFigures(fixtureRoot: fixtureRoot) }),
             ("testReaderExtractionFidelity", { testReaderExtractionFidelity(fixtureRoot: fixtureRoot) }),
             ("testReaderParsingRegressions", { await testReaderParsingRegressions() }),
@@ -1000,6 +1002,11 @@ struct NewsTests {
             ("testContentExtractionPipelineDeep", { await testContentExtractionPipelineDeep() }),
             ("testExtractionURLRejection", { await testExtractionURLRejection() }),
             ("testEnrichmentQueueSchedulingAndPromotion", { await testEnrichmentQueueSchedulingAndPromotion() }),
+            ("testEnrichmentQueueCancelledJobsNotRetained", { await testEnrichmentQueueCancelledJobsNotRetained() }),
+            ("testUserNotesStorageAndFTS", { try await testUserNotesStorageAndFTS() }),
+            ("testNoteAnchoring", { testNoteAnchoring() }),
+            ("testSentenceDiffAndStoryEvolution", { testSentenceDiffAndStoryEvolution() }),
+            ("testPublisherRevisionTextStorage", { try await testPublisherRevisionTextStorage() }),
             ("testDesignSystemAndArticleFilter", { await testDesignSystemAndArticleFilter() }),
             ("testDistributionAndEntitlementsIntegrity", { await testDistributionAndEntitlementsIntegrity() }),
             ("testStrictSemVerAndReleaseSecurity", { await testStrictSemVerAndReleaseSecurity() }),
@@ -1282,6 +1289,22 @@ struct NewsTests {
         }
         store.refreshLoadedHook = nil
         assertTrue(store.articles.contains { $0.id == late.id }, "A follow-up refresh publishes the stored story")
+
+        // An older refresh that finishes after a newer one published does not replace it (a prune or any second caller).
+        let newest = FeedArticle(
+            title: "Newest story", link: "https://example.org/newest", guid: "newest", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_200), source: "Publisher")
+        var interleaved = false
+        store.refreshLoadedHook = {
+            guard !interleaved else { return }
+            interleaved = true
+            _ = try? await db.upsertArticles([newest])
+            await store.refreshState()
+        }
+        await store.refreshState()
+        store.refreshLoadedHook = nil
+        assertTrue(
+            store.articles.contains { $0.id == newest.id }, "An older snapshot does not replace a newer refresh")
         await db.close()
     }
 
@@ -1539,7 +1562,7 @@ struct NewsTests {
         execute(copy, "DROP VIEW article_fts_rows;")
         try await db.open()
         assertEqual(
-            value(copy, "PRAGMA user_version;"), "29", "Copied v14 library upgrades through v15 to the current schema")
+            value(copy, "PRAGMA user_version;"), "31", "Copied v14 library upgrades through v15 to the current schema")
         assertEqual(
             value(copy, "SELECT count(*) FROM articles WHERE category IS NOT NULL;"), "0",
             "A library from before v22 keeps none of the classifier labels v22 wrote into the publisher column (#817)")
@@ -1617,7 +1640,7 @@ struct NewsTests {
         let shrinkPath = directory.appendingPathComponent("shrink.sqlite3").path
         let shrinkDB = DatabaseEngine(path: shrinkPath)
         try await shrinkDB.open()
-        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "29", "New database opens at schema v29")
+        assertEqual(value(shrinkPath, "PRAGMA user_version;"), "31", "New database opens at schema v31")
         assertEqual(value(shrinkPath, "PRAGMA auto_vacuum;"), "2", "New database uses incremental auto_vacuum (2)")
 
         let now = Date(timeIntervalSince1970: 1_800_000_000)
@@ -2018,6 +2041,7 @@ struct NewsTests {
         for (name, write) in [
             ("saving a World Tension reading", { _ = try await newer.saveWorldTensionReading(reading) }),
             ("clearing enrichment", { try await newer.clearArticleEnrichment() }),
+            ("clearing the article cache", { try await newer.clearArticleCache() }),
             ("clearing the database cache", { try await newer.clearAllDatabaseCache() }),
         ] as [(String, () async throws -> Void)] {
             do {
@@ -2426,7 +2450,7 @@ struct NewsTests {
         let db = DatabaseEngine(path: workingCopy.path)
         try await db.open()
         assertEqual(
-            value(workingCopy.path, "PRAGMA user_version;"), "29",
+            value(workingCopy.path, "PRAGMA user_version;"), "31",
             "Fixture migrates cleanly to current schema v26 (#539)"
         )
         assertEqual(
@@ -2902,8 +2926,9 @@ struct NewsTests {
             searches += 1
             let start = ProcessInfo.processInfo.systemUptime
             let page = try await db.searchArticles(query: text, limit: 201, muting: muting)
-            _ = try await db.mutedArticleCount(search: text, muting: muting)
-            let totals = try await db.listTotals(search: text, muting: muting)
+            let vector = try await db.searchQueryVector(for: text)
+            _ = try await db.mutedArticleCount(search: text, searchVector: vector, muting: muting)
+            let totals = try await db.listTotals(search: text, searchVector: vector, muting: muting)
             if let last = page.last {
                 _ = try await db.searchArticles(
                     query: text, limit: 201, after: ArticleQueryCursor(last), muting: muting)
@@ -4289,6 +4314,41 @@ struct NewsTests {
         assertEqual(first.pubDate, DateParser.unknownDate, "Undated XML stories do not become breaking news")
         assertEqual(first.publicationDateText, "Date unavailable", "Unknown dates have an honest display label")
         assertEqual(first.cardDateText(), "Date unavailable", "Cards keep the honest unknown-date label")
+        assertEqual(first.dateAccessibilityText, "publication date unavailable", "No date, no claim of publication")
+        // An undated story with an ingestion time shows when it was added (#1037).
+        var storedLate = first
+        let clock = Date(timeIntervalSince1970: 1_800_000_000)
+        storedLate.ingestedAt = clock.addingTimeInterval(-2 * 3600)
+        // The same short date a dated story shows for that moment, so the test holds under any locale and OS wording.
+        let twoHoursAgo = FeedArticle(
+            title: "Dated", link: "https://example.com/two-hours", guid: nil, description: "",
+            pubDate: clock.addingTimeInterval(-2 * 3600), source: "Publisher")
+        assertEqual(
+            storedLate.cardDateText(now: clock), "Added " + twoHoursAgo.cardDateText(now: clock),
+            "A card shows when an undated story was added")
+        assertTrue(storedLate.publicationDateText.hasPrefix("Added "), "The reader shows the added date")
+        assertTrue(storedLate.dateAccessibilityText.hasPrefix("added "), "Accessibility says added, not published")
+        var dated = FeedArticle(
+            title: "Dated", link: "https://example.com/dated", guid: nil, description: "",
+            pubDate: Date(timeIntervalSince1970: 1_700_000_000), source: "Publisher")
+        dated.ingestedAt = storedLate.ingestedAt
+        assertTrue(dated.dateAccessibilityText.hasPrefix("published "), "A dated story is still published")
+        assertFalse(dated.cardDateText().hasPrefix("Added"), "A dated story ignores the ingestion time")
+        // Loaded from the database an undated story carries its ingestion time; a search result carries a score instead (#1037).
+        let undatedDB = DatabaseEngine(path: ":memory:")
+        try await undatedDB.open()
+        let undatedStory = FeedArticle(
+            title: "Zeppelin harbour inspection", link: "https://example.com/zeppelin", guid: "zeppelin",
+            description: "", pubDate: DateParser.unknownDate, source: "Publisher")
+        try await undatedDB.upsertArticles([undatedStory])
+        let listed = try await undatedDB.fetchArticles().first
+        assertTrue(listed?.ingestedAt != nil, "A listed undated story carries when it was stored")
+        let found = try await undatedDB.searchArticles(query: "zeppelin").first
+        assertEqual(found?.id, listed?.id, "The search finds the undated story")
+        assertTrue((found?.queryOrderValue ?? 1_000) < 1, "A search keeps its score as the order value")
+        assertTrue(found?.ingestedAt != nil, "A search result still carries when the story was stored")
+        assertEqual(found?.ingestedAt, listed?.ingestedAt, "The stored time is not the score")
+        await undatedDB.close()
         do {
             let now = Date(timeIntervalSince1970: 1_700_000_000)
             func story(ageInSeconds age: TimeInterval) -> FeedArticle {
@@ -6057,7 +6117,7 @@ struct NewsTests {
             let sheetNew = SmartBinderSheet()
             let hostNew = NSHostingView(rootView: sheetNew.environmentObject(settings))
             window.contentView = hostNew
-            window.makeKeyAndOrderFront(nil)
+            // Laid out in a window that is never ordered on screen: the headless suite opens none (#991).
             hostNew.layoutSubtreeIfNeeded()
             _ = hostNew.fittingSize
 
@@ -6936,7 +6996,7 @@ struct NewsTests {
     @MainActor
     static func testFeedHealth() async throws {
         print("  - Testing feed health: availability, freshness, text quality and persistence...")
-        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
         func health(_ configure: (inout FeedFetchState) -> Void) -> FeedHealth {
             var state = FeedFetchState(lastFetchedAt: now)
             configure(&state)
@@ -7125,6 +7185,90 @@ struct NewsTests {
         }
         assertEqual(manager.feedHealth[live]?.textQuality, .full, "Content stats survive a failure")
         manager.stopBackgroundWork()
+    }
+
+    /// #981: a feed date beyond clock skew is stored as unknown (ordered by ingestion time, pruned with its
+    /// neighbours) in every format; a few minutes ahead keeps its date.
+    static func testFutureDatedItems() async throws {
+        print("  - Testing future-dated feed items...")
+        // A fixed clock handed to every upsert keeps the test off the wall clock.
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let iso = ISO8601DateFormatter()
+        let soon = iso.string(from: now.addingTimeInterval(300))
+        let rss = """
+            <rss><channel><title>Wire</title>
+            <item><title>RSS future</title><link>https://example.com/rss-future</link><pubDate>Sat, 01 Jan 2050 00:00:00 GMT</pubDate></item>
+            <item><title>RSS skew</title><link>https://example.com/rss-skew</link><pubDate>\(iso.string(from: now.addingTimeInterval(300)))</pubDate></item>
+            </channel></rss>
+            """
+        let atom = """
+            <feed xmlns='http://www.w3.org/2005/Atom'><title>Wire</title>
+            <entry><id>atom-future</id><title>Atom future</title><link href='https://example.com/atom-future'/><published>2050-01-01T00:00:00Z</published></entry>
+            <entry><id>atom-skew</id><title>Atom skew</title><link href='https://example.com/atom-skew'/><published>\(soon)</published></entry>
+            </feed>
+            """
+        let json = """
+            {"version":"https://jsonfeed.org/version/1.1","title":"Wire","items":[
+            {"id":"json-future","url":"https://example.com/json-future","title":"JSON future","content_text":"Text","date_published":"2050-01-01T00:00:00Z"},
+            {"id":"json-skew","url":"https://example.com/json-skew","title":"JSON skew","content_text":"Text","date_published":"\(soon)"}]}
+            """
+        let articles =
+            FeedXMLParser(data: Data(rss.utf8), feedURL: "https://example.com/rss").parse()
+            + FeedXMLParser(data: Data(atom.utf8), feedURL: "https://example.com/atom").parse()
+            + (JSONFeedParser.parse(data: Data(json.utf8), feedURL: "https://example.com/json") ?? [])
+        assertEqual(articles.count, 6, "All three formats parse")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        try await db.upsertArticles(articles, now: now)
+        let stored = try await db.fetchArticles()
+        for format in ["RSS", "Atom", "JSON"] {
+            let future = stored.first { $0.title == "\(format) future" }
+            let skew = stored.first { $0.title == "\(format) skew" }
+            assertEqual(future?.pubDate, DateParser.unknownDate, "\(format): a date years ahead is stored as unknown")
+            assertTrue(
+                abs((future?.queryOrderValue ?? 0) - now.timeIntervalSince1970) < 60,
+                "\(format): the future-dated story lists by its ingestion time")
+            assertTrue(
+                abs((skew?.pubDate.timeIntervalSince1970 ?? 0) - now.timeIntervalSince1970 - 300) < 5,
+                "\(format): clock skew keeps the date")
+        }
+        let futureCard = await MainActor.run { stored.first { $0.title == "RSS future" }?.cardDateText() }
+        assertTrue(futureCard?.hasPrefix("Added ") == true, "A future date shows when the story was added (#1037)")
+        try await db.upsertArticles(articles, now: now.addingTimeInterval(60))
+        let refreshed = try await db.fetchArticles()
+        assertEqual(
+            refreshed.first { $0.title == "RSS future" }?.queryOrderValue,
+            stored.first { $0.title == "RSS future" }?.queryOrderValue, "A refresh keeps the original ingestion time")
+        // A row stored with a future date before the clamp existed is repaired when its feed refreshes, even with
+        // retention off.
+        let stale = stored.first { $0.title == "RSS future" }!
+        _ = try await db.eventRows(
+            "UPDATE articles SET published_at = ? WHERE id = ?;", [.real(2_524_608_000), .text(stale.id)])
+        try await db.upsertArticles(articles, now: now.addingTimeInterval(120))
+        assertEqual(
+            try await db.fetchArticles().first { $0.title == "RSS future" }?.pubDate, DateParser.unknownDate,
+            "A refresh repairs a stored future date")
+        // A row stored before the clamp existed is returned to ingestion order by retention.
+        let legacy = stored.first { $0.title == "RSS skew" }!
+        _ = try await db.eventRows(
+            "UPDATE articles SET published_at = ? WHERE id = ?;", [.real(2_524_608_000), .text(legacy.id)])
+        for article in stored { try await db.markRead(articleId: article.id, isRead: true) }
+        assertEqual(
+            try await db.pruneOldArticles(keepReadDays: 30, now: now.addingTimeInterval(60 * 86400)), 6,
+            "Future-dated stories are pruned with their neighbours")
+        // Feed health ignores a clamped date, and a link-less item keeps the ID the parser gave it (its fingerprint
+        // would otherwise change with the date).
+        let linkless = FeedArticle(
+            title: "Wire brief", link: "", guid: nil, description: "Brief",
+            pubDate: Date(timeIntervalSince1970: 2_524_608_000),
+            source: "Wire")
+        let healthFeed = "https://example.com/health"
+        let inserted = try await db.upsertArticles(
+            [linkless], feedUrl: healthFeed, validators: FeedValidators(etag: nil, lastModified: nil), now: now)
+        assertTrue(inserted.contains(linkless.id), "A clamped link-less item keeps its parsed ID")
+        assertEqual(
+            try await db.feedFetchStates()[healthFeed]?.latestItemAt, nil, "A future date is not the newest item")
+        await db.close()
     }
 
     static func testUndatedArticleOrdering() async throws {
@@ -8316,7 +8460,7 @@ struct NewsTests {
         await cancelledDB.close()
         let db = DatabaseEngine(path: copyPath)
         try await db.open()
-        assertEqual(value(copyPath, "PRAGMA user_version;"), "29", "Copied v4 library upgrades to the current schema")
+        assertEqual(value(copyPath, "PRAGMA user_version;"), "31", "Copied v4 library upgrades to the current schema")
         assertEqual(value(originalPath, "PRAGMA user_version;"), "4", "Original fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 3, "Migration keeps historical rows")
         assertEqual(
@@ -8571,7 +8715,7 @@ struct NewsTests {
             value(failure, "SELECT article_id FROM article_aliases WHERE value='observed-variant-b';"), "historical-b",
             "Injected failure preserves old aliases")
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "29", "Copied library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "8", "Original fixture remains untouched")
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
@@ -10011,7 +10155,7 @@ struct NewsTests {
 
         let db = DatabaseEngine(path: copy)
         try await db.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "29", "Copied v11 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied v11 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "11", "Original v11 fixture stays untouched")
         assertEqual(try await db.fetchArticles(limit: nil).count, 5, "Event migration keeps every article")
         assertTrue(try await db.isRead(articleId: "event-a"), "Event migration keeps read state")
@@ -10282,12 +10426,12 @@ struct NewsTests {
         }
         let articles = [
             article("current", hours: 0), article("earlier", hours: -1),
-            article("old", hours: -EventStoryRelation.window / 3600 - 1), article("future", hours: 1),
+            article("old", hours: -EventStoryRelation.window / 3600 - 1), article("future", hours: 0.2),
             article("mixed-1", hours: -2), article("mixed-2", hours: -2, unrelated: true),
             article("mixed-3", hours: -2, unrelated: true),
             article("half-1", hours: -3), article("half-2", hours: -3, unrelated: true),
         ]
-        try await db.upsertArticles(articles)
+        try await db.upsertArticles(articles, now: now)
         let current = try await db.createEvent(memberArticleIDs: ["current"], at: now)
         let previous = try await db.createEvent(memberArticleIDs: ["earlier"], at: now.addingTimeInterval(-10 * 86400))
         _ = try await db.createEvent(memberArticleIDs: ["old"], at: now)
@@ -10348,7 +10492,7 @@ struct NewsTests {
         assertTrue(try await db.isSaved(articleId: "current"), "Lookup preserves saved state")
         assertTrue(
             try await EventStoryRelation.find(eventID: "missing", in: db).isEmpty, "Deleted events have no links")
-        try await db.upsertArticles([article("forward", hours: 0)])
+        try await db.upsertArticles([article("forward", hours: 0)], now: now)
         let forward = try await db.createEvent(memberArticleIDs: ["forward"], at: now)
         _ = try await db.mergeEvents(forward.id, into: current.id, at: now)
         assertEqual(
@@ -10357,7 +10501,7 @@ struct NewsTests {
         var extraIDs: [String] = []
         for i in 0..<5 {
             let id = "extra-\(i)"
-            try await db.upsertArticles([article(id, hours: -0.5)])
+            try await db.upsertArticles([article(id, hours: -0.5)], now: now)
             extraIDs.append(try await db.createEvent(memberArticleIDs: [id], at: now).id)
         }
         let capped = try await EventStoryRelation.find(eventID: current.id, in: db)
@@ -10369,7 +10513,7 @@ struct NewsTests {
         let undated = FeedArticle(
             storedID: "undated", title: articles[0].title, link: articles[0].link + "/undated", guid: "undated",
             description: articles[0].description, pubDate: DateParser.unknownDate, source: "Other publisher")
-        try await db.upsertArticles([undated])
+        try await db.upsertArticles([undated], now: now)
         _ = try await db.addArticles(["undated"], toEvent: current.id, at: now)
         assertTrue(
             try await EventStoryRelation.find(eventID: current.id, in: db).isEmpty,
@@ -10400,11 +10544,11 @@ struct NewsTests {
             description: "Volodymyr Zelenskyy congratulated football fans after the national team won a league match.",
             pubDate: now.addingTimeInterval(-3 * 3600), source: "Publisher near")
         let window = EventStoryRelation.window / 3600
-        try await copy.upsertArticles([articles[0], articles[1], near])
+        try await copy.upsertArticles([articles[0], articles[1], near], now: now)
         for (id, hours) in [
-            ("old-in", -2), ("old-out", -window - 2), ("continuing-in", -2), ("continuing-after", 1),
+            ("old-in", -2), ("old-out", -window - 2), ("continuing-in", -2), ("continuing-after", 0.2),
         ] {
-            try await copy.upsertArticles([article(id, hours: hours)])
+            try await copy.upsertArticles([article(id, hours: hours)], now: now)
         }
         _ = try await copy.createEvent(memberArticleIDs: ["current"], at: now)
         let linkedEvent = try await copy.createEvent(memberArticleIDs: ["earlier"], at: now)
@@ -12752,7 +12896,7 @@ struct NewsTests {
             value("SELECT count(*) FROM sqlite_master WHERE name='idx_story_images_url';"), "0",
             "Cancellation leaves no partial index")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "29", "Existing v18 libraries receive the image index migration")
+        assertEqual(value("PRAGMA user_version;"), "31", "Existing v18 libraries receive the image index migration")
         assertEqual(
             sqlite3_exec(handle, "ANALYZE story_images;", nil, nil, nil), SQLITE_OK,
             "Use current fixture cardinality for the query planner")
@@ -12803,7 +12947,7 @@ struct NewsTests {
                 "UPDATE articles SET category = 'World' WHERE id = 'hint-classified'; UPDATE articles SET category = 'Sport' WHERE id = 'hint-publisher'; UPDATE articles SET category = 'World' WHERE id = 'hint-unclassified'; UPDATE articles SET category = 'Politics' WHERE id = 'hint-unrated'; PRAGMA user_version = 27;",
                 nil, nil, nil), SQLITE_OK, "Reconstruct a v27 library with a classifier category in the hint column")
         try await db.open()
-        assertEqual(value("PRAGMA user_version;"), "29", "The v27 library migrates to v28")
+        assertEqual(value("PRAGMA user_version;"), "31", "The v27 library migrates to v28")
         assertEqual(
             value("SELECT category FROM articles WHERE id = 'hint-classified';"), nil,
             "v28 clears a hint that holds the classifier's category")
@@ -13538,7 +13682,7 @@ struct NewsTests {
             ), "0", "Cancelled v14 migration rolls back its tables")
         let migrated = DatabaseEngine(path: copy)
         try await migrated.open()
-        assertEqual(value(copy, "PRAGMA user_version;"), "29", "Copied v13 library upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Copied v13 library upgrades to the current schema")
         assertEqual(value(path, "PRAGMA user_version;"), "13", "Original v13 fixture stays untouched")
         assertEqual(
             try await migrated.fetchEvent(id: event.id)?.memberArticleIDs.count, 5, "Migration keeps events and members"
@@ -14585,7 +14729,8 @@ struct NewsTests {
         let beforePurge = try await db.publisherContentRevisions(for: companion.id)
         try await db.clearArticleCache()
         assertEqual(
-            try await db.publisherContentRevisions(for: companion.id), beforePurge,
+            try await db.publisherContentRevisions(for: companion.id).map(\.fingerprint),
+            beforePurge.map(\.fingerprint),
             "A local cache purge is not a publisher update")
         assertTrue(
             try await db.fetchArticles(id: article.id).first?.fullContent != nil,
@@ -14672,7 +14817,7 @@ struct NewsTests {
             guard sqlite3_step(statement) == SQLITE_ROW else { return nil }
             return sqlite3_column_text(statement, 0).map { String(cString: $0) }
         }
-        assertEqual(value(copy, "PRAGMA user_version;"), "29", "Provenance schema upgrades to the current schema")
+        assertEqual(value(copy, "PRAGMA user_version;"), "31", "Provenance schema upgrades to the current schema")
         assertEqual(value(original, "PRAGMA user_version;"), "15", "Original v15 fixture remains untouched")
         assertEqual(value(copy, "PRAGMA quick_check;"), "ok", "Upgraded provenance library passes quick_check")
         assertEqual(value(copy, "PRAGMA foreign_key_check;"), nil, "Provenance has no dangling article references")
@@ -15538,6 +15683,10 @@ struct NewsTests {
             return
         }
         try await db.includeEvent(vote, inEvent: protest)
+        // The combination is the reader's change: it is already seen, without a second call to race a clustering pass.
+        var card = try await db.eventFeedSummaries(forArticles: [ids[0]]).first
+        assertEqual(card?.seenVersion, card?.membershipVersion, "Same Event records the combined version as seen")
+        assertFalse(card?.hasSubstantiveUpdate ?? true, "The combination itself is not an update")
         assertEqual(try await event(0), protest, "Same Event moves the related event's reports into this one")
         assertEqual(try await db.resolvedEventID(vote), protest, "The absorbed event forwards to the survivor")
         assertEqual(
@@ -15555,6 +15704,8 @@ struct NewsTests {
         ids.append(try await db.resolvedArticleID(for: later))
         _ = try await EventClusterer.run(in: db, now: now.addingTimeInterval(90))
         assertEqual(try await event(4), protest, "A later vote report joins the combined event")
+        card = try await db.eventFeedSummaries(forArticles: [ids[0]]).first
+        assertTrue(card?.hasSubstantiveUpdate ?? false, "A report that joined after Same Event still shows Updated")
 
         // Separating it later wins over the inclusion, and including it again wins over the separation.
         try await db.separateArticle(ids[0], fromEvent: protest)
@@ -17725,15 +17876,16 @@ struct NewsTests {
 
         // 4. Cancel articleB
         await queue.cancel(articleId: articleB.id, reason: .user)
-        let stateB = await queue.state(for: articleB.id)
-        assertEqual(stateB, .cancelled(.user), "Article B should be in cancelled state")
+        assertFalse(await queue.retainsJob(for: articleB.id), "Article B is evicted from jobs on cancel (#986)")
+        assertEqual(await queue.state(for: articleB.id), nil, "Article B state is nil after eviction (#986)")
 
         // 5. Cancel all
         await queue.cancelAll(reason: .superseded)
+        assertFalse(await queue.retainsJob(for: articleA.id), "Article A is evicted from jobs on cancelAll (#986)")
         let stateA = await queue.state(for: articleA.id)
         assertTrue(
-            stateA == .cancelled(.superseded) || stateA == .completed,
-            "Article A is superseded unless it already finished")
+            stateA == nil || stateA == .completed,
+            "Article A is evicted unless it already finished (#986)")
         for _ in 0..<10 {
             await queue.enqueue(article: articleA, priority: .background)
             await queue.cancelAll(reason: .superseded)
@@ -17786,6 +17938,511 @@ struct NewsTests {
 
         // Empty snapshot handling does not crash or create jobs
         await queue.enqueue(articles: [], priority: .background, allowHTTP: false)
+    }
+
+    static func testEnrichmentQueueCancelledJobsNotRetained() async {
+        print("  - Testing EnrichmentQueue does not retain cancelled jobs or payloads (#986)...")
+        let database = DatabaseEngine(path: ":memory:")
+        do { try await database.open() } catch { return assertTrue(false, "The queue test database opens") }
+        let store = await ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
+        let queue = EnrichmentQueue(store: store)
+
+        let hold = OpenGate()
+        for index in 0..<3 {
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "hold-\(index)") {
+                    await hold.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("Held generations fill the queue") { await queue.activeJobCount() == 3 }
+
+        let articles = (0..<5).map { index in
+            FeedArticle(
+                title: "Headline \(index)",
+                link: "https://example.com/\(index)",
+                guid: "leak-\(index)",
+                description: "Summary \(index)",
+                pubDate: Date(),
+                source: "Source",
+                fullContent: "Very long body text for article \(index)"
+            )
+        }
+        await queue.enqueue(articles: articles, priority: .background)
+        for article in articles {
+            assertTrue(await queue.retainsJob(for: article.id), "Queued article is initially retained")
+        }
+
+        await queue.cancelAll(reason: .superseded)
+
+        for article in articles {
+            assertFalse(
+                await queue.retainsJob(for: article.id),
+                "Cancelled job \(article.id) is evicted from EnrichmentQueue.jobs so FeedArticle is not retained (#986)"
+            )
+        }
+        assertEqual(
+            await queue.stateCounts()["cancelled (superseded)"], 5,
+            "Diagnostics still count the cancelled jobs without holding them (#986)")
+
+        // An article enqueued again after the cancel is a new job and stays retained until it runs.
+        await queue.enqueue(articles: [articles[0]], priority: .background)
+        assertTrue(await queue.retainsJob(for: articles[0].id), "A re-enqueued article is retained again (#986)")
+        await queue.cancel(articleId: articles[0].id, reason: .user)
+        assertFalse(await queue.retainsJob(for: articles[0].id), "Cancelling one article evicts its job (#986)")
+        await hold.open()
+    }
+
+    /// Highlights and notes: storage, FTS5, VACUUM, retention, cascade and the store's revision counter (#711).
+    @MainActor static func testUserNotesStorageAndFTS() async throws {
+        print("  - Testing highlights and notes: storage, FTS5, VACUUM, retention and cascade (#711)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-notes-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
+        try await database.open()
+        assertEqual(try await database.storedSchemaVersion(), 31, "The library migrates to the current schema")
+
+        // Rows of the index itself: a listing joins the notes table and would hide a row a trigger left behind.
+        /// How many index rows match the word.
+        func indexRows(_ word: String) async throws -> Int {
+            Int(
+                try await database.eventRows(
+                    "SELECT count(*) FROM user_notes_fts WHERE user_notes_fts MATCH ?;", [.text(word)]
+                )
+                .first?.first.flatMap { $0 } ?? "") ?? -1
+        }
+        /// Runs FTS5's integrity check of the note index against the notes.
+        func checkIndex(_ moment: String) async throws {
+            do {
+                try await database.eventRows(
+                    "INSERT INTO user_notes_fts(user_notes_fts, rank) VALUES ('integrity-check', 1);")
+            } catch { assertTrue(false, "The note index matches the notes \(moment)") }
+        }
+        let old = Date(timeIntervalSince1970: 1_700_000_000)
+        let first = FeedArticle(
+            title: "Superconductor claim tested", link: "https://example.com/sc", guid: "note-1",
+            description: "Lab replicates zero resistance", pubDate: old, source: "Physics Daily")
+        let second = FeedArticle(
+            title: "Quantum chip benchmark", link: "https://example.com/qc", guid: "note-2",
+            description: "A chip with fault-tolerant qubits", pubDate: old, source: "Quantum Review")
+        _ = try await database.upsertArticles([first, second])
+        let paragraphs = ["The lab replicates zero resistance at ambient pressure.", "Reviewers want a second lab."]
+        /// A note on `quote` in the fixture paragraphs.
+        func note(_ article: FeedArticle, _ index: Int, _ start: Int, _ quote: String, body: String = "") -> UserNote {
+            NoteAnchor.note(
+                articleID: article.id, paragraphs: paragraphs, index: index, start: start, quote: quote, body: body)
+        }
+        let resistance = note(first, 0, 19, "zero resistance", body: "Follow up with the authors")
+        let reviewers = note(first, 1, 0, "Reviewers want")
+        let chip = note(second, 0, 4, "lab replicates", body: "Hardware roadmap")
+        try await database.saveNotes([chip, reviewers, resistance])
+
+        assertEqual(
+            try await database.fetchNotes(for: first.id).map(\.id), [resistance.id, reviewers.id],
+            "A story's notes come in reading order")
+        let stored = try await database.fetchNotes(for: first.id).first
+        assertEqual(
+            [stored?.selectedText, stored?.prefix, stored?.suffix, stored?.noteBody],
+            [resistance.selectedText, resistance.prefix, resistance.suffix, resistance.noteBody],
+            "A note reads back as it was saved")
+        assertEqual(
+            [stored?.paragraphIndex, stored?.charStart], [0, 19], "With the place it had")
+        assertEqual(try await database.noteListings().count, 3, "The Library lists every note")
+        assertEqual(
+            try await database.noteListings().first?.articleTitle, "Quantum chip benchmark",
+            "The newest note is first and names its story")
+
+        assertEqual(
+            try await database.noteListings(matching: "resist").map(\.note.id), [resistance.id],
+            "FTS5 finds a quote by a word prefix")
+        assertEqual(
+            try await database.noteListings(matching: "roadmap").map(\.note.id), [chip.id],
+            "FTS5 finds a note by its text")
+        assertEqual(
+            try await database.noteListings(matching: "\"unbalanced (").count, 0,
+            "Typed punctuation cannot break a search")
+
+        var edited = resistance
+        edited.noteBody = "Confirmed by an independent lab"
+        try await database.saveNotes([edited])
+        assertEqual(try await database.noteListings(matching: "independent").count, 1, "An edit is searchable")
+        assertEqual(try await database.noteListings(matching: "authors").count, 0, "The replaced text is not")
+        assertEqual(
+            try await database.fetchNotes(for: first.id).count, 2, "Saving the same note again does not copy it")
+
+        // The index survives a rebuild of the file (the hidden rowid of a TEXT-keyed table may change on VACUUM).
+        try await database.deleteNote(id: reviewers.id)
+        try await database.executeSimple("VACUUM;")
+        assertEqual(
+            try await database.noteListings(matching: "independent").map(\.note.id), [resistance.id],
+            "FTS5 still finds the note after VACUUM")
+        assertEqual(try await indexRows("reviewers"), 0, "A deleted note leaves the index")
+        assertEqual(try await indexRows("independent"), 1, "The index holds the edited text once")
+        try await checkIndex("after VACUUM")
+
+        // The store reloads its readers through one revision counter.
+        let store = ArticleStore(database: database)
+        let revision = store.userNotesRevision
+        let storeNote = UserNote(
+            articleID: second.id, paragraphIndex: 0, charStart: 0, selectedText: "A chip", prefix: "", suffix: " with")
+        assertTrue(await store.saveNotes([storeNote]), "The store saves a note")
+        assertEqual(store.userNotesRevision, revision + 1, "Saving bumps the revision")
+        assertEqual(await store.notes(for: second.id).count, 2, "The store reads a story's notes")
+        assertEqual(await store.noteListings(matching: "chip").count, 1, "The store searches notes")
+        assertTrue(await store.deleteNote(id: storeNote.id), "The store deletes a note")
+        assertEqual(store.userNotesRevision, revision + 2, "Deleting bumps the revision")
+
+        // Retention keeps a read story that has a note; another read story of the same age goes (#711).
+        try await database.markReadBatch(articleIds: [first.id, second.id], isRead: true)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        try await database.executeSimple("DELETE FROM user_notes WHERE id = '\(chip.id)';")
+        assertEqual(try await database.pruneOldArticles(keepReadDays: 30, now: now), 1, "One old read story is pruned")
+        assertEqual(try await database.fetchArticles(id: first.id).count, 1, "The story with a note is kept")
+        assertEqual(try await database.fetchNotes(for: first.id).count, 1, "Its note is kept")
+
+        // Deleting a story deletes its notes and their index rows.
+        try await database.executeSimple("DELETE FROM articles WHERE id = '\(first.id)';")
+        assertEqual(try await database.fetchNotes(for: first.id).count, 0, "Deleting a story deletes its notes")
+        assertEqual(try await indexRows("independent"), 0, "And their index rows")
+        try await checkIndex("after the cascade")
+    }
+
+    /// Placing selections, finding a note again after re-extraction, and painting its range (#711).
+    static func testNoteAnchoring() {
+        print("  - Testing highlight anchoring across re-extraction and selections (#711)...")
+        let story = [
+            "Officials said the bridge opens on Tuesday.",
+            "",
+            "Crews finished the deck. Officials said the bridge opens on Tuesday after inspections.",
+        ]
+        // Selections: one passage, several lines, and text that is not in the story.
+        let one = NoteAnchor.place(selection: "the bridge opens", in: story)
+        assertEqual(one?.map(\.index), [0], "A quote that occurs twice is placed at its first occurrence")
+        assertEqual(one?.map(\.start), [15], "With its character offset")
+        let lines = NoteAnchor.place(selection: "Crews finished the deck.\n\nOfficials said the bridge", in: story)
+        assertEqual(lines?.map(\.index), [2, 2], "Lines of one selection stay in order")
+        assertEqual(lines?.map(\.start), [0, 25], "Each line gets its own offset")
+        // The same quote again goes to its next occurrence, and when all are taken the first is returned (a duplicate).
+        let again = NoteAnchor.place(selection: "the bridge opens", in: story, taken: [(0, 15..<31)])
+        assertEqual(again?.map(\.index), [2], "A highlighted occurrence is skipped")
+        assertEqual(again?.map(\.start), [40], "For the next one")
+        let all = NoteAnchor.place(selection: "the bridge opens", in: story, taken: [(0, 15..<31), (2, 40..<56)])
+        assertEqual(all?.map(\.index), [0], "With every occurrence taken the first is returned")
+        assertTrue(NoteAnchor.place(selection: "not in the story", in: story) == nil, "Unknown text has no place")
+        assertTrue(NoteAnchor.place(selection: "  \n ", in: story) == nil, "A blank selection has no place")
+
+        // A note made in the third block, where the quote also occurs in the first block.
+        let note = NoteAnchor.note(
+            articleID: "a", paragraphs: story, index: 2, start: 25, quote: "Officials said the bridge opens")
+        assertEqual(note.prefix, "Crews finished the deck. ", "The note keeps the words before the quote")
+        assertEqual(note.suffix, " on Tuesday after inspections.", "And after it")
+        assertEqual(
+            NoteAnchor.resolve(note, in: story)?.index, 2, "The stored position is used while the text still matches")
+        assertEqual(NoteAnchor.resolve(note, in: story)?.range, 25..<56, "With the stored character range")
+
+        // A re-extraction adds a block above and rewrites the first one: the offsets are stale, the context decides.
+        let extracted = ["Updated: the story was edited.", "Officials said the bridge opens in May."] + story
+        let moved = NoteAnchor.resolve(note, in: extracted)
+        assertEqual(moved?.index, 4, "The quote follows its context to the moved block, not the first look-alike")
+        assertEqual(moved?.range, 25..<56, "With its range")
+        let shifted = [
+            "Breaking: Crews finished the deck. Officials said the bridge opens on Tuesday after inspections."
+        ]
+        assertEqual(
+            NoteAnchor.resolve(note, in: shifted)?.range, 25 + 10..<56 + 10, "Offsets inside a block are found again")
+
+        // A look-alike that moved into the stored position does not keep the note: the context decides.
+        let before = ["Officials: the bridge opens in May.", "Crews said the bridge opens soon."]
+        let second = NoteAnchor.note(
+            articleID: "a", paragraphs: before, index: 1, start: 11, quote: "the bridge opens")
+        assertEqual(NoteAnchor.resolve(second, in: before)?.index, 1, "Unchanged text keeps the stored place")
+        let swapped = [before[1], before[0]]
+        assertEqual(
+            NoteAnchor.resolve(second, in: swapped)?.index, 0,
+            "The quote follows its context when another occurrence takes its place")
+
+        // Without any context left the nearest block wins, and a quote that is gone is lost.
+        let bare = UserNote(
+            articleID: "a", paragraphIndex: 3, charStart: 0, selectedText: "bridge opens", prefix: "", suffix: "")
+        assertEqual(NoteAnchor.resolve(bare, in: story)?.index, 2, "A tie goes to the nearest block")
+        assertTrue(NoteAnchor.resolve(note, in: ["The bridge is open."]) == nil, "A quote that was rewritten is lost")
+        assertTrue(NoteAnchor.resolve(note, in: []) == nil, "An empty story holds no quote")
+
+        // Offsets count characters, so emoji and combining marks do not shift the range.
+        let emoji = ["🇳🇱 Café opens 🎉 at nine."]
+        let greeting = NoteAnchor.note(
+            articleID: "a", paragraphs: emoji, index: 0, start: 15, quote: "at nine")
+        assertEqual(NoteAnchor.resolve(greeting, in: emoji)?.range, 15..<22, "Characters, not UTF-16 units")
+
+        // The overlay paints exactly the resolved ranges.
+        let overlay = ReaderOverlay(notes: [note, bare], paragraphs: story)
+        assertEqual(overlay.highlights[2]?.count, 2, "Both notes are painted in the third block")
+        var text = AttributedString(story[2])
+        text.paint(25..<56, AppColor.noteHighlight)
+        text.paint(900..<901, AppColor.noteHighlight)
+        let painted = text.runs.filter { $0.backgroundColor != nil }.map { String(text[$0.range].characters) }
+        assertEqual(
+            painted, ["Officials said the bridge opens"], "Only the quote has a background; a stale range is ignored")
+    }
+
+    /// The sentence diff on a three-revision breaking story, its block overlay, the pair budget and which updates a story can be compared with (#712).
+    static func testSentenceDiffAndStoryEvolution() {
+        print("  - Testing the sentence diff on a multi-revision breaking story (#712)...")
+        let first =
+            "Two people were hurt when a bus hit a bridge rail on Monday. Police closed the road. "
+            + "The driver was taken to hospital."
+        let second =
+            "Two people were hurt when a bus hit a bridge rail on Monday.  Police closed the road. "
+            + "The driver, 54, was taken to hospital. A tow truck is on the way."
+        let third =
+            "Three people were hurt when a bus hit a bridge rail on Monday. Police closed the road. "
+            + "The driver, 54, was taken to hospital. The road reopened at 9 pm."
+
+        /// The diff of two texts as "= kept", "+ added" and "- retracted" lines.
+        func kinds(_ before: String, _ after: String) -> [String] {
+            SentenceDiff.diff(before: before, after: after).map { item in
+                switch item.kind {
+                case .unchanged: "= \(item.text)"
+                case .added: "+ \(item.text)"
+                case .retracted: "- \(item.text)"
+                }
+            }
+        }
+        assertEqual(
+            kinds(first, second),
+            [
+                "= Two people were hurt when a bus hit a bridge rail on Monday.", "= Police closed the road.",
+                "- The driver was taken to hospital.", "+ The driver, 54, was taken to hospital.",
+                "+ A tow truck is on the way.",
+            ], "Extra spaces are not a change; a reworded sentence is one retracted and one added")
+        assertEqual(
+            kinds(second, third),
+            [
+                "- Two people were hurt when a bus hit a bridge rail on Monday.",
+                "+ Three people were hurt when a bus hit a bridge rail on Monday.", "= Police closed the road.",
+                "= The driver, 54, was taken to hospital.", "- A tow truck is on the way.",
+                "+ The road reopened at 9 pm.",
+            ], "The next revision is classified against the one before it")
+        assertEqual(
+            SentenceDiff.diff(before: first, after: first).filter { $0.kind != .unchanged }.count, 0, "Same text")
+        assertEqual(SentenceDiff.diff(before: "", after: second).filter { $0.kind == .added }.count, 4, "All new")
+        assertEqual(SentenceDiff.diff(before: second, after: "").filter { $0.kind == .retracted }.count, 4, "All gone")
+
+        // Blocks of the third revision, as the reader shows them: tinted ranges and the retracted lines' places.
+        let blocks = [
+            "Three people were hurt when a bus hit a bridge rail on Monday. Police closed the road.",
+            "",
+            "The driver, 54, was taken to hospital. The road reopened at 9 pm.",
+        ]
+        let overlay = SentenceDiff.overlay(before: second, after: third, blocks: blocks)
+        /// The characters of `range` in the block's text.
+        func slice(_ block: Int, _ range: Range<Int>) -> String {
+            String(Array(blocks[block])[range])
+        }
+        assertEqual(
+            overlay.added[0].map { $0.map { slice(0, $0) } },
+            ["Three people were hurt when a bus hit a bridge rail on Monday."], "A reworded sentence is tinted")
+        assertEqual(
+            overlay.added[2].map { $0.map { slice(2, $0) } }, ["The road reopened at 9 pm."],
+            "A new sentence is tinted")
+        assertEqual(overlay.added[1], nil, "A block without text is untouched")
+        assertEqual(
+            overlay.retracted[-1], ["Two people were hurt when a bus hit a bridge rail on Monday."],
+            "A sentence retracted before any kept one is listed before the first block")
+        assertEqual(
+            overlay.retracted[2], ["A tow truck is on the way."], "A retracted sentence follows the sentence before it")
+        assertTrue(
+            SentenceDiff.overlay(before: third, after: third, blocks: blocks).added.isEmpty, "No change, no tint")
+        assertTrue(SentenceDiff.overlay(before: third, after: third, blocks: blocks).isEmpty, "And nothing retracted")
+
+        // Duplicate sentences: only the added copy is tinted, and a retracted sentence follows its own neighbours.
+        let echo = "It rained. Police said. The road closed."
+        let echoBlocks = ["It rained. Police said. The road closed. Police said."]
+        let echoOverlay = SentenceDiff.overlay(before: echo, after: echo + " Police said.", blocks: echoBlocks)
+        assertEqual(echoOverlay.added[0], [41..<53], "The repeated sentence is tinted once, where it was added")
+        let removedEcho = SentenceDiff.overlay(before: echoBlocks[0], after: echo, blocks: [echo])
+        assertEqual(
+            removedEcho.retracted[0], ["Police said."], "The sentence removed at the end follows the last block")
+
+        // Past the pair budget only the shared head and tail are kept, and the middle is replaced as a whole: with
+        // the budget the two extra sentences would be the only changes.
+        let head = (0..<10).map { "Head \($0) stays." }
+        let tail = (0..<10).map { "Tail \($0) stays." }
+        let shared = (0..<2_100).map { "Shared sentence \($0) holds." }
+        let items = SentenceDiff.diff(
+            before: (head + shared + tail).joined(separator: " "),
+            after: (head + ["Extra sentence."] + shared + ["Closing sentence."] + tail).joined(separator: " "))
+        assertEqual(items.filter { $0.kind == .unchanged }.count, 20, "The shared head and tail survive a large diff")
+        assertEqual(items.filter { $0.kind == .added }.count, 2_102, "Past the budget the new middle is added whole")
+        assertEqual(items.filter { $0.kind == .retracted }.count, 2_100, "And the old middle is retracted whole")
+
+        // Which updates a story can be compared with.
+        /// A revision with the given kind and kept text.
+        func revision(_ version: Int, _ kind: PublisherContentRevision.Kind, _ previous: String?)
+            -> PublisherContentRevision
+        {
+            PublisherContentRevision(
+                version: version, observedAt: Date(), kind: kind, changedFields: 4, inputHash: "h\(version)",
+                previousText: previous)
+        }
+        let body = String(repeating: "x", count: 100)
+        assertEqual(
+            PublisherContentRevision.comparable(
+                [
+                    revision(3, .publisherUpdate, "older body"), revision(2, .publisherUpdate, "oldest"),
+                    revision(1, .snapshot, nil),
+                ], current: body
+            ).map(\.version), [3, 2], "Updates that kept their text are listed newest first")
+        assertEqual(
+            PublisherContentRevision.comparable(
+                [revision(2, .publisherUpdate, String(repeating: "t", count: 50)), revision(1, .snapshot, nil)],
+                current: String(repeating: "x", count: 2_000)
+            ).map(\.version), [], "A teaser that the page's body completed is not an edit")
+        assertEqual(
+            PublisherContentRevision.comparable(
+                [
+                    revision(4, .publisherUpdate, "body before"), revision(3, .extraction, nil),
+                    revision(2, .publisherUpdate, "summary before"), revision(1, .snapshot, nil),
+                ], current: body
+            ).map(\.version), [4], "An update before an extraction compares a summary with a body")
+        assertEqual(
+            PublisherContentRevision.comparable([revision(2, .publisherUpdate, nil)], current: body).count, 0,
+            "An update that kept no text has nothing to compare")
+
+        // The text a revision compares: the body, or the summary while there is no body.
+        assertEqual(PublisherContentRevision.text(description: "Summary", content: "Body"), "Body", "Body first")
+        assertEqual(PublisherContentRevision.text(description: "Summary", content: ""), "Summary", "Then the summary")
+        assertEqual(PublisherContentRevision.text(description: "Summary", content: nil), "Summary", "No body")
+    }
+
+    /// The text kept for publisher updates: the chain, the summary-only and title-only cases, the size limit, the cache purge and the schema 30 migration (#712).
+    static func testPublisherRevisionTextStorage() async throws {
+        print("  - Testing the text kept for publisher updates, its limits and its migration (#712)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-revision-text-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        /// Runs SQL on the fixture file outside the engine.
+        func execute(_ sql: String) {
+            var handle: OpaquePointer?
+            assertEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the revision fixture")
+            defer { sqlite3_close(handle) }
+            assertEqual(sqlite3_exec(handle, sql, nil, nil, nil), SQLITE_OK, "Run \(sql.prefix(40))")
+        }
+        let db = DatabaseEngine(path: path)
+        try await db.open()
+        let article = FeedArticle(
+            storedID: "evolving", title: "Bus hits bridge", link: "https://example.com/evolving", guid: "evolving",
+            description: "A bus hit a bridge.", pubDate: Date(), source: "Harbor News")
+        _ = try await db.upsertArticles([article])
+        let saved = FeedArticle(
+            storedID: "kept", title: "Kept story", link: "https://example.com/kept", guid: "kept",
+            description: "Kept summary.", pubDate: Date(), source: "Harbor News")
+        _ = try await db.upsertArticles([saved])
+        try await db.setSaved(articleId: saved.id, isSaved: true)
+
+        /// A story's stored revisions, newest first.
+        func revisions(_ id: String = "evolving") async throws -> [PublisherContentRevision] {
+            try await db.publisherContentRevisions(for: id)
+        }
+        assertEqual(try await revisions().first?.previousText, nil, "A first sight keeps no text")
+        let one = "The bus hit the rail on Monday. Police closed the road."
+        let two = one + " The driver was taken to hospital."
+        let three = "The bus hit the rail on Monday. The road reopened. The driver was taken to hospital."
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: one))
+        assertEqual(try await revisions().first?.kind, .extraction, "The first body is an extraction")
+        assertEqual(try await revisions().first?.previousText, nil, "An extraction keeps no text")
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: two))
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: three))
+        let chain = try await revisions().filter { $0.kind == .publisherUpdate }
+        assertEqual(chain.map(\.previousText), [two, one], "Each update keeps the text it replaced, newest first")
+
+        // A summary-only story compares summaries; a title-only change replaces no text.
+        let summaryOnly = FeedArticle(
+            storedID: "summary", title: "Summary story", link: "https://example.com/summary", guid: "summary",
+            description: "Before.", pubDate: Date(), source: "Harbor News")
+        _ = try await db.upsertArticles([summaryOnly])
+        let changed = FeedArticle(
+            storedID: "summary", title: "Summary story", link: summaryOnly.link, guid: "summary",
+            description: "After.", pubDate: summaryOnly.pubDate, source: "Harbor News")
+        _ = try await db.upsertArticles([changed])
+        assertEqual(
+            try await revisions("summary").first?.previousText, "Before.", "Summaries are compared without a body")
+        let retitled = FeedArticle(
+            storedID: "summary", title: "Summary story, updated", link: summaryOnly.link, guid: "summary",
+            description: "After.", pubDate: summaryOnly.pubDate, source: "Harbor News")
+        _ = try await db.upsertArticles([retitled])
+        let titleOnly = try await revisions("summary").first
+        assertEqual(titleOnly?.kind, .publisherUpdate, "A new headline is an update")
+        assertEqual(titleOnly?.previousText, nil, "But it replaced no text, so none is kept")
+
+        // A text too long to keep whole is not kept: a cut text would show invented changes.
+        let huge = String(repeating: "A long sentence about the bridge. ", count: 1_600)
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: huge))
+        try await db.updateEnrichment(articleId: article.id, update: .init(content: huge + " More."))
+        let hugeRevisions = try await revisions()
+        assertEqual(hugeRevisions[1].previousText, three, "The update that replaced a short text keeps it")
+        assertEqual(hugeRevisions[0].previousText, nil, "An over-limit text is not kept")
+
+        // Clear Article Cache removes the kept text of stories whose bodies it clears, not of saved ones.
+        try await db.updateEnrichment(articleId: saved.id, update: .init(content: "Saved body one."))
+        try await db.updateEnrichment(articleId: saved.id, update: .init(content: "Saved body two."))
+        try await db.clearArticleCache()
+        assertTrue(
+            try await revisions().allSatisfy { $0.previousText == nil }, "A cache purge drops the text it kept")
+        assertEqual(try await revisions("kept").first?.previousText, "Saved body one.", "A saved story keeps its text")
+        await db.close()
+
+        // A library at schema 30 (no column, the v16 triggers) migrates: rows stay, new updates keep text.
+        execute(
+            """
+            DROP TRIGGER trg_publisher_content_insert; DROP TRIGGER trg_publisher_content_update;
+            ALTER TABLE publisher_content_revisions DROP COLUMN previous_text;
+            CREATE TRIGGER trg_publisher_content_insert AFTER INSERT ON articles BEGIN
+                INSERT INTO publisher_content_revisions VALUES (new.id, 1, new.created_at, 'snapshot', 0,
+                    news_publisher_input(new.title, coalesce(new.description, ''), new.content));
+            END;
+            CREATE TRIGGER trg_publisher_content_update AFTER UPDATE OF title, description, content ON articles
+            WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR old.content IS NOT new.content
+            BEGIN
+                UPDATE article_enrichment SET summary = NULL, key_points = NULL, sentiment = NULL,
+                    entities = NULL, topics = NULL, category = NULL, confidence = NULL,
+                    model_identifier = NULL, analysis_version = NULL, input_content_version = NULL, input_text_hash = NULL
+                    WHERE article_id = new.id;
+                DELETE FROM event_overviews WHERE event_id IN (SELECT event_id FROM event_members WHERE article_id = new.id)
+                    OR id IN (SELECT overview_id FROM event_overview_citations WHERE article_id = new.id);
+                INSERT INTO publisher_content_revisions
+                SELECT new.id, coalesce(max(version), 0) + 1, new.updated_at,
+                    CASE WHEN old.title IS NOT new.title OR old.description IS NOT new.description OR coalesce(old.content, '') != ''
+                         THEN 'publisher_update' ELSE 'extraction' END,
+                    (old.title IS NOT new.title) + 2 * (old.description IS NOT new.description) + 4 * (old.content IS NOT new.content),
+                    news_publisher_input(new.title, coalesce(new.description, ''), new.content)
+                FROM publisher_content_revisions WHERE article_id = new.id
+                HAVING old.title IS NOT new.title OR old.description IS NOT new.description OR new.content IS NOT NULL;
+                DELETE FROM publisher_content_revisions WHERE article_id = new.id AND version <
+                    (SELECT max(version) - 19 FROM publisher_content_revisions WHERE article_id = new.id);
+            END;
+            PRAGMA user_version = 30;
+            """)
+        let migrated = DatabaseEngine(path: path)
+        try await migrated.open()
+        assertEqual(try await migrated.storedSchemaVersion(), 31, "A schema 30 library migrates to 31")
+        assertEqual(
+            try await migrated.publisherContentRevisions(for: article.id).count, hugeRevisions.count,
+            "Revisions survive the migration")
+        assertTrue(
+            try await migrated.publisherContentRevisions(for: article.id).allSatisfy { $0.previousText == nil },
+            "Earlier revisions have no text")
+        try await migrated.updateEnrichment(articleId: article.id, update: .init(content: three))
+        try await migrated.updateEnrichment(articleId: article.id, update: .init(content: two))
+        assertEqual(
+            try await migrated.publisherContentRevisions(for: article.id).first?.previousText, three,
+            "Updates after the migration keep the text they replace")
+        await migrated.close()
     }
 
     /// Runs on the main actor: resolving an AppKit-backed Color off the main thread waits on SwiftUI's main-thread
@@ -21633,6 +22290,44 @@ struct NewsTests {
         var fetched = 0
         for item in five { fetched += await log.count(item.link) }
         assertEqual(fetched, OverviewGenerationCoordinator.maxEvidenceFetches, "Four representatives at most")
+
+        // Clear Article Cache while the warm-up's fetches are in flight: nothing lands afterwards (#982). Without the
+        // coordinator's reset the store's generation refuses the write; with it the fetches are cancelled as well.
+        func enrichmentRows(_ id: String) async throws -> Int {
+            let rows = try await database.eventRows(
+                "SELECT count(*) FROM article_enrichment WHERE article_id = ?;", [.text(id)])
+            return rows.first?.first.flatMap { $0.flatMap { Int($0) } } ?? -1
+        }
+        for (wired, names) in [(false, ("ev-x1", "ev-x2")), (true, ("ev-y1", "ev-y2"))] {
+            let (x, y) = (article(names.0, "Publisher \(names.0)"), article(names.1, "Publisher \(names.1)"))
+            _ = try await database.upsertArticles([x, y])
+            let hold = OpenGate()
+            for item in [x, y] { await pages.set(item.link, success(page(item.source)), gate: hold) }
+            let warm = coordinator()
+            store.analysisClearedHandler = nil
+            if wired { store.analysisClearedHandler = { await warm.analysisCleared() } }
+            let warming = Task { await warm.articlesWithPublisherText([x, y], excluding: [], store: store) }
+            while await hold.arrivals < 2 { await Task.yield() }
+            try await store.clearArticleCache()
+            await hold.open()
+            _ = await warming.value
+            while !(await log.isIdle) { await Task.yield() }
+            try await Task.sleep(for: .milliseconds(100))
+            for item in [x, y] {
+                let row = try await stored(item.id)
+                assertEqual(row?.fullContent, nil, "A body fetched before Clear Article Cache is not written back")
+                assertEqual(row?.readerDocument, nil, "No reader document comes back after the clear")
+                assertEqual(try await enrichmentRows(item.id), 0, "No enrichment row comes back after the clear")
+            }
+            if wired {
+                // A fetch that starts after the clear runs under the new generation and stores.
+                _ = await warm.articlesWithPublisherText([x, y], excluding: [], store: store)
+                assertEqual(
+                    try await stored(x.id)?.fullContent, page(x.source), "A warm-up after the clear stores its text")
+                assertEqual(try await enrichmentRows(x.id), 1, "and its enrichment row")
+            }
+        }
+        store.analysisClearedHandler = nil
     }
 
     /// Every framework error type reaches one of the three outcomes (#508); the macOS 27 types exist only in that SDK.
@@ -23739,6 +24434,15 @@ struct NewsTests {
             sizedArticle.readerDocument?.leadImageURL, base + "/large.jpg",
             "The lead prefers the larger rendition on equal evidence")
         assertEqual(sizedArticle.readerDocument?.images?.count, 2, "Video media:content is not an image")
+        // A site mark is not the story's picture (#995): the SVG of CNBC's page chrome blocked the page lookup.
+        let vectorRSS =
+            "<rss xmlns:media='http://search.yahoo.com/mrss/'><channel><title>Publisher</title><item><title>Vector report</title><link>\(base)</link><media:content url='\(base)/mark.svg' type='image/svg+xml'/><description><![CDATA[<img src='\(base)/site.svg'><img src='\(base)/photo.jpg'>Text]]></description></item><item><title>Mark only</title><link>\(base)/2</link><media:content url='\(base)/mark.svg' type='image/svg+xml'/></item><item><title>Typed mark</title><link>\(base)/3</link><media:content url='\(base)/mark' type='image/svg+xml'/><description><![CDATA[<img src='\(base)/pixel.gif'><img src='\(base)/story.jpg'>Text]]></description></item></channel></rss>"
+        let vectorArticles = FeedXMLParser(data: Data(vectorRSS.utf8), feedURL: base).parse()
+        assertEqual(vectorArticles.first?.imageUrl, base + "/photo.jpg", "A feed SVG gives way to the photo after it")
+        assertTrue(vectorArticles[1].imageUrl == nil, "A feed with only an SVG has no image: the page lookup runs")
+        assertEqual(
+            vectorArticles.last?.imageUrl, base + "/story.jpg",
+            "A declared SVG type and a tracking pixel give way to the photo")
         let entityRSS =
             "<rss><channel><title>Publisher</title><item><title>Entity report</title><link>\(base)/entity</link><description><![CDATA[Infantino in March&#039;s vote &#x2014; &hellip;]]></description></item></channel></rss>"
         assertEqual(
@@ -28948,6 +29652,50 @@ struct NewsTests {
             "Rebuild drops entries the open library does not hold (#812)")
         assertTrue(
             await mockIndexer.contains(id: "spotlight-unit-1"), "Rebuild indexes the library's saved stories (#812)")
+
+        // 6. A generated summary never reaches the entry, so Clear AI Analysis leaves none behind (#983)
+        let generated = "Model-written summary of the fusion story."
+        let analysis = ArticleAnalysis(
+            summary: generated, keyPoints: [], entities: [], category: "Science",
+            modelIdentifier: "test", analysisVersion: 1)
+        await store.saveArticleAnalysis(analysis, for: "spotlight-unit-1")
+        await store.rebuildSpotlightIndex()
+        let withSummary = await mockIndexer.item(for: "spotlight-unit-1")
+        assertEqual(
+            withSummary?.attributeSet.contentDescription, "Scientists achieved sustained net energy gain.",
+            "A saved story with a generated summary is indexed with the publisher description only (#983)")
+        try await store.clearAIAnalysis()
+        await store.rebuildSpotlightIndex()
+        let afterClear = await mockIndexer.item(for: "spotlight-unit-1")
+        assertEqual(
+            afterClear?.attributeSet.contentDescription, "Scientists achieved sustained net energy gain.",
+            "The entry stays and holds the publisher description, not the generated summary, after a clear (#983)")
+        // A story that already carries a generated summary when it is saved (no rebuild involved)
+        let later = FeedArticle(
+            storedID: "spotlight-unit-2", title: "Fusion Follow-up", link: "https://example.com/fusion-2",
+            guid: "spotlight-unit-2", description: "Follow-up from the publisher.", pubDate: pubDate,
+            source: "Science Daily")
+        await store.batchUpsert(articles: [later], feedUrl: "https://example.com/rss")
+        await store.saveArticleAnalysis(analysis, for: "spotlight-unit-2")
+        let summarised = try await db.fetchArticles().first { $0.id == "spotlight-unit-2" }
+        assertEqual(summarised?.aiSummary, generated, "The unsaved story carries its generated summary")
+        savedManager.save(summarised ?? later)
+        await savedManager.waitForPendingChanges()
+        assertEqual(
+            await mockIndexer.item(for: "spotlight-unit-2")?.attributeSet.contentDescription,
+            "Follow-up from the publisher.",
+            "Saving a story with a summary indexes the publisher description only (#983)")
+        try await store.clearAIAnalysis()
+        assertEqual(
+            await mockIndexer.item(for: "spotlight-unit-2")?.attributeSet.contentDescription,
+            "Follow-up from the publisher.",
+            "The saved entry still holds no generated text after Clear AI Analysis (#983)")
+        var enriched = article
+        enriched.aiSummary = generated
+        assertEqual(
+            SystemSpotlightIndexer.makeSearchableItem(for: enriched).attributeSet.contentDescription,
+            "Scientists achieved sustained net energy gain.",
+            "An article carrying aiSummary still indexes the publisher description (#983)")
         await db.close()
     }
 
@@ -29217,6 +29965,12 @@ struct NewsTests {
             queryEmbedding: queryVec
         )
         assertEqual(hybridResults.count, 2, "Both lexical and semantic candidates surfaced")
+        // A caller that resolved no vector keeps it: the page does not look one up again behind its counts (#985)
+        let resolvedWithoutVector = try await db.searchArticles(
+            query: "astronomy cosmic exploration", limit: 10, queryEmbedding: nil, vectorResolved: true)
+        assertFalse(
+            resolvedWithoutVector.contains { $0.id == "art-jwst" },
+            "A resolved nil vector stays lexical: the semantic candidate does not surface (#985)")
 
         let jwstHit = hybridResults.first { $0.id == "art-jwst" }
         assertTrue(jwstHit != nil, "Semantic candidate surfaced despite zero keyword overlap")
@@ -29233,7 +29987,7 @@ struct NewsTests {
             query: "astronomy cosmic exploration", limit: 10, queryEmbedding: queryVec)
         assertEqual(repeated.map(\.id), hybridResults.map(\.id), "The fused order is the same on every run")
         assertEqual(
-            try await db.listTotals(search: "astronomy cosmic exploration").stories, 2,
+            try await db.listTotals(search: "astronomy cosmic exploration", searchVector: queryVec).stories, 2,
             "The masthead total counts the semantic match the list shows")
 
         // A quoted phrase (an entity tag) asks for those exact words: no semantic matches, in the list or the count.
@@ -29241,7 +29995,7 @@ struct NewsTests {
             query: "\"astronomy cosmic exploration\"", limit: 10, queryEmbedding: queryVec)
         assertEqual(phrase.map(\.id), ["art-lexical"], "A quoted phrase stays lexical")
         assertEqual(
-            try await db.listTotals(search: "\"astronomy cosmic exploration\"").stories, 1,
+            try await db.listTotals(search: "\"astronomy cosmic exploration\"", searchVector: queryVec).stories, 1,
             "A quoted phrase's total counts lexical matches only")
     }
 
@@ -29296,8 +30050,11 @@ struct NewsTests {
         _ = try await db.searchArticles(
             query: "superconductors", limit: 10, muting: muteRules, queryEmbedding: quantumVec)
         assertEqual(
-            try await db.mutedArticleCount(search: "superconductors", muting: muteRules), 1,
-            "The muted count includes a muted story the semantic arm would list")
+            try await db.mutedArticleCount(search: "superconductors", muting: muteRules), 0,
+            "Without the query vector the count is lexical, and nothing matches the word")
+        assertEqual(
+            try await db.mutedArticleCount(search: "superconductors", searchVector: quantumVec, muting: muteRules), 1,
+            "The muted count includes a muted story the semantic arm would list, and is not the lexical one cached")
 
         // 2. Mute topic crypto
         let topicMuting = MuteRules(topics: ["Crypto"])
@@ -29314,6 +30071,29 @@ struct NewsTests {
         let reutersResults = try await db.searchArticles(
             query: "quantum source:reuters", limit: 10, queryEmbedding: quantumVec)
         assertEqual(reutersResults.map(\.id), ["art-2"], "source:reuters filters to Reuters stories")
+
+        // 5. Two searches interleave (#985): B runs between A's page and A's counts. Each search's counts follow its
+        // own vector, so they equal its result set whatever the other search did.
+        let pageA = try await db.searchArticles(
+            query: "superconductors", limit: 10, muting: muteRules, queryEmbedding: quantumVec)
+        let pageB = try await db.searchArticles(
+            query: "ledgers", limit: 10, muting: muteRules, queryEmbedding: cryptoVec)
+        let hiddenA = try await db.mutedArticleCount(
+            search: "superconductors", searchVector: quantumVec, muting: muteRules)
+        let totalsA = try await db.listTotals(
+            search: "superconductors", searchVector: quantumVec, muting: muteRules)
+        let totalsB = try await db.listTotals(search: "ledgers", searchVector: cryptoVec, muting: muteRules)
+        assertEqual(pageA.map(\.id), ["art-2"], "Search A lists its own semantic match")
+        assertEqual(pageB.map(\.id), ["art-3"], "Search B lists its own semantic match")
+        assertEqual(totalsA.stories, pageA.count, "A's total equals A's results after B ran")
+        assertEqual(totalsB.stories, pageB.count, "B's total equals B's results")
+        assertEqual(hiddenA, 1, "A's muted count still includes the story its vector reaches")
+        assertEqual(
+            try await db.mutedArticleCount(search: "ledgers", searchVector: cryptoVec, muting: muteRules), 0,
+            "B hides nothing")
+        let phraseVector = try await db.searchQueryVector(for: "\"quantum research\"")
+        let operatorVector = try await db.searchQueryVector(for: "is:unread")
+        assertTrue(phraseVector == nil && operatorVector == nil, "A quoted phrase and operators alone have no vector")
     }
 
     static func testHybridSearchCursorPagination() async throws {
@@ -29528,5 +30308,12 @@ struct NewsTests {
             assertTrue(
                 footerBounds.maxY > 0 && footerBounds.maxY < height * 0.15, "The footer sits at the bottom of the page")
         }
+    }
+}
+
+extension PublisherContentRevision {
+    /// Everything but the kept text, which a cache purge removes.
+    fileprivate var fingerprint: String {
+        "\(version)|\(kind)|\(observedAt.timeIntervalSince1970)|\(changedFields)|\(inputHash)"
     }
 }

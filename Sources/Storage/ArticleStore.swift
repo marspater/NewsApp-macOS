@@ -132,6 +132,9 @@ final class ArticleStore: ObservableObject {
 
     /// Bumped whenever a read or save change lands in memory, so a refresh that loaded around it can tell (#786).
     private var stateChanges: UInt = 0
+    /// Orders concurrent `refreshState` loads: an older load that finishes after a newer one has published is dropped.
+    private var refreshTickets: UInt = 0
+    private var lastPublishedTicket: UInt = 0
     /// Runs after `refreshState` has loaded and before it assigns; lets a test land a change in between.
     var refreshLoadedHook: (@MainActor () async -> Void)?
 
@@ -164,6 +167,8 @@ final class ArticleStore: ObservableObject {
             var published = false
             for _ in 1...3 {
                 let changesAtStart = stateChanges
+                refreshTickets &+= 1
+                let ticket = refreshTickets
                 let generation = newCountRequest()
                 let fetched = try await database.fetchArticles(limit: 500)
                 let readIDs = try await database.getReadArticleIDs()
@@ -171,6 +176,12 @@ final class ArticleStore: ObservableObject {
                 let counts = try await database.counts(muting: muting)
                 await refreshLoadedHook?()
                 guard changesAtStart == stateChanges else { continue }
+                // A refresh that started later has already published newer rows; this older snapshot must not replace it.
+                if ticket < lastPublishedTicket {
+                    published = true
+                    break
+                }
+                lastPublishedTicket = ticket
                 self.articles = fetched
                 self.readArticleIDs = readIDs
                 self.savedArticles = saved
@@ -608,7 +619,7 @@ final class ArticleStore: ObservableObject {
 
     /// Purges all generated AI analysis data while preserving articles and subscriptions.
     func clearAIAnalysis() async throws {
-        try await database.clearArticleEnrichment()
+        try await resettingAfterClear { try await database.clearArticleEnrichment() }
         logger.notice("Cleared AI analysis")
         // Running work is refused at commit by the generation bump; its session state is reset here (#805).
         await finishAnalysisClear()
@@ -616,7 +627,7 @@ final class ArticleStore: ObservableObject {
 
     /// Clears cached full article content while preserving subscriptions, saved stories, and read history.
     func clearArticleCache() async throws {
-        try await database.clearArticleCache()
+        try await resettingAfterClear { try await database.clearArticleCache() }
         logger.notice("Cleared story body cache")
         // This clear removes enrichment for unsaved stories too, so running work and its session state are reset (#886).
         await finishAnalysisClear()
@@ -624,10 +635,22 @@ final class ArticleStore: ObservableObject {
 
     /// Clears replaceable caches while preserving subscriptions, history and saved bodies.
     func clearAllDatabaseCache() async throws {
-        try await database.clearAllDatabaseCache()
+        try await resettingAfterClear { try await database.clearAllDatabaseCache() }
         logger.notice("Cleared all database caches")
         // This clear removes enrichment too, so running work and its session state are reset the same way (#805).
         await finishAnalysisClear()
+    }
+
+    /// Runs a clear. One that commits and then fails to rewrite the tension history still moved the database's
+    /// generation and emptied the tables, so the session resets before the error surfaces (#984).
+    private func resettingAfterClear(_ clear: () async throws -> Void) async throws {
+        let before = await database.analysisGeneration
+        do {
+            try await clear()
+        } catch {
+            if await database.analysisGeneration != before { await finishAnalysisClear() }
+            throw error
+        }
     }
 
     /// Clears running at once; while any runs, `refreshState` leaves `analysisGeneration` alone.
@@ -650,13 +673,15 @@ final class ArticleStore: ObservableObject {
     func pruneOldArticles(keepReadDays: Int = 30) async -> Int {
         do {
             let count = try await database.pruneOldArticles(keepReadDays: keepReadDays)
-            if count > 0 {
-                await refreshState()
-            }
+            // Retention also repairs future dates (#981), which changes rows without deleting any.
+            await refreshState()
             return count
         } catch {
             logger.error("Failed to prune old articles: \(error.localizedDescription)")
             return 0
         }
     }
+
+    /// Bumped by every change to the reader's notes (`ArticleStore+Notes.swift`).
+    @Published var userNotesRevision = 0
 }
