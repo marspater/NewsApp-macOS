@@ -55,6 +55,17 @@ runner_inputs_key() {
 
 # A plain run skips compiling and running the Swift tests when the same inputs already passed on this machine.
 # NEWS_TEST_FORCE=1 runs them anyway; runs with arguments (baselines, live checks) are never skipped.
+copy_coverage() {
+    local source="$1" destination="$2" temporary
+    mkdir -p "$(dirname "$destination")" || return 1
+    temporary=$(mktemp "${destination}.tmp.XXXXXX") || return 1
+    if cp "$source" "$temporary" && mv -f "$temporary" "$destination"; then
+        return 0
+    fi
+    rm -f "$temporary"
+    return 1
+}
+
 PASS_STAMP=""
 if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/dev/null); then
     PASS_STAMP="${TMPDIR:-/tmp}/news-test-passes/$KEY"
@@ -64,8 +75,7 @@ if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/d
         if [[ -z "${NEWS_TEST_COVERAGE:-}" ]]; then
             echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
             exit 0
-        elif [[ -f "$PASS_STAMP.lcov" ]] && mkdir -p "$(dirname "$NEWS_TEST_COVERAGE")" \
-            && cp "$PASS_STAMP.lcov" "$NEWS_TEST_COVERAGE"; then
+        elif [[ -f "$PASS_STAMP.lcov" ]] && copy_coverage "$PASS_STAMP.lcov" "$NEWS_TEST_COVERAGE"; then
             echo "Coverage written to $NEWS_TEST_COVERAGE (from the earlier run with these inputs)"
             echo "✅ SUCCESS: Swift tests already passed for these inputs ($KEY); skipped. NEWS_TEST_FORCE=1 reruns them."
             exit 0
@@ -196,11 +206,7 @@ else
         if script/coverage_export.sh "$LOGS/profiles" "$RUNNER" "$NEWS_TEST_COVERAGE"; then
             echo "Coverage written to $NEWS_TEST_COVERAGE"
             # The copy beside the stamp lands whole or not at all; without it the next run exports again.
-            if [[ -n "$PASS_STAMP" ]] && ! {
-                mkdir -p "$(dirname "$PASS_STAMP")" && cp "$NEWS_TEST_COVERAGE" "$PASS_STAMP.lcov.tmp" \
-                    && mv -f "$PASS_STAMP.lcov.tmp" "$PASS_STAMP.lcov"
-            }; then
-                rm -f "$PASS_STAMP.lcov.tmp"
+            if [[ -n "$PASS_STAMP" ]] && ! copy_coverage "$NEWS_TEST_COVERAGE" "$PASS_STAMP.lcov"; then
                 echo "⚠️ Could not keep the coverage report beside the pass stamp; the next run exports it again." >&2
             fi
         else
