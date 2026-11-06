@@ -101,15 +101,18 @@ enum NoteAnchor {
         return placed.isEmpty ? nil : placed
     }
 
-    /// The quote's character range in the story now, with its block index: at the stored position while the text
-    /// still matches there, else at the occurrence whose surroundings agree best with the stored context (ties go to
-    /// the nearest block, then the earliest). nil once the quoted words are gone.
+    /// The quote's character range in the story now, with its block index: at the stored position while the text and
+    /// its surroundings still match there, else at the occurrence whose surroundings agree best with the stored
+    /// context (ties go to the nearest block, then the earliest). A look-alike that moved into the stored position
+    /// does not keep it. nil once the quoted words are gone.
     static func resolve(_ note: UserNote, in paragraphs: [String]) -> (index: Int, range: Range<Int>)? {
         let length = note.selectedText.count
         if paragraphs.indices.contains(note.paragraphIndex) {
             let characters = Array(paragraphs[note.paragraphIndex])
+            let stored = (index: note.paragraphIndex, start: note.charStart)
             if note.charStart >= 0, note.charStart + length <= characters.count,
-                String(characters[note.charStart..<note.charStart + length]) == note.selectedText
+                String(characters[note.charStart..<note.charStart + length]) == note.selectedText,
+                score(stored, note, paragraphs) == note.prefix.count + note.suffix.count
             {
                 return (note.paragraphIndex, note.charStart..<note.charStart + length)
             }
