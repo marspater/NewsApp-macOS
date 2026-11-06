@@ -169,6 +169,8 @@ enum EventClusterer {
         var attempts: [String: Int] = [:]
         /// Partners placed earlier in this pass; their rows in the current batch are stale.
         var handled = Set<String>()
+        /// Each candidate row's language this pass (#572).
+        var candidateLanguages: [String: EventCandidateLanguage] = [:]
         func read(_ row: EventMatchRow) {
             if readTexts[row.id] == nil { readTexts[row.id] = row.title + "\n" + row.description }
         }
@@ -479,7 +481,8 @@ enum EventClusterer {
                         description: row.description, pubDate: row.date, source: row.source)
                     let candidates = try await timing(\.candidateSearch) {
                         try await EventCandidateFinder.candidates(
-                            for: probe, in: database, policy: candidatePolicy, now: now)
+                            for: probe, in: database, policy: candidatePolicy, now: now,
+                            languages: &candidateLanguages)
                     }
                     let rows = Dictionary(
                         try await timing(\.eventReads) {
