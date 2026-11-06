@@ -18243,11 +18243,24 @@ struct NewsTests {
             )
         }
         await queue.cancelAll(reason: .superseded)
+        // A job that runs and finishes leaves the queue, so held work keeps every slot and the batch stays queued.
+        await eventually("The cancelled work has left its slots") { await queue.activeJobCount() == 0 }
+        let batchHold = OpenGate()
+        for index in 0..<3 {
+            Task {
+                _ = await queue.scheduleOverviewGeneration(eventID: "batch-hold-\(index)") {
+                    await batchHold.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("Held generations fill the queue") { await queue.activeJobCount() == 3 }
         await queue.enqueue(articles: batchArticles, priority: .background, allowHTTP: false)
         for article in batchArticles {
             let state = await queue.state(for: article.id)
             assertTrue(state != nil, "Batch enqueued article \(article.id) should exist in queue")
         }
+        await batchHold.open()
 
         // Empty snapshot handling does not crash or create jobs
         await queue.enqueue(articles: [], priority: .background, allowHTTP: false)
