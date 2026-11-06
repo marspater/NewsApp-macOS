@@ -10942,6 +10942,10 @@ struct NewsTests {
         assertTrue(
             EventMatcher.conflictsBlock([pair, pair, pair, maskedPlaces], policy: vetoMinimum),
             "A places veto with a headline conflict behind it is not outvoted")
+        assertTrue(
+            !EventMatcher.conflictsBlock(
+                [pair, EventMatcher.forced(maskedPlaces, policy: vetoMinimum)], policy: vetoMinimum),
+            "A reader's Same Event verdict clears the absolute mask too, so revalidation keeps the pair")
         var weekday = diverging
         weekday.conflict = .weekday
         assertTrue(

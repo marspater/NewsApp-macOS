@@ -1034,6 +1034,7 @@ enum EventMatcher {
     static func forced(_ pair: EventPairAssessment, policy: EventMatchPolicy = .standard) -> EventPairAssessment {
         var pair = pair
         pair.conflict = nil
+        pair.masksAbsoluteConflict = false
         pair.isBorderline = false
         pair.isMatch = true
         pair.isCompatible = true
