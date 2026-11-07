@@ -1,1 +1,1 @@
-- Adds the `Development`, `Integration` and `Release` test plans for the native `NewsTests` bundle; CI runs `Release`.
+- Adds the `Development`, `Integration`, `Release` and `UITests` test plans to the `News` scheme; CI runs `Release` for the native bundle and `UITests` for the UI smoke flows.

@@ -38,6 +38,9 @@
          <TestPlanReference
             reference = "container:Tests/Plans/Release.xctestplan">
          </TestPlanReference>
+         <TestPlanReference
+            reference = "container:Tests/Plans/UITests.xctestplan">
+         </TestPlanReference>
       </TestPlans>
    </TestAction>
    <LaunchAction
