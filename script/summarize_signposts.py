@@ -4,10 +4,10 @@ Writes <prefix>.json and <prefix>.md: per subsystem category and interval name, 
 Usage: summarize_signposts.py signposts.xml summary [--meta key=value ...]
 """
 
+# Standard library only: the input is xctrace's own export from the same job, and expat resolves no external entities.
 import json
 import statistics
 import sys
-# Standard library only: the input is xctrace's own export from the same job, and expat resolves no external entities.
 import xml.etree.ElementTree as ET  # nosec B405 # nosemgrep
 from collections import defaultdict
 

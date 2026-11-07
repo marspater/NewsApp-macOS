@@ -25,6 +25,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
         with:
+          persist-credentials: false
           fetch-depth: 0  # tags and commit count stamp the bundle version
 
       - name: System Environment Info
