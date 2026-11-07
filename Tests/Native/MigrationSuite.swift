@@ -36,24 +36,26 @@ import dnssd
 /// Native port of the `MigrationTests` atom (#1070): the same eight tests, in the runner's order, with each
 /// `assertEqual`/`assertTrue`/`assertFalse` turned into the matching `expect` helper of NativeExpectations.swift, so a
 /// failure is recorded and later tests still run. The runner keeps its copy until CI shows parity.
-@Suite(.serialized) struct MigrationSuite {
-    @Test func feedFailureKindMigration() async throws { try await Self.testFeedFailureKindMigration() }
-    @Test func persistentArticleAliases() async throws {
-        try await Self.testPersistentArticleAliases(fixtureRoot: NewsTests.defaultFixtureRoot)
+extension NativeSuites {
+    @Suite struct MigrationSuite {
+        @Test func feedFailureKindMigration() async throws { try await Self.testFeedFailureKindMigration() }
+        @Test func persistentArticleAliases() async throws {
+            try await Self.testPersistentArticleAliases(fixtureRoot: NewsTests.defaultFixtureRoot)
+        }
+        @Test func batchStateAliasResolution() async throws { try await Self.testBatchStateAliasResolution() }
+        @Test func identityBaselineScenarios() async throws {
+            try await Self.testIdentityBaselineScenarios(fixtureRoot: NewsTests.defaultFixtureRoot)
+        }
+        @Test func historicalReconciliation() async throws {
+            try await Self.testHistoricalReconciliation(fixtureRoot: NewsTests.defaultFixtureRoot)
+        }
+        @Test func ftsRowIDMigration() async throws { try await Self.testFTSRowIDMigration() }
+        @Test func realLibraryMigrationFixture() async throws { try await Self.testRealLibraryMigrationFixture() }
+        @Test func migrationCoordinatorAtomicity() async throws { try await Self.testMigrationCoordinatorAtomicity() }
     }
-    @Test func batchStateAliasResolution() async throws { try await Self.testBatchStateAliasResolution() }
-    @Test func identityBaselineScenarios() async throws {
-        try await Self.testIdentityBaselineScenarios(fixtureRoot: NewsTests.defaultFixtureRoot)
-    }
-    @Test func historicalReconciliation() async throws {
-        try await Self.testHistoricalReconciliation(fixtureRoot: NewsTests.defaultFixtureRoot)
-    }
-    @Test func ftsRowIDMigration() async throws { try await Self.testFTSRowIDMigration() }
-    @Test func realLibraryMigrationFixture() async throws { try await Self.testRealLibraryMigrationFixture() }
-    @Test func migrationCoordinatorAtomicity() async throws { try await Self.testMigrationCoordinatorAtomicity() }
 }
 
-extension MigrationSuite {
+extension NativeSuites.MigrationSuite {
     static func testFTSRowIDMigration() async throws {
         print("  - Testing durable FTS keys, copied v14 migration, rollback, VACUUM and deletion...")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(

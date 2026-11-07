@@ -35,3 +35,7 @@ func expectFalse(_ condition: Bool, _ message: String = "", sourceLocation: Sour
 /// The checkout root, for fixtures the runner reads relative to its working directory: xctest runs elsewhere.
 let nativeRepositoryRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
+
+/// Parent of every native suite: Swift Testing runs unrelated suites concurrently, and ported tests share static
+/// doubles such as `MockURLProtocol.requestHandler`, so all nested suites run one test at a time.
+@Suite(.serialized) enum NativeSuites {}

@@ -16,25 +16,28 @@ import Foundation
 import Testing
 
 /// Proof of the native target (#1070): Swift Testing over the same sources and test helpers the custom runner compiles.
-@Suite struct FeedHealthMetricsSuite {
-    private let now = Date(timeIntervalSince1970: 1_793_491_200)
+extension NativeSuites {
+    @Suite struct FeedHealthMetricsSuite {
+        private let now = Date(timeIntervalSince1970: 1_793_491_200)
 
-    @Test func noHistoryIsUnknownNotZero() {
-        let metrics = FeedHealthMetrics(FeedHealthObservations(), now: now)
-        #expect(metrics.successRate == nil)
-        #expect(metrics.averageLatency == nil)
-        #expect(metrics.extractionClass == .unknown)
-    }
+        @Test func noHistoryIsUnknownNotZero() {
+            let metrics = FeedHealthMetrics(FeedHealthObservations(), now: now)
+            #expect(metrics.successRate == nil)
+            #expect(metrics.averageLatency == nil)
+            #expect(metrics.extractionClass == .unknown)
+        }
 
-    @Test func rateAndLatencyCountSuccessesOnly() {
-        let metrics = FeedHealthMetrics(FeedHealthObservations(attempts: 4, successes: 3, latencyTotal: 1.5), now: now)
-        #expect(metrics.successRate == 0.75)
-        #expect(metrics.averageLatency == 0.5)
-    }
+        @Test func rateAndLatencyCountSuccessesOnly() {
+            let metrics = FeedHealthMetrics(
+                FeedHealthObservations(attempts: 4, successes: 3, latencyTotal: 1.5), now: now)
+            #expect(metrics.successRate == 0.75)
+            #expect(metrics.averageLatency == 0.5)
+        }
 
-    /// Run the existing atom without terminating the native test process on failure.
-    @Test func existingAtomPasses() async {
-        await FeedHealthMetricsTests.run(exitOnFailure: false)
-        #expect(FeedHealthMetricsTests.failures == 0)
+        /// Run the existing atom without terminating the native test process on failure.
+        @Test func existingAtomPasses() async {
+            await FeedHealthMetricsTests.run(exitOnFailure: false)
+            #expect(FeedHealthMetricsTests.failures == 0)
+        }
     }
 }
