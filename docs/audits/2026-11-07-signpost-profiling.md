@@ -10,7 +10,7 @@ Part of #577, item G of [the native integration plan](../plans/2026-11-07-native
 2. Records it with `xctrace record --template 'Time Profiler' --instrument os_signpost --time-limit 60s`, launching the binary with `NEWS_LIBRARY_NAME=profile-<run id>` (an empty library per run) and `NEWS_FIXTURE_FEED` set to `Tests/Fixtures/profiling/feed.xml` with the current date. The fixture feed answers every subscription only in a build that contains #1121; before that the development build ignores the variable and refreshes from the network, so runs are not comparable until #1121 is on main.
 3. Exports the `os-signpost-interval` table and runs `script/summarize_signposts.py`: per category and interval name of the `com.marspater.news` subsystem (`NewsSignposts.swift`), count, median and p90 duration in milliseconds, plus revision, hardware, OS and Xcode.
 
-Artifacts (90 days): `News.trace`, `summary.json`, `summary.md`, `build.log`. The job summary shows the table.
+Artifacts (90 days): `News.trace`, `summary.json`, `summary.md`, `build.log` and `toc.xml` (the export's table of contents, for a renamed schema). The job summary shows the table.
 
 `PROFILE_DRY_RUN=1` builds and prints the recording command without launching the app; that is the only mode for a developer's Mac.
 
