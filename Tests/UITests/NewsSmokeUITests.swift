@@ -51,7 +51,11 @@ final class NewsSmokeUITests: XCTestCase {
         app.launchEnvironment["NEWS_LIBRARY_NAME"] = Self.libraryName
         app.launchEnvironment["NEWS_FIXTURE_FEED"] = try Self.fixtureFeed()
         // Argument-domain defaults: they win over the development container's stored settings without changing them.
-        app.launchArguments += ["-first_launch_completed", "YES", "-notifications_enabled", "NO"]
+        // One subscription, so the fixture is stored whatever the container's own subscriptions are.
+        app.launchArguments += [
+            "-first_launch_completed", "YES", "-notifications_enabled", "NO",
+            "-saved_feed_urls", "(\"https://example.com/ui-smoke/feed.xml\")",
+        ]
         app.launch()
 
         // The app under test must be the development build, never the release app (`com.marspater.news`).
@@ -92,8 +96,12 @@ final class NewsSmokeUITests: XCTestCase {
     func searchHeadline() -> XCUIElement {
         let field = app.searchFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10), "No search field in the toolbar")
-        field.click()
-        field.typeText("Lighthouse Restoration\n")
+        // The toolbar field rests collapsed; ⌘F expands and focuses it, after which typing goes to the app.
+        app.typeKey("f", modifierFlags: .command)
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
+        XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 5), .completed, "The search field did not take focus")
+        app.typeText("Lighthouse Restoration\n")
         let result = app.staticTexts[Self.headline].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 60), "The fixture headline was not found")
         return result
