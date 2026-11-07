@@ -1278,10 +1278,7 @@ struct SettingsView: View {
 
     private nonisolated static func calculateDatabaseBytes() -> Int64 {
         let fileManager = FileManager.default
-        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            return 0
-        }
-        let dbDir = appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
+        let dbDir = DatabaseEngine.defaultLibraryURL.deletingLastPathComponent()
         let files = ["news.sqlite3", "news.sqlite3-wal", "news.sqlite3-shm"]
         var total: Int64 = 0
         for file in files {
