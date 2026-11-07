@@ -85,8 +85,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      # Debug: the checks test behaviour, not speed, and an unoptimized build compiles about four times faster.
+      # The runner build above cannot be reused: each target compiles Sources/ itself (#577, 2026-11-07 audit).
       - name: Verify Publisher Excerpts
-        run: NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
+        run: NEWS_CONFIGURATION=Debug NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
 
       - name: Verify Swift Package Manager Build
         run: swift build --force-resolved-versions --target News

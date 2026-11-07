@@ -54,7 +54,7 @@ workflows:
         script: |
           #!/usr/bin/env bash
           set -euo pipefail
-          NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh build/ci/excerpts 2>&1 | tee build/ci/excerpts.log
+          NEWS_CONFIGURATION=Debug NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh build/ci/excerpts 2>&1 | tee build/ci/excerpts.log
       - name: Verify SwiftPM app target
         script: |
           #!/usr/bin/env bash
