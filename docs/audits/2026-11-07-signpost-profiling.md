@@ -20,4 +20,13 @@ Compare only runs with the same hardware model, OS and Xcode lines in `meta`. Do
 
 ## Baseline
 
-No run has been captured yet. The first scheduled or dispatched run on main after #1121 merges is the baseline.
+No baseline run has been captured yet. The first scheduled or dispatched run on main after #1121 merges is the baseline.
+
+One validation run went through on the PR branch (run 42389990746, revision 5c138b2, a temporary push trigger removed before merge). The app ignored the fixture feed (no #1121) and refreshed from the network, so these numbers only show the pipeline works and are not a baseline. The runner reports `VirtualMac2,1`: GitHub's macOS runners are virtual machines, so compare only runs from the same runner image.
+
+| Category | Interval | Count | Median ms | p90 ms |
+|---|---|---:|---:|---:|
+| Database | DatabaseBatchUpsert | 2 | 35.51 | 45.206 |
+| Enrichment | EnrichmentJob | 42 | 16.159 | 35.257 |
+| Feeds | RefreshFeeds | 1 | 1196.747 | 1196.747 |
+| Intelligence | AIClassification | 42 | 9.283 | 24.077 |
