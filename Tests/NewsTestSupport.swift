@@ -458,7 +458,7 @@ extension NewsTests {
     }
 
     /// TIME_WAIT counts (all, loopback rows, and the distinct loopback local ports inside the ephemeral range),
-    /// loopback LISTEN/ESTABLISHED counts and the ephemeral port range, from netstat and sysctl.
+    /// all LISTEN, loopback ESTABLISHED counts and the ephemeral port range, from netstat and sysctl.
     static func loopbackSocketSummary() -> String {
         func run(_ path: String, _ arguments: [String]) -> String {
             let process = Process()
@@ -492,7 +492,8 @@ extension NewsTests {
         let range = "\(ephemeral.lowerBound)-\(ephemeral.upperBound)"
         return
             "TIME_WAIT \(timeWait) (loopback \(loopbackTimeWait.count), \(localPorts.count) distinct ephemeral local ports), "
-            + "loopback LISTEN \(loopback.filter { $0.contains("LISTEN") }.count), "
+            // Listeners on port .any bind the wildcard address (`*.port`), so LISTEN counts every TCP listener.
+            + "LISTEN \(sockets.filter { $0.contains("LISTEN") }.count), "
             + "loopback ESTABLISHED \(loopback.filter { $0.contains("ESTABLISHED") }.count), ephemeral ports \(range)"
     }
 
