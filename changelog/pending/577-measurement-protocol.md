@@ -1,0 +1,1 @@
+- `script/xcode_build.sh` keeps the full `xcodebuild` transcript in `build/xcodebuild-<target>.log` and prints its path when a build fails.
