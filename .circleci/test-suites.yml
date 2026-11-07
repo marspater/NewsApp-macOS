@@ -28,6 +28,12 @@ options:
     - test-atom: Tests/StorageTests.swift
       include:
         - Tests/StorageTests.swift
+    - test-atom: Tests/ActiveWorkCancellationTests.swift
+      include:
+        - Tests/ActiveWorkCancellationTests.swift
+    - test-atom: Tests/SocketTests.swift
+      include:
+        - Tests/SocketTests.swift
     - test-atom: Tests/DiagnosticsTests.swift
       include:
         - Tests/DiagnosticsTests.swift
