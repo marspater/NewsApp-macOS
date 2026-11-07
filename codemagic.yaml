@@ -57,7 +57,7 @@ workflows:
           set -euo pipefail
           status=0
           xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-            -derivedDataPath build/DerivedData -only-testing:NewsTests \
+            -derivedDataPath build/DerivedData -testPlan Release \
             -resultBundlePath build/ci/NewsTests.xcresult -quiet 2>&1 | tee build/ci/native-tests.log || status=$?
           if [[ -d build/ci/NewsTests.xcresult ]]; then
             ditto -c -k --keepParent build/ci/NewsTests.xcresult build/ci/NewsTests.xcresult.zip

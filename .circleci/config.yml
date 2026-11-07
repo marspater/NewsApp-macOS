@@ -50,7 +50,7 @@ jobs:
           command: |
             set -o pipefail
             xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-              -derivedDataPath build/DerivedData -only-testing:NewsTests \
+              -derivedDataPath build/DerivedData -testPlan Release \
               -resultBundlePath build/ci/NewsTests.xcresult -quiet
       - store_artifacts:
           path: build/ci/NewsTests.xcresult
