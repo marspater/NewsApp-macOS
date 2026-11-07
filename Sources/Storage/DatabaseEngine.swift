@@ -128,7 +128,8 @@ actor DatabaseEngine {
     nonisolated static let defaultLibraryURL: URL = {
         let fileManager = FileManager.default
         let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        if appSupport.path.contains("/Library/Containers/") {
+        // The sandbox sets APP_SANDBOX_CONTAINER_ID for every process it contains.
+        if ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil {
             return appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
                 .appendingPathComponent("news.sqlite3")
         }
