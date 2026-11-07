@@ -7,13 +7,14 @@ Usage: summarize_signposts.py signposts.xml summary [--meta key=value ...]
 import json
 import statistics
 import sys
-import xml.etree.ElementTree as ET
+# Standard library only: the input is xctrace's own export from the same job, and expat resolves no external entities.
+import xml.etree.ElementTree as ET  # nosec B405 # nosemgrep
 from collections import defaultdict
 
 
 def rows(path):
     """Yields each row as {mnemonic: element}, resolving xctrace's id/ref de-duplication."""
-    root = ET.parse(path).getroot()
+    root = ET.parse(path).getroot()  # nosec B314 # nosemgrep  # NOSONAR
     node = root.find(".//node")
     if node is None:
         return
@@ -44,7 +45,10 @@ def summarize(path):
         if cells.get("subsystem") is None or text(cells["subsystem"]) != "com.marspater.news":
             continue
         key = (text(cells["category"]), text(cells["name"]))
-        groups[key].append(int(cells["duration"].text) / 1e6)
+        duration = cells.get("duration")
+        if duration is None or not (duration.text or "").isdigit():
+            sys.exit(f"Interval {key} has no duration in nanoseconds; check the schema in toc.xml")
+        groups[key].append(int(duration.text) / 1e6)
     return [
         {
             "category": category,
