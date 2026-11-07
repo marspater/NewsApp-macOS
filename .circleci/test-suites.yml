@@ -28,6 +28,9 @@ options:
     - test-atom: Tests/StorageTests.swift
       include:
         - Tests/StorageTests.swift
+    - test-atom: Tests/ReaderTests.swift
+      include:
+        - Tests/ReaderTests.swift
     - test-atom: Tests/IntelligenceTests.swift
       include:
         - Tests/IntelligenceTests.swift
