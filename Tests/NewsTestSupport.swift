@@ -473,6 +473,8 @@ extension NewsTests {
             return String(decoding: data, as: UTF8.self)
         }
         let sockets = run("/usr/sbin/netstat", ["-an", "-p", "tcp"]).split(separator: "\n")
+        // netstat always prints its header; no output means the table was not read, which is not zero sockets.
+        guard !sockets.isEmpty else { return "socket table unavailable (netstat printed nothing)" }
         let timeWait = sockets.filter { $0.contains("TIME_WAIT") }.count
         let loopback = sockets.filter { $0.contains("127.0.0.1") }
         let loopbackTimeWait = loopback.filter { $0.contains("TIME_WAIT") }
