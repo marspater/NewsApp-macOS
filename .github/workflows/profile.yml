@@ -1,0 +1,59 @@
+name: Profile
+
+# Scheduled signpost recording (#577): one runner class, one workload, so weekly traces stay comparable.
+# Never part of pull request checks; see docs/audits/2026-11-07-signpost-profiling.md.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'  # Mondays 04:17 UTC
+
+concurrency:
+  group: profile
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  signposts:
+    name: Signpost Recording (macOS 26, Apple Silicon)
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # tags and commit count stamp the bundle version
+
+      - name: System Environment Info
+        run: |
+          echo "Host: $(sysctl -n hw.model) $(sysctl -n machdep.cpu.brand_string)"
+          echo "OS: $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+          echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          echo "Load: $(sysctl -n vm.loadavg)"
+
+      - name: Test Signpost Summary
+        run: python3 -m unittest discover -s script -p 'test_summarize_signposts.py'
+
+      - name: Record Signposts
+        run: script/profile_signposts.sh "$RUNNER_TEMP/profile"
+
+      - name: Upload Trace and Summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: signpost-profile-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/profile/News.trace
+            ${{ runner.temp }}/profile/summary.json
+            ${{ runner.temp }}/profile/summary.md
+            ${{ runner.temp }}/profile/build.log
+            ${{ runner.temp }}/profile/toc.xml
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Job Summary
+        if: success()
+        run: cat "$RUNNER_TEMP/profile/summary.md" >> "$GITHUB_STEP_SUMMARY"
