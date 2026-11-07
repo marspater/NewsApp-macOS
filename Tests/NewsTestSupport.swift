@@ -533,4 +533,13 @@ extension NewsTests {
         return (client, try await socketRead(client, count: 10))
     }
 
+    static func extractDialogText(from result: some IntentResult) -> String? {
+        let mirror = Mirror(reflecting: result)
+        for child in mirror.children where child.label == "dialog" {
+            let desc = String(describing: child.value)
+            if desc.starts(with: "nil") || desc == "Optional(nil)" { return nil }
+            return desc
+        }
+        return nil
+    }
 }

@@ -2547,16 +2547,6 @@ extension NewsTests {
         }
     }
 
-    static func extractDialogText(from result: some IntentResult) -> String? {
-        let mirror = Mirror(reflecting: result)
-        for child in mirror.children where child.label == "dialog" {
-            let desc = String(describing: child.value)
-            if desc.starts(with: "nil") || desc == "Optional(nil)" { return nil }
-            return desc
-        }
-        return nil
-    }
-
     private static func shortcutMetadata(from shortcut: AppShortcut) -> (
         shortTitle: String, systemImage: String, phrases: [String]
     ) {
