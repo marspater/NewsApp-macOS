@@ -21,6 +21,10 @@ options:
     - Package.resolved
     # Fixtures are read at run time, which coverage cannot attribute to a test atom.
     - Tests/Fixtures/**
+    # Distribution manifests are read at run time by testDistributionAndEntitlementsIntegrity.
+    - News.entitlements
+    - PrivacyInfo.xcprivacy
+    - container-migration.plist
   # Each atom holds its own tests: a change there always runs its atom, whatever coverage attributes.
   test-selection-rules:
     - test-atom: Tests/NewsTests.swift

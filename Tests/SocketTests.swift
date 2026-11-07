@@ -215,6 +215,8 @@ extension NewsTests {
         assertTrue(elapsed < .seconds(5), "The fallback takes about a quarter second, not the handshake timeout")
         assertEqual(
             observed.hosts, ["2606:4700::1111", "93.184.216.34"], "IPv6 was tried first, IPv4 after the delay")
+        // The silent listener records the accept on its own queue, after the winner's reply can already be here.
+        await eventually("The dead attempt reached the silent proxy") { held.count >= 1 }
         assertEqual(held.count, 1, "The dead attempt reached the silent proxy exactly once")
         try await socketSend(client, Data("fallback".utf8))
         assertEqual(try await socketRead(client, count: 8), Data("fallback".utf8), "The tunnel relays over the winner")

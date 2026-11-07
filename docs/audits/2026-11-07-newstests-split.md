@@ -59,9 +59,9 @@ Plain `NEWS_TEST_FORCE=1 NEWS_TEST_TIMING=1 ./test.sh`, no rebuild, two runs eac
 |---|---|---|---|
 | main 07de3cf | 1:05, 1:04 | 267 | 54, 46, 46 |
 | this split alone | 1:10, 1:11 | 316, 322 | 48-50 Clustering, 46-48 ActiveWorkCancellation |
-| this split merged with #1088 | 0:46, 0:46 | 117 | 27 ActiveWorkCancellation, 21 Clustering, 16 UserInterface |
+| this split merged with main aef6850 (#1088, #1090, #1101) | 0:26, 0:27 | 63, 65 | 13 ActiveWorkCancellation, 11 UserInterface, 8-9 Storage or Clustering |
 
-The split alone is about 6 s slower: more processes each load the Core ML model on first use. #1088's `--warm-models` step removes that cost, so #570's "wall time not worse" holds only once #1088 is merged. #1088 alone on main was not measured here, so the saving in the third row is not attributed between the two changes.
+The split alone is about 6 s slower: more processes each load the Core ML model on first use. #1088's `--warm-models` step removes that cost, so #570's "wall time not worse" holds only once #1088 is merged. #1088 alone on main was not measured here, so the saving in the third row is not attributed between the two changes. A trial merge of #1088 alone measured 0:46 and 117 job-seconds earlier the same day; the third row is the final merged tree, and machine load between the two was not controlled.
 
 The corpus validation (`StoryCorpus.run(evaluate:)`) used to run in each of the six `NewsTests` processes and now runs once, in the `NewsTests` atom (11-12 s for the atom alone without #1088). Do not count that saving twice with #1088.
 
