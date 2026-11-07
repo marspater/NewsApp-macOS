@@ -20,7 +20,7 @@ jobs:
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-    timeout-minutes: 30
+    timeout-minutes: 50
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -52,6 +52,26 @@ jobs:
             ${{ runner.temp }}/profile/summary.md
             ${{ runner.temp }}/profile/build.log
             ${{ runner.temp }}/profile/toc.xml
+          if-no-files-found: warn
+          retention-days: 90
+
+      # XCTest clock, memory and CPU metrics (#577): launch and one search on the smoke fixture. Only here, never in
+      # ci.yml; the tests skip themselves unless NEWS_PERFORMANCE_TESTS reaches the runner.
+      - name: Run Performance Tests
+        if: always()
+        run: |
+          set -o pipefail
+          TEST_RUNNER_NEWS_PERFORMANCE_TESTS=1 xcodebuild test -project News.xcodeproj -scheme News \
+            -destination 'platform=macOS' -derivedDataPath build/DerivedData \
+            -only-testing:NewsUITests/NewsPerformanceTests \
+            -resultBundlePath "$RUNNER_TEMP/NewsPerformanceTests.xcresult" -quiet
+
+      - name: Upload Performance Test Results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: performance-tests-xcresult-${{ github.run_id }}
+          path: ${{ runner.temp }}/NewsPerformanceTests.xcresult
           if-no-files-found: warn
           retention-days: 90
 
