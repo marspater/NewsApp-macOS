@@ -38,7 +38,7 @@ import dnssd
 /// each force unwrap into `#require`, so a failure is recorded and later tests still run. The runner keeps its copy
 /// until CI shows parity.
 extension NativeSuites {
-    @Suite(.tags(.storage)) struct StorageSuite {
+    @Suite(.tags(.storage, .integration)) struct StorageSuite {
         @Test func databaseEnginePersistence() async { await Self.testDatabaseEnginePersistence() }
         @Test func fts5SearchAndOperators() async { await Self.testFTS5SearchAndOperators() }
         @Test func unchangedFTSRefresh() async throws { try await Self.testUnchangedFTSRefresh() }
