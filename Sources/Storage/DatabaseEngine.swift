@@ -147,12 +147,14 @@ actor DatabaseEngine {
     }()
 
     /// The library's file name: `NEWS_LIBRARY_NAME` + `.sqlite3` when it is a plain name (ASCII letters, digits, `-`,
-    /// `_` and `.`, no `..`), so UI tests can use a fresh library in the same directory (#1113). Anything else is
-    /// ignored with a warning; the variable can never select another directory.
+    /// `_` and `.`, no `..`, no `before-`), so UI tests can use a fresh library in the same directory (#1113). Anything
+    /// else is ignored with a warning; the variable can never select another directory.
     nonisolated static func libraryFileName(environment: [String: String]) -> String {
         guard let name = environment["NEWS_LIBRARY_NAME"] else { return "news.sqlite3" }
         let plain = name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) }
-        guard !name.isEmpty, plain, !name.contains("..") else {
+        // Copies kept beside a library are named `<library>-before-…`, so a selectable name never contains "before-":
+        // it could otherwise be overwritten or pruned as another library's copy.
+        guard !name.isEmpty, plain, !name.contains(".."), !name.lowercased().contains("before-") else {
             NewsSignposts.databaseLog.warning(
                 "Ignoring NEWS_LIBRARY_NAME \(name, privacy: .public): not a plain file name")
             return "news.sqlite3"

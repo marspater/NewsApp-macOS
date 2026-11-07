@@ -36,7 +36,10 @@ extension NativeSuites {
             #expect(url.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL)
         }
 
-        @Test(arguments: ["", "..", "../news", "a/b", "/etc/x", "a..b", "nam e", "näme", "a\\b", "~"])
+        @Test(arguments: [
+            "", "..", "../news", "a/b", "/etc/x", "a..b", "nam e", "näme", "a\\b", "~",
+            "news-before-v34-2026-11-07", "x-Before-restore",
+        ])
         func invalidNameFallsBackToTheDefault(_ name: String) {
             let url = resolved(name)
             #expect(url.lastPathComponent == "news.sqlite3")
