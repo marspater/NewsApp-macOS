@@ -1,0 +1,1 @@
+- A weekly GitHub Actions workflow (`profile.yml`) records the development build's signposts with `xctrace` on a fixed fixture workload and publishes the trace with a per-interval summary (`script/profile_signposts.sh`).
