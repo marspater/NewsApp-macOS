@@ -63,21 +63,8 @@ jobs:
           key: swiftpm-${{ runner.os }}-xcode26-${{ hashFiles('Package.resolved') }}
           restore-keys: swiftpm-${{ runner.os }}-xcode26-
 
-      # One instrumented run is the gate and writes coverage.lcov; a failed export leaves no file and does not fail the step.
       - name: Run Unit Tests
-        run: NEWS_TEST_COVERAGE=coverage.lcov ./test.sh
-
-      - name: Upload Coverage to Codecov
-        if: hashFiles('coverage.lcov') != ''
-        # fail_ci_if_error keeps a failed CLI integrity check fatal inside the action; the step stays non-blocking.
-        continue-on-error: true
-        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage.lcov
-          disable_search: true
-          flags: macos-26
-          fail_ci_if_error: true
+        run: ./test.sh
 
       - name: Test Editorial Evaluation Controls
         run: python3 -m unittest discover -s script/evaluation -p 'test_editorial*.py'
