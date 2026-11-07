@@ -81,6 +81,8 @@ public struct RefreshFeedsIntent: AppIntent {
     public static let title: LocalizedStringResource = "Refresh Feeds"
     public static let description = IntentDescription("Fetches latest stories from all subscribed feeds.")
     public static let openAppWhenRun: Bool = false
+    /// macOS 26 and later read this instead of `openAppWhenRun`, which stays for macOS 15.
+    @available(macOS 26.0, *) public static var supportedModes: IntentModes { .background }
 
     private let feedManager: FeedManager?
 
@@ -109,6 +111,8 @@ public struct AddFeedIntent: AppIntent {
     public static let title: LocalizedStringResource = "Add Feed"
     public static let description = IntentDescription("Subscribes to an RSS or Atom feed URL.")
     public static let openAppWhenRun: Bool = false
+    /// macOS 26 and later read this instead of `openAppWhenRun`, which stays for macOS 15.
+    @available(macOS 26.0, *) public static var supportedModes: IntentModes { .background }
 
     @Parameter(title: "Feed URL")
     public var url: URL
@@ -147,6 +151,8 @@ public struct OpenSectionIntent: AppIntent {
     public static let title: LocalizedStringResource = "Open Section"
     public static let description = IntentDescription("Opens a specified section in News.")
     public static let openAppWhenRun: Bool = true
+    /// macOS 26 and later read this instead of `openAppWhenRun`, which stays for macOS 15.
+    @available(macOS 26.0, *) public static var supportedModes: IntentModes { .foreground }
 
     @Parameter(title: "Section")
     public var section: AppSection
@@ -180,6 +186,8 @@ public struct MarkAllAsReadIntent: AppIntent {
     public static let title: LocalizedStringResource = "Mark All as Read"
     public static let description = IntentDescription("Marks all stories in the library as read.")
     public static let openAppWhenRun: Bool = false
+    /// macOS 26 and later read this instead of `openAppWhenRun`, which stays for macOS 15.
+    @available(macOS 26.0, *) public static var supportedModes: IntentModes { .background }
 
     private let articleStore: ArticleStore?
 
@@ -206,6 +214,8 @@ public struct NewBriefingIntent: AppIntent {
     public static let title: LocalizedStringResource = "New Briefing"
     public static let description = IntentDescription("Generates a fresh daily briefing edition.")
     public static let openAppWhenRun: Bool = false
+    /// macOS 26 and later read this instead of `openAppWhenRun`, which stays for macOS 15.
+    @available(macOS 26.0, *) public static var supportedModes: IntentModes { .background }
 
     private let appSettings: AppSettings?
     private let resetAction: (@MainActor @Sendable () -> Void)?

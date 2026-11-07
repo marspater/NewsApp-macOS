@@ -2426,6 +2426,15 @@ extension NewsTests {
         // 3. OpenSectionIntent: AppSection enumeration and navigation routing
         assertEqual(OpenSectionIntent.title, "Open Section", "OpenSectionIntent title is 'Open Section'")
         assertTrue(OpenSectionIntent.openAppWhenRun, "OpenSectionIntent opens app in foreground")
+        if #available(macOS 26.0, *) {
+            assertEqual(OpenSectionIntent.supportedModes, .foreground, "macOS 26 opens the app for Open Section")
+            for modes in [
+                RefreshFeedsIntent.supportedModes, AddFeedIntent.supportedModes, MarkAllAsReadIntent.supportedModes,
+                NewBriefingIntent.supportedModes,
+            ] {
+                assertEqual(modes, .background, "macOS 26 runs the other intents without opening the app")
+            }
+        }
 
         let sections: [AppSection] = [.today, .unread, .briefing, .savedStories]
         for section in sections {
