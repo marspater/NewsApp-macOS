@@ -1,0 +1,1 @@
+- Ports the storage atom (16 tests, 376 assertions) to the native Swift Testing target under the `.storage` tag.

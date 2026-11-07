@@ -45,4 +45,7 @@ extension Tag {
     @Tag static var migration: Self
     @Tag static var feedHealth: Self
     @Tag static var publisherExcerpts: Self
+    @Tag static var storage: Self
+    /// Every suite the Integration test plan runs: a plan's tag list selects only tests carrying all of its tags.
+    @Tag static var integration: Self
 }
