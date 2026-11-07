@@ -132,15 +132,33 @@ actor DatabaseEngine {
         // lies under the container; both must hold, so an inherited variable alone cannot select the real home.
         let sandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
         if sandboxed, appSupport.pathComponents.contains("Containers") {
-            return appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
-                .appendingPathComponent("news.sqlite3")
+            let library = appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
+                .appendingPathComponent(libraryFileName(environment: ProcessInfo.processInfo.environment))
+            NewsSignposts.databaseLog.info("The default library is \(library.path, privacy: .public)")
+            return library
         }
         let directory = fileManager.temporaryDirectory.appendingPathComponent(
             "com.marspater.news-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)", isDirectory: true)
+        let library = directory.appendingPathComponent(
+            libraryFileName(environment: ProcessInfo.processInfo.environment))
         NewsSignposts.databaseLog.info(
-            "Not in a sandbox container; the default library is \(directory.path, privacy: .public)")
-        return directory.appendingPathComponent("news.sqlite3")
+            "Not in a sandbox container; the default library is \(library.path, privacy: .public)")
+        return library
     }()
+
+    /// The library's file name: `NEWS_LIBRARY_NAME` + `.sqlite3` when it is a plain name (ASCII letters, digits, `-`,
+    /// `_` and `.`, no `..`), so UI tests can use a fresh library in the same directory (#1113). Anything else is
+    /// ignored with a warning; the variable can never select another directory.
+    nonisolated static func libraryFileName(environment: [String: String]) -> String {
+        guard let name = environment["NEWS_LIBRARY_NAME"] else { return "news.sqlite3" }
+        let plain = name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) }
+        guard !name.isEmpty, plain, !name.contains("..") else {
+            NewsSignposts.databaseLog.warning(
+                "Ignoring NEWS_LIBRARY_NAME \(name, privacy: .public): not a plain file name")
+            return "news.sqlite3"
+        }
+        return "\(name).sqlite3"
+    }
 
     init(path: String? = nil) {
         if let customPath = path {

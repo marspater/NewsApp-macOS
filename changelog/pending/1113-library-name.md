@@ -1,0 +1,1 @@
+- `NEWS_LIBRARY_NAME` selects `<name>.sqlite3` next to the default library, so UI tests can run against a fresh library; a value that is not a plain name is ignored with a logged warning. Follows #1114.
