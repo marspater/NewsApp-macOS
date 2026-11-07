@@ -182,7 +182,14 @@ extension NewsTests {
                     if case .ready = state, once.claim() { continuation.resume() }
                     if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
                 }
-                listener.start(queue: listener === silent ? silentQueue : upstreamQueue)
+                let queue = listener === silent ? silentQueue : upstreamQueue
+                queue.asyncAfter(deadline: .now() + 5) {
+                    if once.claim() {
+                        listener.cancel()
+                        continuation.resume(throwing: LoopbackTimeout())
+                    }
+                }
+                listener.start(queue: queue)
             }
         }
         defer {
@@ -509,10 +516,17 @@ extension NewsTests {
                     receivedRequests: receivedRequests, live: live)
             }
         }
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let once = SocketObservation()
             upstream.stateUpdateHandler = { state in
                 if case .ready = state, once.claim() { continuation.resume() }
+                if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
+            }
+            upstreamQueue.asyncAfter(deadline: .now() + 5) {
+                if once.claim() {
+                    upstream.cancel()
+                    continuation.resume(throwing: LoopbackTimeout())
+                }
             }
             upstream.start(queue: upstreamQueue)
         }

@@ -508,17 +508,24 @@ extension NewsTests {
         let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: endpoint)!, using: .tcp)
         // A loopback connect can fail with EADDRINUSE when parallel runs churn ephemeral ports. NWConnection
         // then parks in .waiting and never completes a send, so surface that state instead of hanging.
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let once = SocketObservation()
-            client.stateUpdateHandler = { state in
-                switch state {
-                case .ready: if once.claim() { continuation.resume() }
-                case .waiting(let error), .failed(let error): if once.claim() { continuation.resume(throwing: error) }
-                case .cancelled: if once.claim() { continuation.resume(throwing: CancellationError()) }
-                default: break
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let once = SocketObservation()
+                client.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready: if once.claim() { continuation.resume() }
+                    case .waiting(let error), .failed(let error):
+                        if once.claim() { continuation.resume(throwing: error) }
+                    case .cancelled: if once.claim() { continuation.resume(throwing: CancellationError()) }
+                    default: break
+                    }
                 }
+                client.start(queue: .global())
             }
-            client.start(queue: .global())
+        } catch {
+            client.stateUpdateHandler = nil
+            client.cancel()
+            throw error
         }
         client.stateUpdateHandler = nil
         try await socketSend(client, Data([5, 1, 0]))
