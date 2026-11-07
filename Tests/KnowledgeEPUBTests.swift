@@ -112,6 +112,6 @@ enum KnowledgeEPUBTests {
             } catch KnowledgeEPUB.Error.tooLarge { check(true, "document limit") }
         } catch { check(false, "unexpected error: \(error)") }
         print("Finished \(checks) EPUB checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("KnowledgeEPUBTests: \(failures) check failure(s)") }
     }
 }

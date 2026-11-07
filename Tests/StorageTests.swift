@@ -1388,8 +1388,7 @@ extension NewsTests {
                     "fetchArticles throws Database not open on closed db")
             }
         } catch {
-            print("❌ DatabaseEngine test failed: \(error.localizedDescription)")
-            exit(1)
+            recordFailure("DatabaseEngine test failed: \(error.localizedDescription)")
         }
     }
 
@@ -1650,8 +1649,7 @@ extension NewsTests {
             await repaired.close()
 
         } catch {
-            print("❌ FTS5 test failed: \(error.localizedDescription)")
-            exit(1)
+            recordFailure("FTS5 test failed: \(error.localizedDescription)")
         }
     }
 
@@ -1722,8 +1720,7 @@ extension NewsTests {
             assertTrue(ids.contains(oldSaved.id), "Old saved article must remain")
             assertTrue(ids.contains(recentRead.id), "Recent read article must remain")
         } catch {
-            print("❌ Retention test failed: \(error.localizedDescription)")
-            exit(1)
+            recordFailure("Retention test failed: \(error.localizedDescription)")
         }
     }
 

@@ -67,7 +67,7 @@ struct ReaderAccessibilityTests {
 
         print("Finished \(testsRun) reader accessibility checks with \(failures) failures.")
         if failures > 0 {
-            exit(1)
+            recordFailure("ReaderAccessibilityTests: \(failures) check failure(s)")
         } else {
             print("✅ ALL READER ACCESSIBILITY CHECKS PASSED")
         }

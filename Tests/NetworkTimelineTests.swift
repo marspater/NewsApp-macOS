@@ -239,6 +239,6 @@ enum NetworkTimelineTests {
             try await checkMigration()
         } catch { check(false, "Unexpected error: \(error)") }
         print("Finished \(checks) network timeline checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("NetworkTimelineTests: \(failures) check failure(s)") }
     }
 }

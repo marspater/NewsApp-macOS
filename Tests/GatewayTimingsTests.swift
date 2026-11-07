@@ -123,6 +123,6 @@ enum GatewayTimingsTests {
         checkExport()
         do { try await checkTunnel() } catch { check(false, "Unexpected error: \(error)") }
         print("Finished \(checks) gateway timing checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("GatewayTimingsTests: \(failures) check failure(s)") }
     }
 }

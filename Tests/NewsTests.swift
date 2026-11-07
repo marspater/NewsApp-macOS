@@ -37,8 +37,7 @@ struct NewsTests {
         do {
             try await runTests()
         } catch {
-            print("❌ TEST FAILED with unexpected error: \(error)")
-            exit(1)
+            recordFailure("TEST FAILED with unexpected error: \(error)")
         }
     }
 

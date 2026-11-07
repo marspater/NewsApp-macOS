@@ -173,7 +173,7 @@ enum EditorialMomentumTests {
             #endif
         } catch { check(false, "Unexpected error: \(error)") }
         print("Finished \(checks) momentum checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("EditorialMomentumTests: \(failures) check failure(s)") }
     }
 }
 

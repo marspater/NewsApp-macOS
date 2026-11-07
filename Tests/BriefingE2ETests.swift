@@ -391,8 +391,7 @@ struct BriefingE2ETests {
 
         print("\nFinished \(testsRun) Briefing E2E tests with \(failures) failures.")
         if failures > 0 {
-            print("❌ E2E SUITE FAILED with \(failures) failures")
-            exit(1)
+            recordFailure("E2E SUITE FAILED with \(failures) failures")
         } else {
             print("✅ ALL 120 BRIEFING E2E TESTS PASSED (Tiers 1-4 Complete)")
         }

@@ -83,6 +83,47 @@ class MockURLProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+/// Failures the assertions, `recordFailure` and `runSuite` collect in this process. Tests/Runner.swift prints the
+/// summary and sets the exit status once the atom has run, so one failure no longer hides the tests after it.
+final class TestFailureLog: @unchecked Sendable {
+    static let shared = TestFailureLog()
+    private let lock = NSLock()
+    /// The test failures are filed under; runSuite names each test, other atoms report under the atom.
+    private var current = ProcessInfo.processInfo.environment["NEWS_TEST_ATOM"] ?? "runner"
+    private var failures: [(test: String, line: String)] = []
+    private var timings: [(test: String, duration: Duration)] = []
+
+    var count: Int { lock.withLock { failures.count } }
+    func begin(_ test: String) { lock.withLock { current = test } }
+    func record(_ line: String) { lock.withLock { failures.append((current, line)) } }
+    func time(_ test: String, _ duration: Duration) { lock.withLock { timings.append((test, duration)) } }
+
+    /// Prints each failed test with its first failure line, then exits 1 if anything failed and 0 otherwise.
+    func finish() -> Never {
+        let (failures, timings) = lock.withLock { (self.failures, self.timings) }
+        if ProcessInfo.processInfo.environment["NEWS_TEST_TIMING"] == "1" {
+            for timing in timings { print("    ⏱ \(timing.test) \(timing.duration)") }
+        }
+        var order: [String] = []
+        var first: [String: String] = [:]
+        for failure in failures where first[failure.test] == nil {
+            order.append(failure.test)
+            first[failure.test] = failure.line
+        }
+        guard !order.isEmpty else { exit(0) }
+        print("❌ \(order.count) failed test(s), \(failures.count) failure(s):")
+        for test in order { print("   \(test): \(first[test]!)") }
+        exit(1)
+    }
+}
+
+/// Prints and records a failure without stopping the test; for checks the assertions below do not cover.
+func recordFailure(_ message: String, file: String = #file, line: Int = #line) {
+    print("❌ \(message)")
+    print("   Location: \(file):\(line)")
+    TestFailureLog.shared.record("\(message) (\(file):\(line))")
+}
+
 func assertEqual<T: Equatable>(
     _ actual: T, _ expected: T, _ message: String = "", file: String = #file, line: Int = #line
 ) {
@@ -91,7 +132,8 @@ func assertEqual<T: Equatable>(
         print("   Expected: \(expected)")
         print("   Actual:   \(actual)")
         print("   Location: \(file):\(line)")
-        exit(1)
+        TestFailureLog.shared.record(
+            "ASSERTION FAILED: \(message) (expected \(expected), actual \(actual)) (\(file):\(line))")
     }
 }
 
@@ -99,7 +141,7 @@ func assertTrue(_ condition: Bool, _ message: String = "", file: String = #file,
     if !condition {
         print("❌ ASSERTION FAILED: \(message) (expected true, got false)")
         print("   Location: \(file):\(line)")
-        exit(1)
+        TestFailureLog.shared.record("ASSERTION FAILED: \(message) (expected true, got false) (\(file):\(line))")
     }
 }
 
@@ -107,7 +149,7 @@ func assertFalse(_ condition: Bool, _ message: String = "", file: String = #file
     if condition {
         print("❌ ASSERTION FAILED: \(message) (expected false, got true)")
         print("   Location: \(file):\(line)")
-        exit(1)
+        TestFailureLog.shared.record("ASSERTION FAILED: \(message) (expected false, got true) (\(file):\(line))")
     }
 }
 
@@ -334,13 +376,17 @@ enum EventControlSet {
 }
 
 extension NewsTests {
-    /// Runs an atom's tests in order, one after another in this process. NEWS_TEST_TIMING=1 prints each duration.
+    /// Runs an atom's tests in order, one after another in this process. A test that throws is recorded and the next
+    /// one runs; Tests/Runner.swift prints the summary. NEWS_TEST_TIMING=1 prints each duration.
     static func runSuite(_ tests: [(name: String, run: () async throws -> Void)]) async throws {
         let timing = ProcessInfo.processInfo.environment["NEWS_TEST_TIMING"] == "1"
         for test in tests {
+            TestFailureLog.shared.begin(test.name)
             let start = ContinuousClock.now
-            try await test.run()
-            if timing { print("    ⏱ \(test.name) \(ContinuousClock.now - start)") }
+            do { try await test.run() } catch { recordFailure("\(test.name) threw: \(error)") }
+            let duration = ContinuousClock.now - start
+            TestFailureLog.shared.time(test.name, duration)
+            if timing { print("    ⏱ \(test.name) \(duration)") }
         }
     }
 

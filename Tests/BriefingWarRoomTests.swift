@@ -37,7 +37,7 @@ enum BriefingWarRoomTests {
         regionFilter()
         tensionCaptions()
         print("Finished \(checks) Briefing war room checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("BriefingWarRoomTests: \(failures) check failure(s)") }
     }
 
     /// The region filter hides the signal modules it empties, and clears itself when its control is gone (#850, #851).

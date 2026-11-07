@@ -21,6 +21,7 @@ script/test_event_overview_accessibility.sh # Story Overview sections, Industry 
 NEWS_TEST_FORCE=1 ./test.sh       # A plain ./test.sh skips the Swift runner and the three headless runners when the same inputs already passed all of them on this machine (the stamp is written after the last one); this reruns them
 NEWS_TEST_JOBS=3 ./test.sh # A plain run is a job pool: each test atom (script/test_atoms.sh) is its own process, and NEWS_TEST_JOBS bounds how many run at once (default 6, capped at the core count); NEWS_TEST_TIMING=1 prints each domain test's duration
 script/check_test_registry.sh     # Every Tests/*.swift suite with an entry point is dispatched once by Tests/Runner.swift or called by a registered suite; the plain ./test.sh runs it first
+script/test_failure_report.sh     # A failed assertion or a thrown test no longer stops its atom: the runner records it, runs the rest, then prints each failed test with its first failure and exits 1. This proves it with a hidden two-failure atom (pass a built runner to skip the build)
 ./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
 script/format.sh --check          # Strict repository-wide Swift formatting lint

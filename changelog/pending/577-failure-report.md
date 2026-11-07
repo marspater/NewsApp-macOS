@@ -1,0 +1,1 @@
+- The test runner reports every failed test of an atom: assertions and thrown tests are recorded instead of exiting, the remaining tests run, and the atom ends with a summary of each failed test and its first failure before exiting 1. `script/test_failure_report.sh` proves it with a hidden two-failure atom.
