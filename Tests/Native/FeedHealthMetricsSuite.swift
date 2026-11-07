@@ -17,7 +17,7 @@ import Testing
 
 /// Proof of the native target (#1070): Swift Testing over the same sources and test helpers the custom runner compiles.
 extension NativeSuites {
-    @Suite struct FeedHealthMetricsSuite {
+    @Suite(.tags(.feedHealth)) struct FeedHealthMetricsSuite {
         private let now = Date(timeIntervalSince1970: 1_793_491_200)
 
         @Test func noHistoryIsUnknownNotZero() {
