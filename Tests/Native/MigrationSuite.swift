@@ -37,7 +37,7 @@ import dnssd
 /// `assertEqual`/`assertTrue`/`assertFalse` turned into the matching `expect` helper of NativeExpectations.swift, so a
 /// failure is recorded and later tests still run. The runner keeps its copy until CI shows parity.
 extension NativeSuites {
-    @Suite(.tags(.migration)) struct MigrationSuite {
+    @Suite(.tags(.migration, .integration)) struct MigrationSuite {
         @Test func feedFailureKindMigration() async throws { try await Self.testFeedFailureKindMigration() }
         @Test func persistentArticleAliases() async throws {
             try await Self.testPersistentArticleAliases(fixtureRoot: NewsTests.defaultFixtureRoot)

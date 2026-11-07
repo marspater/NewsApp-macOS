@@ -1,0 +1,28 @@
+{
+  "configurations": [
+    {
+      "id": "5E7A1D00-0000-4000-8000-000000000002",
+      "name": "Integration",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "codeCoverage": true
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "selectedTags": {
+        "tags": [
+          "integration"
+        ]
+      },
+      "target": {
+        "containerPath": "container:News.xcodeproj",
+        "identifier": "0A000000000000000000008A",
+        "name": "NewsTests"
+      }
+    }
+  ],
+  "version": 1
+}

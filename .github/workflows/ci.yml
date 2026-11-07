@@ -91,7 +91,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-            -derivedDataPath build/DerivedData -only-testing:NewsTests \
+            -derivedDataPath build/DerivedData -testPlan Release \
             -resultBundlePath "$RUNNER_TEMP/NewsTests.xcresult" -quiet
 
       - name: Upload Native Test Results
@@ -109,7 +109,7 @@ jobs:
         run: |
           set -o pipefail
           xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-            -derivedDataPath build/DerivedData -only-testing:NewsUITests \
+            -derivedDataPath build/DerivedData -testPlan UITests -only-testing:NewsUITests \
             -resultBundlePath "$RUNNER_TEMP/NewsUITests.xcresult" -quiet
 
       - name: Upload UI Test Results

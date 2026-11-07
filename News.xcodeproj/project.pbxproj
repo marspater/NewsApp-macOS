@@ -59,6 +59,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Fixtures,
+				Plans,
 			);
 			target = 0A0000000000000000000041 /* NewsTestRunner */;
 		};
@@ -66,6 +67,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Fixtures,
+				Plans,
 			);
 			target = 0A0000000000000000000042 /* NewsHarness */;
 		};
@@ -88,6 +90,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Fixtures,
+				Plans,
 				Runner.swift,
 			);
 			target = 0A000000000000000000008A /* NewsTests */;
@@ -129,6 +132,7 @@
 			};
 			explicitFolders = (
 				Fixtures,
+				Plans,
 			);
 			path = Tests;
 			sourceTree = "<group>";
