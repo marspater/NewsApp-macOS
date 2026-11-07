@@ -4,8 +4,6 @@ name: Profile
 # Never part of pull request checks; see docs/audits/2026-11-07-signpost-profiling.md.
 on:
   workflow_dispatch:
-  push:
-    branches: [ mars/signpost-profiling ]  # temporary: first run before merge
   schedule:
     - cron: '17 4 * * 1'  # Mondays 04:17 UTC
 
