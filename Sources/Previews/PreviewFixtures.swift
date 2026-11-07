@@ -165,8 +165,16 @@
 
         static let briefing = FiniteBriefing(startedAt: now, articles: entries.map(\.representative))
 
+        /// Every board module filled from the modules' own capture fixtures, as the Briefing captures show it.
+        static var boardData: BriefingBoardData { .captureFixture(details: BriefingStoryDetails()) }
+
+        /// Previews have nowhere to navigate, so every action does nothing.
         static var briefingActions: BriefingActions {
-            BriefingActions(onOpenArticle: { _ in }, onOpenEvent: { _ in }, onStartNewBriefing: {}, onBackToToday: {})
+            BriefingActions(
+                onOpenArticle: { _ in /* No navigation in a preview. */ },
+                onOpenEvent: { _ in /* No navigation in a preview. */ },
+                onStartNewBriefing: { /* No new edition in a preview. */  },
+                onBackToToday: { /* No navigation in a preview. */  })
         }
 
         /// Never wakes, so the hero carousel holds its first story.
@@ -205,7 +213,7 @@
             store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
             feedManager = FeedManager(
                 settings: settings, store: store, schedulesRefresh: false,
-                fetchBatch: { _, _ in [] }, notifyBatch: { _, _ in },
+                fetchBatch: { _, _ in [] }, notifyBatch: { _, _ in /* Previews post no notifications. */ },
                 allowsBackgroundWork: { false })
             readManager = ReadManager(articleStore: store)
             savedStories = SavedStoriesManager(articleStore: store)

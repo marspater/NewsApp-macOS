@@ -436,7 +436,7 @@ struct BriefingView: View {
     #Preview("Briefing", traits: .modifier(PreviewEnvironment())) {
         ScrollView {
             BriefingView(
-                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing,
+                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing, data: PreviewFixtures.boardData,
                 nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
                 clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
         }
@@ -459,7 +459,8 @@ struct BriefingView: View {
                     .event(
                         PreviewFixtures.longEvent, representative: PreviewFixtures.longArticle,
                         visibleMembers: [PreviewFixtures.longArticle])
-                ] + PreviewFixtures.entries, briefing: nil, nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
+                ] + PreviewFixtures.entries, briefing: nil, data: PreviewFixtures.boardData,
+                nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
                 clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
         }
         .frame(width: AppLayout.mainWindowMinimumWidth, height: AppLayout.tensionSheetHeight)
@@ -468,7 +469,7 @@ struct BriefingView: View {
     #Preview("Briefing dark", traits: .modifier(PreviewEnvironment())) {
         ScrollView {
             BriefingView(
-                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing,
+                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing, data: PreviewFixtures.boardData,
                 nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
                 clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
         }
@@ -479,7 +480,7 @@ struct BriefingView: View {
     #Preview("Briefing accessibility", traits: .modifier(PreviewEnvironment())) {
         ScrollView {
             BriefingView(
-                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing,
+                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing, data: PreviewFixtures.boardData,
                 nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
                 clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
         }
