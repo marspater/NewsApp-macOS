@@ -16,7 +16,13 @@ news_xcodebuild() {
         -configuration "$configuration" -derivedDataPath "$NEWS_DERIVED_DATA" -quiet \
         MACOSX_DEPLOYMENT_TARGET="${TARGET_MACOS:-15.0}" "$@" build 2>&1 | tee "$log" |
         sed '/^error: the following command failed with exit code 0 but produced no further output$/d'
-    status="${PIPESTATUS[0]}"
-    if [[ "$status" != 0 ]]; then echo "xcodebuild failed ($status); full transcript: $log" >&2; fi
+    local statuses=("${PIPESTATUS[@]}")
+    status="${statuses[0]}"
+    if [[ "${statuses[1]}" != 0 ]]; then
+        echo "warning: could not write the transcript $log" >&2
+        if [[ "$status" != 0 ]]; then echo "xcodebuild failed ($status)" >&2; fi
+    elif [[ "$status" != 0 ]]; then
+        echo "xcodebuild failed ($status); full transcript: $log" >&2
+    fi
     return "$status"
 }

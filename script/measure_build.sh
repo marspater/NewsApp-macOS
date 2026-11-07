@@ -35,7 +35,7 @@ measure() {
         "$(git rev-parse --short HEAD)" "$XCODE" "$load" | tee -a "$RESULTS"
 }
 
-for run in 1 2 3; do
+for _ in 1 2 3; do
     rm -rf "$NEWS_DERIVED_DATA"
     measure cold_app app
     touch "$MODELS_FILE"
