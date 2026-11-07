@@ -9,9 +9,14 @@ news_xcodebuild() {
     shift 2
     # -quiet prints warnings and errors only. With it, Xcode 27 also prints "the following command failed with exit
     # code 0 but produced no further output" after a compile that only warned; that line is dropped, the status kept.
+    # The unfiltered transcript goes to build/xcodebuild-TARGET.log and is named when the build fails (#577).
+    local log="$PWD/build/xcodebuild-$target.log" status
+    mkdir -p "$PWD/build"
     xcodebuild -project News.xcodeproj -scheme "$target" -destination "generic/platform=macOS" \
         -configuration "$configuration" -derivedDataPath "$NEWS_DERIVED_DATA" -quiet \
-        MACOSX_DEPLOYMENT_TARGET="${TARGET_MACOS:-15.0}" "$@" build 2>&1 |
+        MACOSX_DEPLOYMENT_TARGET="${TARGET_MACOS:-15.0}" "$@" build 2>&1 | tee "$log" |
         sed '/^error: the following command failed with exit code 0 but produced no further output$/d'
-    return "${PIPESTATUS[0]}"
+    status="${PIPESTATUS[0]}"
+    if [[ "$status" != 0 ]]; then echo "xcodebuild failed ($status); full transcript: $log" >&2; fi
+    return "$status"
 }
