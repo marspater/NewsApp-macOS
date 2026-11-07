@@ -1034,7 +1034,8 @@ struct SettingsView: View {
                 }
                 storageRow(
                     "Library Database", detail: databaseSize,
-                    description: "Subscriptions, read history, saved stories and the search index."
+                    description:
+                        "Subscriptions, read history, saved stories and the search index, in \(DatabaseEngine.defaultLibraryURL.lastPathComponent)."
                 ) {
                     TagView(
                         title: articleStore.databaseHealthNotice == nil ? "Active" : "Read-Only",

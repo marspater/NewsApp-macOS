@@ -67,9 +67,30 @@ final class AppContainer: ObservableObject {
     ) {
         self.appSettings = appSettings ?? AppSettings.shared
         self.articleStore = articleStore ?? ArticleStore.shared
-        self.feedManager = feedManager ?? FeedManager(settings: self.appSettings, store: self.articleStore)
+        self.feedManager =
+            feedManager
+            ?? FeedManager(
+                settings: self.appSettings, store: self.articleStore, fetchBatch: Self.fixtureFeedBatch())
         self.readManager = readManager ?? ReadManager(articleStore: self.articleStore)
         self.savedStories = savedStories ?? SavedStoriesManager(articleStore: self.articleStore)
         self.themeManager = themeManager ?? ThemeManager.shared
+    }
+
+    /// The development build (`com.marspater.news.dev`) answers every subscription with the RSS document in
+    /// `NEWS_FIXTURE_FEED` instead of the network, so UI tests run on fixed stories (#1070). Any other bundle, or no
+    /// variable, fetches as usual.
+    nonisolated static func fixtureFeedBatch(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier
+    ) -> (@Sendable ([String], Bool) async -> FeedManager.FeedBatch)? {
+        guard LogWindowModel.isAvailable(bundleIdentifier: bundleIdentifier),
+            let xml = environment["NEWS_FIXTURE_FEED"]
+        else { return nil }
+        let data = Data(xml.utf8)
+        return { urls, _ in
+            // One copy, filed under the first subscription, so the same story is not stored once per feed.
+            guard let url = urls.first else { return [] }
+            return [(url, FeedFetcher.webArticles(FeedXMLParser(data: data, feedURL: url).parse()), nil, nil)]
+        }
     }
 }
