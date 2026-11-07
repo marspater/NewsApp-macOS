@@ -22,7 +22,7 @@ import Testing
 
 extension NativeSuites {
     /// The deterministic publisher-excerpt checks, formerly the NewsHarness entry Tests/Harness/PublisherExcerptTests.swift (#577, #1070).
-    @Suite(.tags(.publisherExcerpts)) @MainActor struct PublisherExcerptSuite {
+    @Suite(.tags(.publisherExcerpts, .integration)) @MainActor struct PublisherExcerptSuite {
         @Test func currentAnalysisVersionBumped() { Self.testCurrentAnalysisVersionBumped() }
         @Test func exactExcerptCitationCorrespondence() { Self.testExactExcerptCitationCorrespondence() }
         @Test func attributionControls() { Self.testAttributionControls() }

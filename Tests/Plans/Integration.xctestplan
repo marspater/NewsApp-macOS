@@ -14,10 +14,7 @@
       "parallelizable": false,
       "selectedTags": {
         "tags": [
-          "feedParsing",
-          "migration",
-          "publisherExcerpts",
-          "storage"
+          "integration"
         ]
       },
       "target": {
