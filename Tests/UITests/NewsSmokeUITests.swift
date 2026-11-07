@@ -106,9 +106,14 @@ final class NewsSmokeUITests: XCTestCase {
             predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
         XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 5), .completed, "The search field did not take focus")
         app.typeText("Lighthouse Restoration\n")
-        let result = app.staticTexts[Self.headline].firstMatch
+        let result = story()
         XCTAssertTrue(result.waitForExistence(timeout: 60), "The fixture headline was not found")
         return result
+    }
+
+    /// A story card: one button whose label starts with the headline, followed by source, date and state.
+    func story() -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", Self.headline)).firstMatch
     }
 
     func openHeadline() {
@@ -150,7 +155,7 @@ final class NewsSmokeUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Remove from Saved Stories"].waitForExistence(timeout: 10), "The story was not saved")
         // The search stays: Saved Stories then lists the saved stories that match it.
         sidebarRow("Saved Stories").click()
-        XCTAssertTrue(app.staticTexts[Self.headline].firstMatch.waitForExistence(timeout: 10), "Not under Saved")
+        XCTAssertTrue(story().waitForExistence(timeout: 10), "Not under Saved")
     }
 
     func test06OpenAndCloseSettings() {
