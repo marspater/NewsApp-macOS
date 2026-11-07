@@ -34,7 +34,7 @@ import dnssd
 #endif
 
 /// Native port of the `StorageTests` atom (#1070): the same sixteen tests, in the runner's order, with each
-/// `assertEqual`/`assertTrue`/`assertFalse` turned into the matching `expect` helper of NativeExpectations.swift and
+/// `assertEqual`/`assertTrue`/`assertFalse` turned into the matching `expect` helper of NativeExpectations.swift, each caught `recordFailure` into `expectTrue(false, ...)` (the runner log is invisible to Swift Testing),
 /// each force unwrap into `#require`, so a failure is recorded and later tests still run. The runner keeps its copy
 /// until CI shows parity.
 extension NativeSuites {
@@ -1393,7 +1393,7 @@ extension NativeSuites.StorageSuite {
                     "fetchArticles throws Database not open on closed db")
             }
         } catch {
-            recordFailure("DatabaseEngine test failed: \(error.localizedDescription)")
+            expectTrue(false, "DatabaseEngine test failed: \(error.localizedDescription)")
         }
     }
 
@@ -1654,7 +1654,7 @@ extension NativeSuites.StorageSuite {
             await repaired.close()
 
         } catch {
-            recordFailure("FTS5 test failed: \(error.localizedDescription)")
+            expectTrue(false, "FTS5 test failed: \(error.localizedDescription)")
         }
     }
 
@@ -1725,7 +1725,7 @@ extension NativeSuites.StorageSuite {
             expectTrue(ids.contains(oldSaved.id), "Old saved article must remain")
             expectTrue(ids.contains(recentRead.id), "Recent read article must remain")
         } catch {
-            recordFailure("Retention test failed: \(error.localizedDescription)")
+            expectTrue(false, "Retention test failed: \(error.localizedDescription)")
         }
     }
 
