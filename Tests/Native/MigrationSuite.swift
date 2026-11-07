@@ -839,10 +839,10 @@ extension MigrationSuite {
     @MainActor
     static func testIdentityBaselineScenarios(fixtureRoot: URL) async throws {
         print("  - Testing baseline query, mobile/AMP and publisher reprint scenarios...")
-        func feedArticle(_ link: String, guid: String, feed: String) -> FeedArticle {
+        func feedArticle(_ link: String, guid: String, feed: String) throws -> FeedArticle {
             let xml =
                 "<rss><channel><title>Baseline publisher</title><item><title>Same headline</title><link><![CDATA[\(link)]]></link><guid>\(guid)</guid><description>Short publisher teaser.</description><pubDate>Thu, 01 Oct 2026 12:00:00 GMT</pubDate></item></channel></rss>"
-            var article = FeedXMLParser(data: Data(xml.utf8), feedURL: feed).parse().first!
+            var article = try #require(FeedXMLParser(data: Data(xml.utf8), feedURL: feed).parse().first)
             article.identityFeedURL = feed
             return article
         }
@@ -851,15 +851,15 @@ extension MigrationSuite {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
             let base = fixtureRoot.appendingPathComponent("baseline/query-\(index)").absoluteString
-            let first = feedArticle(base + "?\(key)=1&utm_source=rss", guid: "query-first", feed: feed)
+            let first = try feedArticle(base + "?\(key)=1&utm_source=rss", guid: "query-first", feed: feed)
             try await db.upsertArticles([first], feedUrl: feed)
             try await db.markRead(articleId: first.id, isRead: true)
             try await db.setSaved(articleId: first.id, isSaved: true)
-            let trackingVariant = feedArticle(base + "?\(key)=1&fbclid=changed", guid: "query-variant", feed: feed)
+            let trackingVariant = try feedArticle(base + "?\(key)=1&fbclid=changed", guid: "query-variant", feed: feed)
             expectTrue(
                 try await db.upsertArticles([trackingVariant], feedUrl: feed).isEmpty,
                 "Tracking-only \(key) variant reuses one document")
-            let otherDocument = feedArticle(base + "?\(key)=2&utm_medium=feed", guid: "query-other", feed: feed)
+            let otherDocument = try feedArticle(base + "?\(key)=2&utm_medium=feed", guid: "query-other", feed: feed)
             try await db.upsertArticles([otherDocument], feedUrl: feed)
             expectEqual(
                 try await db.fetchArticles(limit: nil).count, 2,
@@ -915,11 +915,11 @@ extension MigrationSuite {
             let db = DatabaseEngine(path: ":memory:")
             try await db.open()
             let requested = fixtureRoot.appendingPathComponent(path)
-            let original = feedArticle(requested.absoluteString, guid: "format-original", feed: feed)
+            let original = try feedArticle(requested.absoluteString, guid: "format-original", feed: feed)
             try await db.upsertArticles([original], feedUrl: feed)
             try await db.markRead(articleId: original.id, isRead: true)
             try await db.setSaved(articleId: original.id, isSaved: true)
-            let variant = feedArticle(desktop.absoluteString, guid: "format-variant", feed: feed)
+            let variant = try feedArticle(desktop.absoluteString, guid: "format-variant", feed: feed)
             expectTrue(
                 original.normalizedLink != variant.normalizedLink,
                 "Mobile/AMP paths are not guessed equivalent by normalization")
@@ -932,9 +932,8 @@ extension MigrationSuite {
                 )
             }
             let result = await pipeline.extractArticleWithIdentity(from: requested.absoluteString)
-            guard let evidence = result.evidence else {
-                fatalError("Matching protected format fixture must produce evidence")
-            }
+            let evidence = try #require(
+                result.evidence, "Matching protected format fixture must produce evidence")
             expectTrue(evidence.urls.contains(desktop.absoluteString), "Matching format canonical is verified")
             try await db.recordDocumentIdentity(evidence, articleID: original.id)
             expectTrue(
@@ -948,8 +947,9 @@ extension MigrationSuite {
 
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
-        var wire = feedArticle("https://wire.example/report", guid: "syndicated-guid", feed: "https://wire.example/rss")
-        var reprint = feedArticle(
+        var wire = try feedArticle(
+            "https://wire.example/report", guid: "syndicated-guid", feed: "https://wire.example/rss")
+        var reprint = try feedArticle(
             "https://outlet.example/report", guid: "syndicated-guid", feed: "https://outlet.example/rss")
         wire.fullContent = prose
         reprint.fullContent = prose
@@ -960,8 +960,8 @@ extension MigrationSuite {
         expectEqual(
             stored.count, 2,
             "Identical wire text, headline, date and raw GUID across publishers remain two source documents")
-        let wireID = stored.first { $0.link == wire.link }!.id
-        let reprintID = stored.first { $0.link == reprint.link }!.id
+        let wireID = try #require(stored.first { $0.link == wire.link }).id
+        let reprintID = try #require(stored.first { $0.link == reprint.link }).id
         try await db.markRead(articleId: wireID, isRead: true)
         try await db.setSaved(articleId: wireID, isSaved: true)
         expectFalse(try await db.isRead(articleId: reprintID), "Reprint reading state stays independent")
