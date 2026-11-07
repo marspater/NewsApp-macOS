@@ -136,7 +136,7 @@ actor DatabaseEngine {
                 .appendingPathComponent("news.sqlite3")
         }
         let directory = fileManager.temporaryDirectory.appendingPathComponent(
-            "com.marspater.news-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+            "com.marspater.news-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)", isDirectory: true)
         NewsSignposts.databaseLog.info(
             "Not in a sandbox container; the default library is \(directory.path, privacy: .public)")
         return directory.appendingPathComponent("news.sqlite3")
