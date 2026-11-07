@@ -1,0 +1,1 @@
+- Adds Xcode previews for the Briefing board (normal, empty, long text, dark, accessibility) over deterministic preview fixtures in `Sources/Previews/PreviewFixtures.swift`: fixed dates, an in-memory library, no network or model. Debug-only; Release carries none of it.
