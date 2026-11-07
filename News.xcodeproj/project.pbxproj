@@ -59,7 +59,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Fixtures,
-				UITests/NewsSmokeUITests.swift,
 			);
 			target = 0A0000000000000000000041 /* NewsTestRunner */;
 		};
@@ -67,7 +66,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Fixtures,
-				UITests/NewsSmokeUITests.swift,
 			);
 			target = 0A0000000000000000000042 /* NewsHarness */;
 		};
@@ -91,7 +89,6 @@
 			membershipExceptions = (
 				Fixtures,
 				Runner.swift,
-				UITests/NewsSmokeUITests.swift,
 			);
 			target = 0A000000000000000000008A /* NewsTests */;
 		};
@@ -558,6 +555,7 @@
 				EXCLUDED_SOURCE_FILE_NAMES = (
 					"Tests/Harness/*",
 					"Tests/Native/*",
+					"Tests/UITests/*",
 				);
 				PRODUCT_NAME = NewsTestRunner;
 				SWIFT_VERSION = 5.0;
@@ -571,6 +569,7 @@
 				EXCLUDED_SOURCE_FILE_NAMES = (
 					"Tests/Harness/*",
 					"Tests/Native/*",
+					"Tests/UITests/*",
 				);
 				PRODUCT_NAME = NewsTestRunner;
 				SWIFT_VERSION = 5.0;
@@ -584,7 +583,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* container-migration.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* Tests/UITests/* container-migration.plist";
 				GENERATE_INFOPLIST_FILE = NO;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/TestDefaults.swift $(NEWS_HARNESS)";
 				INFOPLIST_FILE = Info.plist;
@@ -606,7 +605,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* container-migration.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* Tests/UITests/* container-migration.plist";
 				GENERATE_INFOPLIST_FILE = NO;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/TestDefaults.swift $(NEWS_HARNESS)";
 				INFOPLIST_FILE = Info.plist;
@@ -625,7 +624,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/*";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/* Tests/UITests/*";
 				GENERATE_INFOPLIST_FILE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
@@ -638,7 +637,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/*";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/* Tests/UITests/*";
 				GENERATE_INFOPLIST_FILE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
