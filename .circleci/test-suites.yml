@@ -28,6 +28,9 @@ options:
     - test-atom: Tests/StorageTests.swift
       include:
         - Tests/StorageTests.swift
+    - test-atom: Tests/DiagnosticsTests.swift
+      include:
+        - Tests/DiagnosticsTests.swift
     - test-atom: Tests/UserInterfaceTests.swift
       include:
         - Tests/UserInterfaceTests.swift
