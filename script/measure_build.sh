@@ -6,7 +6,7 @@
 #   NEWS_MEASURE_RESULTS  results file (build/measure-results.txt); each run is appended as it finishes
 set -euo pipefail
 
-LOCK="${TMPDIR:-/tmp}/news-measure.lock"   # outside the checkout, so it spans every worktree
+LOCK=/tmp/news-measure.lock   # one fixed path, so it spans every worktree and session on this Mac
 RESULTS="${NEWS_MEASURE_RESULTS:-build/measure-results.txt}"
 mkdir -p build
 if pgrep -f 'xcodebuild|swift-build|swiftc' >/dev/null; then echo "Another build is running; not measuring." >&2; exit 1; fi
