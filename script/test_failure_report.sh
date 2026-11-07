@@ -19,5 +19,5 @@ for line in "self-check first failure" "selfCheckFirst threw" "self-check second
     "2 failed test(s), 3 failure(s)"; do
     grep -qF "$line" "$WORK/out.log" || { echo "❌ missing: $line"; fail=1; }
 done
-[[ "$fail" -eq 0 ]] && echo "Failure report: both failed tests reported, exit 1" || cat "$WORK/out.log"
+if [[ "$fail" -eq 0 ]]; then echo "Failure report: both failed tests reported, exit 1"; else cat "$WORK/out.log"; fi
 exit "$fail"
