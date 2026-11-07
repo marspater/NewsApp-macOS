@@ -11,15 +11,16 @@ RESULTS="${NEWS_MEASURE_RESULTS:-build/measure-results.txt}"
 mkdir -p build
 if pgrep -f 'xcodebuild|swift-build|swiftc' >/dev/null; then echo "Another build is running; not measuring." >&2; exit 1; fi
 mkdir "$LOCK" 2>/dev/null || { echo "$LOCK exists: another measurement is running." >&2; exit 1; }
-export NEWS_DERIVED_DATA
-NEWS_DERIVED_DATA="$(mktemp -d)/DerivedData"
-trap 'rm -rf "$LOCK" "$(dirname "$NEWS_DERIVED_DATA")"' EXIT
+SCRATCH=""
+trap 'rm -rf "$LOCK" ${SCRATCH:+"$SCRATCH"}' EXIT
+SCRATCH="$(mktemp -d)"
+export NEWS_DERIVED_DATA="$SCRATCH/DerivedData"
 
 XCODE="$(xcodebuild -version | tr '\n' ' ')"
 MODELS_FILE=Sources/Models/FeedError.swift
 VIEWS_FILE=Sources/Views/List/ArticleCardView.swift
 
-app() { NEWS_APP_DIR="$(dirname "$NEWS_DERIVED_DATA")/News.app" NEWS_SENTRY_DISABLED=1 ./build.sh; }
+app() { NEWS_APP_DIR="$SCRATCH/News.app" NEWS_SENTRY_DISABLED=1 ./build.sh; }
 tests() {
     xcodebuild build-for-testing -project News.xcodeproj -scheme News -destination 'platform=macOS' \
         -derivedDataPath "$NEWS_DERIVED_DATA" -only-testing:NewsTests -quiet
