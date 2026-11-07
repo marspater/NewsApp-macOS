@@ -83,3 +83,15 @@ Facts: `Models`, `Storage`, `Intelligence`, `Services`, `Coordinators` hold 307 
 5. G.
 
 B never blocks C to G: if the spike fails its measurements they proceed on the current targets. D before E. C's test plans after three tagged domains. GitHub Actions, CircleCI and Codemagic all stay.
+
+## 4. Status, 8 November 2026
+
+| Item | Outcome |
+|---|---|
+| A | Done: #1115 (protocol, `script/measure_build.sh`, transcripts, this plan), #1120 (harness after-times) |
+| B | Rejected after one bounded spike; ADR-002 (#1118). Revisit only with a bounded experiment if profiling after #1070 still shows duplicate compilation as a material cost |
+| C | Migrations, feed parsing, publisher excerpts and storage are native (#1109, #1117, #1122); their runner copies are gone where CI proved parity (#1124); four test plans and CI through them (#1125). Remaining under #1070: the other atoms, then Swift 6 for `NewsTests` |
+| D | Done: `NEWS_LIBRARY_NAME` (#1116) on the library path from #1114 |
+| E | Done: `NewsUITests`, six smoke flows on all three providers (#1121, #1127) |
+| F | Done for the Briefing family (#1119); the other families take their previews with their roadmap issues (#932, #938, #715, #716, #717, #655) |
+| G | Done: weekly `xctrace` signpost recording (#1123) and XCTest launch and search metrics on that schedule (#1126); the first scheduled run sets the baseline |

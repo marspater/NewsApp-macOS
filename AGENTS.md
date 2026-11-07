@@ -15,9 +15,10 @@ These instructions govern agent workflow, not the project specification.
 1. Inspect branch, dirty state and current `origin/main` before implementation. Preserve existing changes and user data; do not reset, discard, reinstall or overwrite an existing app without task authorization.
 2. Trace the real path and reuse existing services. Make the smallest coherent fix; avoid unrelated refactors, speculative abstractions and new dependencies.
 3. Preserve surrounding conventions and public APIs unless a behavior change is required. Remove dead experiments and update shared documentation when behavior changes. A changelog entry is a fragment file `changelog/pending/<issue>.md`, never an edit to `CHANGELOG.md`.
-4. Run relevant checks from CONTRIBUTING.md, then review the diff for correctness, security, concurrency, lifecycle and accessibility regressions. Fix the cause of failed checks; do not weaken coverage to obtain a green result.
-5. Before publication, fetch `origin/main` again and re-evaluate material changes. Never force-push or rewrite unrelated history. Keep commits focused and use Conventional Commits.
-6. Report what changed, completed checks, commit/push status and concrete limitations. Distinguish local builds, live checks, installation and CI results. Never claim an unfinished or skipped check passed.
+4. Tests: a new or changed regression goes to the domain's Swift Testing suite under `Tests/Native/` when that domain is ported (migrations, feed parsing, storage, publisher excerpts), tagged with its domain and `.integration`, and keeps the runner copy only while the domain's atom still exists; otherwise to its `Tests/<Domain>Tests.swift` atom. UI flows go to `Tests/UITests/` and run in CI through the `UITests` plan; on a Mac in use, only `build-for-testing`. Build-time claims follow `docs/audits/2026-11-07-build-measurement-protocol.md`: `script/measure_build.sh`, one measurement per Mac at a time, medians of three.
+5. Run relevant checks from CONTRIBUTING.md, then review the diff for correctness, security, concurrency, lifecycle and accessibility regressions. Fix the cause of failed checks; do not weaken coverage to obtain a green result.
+6. Before publication, fetch `origin/main` again and re-evaluate material changes. Never force-push or rewrite unrelated history. Keep commits focused and use Conventional Commits.
+7. Report what changed, completed checks, commit/push status and concrete limitations. Distinguish local builds, live checks, installation and CI results. Never claim an unfinished or skipped check passed.
 
 ## Scope and communication
 
@@ -26,5 +27,6 @@ These instructions govern agent workflow, not the project specification.
 - Development verification stays arm64 and ad-hoc signed. Push a `v*` tag only when Mars explicitly asks: the push publishes a GitHub release through `release.yml`. Run the notarization helpers in `script/distribution/` only on Mars's request.
 - A fix that touches files owned by another open epic (its "Does not touch" lines) gets no PR for that part: post the diff and progress on the issue instead. When a fix substantially relates to an open issue linked to an epic, document it in that issue and explain how the two relate.
 - After a PR merges, delete its local worktree and branch; the remote branch can stay.
+- Xcode: Run, Test and Profile use the Debug configuration and the development bundle id `com.marspater.news.dev`; nothing in development or testing opens the real library in `com.marspater.news`. Outside a sandbox container the default library lives under the temporary directory, and `NEWS_LIBRARY_NAME` selects a fresh library name inside the container.
 - Do not merge stale PRs wholesale. Review against current code, incorporate useful changes selectively and explain duplicate or superseded proposals.
 - Keep output concise and evidence-led. Ask only for missing decisions that block safe progress; complete independent authorized work while waiting.

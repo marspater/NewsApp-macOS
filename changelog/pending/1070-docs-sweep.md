@@ -1,0 +1,1 @@
+- Retires the `Tests/Harness/PublisherExcerptTests.swift` harness entry, whose nine checks run natively in `PublisherExcerptSuite`, and brings CONTRIBUTING, README, AGENTS, ARCHITECTURE and the release checklist up to date with the native test plans, the UI smoke flows and the build measurement protocol.
