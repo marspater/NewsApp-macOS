@@ -187,11 +187,9 @@ else
     # reuses that cache. Two processes compiling the same model under one name race on the bundle rename (seen on
     # CI), so one process compiles the shared models first; a single job has nothing to race with and loads what it
     # needs. Sharing the name also shares the name's standard defaults and URL storage across the pool's jobs.
-    if [[ "$JOB_COUNT" -gt 1 ]]; then
-        if ! LLVM_PROFILE_FILE="$LOGS/warm.profraw" "$RUNNER" --warm-models; then
-            echo "❌ Could not load the shared Core ML models before the pool." >&2
-            exit 1
-        fi
+    # A failed warm-up only warns: atoms that need no model still run, and those that do report it themselves.
+    if [[ "$JOB_COUNT" -gt 1 ]] && ! LLVM_PROFILE_FILE="$LOGS/warm.profraw" "$RUNNER" --warm-models; then
+        echo "⚠️ Could not load the shared Core ML models before the pool." >&2
     fi
     # shellcheck disable=SC2016 # the pool script expands its variables inside the worker, by design
     xargs -P "$JOBS" -L 1 bash -c '
