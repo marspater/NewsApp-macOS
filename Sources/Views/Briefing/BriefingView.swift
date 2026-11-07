@@ -431,3 +431,59 @@ struct BriefingView: View {
         }
     }
 }
+
+#if DEBUG
+    #Preview("Briefing", traits: .modifier(PreviewEnvironment())) {
+        ScrollView {
+            BriefingView(
+                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing,
+                nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
+                clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
+        }
+        .frame(width: AppLayout.mainWindowMinimumWidth, height: AppLayout.tensionSheetHeight)
+    }
+
+    #Preview("Briefing empty", traits: .modifier(PreviewEnvironment())) {
+        ScrollView {
+            BriefingView(
+                entries: [], briefing: nil, nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
+                clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
+        }
+        .frame(width: AppLayout.mainWindowMinimumWidth, height: AppLayout.tensionSheetHeight)
+    }
+
+    #Preview("Briefing long text", traits: .modifier(PreviewEnvironment())) {
+        ScrollView {
+            BriefingView(
+                entries: [
+                    .event(
+                        PreviewFixtures.longEvent, representative: PreviewFixtures.longArticle,
+                        visibleMembers: [PreviewFixtures.longArticle])
+                ] + PreviewFixtures.entries, briefing: nil, nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
+                clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
+        }
+        .frame(width: AppLayout.mainWindowMinimumWidth, height: AppLayout.tensionSheetHeight)
+    }
+
+    #Preview("Briefing dark", traits: .modifier(PreviewEnvironment())) {
+        ScrollView {
+            BriefingView(
+                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing,
+                nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
+                clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
+        }
+        .frame(width: AppLayout.mainWindowMinimumWidth, height: AppLayout.tensionSheetHeight)
+        .preferredColorScheme(.dark)
+    }
+
+    #Preview("Briefing accessibility", traits: .modifier(PreviewEnvironment())) {
+        ScrollView {
+            BriefingView(
+                entries: PreviewFixtures.entries, briefing: PreviewFixtures.briefing,
+                nextEdition: PreviewFixtures.now.addingTimeInterval(86_400),
+                clock: PreviewFixtures.StillClock(), actions: PreviewFixtures.briefingActions)
+        }
+        .frame(width: AppLayout.mainWindowMinimumWidth, height: AppLayout.tensionSheetHeight)
+        .previewAccessibility()
+    }
+#endif
