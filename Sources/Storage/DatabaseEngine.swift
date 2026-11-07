@@ -127,24 +127,29 @@ actor DatabaseEngine {
     /// directory instead (#1113).
     nonisolated static let defaultLibraryURL: URL = {
         let fileManager = FileManager.default
-        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        // The sandbox sets APP_SANDBOX_CONTAINER_ID for every process it contains, and the directory it hands out
-        // lies under the container; both must hold, so an inherited variable alone cannot select the real home.
-        let sandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
-        if sandboxed, appSupport.pathComponents.contains("Containers") {
-            let library = appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
-                .appendingPathComponent(libraryFileName(environment: ProcessInfo.processInfo.environment))
-            NewsSignposts.databaseLog.info("The default library is \(library.path, privacy: .public)")
-            return library
-        }
-        let directory = fileManager.temporaryDirectory.appendingPathComponent(
-            "com.marspater.news-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)", isDirectory: true)
-        let library = directory.appendingPathComponent(
-            libraryFileName(environment: ProcessInfo.processInfo.environment))
-        NewsSignposts.databaseLog.info(
-            "Not in a sandbox container; the default library is \(library.path, privacy: .public)")
+        let library = libraryURL(
+            environment: ProcessInfo.processInfo.environment,
+            applicationSupport: fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!,
+            temporaryDirectory: fileManager.temporaryDirectory,
+            launchID: "\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)")
+        NewsSignposts.databaseLog.info("The default library is \(library.path, privacy: .public)")
         return library
     }()
+
+    /// `defaultLibraryURL` for the given process state; separate so tests can check both branches.
+    nonisolated static func libraryURL(
+        environment: [String: String], applicationSupport: URL, temporaryDirectory: URL, launchID: String
+    ) -> URL {
+        let name = libraryFileName(environment: environment)
+        // The sandbox sets APP_SANDBOX_CONTAINER_ID for every process it contains, and the directory it hands out
+        // lies under the container; both must hold, so an inherited variable alone cannot select the real home.
+        if environment["APP_SANDBOX_CONTAINER_ID"] != nil, applicationSupport.pathComponents.contains("Containers") {
+            return applicationSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
+                .appendingPathComponent(name)
+        }
+        return temporaryDirectory.appendingPathComponent("com.marspater.news-\(launchID)", isDirectory: true)
+            .appendingPathComponent(name)
+    }
 
     /// The library's file name: `NEWS_LIBRARY_NAME` + `.sqlite3` when it is a plain name (ASCII letters, digits, `-`,
     /// `_` and `.`, no `..`, no `before-`), so UI tests can use a fresh library in the same directory (#1113). Anything

@@ -45,5 +45,28 @@ extension NativeSuites {
             #expect(url.lastPathComponent == "news.sqlite3")
             #expect(url.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL)
         }
+        @Test(arguments: [nil, "uitest-2026-11-07", "../x"])
+        func sandboxedLibraryStaysInTheContainer(_ name: String?) {
+            let support = URL(fileURLWithPath: "/Users/u/Library/Containers/c/Data/Library/Application Support")
+            var environment = ["APP_SANDBOX_CONTAINER_ID": "c"]
+            environment["NEWS_LIBRARY_NAME"] = name
+            let url = DatabaseEngine.libraryURL(
+                environment: environment, applicationSupport: support,
+                temporaryDirectory: URL(fileURLWithPath: "/tmp"), launchID: "1")
+            #expect(url.deletingLastPathComponent().path == support.appendingPathComponent("com.marspater.news").path)
+            #expect(url.lastPathComponent == DatabaseEngine.libraryFileName(environment: environment))
+        }
+
+        @Test(arguments: [nil, "uitest-2026-11-07", "../x"])
+        func unsandboxedLibraryStaysInItsLaunchDirectory(_ name: String?) {
+            let environment = name.map { ["NEWS_LIBRARY_NAME": $0] } ?? [:]
+            let url = DatabaseEngine.libraryURL(
+                environment: environment,
+                applicationSupport: URL(fileURLWithPath: "/Users/u/Library/Application Support"),
+                temporaryDirectory: URL(fileURLWithPath: "/tmp"), launchID: "1-abc")
+            #expect(url.deletingLastPathComponent().path == "/tmp/com.marspater.news-1-abc")
+            let expected = name == "uitest-2026-11-07" ? "uitest-2026-11-07.sqlite3" : "news.sqlite3"
+            #expect(url.lastPathComponent == expected)
+        }
     }
 }
