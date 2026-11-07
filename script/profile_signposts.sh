@@ -6,7 +6,7 @@
 #   PROFILE_TIME_LIMIT      recording length (default 60s)
 #   PROFILE_RUN_ID          library suffix (default: GITHUB_RUN_ID or the current time)
 # Workload: the Debug app as com.marspater.news.dev, its own library (NEWS_LIBRARY_NAME=profile-<run id>) and every
-# subscription answered from Tests/Fixtures/profiling/feed.xml (NEWS_FIXTURE_FEED, development bundle only).
+# subscription answered from Tests/Fixtures/ui-smoke/feed.xml (NEWS_FIXTURE_FEED, development bundle only).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -29,11 +29,13 @@ if [[ "$ACTUAL_ID" != "$BUNDLE_ID" ]]; then
     exit 1
 fi
 
-FEED=$(sed "s/{{PUBDATE}}/$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')/" Tests/Fixtures/profiling/feed.xml | tr -d '\n')
+FEED=$(sed "s/{{PUBDATE}}/$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')/" Tests/Fixtures/ui-smoke/feed.xml | tr -d '\n')
 RECORD=(xcrun xctrace record --template 'Time Profiler' --instrument os_signpost --time-limit "$TIME_LIMIT"
     --no-prompt --output "$OUTPUT/News.trace"
     --env "NEWS_LIBRARY_NAME=profile-$RUN_ID" --env "NEWS_FIXTURE_FEED=$FEED"
-    --launch -- "$APP/Contents/MacOS/News")
+    --launch -- "$APP/Contents/MacOS/News"
+    # Argument-domain defaults, as NewsSmokeUITests: no onboarding, no notification prompt, one subscription.
+    -first_launch_completed YES -notifications_enabled NO -saved_feed_urls '("https://example.com/ui-smoke/feed.xml")')
 
 if [[ "${PROFILE_DRY_RUN:-0}" == 1 ]]; then
     printf '%q ' "${RECORD[@]/#NEWS_FIXTURE_FEED=*/NEWS_FIXTURE_FEED=<feed>}"; echo
