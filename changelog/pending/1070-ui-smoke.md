@@ -1,0 +1,1 @@
+- Adds the `NewsUITests` UI-testing target: six smoke flows (launch, sidebar sections, search, open a story, save it, Settings) against the Debug app on a fresh per-run library and a fixture feed, run on all three CI providers. The Storage pane now names the library file in use.
