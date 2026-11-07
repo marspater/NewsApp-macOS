@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// What drives World Tension: the event types today's stories report, severity beside coverage (#850).

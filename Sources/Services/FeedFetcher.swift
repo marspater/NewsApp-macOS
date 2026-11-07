@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import os
 
 /// Outcome of one feed request. `articles == nil && error == nil` means the server answered 304 Not Modified.

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 extension DatabaseEngine {
     /// One actor turn captures current stored text, citations and notes without fetching or changing read state.

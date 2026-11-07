@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import NewsCore
 import SwiftUI
 
 /// Opt-in browser for the curated starter catalog. Nothing is subscribed until the user chooses it.

@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 /// Specific failure reason for an overview claim verification check.
 public enum ClaimVerificationFailureReason: Sendable, Equatable {

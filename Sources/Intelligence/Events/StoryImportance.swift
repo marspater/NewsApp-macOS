@@ -13,15 +13,7 @@
 // limitations under the License.
 
 import Foundation
-
-/// How much a story matters to a general reader following the news, decided on device from its headline and summary.
-enum StoryImportance: Int, Sendable, Comparable {
-    case minor = 0
-    case notable = 1
-    case major = 2
-
-    static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
-}
+import NewsCore
 
 /// Bounded publisher-image lookup. Nothing in the app rates importance; the opt-in live curation measurement in the
 /// test build does (#549).

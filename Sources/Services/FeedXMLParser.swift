@@ -14,6 +14,7 @@
 
 import FeedKit
 import Foundation
+import NewsCore
 
 /// Checks shared by every XML document the app reads from outside: feeds and OPML imports (#928).
 enum XMLInputGuard {

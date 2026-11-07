@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// Regions: story count per region, selecting one filters the board (#850). The region tiles share this data.

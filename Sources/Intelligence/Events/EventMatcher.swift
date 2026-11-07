@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 /// Deterministic who/what/where/when signals for one article, taken from its title and the start of
 /// its description. Nothing here is generated. The clusterer stores them as JSON (`article_features`, v24) under

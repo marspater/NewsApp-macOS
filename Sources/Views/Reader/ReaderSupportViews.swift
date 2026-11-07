@@ -16,6 +16,7 @@
 // Reader modes, commands and small views shared by ArticleDetailView.
 
 import AppKit
+import NewsCore
 import SwiftUI
 
 enum DetailViewMode: String, CaseIterable, Identifiable {

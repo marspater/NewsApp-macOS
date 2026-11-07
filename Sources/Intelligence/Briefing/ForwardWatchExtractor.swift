@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// One forward-looking line a publisher stated, in the publisher's words. The app schedules nothing.
 struct ForwardWatchItem: Equatable, Hashable, Sendable {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// Private highlights and notes (V1 #711). Every change bumps `userNotesRevision`, which the reader and the Library
 /// list watch to reload.

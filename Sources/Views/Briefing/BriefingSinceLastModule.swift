@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// Since your last briefing: what changed since the previous edition (#849). Each edition saves a snapshot of its

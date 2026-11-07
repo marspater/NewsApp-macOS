@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 // MARK: - Quality Gate Types
 

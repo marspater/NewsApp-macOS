@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// Security and prompt-injection defenses for on-device generative tasks.
 /// Enforces that third-party source text is treated strictly as passive data, never instructions.

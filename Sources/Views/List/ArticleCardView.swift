@@ -16,6 +16,7 @@
 // NewsApp Story Card View
 
 import AppKit
+import NewsCore
 import SwiftUI
 
 struct ArticleCardView<Footer: View>: View {

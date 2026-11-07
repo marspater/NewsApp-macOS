@@ -65,10 +65,10 @@ enum CatalogReviewEngine {
         catalog: [CatalogFeed] = FeedCatalog.feeds
     ) -> [TopicGap] {
         let subscribedKeys = Set(
-            subscribedURLs.compactMap { AppSettings.normalizeFeedURL($0).map(AppSettings.feedKey) })
+            subscribedURLs.compactMap { FeedURL.normalizeFeedURL($0).map(FeedURL.feedKey) })
         var coveredSets = Set<CatalogSet>()
 
-        for feed in catalog where subscribedKeys.contains(AppSettings.feedKey(feed.url)) {
+        for feed in catalog where subscribedKeys.contains(FeedURL.feedKey(feed.url)) {
             coveredSets.insert(feed.set)
         }
 
@@ -91,18 +91,18 @@ enum CatalogReviewEngine {
         advisory: FeedAdvisory? = nil,
         catalog: [CatalogFeed] = FeedCatalog.feeds
     ) -> [CatalogFeed] {
-        guard let normalizedURL = AppSettings.normalizeFeedURL(feedURL) else { return [] }
-        let key = AppSettings.feedKey(normalizedURL)
+        guard let normalizedURL = FeedURL.normalizeFeedURL(feedURL) else { return [] }
+        let key = FeedURL.feedKey(normalizedURL)
         if let advisory, !advisory.suggestedAlternativeFeedIDs.isEmpty {
             let targetIDs = Set(advisory.suggestedAlternativeFeedIDs)
-            let matches = catalog.filter { targetIDs.contains($0.id) && AppSettings.feedKey($0.url) != key }
+            let matches = catalog.filter { targetIDs.contains($0.id) && FeedURL.feedKey($0.url) != key }
             if !matches.isEmpty { return matches }
         }
 
         // Fallback: match by the feed's set in the catalog
-        guard let matchingFeed = catalog.first(where: { AppSettings.feedKey($0.url) == key }) else {
+        guard let matchingFeed = catalog.first(where: { FeedURL.feedKey($0.url) == key }) else {
             return []
         }
-        return catalog.filter { $0.set == matchingFeed.set && AppSettings.feedKey($0.url) != key }
+        return catalog.filter { $0.set == matchingFeed.set && FeedURL.feedKey($0.url) != key }
     }
 }

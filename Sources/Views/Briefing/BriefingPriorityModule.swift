@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// Priority developments: impact, momentum, original reports and the reported fact of the most-covered threads (#849).

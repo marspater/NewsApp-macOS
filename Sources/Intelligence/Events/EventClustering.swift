@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// What one pair decision rested on, stored as JSON in `pair_assessments.features` (#551): the cosine, the pair model's
 /// probability when it was asked, the conflict and the shared-evidence counts. Numbers only, no text.

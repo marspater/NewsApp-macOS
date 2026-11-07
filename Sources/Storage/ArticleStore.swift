@@ -14,6 +14,7 @@
 
 import Combine
 import Foundation
+import NewsCore
 import SwiftUI
 import os
 

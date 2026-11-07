@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 // News tension (experiment, #99). The normative text is docs/methodology/tension-index-v1.md; change it and this file
 // together and bump `TensionMethodology.version`. Weights and smoothing come from calibration (#158); `TensionHistory`

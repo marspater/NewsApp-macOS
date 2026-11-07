@@ -14,6 +14,7 @@
 
 import FeedKit
 import Foundation
+import NewsCore
 
 class JSONFeedParser {
     /// Parses a JSON Feed 1.0/1.1 payload into normalized `FeedArticle` items.

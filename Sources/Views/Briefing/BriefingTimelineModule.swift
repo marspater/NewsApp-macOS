@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// Escalation timeline: turning points across the lead story's thread (#850).

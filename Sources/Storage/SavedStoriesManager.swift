@@ -14,6 +14,7 @@
 
 import Combine
 import Foundation
+import NewsCore
 
 /// Manages bookmarked / saved articles in memory for instant reactive UI updates,
 /// backed asynchronously by ArticleStore and SQLite persistence.

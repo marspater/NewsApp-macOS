@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 /// Result of deterministically validating an overview timeline item against evidence passages and rules.
 struct OverviewTimelineValidationResult: Sendable, Equatable {

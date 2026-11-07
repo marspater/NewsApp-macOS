@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// The edition's event threads, most publishers first; executive sitrep, priority developments and source footprint

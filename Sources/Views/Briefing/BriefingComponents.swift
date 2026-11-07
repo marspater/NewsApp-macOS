@@ -19,6 +19,7 @@
 import AppKit
 import Charts
 import Foundation
+import NewsCore
 import SwiftUI
 
 // MARK: - Carousel Clock Protocol & Implementations

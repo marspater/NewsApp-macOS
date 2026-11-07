@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// Weak signals: low-coverage stories that also carry a major rating, a link to a big thread, rising momentum or a

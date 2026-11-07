@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// Builds an event overview's timeline (#143) from verified, passage-anchored facts, without a model.
 ///

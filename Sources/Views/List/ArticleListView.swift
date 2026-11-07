@@ -16,6 +16,7 @@
 // NewsApp Article Grid List View & Navigation Coordinator
 
 import AppKit
+import NewsCore
 import SwiftUI
 
 /// A focused scene value is compared on every view update. Without `Equatable`, SwiftUI compares the closures'

@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 /// Result of deterministically validating an overview perspective against evidence passages and rules.
 struct OverviewPerspectiveValidationResult: Sendable, Equatable {

@@ -16,6 +16,7 @@ import AppKit
 import Combine
 import Foundation
 import NaturalLanguage
+import NewsCore
 import UserNotifications
 import os
 

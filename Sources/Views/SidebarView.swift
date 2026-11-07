@@ -16,6 +16,7 @@
 // NewsApp Sidebar Navigation & Subscription Management
 
 import AppKit
+import NewsCore
 import SwiftUI
 import UniformTypeIdentifiers
 

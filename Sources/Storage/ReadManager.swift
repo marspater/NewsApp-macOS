@@ -14,6 +14,7 @@
 
 import Combine
 import Foundation
+import NewsCore
 
 /// Manages article read states in memory for instant reactive UI updates,
 /// backed asynchronously by ArticleStore and SQLite persistence.

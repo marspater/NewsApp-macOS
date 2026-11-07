@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 #if canImport(FoundationModels)
     import FoundationModels

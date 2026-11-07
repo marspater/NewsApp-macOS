@@ -14,6 +14,7 @@
 
 import AppKit
 import Combine
+import NewsCore
 import SwiftUI
 import UserNotifications
 import os

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import NewsCore
 import SwiftUI
 
 /// One line of operational feed health. Wording and color describe availability and content only, never trustworthiness.

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// The top stories of the edition, one at a time over their best image (DESIGN.md 8.4). The app's only auto-advancing

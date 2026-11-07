@@ -36,7 +36,7 @@ struct CatalogFeed: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let publisher: String
-    /// Already in `AppSettings.normalizeFeedURL` form, so subscribed state compares by plain equality.
+    /// Already in `FeedURL.normalizeFeedURL` form, so subscribed state compares by plain equality.
     let url: String
     /// BCP 47 language code of the feed content.
     let language: String
@@ -185,9 +185,9 @@ enum FeedCatalog {
 
     /// The active maintainer advisory for a feed URL, if one is registered.
     static func advisory(for url: String) -> FeedAdvisory? {
-        guard let normalized = AppSettings.normalizeFeedURL(url) else { return nil }
+        guard let normalized = FeedURL.normalizeFeedURL(url) else { return nil }
         // Keys carry no trailing slash, so a slash variant of a subscription finds its advisory.
-        return advisoriesByURL[AppSettings.feedKey(normalized)]
+        return advisoriesByURL[FeedURL.feedKey(normalized)]
     }
 
     /// Alternative catalog feeds for a subscription or catalog source.

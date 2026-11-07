@@ -35,7 +35,7 @@ while read -r file; do
             grep -qxF "$file" <<< "$atoms" || exec script/test_atoms.sh
             selected+="$file"$'\n'
             ;;
-        Sources/*.swift)
+        Sources/*.swift | NewsCore/*.swift)
             type=$(basename "$file" .swift)
             type=${type%%+*}
             # shellcheck disable=SC2086 # atom paths have no spaces

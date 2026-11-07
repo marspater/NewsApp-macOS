@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import AppKit
+import NewsCore
 import SwiftUI
 import UniformTypeIdentifiers
 

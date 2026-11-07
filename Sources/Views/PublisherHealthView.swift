@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import NewsCore
 import SwiftUI
 
 /// The Publisher Health sheet, opened from Settings → Subscriptions (#715): one sortable row per feed. It describes

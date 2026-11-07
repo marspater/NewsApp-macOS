@@ -14,6 +14,7 @@
 
 import AppKit
 import Foundation
+import NewsCore
 import QuickLookUI
 
 extension Notification.Name {

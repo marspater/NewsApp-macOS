@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 /// Cheap, deterministic signals for finding articles that may report the same event. They only
 /// narrow the search; whether two articles describe one event is decided by the matcher.

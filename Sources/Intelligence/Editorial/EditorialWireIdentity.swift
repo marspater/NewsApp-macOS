@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// One stored article as the identity mapping reads it. `fetchedAt` is when News first stored it.
 struct WireIdentityArticle: Sendable {

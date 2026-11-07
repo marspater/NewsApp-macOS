@@ -16,6 +16,7 @@
 // NewsApp Article Detail Reading Experience & Native Toolbar
 
 import AppKit
+import NewsCore
 import SwiftUI
 
 struct ArticleDetailView: View {

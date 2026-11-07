@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// Result of deterministically validating an overview thematic angle against evidence passages and rules.
 struct OverviewThematicAngleValidationResult: Sendable, Equatable {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// Forward watch: scheduled, expected and conditional items stated in cited reporting, in the publisher's words

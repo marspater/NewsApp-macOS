@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 /// Ground-truth classification of journalistic tone for corpus evaluation.
 public enum JournalisticToneGroundTruth: String, Sendable, Codable, Equatable {

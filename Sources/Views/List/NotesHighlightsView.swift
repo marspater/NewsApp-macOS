@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import NewsCore
 import SwiftUI
 
 /// Library › Notes & Highlights: every highlight and note, newest first, searchable (V1 #711).

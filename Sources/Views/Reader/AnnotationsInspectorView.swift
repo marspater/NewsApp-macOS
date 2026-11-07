@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import NewsCore
 import SwiftUI
 
 /// Trailing inspector with the highlights and notes of the story in the reader (V1 #711).

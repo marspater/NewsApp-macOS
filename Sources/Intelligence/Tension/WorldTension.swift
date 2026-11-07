@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import Observation
 
 enum WorldTensionFactor: String, CaseIterable, Codable, Sendable {

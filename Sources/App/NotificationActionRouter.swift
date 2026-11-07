@@ -15,6 +15,7 @@
 import AppKit
 import Combine
 import Foundation
+import NewsCore
 import UserNotifications
 
 /// Notification category and action identifiers for interactive story alerts (#560).

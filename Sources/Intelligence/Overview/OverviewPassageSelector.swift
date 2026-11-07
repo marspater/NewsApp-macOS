@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 /// Manages context token budgeting for on-device event overview generation.
 /// Differentiates tokens from raw character counts, reserving budget for instructions, schema, and response.

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import NewsCore
 import SwiftUI
 
 /// The first-launch flow (#562): one step per screen (`OnboardingStep`), with Back and Continue. It shows once;

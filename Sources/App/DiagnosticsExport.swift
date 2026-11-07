@@ -15,6 +15,7 @@
 import AppKit
 import CoreSpotlight
 import Foundation
+import NewsCore
 import OSLog
 import UniformTypeIdentifiers
 import UserNotifications

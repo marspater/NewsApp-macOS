@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// Stored numbers behind the Publisher Health inspector (#715).
 extension DatabaseEngine {

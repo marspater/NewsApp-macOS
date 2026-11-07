@@ -16,6 +16,7 @@
 // NewsApp Event Card & Source List
 
 import AppKit
+import NewsCore
 import SwiftUI
 
 /// One card for a confirmed event: the representative story as an ordinary card, with the event's coverage row

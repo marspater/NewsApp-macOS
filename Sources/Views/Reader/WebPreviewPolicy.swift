@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import NewsCore
 import WebKit
 
 /// WebKit implicitly bypasses native proxies for local destinations. Block those URL

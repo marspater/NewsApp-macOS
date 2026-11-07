@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SwiftUI
 
 /// Source footprint: where the lead thread's publishers come from and how many carry wire copy (#849).

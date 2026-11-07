@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 /// One sitrep sentence per thread (#849). The on-device model may restate the thread's top highlights in one sentence;
 /// a sentence that is too long, carries a link or names anything the highlights do not is dropped for the first

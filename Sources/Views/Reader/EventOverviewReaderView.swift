@@ -16,6 +16,7 @@
 // NewsApp Event Overview Reader Mode & Source Navigation
 
 import AppKit
+import NewsCore
 import SwiftUI
 
 /// Native SwiftUI reader view for multi-source event overviews.

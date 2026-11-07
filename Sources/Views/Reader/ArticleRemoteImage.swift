@@ -15,6 +15,7 @@
 // ArticleRemoteImage.swift
 // Remote images loaded through the protected reader image path
 
+import NewsCore
 import SwiftUI
 
 extension Notification.Name {

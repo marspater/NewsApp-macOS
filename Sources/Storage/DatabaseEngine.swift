@@ -14,6 +14,7 @@
 
 import Accelerate
 import Foundation
+import NewsCore
 import SQLite3
 import os
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import os
 
 /// Priority levels for enrichment jobs.

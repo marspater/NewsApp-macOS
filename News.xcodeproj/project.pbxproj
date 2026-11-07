@@ -17,7 +17,22 @@
 		0A0000000000000000000037 /* NewsParsingDependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000063 /* NewsParsingDependencies */; };
 		0A0000000000000000000038 /* NewsParsingDependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000062 /* NewsParsingDependencies */; };
 		0A0000000000000000000080 /* NewsParsingDependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000081 /* NewsParsingDependencies */; };
+		0A0000000000000000000091 /* libNewsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000090 /* libNewsCore.a */; };
+		0A0000000000000000000092 /* libNewsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000090 /* libNewsCore.a */; };
+		0A0000000000000000000093 /* libNewsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000090 /* libNewsCore.a */; };
+		0A0000000000000000000094 /* libNewsCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000090 /* libNewsCore.a */; };
+		0A0000000000000000000095 /* NewsParsingDependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000096 /* NewsParsingDependencies */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0A000000000000000000009F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0A0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0A000000000000000000009A;
+			remoteInfo = NewsCore;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0A0000000000000000000020 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = AppIcon.icon; path = Assets/AppIcon.icon; sourceTree = "<group>"; };
@@ -29,6 +44,7 @@
 		0A0000000000000000000026 /* NewsTestRunner */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = NewsTestRunner; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000000000000000000027 /* NewsHarness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NewsHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000000000000000000082 /* NewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0A0000000000000000000090 /* libNewsCore.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libNewsCore.a; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -124,6 +140,11 @@
 			path = Tests;
 			sourceTree = "<group>";
 		};
+		0A00000000000000000000A2 /* NewsCore */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = NewsCore;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -131,6 +152,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0A0000000000000000000091 /* libNewsCore.a in Frameworks */,
 				0A0000000000000000000033 /* NewsParsingDependencies in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -139,6 +161,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0A0000000000000000000092 /* libNewsCore.a in Frameworks */,
 				0A0000000000000000000038 /* NewsParsingDependencies in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -147,6 +170,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0A0000000000000000000093 /* libNewsCore.a in Frameworks */,
 				0A0000000000000000000037 /* NewsParsingDependencies in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -155,7 +179,16 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0A0000000000000000000094 /* libNewsCore.a in Frameworks */,
 				0A0000000000000000000080 /* NewsParsingDependencies in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0A000000000000000000009B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0A0000000000000000000095 /* NewsParsingDependencies in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -167,6 +200,7 @@
 			children = (
 				0A0000000000000000000010 /* Sources */,
 				0A0000000000000000000011 /* Tests */,
+				0A00000000000000000000A2 /* NewsCore */,
 				0A0000000000000000000020 /* AppIcon.icon */,
 				0A0000000000000000000021 /* Info.plist */,
 				0A0000000000000000000022 /* News.entitlements */,
@@ -183,6 +217,7 @@
 				0A0000000000000000000026 /* NewsTestRunner */,
 				0A0000000000000000000027 /* NewsHarness.app */,
 				0A0000000000000000000082 /* NewsTests.xctest */,
+				0A0000000000000000000090 /* libNewsCore.a */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -201,6 +236,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				0A000000000000000000009C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0A0000000000000000000010 /* Sources */,
@@ -223,6 +259,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				0A000000000000000000009C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0A0000000000000000000010 /* Sources */,
@@ -247,6 +284,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				0A000000000000000000009C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0A0000000000000000000010 /* Sources */,
@@ -270,6 +308,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				0A000000000000000000009C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				0A0000000000000000000010 /* Sources */,
@@ -282,6 +321,28 @@
 			productName = NewsTests;
 			productReference = 0A0000000000000000000082 /* NewsTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		0A000000000000000000009A /* NewsCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A000000000000000000009D /* Build configuration list for PBXNativeTarget "NewsCore" */;
+			buildPhases = (
+				0A000000000000000000009E /* Sources */,
+				0A000000000000000000009B /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				0A00000000000000000000A2 /* NewsCore */,
+			);
+			name = NewsCore;
+			packageProductDependencies = (
+				0A0000000000000000000096 /* NewsParsingDependencies */,
+			);
+			productName = NewsCore;
+			productReference = 0A0000000000000000000090 /* libNewsCore.a */;
+			productType = "com.apple.product-type.library.static";
 		};
 /* End PBXNativeTarget section */
 
@@ -302,6 +363,9 @@
 						CreatedOnToolsVersion = 27.0;
 					};
 					0A000000000000000000008A = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					0A000000000000000000009A = {
 						CreatedOnToolsVersion = 27.0;
 					};
 				};
@@ -327,6 +391,7 @@
 				0A0000000000000000000041 /* NewsTestRunner */,
 				0A0000000000000000000042 /* NewsHarness */,
 				0A000000000000000000008A /* NewsTests */,
+				0A000000000000000000009A /* NewsCore */,
 			);
 		};
 /* End PBXProject section */
@@ -383,7 +448,21 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0A000000000000000000009E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+/* Begin PBXTargetDependency section */
+		0A000000000000000000009C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0A000000000000000000009A /* NewsCore */;
+			targetProxy = 0A000000000000000000009F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		0A0000000000000000000071 /* Debug */ = {
@@ -409,6 +488,7 @@
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_PACKAGE_NAME = News;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
@@ -436,6 +516,7 @@
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
 				SWIFT_COMPILATION_MODE = singlefile;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_PACKAGE_NAME = News;
 				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
@@ -577,6 +658,24 @@
 			};
 			name = Release;
 		};
+		0A00000000000000000000A0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_MODULE_NAME = NewsCore;
+				PRODUCT_NAME = NewsCore;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		0A00000000000000000000A1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_MODULE_NAME = NewsCore;
+				PRODUCT_NAME = NewsCore;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -625,6 +724,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		0A000000000000000000009D /* Build configuration list for PBXNativeTarget "NewsCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A00000000000000000000A0 /* Debug */,
+				0A00000000000000000000A1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -648,6 +756,10 @@
 			productName = NewsParsingDependencies;
 		};
 		0A0000000000000000000081 /* NewsParsingDependencies */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = NewsParsingDependencies;
+		};
+		0A0000000000000000000096 /* NewsParsingDependencies */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = NewsParsingDependencies;
 		};

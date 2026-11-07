@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 struct KnowledgeExportQuote: Sendable {
     let text: String

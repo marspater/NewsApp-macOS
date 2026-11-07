@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import SQLite3
 
 /// One event of a saved Briefing edition, as "Since your last briefing" compares it.

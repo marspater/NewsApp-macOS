@@ -15,6 +15,7 @@
 // UpdateChecker.swift
 
 import Foundation
+import NewsCore
 import os
 
 #if canImport(AppKit)

@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 /// Extracts structured, evidence-backed Industry Impact entries strictly from verified passages (Epic T, #670).
 /// Enforces:

@@ -116,14 +116,14 @@ case "$MODE" in
         fi
         ;;
     --all)
-        echo "🎨 Formatting all Swift files in Sources and Tests..."
+        echo "🎨 Formatting all Swift files in Sources, NewsCore and Tests..."
         # One process across all cores; one swift-format launch per file took several times longer.
-        $SWIFT_FORMAT format -i --parallel -r "${CONFIG_ARG[@]}" Sources Tests
+        $SWIFT_FORMAT format -i --parallel -r "${CONFIG_ARG[@]}" Sources NewsCore Tests
         echo "✅ Finished formatting all Swift files."
         ;;
     --check|--lint-all)
-        echo "🔍 Linting all Swift files in Sources and Tests..."
-        $SWIFT_FORMAT lint -s --parallel -r "${CONFIG_ARG[@]}" Sources Tests
+        echo "🔍 Linting all Swift files in Sources, NewsCore and Tests..."
+        $SWIFT_FORMAT lint -s --parallel -r "${CONFIG_ARG[@]}" Sources NewsCore Tests
         echo "✅ All Swift files pass formatting lint."
         ;;
     "")

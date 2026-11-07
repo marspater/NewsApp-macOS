@@ -14,6 +14,7 @@
 
 import Foundation
 import NaturalLanguage
+import NewsCore
 
 // MARK: - Generated Text Fidelity (#951)
 

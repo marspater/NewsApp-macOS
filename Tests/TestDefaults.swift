@@ -13,6 +13,8 @@
 // limitations under the License.
 
 import Foundation
+// Every test target links NewsCore and compiles this file; the re-export makes its types visible to every test file.
+@_exported import NewsCore
 
 /// A unique defaults suite whose plist lives in the temporary directory. A plain suite name
 /// is stored in Library/Preferences, where cfprefsd rewrites an empty plist seconds after a

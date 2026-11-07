@@ -17,6 +17,7 @@
 
 import AppKit
 import CoreSpotlight
+import NewsCore
 import SwiftUI
 import UniformTypeIdentifiers
 

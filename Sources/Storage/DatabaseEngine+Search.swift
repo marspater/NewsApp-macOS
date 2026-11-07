@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 
 // MARK: - DatabaseEngine Hybrid Search (#708)
 

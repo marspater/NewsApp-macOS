@@ -14,6 +14,7 @@
 
 import CoreSpotlight
 import Foundation
+import NewsCore
 import UniformTypeIdentifiers
 import os
 

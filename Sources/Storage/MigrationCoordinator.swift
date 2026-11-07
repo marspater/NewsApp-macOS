@@ -13,6 +13,7 @@
 // limitations under the License.
 
 import Foundation
+import NewsCore
 import os
 
 /// Structured statistics describing the result of a legacy data migration.

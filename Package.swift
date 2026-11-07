@@ -36,10 +36,12 @@ let package = Package(
             ],
             path: "BuildSupport"
         ),
+        .target(name: "NewsCore", dependencies: ["NewsParsingDependencies"], path: "NewsCore"),
         .executableTarget(
             name: "News",
             dependencies: [
-                .product(name: "SwiftSoup", package: "SwiftSoup"), .product(name: "FeedKit", package: "FeedKit"),
+                "NewsCore", .product(name: "SwiftSoup", package: "SwiftSoup"),
+                .product(name: "FeedKit", package: "FeedKit"),
             ],
             path: "Sources",
             resources: [.copy("ThirdPartyNotices.txt"), .copy("Resources")]

@@ -26,6 +26,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import NewsCore
 import SwiftUI
 
 /// Modal sheet for creating and editing user-defined Smart Binders (DESIGN.md §4, §8.6).

@@ -16,6 +16,7 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
 import ImageIO
+import NewsCore
 import UniformTypeIdentifiers
 import UserNotifications
 
