@@ -27,11 +27,14 @@ News is a native, local-first RSS, Atom, and JSON Feed reader built with SwiftUI
 
 ### 2.1 Targets & Schemes
 
-Three targets, each with a shared scheme of the same name, over the synchronized `Sources/` folder (no per-file project entries):
+Four targets over the synchronized `Sources/` folder (no per-file project entries); the first three have a shared scheme of the same name, and the `News` scheme's test action runs the fourth:
 
 1. **`News`** (app): every file under `Sources/`, `Info.plist`, `News.entitlements`, `Assets/AppIcon.icon`, `container-migration.plist`, `PrivacyInfo.xcprivacy` and the `Sources/Resources/CoreML` folder; App Intents metadata is extracted by Xcode. The scheme runs, profiles and archives it. Debug builds use the development identifier `com.marspater.news.dev` and leave `container-migration.plist` out, so a run from Xcode neither opens nor moves the real library; Release builds use `com.marspater.news`.
 2. **`NewsTestRunner`** (command-line tool): `Sources/` without `App/Main.swift`, `App/NewsApp.swift` and the five window-level views (`MainView`, `SidebarView`, `OnboardingView`, `ArticleListView`, `EventCardView`, whose command builders need Swift 6 mode on Xcode 26.6; `Tests/ReaderCommandNames.swift` supplies the command names), plus every `Tests/*.swift` outside `Harness/` and `Fixtures/`; `Tests/Runner.swift` is its entry point and `NEWS_TEST_ATOM` selects one file's tests. Swift 5 language mode, as the suites are written.
 3. **`NewsHarness`** (app): the app's files without `App/Main.swift` and `container-migration.plist`, plus `Tests/TestDefaults.swift` and the entry file(s) `NEWS_HARNESS` names under `Tests/Harness/` (`INCLUDED_SOURCE_FILE_NAMES`); the QA and baseline scripts build it through `build.sh`. Unsandboxed, so a harness writes its evidence where its script says; `NEWS_HARNESS_SANDBOX=1` signs it with `News.entitlements` for the modes that reuse the production sandbox (the reading workload, the notification QA).
+4. **`NewsTests`** (Swift Testing bundle, no host app): `Sources/` with the runner's exclusions plus `Tests/Native/*`, Swift 5 language mode; the suites sit under one `.serialized` parent (`Tests/Native/NativeExpectations.swift`). `xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' -only-testing:NewsTests` runs it and GitHub CI keeps the `.xcresult` (#1109).
+
+`NewsTests` is the native verification path: each domain ported there under #1070 reports per-test results in Xcode and in the result bundle. `NewsTestRunner` remains the gate for every domain not yet ported, the CLI modes (`./test.sh` atoms, the corpus check) and the self-checks `test.sh` runs before the compile; a domain's runner copy is deleted once CI shows parity. Each of the four targets compiles `Sources/` itself, so the bundle costs a full compile in CI; build times are measured as `docs/audits/2026-11-07-build-measurement-protocol.md` describes. `script/xcode_build.sh` keeps the full `xcodebuild` transcript of each target in `build/xcodebuild-<target>.log`.
 
 ### 2.2 Build Settings
 
@@ -40,7 +43,7 @@ The project sets, for every target:
 ```xcconfig
 MACOSX_DEPLOYMENT_TARGET = 15.0   // build scripts pass TARGET_MACOS
 ARCHS = arm64
-SWIFT_VERSION = 6.0               // 5.0 for NewsTestRunner
+SWIFT_VERSION = 6.0               // 5.0 for NewsTestRunner and NewsTests
 SWIFT_OPTIMIZATION_LEVEL[config=Debug] = -Onone
 SWIFT_OPTIMIZATION_LEVEL[config=Release] = -O
 SWIFT_COMPILATION_MODE[config=Release] = singlefile   // build_release.sh overrides wholemodule
