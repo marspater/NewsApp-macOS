@@ -35,7 +35,7 @@ import dnssd
 
 extension NativeSuites {
     /// The runner's FeedParsingTests atom, test by test (#1070); the runner copy stays until CI shows parity.
-    @Suite(.tags(.feedParsing)) struct FeedParsingSuite {
+    @Suite(.tags(.feedParsing, .integration)) struct FeedParsingSuite {
         @Test func feedErrorHierarchy() async throws { try await Self.testFeedErrorHierarchy() }
         @Test func dateParsing() async throws { try await Self.testDateParsing() }
         @Test func conditionalFeedRequests() async throws {

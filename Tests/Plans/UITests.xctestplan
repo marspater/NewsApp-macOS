@@ -1,0 +1,23 @@
+{
+  "configurations": [
+    {
+      "id": "5E7A1D00-0000-4000-8000-000000000004",
+      "name": "UITests",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "codeCoverage": false
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:News.xcodeproj",
+        "identifier": "0A0000000000000000000096",
+        "name": "NewsUITests"
+      }
+    }
+  ],
+  "version": 1
+}
