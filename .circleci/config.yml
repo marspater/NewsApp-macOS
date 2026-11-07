@@ -44,9 +44,17 @@ jobs:
       - run:
           name: "Run unit tests and regressions via Smarter Testing"
           command: circleci testsuite run "unit tests"
+      # Native Swift Testing target (#1070), as on GitHub Actions; it holds the publisher-excerpt checks (#577).
       - run:
-          name: "Verify publisher excerpts"
-          command: NEWS_CONFIGURATION=Debug NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
+          name: "Run native tests"
+          command: |
+            set -o pipefail
+            xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+              -derivedDataPath build/DerivedData -only-testing:NewsTests \
+              -resultBundlePath build/ci/NewsTests.xcresult -quiet
+      - store_artifacts:
+          path: build/ci/NewsTests.xcresult
+          destination: native-tests-xcresult
       - run:
           name: "Verify Swift Package Manager build"
           command: swift build --force-resolved-versions --target News

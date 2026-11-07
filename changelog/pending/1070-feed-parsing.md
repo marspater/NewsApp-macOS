@@ -1,0 +1,1 @@
+- Ports the feed-parsing atom (23 tests) and the deterministic publisher-excerpt checks (9 tests) to the native Swift Testing target, and tags the native suites by domain.
