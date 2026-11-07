@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>UI Smoke Wire</title>
+    <link>https://example.com/</link>
+    <description>Fixed stories for the NewsUITests smoke flows (#1070).</description>
+    <item>
+      <title>Harbor Council Approves Lighthouse Restoration Plan</title>
+      <link>https://example.com/news/lighthouse-restoration</link>
+      <guid>https://example.com/news/lighthouse-restoration</guid>
+      <pubDate>{{PUBDATE}}</pubDate>
+      <category>Science</category>
+      <description>The council voted to restore the old lighthouse on the north pier, with work starting in spring.</description>
+    </item>
+    <item>
+      <title>Regional Orchestra Announces Free Summer Concert Series</title>
+      <link>https://example.com/news/summer-concerts</link>
+      <guid>https://example.com/news/summer-concerts</guid>
+      <pubDate>{{PUBDATE}}</pubDate>
+      <category>Entertainment</category>
+      <description>Six open-air concerts will take place in the city park from June to August.</description>
+    </item>
+  </channel>
+</rss>

@@ -29,6 +29,7 @@
 		0A0000000000000000000026 /* NewsTestRunner */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = NewsTestRunner; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000000000000000000027 /* NewsHarness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NewsHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0A0000000000000000000082 /* NewsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NewsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0A0000000000000000000090 /* NewsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NewsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -91,6 +92,13 @@
 			);
 			target = 0A000000000000000000008A /* NewsTests */;
 		};
+		0A0000000000000000000091 /* Exceptions for "Tests" folder in "NewsUITests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Fixtures,
+			);
+			target = 0A0000000000000000000096 /* NewsUITests */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -115,6 +123,7 @@
 				0A0000000000000000000014 /* Exceptions for "Tests" folder in "NewsTestRunner" target */,
 				0A0000000000000000000015 /* Exceptions for "Tests" folder in "NewsHarness" target */,
 				0A0000000000000000000084 /* Exceptions for "Tests" folder in "NewsTests" target */,
+				0A0000000000000000000091 /* Exceptions for "Tests" folder in "NewsUITests" target */,
 			);
 			explicitFileTypes = {
 			};
@@ -125,6 +134,16 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		0A0000000000000000000094 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0A0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0A0000000000000000000040;
+			remoteInfo = News;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		0A0000000000000000000051 /* Frameworks */ = {
@@ -159,6 +178,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0A0000000000000000000092 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -183,6 +209,7 @@
 				0A0000000000000000000026 /* NewsTestRunner */,
 				0A0000000000000000000027 /* NewsHarness.app */,
 				0A0000000000000000000082 /* NewsTests.xctest */,
+				0A0000000000000000000090 /* NewsUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -283,6 +310,26 @@
 			productReference = 0A0000000000000000000082 /* NewsTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		0A0000000000000000000096 /* NewsUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A0000000000000000000097 /* Build configuration list for PBXNativeTarget "NewsUITests" */;
+			buildPhases = (
+				0A0000000000000000000093 /* Sources */,
+				0A0000000000000000000092 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				0A0000000000000000000095 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				0A0000000000000000000011 /* Tests */,
+			);
+			name = NewsUITests;
+			productName = NewsUITests;
+			productReference = 0A0000000000000000000090 /* NewsUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -303,6 +350,10 @@
 					};
 					0A000000000000000000008A = {
 						CreatedOnToolsVersion = 27.0;
+					};
+					0A0000000000000000000096 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 0A0000000000000000000040;
 					};
 				};
 			};
@@ -327,6 +378,7 @@
 				0A0000000000000000000041 /* NewsTestRunner */,
 				0A0000000000000000000042 /* NewsHarness */,
 				0A000000000000000000008A /* NewsTests */,
+				0A0000000000000000000096 /* NewsUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -383,7 +435,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		0A0000000000000000000093 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0A0000000000000000000095 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 0A0000000000000000000040 /* News */;
+			targetProxy = 0A0000000000000000000094 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		0A0000000000000000000071 /* Debug */ = {
@@ -489,6 +556,7 @@
 				EXCLUDED_SOURCE_FILE_NAMES = (
 					"Tests/Harness/*",
 					"Tests/Native/*",
+					"Tests/UITests/*",
 				);
 				PRODUCT_NAME = NewsTestRunner;
 				SWIFT_VERSION = 5.0;
@@ -502,6 +570,7 @@
 				EXCLUDED_SOURCE_FILE_NAMES = (
 					"Tests/Harness/*",
 					"Tests/Native/*",
+					"Tests/UITests/*",
 				);
 				PRODUCT_NAME = NewsTestRunner;
 				SWIFT_VERSION = 5.0;
@@ -515,7 +584,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* container-migration.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* Tests/UITests/* container-migration.plist";
 				GENERATE_INFOPLIST_FILE = NO;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/TestDefaults.swift $(NEWS_HARNESS)";
 				INFOPLIST_FILE = Info.plist;
@@ -537,7 +606,7 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* container-migration.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* Tests/UITests/* container-migration.plist";
 				GENERATE_INFOPLIST_FILE = NO;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/TestDefaults.swift $(NEWS_HARNESS)";
 				INFOPLIST_FILE = Info.plist;
@@ -556,7 +625,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/*";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/* Tests/UITests/*";
 				GENERATE_INFOPLIST_FILE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
@@ -569,11 +638,37 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/*";
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/* Tests/UITests/*";
 				GENERATE_INFOPLIST_FILE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
 				PRODUCT_NAME = NewsTests;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		0A0000000000000000000098 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/*";
+				GENERATE_INFOPLIST_FILE = YES;
+				INCLUDED_SOURCE_FILE_NAMES = "Tests/UITests/*";
+				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
+				PRODUCT_NAME = NewsUITests;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		0A0000000000000000000099 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/*";
+				GENERATE_INFOPLIST_FILE = YES;
+				INCLUDED_SOURCE_FILE_NAMES = "Tests/UITests/*";
+				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
+				PRODUCT_NAME = NewsUITests;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -622,6 +717,15 @@
 			buildConfigurations = (
 				0A0000000000000000000088 /* Debug */,
 				0A0000000000000000000089 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		0A0000000000000000000097 /* Build configuration list for PBXNativeTarget "NewsUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A0000000000000000000098 /* Debug */,
+				0A0000000000000000000099 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
