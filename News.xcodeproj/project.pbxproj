@@ -657,7 +657,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
 				PRODUCT_NAME = NewsUITests;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = News;
 			};
 			name = Debug;
 		};
@@ -671,7 +670,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
 				PRODUCT_NAME = NewsUITests;
 				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = News;
 			};
 			name = Release;
 		};

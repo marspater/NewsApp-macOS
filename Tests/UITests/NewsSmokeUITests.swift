@@ -43,11 +43,15 @@ final class NewsSmokeUITests: XCTestCase {
             .replacingOccurrences(of: "{{PUBDATE}}", with: formatter.string(from: Date()))
     }
 
+    /// The Debug app built beside the test runner (`NewsUITests-Runner.app`).
+    static let newsAppURL = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("News.app")
+
     var app: XCUIApplication!
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        app = XCUIApplication()
+        // Launched by URL: TEST_TARGET_NAME = News resolved to the package's `News` executable, not News.app.
+        app = XCUIApplication(url: Self.newsAppURL)
         app.launchEnvironment["NEWS_LIBRARY_NAME"] = Self.libraryName
         app.launchEnvironment["NEWS_FIXTURE_FEED"] = try Self.fixtureFeed()
         // Argument-domain defaults: they win over the development container's stored settings without changing them.
@@ -59,7 +63,7 @@ final class NewsSmokeUITests: XCTestCase {
         app.launch()
 
         // The app under test must be the development build, never the release app (`com.marspater.news`).
-        let info = Bundle(url: Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("News.app"))
+        let info = Bundle(url: Self.newsAppURL)
         XCTAssertEqual(info?.bundleIdentifier, "com.marspater.news.dev")
 
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 30), "The main window did not appear")

@@ -108,14 +108,9 @@ jobs:
       - name: Run UI Tests
         run: |
           set -o pipefail
-          xcodebuild build-for-testing -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-            -derivedDataPath build/DerivedData -only-testing:NewsUITests -quiet
-          # The app the UI tests launch; a missing News.app here explains a "bundle identifier for News" error.
-          xctestrun=$(ls -t build/DerivedData/Build/Products/*.xctestrun | head -1)
-          plutil -p "$xctestrun" | grep -E 'UITargetAppPath|TestHostPath'
-          ls build/DerivedData/Build/Products/Debug
-          xcodebuild test-without-building -xctestrun "$xctestrun" -destination 'platform=macOS' \
-            -only-testing:NewsUITests -resultBundlePath "$RUNNER_TEMP/NewsUITests.xcresult" -quiet
+          xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -only-testing:NewsUITests \
+            -resultBundlePath "$RUNNER_TEMP/NewsUITests.xcresult" -quiet
 
       - name: Upload UI Test Results
         if: always()
