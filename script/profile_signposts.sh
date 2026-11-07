@@ -42,7 +42,12 @@ if [[ "${PROFILE_DRY_RUN:-0}" == 1 ]]; then
 fi
 
 # xctrace exits non-zero when the time limit ends the launched process; the trace is still complete.
-"${RECORD[@]}" || [[ -d "$OUTPUT/News.trace" ]]
+STATUS=0
+"${RECORD[@]}" || STATUS=$?
+if [[ $STATUS -ne 0 ]]; then
+    [[ -d "$OUTPUT/News.trace" ]] || { echo "❌ xctrace exited $STATUS and wrote no trace" >&2; exit 1; }
+    echo "xctrace exited $STATUS; using the trace it wrote (expected when the time limit ends the app)" >&2
+fi
 # The table of contents names every exported table, so a renamed schema shows up in the artifact.
 xcrun xctrace export --input "$OUTPUT/News.trace" --toc --output "$OUTPUT/toc.xml"
 xcrun xctrace export --input "$OUTPUT/News.trace" \

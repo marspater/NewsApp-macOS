@@ -18,7 +18,11 @@ def rows(path):
     node = root.find(".//node")
     if node is None:
         return
-    columns = [col.findtext("mnemonic") for col in node.find("schema").findall("col")]
+    schema = node.find("schema")
+    columns = [col.findtext("mnemonic") for col in schema.findall("col")] if schema is not None else []
+    missing = {"duration", "subsystem", "category", "name"} - set(columns)
+    if missing:
+        sys.exit(f"Columns {sorted(missing)} missing in {path}; check the schema in toc.xml")
     by_id = {}
     for element in node.iter():
         if "id" in element.attrib:
