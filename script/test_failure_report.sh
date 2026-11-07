@@ -5,10 +5,15 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/news-failure-report.XXXXXX")
-trap 'rm -rf "$WORK" "$HOME/Library/Caches/test_runner" "$HOME/Library/HTTPStorages/test_runner"' EXIT
+# A built runner is named after this run, as ./test.sh names its own, so cleanup never touches another run's state;
+# a supplied runner's Library state stays the caller's.
+NAME="test_runner.${WORK##*.}"
+trap 'rm -rf "$WORK"' EXIT
 RUNNER="${1:-}"
 if [[ -z "$RUNNER" ]]; then
-    RUNNER="$WORK/test_runner"
+    RUNNER="$WORK/$NAME"
+    trap 'rm -rf "$WORK" "$HOME/Library/Caches/$NAME" "$HOME/Library/HTTPStorages/$NAME" \
+        "$HOME/Library/Preferences/$NAME.plist"' EXIT
     script/build_test_runner.sh "$RUNNER" > "$WORK/build.log" 2>&1 || { tail -40 "$WORK/build.log"; exit 1; }
 fi
 NEWS_TEST_ATOM=failure-report-self-check "$RUNNER" > "$WORK/out.log" 2>&1
