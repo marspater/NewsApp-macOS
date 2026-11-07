@@ -62,7 +62,7 @@ jobs:
         run: |
           set -o pipefail
           TEST_RUNNER_NEWS_PERFORMANCE_TESTS=1 xcodebuild test -project News.xcodeproj -scheme News \
-            -destination 'platform=macOS' -derivedDataPath build/DerivedData \
+            -testPlan UITests -destination 'platform=macOS' -derivedDataPath build/DerivedData \
             -only-testing:NewsUITests/NewsPerformanceTests \
             -resultBundlePath "$RUNNER_TEMP/NewsPerformanceTests.xcresult" -quiet
 
