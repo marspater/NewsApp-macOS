@@ -171,10 +171,18 @@
         /// Previews have nowhere to navigate, so every action does nothing.
         static var briefingActions: BriefingActions {
             BriefingActions(
-                onOpenArticle: { _ in /* No navigation in a preview. */ },
-                onOpenEvent: { _ in /* No navigation in a preview. */ },
-                onStartNewBriefing: { /* No new edition in a preview. */  },
-                onBackToToday: { /* No navigation in a preview. */  })
+                onOpenArticle: { _ in
+                    // No navigation in a preview.
+                },
+                onOpenEvent: { _ in
+                    // No navigation in a preview.
+                },
+                onStartNewBriefing: {
+                    // No new edition in a preview.
+                },
+                onBackToToday: {
+                    // No navigation in a preview.
+                })
         }
 
         /// Never wakes, so the hero carousel holds its first story.
@@ -213,7 +221,10 @@
             store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
             feedManager = FeedManager(
                 settings: settings, store: store, schedulesRefresh: false,
-                fetchBatch: { _, _ in [] }, notifyBatch: { _, _ in /* Previews post no notifications. */ },
+                fetchBatch: { _, _ in [] },
+                notifyBatch: { _, _ in
+                    // Previews post no notifications.
+                },
                 allowsBackgroundWork: { false })
             readManager = ReadManager(articleStore: store)
             savedStories = SavedStoriesManager(articleStore: store)
