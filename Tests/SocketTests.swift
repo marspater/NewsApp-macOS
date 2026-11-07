@@ -176,17 +176,20 @@ extension NewsTests {
             }
         }
         for listener in [silent, upstream] {
+            let operation = "listener start (\(listener === silent ? "silent" : "upstream"), port .any)"
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 let once = SocketObservation()
                 listener.stateUpdateHandler = { state in
                     if case .ready = state, once.claim() { continuation.resume() }
-                    if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
+                    if case .failed(let error) = state, once.claim() {
+                        continuation.resume(throwing: loopbackFailure(operation, error))
+                    }
                 }
                 let queue = listener === silent ? silentQueue : upstreamQueue
                 queue.asyncAfter(deadline: .now() + 5) {
                     if once.claim() {
                         listener.cancel()
-                        continuation.resume(throwing: LoopbackTimeout())
+                        continuation.resume(throwing: loopbackFailure(operation, LoopbackTimeout()))
                     }
                 }
                 listener.start(queue: queue)
@@ -274,16 +277,19 @@ extension NewsTests {
             connection.start(queue: queue)
             holdCancellationResponse(connection, ready: ready, closed: closed)
         }
+        let operation = "listener start (cancellation upstream, port .any)"
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let once = SocketObservation()
             upstream.stateUpdateHandler = { state in
                 if case .ready = state, once.claim() { continuation.resume() }
-                if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
+                if case .failed(let error) = state, once.claim() {
+                    continuation.resume(throwing: loopbackFailure(operation, error))
+                }
             }
             queue.asyncAfter(deadline: .now() + 5) {
                 if once.claim() {
                     upstream.cancel()
-                    continuation.resume(throwing: LoopbackTimeout())
+                    continuation.resume(throwing: loopbackFailure(operation, LoopbackTimeout()))
                 }
             }
             upstream.start(queue: queue)
@@ -516,16 +522,19 @@ extension NewsTests {
                     receivedRequests: receivedRequests, live: live)
             }
         }
+        let operation = "listener start (boundary upstream, port .any)"
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let once = SocketObservation()
             upstream.stateUpdateHandler = { state in
                 if case .ready = state, once.claim() { continuation.resume() }
-                if case .failed(let error) = state, once.claim() { continuation.resume(throwing: error) }
+                if case .failed(let error) = state, once.claim() {
+                    continuation.resume(throwing: loopbackFailure(operation, error))
+                }
             }
             upstreamQueue.asyncAfter(deadline: .now() + 5) {
                 if once.claim() {
                     upstream.cancel()
-                    continuation.resume(throwing: LoopbackTimeout())
+                    continuation.resume(throwing: loopbackFailure(operation, LoopbackTimeout()))
                 }
             }
             upstream.start(queue: upstreamQueue)

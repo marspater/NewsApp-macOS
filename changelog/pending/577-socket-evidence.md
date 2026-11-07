@@ -1,0 +1,1 @@
+- A loopback socket test's first transport error now names the failed operation (listener start, connect, send or receive, with its port) and prints the socket summary at once, not only when the rerun fails too.
