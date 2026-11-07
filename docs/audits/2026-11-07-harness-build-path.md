@@ -50,3 +50,15 @@ Moving the step to a main-only or scheduled workflow was considered and not chos
 ## Result in CI
 
 PR #1108's GitHub run 42362521968 (Debug harness): "Verify Publisher Excerpts" took 1m51s against 5m50s on main, all 48 checks passing. In the same run `./test.sh` took 8m04s against 4m42s on main without any change to it, so runner load varies between runs; compare step times, not job totals.
+
+## Lever 2 implemented (#1070, PR #1117)
+
+The nine publisher-excerpt checks now run in the native `NewsTests` bundle (`Tests/Native/PublisherExcerptSuite.swift`), so the separate `NewsHarness` build is gone from CI. CircleCI and Codemagic, which did not run the native bundle before, now run the same `xcodebuild test -only-testing:NewsTests` step as GitHub Actions and keep its `.xcresult`. `Tests/Harness/PublisherExcerptTests.swift` stays for the release checklist.
+
+| Provider | "Verify publisher excerpts" before | Native test step after |
+|---|---|---|
+| GitHub Actions | 1m51s (run 42362521968, #1108) | 3m08s (run 42384727771, main after the merge; the step existed before and took 4m38s with 11 tests) |
+| CircleCI | 43 s (job 3806, #1117 before the switch) | 69 s (#1117 run after the switch) |
+| Codemagic | unknown, no API access | unknown, no API access |
+
+On GitHub the native step already ran before this change, so the saving there is the whole excerpt step minus the native step's growth from 32 more tests. On CircleCI and Codemagic the native step is new and replaces the harness step, so the step is a swap, not a saving.
