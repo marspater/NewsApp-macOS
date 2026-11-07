@@ -42,7 +42,7 @@ extension NewsTests {
         let tests: [(name: String, run: () async throws -> Void)] = [
             ("testActiveWorkCancellation", { try await testActiveWorkCancellation() })
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     static func testActiveWorkCancellation() async throws {

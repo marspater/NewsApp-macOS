@@ -126,6 +126,7 @@ struct NewsRegressionRunner {
                     exit(1)
                 }
             }
+            if selected("Tests/EpicNE2ETests.swift"), !targetedMode { await EpicNE2ETests.run() }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
             // The harness suites run only when named: a targeted runner mode must not pick them up.
             if atom == "Tests/EventOverviewAccessibilityTests.swift" { await EventOverviewAccessibilityTests.main() }

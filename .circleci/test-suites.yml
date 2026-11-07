@@ -15,16 +15,20 @@ options:
     - script/ci_testsuite.sh
     - script/test_atoms.sh
     - Tests/Runner.swift
+    - Tests/NewsTestSupport.swift
     - News.xcodeproj/**
     - Package.swift
     - Package.resolved
     # Fixtures are read at run time, which coverage cannot attribute to a test atom.
     - Tests/Fixtures/**
-  # Tests/NewsTests.swift holds its own tests: a change there always runs its atom, whatever coverage attributes.
+  # Each atom holds its own tests: a change there always runs its atom, whatever coverage attributes.
   test-selection-rules:
     - test-atom: Tests/NewsTests.swift
       include:
         - Tests/NewsTests.swift
+    - test-atom: Tests/EpicNE2ETests.swift
+      include:
+        - Tests/EpicNE2ETests.swift
     - test-atom: Tests/StorageTests.swift
       include:
         - Tests/StorageTests.swift

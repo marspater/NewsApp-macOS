@@ -66,7 +66,7 @@ extension NewsTests {
             ("testPublisherRevisionTextStorage", { try await testPublisherRevisionTextStorage() }),
             ("testGranularCacheClearingAndRetention", { try await testGranularCacheClearingAndRetention() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     static func testUnchangedFTSRefresh() async throws {

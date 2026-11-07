@@ -61,23 +61,7 @@ extension NewsTests {
             ("testCardImagePrefetchFirstPaint", { await testCardImagePrefetchFirstPaint() }),
             ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
-        try await runSharded(tests)
-    }
-
-    static func mockHTTPClient(configuration: URLSessionConfiguration) -> SecureHTTPClient {
-        // URLProtocol supplies bytes; fixture DNS must also stay independent of the network.
-        SecureHTTPClient(
-            configuration: configuration,
-            resolver: { host in
-                IPAddressValidator.validateHost(
-                    host,
-                    resolver: { fixtureHost in
-                        ["example.com", "example.org", "api.github.com", "reader.invalid", "8.8.8.8", "8.8.4.4"]
-                            .contains(fixtureHost)
-                            ? .allowed(ips: ["8.8.8.8"])
-                            : .unresolvable(reason: "No configured mock DNS address")
-                    })
-            })
+        try await runSuite(tests)
     }
 
     @MainActor
@@ -2561,16 +2545,6 @@ extension NewsTests {
         } catch {
             assertTrue(false, "Default NewBriefingIntent threw: \(error)")
         }
-    }
-
-    static func extractDialogText(from result: some IntentResult) -> String? {
-        let mirror = Mirror(reflecting: result)
-        for child in mirror.children where child.label == "dialog" {
-            let desc = String(describing: child.value)
-            if desc.starts(with: "nil") || desc == "Optional(nil)" { return nil }
-            return desc
-        }
-        return nil
     }
 
     private static func shortcutMetadata(from shortcut: AppShortcut) -> (

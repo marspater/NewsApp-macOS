@@ -68,7 +68,7 @@ extension NewsTests {
             ("testValidatedDocumentIdentity", { try await testValidatedDocumentIdentity(fixtureRoot: fixtureRoot) }),
             ("testPublisherTextFingerprints", { try await testPublisherTextFingerprints() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     static func testFeedErrorHierarchy() async {

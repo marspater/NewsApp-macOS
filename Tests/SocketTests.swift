@@ -45,7 +45,7 @@ extension NewsTests {
             ("testTransportCancellation", { try await rerunningLoopbackFlake(testTransportCancellation) }),
             ("testGatewayAddressFallback", { try await rerunningLoopbackFlake(testGatewayAddressFallback) }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     /// Upstream failures reach `URLSession` only as the gateway's SOCKS rejection, so this runs the real gateway and
@@ -73,76 +73,6 @@ extension NewsTests {
         assertEqual(
             await failure(gatewayAnswer: .unresolvable(reason: "Timed out")), .transport,
             "A lookup the gateway could not finish is a transport failure")
-    }
-
-    static func socketSend(_ connection: NWConnection, _ data: Data) async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            connection.send(
-                content: data,
-                completion: .contentProcessed { error in
-                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
-                })
-        }
-    }
-
-    static func socketRead(_ connection: NWConnection, count: Int) async throws -> Data {
-        var data = Data()
-        while data.count < count {
-            let next: Data = try await withCheckedThrowingContinuation { continuation in
-                let once = SocketObservation()
-                DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
-                    if once.claim() {
-                        connection.cancel()
-                        continuation.resume(throwing: LoopbackTimeout())
-                    }
-                }
-                connection.receive(minimumIncompleteLength: 1, maximumLength: count - data.count) {
-                    bytes, _, eof, error in
-                    guard once.claim() else { return }
-                    if let error {
-                        continuation.resume(throwing: error)
-                    } else if let bytes, !bytes.isEmpty {
-                        continuation.resume(returning: bytes)
-                    } else {
-                        continuation.resume(throwing: eof ? FeedError.network("EOF") : LoopbackTimeout())
-                    }
-                }
-            }
-            data.append(next)
-        }
-        return data
-    }
-
-    static func socksConnect(_ proxy: NetworkBoundaryProxy, host: String, command: UInt8 = 1, port: UInt16 = 80)
-        async throws -> (NWConnection, Data)
-    {
-        let endpoint = try await proxy.port()
-        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: endpoint)!, using: .tcp)
-        // A loopback connect can fail with EADDRINUSE when parallel runs churn ephemeral ports. NWConnection
-        // then parks in .waiting and never completes a send, so surface that state instead of hanging.
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let once = SocketObservation()
-            client.stateUpdateHandler = { state in
-                switch state {
-                case .ready: if once.claim() { continuation.resume() }
-                case .waiting(let error), .failed(let error): if once.claim() { continuation.resume(throwing: error) }
-                case .cancelled: if once.claim() { continuation.resume(throwing: CancellationError()) }
-                default: break
-                }
-            }
-            client.start(queue: .global())
-        }
-        client.stateUpdateHandler = nil
-        try await socketSend(client, Data([5, 1, 0]))
-        assertEqual(try await socketRead(client, count: 2), Data([5, 0]), "SOCKS greeting succeeds")
-        let hostBytes = Data(host.utf8)
-        var request = Data([5, command, 0, 3, UInt8(hostBytes.count)])
-        request.append(hostBytes)
-        request.append(contentsOf: [UInt8(port >> 8), UInt8(port & 255)])
-        // Fragment across every protocol boundary, not just a single network packet.
-        try await socketSend(client, Data(request.prefix(1)))
-        try await socketSend(client, Data(request.dropFirst()))
-        return (client, try await socketRead(client, count: 10))
     }
 
     /// Hold a real HTTP response open until cancellation closes the upstream socket.

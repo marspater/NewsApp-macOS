@@ -55,7 +55,7 @@ extension NewsTests {
             ("testDiagnosticsSpotlightAndCaches", { await testDiagnosticsSpotlightAndCaches() }),
             ("testDiagnosticsSections", { try await testDiagnosticsSections() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     static func testSignpostHelperExecution() async {

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Tests/NewsTests.swift is an atom with no test list: Runner calls it for the CLI modes and its one corpus check.
 # Every test suite runs exactly once: a Tests/*.swift file with a `run()`, `main()`, or `runAllTests()` entry point is
 # either an atom Tests/Runner.swift dispatches (script/test_atoms.sh) or a suite another registered suite calls, and
 # every dispatched atom exists. A new file that is neither is a suite nobody runs. One atom may dispatch
@@ -18,14 +19,13 @@ for file in $(grep -lE 'static func (run|main|runAllTests)\(\)' Tests/*.swift); 
     [ "$file" = Tests/Runner.swift ] && continue
     grep -qxF "$file" <<< "$atoms" && continue
     type=$(basename "$file" .swift)
-    # Called from another suite, as NewsTests runs EpicNE2ETests.
+    # Called from another suite.
     grep -lE "\b$type\.(run|main|runAllTests)\(\)" Tests/*.swift | grep -v -x "$file" | grep -q . && continue
     echo "❌ $file has an entry point but nothing runs it: add it to Tests/Runner.swift"
     status=1
 done
 # A domain atom (a file with its own test list) never runs in a targeted mode: `--story-regressions` runs only itself.
-for file in $(grep -lE 'try await runSharded\(tests\)' Tests/*.swift); do
-    [ "$file" = Tests/NewsTests.swift ] && continue
+for file in $(grep -lE 'try await runSuite\(tests\)' Tests/*.swift); do
     grep -qF "selected(\"$file\"), !targetedMode" Tests/Runner.swift || {
         echo "❌ $file must be dispatched with !targetedMode in Tests/Runner.swift"; status=1;
     }

@@ -52,7 +52,7 @@ extension NewsTests {
             ("testLookupFailsClosedAcrossFamilies", { testLookupFailsClosedAcrossFamilies() }),
             ("testRedirectDelegateDoesNoDNS", { await testRedirectDelegateDoesNoDNS() }),
         ]
-        try await runSharded(tests)
+        try await runSuite(tests)
     }
 
     static func testURLNormalization() async {
