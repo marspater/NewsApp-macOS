@@ -103,5 +103,9 @@ final class NewsPerformanceTests: XCTestCase {
         // An empty field may report its placeholder as value, so check only that the query is gone.
         XCTAssertFalse(((field.value as? String) ?? "").contains("Lighthouse"), "The search field did not clear")
         app.typeKey(.escape, modifierFlags: [])
+        // The next measurement starts from the unfiltered list, so its end can only come from its own search.
+        XCTAssertTrue(
+            app.staticTexts[Self.otherHeadline].firstMatch.waitForExistence(timeout: 30),
+            "The list did not return to the unfiltered fixture")
     }
 }
