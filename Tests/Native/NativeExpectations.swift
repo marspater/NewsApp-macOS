@@ -39,3 +39,10 @@ let nativeRepositoryRoot = URL(fileURLWithPath: #filePath).deletingLastPathCompo
 /// Parent of every native suite: Swift Testing runs unrelated suites concurrently, and ported tests share static
 /// doubles such as `MockURLProtocol.requestHandler`, so all nested suites run one test at a time.
 @Suite(.serialized) enum NativeSuites {}
+
+extension Tag {
+    @Tag static var feedParsing: Self
+    @Tag static var migration: Self
+    @Tag static var feedHealth: Self
+    @Tag static var publisherExcerpts: Self
+}
