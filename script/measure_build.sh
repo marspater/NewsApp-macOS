@@ -20,7 +20,11 @@ XCODE="$(xcodebuild -version | tr '\n' ' ')"
 MODELS_FILE=Sources/Models/FeedError.swift
 VIEWS_FILE=Sources/Views/List/ArticleCardView.swift
 
-app() { NEWS_CONFIGURATION=Release NEWS_WHOLE_MODULE=0 NEWS_APP_DIR="$SCRATCH/News.app" NEWS_SENTRY_DISABLED=1 ./build.sh; }
+# Every build.sh setting is fixed here, so an exported NEWS_* value cannot change what is measured.
+app() {
+    env -u NEWS_HARNESS -u NEWS_HARNESS_SANDBOX -u NEWS_OMIT_RESOURCES -u NEWS_BUNDLE_ID \
+        NEWS_CONFIGURATION=Release NEWS_WHOLE_MODULE=0 NEWS_APP_DIR="$SCRATCH/News.app" NEWS_SENTRY_DISABLED=1 ./build.sh
+}
 tests() {
     xcodebuild build-for-testing -project News.xcodeproj -scheme News -destination 'platform=macOS' \
         -derivedDataPath "$NEWS_DERIVED_DATA" -only-testing:NewsTests -quiet
