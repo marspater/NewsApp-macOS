@@ -60,12 +60,6 @@ options:
     - test-atom: Tests/ClusteringTests.swift
       include:
         - Tests/ClusteringTests.swift
-    - test-atom: Tests/FeedParsingTests.swift
-      include:
-        - Tests/FeedParsingTests.swift
-    - test-atom: Tests/MigrationTests.swift
-      include:
-        - Tests/MigrationTests.swift
     - test-atom: Tests/NetworkingTests.swift
       include:
         - Tests/NetworkingTests.swift

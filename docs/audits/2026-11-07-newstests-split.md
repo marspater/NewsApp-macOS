@@ -26,7 +26,7 @@ Date: 7 November 2026. Base: main at 07de3cf, Apple Silicon laptop; timings are 
 | ActiveWorkCancellationTests | 1 |
 | Total | 212 |
 
-`EpicNE2ETests` was a 213th entry in the old list; it is now its own atom and keeps its own 71 checks. Atoms: 23 before, 36 after.
+`EpicNE2ETests` was a 213th entry in the old list; it is now its own atom and keeps its own 71 checks. Atoms: 23 before, 36 after. Update (#1070): the `MigrationTests` and `FeedParsingTests` atoms moved to the native `NewsTests` bundle (`Tests/Native/MigrationSuite.swift`, `FeedParsingSuite.swift`) and their runner copies are gone, so the runner has 34 atoms. The 12 tests the CLI modes still call (`--story-regressions`, `--fts-refresh-regression`) stay in `Tests/CLIModeRegressionTests.swift`, which is not an atom.
 
 ## Line check
 
@@ -67,4 +67,4 @@ The corpus validation (`StoryCorpus.run(evaluate:)`) used to run in each of the 
 
 ## Commit-hook selection
 
-`script/changed_atoms.sh` maps a changed `Sources/X.swift` to atoms whose file names `X`. Bodies moved verbatim, so each moved test's file names the types it exercises; a helper's types are named in `NewsTestSupport.swift`, which is not an atom. A change to that file selects every atom (36 of 36, checked). Of 133 `Sources/` files, 45 name no atom and fall back to every atom, the same 45 count as before the split.
+`script/changed_atoms.sh` maps a changed `Sources/X.swift` to atoms whose file names `X`. Bodies moved verbatim, so each moved test's file names the types it exercises; a helper's types are named in `NewsTestSupport.swift`, which is not an atom. A change to that file selects every atom (36 of 36 at the split, checked; 34 atoms after #1070). Of 133 `Sources/` files, 45 name no atom and fall back to every atom, the same 45 count as before the split.

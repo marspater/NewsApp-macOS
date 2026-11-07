@@ -165,7 +165,7 @@ else
     job() { printf '%s\t%s\n' "$1" "$2" >> "$JOB_LIST"; }
     ATOMS="${ONLY_ATOMS:-$(script/test_atoms.sh)}"
     # Longest first, so the pool ends evenly (times in docs/audits/2026-11-07-newstests-split.md); the rest follow.
-    LONGEST="ActiveWorkCancellation Socket Clustering UserInterface Storage Intelligence Migration FeedParsing
+    LONGEST="ActiveWorkCancellation Socket Clustering UserInterface Storage Intelligence
         Lifecycle AnalysisGeneration FeedKitSwiftSoup News Reader"
     for name in $LONGEST; do
         atom="Tests/${name}Tests.swift"

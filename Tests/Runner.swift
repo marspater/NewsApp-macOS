@@ -71,16 +71,6 @@ struct NewsRegressionRunner {
                     recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
-            if selected("Tests/MigrationTests.swift"), !targetedMode {
-                do { try await MigrationTests.run() } catch {
-                    recordFailure("TEST FAILED with unexpected error: \(error)")
-                }
-            }
-            if selected("Tests/FeedParsingTests.swift"), !targetedMode {
-                do { try await FeedParsingTests.run() } catch {
-                    recordFailure("TEST FAILED with unexpected error: \(error)")
-                }
-            }
             if selected("Tests/ClusteringTests.swift"), !targetedMode {
                 do { try await ClusteringTests.run() } catch {
                     recordFailure("TEST FAILED with unexpected error: \(error)")
