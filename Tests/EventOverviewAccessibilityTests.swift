@@ -79,7 +79,7 @@ struct EventOverviewAccessibilityTests {
 
         print("Finished \(testsRun) event overview accessibility checks with \(failures) failures.")
         if failures > 0 {
-            exit(1)
+            recordFailure("EventOverviewAccessibilityTests: \(failures) check failure(s)")
         } else {
             print("✅ ALL EVENT OVERVIEW ACCESSIBILITY CHECKS PASSED")
         }

@@ -422,6 +422,6 @@ enum EditorialWireIdentityTests {
             }
         } catch { check(false, "Unexpected error: \(error)") }
         print("Finished \(checks) wire identity checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("EditorialWireIdentityTests: \(failures) check failure(s)") }
     }
 }

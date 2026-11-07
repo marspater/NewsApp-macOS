@@ -61,7 +61,7 @@ enum EditorialNoveltyTests {
             check(false, "Unexpected error: \(error)")
         }
         print("Finished \(checks) editorial novelty checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("EditorialNoveltyTests: \(failures) check failure(s)") }
     }
 
     static func routeMismatchReporting() {

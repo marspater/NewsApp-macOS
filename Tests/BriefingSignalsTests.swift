@@ -36,7 +36,7 @@ enum BriefingSignalsTests {
         forwardWatchCitations()
         forwardWatchMerge()
         print("Finished \(checks) Briefing signals checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("BriefingSignalsTests: \(failures) check failure(s)") }
     }
 
     static let now = Date(timeIntervalSince1970: 1_793_188_800)

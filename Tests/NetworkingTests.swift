@@ -220,22 +220,19 @@ extension NewsTests {
         if case .blocked = IPAddressValidator.validateHost("localhost") {
             // expected
         } else {
-            print("❌ validateHost('localhost') was not blocked")
-            exit(1)
+            recordFailure("validateHost('localhost') was not blocked")
         }
 
         if case .blocked = IPAddressValidator.validateHost("test.local") {
             // expected
         } else {
-            print("❌ validateHost('test.local') was not blocked")
-            exit(1)
+            recordFailure("validateHost('test.local') was not blocked")
         }
 
         if case .blocked = IPAddressValidator.validateHost("router.internal") {
             // expected
         } else {
-            print("❌ validateHost('router.internal') was not blocked")
-            exit(1)
+            recordFailure("validateHost('router.internal') was not blocked")
         }
 
         // 7. Socket Address Validation (validateSocketAddress)
@@ -313,8 +310,7 @@ extension NewsTests {
             // The request itself carries the image Accept header, not the document one (#1010).
             assertEqual(requestedAccept.hosts, [SecureHTTPClient.imageAccept], "Image requests send the image Accept")
         } catch {
-            print("❌ Unexpected error in fetchImage success test: \(error)")
-            exit(1)
+            recordFailure("Unexpected error in fetchImage success test: \(error)")
         }
 
         // #794: an http image address is requested over HTTPS instead of being refused.
@@ -354,19 +350,16 @@ extension NewsTests {
 
         do {
             _ = try await client.fetchImage(from: targetURL)
-            print("❌ Expected fetchImage to throw responseTooLarge error")
-            exit(1)
+            recordFailure("Expected fetchImage to throw responseTooLarge error")
         } catch let error as FeedError {
             if case .responseTooLarge(let bytes, let maxAllowedLimit) = error {
                 assertEqual(Int(bytes), tooLargeDataSize, "Expected byte size in error")
                 assertEqual(Int(maxAllowedLimit), maxAllowed, "Expected max limit in error")
             } else {
-                print("❌ Expected responseTooLarge error, got: \(error)")
-                exit(1)
+                recordFailure("Expected responseTooLarge error, got: \(error)")
             }
         } catch {
-            print("❌ Unexpected error type: \(error)")
-            exit(1)
+            recordFailure("Unexpected error type: \(error)")
         }
 
         // Cleanup MockURLProtocol state
@@ -379,54 +372,45 @@ extension NewsTests {
         // 1. Insecure scheme rejection (e.g. file://, javascript://)
         do {
             _ = try await SecureHTTPClient.shared.fetchData(from: URL(string: "file:///etc/passwd")!, maxBytes: 1024)
-            print("❌ file:///etc/passwd should have thrown an insecureScheme error")
-            exit(1)
+            recordFailure("file:///etc/passwd should have thrown an insecureScheme error")
         } catch let err as FeedError {
             if case .insecureScheme = err {
                 // expected
             } else {
-                print("❌ Unexpected error for file scheme: \(err)")
-                exit(1)
+                recordFailure("Unexpected error for file scheme: \(err)")
             }
         } catch {
-            print("❌ Unexpected error type: \(error)")
-            exit(1)
+            recordFailure("Unexpected error type: \(error)")
         }
 
         // 2. Blocked port rejection (e.g. port 22, port 6379)
         do {
             _ = try await SecureHTTPClient.shared.fetchData(
                 from: URL(string: "https://example.com:22/feed")!, maxBytes: 1024)
-            print("❌ Port 22 should have been blocked")
-            exit(1)
+            recordFailure("Port 22 should have been blocked")
         } catch let err as FeedError {
             if case .blockedPort(let p) = err {
                 assertEqual(p, 22, "Should block port 22")
             } else {
-                print("❌ Unexpected error for blocked port: \(err)")
-                exit(1)
+                recordFailure("Unexpected error for blocked port: \(err)")
             }
         } catch {
-            print("❌ Unexpected error: \(error)")
-            exit(1)
+            recordFailure("Unexpected error: \(error)")
         }
 
         // 3. Blocked host rejection (e.g. localhost)
         do {
             _ = try await SecureHTTPClient.shared.fetchData(
                 from: URL(string: "https://localhost/feed")!, maxBytes: 1024)
-            print("❌ https://localhost should have been blocked")
-            exit(1)
+            recordFailure("https://localhost should have been blocked")
         } catch let err as FeedError {
             if case .blockedHost = err {
                 // expected
             } else {
-                print("❌ Unexpected error for localhost: \(err)")
-                exit(1)
+                recordFailure("Unexpected error for localhost: \(err)")
             }
         } catch {
-            print("❌ Unexpected error: \(error)")
-            exit(1)
+            recordFailure("Unexpected error: \(error)")
         }
     }
 

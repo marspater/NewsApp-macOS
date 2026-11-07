@@ -183,6 +183,6 @@ enum DNSAnswerCacheTests {
         checkBound()
         await checkTestResolversStayUncached()
         print("Finished \(checks) DNS answer cache checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("DNSAnswerCacheTests: \(failures) check failure(s)") }
     }
 }

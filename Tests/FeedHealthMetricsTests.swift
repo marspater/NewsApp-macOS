@@ -322,6 +322,6 @@ enum FeedHealthMetricsTests {
             try await checkRefresh()
         } catch { check(false, "Unexpected error: \(error)") }
         print("Finished \(checks) feed health metric checks with \(failures) failures.")
-        if exitOnFailure && failures > 0 { exit(1) }
+        if exitOnFailure && failures > 0 { recordFailure("FeedHealthMetricsTests: \(failures) check failure(s)") }
     }
 }

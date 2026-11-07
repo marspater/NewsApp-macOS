@@ -127,7 +127,7 @@ enum EditorialRankingTests {
             #endif
         } catch { check(false, "Unexpected error: \(error)") }
         print("Finished \(checks) ranking checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("EditorialRankingTests: \(failures) check failure(s)") }
     }
 }
 #if EDITORIAL_STANDALONE

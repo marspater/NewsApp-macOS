@@ -39,7 +39,7 @@ enum BriefingImpactTests {
         await dynamicIndicatorsAndOverviewQuality()
         await comprehensiveCoverageVerification()
         print("Finished \(checks) Briefing strategic impact checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("BriefingImpactTests: \(failures) check failure(s)") }
     }
 
     static let now = Date(timeIntervalSince1970: 1_793_372_400)

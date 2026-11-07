@@ -63,74 +63,62 @@ struct NewsRegressionRunner {
             if selected("Tests/EditorialPersonalizationTests.swift") { await EditorialPersonalizationTests.run() }
             if selected("Tests/StorageTests.swift"), !targetedMode {
                 do { try await StorageTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/NetworkingTests.swift"), !targetedMode {
                 do { try await NetworkingTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/MigrationTests.swift"), !targetedMode {
                 do { try await MigrationTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/FeedParsingTests.swift"), !targetedMode {
                 do { try await FeedParsingTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/ClusteringTests.swift"), !targetedMode {
                 do { try await ClusteringTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/IntelligenceTests.swift"), !targetedMode {
                 do { try await IntelligenceTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/ReaderTests.swift"), !targetedMode {
                 do { try await ReaderTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/LifecycleTests.swift"), !targetedMode {
                 do { try await LifecycleTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/UserInterfaceTests.swift"), !targetedMode {
                 do { try await UserInterfaceTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/DiagnosticsTests.swift"), !targetedMode {
                 do { try await DiagnosticsTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/SocketTests.swift"), !targetedMode {
                 do { try await SocketTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/ActiveWorkCancellationTests.swift"), !targetedMode {
                 do { try await ActiveWorkCancellationTests.run() } catch {
-                    print("❌ TEST FAILED with unexpected error: \(error)")
-                    exit(1)
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
                 }
             }
             if selected("Tests/EpicNE2ETests.swift"), !targetedMode { await EpicNE2ETests.run() }
@@ -143,10 +131,24 @@ struct NewsRegressionRunner {
                     try await TensionCalibrationTests.runAllTests()
                     print("✅ All tension calibration tests passed successfully!")
                 } catch {
-                    print("❌ Tension calibration tests failed: \(error)")
-                    exit(1)
+                    recordFailure("Tension calibration tests failed: \(error)")
                 }
             }
         }
+        // Opt-in proof that the summary reports every failure (script/test_failure_report.sh); no pool selects it.
+        if atom == "failure-report-self-check" {
+            try? await NewsTests.runSuite([
+                (
+                    "selfCheckFirst",
+                    {
+                        assertEqual(1, 2, "self-check first failure")
+                        throw CocoaError(.userCancelled)
+                    }
+                ),
+                ("selfCheckSecond", { assertTrue(false, "self-check second failure") }),
+            ])
+        }
+        // Every atom ends here: the summary prints each failed test and sets the exit status.
+        TestFailureLog.shared.finish()
     }
 }

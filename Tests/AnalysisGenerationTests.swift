@@ -48,7 +48,7 @@ enum AnalysisGenerationTests {
             check(false, "Unexpected error: \(error)")
         }
         print("Finished \(checks) analysis generation checks with \(failures) failures.")
-        if failures > 0 { exit(1) }
+        if failures > 0 { recordFailure("AnalysisGenerationTests: \(failures) check failure(s)") }
     }
 
     static func article(_ id: String, title: String = "Port authority raises alert level") -> FeedArticle {

@@ -34,8 +34,7 @@ enum BriefingIntelligenceTests {
         testFootprintGrouping()
         await testSitrepComposerFallsBack()
         if failures > 0 {
-            print("❌ BriefingIntelligenceTests: \(failures) failure(s)")
-            exit(1)
+            recordFailure("BriefingIntelligenceTests: \(failures) failure(s)")
         }
         print("Finished BriefingIntelligenceTests.")
     }
