@@ -63,6 +63,19 @@ workflows:
             ditto -c -k --keepParent build/ci/NewsTests.xcresult build/ci/NewsTests.xcresult.zip
           fi
           exit "$status"
+      # NewsUITests (#1070), as on GitHub Actions.
+      - name: Run UI tests
+        script: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          status=0
+          xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -only-testing:NewsUITests \
+            -resultBundlePath build/ci/NewsUITests.xcresult -quiet 2>&1 | tee build/ci/ui-tests.log || status=$?
+          if [[ -d build/ci/NewsUITests.xcresult ]]; then
+            ditto -c -k --keepParent build/ci/NewsUITests.xcresult build/ci/NewsUITests.xcresult.zip
+          fi
+          exit "$status"
       - name: Verify SwiftPM app target
         script: |
           #!/usr/bin/env bash
@@ -95,3 +108,4 @@ workflows:
       - build/ci/*.log
       - build/ci/entitlements.plist
       - build/ci/NewsTests.xcresult.zip
+      - build/ci/NewsUITests.xcresult.zip

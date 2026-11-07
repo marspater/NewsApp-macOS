@@ -103,6 +103,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # NewsUITests (#1070): smoke flows against the Debug app on a fresh library and a fixture feed. Agents never
+      # run UI automation on the maintainer's Mac, so CI is where these run.
+      - name: Run UI Tests
+        run: |
+          set -o pipefail
+          xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -only-testing:NewsUITests \
+            -resultBundlePath "$RUNNER_TEMP/NewsUITests.xcresult" -quiet
+
+      - name: Upload UI Test Results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-tests-xcresult
+          path: ${{ runner.temp }}/NewsUITests.xcresult
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Verify Swift Package Manager Build
         run: swift build --force-resolved-versions --target News
 
