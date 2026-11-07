@@ -251,7 +251,7 @@ struct TensionIndexView: View {
     private func summary(_ reading: WorldTensionReading) -> some View {
         Group {
             if let lead = reading.assessment.lead {
-                Text(lead).bold() + Text(" ") + Text(reading.assessment.summary)
+                Text("\(Text(lead).bold()) \(reading.assessment.summary)")
             } else {
                 Text(reading.assessment.summary)
             }

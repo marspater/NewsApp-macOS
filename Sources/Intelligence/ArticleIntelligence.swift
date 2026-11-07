@@ -237,6 +237,13 @@ public struct NewsTextModel: Sendable {
             if #available(macOS 27.0, *) {
                 if let error = error as? LanguageModelError { return failure(error) }
                 if error is SystemLanguageModel.Error { return classified(nil, transient: true, unknown: error) }
+                // The other two replacements Apple names for deprecated `GenerationError` cases.
+                if error is GeneratedContent.ParsingError {
+                    return classified(.decoding, transient: false, unknown: error)
+                }
+                if let error = error as? LanguageModelSession.Error {
+                    return classified(nil, transient: error == .concurrentRequests, unknown: error)
+                }
             }
         #endif
         return classified(nil, transient: false, unknown: error)

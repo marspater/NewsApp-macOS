@@ -1442,6 +1442,13 @@ extension NewsTests {
                 assertTrue(
                     NewsTextModel.failure(any: SystemLanguageModel.Error.assetsUnavailable(.init(debugDescription: "")))
                         is NewsTextModel.TemporarilyUnavailable, "Missing model assets retry later")
+                assertEqual(
+                    NewsTextModel.failure(any: GeneratedContent.ParsingError(rawContent: "", debugDescription: ""))
+                        as? NewsTextModel.Rejected, NewsTextModel.Rejected(reason: .decoding),
+                    "Undecodable macOS 27 output is final")
+                assertTrue(
+                    NewsTextModel.failure(any: LanguageModelSession.Error.concurrentRequests)
+                        is NewsTextModel.TemporarilyUnavailable, "A busy macOS 27 session retries later")
             }
         #endif
         assertTrue(NewsTextModel.failure(any: CancellationError()) is CancellationError, "Cancellation passes through")
