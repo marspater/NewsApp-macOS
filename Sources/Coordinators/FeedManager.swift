@@ -721,7 +721,7 @@ class FeedManager: NSObject, ObservableObject {
                     previous?.cancel()
                 }
                 // The wait can last minutes: a pass queued before notifications were turned off posts nothing.
-                guard await self?.notificationsStillEnabled() == true else { return }
+                guard self?.notificationsStillEnabled() == true else { return }
                 await self?.deliverNotifications(notifiable)
             }
         }
