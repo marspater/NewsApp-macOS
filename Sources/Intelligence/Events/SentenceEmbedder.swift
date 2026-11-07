@@ -325,20 +325,19 @@ actor SentenceEmbedder {
         else { return nil }
         var pooled = [Float](repeating: 0, count: vectorDimension)
         let tokenStride = hidden.strides[1].intValue
-        let dimensionStride = Int32(hidden.strides[2].intValue)
+        let dimensionStride = vDSP_Stride(hidden.strides[2].intValue)
         if hidden.dataType == .float32 {
             hidden.withUnsafeBufferPointer(ofType: Float.self) { buffer in
                 pooled.withUnsafeMutableBufferPointer { sum in
                     for token in 0..<tokens {
-                        cblas_saxpy(
-                            Int32(vectorDimension), 1, buffer.baseAddress! + token * tokenStride, dimensionStride,
-                            sum.baseAddress!, 1)
+                        vDSP_vadd(
+                            buffer.baseAddress! + token * tokenStride, dimensionStride, sum.baseAddress!, 1,
+                            sum.baseAddress!, 1, vDSP_Length(vectorDimension))
                     }
                 }
             }
         } else if hidden.dataType == .float16 {
             // The fixed-length export returns half floats (#554); summed in Float, as the boxed path below did.
-            let dimensionStride = Int(dimensionStride)
             hidden.withUnsafeBufferPointer(ofType: Float16.self) { buffer in
                 for token in 0..<tokens {
                     for dimension in 0..<vectorDimension {
