@@ -85,12 +85,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Debug: the checks test behaviour, not speed, and an unoptimized build compiles about four times faster.
-      # The runner build above cannot be reused: each target compiles Sources/ itself (#577, 2026-11-07 audit).
-      - name: Verify Publisher Excerpts
-        run: NEWS_CONFIGURATION=Debug NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
-
-      # Native Swift Testing target (#1070): the suites ported so far, alongside the runner's copies until parity.
+      # Native Swift Testing target (#1070): the suites ported so far, alongside the runner's copies until parity, and
+      # the publisher-excerpt checks that used to build NewsHarness here (#577).
       - name: Run Native Tests
         run: |
           set -o pipefail
