@@ -23,8 +23,10 @@ struct NewsRegressionRunner {
     static func main() async {
         // test.sh runs this once before its pool: it fills the executable's Core ML cache before processes share it.
         if CommandLine.arguments.contains("--warm-models") {
-            guard await SentenceEmbedder.shared.isAvailable, await PairScorer.shared.isAvailable else { exit(1) }
-            return
+            // Both load whatever the other does, so one failure leaves no model to compile inside the pool.
+            let embedder = await SentenceEmbedder.shared.isAvailable
+            let scorer = await PairScorer.shared.isAvailable
+            exit(embedder && scorer ? 0 : 1)
         }
         let atom = ProcessInfo.processInfo.environment["NEWS_TEST_ATOM"]
         /// Whether `file`'s tests run: every file without NEWS_TEST_ATOM, else the named one.
