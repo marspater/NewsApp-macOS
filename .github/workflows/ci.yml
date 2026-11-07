@@ -90,6 +90,23 @@ jobs:
       - name: Verify Publisher Excerpts
         run: NEWS_CONFIGURATION=Debug NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
 
+      # Native Swift Testing target (#1070): the suites ported so far, alongside the runner's copies until parity.
+      - name: Run Native Tests
+        run: |
+          set -o pipefail
+          xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData -only-testing:NewsTests \
+            -resultBundlePath "$RUNNER_TEMP/NewsTests.xcresult" -quiet
+
+      - name: Upload Native Test Results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-tests-xcresult
+          path: ${{ runner.temp }}/NewsTests.xcresult
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Verify Swift Package Manager Build
         run: swift build --force-resolved-versions --target News
 
