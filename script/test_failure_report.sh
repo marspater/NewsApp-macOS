@@ -21,7 +21,9 @@ status=$?
 fail=0
 [[ "$status" -eq 1 ]] || { echo "❌ expected exit 1, got $status"; fail=1; }
 for line in "self-check first failure" "selfCheckFirst threw" "self-check second failure" \
-    "2 failed test(s), 3 failure(s)"; do
+    "2 failed test(s), 3 failure(s)" \
+    "   selfCheckFirst: ASSERTION FAILED: self-check first failure" \
+    "   selfCheckSecond: ASSERTION FAILED: self-check second failure"; do
     grep -qF "$line" "$WORK/out.log" || { echo "❌ missing: $line"; fail=1; }
 done
 if [[ "$fail" -eq 0 ]]; then echo "Failure report: both failed tests reported, exit 1"; else cat "$WORK/out.log"; fi
