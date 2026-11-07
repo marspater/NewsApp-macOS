@@ -12,12 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import Foundation
+
 /// The app's entry point, in a file of its own: the test runner and the harness apps compile every other file under
 /// Sources/ with their own @main (News.xcodeproj excludes this one from those targets).
 @main
 enum NewsMain {
-    /// Starts the SwiftUI app.
+    /// Starts the SwiftUI app. Outside an app bundle (the Swift package's `News` executable, which Xcode runs when the
+    /// repository folder is opened instead of News.xcodeproj) macOS has no bundle record for the process, and
+    /// UserNotifications throws on first use, so the binary stops with a pointer to the project instead of crashing.
     static func main() {
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            let message = """
+                News must run as News.app: open News.xcodeproj in Xcode (not the folder or Package.swift), or run \
+                ./build.sh. The Swift package executable is for compile checks only.
+
+                """
+            FileHandle.standardError.write(Data(message.utf8))
+            exit(1)
+        }
         NewsApp.main()
     }
 }
