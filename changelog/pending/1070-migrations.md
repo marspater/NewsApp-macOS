@@ -1,0 +1,1 @@
+- Ports the migration suite (eight tests) to the native Swift Testing target, and GitHub CI now runs `xcodebuild test -only-testing:NewsTests` and keeps its result bundle.
