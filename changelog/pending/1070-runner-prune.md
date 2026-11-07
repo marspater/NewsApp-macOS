@@ -1,0 +1,1 @@
+- Removes the runner copies of the migration and feed-parsing atoms now that their native suites pass in CI; the 12 tests the CLI modes call stay in `Tests/CLIModeRegressionTests.swift`.
