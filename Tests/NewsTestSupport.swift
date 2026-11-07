@@ -439,12 +439,22 @@ extension NewsTests {
             try await test()
         } catch let error where error is LoopbackTimeout || error as? NWError == .posix(.EADDRINUSE) {
             print("  ↻ Loopback transport error under load (\(error)); running the socket test once more")
+            // The first failure already carries the socket state; the operation line above it names what failed.
+            print("  socket state at the first failure (\(error)): \(loopbackSocketSummary())")
             do { try await test() } catch {
                 // The second failure carries the error and the socket state, so a CI log can say what collided.
                 print("  socket state at the second failure (\(error)): \(loopbackSocketSummary())")
                 throw error
             }
         }
+    }
+
+    /// Prints which loopback operation failed (a listener start, an outbound connect, a send or a receive, with its
+    /// port) before the error leaves the helper, so the first failure of a rerun test is attributable (#577); returns
+    /// the error unchanged.
+    static func loopbackFailure(_ operation: String, _ error: Error) -> Error {
+        print("  loopback \(operation) failed (\(error))")
+        return error
     }
 
     /// TIME_WAIT counts (all, loopback rows, and the distinct loopback local ports inside the ephemeral range),
@@ -514,7 +524,11 @@ extension NewsTests {
             connection.send(
                 content: data,
                 completion: .contentProcessed { error in
-                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                    if let error {
+                        continuation.resume(throwing: loopbackFailure("send to \(connection.endpoint)", error))
+                    } else {
+                        continuation.resume()
+                    }
                 })
         }
     }
@@ -527,18 +541,22 @@ extension NewsTests {
                 DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
                     if once.claim() {
                         connection.cancel()
-                        continuation.resume(throwing: LoopbackTimeout())
+                        continuation.resume(
+                            throwing: loopbackFailure("receive from \(connection.endpoint)", LoopbackTimeout()))
                     }
                 }
                 connection.receive(minimumIncompleteLength: 1, maximumLength: count - data.count) {
                     bytes, _, eof, error in
                     guard once.claim() else { return }
                     if let error {
-                        continuation.resume(throwing: error)
+                        continuation.resume(throwing: loopbackFailure("receive from \(connection.endpoint)", error))
                     } else if let bytes, !bytes.isEmpty {
                         continuation.resume(returning: bytes)
                     } else {
-                        continuation.resume(throwing: eof ? FeedError.network("EOF") : LoopbackTimeout())
+                        continuation.resume(
+                            throwing: eof
+                                ? FeedError.network("EOF")
+                                : loopbackFailure("receive from \(connection.endpoint)", LoopbackTimeout()))
                     }
                 }
             }
@@ -550,7 +568,10 @@ extension NewsTests {
     static func socksConnect(_ proxy: NetworkBoundaryProxy, host: String, command: UInt8 = 1, port: UInt16 = 80)
         async throws -> (NWConnection, Data)
     {
-        let endpoint = try await proxy.port()
+        let endpoint: UInt16
+        do { endpoint = try await proxy.port() } catch {
+            throw loopbackFailure("listener start (NetworkBoundaryProxy, port .any)", error)
+        }
         let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: endpoint)!, using: .tcp)
         // A loopback connect can fail with EADDRINUSE when parallel runs churn ephemeral ports. NWConnection
         // then parks in .waiting and never completes a send, so surface that state instead of hanging.
@@ -571,7 +592,7 @@ extension NewsTests {
         } catch {
             client.stateUpdateHandler = nil
             client.cancel()
-            throw error
+            throw loopbackFailure("connect to 127.0.0.1:\(endpoint)", error)
         }
         client.stateUpdateHandler = nil
         try await socketSend(client, Data([5, 1, 0]))
