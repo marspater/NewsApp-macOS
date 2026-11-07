@@ -1,0 +1,1 @@
+- Adds the `Development`, `Integration` and `Release` test plans for the native `NewsTests` bundle; CI runs `Release`.

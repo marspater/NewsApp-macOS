@@ -1,0 +1,23 @@
+{
+  "configurations": [
+    {
+      "id": "5E7A1D00-0000-4000-8000-000000000003",
+      "name": "Release",
+      "options": {}
+    }
+  ],
+  "defaultOptions": {
+    "codeCoverage": true
+  },
+  "testTargets": [
+    {
+      "parallelizable": false,
+      "target": {
+        "containerPath": "container:News.xcodeproj",
+        "identifier": "0A000000000000000000008A",
+        "name": "NewsTests"
+      }
+    }
+  ],
+  "version": 1
+}
