@@ -46,3 +46,7 @@ D is no faster than A, which confirms that the runner build gives the harness no
 3. **Cache DerivedData build products keyed on source hashes.** About 1 GB per job, and Xcode decides staleness by file times, which a fresh checkout resets, so a restored cache would likely recompile anyway. Not worth trying before 1 and 2.
 
 Moving the step to a main-only or scheduled workflow was considered and not chosen: with lever 1 the step should cost about a minute and a half, and it guards a correctness contract that PRs should keep checking.
+
+## Result in CI
+
+PR #1108's GitHub run 42362521968 (Debug harness): "Verify Publisher Excerpts" took 1m51s against 5m50s on main, all 48 checks passing. In the same run `./test.sh` took 8m04s against 4m42s on main without any change to it, so runner load varies between runs; compare step times, not job totals.
