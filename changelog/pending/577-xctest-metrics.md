@@ -1,0 +1,1 @@
+- `NewsPerformanceTests` measures launch to the main window and one search on the fixture feed (clock, memory, CPU) in the weekly profile workflow; pull request checks skip it.
