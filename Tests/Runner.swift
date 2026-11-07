@@ -31,6 +31,8 @@ struct NewsRegressionRunner {
         let atom = ProcessInfo.processInfo.environment["NEWS_TEST_ATOM"]
         /// Whether `file`'s tests run: every file without NEWS_TEST_ATOM, else the named one.
         func selected(_ file: String) -> Bool { atom == nil || atom == file }
+        /// A targeted mode (arguments, no atom) runs only what the mode names; the domain suites stay out of it.
+        let targetedMode = atom == nil && CommandLine.arguments.count > 1
         if selected("Tests/FeedKitSwiftSoupTests.swift") { FeedKitSwiftSoupTests.run() }
         if !CommandLine.arguments.contains("--parsing-regressions") {
             if selected("Tests/FeedKitSwiftSoupTests.swift") {
@@ -59,6 +61,79 @@ struct NewsRegressionRunner {
             if selected("Tests/FeedHealthMetricsTests.swift") { await FeedHealthMetricsTests.run() }
             if selected("Tests/EditorialRankingTests.swift") { await EditorialRankingTests.run() }
             if selected("Tests/EditorialPersonalizationTests.swift") { await EditorialPersonalizationTests.run() }
+            if selected("Tests/StorageTests.swift"), !targetedMode {
+                do { try await StorageTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/NetworkingTests.swift"), !targetedMode {
+                do { try await NetworkingTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/MigrationTests.swift"), !targetedMode {
+                do { try await MigrationTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/FeedParsingTests.swift"), !targetedMode {
+                do { try await FeedParsingTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/ClusteringTests.swift"), !targetedMode {
+                do { try await ClusteringTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/IntelligenceTests.swift"), !targetedMode {
+                do { try await IntelligenceTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/ReaderTests.swift"), !targetedMode {
+                do { try await ReaderTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/LifecycleTests.swift"), !targetedMode {
+                do { try await LifecycleTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/UserInterfaceTests.swift"), !targetedMode {
+                do { try await UserInterfaceTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/DiagnosticsTests.swift"), !targetedMode {
+                do { try await DiagnosticsTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/SocketTests.swift"), !targetedMode {
+                do { try await SocketTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/ActiveWorkCancellationTests.swift"), !targetedMode {
+                do { try await ActiveWorkCancellationTests.run() } catch {
+                    print("❌ TEST FAILED with unexpected error: \(error)")
+                    exit(1)
+                }
+            }
+            if selected("Tests/EpicNE2ETests.swift"), !targetedMode { await EpicNE2ETests.run() }
             if selected("Tests/NewsTests.swift") { await NewsTests.main() }
             // The harness suites run only when named: a targeted runner mode must not pick them up.
             if atom == "Tests/EventOverviewAccessibilityTests.swift" { await EventOverviewAccessibilityTests.main() }

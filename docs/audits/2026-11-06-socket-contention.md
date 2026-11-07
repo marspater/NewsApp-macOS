@@ -11,6 +11,8 @@ Item A1 of the testing audit. GitHub run 42239564143 (macOS 26 runner) failed `t
 
 The collision does not reproduce locally. It is specific to the loaded CI runner, and the failing log does not say whether the listener bind or the connect raised it.
 
+Update, 7 November 2026: the `NEWS_TEST_SHARD=sockets` lane below is now the `Tests/SocketTests.swift` atom, still one process running the four tests in order (docs/audits/2026-11-07-newstests-split.md).
+
 ## Change
 
 - The four loopback socket tests (`testGatewayRejectionIsTransport`, `testSocketNetworkBoundary`, `testTransportCancellation`, `testGatewayAddressFallback`) run in their own lane, `NEWS_TEST_SHARD=sockets`, one after another in one process beside the other lanes, so no two socket tests share the ephemeral range at the same instant. The slow lane is unchanged, so the pool's longest job does not grow; the sockets lane took 93 s on a loaded Mac.
