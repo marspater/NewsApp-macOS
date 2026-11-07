@@ -120,17 +120,36 @@ actor DatabaseEngine {
     // sqliteTransient destructor constant (-1 converted to unsafe pointer)
     static let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
+    /// The library opened without an explicit path: `Application Support/com.marspater.news/news.sqlite3`, which the
+    /// sandbox places in this bundle's container. A process outside a container (the test runner, the native test
+    /// bundle, an unsandboxed harness) would otherwise land in the user's real `~/Library/Application Support`, the
+    /// pre-sandbox location `container-migration.plist` migrates from, so it gets its own library under the temporary
+    /// directory instead (#1113).
+    nonisolated static let defaultLibraryURL: URL = {
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        // The sandbox sets APP_SANDBOX_CONTAINER_ID for every process it contains, and the directory it hands out
+        // lies under the container; both must hold, so an inherited variable alone cannot select the real home.
+        let sandboxed = ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+        if sandboxed, appSupport.pathComponents.contains("Containers") {
+            return appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
+                .appendingPathComponent("news.sqlite3")
+        }
+        let directory = fileManager.temporaryDirectory.appendingPathComponent(
+            "com.marspater.news-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)", isDirectory: true)
+        NewsSignposts.databaseLog.info(
+            "Not in a sandbox container; the default library is \(directory.path, privacy: .public)")
+        return directory.appendingPathComponent("news.sqlite3")
+    }()
+
     init(path: String? = nil) {
         if let customPath = path {
             self.dbPath = customPath
         } else {
-            let fileManager = FileManager.default
-            let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let appDir = appSupport.appendingPathComponent("com.marspater.news", isDirectory: true)
-            if !fileManager.fileExists(atPath: appDir.path) {
-                try? fileManager.createDirectory(at: appDir, withIntermediateDirectories: true)
-            }
-            self.dbPath = appDir.appendingPathComponent("news.sqlite3").path
+            let library = Self.defaultLibraryURL
+            try? FileManager.default.createDirectory(
+                at: library.deletingLastPathComponent(), withIntermediateDirectories: true)
+            self.dbPath = library.path
         }
     }
 
