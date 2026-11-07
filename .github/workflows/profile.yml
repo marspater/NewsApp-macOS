@@ -65,6 +65,10 @@ jobs:
             -testPlan UITests -destination 'platform=macOS' -derivedDataPath build/DerivedData \
             -only-testing:NewsUITests/NewsPerformanceTests \
             -resultBundlePath "$RUNNER_TEMP/NewsPerformanceTests.xcresult" -quiet
+          # Skipped tests exit 0: require that both measured tests actually passed.
+          passed=$(xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/NewsPerformanceTests.xcresult" \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["passedTests"])')
+          [[ "$passed" -ge 2 ]] || { echo "::error::Only $passed performance tests passed"; exit 1; }
 
       - name: Upload Performance Test Results
         if: always()

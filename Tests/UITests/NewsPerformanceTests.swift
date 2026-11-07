@@ -27,6 +27,7 @@ final class NewsPerformanceTests: XCTestCase {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["NEWS_PERFORMANCE_TESTS"] == "1",
             "Performance metrics run on the profile schedule only")
+        continueAfterFailure = false
         XCTAssertEqual(Bundle(url: NewsSmokeUITests.newsAppURL)?.bundleIdentifier, "com.marspater.news.dev")
         app = XCUIApplication(url: NewsSmokeUITests.newsAppURL)
         app.launchEnvironment["NEWS_LIBRARY_NAME"] = Self.libraryName
@@ -64,30 +65,43 @@ final class NewsPerformanceTests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 30), "No search field in the toolbar")
         // The fixture must be stored before timing starts: the first search waits for the refresh.
         search(field)
-        clear()
+        clear(field)
         measure(metrics: metrics, options: manualStop) {
             search(field)
             stopMeasuring()
-            clear()
+            clear(field)
         }
     }
 
+    /// The fixture's other story: the unfiltered list shows it, a finished search for the headline does not.
+    static let otherHeadline = "Regional Orchestra Announces Free Summer Concert Series"
+
     /// ⌘F expands and focuses the collapsed toolbar field, as in `NewsSmokeUITests.searchHeadline`.
-    func search(_ field: XCUIElement) {
+    func focus(_ field: XCUIElement) {
         app.typeKey("f", modifierFlags: .command)
         let focused = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
         XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 5), .completed, "The search field did not take focus")
+    }
+
+    /// Done when the headline shows and the other story is gone, so an unfiltered list never ends the measurement.
+    func search(_ field: XCUIElement) {
+        focus(field)
         app.typeText("Lighthouse Restoration\n")
+        let filtered = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: app.staticTexts[Self.otherHeadline].firstMatch)
+        XCTAssertEqual(XCTWaiter.wait(for: [filtered], timeout: 60), .completed, "The search did not filter the list")
         XCTAssertTrue(
-            app.staticTexts[NewsSmokeUITests.headline].firstMatch.waitForExistence(timeout: 60),
+            app.staticTexts[NewsSmokeUITests.headline].firstMatch.waitForExistence(timeout: 10),
             "The fixture headline was not found")
     }
 
-    func clear() {
-        app.typeKey("f", modifierFlags: .command)
+    func clear(_ field: XCUIElement) {
+        focus(field)
         app.typeKey("a", modifierFlags: .command)
         app.typeKey(.delete, modifierFlags: [])
+        // An empty field may report its placeholder as value, so check only that the query is gone.
+        XCTAssertFalse(((field.value as? String) ?? "").contains("Lighthouse"), "The search field did not clear")
         app.typeKey(.escape, modifierFlags: [])
     }
 }
