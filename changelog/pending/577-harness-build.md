@@ -1,0 +1,1 @@
+- CI builds the publisher-excerpt harness unoptimized (`NEWS_CONFIGURATION=Debug`, new in `build.sh`): about a quarter of the Release build's compile time, same checks.

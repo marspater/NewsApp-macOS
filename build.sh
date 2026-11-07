@@ -9,6 +9,8 @@
 #   NEWS_HARNESS_SANDBOX=1  signs the harness app with News.entitlements and the hardened runtime, as the app is; by
 #                           default a harness is unsandboxed and can write its evidence where its script says
 #   NEWS_OMIT_RESOURCES     resource file names left out of the bundle (build_and_run.sh: container-migration.plist)
+#   NEWS_CONFIGURATION      Release (default) or Debug: a harness that checks behaviour, not speed, compiles faster
+#                           unoptimized (CI's publisher-excerpt step, #577)
 #   NEWS_WHOLE_MODULE=1     whole-module optimization (build_release.sh); the default is -O per file, incremental
 #   SENTRY_DSN, .sentry-dsn links Sentry crash reporting (script/sentry_dev.sh); NEWS_SENTRY_DISABLED=1 forces it off
 set -e
@@ -18,6 +20,7 @@ source script/xcode_build.sh
 source script/sentry_dev.sh
 
 TARGET=News
+CONFIGURATION="${NEWS_CONFIGURATION:-Release}"
 APP_DIR="${NEWS_APP_DIR:-News.app}"
 SETTINGS=(MARKETING_VERSION="$NEWS_VERSION" CURRENT_PROJECT_VERSION="$NEWS_BUILD"
     PRODUCT_BUNDLE_IDENTIFIER="${NEWS_BUNDLE_ID:-com.marspater.news}" "${NEWS_SENTRY_SETTINGS[@]}")
@@ -36,10 +39,10 @@ if [[ -n "${NEWS_OMIT_RESOURCES:-}" ]]; then
 fi
 
 echo "Building ${TARGET} ${NEWS_VERSION} (${NEWS_BUILD}) for macOS ${TARGET_MACOS:-15.0} (arm64)..."
-news_xcodebuild "$TARGET" Release "${SETTINGS[@]}"
+news_xcodebuild "$TARGET" "$CONFIGURATION" "${SETTINGS[@]}"
 
 rm -rf "$APP_DIR"
-ditto "$NEWS_DERIVED_DATA/Build/Products/Release/$TARGET.app" "$APP_DIR"
+ditto "$NEWS_DERIVED_DATA/Build/Products/$CONFIGURATION/$TARGET.app" "$APP_DIR"
 if [[ -n "$SENTRY_DSN" ]]; then
     plutil -insert SentryDSN -string "$SENTRY_DSN" "$APP_DIR/Contents/Info.plist"
     codesign --force --options runtime --entitlements News.entitlements --sign - "$APP_DIR"
