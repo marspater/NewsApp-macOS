@@ -57,5 +57,5 @@ xcrun xctrace export --input "$OUTPUT/News.trace" \
     --output "$OUTPUT/signposts.xml"
 python3 script/summarize_signposts.py "$OUTPUT/signposts.xml" "$OUTPUT/summary" \
     --meta "revision=$(git rev-parse HEAD)" "time_limit=$TIME_LIMIT" \
-    "hardware=$(sysctl -n hw.model)" "os=$(sw_vers -productVersion)" "xcode=$(xcodebuild -version | head -1)"
+    "hardware=$(sysctl -n hw.model)" "os=$(sw_vers -productVersion)" "xcode=$(xcodebuild -version | head -1)" "xctrace_exit=$STATUS"
 echo "Signpost profile: $OUTPUT"
