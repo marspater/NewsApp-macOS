@@ -36,7 +36,7 @@ Four targets over the synchronized `Sources/` folder (no per-file project entrie
 
    The `News` scheme's tests come from three test plans in `Tests/Plans/` (#1070), all over `NewsTests` only (the `NewsUITests` target of #1121 is in none of them):
    - **`Development`** (scheme default): every native suite, no code coverage, no sanitizers.
-   - **`Integration`**: the suites tagged `.storage`, `.migration`, `.feedParsing` and `.publisherExcerpts`, with code coverage.
+   - **`Integration`**: the suites tagged `.integration` (migration, feed parsing and publisher excerpts; storage joins once its native suite lands), with code coverage. Each of those suites carries its domain tag and `.integration`, because on Xcode 27.0 a plan's `selectedTags` list selects only tests that carry every listed tag: listing the four domain tags selected 0 tests, a single tag selects that domain, and nesting under `NativeSuites` makes no difference (checked with a top-level probe suite, 7 November 2026). `selectedTests` and `skippedTests` by Swift Testing identifier (`NativeSuites/MigrationSuite`) selected and skipped nothing in a plan, while `-only-testing:NewsTests/NativeSuites/MigrationSuite` on the command line works.
    - **`Release`**: everything in the bundle, with code coverage, test repetition off. All three CI providers run `-testPlan Release` and keep the `.xcresult`.
 
    `xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' -testPlan Development -only-testing:NewsTests` runs one plan locally without launching the app. `Tests/Plans` is a membership exception of the synchronized `Tests/` folder, so the plans are never copied into a bundle.
