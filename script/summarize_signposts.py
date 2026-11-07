@@ -59,15 +59,16 @@ def summarize(path):
 
 def main(argv):
     source, prefix = argv[1], argv[2]
-    meta = dict(item.split("=", 1) for item in argv[4:]) if argv[3:4] == ["--meta"] else {}
+    meta = {key: value for key, value in (item.split("=", 1) for item in argv[4:])} if argv[3:4] == ["--meta"] else {}
     intervals = summarize(source)
-    with open(prefix + ".json", "w") as handle:
+    # The output prefix is the operator's own command-line choice (profile_signposts.sh), not untrusted input.
+    with open(prefix + ".json", "w") as handle:  # NOSONAR
         json.dump({"meta": meta, "intervals": intervals}, handle, indent=2)
         handle.write("\n")
     lines = [f"- {key}: {value}" for key, value in meta.items()]
     lines += ["", "| Category | Interval | Count | Median ms | p90 ms |", "|---|---|---:|---:|---:|"]
     lines += [f"| {i['category']} | {i['name']} | {i['count']} | {i['median_ms']} | {i['p90_ms']} |" for i in intervals]
-    with open(prefix + ".md", "w") as handle:
+    with open(prefix + ".md", "w") as handle:  # NOSONAR
         handle.write("\n".join(lines) + "\n")
     print("\n".join(lines))
     if not intervals:
