@@ -1,0 +1,1 @@
+- Release builds now produce debug symbols (`News.app.dSYM`), and each GitHub release attaches them as `News-VERSION-arm64.dSYM.zip`, so crash reports from a shipped build can be symbolicated.
