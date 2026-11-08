@@ -46,11 +46,16 @@ class JSONFeedParser {
         return Task.isCancelled ? nil : articles
     }
 
+    /// Members FeedKit decodes as strings; `id` also takes an integer, which is converted first.
+    private static let stringMembers: Set<String> = [
+        "id", "url", "title", "content_html", "content_text", "summary", "image",
+    ]
+
     /// Normalizes legacy JSON Feed aliases and enforces size/item bounds before decoding.
     private static func normalizedFeedData(_ data: Data) -> Data? {
         guard !Task.isCancelled, data.count <= SecureHTTPClient.defaultFeedLimit,
             var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-            let items = object["items"] as? [[String: Any]]
+            let items = (object["items"] as? [Any])?.compactMap({ $0 as? [String: Any] })
         else { return nil }
         var normalized: [[String: Any]] = []
         for var item in items.prefix(500) {
@@ -61,12 +66,17 @@ class JSONFeedParser {
             ] {
                 if item[key] == nil || item[key] is NSNull { item[key] = item[alias] }
             }
+            if (item["tags"] as? [String])?.isEmpty == true { item["tags"] = item["categories"] }
+            // FeedKit rejects the whole feed over one mistyped member, so only well-typed values reach it.
+            if let number = item["id"] as? NSNumber { item["id"] = number.stringValue }
+            item = item.filter { !stringMembers.contains($0.key) || $0.value is String }
+            item["tags"] =
+                (item["tags"] as? String).map { [$0] } ?? (item["tags"] as? [Any])?.compactMap { $0 as? String }
             if item["id"] == nil || item["id"] is NSNull {
                 // Without an id or a URL the item has no identity; a random one would store it again on every refresh.
                 guard let url = item["url"], !(url is NSNull) else { continue }
                 item["id"] = url
             }
-            if (item["tags"] as? [String])?.isEmpty == true { item["tags"] = item["categories"] }
             if (item["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
                 item["summary"] = FeedXMLParser.stripHTMLSimple(item["description"] as? String ?? "")
             }
@@ -80,13 +90,18 @@ class JSONFeedParser {
             } else {
                 item.removeValue(forKey: "date_published")
             }
+            // JSON Feed 1.1 lists `authors`, 1.0 has one `author`, and feeds in the wild write a bare name.
+            let people = item["authors"] as? [Any] ?? item["author"].map { [$0] } ?? []
+            let names = people.compactMap { ($0 as? [String: Any])?["name"] as? String ?? $0 as? String }
+            item["author"] = names.isEmpty ? nil : ["name": names.joined(separator: ", ")]
             // Unused optional FeedKit fields must not make an otherwise compatible feed fail decoding.
             let fields: Set<String> = [
                 "id", "url", "title", "content_html", "content_text", "summary", "date_published", "image", "tags",
+                "author",
             ]
             normalized.append(item.filter { fields.contains($0.key) })
         }
-        object = object.filter { ["version", "title"].contains($0.key) }
+        object = object.filter { ["version", "title"].contains($0.key) && $0.value is String }
         if object["version"] == nil {
             object["version"] = "https://jsonfeed.org/version/1.1"
         }
@@ -143,7 +158,8 @@ class JSONFeedParser {
             fullContent: body.fullContent,
             category: category,
             contentFetched: body.contentFetched,
-            readerDocument: body.readerDocument
+            readerDocument: body.readerDocument,
+            author: FeedXMLParser.byline(item.author?.name)
         )
     }
 

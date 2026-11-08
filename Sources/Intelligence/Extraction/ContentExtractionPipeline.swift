@@ -855,6 +855,42 @@ enum HTMLDOMBuilder {
         return stack.first?.build() ?? root
     }
 
+    /// Whether the page holds more open elements than any article does. SwiftSoup rescans its open-element stack as
+    /// it builds, so 150 KB of nested tables takes 10 seconds, growing with the square of the depth, and a parse cannot
+    /// be cancelled.
+    /// ponytail: a tag count, so end tags the tree builder would ignore can hide depth from it; bound SwiftSoup itself
+    /// if that happens.
+    static func nestsTooDeeply(_ html: String, limit: Int = 2048) -> Bool {
+        var depth = 0
+        var open: [String: Int] = [:]
+        var rawText: String?
+        for part in html.split(separator: "<") {
+            let isEnd = part.hasPrefix("/")
+            let name = (isEnd ? part.dropFirst() : part).prefix { $0.isLetter || $0.isNumber }.lowercased()
+            if let raw = rawText {
+                if isEnd, name == raw { rawText = nil }
+            } else if isEnd {
+                if let count = open[name], count > 0 {
+                    open[name] = count - 1
+                    depth -= 1
+                }
+            } else if name == "script" || name == "style" {
+                rawText = name
+            } else if !name.isEmpty, !implicitlyClosedTags.contains(name),
+                // A self-closed tag, like inline SVG's <path/>, opens nothing.
+                part.prefix(while: { $0 != ">" }).last != "/"
+            {
+                open[name, default: 0] += 1
+                depth += 1
+                if depth > limit { return true }
+            }
+        }
+        return false
+    }
+
+    /// Void elements, and those HTML closes without an end tag: neither deepens a real page.
+    private static let implicitlyClosedTags = voidTags.union(["p", "li", "dt", "dd", "tr", "td", "th", "option"])
+
     private static func handleClosingTag(scanner: Scanner, stack: inout [DOMElementBuilder]) {
         // Closing tag: </tag>
         guard let closeTag = scanner.scanUpToString(">") else { return }
@@ -1231,6 +1267,9 @@ final class ContentExtractionPipeline: Sendable {
         guard html.utf8.count <= SecureHTTPClient.defaultArticleLimit else {
             return .contentParsingFailed(reason: "Article exceeds extraction limit")
         }
+        guard !HTMLDOMBuilder.nestsTooDeeply(html) else {
+            return .contentParsingFailed(reason: "Article nesting exceeds extraction limit")
+        }
         let soup = loggedExtraction("parseArticleHTML") { try SwiftSoup.parse(html) }
         // Structured data and barrier markers are read before scripts and furniture are removed.
         let structured = soup.map { Self.structuredArticle(in: $0) } ?? StructuredArticle()
@@ -1242,13 +1281,16 @@ final class ContentExtractionPipeline: Sendable {
         let discoveredLeadImage = leadImage ?? soup.flatMap { leadImages(in: $0).first }
         if let soup {
             loggedExtraction("stripFurnitureElements") {
-                try soup.select(
+                // Last first: removing a node reindexes the siblings after it, which is quadratic the other way round.
+                for element in try soup.select(
                     "script, style, noscript, iframe, svg, canvas, form, button, input, select, textarea, dialog, template, "
                         + "[role=navigation], [role=complementary], [role=banner], [role=search], [aria-hidden=true], "
                         + ".visually-hidden, .sr-only, "
                         + "[data-component=byline-block], [data-component=tag-list], [data-component=links-block], [data-component=topic-list], "
                         + ".video-player-error, .media-player__error, .share-tools, .social-share, .newsletter-signup, .advertisement, .ad-slot"
-                ).remove()
+                ).array().reversed() {
+                    try element.remove()
+                }
             }
         }
         let effectiveImage = Self.readerImageURL(discoveredLeadImage, baseURL: baseUrl)
@@ -1562,7 +1604,7 @@ final class ContentExtractionPipeline: Sendable {
     /// Next.js hydration state (`__NEXT_DATA__`), where the body may be HTML.
     static func structuredArticle(in document: SwiftSoup.Document) -> StructuredArticle {
         var scan = StructuredScan()
-        for script in ((try? document.select("script[type=application/ld+json]").array()) ?? []).prefix(16) {
+        for script in ((try? document.select("script[type^=application/ld+json]").array()) ?? []).prefix(16) {
             let data = Data(script.data().utf8)
             guard data.count <= 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) else { continue }
             scan.visitLinkedData(json, depth: 0)
@@ -2040,6 +2082,7 @@ final class ContentExtractionPipeline: Sendable {
     /// Declared article media only; Organization and WebSite images are usually logos.
     func extractLeadImages(from html: String) -> [String] {
         guard !Task.isCancelled, html.utf8.count <= SecureHTTPClient.defaultArticleLimit,
+            !HTMLDOMBuilder.nestsTooDeeply(html),
             let document = loggedExtraction("parseLeadImageHTML", { try SwiftSoup.parse(html) })
         else { return [] }
         return leadImages(in: document)

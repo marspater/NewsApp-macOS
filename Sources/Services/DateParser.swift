@@ -39,16 +39,24 @@ struct DateParser {
             "E, d MMM yyyy HH:mm:ss Z",
             "E, d MMM yyyy HH:mm:ss zzz",
             "E, d MMM yyyy HH:mm zzz",
+            "E, d MMM yyyy, HH:mm:ss zzz",
             "d MMM yyyy HH:mm:ss Z",
             "d MMM yyyy HH:mm Z",
+            "d-MMM-yyyy HH:mm:ss zzz",
             "yyyy-MM-dd HH:mm:ss Z",
+            "yyyy-MM-dd HH:mm:ss Z zzz",
             "yyyy-MM-dd'T'HH:mm:ssZ",
+            "yyyy-MM-dd'T'HH:mmZZZZZ",
             "yyyy-MM-dd HH:mm:ss",
             "MMM d, yyyy",
-            // Zone-less and date-only ISO 8601 forms some feeds emit; UTC is assumed. An unparsed date would leave the
-            // story undated, ordered by ingestion time and never clustered.
+            // Zone-less and date-only forms some feeds emit; UTC is assumed. An unparsed date would leave the story
+            // undated, ordered by ingestion time and never clustered.
             "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm",
             "yyyy-MM-dd",
+            "E, d MMM yyyy HH:mm:ss",
+            "d MMM yyyy HH:mm:ss",
+            "E, d MMM yyyy",
         ]
 
         for fmt in formats {
@@ -58,7 +66,7 @@ struct DateParser {
             }
         }
 
-        // FeedKit's date formatters are internal; retain the shared native parser for JSON aliases and raw XML dates.
+        // A wrong weekday fails the strict patterns above; the date itself is still good.
         if let comma = trimmed.firstIndex(of: ","), trimmed[..<comma].allSatisfy({ $0.isASCII && $0.isLetter }) {
             let withoutWeekday = String(trimmed[trimmed.index(after: comma)...]).trimmingCharacters(in: .whitespaces)
             for format in ["d MMM yyyy HH:mm:ss Z", "d MMM yyyy HH:mm Z"] {
@@ -69,8 +77,8 @@ struct DateParser {
         return nil
     }
 
-    /// Zone names feeds use beyond RFC 822's, as offsets; DateFormatter does not know them and FeedKit's fallback
-    /// mis-offsets them (#796). IST is India's, the common case in English news feeds.
+    /// Zone names feeds use beyond RFC 822's, as offsets; DateFormatter does not know them (#796). IST is India's, the
+    /// common case in English news feeds.
     private static let zoneOffsets = [
         "BST": "+0100", "IST": "+0530", "CET": "+0100", "CEST": "+0200", "EET": "+0200", "EEST": "+0300",
         "WET": "+0000", "WEST": "+0100", "MSK": "+0300", "JST": "+0900", "KST": "+0900", "HKT": "+0800",
