@@ -1920,6 +1920,39 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(
             hostileParser.parseError, "XML entity declarations are not allowed",
             "Entity rejection error is preserved (#1148)")
+
+        // #1148: Attribute list declarations rejected by parser delegate
+        let hostileAttlist = """
+            <!DOCTYPE rss [<!ATTLIST item id CDATA #IMPLIED>]>
+            <rss version="2.0"><channel><item><title>Test</title></item></channel></rss>
+            """.data(using: .utf8)!
+        let attlistParser = FeedXMLParser(data: hostileAttlist, feedURL: "https://example.com/rss")
+        expectTrue(attlistParser.parse().isEmpty, "Attlist declarations refused (#1148)")
+        expectEqual(
+            attlistParser.parseError, "XML attribute list declarations are not allowed",
+            "Attlist error message set (#1148)")
+
+        // #1148: Valid UTF-16 and UTF-32 feeds with BOM are preserved during repair
+        let utf16XML = """
+            <?xml version="1.0" encoding="UTF-16"?>
+            <rss version="2.0"><channel><title>UTF16 &amp; Feed</title><item><title>Item 1</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+            """
+        var utf16Data = Data([0xFF, 0xFE])  // UTF-16 LE BOM
+        utf16Data.append(utf16XML.data(using: .utf16LittleEndian)!)
+        let utf16Parsed = FeedXMLParser(data: utf16Data, feedURL: "https://example.com/rss").parse()
+        expectEqual(utf16Parsed.count, 1, "UTF-16 feed with BOM parses correctly (#1148)")
+
+        var utf32Data = Data([0xFF, 0xFE, 0x00, 0x00])  // UTF-32 LE BOM
+        utf32Data.append(utf16XML.data(using: .utf32LittleEndian)!)
+        let utf32Parsed = FeedXMLParser(data: utf32Data, feedURL: "https://example.com/rss").parse()
+        expectEqual(utf32Parsed.count, 1, "UTF-32 feed with BOM parses correctly (#1148)")
+
+        // #1148: Disallowed numeric entities (control chars, surrogates) are escaped
+        let badEntityXML = """
+            <rss version="2.0"><channel><title>Test</title><item><title>Bad &#0; and &#xD800; and &#X41; and &amp;</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+            """.data(using: .utf8)!
+        let badEntityParsed = FeedXMLParser(data: badEntityXML, feedURL: "https://example.com/rss").parse()
+        expectEqual(badEntityParsed.count, 1, "Feed with disallowed numeric entities parses after escaping (#1148)")
     }
 
     static func testJSONParsing() async {
