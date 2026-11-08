@@ -910,7 +910,7 @@ enum HTMLDOMBuilder {
         }
         let nameEnd = bytes[nameStart...].firstIndex(where: tagNameEnds.contains) ?? bytes.count
         let end = endOfTag(bytes, from: nameEnd)
-        let name = String(decoding: bytes[nameStart..<nameEnd], as: UTF8.self).lowercased()
+        let name = String(bytes: bytes[nameStart..<nameEnd], encoding: .utf8)?.lowercased() ?? ""
         return ScannedTag(next: end.next, name: name, isEnd: isEnd, selfClosed: end.selfClosed)
     }
 
