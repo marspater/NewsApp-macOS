@@ -899,7 +899,7 @@ enum HTMLDOMBuilder {
     private static func scanTag(_ bytes: [UInt8], at start: Int) -> ScannedTag {
         let next = start + 1
         guard next < bytes.count else { return ScannedTag(next: next) }
-        if bytes[next...].starts(with: "!--".utf8) { return ScannedTag(next: endOfComment(bytes, from: next + 1)) }
+        if bytes[next...].starts(with: "!--".utf8) { return ScannedTag(next: endOfComment(bytes, from: next + 3)) }
         if bytes[next] == UInt8(ascii: "!") || bytes[next] == UInt8(ascii: "?") {
             return ScannedTag(next: pastClosingBracket(bytes, from: next))
         }
@@ -918,9 +918,11 @@ enum HTMLDOMBuilder {
         bytes[start...].firstIndex(of: UInt8(ascii: ">")).map { $0 + 1 } ?? bytes.count
     }
 
-    /// `start` is the first dash of `<!--`, so `<!-->` and `<!--->` end where they begin, as in HTML.
+    /// `start` is just past `<!--`. Dashes there still belong to the opening, as in SwiftSoup's tokenizer: `<!-->` and
+    /// `<!--->` end at once, and `<!--!>` does not end at all.
     private static func endOfComment(_ bytes: [UInt8], from start: Int) -> Int {
-        var index = start
+        guard var index = bytes[start...].firstIndex(where: { $0 != UInt8(ascii: "-") }) else { return bytes.count }
+        if bytes[index] == UInt8(ascii: ">") { return index + 1 }
         while let dash = bytes[index...].firstIndex(of: UInt8(ascii: "-")) {
             if bytes[dash...].starts(with: "-->".utf8) { return dash + 3 }
             if bytes[dash...].starts(with: "--!>".utf8) { return dash + 4 }

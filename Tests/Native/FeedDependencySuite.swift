@@ -144,6 +144,7 @@ extension NativeSuites {
         /// None of these closes an element for the parser, so the depth is real.
         @Test(arguments: [
             "<div><!-- </div> -->", "<div><!-- </div> --!>", #"<div title="</div>">"#, "<div title='</div>'>",
+            "<div><!--!></div>-->", "<div><!---!></div>-->", "<div><!----!></div>-->",
             "<div><textarea></div></textarea>", "<div><title></div></title>", "<x-a></x-b>", "<div a=/>",
             #"<div a=b"></div">"#,
         ])
@@ -158,7 +159,8 @@ extension NativeSuites {
         }
 
         @Test(arguments: [
-            "<!-- <div> -->", "<!--> <div></div>", #"<div title="<div>"></div>"#, "<script><!--</script><p>x",
+            "<!-- <div> -->", "<!--> <div></div>", "<!---> <div></div>", #"<div title="<div>"></div>"#,
+            "<script><!--</script><p>x",
             "<TEXTAREA><div></TEXTAREA>", "a < b <1 </1>", "<div/>", #"<div a="b"/>"#,
         ])
         func markupThatOpensNothingDoesNotCount(unit: String) {
