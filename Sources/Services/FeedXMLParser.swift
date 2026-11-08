@@ -757,11 +757,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let range = NSRange(html.startIndex..., in: html)
         // The first picture the feed gate accepts: not vector artwork, a tracking pixel or a site mark.
         return regex.matches(in: html, range: range).lazy
-            .compactMap {
-                Range($0.range(at: 1), in: html).flatMap {
-                    Self.decodedImageAttribute(html[$0]).map { self.resolvedURL($0, baseURL: baseURL) }
-                }
-            }
+            .compactMap { Range($0.range(at: 1), in: html) }
+            .compactMap { Self.decodedImageAttribute(html[$0]) }
+            .map { self.resolvedURL($0, baseURL: baseURL) }
             .first { ReaderImageCandidate.usable(url: $0) }
     }
 }
