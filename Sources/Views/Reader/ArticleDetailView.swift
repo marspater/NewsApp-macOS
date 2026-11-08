@@ -538,7 +538,7 @@ struct ArticleDetailView: View {
 
     /// The reader's lead figure: the image the story card shows (#925), unless a figure opens the body or the body
     /// already shows the same image.
-    static func leadImage(for article: FeedArticle, blocks: [ReaderBlock]) -> String? {
+    nonisolated static func leadImage(for article: FeedArticle, blocks: [ReaderBlock]) -> String? {
         guard !blocks.prefix(2).contains(where: { $0.kind == .figure }),
             let image = article.readerDocument?.selectedImage(fallback: article.imageUrl) ?? article.imageUrl,
             !blocks.contains(where: { $0.kind == .figure && $0.imageURL == image })

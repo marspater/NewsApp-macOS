@@ -298,7 +298,7 @@ final class StoryBannerPresenter {
         if !isHeadless { panel.orderFrontRegardless() }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
-            panel.animator().setFrame(frame, display: true)
+            panel.animator().setFrame(frame, display: false)
             panel.animator().alphaValue = 1
         }
         // The panel never takes focus, so VoiceOver hears the banner as an announcement.
@@ -360,6 +360,7 @@ final class StoryBannerPresenter {
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
+        panel.becomesKeyOnlyIfNeeded = true
         return panel
     }
 }

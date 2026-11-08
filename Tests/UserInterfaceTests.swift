@@ -550,10 +550,10 @@ extension NewsTests {
 
         // 4. Persistence round trip and settings backup/restore
         let suite = testDefaultsSuite("test.smartbinders")
-        let testDefaults = UserDefaults(suiteName: suite)!
         defer { removeTestDefaults(suite) }
 
         try await MainActor.run {
+            let testDefaults = UserDefaults(suiteName: suite)!
             let settings = AppSettings(defaults: testDefaults)
             assertEqual(settings.smartBinders.count, 0, "Initially zero smart binders")
 

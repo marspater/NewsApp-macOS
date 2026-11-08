@@ -658,6 +658,7 @@
 				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/*";
 				GENERATE_INFOPLIST_FILE = YES;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/UITests/*";
+				OTHER_LDFLAGS = "-framework AppIntents";
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
 				PRODUCT_NAME = NewsUITests;
 				SWIFT_VERSION = 5.0;
@@ -671,6 +672,7 @@
 				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/*";
 				GENERATE_INFOPLIST_FILE = YES;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/UITests/*";
+				OTHER_LDFLAGS = "-framework AppIntents";
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
 				PRODUCT_NAME = NewsUITests;
 				SWIFT_VERSION = 5.0;

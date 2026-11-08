@@ -495,7 +495,7 @@ enum BriefingImpactTests {
         }
 
         // Test BriefingActions default closure bodies
-        var defaultActions = BriefingActions(
+        let defaultActions = BriefingActions(
             onOpenArticle: { _ in }, onOpenEvent: { _ in }, onStartNewBriefing: {}, onBackToToday: {}
         )
         defaultActions.onToggleRead(sampleArticle)
