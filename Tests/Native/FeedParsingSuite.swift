@@ -1613,6 +1613,41 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(article.imageUrl, "https://cdn.arstechnica.net/m5-hero.jpg", "Image enclosure URL should be parsed")
         expectEqual(article.category, "Hardware", "Category should match")
         expectEqual(article.source, "Ars Technica & News", "Decoded channel title should be assigned as source")
+
+        // #1134: relative <img> URLs in description and content:encoded resolve against item xml:base and feedURL.
+        let relativeImageXML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+            <channel>
+                <title>Relative Images</title>
+                <item xml:base="https://cdn.example.com/stories/2026/">
+                    <title>Relative Description Image</title>
+                    <link>post-1</link>
+                    <guid isPermaLink="false">rel-1</guid>
+                    <description><![CDATA[<p>Lead</p><img src="images/hero.jpg?w=1200"/>]]></description>
+                </item>
+                <item xml:base="https://cdn.example.com/stories/2026/">
+                    <title>Relative Content Encoded Image</title>
+                    <link>post-2</link>
+                    <guid isPermaLink="false">rel-2</guid>
+                    <description>Plain summary</description>
+                    <content:encoded><![CDATA[<p>First paragraph</p><img src="/assets/featured.png?w=800"/>]]></content:encoded>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .utf8)!
+        let relativeArticles = FeedXMLParser(
+            data: relativeImageXML, feedURL: "https://feeds.example.com/rss.xml"
+        ).parse()
+        expectEqual(relativeArticles.count, 2, "Should parse both relative-image items")
+        expectEqual(
+            relativeArticles[0].imageUrl,
+            "https://cdn.example.com/stories/2026/images/hero.jpg?w=1200",
+            "Relative <img> in description resolves against item xml:base (#1134)")
+        expectEqual(
+            relativeArticles[1].imageUrl,
+            "https://cdn.example.com/assets/featured.png?w=800",
+            "Root-relative <img> in content:encoded resolves against item xml:base (#1134)")
     }
 
     static func testJSONParsing() async {
