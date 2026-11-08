@@ -145,6 +145,7 @@ extension EnvironmentValues {
         _ url: URL, size: Size = .full, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
     ) async throws -> CGImage {
         if let image = cached(url, size: size) { return image }
+        try Task.checkCancellation()
         let currentGeneration = generation
         let key = Key(url: url, size: size)
         // Shared loads survive one card disappearing; the last waiter to cancel stops the download.
@@ -155,18 +156,20 @@ extension EnvironmentValues {
             let maxPixels = size.maxPixels
             // The task stores its own decode, so finished work is kept when every waiter has gone (#591); only a
             // clear() since it started discards it. Data downloaded but not yet decoded is still dropped on cancellation.
-            shared = SharedLoad(
-                task: Task {
-                    let image = try await loader(ReaderImageCandidate.preferredRendition(of: url), maxPixels)
-                    if generation == currentGeneration { store(image, for: url, size: size) }
-                    return image
-                })
-            pending[key] = shared
+            var created: SharedLoad?
+            let download = Task {
+                defer { if let created, pending[key] === created { pending[key] = nil } }
+                let image = try await loader(ReaderImageCandidate.preferredRendition(of: url), maxPixels)
+                if generation == currentGeneration { store(image, for: url, size: size) }
+                return image
+            }
+            let newShared = SharedLoad(task: download)
+            created = newShared
+            shared = newShared
+            pending[key] = newShared
         }
         let task = shared.task
         shared.join()
-        // After clear() a newer load may own the key; only remove this load's own entry.
-        defer { if pending[key] === shared { pending[key] = nil } }
         return try await withTaskCancellationHandler {
             try await task.value
         } onCancel: {
