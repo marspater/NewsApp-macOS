@@ -78,8 +78,16 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private let maxNestingDepth = 64
     private let maxArticlesPerFeed = 500
 
-    init(data: Data, feedURL: String = "") {
-        self.data = data
+    init(data: Data, feedURL: String = "", textEncodingName: String? = nil) {
+        if let textEncodingName,
+            !Self.hasByteOrderMark(data),
+            !Self.declaresEncoding(data),
+            let transcoded = Self.transcodeToUTF8(data: data, encodingName: textEncodingName)
+        {
+            self.data = transcoded
+        } else {
+            self.data = data
+        }
         self.feedURL = feedURL
     }
 
@@ -805,5 +813,57 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             .compactMap { Self.decodedImageAttribute(html[$0]) }
             .map { self.resolvedURL($0, baseURL: baseURL) }
             .first { ReaderImageCandidate.usable(url: $0) }
+    }
+
+    /// Detects UTF-8 or UTF-16 byte order marks at the beginning of XML data (#1149).
+    static func hasByteOrderMark(_ data: Data) -> Bool {
+        data.starts(with: [0xEF, 0xBB, 0xBF])
+            || data.starts(with: [0xFE, 0xFF])
+            || data.starts(with: [0xFF, 0xFE])
+    }
+
+    /// Detects whether an XML prolog explicitly specifies an encoding attribute (#1149).
+    static func declaresEncoding(_ data: Data) -> Bool {
+        let trimmed = data.drop { [0x20, 0x09, 0x0A, 0x0D].contains($0) }
+        guard trimmed.starts(with: Data("<?xml".utf8)) else { return false }
+        let afterXml = trimmed.dropFirst(5)
+        guard let firstByte = afterXml.first, [0x20, 0x09, 0x0A, 0x0D].contains(firstByte) else {
+            return false
+        }
+        let prefix = trimmed.prefix(1024)
+        guard let endRange = prefix.range(of: Data("?>".utf8)) else { return false }
+        let declData = prefix[..<endRange.upperBound]
+        guard
+            let declString = String(data: declData, encoding: .ascii)
+                ?? String(data: declData, encoding: .isoLatin1)
+        else {
+            return false
+        }
+        return declString.range(of: #"\bencoding\s*="#, options: .regularExpression) != nil
+    }
+
+    /// Resolves an IANA charset name or encoding alias to a Foundation `String.Encoding` (#1149).
+    static func stringEncoding(for name: String) -> String.Encoding? {
+        let cleaned = name.trimmingCharacters(in: CharacterSet(charactersIn: "\"' \t"))
+        guard !cleaned.isEmpty else { return nil }
+        let cfEncoding = CFStringConvertIANACharSetNameToEncoding(cleaned as CFString)
+        if cfEncoding != kCFStringEncodingInvalidId {
+            let nsEncoding = CFStringConvertEncodingToNSStringEncoding(cfEncoding)
+            return String.Encoding(rawValue: nsEncoding)
+        }
+        return nil
+    }
+
+    /// Transcodes XML data from the specified encoding to UTF-8, bounded to `limit` bytes (#1149).
+    static func transcodeToUTF8(
+        data: Data, encodingName: String, limit: Int64 = SecureHTTPClient.defaultFeedLimit
+    ) -> Data? {
+        guard data.count <= limit else { return nil }
+        guard let encoding = stringEncoding(for: encodingName) else { return nil }
+        if encoding == .utf8 { return data }
+        guard let string = String(data: data, encoding: encoding) else { return nil }
+        guard let utf8Data = string.data(using: .utf8) else { return nil }
+        guard utf8Data.count <= limit else { return nil }
+        return utf8Data
     }
 }

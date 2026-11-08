@@ -1762,6 +1762,97 @@ extension NativeSuites.FeedParsingSuite {
         expectNil(
             unrelatedArticles.first?.author,
             "Prefix bound to unrelated namespace is not treated as well-known dc:creator (#1150)")
+
+        // #1149: Latin-1 feed with no XML encoding declaration transcoded using charset header.
+        let latin1NoDeclXML = """
+            <rss version="2.0">
+            <channel>
+                <title>Café des Nouvelles</title>
+                <item>
+                    <title>Édition Spéciale</title>
+                    <link>https://example.com/edition</link>
+                    <guid>edition-1</guid>
+                    <description>Résumé des événements.</description>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .isoLatin1)!
+        let parsedNoDecl = FeedXMLParser(
+            data: latin1NoDeclXML, feedURL: "https://example.com/rss", textEncodingName: "iso-8859-1"
+        ).parse()
+        expectEqual(parsedNoDecl.count, 1, "Latin-1 feed with charset header parses successfully (#1149)")
+        expectEqual(
+            parsedNoDecl.first?.title, "Édition Spéciale",
+            "Article title with Latin-1 characters is transcoded (#1149)")
+        expectEqual(
+            parsedNoDecl.first?.source, "Café des Nouvelles",
+            "Channel title with Latin-1 characters is preserved (#1149)")
+
+        // #1149: XML declaration in the document takes precedence over the header charset.
+        let latin1WithDeclXML = """
+            <?xml version="1.0" encoding="ISO-8859-1"?>
+            <rss version="2.0">
+            <channel>
+                <title>Théâtre Français</title>
+                <item>
+                    <title>Représentation</title>
+                    <link>https://example.com/theatre</link>
+                    <guid>theatre-1</guid>
+                    <description>Détails du spectacle.</description>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .isoLatin1)!
+        let parsedWithDecl = FeedXMLParser(
+            data: latin1WithDeclXML, feedURL: "https://example.com/rss", textEncodingName: "utf-8"
+        ).parse()
+        expectEqual(
+            parsedWithDecl.count, 1,
+            "Document encoding declaration takes precedence over conflicting header (#1149)")
+        expectEqual(
+            parsedWithDecl.first?.title, "Représentation",
+            "Article title parses using document's declared encoding (#1149)")
+
+        // #1149: FeedFetcher end-to-end Latin-1 feed with Content-Type charset and no XML declaration
+        let client = NewsTests.mockHTTPClient(
+            configuration: {
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [MockURLProtocol.self]
+                return config
+            }())
+        defer { MockURLProtocol.requestHandler = nil }
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/rss+xml; charset=iso-8859-1"])!,
+                latin1NoDeclXML
+            )
+        }
+        let fetcherResult = await FeedFetcher(client: client).fetchSingleFeed(
+            urlString: "https://example.com/latin1.xml")
+        expectEqual(fetcherResult.error, nil, "Latin-1 feed with Content-Type header fetches and parses (#1149)")
+        expectEqual(
+            fetcherResult.articles?.first?.title, "Édition Spéciale",
+            "FeedFetcher extracts and transcodes Latin-1 feed with charset header (#1149)")
+
+        // #1149: FeedFetcher end-to-end document declaration precedence over header
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/rss+xml; charset=utf-8"])!,
+                latin1WithDeclXML
+            )
+        }
+        let fetcherPrecedenceResult = await FeedFetcher(client: client).fetchSingleFeed(
+            urlString: "https://example.com/declared.xml")
+        expectEqual(
+            fetcherPrecedenceResult.error, nil,
+            "FeedFetcher respects document encoding declaration over conflicting header (#1149)")
+        expectEqual(
+            fetcherPrecedenceResult.articles?.first?.title, "Représentation",
+            "FeedFetcher parses title via declared encoding (#1149)")
     }
 
     static func testJSONParsing() async {
