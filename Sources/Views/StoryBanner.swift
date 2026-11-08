@@ -153,6 +153,8 @@ final class StoryBannerPresenter {
     private var shown: Shown?
     /// Read-only banner state for headless regression assertions.
     var hasPresentedPhoto: Bool { shown?.photo != nil }
+    /// In-flight photo task for headless regression synchronization.
+    var photoTaskForTesting: Task<Void, Never>? { photoTask }
     private var dismissal: Task<Void, Never>?
     /// Current banner owns its image request; replacing or closing it cancels obsolete work.
     private var photoTask: Task<Void, Never>?

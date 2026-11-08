@@ -264,6 +264,9 @@ enum NotificationAttachmentTests {
         let isolated = StoryBannerPresenter(photoLoader: { _, _ in await probe.load() })
         isolated.isHeadless = true
         precondition(isolated.present(banner), "The injected banner presents offscreen")
+        guard let cancelledPhotoTask = isolated.photoTaskForTesting else {
+            fatalError("The first banner presentation owns a photo task")
+        }
         for _ in 0..<200 {
             if await probe.snapshot().starts == 1 { break }
             try? await Task.sleep(for: .milliseconds(10))
@@ -304,7 +307,7 @@ enum NotificationAttachmentTests {
         }
         let completed = await probe.snapshot()
         precondition(completed.completions == 1, "The cancelled image loader completes")
-        for _ in 0..<20 { await Task.yield() }
+        await cancelledPhotoTask.value
         precondition(!isolated.hasPresentedPhoto, "A cancelled image must not appear on the reopened banner")
 
         // A fresh request for that same banner is allowed to render its own photo.
@@ -314,7 +317,27 @@ enum NotificationAttachmentTests {
             try? await Task.sleep(for: .milliseconds(10))
         }
         precondition(isolated.hasPresentedPhoto, "The reopened banner renders its fresh image")
+
+        // Dismissing a banner while a photo request is in flight must cancel the task (#1161).
+        precondition(isolated.present(banner), "Presenting the banner again starts a third request")
+        for _ in 0..<200 {
+            if await probe.snapshot().starts == 3 { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        guard let dismissedPhotoTask = isolated.photoTaskForTesting else {
+            fatalError("The third banner presentation owns a photo task")
+        }
         isolated.dismiss()
+        for _ in 0..<200 {
+            if await probe.snapshot().cancellations == 2 { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let dismissedSnapshot = await probe.snapshot()
+        precondition(
+            dismissedSnapshot.cancellations == 2,
+            "Dismissing the banner cancels its in-flight photo request")
+        await probe.release(2, photo: nil)
+        await dismissedPhotoTask.value
         precondition(!isolated.hasPresentedPhoto, "Dismissing the banner clears its image")
 
         // Notification handlers
