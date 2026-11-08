@@ -68,6 +68,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private var itemImageCandidates = [ReaderImageCandidate]()
     private var itemContentIsXHTML = false
     private var itemCategory = ""
+    private var itemAuthors = ""
     private var itemContentEncoded = ""
     private var itemContentBaseURL: URL?
     private var isCollectingContentEncoded = false
@@ -101,12 +102,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             parseError = "XML entity declarations are not allowed"
             return false
         }
-        let parser = XMLParser(data: data)
+        // Output before the declaration, or anything after the closing root tag, is a server's stray text.
+        let parser = XMLParser(data: Data(data.drop { [0x20, 0x09, 0x0A, 0x0D].contains($0) }))
         parser.delegate = self
         parser.shouldProcessNamespaces = true
         parser.shouldReportNamespacePrefixes = false
         parser.shouldResolveExternalEntities = false
-        if !parser.parse() {
+        if !parser.parse(), !(recognizedFeed && currentNestingDepth == 0) {
             parseError = "Malformed XML feed"
             return false
         }
@@ -207,10 +209,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     /// Processes an opening element inside an RSS `<item>` or Atom `<entry>`, capturing the first non-empty occurrence of each scalar field.
     private func handleItemElement(elementName: String, attributeDict: [String: String]) {
-        let attributes = attributeDict.filter { !$0.key.hasPrefix("xmlns") }.sorted { $0.key < $1.key }.map {
-            key, value in
-            let value = ["url", "href"].contains(key) ? resolvedURL(value) : value
-            return " \(key)=\"\(escapeHTML(value))\""
+        let attributes = attributeDict.filter(Self.isFeedKitAttribute).sorted { $0.key < $1.key }.map { key, value in
+            " \(key)=\"\(escapeHTML(key == "url" ? resolvedURL(value) : value))\""
         }.joined()
         appendItemXML("<\(elementName)\(attributes)>")
         // An Atom entry's <source> describes the feed it was copied from, and a foreign element (vendor:details) is
@@ -264,6 +264,16 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
+    /// The attributes read from FeedKit's model. FeedKit rejects a whole item over one attribute it types as a number
+    /// and cannot convert (`length=""`, `width="100%"`, `isDefault="yes"`), so nothing else reaches it.
+    private static func isFeedKitAttribute(_ key: String, _ value: String) -> Bool {
+        switch key {
+        case "url", "type", "medium": return true
+        case "width", "height": return Int(value.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
+        default: return false
+        }
+    }
+
     /// Resets per-item accumulator buffers when entering a new RSS `<item>` or Atom `<entry>`.
     private func resetItemState() {
         insideItem = true
@@ -286,6 +296,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         itemImageCandidates = []
         itemContentIsXHTML = false
         itemCategory = ""
+        itemAuthors = ""
         itemContentEncoded = ""
         activeTextField = nil
     }
@@ -340,6 +351,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if currentElement == "media:credit", !itemImageCandidates.isEmpty {
             let index = itemImageCandidates.count - 1
             itemImageCandidates[index].credit = String(((itemImageCandidates[index].credit ?? "") + string).prefix(500))
+            return
+        }
+        if currentElement == "dc:creator" || currentElement == "author"
+            || (currentElement == "name" && elementStack.dropLast().last == "author")
+        {
+            itemAuthors += string
             return
         }
         if let active = activeTextField {
@@ -414,6 +431,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             if ["category", "dc:subject"].contains(elementName), !isCollectingContentEncoded, !insideForeignBlock {
                 itemCategory += "\n"
             }
+            if ["dc:creator", "author", "name"].contains(elementName), !isCollectingContentEncoded, !insideForeignBlock
+            {
+                itemAuthors += "\n"
+            }
             if let active = activeTextField, active.depth == currentNestingDepth {
                 if active.field == "link" { itemLink = resolvedURL(itemLink) }
                 activeTextField = nil
@@ -444,8 +465,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func finishArticle() {
-        let fallbackDate = itemUpdated.isEmpty ? itemDublinDate : itemUpdated
-        let rawDate = itemPubDate.isEmpty ? fallbackDate : itemPubDate
+        // An unreadable date falls through to the next field instead of leaving the story undated.
+        let rawDate = [itemPubDate, itemUpdated, itemDublinDate].first { DateParser.parse($0) != nil } ?? ""
         let guid = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
         let link = itemDocumentLink(guid: guid)
         let content = itemContent(articleLink: link)
@@ -472,9 +493,17 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             pubDate: DateParser.parse(rawDate) ?? DateParser.unknownDate, source: itemSourceName(),
             imageUrl: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl, baseURL: itemBaseURL), aiSummary: nil,
             fullContent: content.extracted?.content ?? content.text, category: category,
-            contentFetched: content.text != nil, readerDocument: doc)
+            contentFetched: content.text != nil, readerDocument: doc, author: itemAuthorNames())
         articles.append(article)
         parsedItems.append((itemXML, itemBaseURL))
+    }
+
+    private func itemAuthorNames() -> String? {
+        var seen = Set<String>()
+        let names = itemAuthors.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+        return Self.byline(names.joined(separator: ", "))
     }
 
     private func itemDocumentLink(guid: String) -> String {
@@ -573,7 +602,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func appendItemXML(_ value: String) {
-        guard itemXML != nil else { return }
+        // Dates are DateParser's: FeedKit throws on the ones it cannot read and drops the time from others.
+        guard itemXML != nil, !["pubDate", "published", "updated", "dc:date"].contains(currentElement) else { return }
         itemXMLBytes += value.utf8.count
         // ponytail: FeedKit handles at most 512 KiB per item; larger entries keep the streaming compatibility path.
         guard itemXMLBytes <= 524_288 else {
@@ -617,33 +647,27 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let desc =
             article.description.isEmpty
             ? Self.stripHTMLSimple(item.description ?? dc?.description ?? "") : article.description
-        let date =
-            article.pubDate == DateParser.unknownDate ? item.pubDate ?? dc?.date ?? article.pubDate : article.pubDate
         let cat = article.category ?? item.categories?.first?.text ?? dc?.subject
         return FeedArticle(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines), link: article.link, guid: article.guid,
-            description: desc, pubDate: date, source: article.source, imageUrl: article.imageUrl,
+            description: desc, pubDate: article.pubDate, source: article.source, imageUrl: article.imageUrl,
             fullContent: article.fullContent, category: cat, contentFetched: article.contentFetched,
-            readerDocument: article.readerDocument, author: Self.byline(item.author) ?? Self.byline(dc?.creator))
+            readerDocument: article.readerDocument, author: article.author)
     }
 
     private func atomArticle(_ item: FeedKit.AtomFeedEntry, keeping article: FeedArticle) -> FeedArticle {
         let rawTitle = article.title.isEmpty ? item.title ?? "" : article.title
         let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
         let desc = article.description.isEmpty ? Self.stripHTMLSimple(item.summary?.text ?? "") : article.description
-        let date =
-            article.pubDate == DateParser.unknownDate
-            ? item.published ?? item.updated ?? article.pubDate : article.pubDate
         return FeedArticle(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines), link: article.link, guid: article.guid,
-            description: desc, pubDate: date, source: article.source, imageUrl: article.imageUrl,
+            description: desc, pubDate: article.pubDate, source: article.source, imageUrl: article.imageUrl,
             fullContent: article.fullContent, category: article.category, contentFetched: article.contentFetched,
-            readerDocument: article.readerDocument,
-            author: Self.byline(item.authors?.compactMap(\.name).joined(separator: ", ")))
+            readerDocument: article.readerDocument, author: article.author)
     }
 
     /// A feed's author text, bounded because the field is untrusted and never needs more than a few names.
-    private static func byline(_ raw: String?) -> String? {
+    static func byline(_ raw: String?) -> String? {
         let text = ContentExtractionPipeline.shared.decodeHTMLEntities(raw ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : String(text.prefix(300))
@@ -702,9 +726,11 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     private func normalizedElement(_ name: String, namespaceURI: String?) -> String {
         switch namespaceURI {
-        case "http://purl.org/rss/1.0/modules/content/": return "content:" + name
-        case "http://search.yahoo.com/mrss/": return "media:" + name
-        case "http://purl.org/dc/elements/1.1/": return "dc:" + name
+        // Publishers also declare these without the trailing slash.
+        case "http://purl.org/rss/1.0/modules/content/", "http://purl.org/rss/1.0/modules/content":
+            return "content:" + name
+        case "http://search.yahoo.com/mrss/", "http://search.yahoo.com/mrss": return "media:" + name
+        case "http://purl.org/dc/elements/1.1/", "http://purl.org/dc/elements/1.1": return "dc:" + name
         // RSS 2.0 has no namespace; Atom, RSS 1.0, RDF and XHTML content elements keep their local names.
         case nil, "", "http://www.w3.org/2005/Atom", "http://purl.org/atom/ns#", "http://purl.org/rss/1.0/",
             "http://my.netscape.com/rdf/simple/0.9/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#",

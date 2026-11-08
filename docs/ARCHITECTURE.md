@@ -243,7 +243,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - All URLs, feed bodies, HTML, redirects and OPML are untrusted. Remote fetching goes through the protected gateway: public-DNS validation, numeric-IP pinning, response bounds, cancellation. URLSession and WebKit previews share it. Names resolve through `ProxyResolver` over `DNSLookup` (dns_sd, asynchronous and cancellable, a 5 s deadline per lookup, the configured address families with a 100 ms grace for the second to end) in the preflight and in the gateway; the redirect delegate applies only the DNS-free hostname guard. The gateway connects with Happy Eyeballs (`SOCKSTunnel`: interleaved families, 250 ms attempt delay, at most three attempts in flight) to validated numeric addresses (#945).
 
-- Feed XML: depth 64, 500 items, entity declarations rejected (64 KiB prolog scan + callbacks), FeedKit gets reserialized DTD-free items ≤512 KiB and never fetches URLs. JSON feeds ≤10 MiB, trimmed to 500 items.
+- Feed XML: depth 64, 500 items, entity declarations rejected (64 KiB prolog scan + callbacks), FeedKit gets reserialized DTD-free items ≤512 KiB, without dates (`DateParser` owns those) or attributes it would convert and reject the item over, and never fetches URLs. Bylines, like every other field the app needs, come from the streaming parser. JSON feeds ≤10 MiB, trimmed to 500 items.
 
 - OPML import (#928): ≤5 MB, full-input entity and DTD attribute-list scans (including UTF-16/32), parser callbacks, depth 64 and ≤20,000 outlines. Entity and attribute-list declarations are rejected before Foundation can expand or supply DTD defaults. A refused file names the guard in the alert and changes no subscription or section.
 
@@ -254,7 +254,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 <details>
 <summary><b>Reader extraction</b></summary>
 
-- `HTMLDOMBuilder` scoring with a quality-checked preference for explicit publisher bodies chosen through SwiftSoup. Repaired nodes pass the same rules.
+- `HTMLDOMBuilder` scoring with a quality-checked preference for explicit publisher bodies chosen through SwiftSoup. Repaired nodes pass the same rules. Pages that open more than 2,048 elements without closing them are refused before SwiftSoup, whose tree builder is quadratic in depth and cannot be cancelled.
 
 - Reader v11 removes page furniture by structure and wording, never per publisher:
     - `<h1>` is never body text. The `<p>` right after it, and a Guardian-style standfirst beside the explicit body, become `standfirst` blocks; a paragraph repeating the standfirst is dropped.

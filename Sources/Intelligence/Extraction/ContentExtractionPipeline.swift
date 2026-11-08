@@ -855,6 +855,155 @@ enum HTMLDOMBuilder {
         return stack.first?.build() ?? root
     }
 
+    /// Whether the page holds more open elements than any article does. SwiftSoup rescans its open-element stack as
+    /// it builds, so 150 KB of nested tables takes 10 seconds, growing with the square of the depth, and a parse cannot
+    /// be cancelled. Markup is read as SwiftSoup's tokenizer reads it, so comments, attribute values and raw text
+    /// cannot close elements here that stay open there.
+    /// ponytail: an estimate of the tree builder's rules, not a copy of them; bound SwiftSoup itself if a page gets past
+    /// it (scinfu/SwiftSoup#473 removes the quadratic rebuild).
+    static func nestsTooDeeply(_ html: String, limit: Int = 2048) -> Bool {
+        let bytes = Array(html.utf8)
+        var depth = 0
+        // For each name, the order in which its still-open elements were opened.
+        var open: [String: [Int]] = [:]
+        var scopes: [Int] = []
+        var opened = 0
+        var index = 0
+        while let start = bytes[index...].firstIndex(of: UInt8(ascii: "<")) {
+            let tag = scanTag(bytes, at: start)
+            index = min(tag.next, bytes.count)
+            guard !tag.name.isEmpty else { continue }
+            if tag.isEnd {
+                // The tree builder ignores an end tag beyond the nearest scope boundary, as `</div>` inside a table.
+                if let position = open[tag.name]?.last, position >= scopes.last ?? 0 {
+                    open[tag.name]?.removeLast()
+                    if position == scopes.last { scopes.removeLast() }
+                    depth -= 1
+                }
+            } else if tag.selfClosed || implicitlyClosedTags.contains(tag.name) {
+                // Opens nothing.
+            } else if rawTextTags.contains(tag.name) {
+                index = endOfRawText(bytes, name: tag.name, from: index)
+            } else {
+                open[tag.name, default: []].append(opened)
+                if scopeBoundaryTags.contains(tag.name) { scopes.append(opened) }
+                opened += 1
+                depth += 1
+                if depth > limit { return true }
+            }
+        }
+        return false
+    }
+
+    /// Where scanning resumes after the `<` at some position; `name` is empty for a comment, declaration or plain text.
+    private struct ScannedTag {
+        var next: Int
+        var name = ""
+        var isEnd = false
+        var selfClosed = false
+    }
+
+    private static func scanTag(_ bytes: [UInt8], at start: Int) -> ScannedTag {
+        let next = start + 1
+        guard next < bytes.count else { return ScannedTag(next: next) }
+        if bytes[next...].starts(with: "!--".utf8) { return ScannedTag(next: endOfComment(bytes, from: next + 3)) }
+        if bytes[next] == UInt8(ascii: "!") || bytes[next] == UInt8(ascii: "?") {
+            return ScannedTag(next: pastClosingBracket(bytes, from: next))
+        }
+        let isEnd = bytes[next] == UInt8(ascii: "/")
+        let nameStart = isEnd ? next + 1 : next
+        guard nameStart < bytes.count, (bytes[nameStart] | 0x20) >= 0x61, (bytes[nameStart] | 0x20) <= 0x7A else {
+            return ScannedTag(next: isEnd ? pastClosingBracket(bytes, from: nameStart) : next)
+        }
+        let nameEnd = bytes[nameStart...].firstIndex(where: tagNameEnds.contains) ?? bytes.count
+        let end = endOfTag(bytes, from: nameEnd)
+        let name = String(bytes: bytes[nameStart..<nameEnd], encoding: .utf8)?.lowercased() ?? ""
+        return ScannedTag(next: end.next, name: name, isEnd: isEnd, selfClosed: end.selfClosed)
+    }
+
+    private static func pastClosingBracket(_ bytes: [UInt8], from start: Int) -> Int {
+        bytes[start...].firstIndex(of: UInt8(ascii: ">")).map { $0 + 1 } ?? bytes.count
+    }
+
+    /// `start` is just past `<!--`. Dashes there still belong to the opening, as in SwiftSoup's tokenizer: `<!-->` and
+    /// `<!--->` end at once, and `<!--!>` does not end at all.
+    private static func endOfComment(_ bytes: [UInt8], from start: Int) -> Int {
+        guard var index = bytes[start...].firstIndex(where: { $0 != UInt8(ascii: "-") }) else { return bytes.count }
+        if bytes[index] == UInt8(ascii: ">") { return index + 1 }
+        while let dash = bytes[index...].firstIndex(of: UInt8(ascii: "-")) {
+            if bytes[dash...].starts(with: "-->".utf8) { return dash + 3 }
+            if bytes[dash...].starts(with: "--!>".utf8) { return dash + 4 }
+            index = dash + 1
+        }
+        return bytes.count
+    }
+
+    /// Past the `>` of a tag whose attributes begin at `start`. A quote opens a value only right after `=`, and a `/`
+    /// self-closes only directly before `>`, so a quote or slash elsewhere cannot hide what follows.
+    private static func endOfTag(_ bytes: [UInt8], from start: Int) -> (next: Int, selfClosed: Bool) {
+        var index = start
+        var hasAttributeName = false
+        var afterSlash = false
+        while index < bytes.count {
+            let byte = bytes[index]
+            index += 1
+            switch byte {
+            case UInt8(ascii: ">"):
+                return (index, afterSlash)
+            case UInt8(ascii: "/"):
+                afterSlash = true
+                hasAttributeName = false
+            case UInt8(ascii: "=") where hasAttributeName:
+                index = endOfAttributeValue(bytes, from: index)
+                hasAttributeName = false
+                afterSlash = false
+            case _ where htmlWhitespace.contains(byte):
+                afterSlash = false
+            default:
+                hasAttributeName = true
+                afterSlash = false
+            }
+        }
+        return (index, false)
+    }
+
+    private static func endOfAttributeValue(_ bytes: [UInt8], from start: Int) -> Int {
+        guard let first = bytes[start...].firstIndex(where: { !htmlWhitespace.contains($0) }) else {
+            return bytes.count
+        }
+        let quote = bytes[first]
+        if quote == UInt8(ascii: "\"") || quote == UInt8(ascii: "'") {
+            return bytes[(first + 1)...].firstIndex(of: quote).map { $0 + 1 } ?? bytes.count
+        }
+        return bytes[first...].firstIndex { htmlWhitespace.contains($0) || $0 == UInt8(ascii: ">") } ?? bytes.count
+    }
+
+    /// Past the element's own end tag, which is the only markup raw text can contain.
+    private static func endOfRawText(_ bytes: [UInt8], name: String, from start: Int) -> Int {
+        let closing = Array("</\(name)".utf8)
+        var index = start
+        while let candidate = bytes[index...].firstIndex(of: UInt8(ascii: "<")) {
+            let end = candidate + closing.count
+            if end <= bytes.count, zip(bytes[candidate..<end], closing).allSatisfy({ ($0 | 0x20) == ($1 | 0x20) }),
+                end == bytes.count || tagNameEnds.contains(bytes[end])
+            {
+                return endOfTag(bytes, from: end).next
+            }
+            index = candidate + 1
+        }
+        return bytes.count
+    }
+
+    private static let htmlWhitespace: Set<UInt8> = [0x09, 0x0A, 0x0C, 0x0D, 0x20]
+    private static let tagNameEnds = htmlWhitespace.union([UInt8(ascii: "/"), UInt8(ascii: ">")])
+    private static let scopeBoundaryTags: Set<String> = ["applet", "caption", "table", "marquee", "object"]
+    private static let rawTextTags: Set<String> = [
+        "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "plaintext",
+    ]
+
+    /// Void elements, and those HTML closes without an end tag: neither deepens a real page.
+    private static let implicitlyClosedTags = voidTags.union(["p", "li", "dt", "dd", "tr", "td", "th", "option"])
+
     private static func handleClosingTag(scanner: Scanner, stack: inout [DOMElementBuilder]) {
         // Closing tag: </tag>
         guard let closeTag = scanner.scanUpToString(">") else { return }
@@ -1231,6 +1380,9 @@ final class ContentExtractionPipeline: Sendable {
         guard html.utf8.count <= SecureHTTPClient.defaultArticleLimit else {
             return .contentParsingFailed(reason: "Article exceeds extraction limit")
         }
+        guard !HTMLDOMBuilder.nestsTooDeeply(html) else {
+            return .contentParsingFailed(reason: "Article nesting exceeds extraction limit")
+        }
         let soup = loggedExtraction("parseArticleHTML") { try SwiftSoup.parse(html) }
         // Structured data and barrier markers are read before scripts and furniture are removed.
         let structured = soup.map { Self.structuredArticle(in: $0) } ?? StructuredArticle()
@@ -1242,13 +1394,16 @@ final class ContentExtractionPipeline: Sendable {
         let discoveredLeadImage = leadImage ?? soup.flatMap { leadImages(in: $0).first }
         if let soup {
             loggedExtraction("stripFurnitureElements") {
-                try soup.select(
+                // Last first: removing a node reindexes the siblings after it, which is quadratic the other way round.
+                for element in try soup.select(
                     "script, style, noscript, iframe, svg, canvas, form, button, input, select, textarea, dialog, template, "
                         + "[role=navigation], [role=complementary], [role=banner], [role=search], [aria-hidden=true], "
                         + ".visually-hidden, .sr-only, "
                         + "[data-component=byline-block], [data-component=tag-list], [data-component=links-block], [data-component=topic-list], "
                         + ".video-player-error, .media-player__error, .share-tools, .social-share, .newsletter-signup, .advertisement, .ad-slot"
-                ).remove()
+                ).array().reversed() {
+                    try element.remove()
+                }
             }
         }
         let effectiveImage = Self.readerImageURL(discoveredLeadImage, baseURL: baseUrl)
@@ -1562,7 +1717,7 @@ final class ContentExtractionPipeline: Sendable {
     /// Next.js hydration state (`__NEXT_DATA__`), where the body may be HTML.
     static func structuredArticle(in document: SwiftSoup.Document) -> StructuredArticle {
         var scan = StructuredScan()
-        for script in ((try? document.select("script[type=application/ld+json]").array()) ?? []).prefix(16) {
+        for script in ((try? document.select("script[type^=application/ld+json]").array()) ?? []).prefix(16) {
             let data = Data(script.data().utf8)
             guard data.count <= 1024 * 1024, let json = try? JSONSerialization.jsonObject(with: data) else { continue }
             scan.visitLinkedData(json, depth: 0)
@@ -2040,6 +2195,7 @@ final class ContentExtractionPipeline: Sendable {
     /// Declared article media only; Organization and WebSite images are usually logos.
     func extractLeadImages(from html: String) -> [String] {
         guard !Task.isCancelled, html.utf8.count <= SecureHTTPClient.defaultArticleLimit,
+            !HTMLDOMBuilder.nestsTooDeeply(html),
             let document = loggedExtraction("parseLeadImageHTML", { try SwiftSoup.parse(html) })
         else { return [] }
         return leadImages(in: document)
