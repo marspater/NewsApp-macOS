@@ -20,22 +20,40 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UserNotifications
 
-/// Offline image loader that makes cancellation observable without issuing a network request.
+/// Offline loader with controlled completion, including a cancelled request that ignores cancellation.
 private actor BannerPhotoLoadProbe {
     private var starts = 0
     private var cancellations = 0
+    private var completions = 0
+    private var releases: [Int: CheckedContinuation<CGImage?, Never>] = [:]
 
     func load() async -> CGImage? {
+        let request = starts
         starts += 1
-        do {
-            try await Task.sleep(for: .seconds(30))
-        } catch {
-            if Task.isCancelled { cancellations += 1 }
+        let photo = await withTaskCancellationHandler {
+            await hold(request)
+        } onCancel: {
+            Task { await self.recordCancellation() }
         }
-        return nil
+        completions += 1
+        return photo
     }
 
-    func snapshot() -> (starts: Int, cancellations: Int) { (starts, cancellations) }
+    private func hold(_ request: Int) async -> CGImage? {
+        await withCheckedContinuation { continuation in
+            releases[request] = continuation
+        }
+    }
+
+    private func recordCancellation() { cancellations += 1 }
+
+    func release(_ request: Int, photo: CGImage?) {
+        releases.removeValue(forKey: request)?.resume(returning: photo)
+    }
+
+    func snapshot() -> (starts: Int, cancellations: Int, completions: Int) {
+        (starts, cancellations, completions)
+    }
 }
 
 enum NotificationAttachmentTests {
@@ -276,13 +294,27 @@ enum NotificationAttachmentTests {
         }
         let restarted = await probe.snapshot()
         precondition(restarted.starts == 2, "Reopening the banner starts a fresh image request")
-        isolated.dismiss()
+
+        // The first cancelled request deliberately ignores cancellation and returns an image after the same ID
+        // is shown again. It must never become the reopened banner's photo.
+        await probe.release(0, photo: source)
         for _ in 0..<200 {
-            if await probe.snapshot().cancellations == 2 { break }
+            if await probe.snapshot().completions == 1 { break }
             try? await Task.sleep(for: .milliseconds(10))
         }
-        let dismissed = await probe.snapshot()
-        precondition(dismissed.cancellations == 2, "Dismissing the banner cancels its photo request")
+        precondition((await probe.snapshot()).completions == 1, "The cancelled image loader completes")
+        for _ in 0..<20 { await Task.yield() }
+        precondition(!isolated.hasPresentedPhoto, "A cancelled image must not appear on the reopened banner")
+
+        // A fresh request for that same banner is allowed to render its own photo.
+        await probe.release(1, photo: source)
+        for _ in 0..<200 {
+            if isolated.hasPresentedPhoto { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        precondition(isolated.hasPresentedPhoto, "The reopened banner renders its fresh image")
+        isolated.dismiss()
+        precondition(!isolated.hasPresentedPhoto, "Dismissing the banner clears its image")
 
         // Notification handlers
         NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: NSWindow())

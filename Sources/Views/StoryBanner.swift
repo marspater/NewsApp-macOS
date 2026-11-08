@@ -151,6 +151,8 @@ final class StoryBannerPresenter {
         var hovering = false
     }
     private var shown: Shown?
+    /// Read-only banner state for headless regression assertions.
+    var hasPresentedPhoto: Bool { shown?.photo != nil }
     private var dismissal: Task<Void, Never>?
     /// Current banner owns its image request; replacing or closing it cancels obsolete work.
     private var photoTask: Task<Void, Never>?
@@ -158,7 +160,9 @@ final class StoryBannerPresenter {
     private let photoLoader: @MainActor @Sendable (URL?, CGFloat) async -> CGImage?
 
     init(
-        photoLoader: @escaping @MainActor @Sendable (URL?, CGFloat) async -> CGImage? = StoryBannerPresenter.photo
+        photoLoader: @escaping @MainActor @Sendable (URL?, CGFloat) async -> CGImage? = { url, scale in
+            await StoryBannerPresenter.photo(at: url, scale: scale)
+        }
     ) {
         self.photoLoader = photoLoader
         // The banner follows the window: it leaves when News hides or its last window closes or goes to the Dock.
@@ -251,7 +255,7 @@ final class StoryBannerPresenter {
             return nil
         }
         guard !Task.isCancelled else { return nil }
-        let cropTask = Task.detached(priority: .userInitiated) {
+        let cropTask = Task.detached(priority: .userInitiated) { () -> CGImage? in
             guard !Task.isCancelled else { return nil }
             return bannerPhoto(image, scale: scale)
         }
