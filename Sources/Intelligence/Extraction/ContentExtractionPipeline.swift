@@ -377,17 +377,18 @@ final class DOMElementNode: Sendable {
 
         let result = computeReadingBlocks(allowDivFallback: allowDivFallback)
         cache.withLock {
-            if allowDivFallback {
-                $0.readingBlocksWithFallback = result
-            } else {
-                $0.readingBlocksWithoutFallback = result
+            if !result.contains(where: { $0 === self }) {
+                if allowDivFallback {
+                    $0.readingBlocksWithFallback = result
+                } else {
+                    $0.readingBlocksWithoutFallback = result
+                }
             }
         }
         return result
     }
 
-    private func computeReadingBlocks(allowDivFallback: Bool) -> [DOMElementNode] {
-        guard !isReaderExcluded else { return [] }
+    private func readingBlocksForSpecialTag() -> [DOMElementNode]? {
         if tag == "noscript" { return children.flatMap { $0.readingBlocks(allowDivFallback: false) } }
         if ["figure", "img", "picture", "hr", "iframe", "video"].contains(tag) { return [self] }
         // An article header holds the title and byline; only its standfirst is story text.
@@ -397,14 +398,6 @@ final class DOMElementNode: Sendable {
                     ? node.readingBlocks(allowDivFallback: false) : node.children.flatMap(editorial)
             }
             return children.flatMap(editorial)
-        }
-        if ["div", "p"].contains(tag), children.contains(where: { $0.tag == "br" }) {
-            var groups = [[DOMElementNode]]([[]])
-            for child in children {
-                if child.tag == "br" { groups.append([]) } else { groups[groups.count - 1].append(child) }
-            }
-            let paragraphs = groups.filter { !$0.isEmpty }.map { DOMElementNode(tag: "p", children: $0) }
-            if paragraphs.count > 1, paragraphs.allSatisfy({ $0.combinedText().count >= 25 }) { return paragraphs }
         }
         if tag == "figcaption" { return [] }
         if tag == "ol" {
@@ -417,8 +410,7 @@ final class DOMElementNode: Sendable {
                 if ordinal < Int.max { ordinal += 1 }
                 return DOMElementNode(
                     tag: child.tag, attributes: attributes, children: child.children, text: child.text
-                )
-                .readingBlocks()
+                ).readingBlocks()
             }
         }
         // A nested list follows its parent item as items one level deeper instead of running into its text.
@@ -435,6 +427,21 @@ final class DOMElementNode: Sendable {
         }
         if tag == "table", tableRows() != nil { return [self] }
         if ["p", "h2", "h3", "h4", "h5", "h6", "li", "blockquote", "pre", "aside"].contains(tag) { return [self] }
+        return nil
+    }
+
+    private func readingBlocksForLineBreaks() -> [DOMElementNode]? {
+        guard ["div", "p"].contains(tag), children.contains(where: { $0.tag == "br" }) else { return nil }
+        var groups = [[DOMElementNode]]([[]])
+        for child in children {
+            if child.tag == "br" { groups.append([]) } else { groups[groups.count - 1].append(child) }
+        }
+        let paragraphs = groups.filter { !$0.isEmpty }.map { DOMElementNode(tag: "p", children: $0) }
+        if paragraphs.count > 1, paragraphs.allSatisfy({ $0.combinedText().count >= 25 }) { return paragraphs }
+        return nil
+    }
+
+    private func readingBlocksFromChildren(allowDivFallback: Bool) -> [DOMElementNode] {
         var blocks = [DOMElementNode]()
         var inline = [DOMElementNode]()
         // Phrasing elements (a time stamp, a bold label, a link) never become paragraphs of their own text: their
@@ -487,6 +494,13 @@ final class DOMElementNode: Sendable {
             return [self]
         }
         return []
+    }
+
+    private func computeReadingBlocks(allowDivFallback: Bool) -> [DOMElementNode] {
+        guard !isReaderExcluded else { return [] }
+        if let special = readingBlocksForSpecialTag() { return special }
+        if let lineBreaks = readingBlocksForLineBreaks() { return lineBreaks }
+        return readingBlocksFromChildren(allowDivFallback: allowDivFallback)
     }
 
     static let phrasingTags: Set<String> = [
@@ -1535,6 +1549,8 @@ final class ContentExtractionPipeline: Sendable {
             }
         }
 
+        guard !Task.isCancelled else { return .contentParsingFailed(reason: "Extraction cancelled") }
+
         if candidateParagraphs.contains(where: {
             $0.text.localizedCaseInsensitiveContains("Subscribe to unlock this article")
         }) {
@@ -1654,6 +1670,7 @@ final class ContentExtractionPipeline: Sendable {
             let lead = ReaderImageCandidate.select(from: images, title: title)?.url
             let isComplete =
                 !isTruncated && candidateParagraphs.filter { $0.kind == .paragraph }.count >= 3 && joined.count >= 600
+            guard !Task.isCancelled else { return .contentParsingFailed(reason: "Extraction cancelled") }
             return .success(
                 content: joined, imageUrl: lead,
                 document: ReaderDocument(

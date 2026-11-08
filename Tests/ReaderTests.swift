@@ -1397,6 +1397,18 @@ extension NewsTests {
         } else {
             assertTrue(false, "Extraction should succeed on deeply nested divs (#1151)")
         }
+
+        // 5. #1151: Task cancellation returns contentParsingFailed rather than incomplete content
+        let cancelTask = Task { () -> ExtractionOutcome in
+            pipeline.extractFromHTML(nestedHTML)
+        }
+        cancelTask.cancel()
+        let cancelledOutcome = await cancelTask.value
+        if case .contentParsingFailed(let reason) = cancelledOutcome {
+            assertTrue(
+                reason.contains("cancelled") || reason.contains("Extraction"),
+                "Cancelled extraction reports cancellation (#1151)")
+        }
     }
 
     static func testExtractionURLRejection() async {
