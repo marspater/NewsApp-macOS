@@ -935,6 +935,31 @@ extension NewsTests {
         assertTrue(
             ContentExtractionPipeline.readerImageURL("https://user:secret@example.com/image.png", baseURL: nil) == nil,
             "Credential-bearing image URLs are rejected")
+        let srcsetCommaHTML = """
+            <html><head><title>NASA Announces X-70 Experimental Aircraft</title></head><body><article>
+            <figure><img width="1672" height="940" src="https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg" srcset="https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?scale=.5 .5x, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg 1672w, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=300,169 300w, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=1200,675 1200w"></figure>
+            <figure><img width="800" height="600" src="https://www.nasa.gov/wp-content/uploads/2026/11/x70-half.jpg" srcset="/wp-content/uploads/2026/11/x70-half.jpg .5x"></figure>
+            <p>\(prose)</p><p>Second paragraph. \(prose)</p><p>Third paragraph. \(prose)</p>
+            </article></body></html>
+            """
+        if case .success(_, let srcsetLead, let srcsetDoc) = pipeline.extractFromHTML(
+            srcsetCommaHTML,
+            baseUrl: "https://www.nasa.gov/news-release/nasa-announces-x-70-experimental-aircraft/")
+        {
+            assertEqual(
+                srcsetLead, "https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=1200,675",
+                "srcset URLs with commas in query strings are not split into relative number paths (#1010)")
+            assertEqual(
+                srcsetDoc?.images?.map(\.url),
+                [
+                    "https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=1200,675",
+                    "https://www.nasa.gov/wp-content/uploads/2026/11/x70-half.jpg",
+                ],
+                "Leading-dot density descriptors such as .5x select the URL instead of treating the descriptor as a relative path (#1010)"
+            )
+        } else {
+            assertTrue(false, "srcset comma fixture must extract")
+        }
         assertEqual(
             ContentExtractionPipeline.readerImageURL(
                 "https://cdn.example.com/signed.jpg?token=a&amp;b", baseURL: nil),

@@ -3002,6 +3002,41 @@ extension NewsTests {
         await stubborn.settle()
         assertTrue(DecodedImageCache.cached(keptURL) != nil, "A finished decode is kept after its waiter cancelled")
 
+        // #1132: when one of multiple waiters cancels, the shared load stays in `pending` so a later waiter coalesces.
+        let coalescedLoader = QueuedImageLoader()
+        let coalescedURL = URL(string: "https://cards.example/coalesced/\(UUID().uuidString).jpg")!
+        let waiterA = Task { @MainActor in
+            _ = try? await DecodedImageCache.load(coalescedURL, using: coalescedLoader.loader)
+        }
+        let waiterB = Task { @MainActor in
+            _ = try? await DecodedImageCache.load(coalescedURL, using: coalescedLoader.loader)
+        }
+        await eventually("Both initial waiters join the same in-flight load") { @MainActor in
+            coalescedLoader.requests.count == 1 && DecodedImageCache.sharedLoad(for: coalescedURL)?.waiters == 2
+        }
+        waiterA.cancel()
+        await eventually("First waiter cancellation is recorded without evicting the pending load") { @MainActor in
+            DecodedImageCache.sharedLoad(for: coalescedURL)?.cancelledWaiters == 1
+        }
+        assertTrue(
+            DecodedImageCache.sharedLoad(for: coalescedURL) != nil,
+            "An in-flight load with an active waiter stays in pending after another waiter exits (#1132)")
+        let waiterC = Task { @MainActor in
+            _ = try? await DecodedImageCache.load(coalescedURL, using: coalescedLoader.loader)
+        }
+        await eventually("A third waiter joins the existing shared load instead of starting a second download") {
+            @MainActor in
+            DecodedImageCache.sharedLoad(for: coalescedURL)?.waiters == 3
+        }
+        assertEqual(
+            coalescedLoader.requests.count, 1,
+            "Coalesced waiter reuses the single in-flight request (#1132)")
+        coalescedLoader.release(1)
+        _ = await (waiterA.value, waiterB.value, waiterC.value)
+        await eventually("Pending entry is cleared once the shared task finishes") { @MainActor in
+            DecodedImageCache.sharedLoad(for: coalescedURL) == nil
+        }
+
         // 200 cards: every fifth an event of three reports with an image each, every tenth without an image.
         let now = Date()
         var articles: [FeedArticle] = []
