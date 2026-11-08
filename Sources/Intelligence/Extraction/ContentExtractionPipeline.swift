@@ -653,16 +653,22 @@ final class DOMElementNode: Sendable {
         loggedExtraction("compileSrcsetCandidatesRegex") {
             try NSRegularExpression(
                 pattern:
-                    #"\s*([^\s,]+(?:,[^\s,]+)*)(?:\s+([0-9]+(?:\.[0-9]+)?[wx]))?\s*(?:,|$)"#)
+                    #"\s*([^\s,]+(?:,[^\s,]+)*)(?:\s+([^\s,]+))?\s*(?:,|$)"#)
         } ?? NSRegularExpression()
 
     var readerImageSource: String? {
         // ponytail: bounded responsive candidates for a 1200 px reader; no media-query engine.
         for key in ["data-srcset", "srcset"] {
             let raw = attributes[key] ?? ""
-            let matches = Self.srcsetCandidatesRegex.matches(
-                in: raw, range: NSRange(raw.startIndex..., in: raw))
-            let candidates = matches.prefix(32).compactMap { match -> (String, Double)? in
+            var matches: [NSTextCheckingResult] = []
+            Self.srcsetCandidatesRegex.enumerateMatches(
+                in: raw, range: NSRange(raw.startIndex..., in: raw)
+            ) { match, _, stop in
+                guard let match else { return }
+                matches.append(match)
+                if matches.count == 32 { stop.pointee = true }
+            }
+            let candidates = matches.compactMap { match -> (String, Double)? in
                 guard let urlRange = Range(match.range(at: 1), in: raw) else { return nil }
                 let url = String(raw[urlRange])
                 guard !url.isEmpty else { return nil }
