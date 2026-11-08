@@ -484,8 +484,13 @@ final class DOMElementNode: Sendable {
             }
         }
         flushInline()
-        if isPhrasing { return blocks }
-        if blocks.contains(where: { $0.tag != "figure" }) || !allowDivFallback { return blocks }
+        if isPhrasing || blocks.contains(where: { $0.tag != "figure" }) || !allowDivFallback {
+            return blocks
+        }
+        return readingBlocksFallback()
+    }
+
+    private func readingBlocksFallback() -> [DOMElementNode] {
         let divs = children.flatMap { $0.readingBlocks() }
         if !divs.isEmpty { return divs }
         if ["div", "article", "main", "section"].contains(tag),
