@@ -935,6 +935,22 @@ extension NewsTests {
         assertTrue(
             ContentExtractionPipeline.readerImageURL("https://user:secret@example.com/image.png", baseURL: nil) == nil,
             "Credential-bearing image URLs are rejected")
+        let srcsetCommaHTML = """
+            <html><head><title>NASA Announces X-70 Experimental Aircraft</title></head><body><article>
+            <figure><img width="1672" height="940" src="https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg" srcset="https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg 1672w, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=300,169 300w, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=1200,675 1200w"></figure>
+            <p>\(prose)</p><p>Second paragraph. \(prose)</p><p>Third paragraph. \(prose)</p>
+            </article></body></html>
+            """
+        if case .success(_, let srcsetLead, _) = pipeline.extractFromHTML(
+            srcsetCommaHTML,
+            baseUrl: "https://www.nasa.gov/news-release/nasa-announces-x-70-experimental-aircraft/")
+        {
+            assertEqual(
+                srcsetLead, "https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=1200,675",
+                "srcset URLs with commas in query strings are not split into relative number paths (#1010)")
+        } else {
+            assertTrue(false, "srcset comma fixture must extract")
+        }
         let manyFigures = (0..<20).map { "<figure><img src='/media/\($0).png'></figure>" }.joined()
         guard
             case .success(_, _, let bounded) = pipeline.extractFromHTML(
