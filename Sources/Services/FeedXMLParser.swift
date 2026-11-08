@@ -987,7 +987,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     /// Rewrites the encoding attribute in an XML prolog declaration to UTF-8 (#1148).
     private static func rewritePrologEncodingToUTF8(in text: String) -> String {
-        guard let prologRange = text.range(of: #"^\s*<\?xml[^>]*\?>"#, options: .regularExpression) else {
+        guard let prologRange = text.range(of: #"^[\s\u{FEFF}]*<\?xml[^>]*\?>"#, options: .regularExpression) else {
             return text
         }
         let prolog = String(text[prologRange])
