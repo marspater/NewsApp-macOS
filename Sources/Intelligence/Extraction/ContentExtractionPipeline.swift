@@ -247,6 +247,7 @@ final class DOMElementNode: Sendable {
         if let cached { return cached }
 
         let result = computeCombinedText(lineBreak: lineBreak)
+        guard !Task.isCancelled else { return result }
         cache.withLock {
             if lineBreak == "\n" {
                 $0.combinedTextNewline = result
@@ -301,6 +302,7 @@ final class DOMElementNode: Sendable {
             return cached
         }
         let result = computeIsReaderExcluded()
+        guard !Task.isCancelled else { return result }
         cache.withLock { $0.isReaderExcluded = result }
         return result
     }
@@ -376,6 +378,7 @@ final class DOMElementNode: Sendable {
         if let cached { return cached }
 
         let result = computeReadingBlocks(allowDivFallback: allowDivFallback)
+        guard !Task.isCancelled else { return result }
         cache.withLock {
             if !result.contains(where: { $0 === self }) {
                 if allowDivFallback {

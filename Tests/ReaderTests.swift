@@ -1412,6 +1412,21 @@ extension NewsTests {
         default:
             assertTrue(false, "Expected .contentParsingFailed for cancelled extraction (#1151)")
         }
+
+        // 6. #1151: Cancelled traversal does not cache partial results in DOMElementNode
+        let p1 = DOMElementNode(
+            tag: "p", text: "This is the first substantive paragraph in the article with enough text.")
+        let p2 = DOMElementNode(
+            tag: "p", text: "This is the second substantive paragraph in the article with enough text.")
+        let domRoot = DOMElementNode(tag: "article", children: [p1, p2])
+        _ = await Task { () -> [DOMElementNode] in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return domRoot.readingBlocks()
+        }.value
+        let nonCancelledBlocks = domRoot.readingBlocks()
+        assertTrue(
+            nonCancelledBlocks.count == 2,
+            "DOM reading blocks computed in full after cancellation without caching partials (#1151)")
     }
 
     static func testExtractionURLRejection() async {
