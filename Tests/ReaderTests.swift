@@ -980,6 +980,25 @@ extension NewsTests {
         } else {
             assertTrue(false, "Related-lists fixture must extract")
         }
+        let relatedLinks = (1...8).map {
+            "<a href='/story-\($0)'>Snow-capped mountains carved by deep river valleys preside over state number \($0)</a>"
+        }.joined()
+        let sectionedArticleHTML = """
+            <html><head><title>Sections Above A Related List</title></head><body><article>
+            <section><p>Opening section. \(prose)</p><p>Early detail. \(prose)</p></section>
+            <section><p>Closing section. \(prose)</p><p>Late detail. \(prose)</p><p>Final detail. \(prose)</p></section>
+            <div class="hds-content-lists-inner">\(relatedLinks)</div>
+            </article></body></html>
+            """
+        if case .success(let sectionedText, _, _) = pipeline.extractFromHTML(
+            sectionedArticleHTML, baseUrl: "https://science.nasa.gov/earth/sections/")
+        {
+            assertTrue(
+                sectionedText.contains("Opening section") && sectionedText.contains("Closing section"),
+                "A trailing related list does not cost the article its score against one section (#1081)")
+        } else {
+            assertTrue(false, "Sectioned article fixture must extract")
+        }
         let manyFigures = (0..<20).map { "<figure><img src='/media/\($0).png'></figure>" }.joined()
         guard
             case .success(_, _, let bounded) = pipeline.extractFromHTML(

@@ -716,10 +716,11 @@ final class DOMElementNode: Sendable {
         func navigationLinkText(_ node: DOMElementNode) -> Int {
             if node.isCitedProse { return 0 }
             if node.tag == "a" { return node.combinedText().filter { !$0.isWhitespace }.count }
-            // An excluded widget between prose sections is inside the article, not evidence of a page wrapper.
-            // Keep counting excluded menus at the edges: those still distinguish wrappers from their article body.
+            // An excluded widget between or after prose sections is inside the article, not evidence of a page wrapper,
+            // and its text already left the denominator. Keep counting menus before the prose and rails beside a
+            // single body: those still distinguish wrappers from their article body.
             guard node.children.count >= 3,
-                node.children.dropFirst().dropLast().contains(where: { $0.isReaderExcluded })
+                node.children.dropFirst().contains(where: { $0.isReaderExcluded })
             else {
                 return node.children.reduce(0) { $0 + navigationLinkText($1) }
             }
@@ -729,9 +730,7 @@ final class DOMElementNode: Sendable {
             }
             return node.children.enumerated().reduce(0) { total, entry in
                 let (index, child) = entry
-                if child.isReaderExcluded, let first = proseIndices.first, let last = proseIndices.last,
-                    first < index && index < last
-                {
+                if child.isReaderExcluded, proseIndices.count >= 2, let first = proseIndices.first, first < index {
                     return total
                 }
                 return total + navigationLinkText(child)
