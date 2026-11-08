@@ -935,6 +935,86 @@ extension NewsTests {
         assertTrue(
             ContentExtractionPipeline.readerImageURL("https://user:secret@example.com/image.png", baseURL: nil) == nil,
             "Credential-bearing image URLs are rejected")
+        let relatedListsHTML = """
+            <html><head><title>Taking a Gander at Utah's Goosenecks</title>
+            <meta property="og:image" content="https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672">
+            </head><body><article>
+            <figure><img width="1672" height="940" src="https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks-body.jpg"></figure>
+            <p>\(prose)</p><p>Second paragraph. \(prose)</p><p>Third paragraph. \(prose)</p>
+            <ul><li class="content-list-item">The Colorado Plateau rose while the San Juan River kept cutting its meanders.</li>
+            <li class="content-list-item">The goosenecks now sit a thousand feet below the surrounding desert rim.</li></ul>
+            <div class="hds-content-lists-inner wp-block-nasa-blocks-content-lists">
+                <h2>You may also be interested in:</h2>
+                <p>Stay up-to-date with the latest content from NASA as we explore the universe and discover more about our home planet.</p>
+                <div class="hds-content-item content-list-item-post">
+                    <figure><img width="300" height="200" src="https://assets.science.nasa.gov/olympic-mountain-glory/ISS047-E-104144_th.jpg"></figure>
+                    <p>Snow-capped mountains carved by deep river valleys preside over northwestern Washington state.</p>
+                </div>
+            </div>
+            <div class="hds-topic-cards wp-block-nasa-blocks-topic-cards">
+                <h2>Discover More from NASA Earth Science</h2>
+                <figure><img width="1536" height="864" src="https://assets.science.nasa.gov/iotd-banner.jpg"></figure>
+            </div>
+            </article></body></html>
+            """
+        if case .success(let relatedText, let relatedLead, let relatedDoc) = pipeline.extractFromHTML(
+            relatedListsHTML,
+            baseUrl: "https://science.nasa.gov/earth/earth-observatory/taking-a-gander-at-utahs-goosenecks/")
+        {
+            assertEqual(
+                relatedLead, "https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks-body.jpg",
+                "Article body image is selected instead of related-story or topic-card image (#1081)")
+            assertEqual(
+                relatedDoc?.images?.map(\.url),
+                [
+                    "https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks-body.jpg",
+                    "https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672",
+                ],
+                "Related-story and topic-card images are excluded from reader candidates (#1081)")
+            assertFalse(
+                relatedText.contains("Snow-capped mountains") || relatedText.contains("Stay up-to-date"),
+                "Related content-list prose is excluded from the extracted article body (#1081)")
+            assertTrue(
+                relatedText.contains("Colorado Plateau rose") && relatedText.contains("surrounding desert rim"),
+                "Editorial list items classed content-list-item stay in the article body (#1081)")
+        } else {
+            assertTrue(false, "Related-lists fixture must extract")
+        }
+        let relatedLinks = (1...8).map {
+            "<a href='/story-\($0)'>Snow-capped mountains carved by deep river valleys preside over state number \($0)</a>"
+        }.joined()
+        let sectionedArticleHTML = """
+            <html><head><title>Sections Above A Related List</title></head><body><article>
+            <section><p>Opening section. \(prose)</p><p>Early detail. \(prose)</p></section>
+            <section><p>Closing section. \(prose)</p><p>Late detail. \(prose)</p><p>Final detail. \(prose)</p></section>
+            <div class="hds-content-lists-inner">\(relatedLinks)</div>
+            </article></body></html>
+            """
+        if case .success(let sectionedText, _, _) = pipeline.extractFromHTML(
+            sectionedArticleHTML, baseUrl: "https://science.nasa.gov/earth/sections/")
+        {
+            assertTrue(
+                sectionedText.contains("Opening section") && sectionedText.contains("Closing section"),
+                "A trailing related list does not cost the article its score against one section (#1081)")
+        } else {
+            assertTrue(false, "Sectioned article fixture must extract")
+        }
+        let separateStoriesHTML = """
+            <html><head><title>Two Stories Above A Related List</title></head><body><main>
+            <article><p>Harbor story. \(prose)</p><p>Harbor detail. \(prose)</p></article>
+            <article><p>Orchard story. \(prose)</p><p>Orchard detail. \(prose)</p><p>Orchard close. \(prose)</p></article>
+            <div class="hds-content-lists-inner">\(relatedLinks)</div>
+            </main></body></html>
+            """
+        if case .success(let separateText, _, _) = pipeline.extractFromHTML(
+            separateStoriesHTML, baseUrl: "https://science.nasa.gov/earth/two-stories/")
+        {
+            assertFalse(
+                separateText.contains("Harbor story") && separateText.contains("Orchard story"),
+                "A related list beside separate articles still counts against their wrapper (#1081)")
+        } else {
+            assertTrue(false, "Separate stories fixture must extract")
+        }
         let srcsetCommaHTML = """
             <html><head><title>NASA Announces X-70 Experimental Aircraft</title></head><body><article>
             <figure><img width="1672" height="940" src="https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg" srcset="https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?scale=.5 .5x, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg 1672w, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=300,169 300w, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=1200,675 1200w"></figure>

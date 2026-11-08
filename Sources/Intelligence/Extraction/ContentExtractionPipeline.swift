@@ -319,7 +319,7 @@ final class DOMElementNode: Sendable {
         loggedExtraction("compileAuxiliaryRegex") {
             try NSRegularExpression(
                 pattern:
-                    #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|more-on|most-?viewed|most-?popular|most-?read|top-?stories|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|links-block|newsletter|byline|timestamp(?:-block)?|recommendations?|recommended-(?:stories|articles|content)|social-share|share-tools|promo|advertisement|native-?ad|outbrain|taboola|eventpromo|promolist|topiclist|uploaderembed|author-?bio|mini-bio|follow-(?:authors?|topics?))(?:$|[^a-z0-9])"#
+                    #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|more-on|most-?viewed|most-?popular|most-?read|top-?stories|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|content-lists|links-block|newsletter|byline|timestamp(?:-block)?|recommendations?|recommended-(?:stories|articles|content)|social-share|share-tools|promo|advertisement|native-?ad|outbrain|taboola|eventpromo|promolist|topiclist|topic-cards?|uploaderembed|author-?bio|mini-bio|follow-(?:authors?|topics?))(?:$|[^a-z0-9])"#
             )
         } ?? NSRegularExpression()
 
@@ -737,10 +737,11 @@ final class DOMElementNode: Sendable {
         func navigationLinkText(_ node: DOMElementNode) -> Int {
             if node.isCitedProse { return 0 }
             if node.tag == "a" { return node.combinedText().filter { !$0.isWhitespace }.count }
-            // An excluded widget between prose sections is inside the article, not evidence of a page wrapper.
-            // Keep counting excluded menus at the edges: those still distinguish wrappers from their article body.
+            // An excluded widget between or after prose sections is inside the article, not evidence of a page wrapper,
+            // and its text already left the denominator. Keep counting menus before the prose and rails beside a
+            // single body: those still distinguish wrappers from their article body.
             guard node.children.count >= 3,
-                node.children.dropFirst().dropLast().contains(where: { $0.isReaderExcluded })
+                node.children.dropFirst().contains(where: { $0.isReaderExcluded })
             else {
                 return node.children.reduce(0) { $0 + navigationLinkText($1) }
             }
@@ -748,10 +749,14 @@ final class DOMElementNode: Sendable {
                 let child = node.children[index]
                 return !child.isReaderExcluded && child.readingBlocks().contains(where: { $0.isCitedProse })
             }
+            // Sections share one body, so it runs to the end of the node; side-by-side articles are separate stories.
+            let holdsSections =
+                proseIndices.count >= 2 && !proseIndices.contains(where: { node.children[$0].tag == "article" })
+            let bodyEnd = holdsSections ? node.children.count : proseIndices.last
             return node.children.enumerated().reduce(0) { total, entry in
                 let (index, child) = entry
-                if child.isReaderExcluded, let first = proseIndices.first, let last = proseIndices.last,
-                    first < index && index < last
+                if child.isReaderExcluded, let first = proseIndices.first, let bodyEnd,
+                    first < index && index < bodyEnd
                 {
                     return total
                 }
