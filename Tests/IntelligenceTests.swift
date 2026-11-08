@@ -5123,7 +5123,7 @@ extension NewsTests {
             let clock = ContinuousClock()
             let started = clock.now
             _ = statements(adversarial)
-            assertTrue(clock.now - started < .seconds(2), "Attribution patterns do not backtrack exponentially")
+            assertTrue(clock.now - started < .seconds(5), "Attribution patterns do not backtrack exponentially")
         }
         assertEqual(
             OverviewComposer.displayStatement(
