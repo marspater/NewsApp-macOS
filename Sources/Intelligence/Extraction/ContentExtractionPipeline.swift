@@ -319,7 +319,7 @@ final class DOMElementNode: Sendable {
         loggedExtraction("compileAuxiliaryRegex") {
             try NSRegularExpression(
                 pattern:
-                    #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|more-on|most-?viewed|most-?popular|most-?read|top-?stories|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|content-lists|content-list-item|links-block|newsletter|byline|timestamp(?:-block)?|recommendations?|recommended-(?:stories|articles|content)|social-share|share-tools|promo|advertisement|native-?ad|outbrain|taboola|eventpromo|promolist|topiclist|topic-cards?|uploaderembed|author-?bio|mini-bio|follow-(?:authors?|topics?))(?:$|[^a-z0-9])"#
+                    #"(?i)(?:^|[^a-z0-9])(?:comments?|comment-thread|disqus|also-read|read-more|more-on|most-?viewed|most-?popular|most-?read|top-?stories|onward|onwards|submeta|subscription|related(?:-content|-stories|-articles)?|content-lists|links-block|newsletter|byline|timestamp(?:-block)?|recommendations?|recommended-(?:stories|articles|content)|social-share|share-tools|promo|advertisement|native-?ad|outbrain|taboola|eventpromo|promolist|topiclist|topic-cards?|uploaderembed|author-?bio|mini-bio|follow-(?:authors?|topics?))(?:$|[^a-z0-9])"#
             )
         } ?? NSRegularExpression()
 

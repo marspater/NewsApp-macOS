@@ -941,6 +941,8 @@ extension NewsTests {
             </head><body><article>
             <figure><img width="1672" height="940" src="https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks-body.jpg"></figure>
             <p>\(prose)</p><p>Second paragraph. \(prose)</p><p>Third paragraph. \(prose)</p>
+            <ul><li class="content-list-item">The Colorado Plateau rose while the San Juan River kept cutting its meanders.</li>
+            <li class="content-list-item">The goosenecks now sit a thousand feet below the surrounding desert rim.</li></ul>
             <div class="hds-content-lists-inner wp-block-nasa-blocks-content-lists">
                 <h2>You may also be interested in:</h2>
                 <p>Stay up-to-date with the latest content from NASA as we explore the universe and discover more about our home planet.</p>
@@ -972,6 +974,9 @@ extension NewsTests {
             assertFalse(
                 relatedText.contains("Snow-capped mountains") || relatedText.contains("Stay up-to-date"),
                 "Related content-list prose is excluded from the extracted article body (#1081)")
+            assertTrue(
+                relatedText.contains("Colorado Plateau rose") && relatedText.contains("surrounding desert rim"),
+                "Editorial list items classed content-list-item stay in the article body (#1081)")
         } else {
             assertTrue(false, "Related-lists fixture must extract")
         }
