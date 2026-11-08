@@ -167,18 +167,15 @@ enum NotificationActionRouter {
         store: ArticleStore,
         readManager: ReadManager
     ) async {
-        if let id = target.articleID {
-            readManager.markAsRead(id)
-        } else if let link = target.articleLink,
-            let article = store.articles.first(where: {
-                $0.link == link || $0.normalizedLink == ArticleIdentity.canonicalizeURL(link)
-            })
-        {
-            readManager.markAsRead(article.id)
-        } else if let resolved = try? await store.articleForNavigation(
-            .init(articleID: nil, link: target.articleLink ?? "")
-        ) {
-            readManager.markAsRead(resolved.id)
+        do {
+            let link = target.articleID == nil ? target.articleLink ?? "" : ""
+            if let resolved = try await store.articleForNavigation(
+                .init(articleID: target.articleID, link: link)
+            ) {
+                readManager.markAsRead(resolved.id)
+            }
+        } catch {
+            store.operationError = "The notification story could not be loaded. Please try again."
         }
     }
 

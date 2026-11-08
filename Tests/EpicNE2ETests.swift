@@ -1117,6 +1117,8 @@ enum EpicNE2ETests {
             link: "https://example.com/breaking",
             description: "Breaking update"
         )
+        try? await store68.database.open()
+        await store68.batchUpsert(articles: [breakingArticle])
 
         await EpicNContracts.NotificationActionRouter.route(
             actionIdentifier: EpicNContracts.NotificationActionIdentifier.markRead,
