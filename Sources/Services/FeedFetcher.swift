@@ -97,7 +97,10 @@ actor FeedFetcher {
         if let contentType = response.value(forHTTPHeaderField: "Content-Type")
             ?? (response.allHeaderFields["Content-Type"] as? String)
         {
-            if let match = contentType.range(of: #"(?i)charset\s*=\s*['"]?([^'";\s]+)"#, options: .regularExpression) {
+            if let match = contentType.range(
+                of: #"(?i)(?:^|[;\s])\s*charset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^'";\s]+))"#,
+                options: .regularExpression)
+            {
                 let extracted = contentType[match]
                 if let eqIndex = extracted.firstIndex(of: "=") {
                     let raw = extracted[extracted.index(after: eqIndex)...].trimmingCharacters(

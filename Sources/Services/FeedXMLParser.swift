@@ -740,6 +740,15 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         (isAtom && elementStack.contains("source")) || elementStack.contains { $0.hasPrefix("ext:") }
     }
 
+    private func prefixUndeclared(_ name: String, qualifiedName: String?) -> String {
+        for prefix in ["media:", "dc:", "content:"] {
+            if qualifiedName?.hasPrefix(prefix) == true || name.hasPrefix(prefix) {
+                return name.hasPrefix(prefix) ? name : prefix + name
+            }
+        }
+        return name
+    }
+
     private func normalizedElement(_ name: String, namespaceURI: String?, qualifiedName: String? = nil) -> String {
         switch namespaceURI {
         // Publishers also declare these without the trailing slash.
@@ -749,15 +758,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         case "http://purl.org/dc/elements/1.1/", "http://purl.org/dc/elements/1.1": return "dc:" + name
         // RSS 2.0 has no namespace; Atom, RSS 1.0, RDF and XHTML content elements keep their local names.
         case nil, "":
-            if let qualifiedName {
-                if qualifiedName.hasPrefix("media:") { return name.hasPrefix("media:") ? name : "media:" + name }
-                if qualifiedName.hasPrefix("dc:") { return name.hasPrefix("dc:") ? name : "dc:" + name }
-                if qualifiedName.hasPrefix("content:") { return name.hasPrefix("content:") ? name : "content:" + name }
-            }
-            if name.hasPrefix("media:") || name.hasPrefix("dc:") || name.hasPrefix("content:") {
-                return name
-            }
-            return name
+            return prefixUndeclared(name, qualifiedName: qualifiedName)
         case "http://www.w3.org/2005/Atom", "http://purl.org/atom/ns#", "http://purl.org/rss/1.0/",
             "http://my.netscape.com/rdf/simple/0.9/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
             "http://www.w3.org/1999/xhtml":
