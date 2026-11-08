@@ -857,36 +857,139 @@ enum HTMLDOMBuilder {
 
     /// Whether the page holds more open elements than any article does. SwiftSoup rescans its open-element stack as
     /// it builds, so 150 KB of nested tables takes 10 seconds, growing with the square of the depth, and a parse cannot
-    /// be cancelled.
+    /// be cancelled. Markup is read as SwiftSoup's tokenizer reads it, so comments, attribute values and raw text
+    /// cannot close elements here that stay open there.
     /// ponytail: a tag count, so end tags the tree builder would ignore can hide depth from it; bound SwiftSoup itself
     /// if that happens.
     static func nestsTooDeeply(_ html: String, limit: Int = 2048) -> Bool {
+        let bytes = Array(html.utf8)
         var depth = 0
         var open: [String: Int] = [:]
-        var rawText: String?
-        for part in html.split(separator: "<") {
-            let isEnd = part.hasPrefix("/")
-            let name = (isEnd ? part.dropFirst() : part).prefix { $0.isLetter || $0.isNumber }.lowercased()
-            if let raw = rawText {
-                if isEnd, name == raw { rawText = nil }
-            } else if isEnd {
-                if let count = open[name], count > 0 {
-                    open[name] = count - 1
+        var index = 0
+        while let start = bytes[index...].firstIndex(of: UInt8(ascii: "<")) {
+            let tag = scanTag(bytes, at: start)
+            index = min(tag.next, bytes.count)
+            guard !tag.name.isEmpty else { continue }
+            if tag.isEnd {
+                if let count = open[tag.name], count > 0 {
+                    open[tag.name] = count - 1
                     depth -= 1
                 }
-            } else if name == "script" || name == "style" {
-                rawText = name
-            } else if !name.isEmpty, !implicitlyClosedTags.contains(name),
-                // A self-closed tag, like inline SVG's <path/>, opens nothing.
-                part.prefix(while: { $0 != ">" }).last != "/"
-            {
-                open[name, default: 0] += 1
+            } else if tag.selfClosed || implicitlyClosedTags.contains(tag.name) {
+                continue
+            } else if rawTextTags.contains(tag.name) {
+                index = endOfRawText(bytes, name: tag.name, from: index)
+            } else {
+                open[tag.name, default: 0] += 1
                 depth += 1
                 if depth > limit { return true }
             }
         }
         return false
     }
+
+    /// Where scanning resumes after the `<` at some position; `name` is empty for a comment, declaration or plain text.
+    private struct ScannedTag {
+        var next: Int
+        var name = ""
+        var isEnd = false
+        var selfClosed = false
+    }
+
+    private static func scanTag(_ bytes: [UInt8], at start: Int) -> ScannedTag {
+        let next = start + 1
+        guard next < bytes.count else { return ScannedTag(next: next) }
+        if bytes[next...].starts(with: "!--".utf8) { return ScannedTag(next: endOfComment(bytes, from: next + 1)) }
+        if bytes[next] == UInt8(ascii: "!") || bytes[next] == UInt8(ascii: "?") {
+            return ScannedTag(next: pastClosingBracket(bytes, from: next))
+        }
+        let isEnd = bytes[next] == UInt8(ascii: "/")
+        let nameStart = isEnd ? next + 1 : next
+        guard nameStart < bytes.count, (bytes[nameStart] | 0x20) >= 0x61, (bytes[nameStart] | 0x20) <= 0x7A else {
+            return ScannedTag(next: isEnd ? pastClosingBracket(bytes, from: nameStart) : next)
+        }
+        let nameEnd = bytes[nameStart...].firstIndex(where: tagNameEnds.contains) ?? bytes.count
+        let end = endOfTag(bytes, from: nameEnd)
+        let name = String(decoding: bytes[nameStart..<nameEnd], as: UTF8.self).lowercased()
+        return ScannedTag(next: end.next, name: name, isEnd: isEnd, selfClosed: end.selfClosed)
+    }
+
+    private static func pastClosingBracket(_ bytes: [UInt8], from start: Int) -> Int {
+        bytes[start...].firstIndex(of: UInt8(ascii: ">")).map { $0 + 1 } ?? bytes.count
+    }
+
+    /// `start` is the first dash of `<!--`, so `<!-->` and `<!--->` end where they begin, as in HTML.
+    private static func endOfComment(_ bytes: [UInt8], from start: Int) -> Int {
+        var index = start
+        while let dash = bytes[index...].firstIndex(of: UInt8(ascii: "-")) {
+            if bytes[dash...].starts(with: "-->".utf8) { return dash + 3 }
+            if bytes[dash...].starts(with: "--!>".utf8) { return dash + 4 }
+            index = dash + 1
+        }
+        return bytes.count
+    }
+
+    /// Past the `>` of a tag whose attributes begin at `start`. A quote opens a value only right after `=`, and a `/`
+    /// self-closes only directly before `>`, so a quote or slash elsewhere cannot hide what follows.
+    private static func endOfTag(_ bytes: [UInt8], from start: Int) -> (next: Int, selfClosed: Bool) {
+        var index = start
+        var hasAttributeName = false
+        var afterSlash = false
+        while index < bytes.count {
+            let byte = bytes[index]
+            index += 1
+            switch byte {
+            case UInt8(ascii: ">"):
+                return (index, afterSlash)
+            case UInt8(ascii: "/"):
+                afterSlash = true
+                hasAttributeName = false
+            case UInt8(ascii: "=") where hasAttributeName:
+                index = endOfAttributeValue(bytes, from: index)
+                hasAttributeName = false
+                afterSlash = false
+            case _ where htmlWhitespace.contains(byte):
+                afterSlash = false
+            default:
+                hasAttributeName = true
+                afterSlash = false
+            }
+        }
+        return (index, false)
+    }
+
+    private static func endOfAttributeValue(_ bytes: [UInt8], from start: Int) -> Int {
+        guard let first = bytes[start...].firstIndex(where: { !htmlWhitespace.contains($0) }) else {
+            return bytes.count
+        }
+        let quote = bytes[first]
+        if quote == UInt8(ascii: "\"") || quote == UInt8(ascii: "'") {
+            return bytes[(first + 1)...].firstIndex(of: quote).map { $0 + 1 } ?? bytes.count
+        }
+        return bytes[first...].firstIndex { htmlWhitespace.contains($0) || $0 == UInt8(ascii: ">") } ?? bytes.count
+    }
+
+    /// Past the element's own end tag, which is the only markup raw text can contain.
+    private static func endOfRawText(_ bytes: [UInt8], name: String, from start: Int) -> Int {
+        let closing = Array("</\(name)".utf8)
+        var index = start
+        while let candidate = bytes[index...].firstIndex(of: UInt8(ascii: "<")) {
+            let end = candidate + closing.count
+            if end <= bytes.count, zip(bytes[candidate..<end], closing).allSatisfy({ ($0 | 0x20) == ($1 | 0x20) }),
+                end == bytes.count || tagNameEnds.contains(bytes[end])
+            {
+                return endOfTag(bytes, from: end).next
+            }
+            index = candidate + 1
+        }
+        return bytes.count
+    }
+
+    private static let htmlWhitespace: Set<UInt8> = [0x09, 0x0A, 0x0C, 0x0D, 0x20]
+    private static let tagNameEnds = htmlWhitespace.union([UInt8(ascii: "/"), UInt8(ascii: ">")])
+    private static let rawTextTags: Set<String> = [
+        "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "plaintext",
+    ]
 
     /// Void elements, and those HTML closes without an end tag: neither deepens a real page.
     private static let implicitlyClosedTags = voidTags.union(["p", "li", "dt", "dd", "tr", "td", "th", "option"])

@@ -141,6 +141,30 @@ extension NativeSuites {
             #expect(HTMLDOMBuilder.nestsTooDeeply(String(repeating: "<DIV>", count: 3_000)))
         }
 
+        /// None of these closes an element for the parser, so the depth is real.
+        @Test(arguments: [
+            "<div><!-- </div> -->", "<div><!-- </div> --!>", #"<div title="</div>">"#, "<div title='</div>'>",
+            "<div><textarea></div></textarea>", "<div><title></div></title>", "<x-a></x-b>", "<div a=/>",
+            #"<div a=b"></div">"#,
+        ])
+        func markupThatClosesNothingCannotHideDepth(unit: String) {
+            #expect(HTMLDOMBuilder.nestsTooDeeply(String(repeating: unit, count: 3_000)))
+        }
+
+        @Test func aQuoteOutsideAValueCannotHideTheRestOfThePage() {
+            for opener in [#"<div a">"#, #"<div =">"#, "<div a=b'>"] {
+                #expect(HTMLDOMBuilder.nestsTooDeeply(opener + String(repeating: "<div>", count: 3_000)))
+            }
+        }
+
+        @Test(arguments: [
+            "<!-- <div> -->", "<!--> <div></div>", #"<div title="<div>"></div>"#, "<script><!--</script><p>x",
+            "<TEXTAREA><div></TEXTAREA>", "a < b <1 </1>", "<div/>", #"<div a="b"/>"#,
+        ])
+        func markupThatOpensNothingDoesNotCount(unit: String) {
+            #expect(!HTMLDOMBuilder.nestsTooDeeply(String(repeating: unit, count: 3_000)))
+        }
+
         @Test func manyRemovedSiblingsDoNotStallExtraction() {
             let page = "<article>" + String(repeating: "<style></style>", count: 80_000) + "</article>"
             let elapsed = ContinuousClock().measure { _ = ContentExtractionPipeline.shared.extractFromHTML(page) }
