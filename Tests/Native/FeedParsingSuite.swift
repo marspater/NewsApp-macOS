@@ -1853,6 +1853,21 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(
             fetcherPrecedenceResult.articles?.first?.title, "Représentation",
             "FeedFetcher parses title via declared encoding (#1149)")
+
+        // #1149: Parameter boundary check ignores prefix such as xcharset and matches true charset
+        let xcharsetResp = HTTPURLResponse(
+            url: URL(string: "https://example.com")!, statusCode: 200, httpVersion: nil,
+            headerFields: ["Content-Type": "application/rss+xml; xcharset=utf-8; charset=iso-8859-1"])!
+        expectEqual(
+            FeedFetcher.extractCharset(from: xcharsetResp), "iso-8859-1",
+            "xcharset prefix is ignored in favor of complete charset parameter boundary (#1149)")
+
+        let quotedResp = HTTPURLResponse(
+            url: URL(string: "https://example.com")!, statusCode: 200, httpVersion: nil,
+            headerFields: ["Content-Type": "application/rss+xml; charset=\"iso-8859-1\""])!
+        expectEqual(
+            FeedFetcher.extractCharset(from: quotedResp), "iso-8859-1",
+            "Quoted charset parameter value is extracted cleanly (#1149)")
     }
 
     static func testJSONParsing() async {
