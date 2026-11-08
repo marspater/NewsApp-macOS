@@ -1947,6 +1947,29 @@ extension NativeSuites.FeedParsingSuite {
         let utf32Parsed = FeedXMLParser(data: utf32Data, feedURL: "https://example.com/rss").parse()
         expectEqual(utf32Parsed.count, 1, "UTF-32 feed with BOM parses correctly (#1148)")
 
+        // #1148: UTF-16 with bare ampersand and declared encoding repairs and parses correctly
+        let utf16BareAmpXML = """
+            <?xml version="1.0" encoding="UTF-16"?>
+            <rss version="2.0"><channel><title>AT&T News</title><item><title>Item 1</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+            """
+        var utf16BareAmpData = Data([0xFF, 0xFE])
+        utf16BareAmpData.append(utf16BareAmpXML.data(using: .utf16LittleEndian)!)
+        let utf16BareAmpParsed = FeedXMLParser(data: utf16BareAmpData, feedURL: "https://example.com/rss").parse()
+        expectEqual(utf16BareAmpParsed.count, 1, "UTF-16 feed with bare ampersand repairs and parses (#1148)")
+
+        // #1148: UTF-32 feed with encoding in body/CDATA leaves body text intact
+        let utf32BodyXML = """
+            <?xml version="1.0" ENCODING="UTF-32"?>
+            <rss version="2.0"><channel><title>Test</title><item><title>Code</title><description><![CDATA[use encoding="gzip" here]]></description><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+            """
+        var utf32BodyData = Data([0xFF, 0xFE, 0x00, 0x00])
+        utf32BodyData.append(utf32BodyXML.data(using: .utf32LittleEndian)!)
+        let utf32BodyParsed = FeedXMLParser(data: utf32BodyData, feedURL: "https://example.com/rss").parse()
+        expectEqual(utf32BodyParsed.count, 1, "UTF-32 feed with encoding declaration in body parses (#1148)")
+        expectTrue(
+            utf32BodyParsed.first?.body.contains("encoding=\"gzip\"") == true,
+            "Body encoding attribute remains intact (#1148)")
+
         // #1148: Disallowed numeric entities (control chars, surrogates) are escaped
         let badEntityXML = """
             <rss version="2.0"><channel><title>Test</title><item><title>Bad &#0; and &#xD800; and &#X41; and &amp;</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
