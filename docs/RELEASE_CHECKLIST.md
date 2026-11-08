@@ -21,7 +21,7 @@ NEWS_TEST_FORCE=1 ./test.sh
 ```
 
 `./test.sh` runs the design lint, the Python evaluation self-checks, the whole Swift suite as parallel jobs and the
-three headless runners. `NEWS_TEST_FORCE=1` reruns it even if the same inputs passed on this machine. It does not read the library copy:
+three headless runners. The native bundle and the UI smoke flows are separate: `xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' -testPlan Release` runs every `Tests/Native` suite, and the `UITests` plan runs `NewsUITests` against the Debug app. CI runs both on every push that changes more than Markdown or `docs/`; check that both plans passed in CI for the commit to be tagged, or run them locally, the UI plan only on a Mac nobody is using. `NEWS_TEST_FORCE=1` reruns it even if the same inputs passed on this machine. It does not read the library copy:
 that is exercised by the manual migration step in item 1 and by the holdout in item 3. Also check that
 `CI=1 script/format.sh --check` and `./build.sh` succeed. Without `CI` set, the format script passes with only a warning
 when no swift-format is installed, so also confirm `xcrun --find swift-format` prints a path, or the check proved nothing. The items below name the part of this run that proves each gate,
@@ -31,8 +31,8 @@ plus the extra commands that are not in the plain run.
 
 - Automated, on synthetic libraries (it does not read `NEWS_SNAPSHOT_DB`): `./test.sh --fts-refresh-regression` runs
   the migration fixture, the pre-migration backup and newer-schema guard, and backup restore
-  (`testRealLibraryMigrationFixture`, `testLibraryBackupAndFutureSchemaGuard`, `testLibraryBackupRestore` in
-  `Tests/NewsTests.swift`).
+  (`testRealLibraryMigrationFixture` in `Tests/CLIModeRegressionTests.swift`; `testLibraryBackupAndFutureSchemaGuard` and
+  `testLibraryBackupRestore` in `Tests/StorageTests.swift`; the same tests run natively in `Tests/Native/MigrationSuite.swift` and `StorageSuite.swift` through the Release plan).
 - On the real-library copy (manual, below): compare the copy's
   schema version and story, read and saved counts before and after, as the v2 completion plan does:
   `sqlite3 <file> "PRAGMA user_version; SELECT count(*) FROM articles; SELECT count(*) FROM article_state WHERE is_read = 1; SELECT count(*) FROM article_state WHERE is_saved = 1;"`.
@@ -58,11 +58,11 @@ plus the extra commands that are not in the plain run.
 
 ## 2. Feed parser and networking security tests
 
-- Automated, part of `./test.sh`: the secure HTTP client, SOCKS boundary proxy, redirect and private-address tests
-  in `Tests/NewsTests.swift`, and `Tests/FeedKitSwiftSoupTests.swift`.
+- Automated, part of `./test.sh`: the secure HTTP client, redirect and private-address tests in
+  `Tests/NetworkingTests.swift`, the SOCKS boundary proxy tests in `Tests/SocketTests.swift`, and `Tests/FeedKitSwiftSoupTests.swift`.
 - `./test.sh --parsing-regressions` for the offline HTML and feed compatibility and safety checks.
 - `./test.sh --transport-cancellation` for refresh shutdown over controlled HTTP and SOCKS sockets (optimized build).
-- `NEWS_NATIVE_HARNESS=Tests/Harness/PublisherExcerptTests.swift ./script/native_performance_baseline.sh` (run by CI too).
+- The publisher-excerpt checks run natively: `xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' -testPlan Integration -only-testing:NewsTests/NativeSuites/PublisherExcerptSuite` (part of every CI run through the Release plan).
 - CI additionally runs `.github/workflows/security.yml` (CodeQL, dependency review, secret scan).
 
 ## 3. Matcher holdout
@@ -82,7 +82,7 @@ fresh holdout, as the audits describe.
 ## 4. Notification deduplication
 
 - Automated, part of `./test.sh`: `testNotificationDedupeAcrossRefreshes` and the "notification deduplication beyond the
-  snapshot" test in `Tests/NewsTests.swift`, plus `Tests/NotificationAttachmentTests.swift`.
+  snapshot" test in `Tests/LifecycleTests.swift`, plus `Tests/NotificationAttachmentTests.swift`.
 - Optional, needs a user-authorized News: `./script/test_notification_live.sh DIR` for real OS notifications with
   synthetic reports. Manual: after a refresh on the installed build, no story banner repeats.
 

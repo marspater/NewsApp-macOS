@@ -52,7 +52,8 @@ The app also registers custom URL schemes (`feed://`, `feed:https://`, `feed:htt
 ## Build and test
 
 ```sh
-./test.sh                         # Deterministic regression suite
+./test.sh                         # Deterministic regression suite (custom runner, one process per Tests/<Domain>Tests.swift atom)
+xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' -testPlan Development -only-testing:NewsTests # Native Swift Testing suites (Tests/Native); CI runs the Release plan and the UITests plan
 NEWS_LIVE_READER_CHECK=1 ./test.sh # Optional public-publisher network checks
 ./build.sh                        # arm64, News.app
 ./build_release.sh                # Optimized arm64 verification, News.app
@@ -95,7 +96,7 @@ Standard project, contribution, privacy and security documents stay at the root.
 - `Sources/Storage`: SQLite, migrations and observable stores.
 - `Sources/Intelligence`: extraction, deterministic taxonomy, on-device analysis and bounded enrichment queue.
 - `Sources/Coordinators`: feed refresh and notifications.
-- `Tests/NewsTests.swift`: parsing, security, persistence, classification and state regression checks.
+- `Tests/`: `Runner.swift` dispatches one atom per `<Domain>Tests.swift` for the custom runner; `Native/` holds the Swift Testing suites of ported domains (migrations, feed parsing, storage, publisher excerpts and more), run through the plans in `Plans/`; `UITests/` holds the smoke flows and performance metrics against the Debug app; `Harness/` holds the opt-in QA entry points.
 
 See the [30 September readiness report](docs/audits/2026-09-30-production-readiness.md), [earlier modernization report](docs/audits/2026-09-27-reader-modernization.md) and [security policy](SECURITY.md).
 
