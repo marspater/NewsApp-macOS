@@ -60,7 +60,8 @@ actor FeedFetcher {
             let fresh = FeedValidators(response: response)
 
             let sniffer =
-                String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(
+                    in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))) ?? ""
             if sniffer.hasPrefix("{") || sniffer.hasPrefix("[") {
                 let parsed = JSONFeedParser.parse(
                     data: data, feedURL: urlString, baseURL: response.url?.absoluteString)
