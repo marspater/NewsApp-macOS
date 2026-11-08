@@ -160,6 +160,17 @@ final class DOMElementNode: Sendable {
     let isSelfClosing: Bool
     private let isNavigationCard: Bool
 
+    private struct Cache: Sendable {
+        var combinedTextNewline: String?
+        var combinedTextLineBreak: String?
+        var otherCombinedText: [String: String] = [:]
+        var readingBlocksWithFallback: [DOMElementNode]?
+        var readingBlocksWithoutFallback: [DOMElementNode]?
+        var isReaderExcluded: Bool?
+    }
+
+    private let cache = OSAllocatedUnfairLock(initialState: Cache())
+
     init(
         tag: String,
         attributes: [String: String] = [:],
@@ -224,11 +235,37 @@ final class DOMElementNode: Sendable {
     /// Recursively collects visible text from this node and its children. `lineBreak` marks `<br>` and the boundary
     /// before a nested paragraph, division or list item.
     func combinedText(lineBreak: String = "\n") -> String {
+        let cached: String? = cache.withLock {
+            if lineBreak == "\n" {
+                return $0.combinedTextNewline
+            } else if lineBreak == Self.lineBreak {
+                return $0.combinedTextLineBreak
+            } else {
+                return $0.otherCombinedText[lineBreak]
+            }
+        }
+        if let cached { return cached }
+
+        let result = computeCombinedText(lineBreak: lineBreak)
+        cache.withLock {
+            if lineBreak == "\n" {
+                $0.combinedTextNewline = result
+            } else if lineBreak == Self.lineBreak {
+                $0.combinedTextLineBreak = result
+            } else {
+                $0.otherCombinedText[lineBreak] = result
+            }
+        }
+        return result
+    }
+
+    private func computeCombinedText(lineBreak: String) -> String {
         guard !isReaderExcluded else { return "" }
         if tag == "br" { return lineBreak }
         if tag == "noscript" { return "" }
         var result = text
         for child in children {
+            guard !Task.isCancelled else { break }
             let childText = child.combinedText(lineBreak: lineBreak)
             if !childText.isEmpty {
                 if ["p", "div", "li"].contains(child.tag), !result.isEmpty {
@@ -260,6 +297,15 @@ final class DOMElementNode: Sendable {
     }
 
     var isReaderExcluded: Bool {
+        if let cached = cache.withLock({ $0.isReaderExcluded }) {
+            return cached
+        }
+        let result = computeIsReaderExcluded()
+        cache.withLock { $0.isReaderExcluded = result }
+        return result
+    }
+
+    private func computeIsReaderExcluded() -> Bool {
         if isHidden || isNavigationCard { return true }
         if ["p", "h1", "h2", "h3", "h4", "h5", "h6", "li"].contains(tag),
             ArticleContentRedactor.isBoilerplateLine(text.isEmpty ? children.map { $0.combinedText() }.joined() : text)
@@ -324,6 +370,23 @@ final class DOMElementNode: Sendable {
         } ?? NSRegularExpression()
 
     func readingBlocks(allowDivFallback: Bool = true) -> [DOMElementNode] {
+        let cached = cache.withLock {
+            allowDivFallback ? $0.readingBlocksWithFallback : $0.readingBlocksWithoutFallback
+        }
+        if let cached { return cached }
+
+        let result = computeReadingBlocks(allowDivFallback: allowDivFallback)
+        cache.withLock {
+            if allowDivFallback {
+                $0.readingBlocksWithFallback = result
+            } else {
+                $0.readingBlocksWithoutFallback = result
+            }
+        }
+        return result
+    }
+
+    private func computeReadingBlocks(allowDivFallback: Bool) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
         if tag == "noscript" { return children.flatMap { $0.readingBlocks(allowDivFallback: false) } }
         if ["figure", "img", "picture", "hr", "iframe", "video"].contains(tag) { return [self] }
@@ -388,6 +451,7 @@ final class DOMElementNode: Sendable {
         }
         var previousTag = ""
         for child in children {
+            guard !Task.isCancelled else { break }
             // The page title is shown by the app; the paragraph a publisher sets right after it is the standfirst.
             if child.tag == "h1" {
                 flushInline()
@@ -1948,6 +2012,7 @@ final class ContentExtractionPipeline: Sendable {
         var bestParagraphs: [ReaderBlock] = []
 
         for container in candidateContainers {
+            guard !Task.isCancelled else { break }
             let (score, paragraphs) = scoreContainer(container)
             if score > bestScore {
                 bestScore = score
@@ -1969,6 +2034,7 @@ final class ContentExtractionPipeline: Sendable {
             results.append(node)
         }
         for child in node.children {
+            guard !Task.isCancelled else { break }
             collectCandidateContainers(from: child, into: &results)
         }
     }

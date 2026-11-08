@@ -1370,6 +1370,33 @@ extension NewsTests {
             """
         let extractedImage = pipeline.extractLeadImage(from: htmlWithOG)
         assertEqual(extractedImage, "https://example.com/lead-image.jpg", "Should extract og:image meta tag")
+
+        // 4. #1151: Deeply nested div extraction performance (< 250ms)
+        var nestedHTML = "<html><body>"
+        for i in 0..<128 {
+            nestedHTML += "<div class=\"wrapper-\(i)\">"
+        }
+        nestedHTML +=
+            "<p>This is a sufficiently substantive paragraph for reader extraction. The findings provide critical insights into historical atmospheric compositions.</p>"
+        nestedHTML +=
+            "<p>A second substantive paragraph ensures the extraction pipeline qualifies the prose as an article instead of empty content.</p>"
+        for _ in 0..<128 {
+            nestedHTML += "</div>"
+        }
+        nestedHTML += "</body></html>"
+
+        let start = Date()
+        let outcome = pipeline.extractFromHTML(nestedHTML)
+        let elapsed = Date().timeIntervalSince(start)
+        let elapsedMs = Int(elapsed * 1000)
+        assertTrue(
+            elapsed < 0.25,
+            "128-depth nested div extraction must complete in under 250ms (took \(elapsedMs)ms) (#1151)")
+        if case .success(let text, _, _) = outcome {
+            assertTrue(text.contains("substantive paragraph"), "Nested prose is extracted correctly (#1151)")
+        } else {
+            assertTrue(false, "Extraction should succeed on deeply nested divs (#1151)")
+        }
     }
 
     static func testExtractionURLRejection() async {
