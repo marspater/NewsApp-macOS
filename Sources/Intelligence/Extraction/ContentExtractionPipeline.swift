@@ -876,7 +876,7 @@ enum HTMLDOMBuilder {
                     depth -= 1
                 }
             } else if tag.selfClosed || implicitlyClosedTags.contains(tag.name) {
-                continue
+                // Opens nothing.
             } else if rawTextTags.contains(tag.name) {
                 index = endOfRawText(bytes, name: tag.name, from: index)
             } else {
