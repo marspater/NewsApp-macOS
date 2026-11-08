@@ -703,8 +703,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func resolvedURL(_ value: String, baseURL: URL? = nil) -> String {
-        let value = ContentExtractionPipeline.shared.decodeHTMLEntities(value)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return "" }
         return URL(string: value, relativeTo: baseURL ?? baseURLs.last.flatMap { $0 } ?? URL(string: feedURL))?
             .absoluteURL.absoluteString ?? value
@@ -742,7 +741,11 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let range = NSRange(html.startIndex..., in: html)
         // The first picture the feed gate accepts: not vector artwork, a tracking pixel or a site mark.
         return regex.matches(in: html, range: range).lazy
-            .compactMap { Range($0.range(at: 1), in: html).map { String(html[$0]) } }
+            .compactMap {
+                Range($0.range(at: 1), in: html).map {
+                    ContentExtractionPipeline.shared.decodeHTMLEntities(String(html[$0]))
+                }
+            }
             .first { ReaderImageCandidate.usable(url: resolvedURL($0)) }
     }
 }
