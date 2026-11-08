@@ -110,8 +110,17 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             parseError = "XML entity declarations are not allowed"
             return false
         }
+        guard !XMLInputGuard.declaresAttributeLists(data) else {
+            parseError = "XML attribute list declarations are not allowed"
+            return false
+        }
+        let repaired = Self.repairXML(data: data)
+        guard repaired.count <= SecureHTTPClient.defaultFeedLimit else {
+            parseError = "Feed exceeds parsing limit or was cancelled"
+            return false
+        }
         // Output before the declaration, or anything after the closing root tag, is a server's stray text.
-        let parser = XMLParser(data: Data(data.drop { [0x20, 0x09, 0x0A, 0x0D].contains($0) }))
+        let parser = XMLParser(data: Data(repaired.drop { [0x20, 0x09, 0x0A, 0x0D].contains($0) }))
         parser.delegate = self
         parser.shouldProcessNamespaces = true
         parser.shouldReportNamespacePrefixes = false
@@ -865,5 +874,221 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         guard let utf8Data = string.data(using: .utf8) else { return nil }
         guard utf8Data.count <= limit else { return nil }
         return utf8Data
+    }
+
+    // MARK: - Publisher XML Defect Repair (#1148)
+
+    private static let htmlEntityToNumeric: [String: String] = [
+        "nbsp": "&#160;", "iexcl": "&#161;", "cent": "&#162;", "pound": "&#163;", "curren": "&#164;", "yen": "&#165;",
+        "brvbar": "&#166;", "sect": "&#167;", "uml": "&#168;", "copy": "&#169;", "ordf": "&#170;", "laquo": "&#171;",
+        "not": "&#172;", "shy": "&#173;", "reg": "&#174;", "macr": "&#175;", "deg": "&#176;", "plusmn": "&#177;",
+        "sup2": "&#178;", "sup3": "&#179;", "acute": "&#180;", "micro": "&#181;", "para": "&#182;", "middot": "&#183;",
+        "cedil": "&#184;", "sup1": "&#185;", "ordm": "&#186;", "raquo": "&#187;", "frac14": "&#188;",
+        "frac12": "&#189;",
+        "frac34": "&#190;", "iquest": "&#191;",
+        "Agrave": "&#192;", "Aacute": "&#193;", "Acirc": "&#194;", "Atilde": "&#195;", "Auml": "&#196;",
+        "Aring": "&#197;", "AElig": "&#198;",
+        "Ccedil": "&#199;", "Egrave": "&#200;", "Eacute": "&#201;", "Ecirc": "&#202;", "Euml": "&#203;",
+        "Igrave": "&#204;", "Iacute": "&#205;", "Icirc": "&#206;", "Iuml": "&#207;",
+        "ETH": "&#208;", "Ntilde": "&#209;", "Ograve": "&#210;", "Oacute": "&#211;", "Ocirc": "&#212;",
+        "Otilde": "&#213;", "Ouml": "&#214;", "Oslash": "&#216;",
+        "Ugrave": "&#217;", "Uacute": "&#218;", "Ucirc": "&#219;", "Uuml": "&#220;", "Yacute": "&#221;",
+        "THORN": "&#222;", "szlig": "&#223;",
+        "agrave": "&#224;", "aacute": "&#225;", "acirc": "&#226;", "atilde": "&#227;", "auml": "&#228;",
+        "aring": "&#229;", "aelig": "&#230;",
+        "ccedil": "&#231;", "egrave": "&#232;", "eacute": "&#233;", "ecirc": "&#234;", "euml": "&#235;",
+        "igrave": "&#236;", "iacute": "&#237;", "icirc": "&#238;", "iuml": "&#239;",
+        "eth": "&#240;", "ntilde": "&#241;", "ograve": "&#242;", "oacute": "&#243;", "ocirc": "&#244;",
+        "otilde": "&#245;", "ouml": "&#246;", "oslash": "&#248;",
+        "ugrave": "&#249;", "uacute": "&#250;", "ucirc": "&#251;", "uuml": "&#252;", "yacute": "&#253;",
+        "thorn": "&#254;", "yuml": "&#255;",
+        "ndash": "&#8211;", "mdash": "&#8212;", "lsquo": "&#8216;", "rsquo": "&#8217;", "sbquo": "&#8218;",
+        "ldquo": "&#8220;", "rdquo": "&#8221;", "bdquo": "&#8222;", "dagger": "&#8224;", "Dagger": "&#8225;",
+        "bull": "&#8226;", "hellip": "&#8230;", "permil": "&#8240;", "prime": "&#8242;", "Prime": "&#8243;",
+        "lsaquo": "&#8249;", "rsaquo": "&#8250;", "euro": "&#8364;", "trade": "&#8482;",
+        "larr": "&#8592;", "uarr": "&#8593;", "rarr": "&#8594;", "darr": "&#8595;", "harr": "&#8596;",
+        "crarr": "&#8629;", "infin": "&#8734;", "asymp": "&#8776;", "ne": "&#8800;", "le": "&#8804;", "ge": "&#8805;",
+        "times": "&#215;", "divide": "&#247;",
+    ]
+
+    /// Extracts the encoding declared in an XML prolog, if present (#1148).
+    static func declaredEncoding(in data: Data) -> String.Encoding? {
+        let trimmed = data.drop { [0x20, 0x09, 0x0A, 0x0D].contains($0) }
+        guard trimmed.starts(with: Data("<?xml".utf8)) else { return nil }
+        let prefix = trimmed.prefix(1024)
+        guard let endRange = prefix.range(of: Data("?>".utf8)) else { return nil }
+        let declData = prefix[..<endRange.upperBound]
+        guard
+            let declString = String(data: declData, encoding: .ascii)
+                ?? String(data: declData, encoding: .isoLatin1)
+        else {
+            return nil
+        }
+        guard
+            let match = declString.range(
+                of: #"(?i)\bencoding\s*=\s*['"]([^'"]+)['"]"#, options: .regularExpression)
+        else {
+            return nil
+        }
+        let matchedStr = declString[match]
+        guard let eqIndex = matchedStr.firstIndex(of: "=") else { return nil }
+        let encName = matchedStr[matchedStr.index(after: eqIndex)...].trimmingCharacters(
+            in: CharacterSet(charactersIn: "\"' \t"))
+        return stringEncoding(for: encName)
+    }
+
+    /// Repairs publisher XML defects (bare ampersands, common HTML entities, invalid control characters,
+    /// invalid UTF-8 bytes) outside CDATA sections and comments (#1148).
+    static func repairXML(data: Data) -> Data {
+        let cdataStart = Data("<![CDATA[".utf8)
+        let cdataEnd = Data("]]>".utf8)
+        let commentStart = Data("<!--".utf8)
+        let commentEnd = Data("-->".utf8)
+
+        var result = Data()
+        result.reserveCapacity(data.count + 128)
+
+        let encoding = declaredEncoding(in: data) ?? .utf8
+        var currentIndex = data.startIndex
+
+        while currentIndex < data.endIndex {
+            let remainder = data[currentIndex...]
+            let nextCData = remainder.range(of: cdataStart)
+            let nextComment = remainder.range(of: commentStart)
+
+            let nextSpecial: (range: Range<Data.Index>, isCData: Bool)?
+            switch (nextCData, nextComment) {
+            case (.some(let cd), .some(let cm)):
+                if cd.lowerBound <= cm.lowerBound {
+                    nextSpecial = (cd, true)
+                } else {
+                    nextSpecial = (cm, false)
+                }
+            case (.some(let cd), .none):
+                nextSpecial = (cd, true)
+            case (.none, .some(let cm)):
+                nextSpecial = (cm, false)
+            case (.none, .none):
+                nextSpecial = nil
+            }
+
+            if let (specialRange, isCData) = nextSpecial {
+                let outsideData = data[currentIndex..<specialRange.lowerBound]
+                if !outsideData.isEmpty {
+                    result.append(contentsOf: sanitizeOutside(outsideData, encoding: encoding))
+                }
+
+                if isCData {
+                    let searchStart = specialRange.upperBound
+                    if let closeRange = data[searchStart...].range(of: cdataEnd) {
+                        result.append(data[specialRange.lowerBound..<closeRange.upperBound])
+                        currentIndex = closeRange.upperBound
+                    } else {
+                        result.append(data[specialRange.lowerBound...])
+                        currentIndex = data.endIndex
+                    }
+                } else {
+                    let searchStart = specialRange.upperBound
+                    if let closeRange = data[searchStart...].range(of: commentEnd) {
+                        result.append(data[specialRange.lowerBound..<closeRange.upperBound])
+                        currentIndex = closeRange.upperBound
+                    } else {
+                        result.append(data[specialRange.lowerBound...])
+                        currentIndex = data.endIndex
+                    }
+                }
+            } else {
+                let outsideData = data[currentIndex...]
+                if !outsideData.isEmpty {
+                    result.append(contentsOf: sanitizeOutside(outsideData, encoding: encoding))
+                }
+                currentIndex = data.endIndex
+            }
+        }
+
+        return result
+    }
+
+    private static func isValidNumericEntity(_ content: Substring) -> Bool {
+        guard content.hasPrefix("#") else { return false }
+        let body = content.dropFirst()
+        if body.hasPrefix("x") || body.hasPrefix("X") {
+            let hex = body.dropFirst()
+            return !hex.isEmpty && hex.allSatisfy { $0.isHexDigit }
+        } else {
+            return !body.isEmpty && body.allSatisfy { $0.isNumber }
+        }
+    }
+
+    private static func sanitizeOutside(_ data: Data, encoding: String.Encoding) -> Data {
+        let text: String
+        if encoding == .utf8 {
+            text = String(decoding: data, as: UTF8.self)
+        } else {
+            text = String(data: data, encoding: encoding) ?? String(decoding: data, as: UTF8.self)
+        }
+
+        var strippedScalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            let val = scalar.value
+            let isDisallowed =
+                (val <= 0x08) || (val >= 0x0B && val <= 0x0C) || (val >= 0x0E && val <= 0x1F) || (val == 0x7F)
+            if !isDisallowed {
+                strippedScalars.append(scalar)
+            }
+        }
+        let cleaned = String(strippedScalars)
+
+        var result = ""
+        result.reserveCapacity(cleaned.count + 16)
+        var idx = cleaned.startIndex
+
+        while idx < cleaned.endIndex {
+            if cleaned[idx] == "&" {
+                let nextIdx = cleaned.index(after: idx)
+                var semicolonIdx: String.Index? = nil
+                var searchIdx = nextIdx
+                var count = 0
+                while searchIdx < cleaned.endIndex && count < 32 {
+                    let c = cleaned[searchIdx]
+                    if c == ";" {
+                        semicolonIdx = searchIdx
+                        break
+                    }
+                    if c.isWhitespace || c == "<" || c == ">" || c == "&" || c == "\"" || c == "'" {
+                        break
+                    }
+                    searchIdx = cleaned.index(after: searchIdx)
+                    count += 1
+                }
+
+                if let semi = semicolonIdx {
+                    let entity = String(cleaned[nextIdx..<semi])
+                    if ["amp", "lt", "gt", "quot", "apos"].contains(entity) {
+                        result.append("&")
+                        result.append(contentsOf: cleaned[nextIdx...semi])
+                        idx = cleaned.index(after: semi)
+                    } else if isValidNumericEntity(cleaned[nextIdx..<semi]) {
+                        result.append("&")
+                        result.append(contentsOf: cleaned[nextIdx...semi])
+                        idx = cleaned.index(after: semi)
+                    } else if let numeric = htmlEntityToNumeric[entity] {
+                        result.append(numeric)
+                        idx = cleaned.index(after: semi)
+                    } else {
+                        result.append("&amp;")
+                        idx = nextIdx
+                    }
+                } else {
+                    result.append("&amp;")
+                    idx = nextIdx
+                }
+            } else {
+                result.append(cleaned[idx])
+                idx = cleaned.index(after: idx)
+            }
+        }
+
+        return result.data(using: encoding) ?? Data(result.utf8)
     }
 }
