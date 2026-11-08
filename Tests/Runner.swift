@@ -42,7 +42,7 @@ struct NewsRegressionRunner {
             }
             if selected("Tests/NotificationAttachmentTests.swift") {
                 NotificationAttachmentTests.run()
-                NotificationAttachmentTests.runBanner()
+                await NotificationAttachmentTests.runBanner()
             }
             if selected("Tests/BriefingE2ETests.swift") { await BriefingE2ETests.run() }
             if selected("Tests/BriefingWarRoomTests.swift") { await BriefingWarRoomTests.run() }
