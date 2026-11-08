@@ -1712,6 +1712,56 @@ extension NativeSuites.FeedParsingSuite {
                 "https://cdn.example.com/second.jpg",
             ],
             "CDATA image attributes decode once and an over-long candidate is skipped before decoding (#1082)")
+
+        // #1150: undeclared media: and dc: prefixes preserve the item's image and byline.
+        let undeclaredPrefixXML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+            <channel>
+                <title>Undeclared Prefixes</title>
+                <item>
+                    <title>Undeclared Item</title>
+                    <link>https://example.com/undeclared</link>
+                    <media:thumbnail url="https://example.com/undeclared-thumb.jpg"/>
+                    <dc:creator>Jane Doe</dc:creator>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .utf8)!
+        let undeclaredArticles = FeedXMLParser(data: undeclaredPrefixXML, feedURL: "https://example.com/rss").parse()
+        expectEqual(undeclaredArticles.count, 1, "Should parse undeclared-prefix item")
+        expectEqual(
+            undeclaredArticles.first?.imageUrl,
+            "https://example.com/undeclared-thumb.jpg",
+            "Undeclared media:thumbnail preserves item image (#1150)")
+        expectEqual(
+            undeclaredArticles.first?.author,
+            "Jane Doe",
+            "Undeclared dc:creator preserves item byline (#1150)")
+
+        // #1150: prefixes bound to an unrelated namespace are treated as foreign elements, not well-known ones.
+        let unrelatedNamespaceXML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0" xmlns:media="http://example.com/other-media" xmlns:dc="http://example.com/other-dc">
+            <channel>
+                <title>Unrelated Namespaces</title>
+                <item>
+                    <title>Unrelated Item</title>
+                    <link>https://example.com/unrelated</link>
+                    <media:thumbnail url="https://example.com/unrelated-thumb.jpg"/>
+                    <dc:creator>Other Creator</dc:creator>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .utf8)!
+        let unrelatedArticles = FeedXMLParser(data: unrelatedNamespaceXML, feedURL: "https://example.com/rss").parse()
+        expectEqual(unrelatedArticles.count, 1, "Should parse unrelated-namespace item")
+        expectNil(
+            unrelatedArticles.first?.imageUrl,
+            "Prefix bound to unrelated namespace is not treated as well-known media:thumbnail (#1150)")
+        expectNil(
+            unrelatedArticles.first?.author,
+            "Prefix bound to unrelated namespace is not treated as well-known dc:creator (#1150)")
     }
 
     static func testJSONParsing() async {

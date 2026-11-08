@@ -173,7 +173,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     // MARK: - XMLParserDelegate
 
     func parser(
-        _ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName _: String?,
+        _ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?,
         attributes attributeDict: [String: String] = [:]
     ) {
         currentNestingDepth += 1
@@ -183,7 +183,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             return
         }
 
-        let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
+        let elementName = normalizedElement(elementName, namespaceURI: namespaceURI, qualifiedName: qualifiedName)
         let parentBase = baseURLs.last.flatMap { $0 } ?? URL(string: feedURL)
         baseURLs.append(
             attributeDict["xml:base"].flatMap { URL(string: $0, relativeTo: parentBase)?.absoluteURL } ?? parentBase)
@@ -418,13 +418,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     /// Handles closing XML elements, finalizing the active text field or completed article item.
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName _: String?)
-    {
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
         guard !Task.isCancelled else {
             parser.abortParsing()
             return
         }
-        let elementName = normalizedElement(elementName, namespaceURI: namespaceURI)
+        let elementName = normalizedElement(elementName, namespaceURI: namespaceURI, qualifiedName: qualifiedName)
         if insideItem {
             appendItemXML("</\(elementName)>")
             // A category inside an Atom <source> or a foreign element must not block the entry's own term.
@@ -724,7 +723,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         (isAtom && elementStack.contains("source")) || elementStack.contains { $0.hasPrefix("ext:") }
     }
 
-    private func normalizedElement(_ name: String, namespaceURI: String?) -> String {
+    private func normalizedElement(_ name: String, namespaceURI: String?, qualifiedName: String? = nil) -> String {
         switch namespaceURI {
         // Publishers also declare these without the trailing slash.
         case "http://purl.org/rss/1.0/modules/content/", "http://purl.org/rss/1.0/modules/content":
@@ -732,7 +731,17 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         case "http://search.yahoo.com/mrss/", "http://search.yahoo.com/mrss": return "media:" + name
         case "http://purl.org/dc/elements/1.1/", "http://purl.org/dc/elements/1.1": return "dc:" + name
         // RSS 2.0 has no namespace; Atom, RSS 1.0, RDF and XHTML content elements keep their local names.
-        case nil, "", "http://www.w3.org/2005/Atom", "http://purl.org/atom/ns#", "http://purl.org/rss/1.0/",
+        case nil, "":
+            if let qualifiedName {
+                if qualifiedName.hasPrefix("media:") { return name.hasPrefix("media:") ? name : "media:" + name }
+                if qualifiedName.hasPrefix("dc:") { return name.hasPrefix("dc:") ? name : "dc:" + name }
+                if qualifiedName.hasPrefix("content:") { return name.hasPrefix("content:") ? name : "content:" + name }
+            }
+            if name.hasPrefix("media:") || name.hasPrefix("dc:") || name.hasPrefix("content:") {
+                return name
+            }
+            return name
+        case "http://www.w3.org/2005/Atom", "http://purl.org/atom/ns#", "http://purl.org/rss/1.0/",
             "http://my.netscape.com/rdf/simple/0.9/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
             "http://www.w3.org/1999/xhtml":
             return name

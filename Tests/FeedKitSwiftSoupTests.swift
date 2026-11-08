@@ -224,6 +224,37 @@ enum FeedKitSwiftSoupTests {
             nestedArticles.last?.readerDocument?.images?.first?.credit == "Second photographer",
             "Separate item media credits remain associated with their own images")
 
+        // #1150: undeclared media: and dc: prefixes preserve the item's image and byline.
+        let undeclaredXML = """
+            <rss version="2.0"><channel><title>Undeclared</title><item>
+            <title>Story</title><link>https://example.com/story</link>
+            <media:thumbnail url="https://example.com/undeclared.jpg"/>
+            <dc:creator>Jane Doe</dc:creator>
+            </item></channel></rss>
+            """
+        let undeclaredParsed = FeedXMLParser(data: Data(undeclaredXML.utf8), feedURL: base).parse().first
+        check(
+            undeclaredParsed?.imageUrl == "https://example.com/undeclared.jpg",
+            "Undeclared media:thumbnail preserves item image (#1150)")
+        check(
+            undeclaredParsed?.author == "Jane Doe",
+            "Undeclared dc:creator preserves item byline (#1150)")
+
+        let unrelatedXML = """
+            <rss version="2.0" xmlns:media="http://example.com/other" xmlns:dc="http://example.com/other"><channel><title>Unrelated</title><item>
+            <title>Story</title><link>https://example.com/story</link>
+            <media:thumbnail url="https://example.com/unrelated.jpg"/>
+            <dc:creator>Other Author</dc:creator>
+            </item></channel></rss>
+            """
+        let unrelatedParsed = FeedXMLParser(data: Data(unrelatedXML.utf8), feedURL: base).parse().first
+        check(
+            unrelatedParsed?.imageUrl == nil,
+            "Prefix bound to unrelated namespace is not treated as well-known media:thumbnail (#1150)")
+        check(
+            unrelatedParsed?.author == nil,
+            "Prefix bound to unrelated namespace is not treated as well-known dc:creator (#1150)")
+
         let rdf = """
             <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/"
             xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>RDF Publisher</title></channel>
