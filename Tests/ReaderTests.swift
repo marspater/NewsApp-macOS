@@ -937,9 +937,9 @@ extension NewsTests {
             "Credential-bearing image URLs are rejected")
         assertEqual(
             ContentExtractionPipeline.readerImageURL(
-                "https://assets.science.nasa.gov/photo.jpg?w=2048&#038;h=1365&amp;fit=clip", baseURL: nil),
-            "https://assets.science.nasa.gov/photo.jpg?w=2048&h=1365&fit=clip",
-            "Image candidate URLs decode &#038; and &amp; before URL parsing (#1082)")
+                "https://cdn.example.com/signed.jpg?token=a&amp;b", baseURL: nil),
+            "https://cdn.example.com/signed.jpg?token=a&amp;b",
+            "An attribute the HTML parser already decoded is not decoded a second time (#1082)")
         let entityImagesHTML = """
             <html><head><title>Entity Image Attributes</title>
             <meta property="og:image" content="https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672&#038;h=940&amp;crop=1">

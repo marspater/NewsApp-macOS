@@ -14,6 +14,7 @@
 
 import FeedKit
 import Foundation
+import SwiftSoup
 
 /// Checks shared by every XML document the app reads from outside: feeds and OPML imports (#928).
 enum XMLInputGuard {
@@ -443,8 +444,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let guid = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
         let link = itemDocumentLink(guid: guid)
         let content = itemContent(articleLink: link)
-        if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemDescription) ?? "" }
-        if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemContentEncoded) ?? "" }
+        if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemDescription, baseURL: itemBaseURL) ?? "" }
+        if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemContentEncoded, baseURL: itemBaseURL) ?? "" }
         let category = itemCategory.components(separatedBy: .newlines)
             .map {
                 ContentExtractionPipeline.shared.decodeHTMLEntities($0).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -460,7 +461,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             link: resolvedURL(link, baseURL: itemBaseURL), guid: guid.isEmpty ? nil : guid,
             description: Self.stripHTMLSimple(itemDescription).trimmingCharacters(in: .whitespacesAndNewlines),
             pubDate: DateParser.parse(rawDate) ?? DateParser.unknownDate, source: itemSourceName(),
-            imageUrl: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl), aiSummary: nil,
+            imageUrl: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl, baseURL: itemBaseURL), aiSummary: nil,
             fullContent: content.extracted?.content ?? content.text, category: category,
             contentFetched: content.text != nil, readerDocument: doc)
         articles.append(article)
@@ -509,7 +510,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let cleaned = content?.isEmpty == true ? nil : content
         let extracted =
             plainText
-            ? nil : ContentExtractionPipeline.shared.extractFromHTML(trimmed, baseUrl: resolvedURL(articleLink))
+            ? nil
+            : ContentExtractionPipeline.shared.extractFromHTML(
+                trimmed, baseUrl: resolvedURL(articleLink, baseURL: itemBaseURL))
         let isTeaser = extracted?.document?.hasCompleteArticleBody == false || (cleaned?.count ?? 0) < 600
         return ItemContent(text: cleaned, extracted: extracted, isTeaser: isTeaser, isPlainText: plainText)
     }
@@ -546,7 +549,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
                 isComplete: doc?.isComplete
             )
         }
-        return doc?.curated(feedImage: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl), title: itemTitle)
+        return doc?.curated(
+            feedImage: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl, baseURL: itemBaseURL), title: itemTitle)
     }
 
     func parser(_ parser: XMLParser, foundInternalEntityDeclarationWithName _: String, value _: String?) {
@@ -735,17 +739,29 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             options: .caseInsensitive)
     }()
 
-    private func extractImageFromHTML(_ html: String) -> String? {
+    /// `&#038;` is the longest reference feeds use for one URL byte, so a candidate that fits the 8,192-byte
+    /// image URL limit once decoded always passes this bound.
+    private static let maxEncodedImageAttributeBytes = 8192 * 6
+
+    /// Regex captures from CDATA markup never met an HTML parser, so they decode here, once, under attribute
+    /// rules: `decodeHTMLEntities` would also unwrap `&amp;#38;`, and text rules would eat `&copy=` in a query.
+    private static func decodedImageAttribute(_ raw: Substring) -> String? {
+        guard raw.utf8.count <= maxEncodedImageAttributeBytes else { return nil }
+        let raw = String(raw)
+        return (try? SwiftSoup.Parser.unescapeEntities(raw, true)) ?? raw
+    }
+
+    private func extractImageFromHTML(_ html: String, baseURL: URL? = nil) -> String? {
         // Avoid repeated compilation of regex per parsed item
         guard let regex = Self.imageRegex else { return nil }
         let range = NSRange(html.startIndex..., in: html)
         // The first picture the feed gate accepts: not vector artwork, a tracking pixel or a site mark.
         return regex.matches(in: html, range: range).lazy
             .compactMap {
-                Range($0.range(at: 1), in: html).map {
-                    ContentExtractionPipeline.shared.decodeHTMLEntities(String(html[$0]))
+                Range($0.range(at: 1), in: html).flatMap {
+                    Self.decodedImageAttribute(html[$0]).map { self.resolvedURL($0, baseURL: baseURL) }
                 }
             }
-            .first { ReaderImageCandidate.usable(url: resolvedURL($0)) }
+            .first { ReaderImageCandidate.usable(url: $0) }
     }
 }

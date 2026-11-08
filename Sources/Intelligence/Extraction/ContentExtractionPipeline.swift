@@ -1693,11 +1693,9 @@ final class ContentExtractionPipeline: Sendable {
 
     /// Structural URL validation only; actual loads still pass through SecureHTTPClient.
     static func readerImageURL(_ raw: String?, baseURL: String?) -> String? {
-        guard let raw, raw.utf8.count <= 8192 else { return nil }
-        let decoded = Self.shared.decodeHTMLEntities(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard
+        guard let raw, raw.utf8.count <= 8192,
             let url = URL(
-                string: decoded,
+                string: raw.trimmingCharacters(in: .whitespacesAndNewlines),
                 relativeTo: baseURL.flatMap(URL.init(string:)))?.absoluteURL,
             ["https", "http"].contains(url.scheme?.lowercased() ?? ""),
             url.host?.isEmpty == false, url.user == nil, url.password == nil
