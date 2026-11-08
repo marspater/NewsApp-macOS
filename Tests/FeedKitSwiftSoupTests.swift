@@ -376,9 +376,10 @@ enum FeedKitSwiftSoupTests {
         let latin1Undeclared =
             "<rss version=\"2.0\"><channel><title>Café</title><item><title>Étude</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>"
         let latin1Data = latin1Undeclared.data(using: .isoLatin1)!
+        let unrepairedArticle = FeedXMLParser(data: latin1Data, feedURL: base).parse().first
         check(
-            FeedXMLParser(data: latin1Data, feedURL: base).parse().isEmpty,
-            "Latin-1 feed without encoding declaration fails without charset")
+            unrepairedArticle?.title != "Étude",
+            "Latin-1 feed without encoding declaration does not decode Latin-1 without charset")
         let transcodedArticle = FeedXMLParser(data: latin1Data, feedURL: base, textEncodingName: "iso-8859-1").parse()
             .first
         check(
@@ -392,6 +393,20 @@ enum FeedKitSwiftSoupTests {
         check(
             declaredArticle?.title == "Pièce",
             "Document encoding declaration takes precedence over textEncodingName (#1149)")
+        // #1148: Single publisher defects do not reject the whole feed
+        var defectiveFeed = Data(
+            """
+            <rss version="2.0"><channel><title>Defects & Network &nbsp;</title>
+            <item><title>Bare &amp; and bare & and &copy; and \u{0007}</title><link>https://example.com/1</link><guid>1</guid><description><![CDATA[Raw & and <markup> untouched]]></description></item>
+            <item><title>Invalid bytes: 
+            """.utf8)
+        defectiveFeed.append(contentsOf: [0xFF, 0xFE])
+        defectiveFeed.append(
+            contentsOf: "</title><link>https://example.com/2</link><guid>2</guid></item></channel></rss>".utf8)
+        let repairedArticles = FeedXMLParser(data: defectiveFeed, feedURL: base).parse()
+        check(repairedArticles.count == 2, "Defective publisher feed keeps all items (#1148)")
+        let cdataSample = "<![CDATA[Raw & and <markup> and &nbsp; untouched]]>".data(using: .utf8)!
+        check(FeedXMLParser.repairXML(data: cdataSample) == cdataSample, "CDATA content remains unchanged (#1148)")
         let deep =
             "<rss><channel>" + String(repeating: "<x>", count: 65) + String(repeating: "</x>", count: 65)
             + "</channel></rss>"

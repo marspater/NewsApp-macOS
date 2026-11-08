@@ -79,7 +79,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private let maxArticlesPerFeed = 500
 
     init(data: Data, feedURL: String = "", textEncodingName: String? = nil) {
-        if let textEncodingName,
+        if let bom = Self.detectBOMEncoding(in: data),
+            bom == .utf32BigEndian || bom == .utf32LittleEndian,
+            let text = String(bytes: data, encoding: bom)
+        {
+            let utf8Text = Self.rewritePrologEncodingToUTF8(in: text)
+            self.data = Data(utf8Text.utf8)
+        } else if let textEncodingName,
             !Self.hasByteOrderMark(data),
             !Self.declaresEncoding(data),
             let transcoded = Self.transcodeToUTF8(data: data, encodingName: textEncodingName)
@@ -110,8 +116,17 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             parseError = "XML entity declarations are not allowed"
             return false
         }
+        guard !XMLInputGuard.declaresAttributeLists(data) else {
+            parseError = "XML attribute list declarations are not allowed"
+            return false
+        }
+        let repaired = Self.repairXML(data: data)
+        guard repaired.count <= SecureHTTPClient.defaultFeedLimit else {
+            parseError = "Feed exceeds parsing limit or was cancelled"
+            return false
+        }
         // Output before the declaration, or anything after the closing root tag, is a server's stray text.
-        let parser = XMLParser(data: Data(data.drop { [0x20, 0x09, 0x0A, 0x0D].contains($0) }))
+        let parser = XMLParser(data: Data(repaired.drop { [0x20, 0x09, 0x0A, 0x0D].contains($0) }))
         parser.delegate = self
         parser.shouldProcessNamespaces = true
         parser.shouldReportNamespacePrefixes = false
@@ -598,6 +613,14 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             feedImage: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl, baseURL: itemBaseURL), title: itemTitle)
     }
 
+    func parser(
+        _ parser: XMLParser, foundAttributeDeclarationWithName _: String, forElement _: String,
+        type _: String?, defaultValue _: String?
+    ) {
+        parseError = "XML attribute list declarations are not allowed"
+        parser.abortParsing()
+    }
+
     func parser(_ parser: XMLParser, foundInternalEntityDeclarationWithName _: String, value _: String?) {
         parser.abortParsing()
     }
@@ -818,9 +841,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     /// Detects UTF-8 or UTF-16 byte order marks at the beginning of XML data (#1149).
     static func hasByteOrderMark(_ data: Data) -> Bool {
-        data.starts(with: [0xEF, 0xBB, 0xBF])
-            || data.starts(with: [0xFE, 0xFF])
-            || data.starts(with: [0xFF, 0xFE])
+        detectBOMEncoding(in: data) != nil
     }
 
     /// Detects whether an XML prolog explicitly specifies an encoding attribute (#1149).
@@ -866,5 +887,295 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         guard let utf8Data = string.data(using: .utf8) else { return nil }
         guard utf8Data.count <= limit else { return nil }
         return utf8Data
+    }
+
+    // MARK: - Publisher XML Defect Repair (#1148)
+
+    private static let htmlEntityToNumeric: [String: String] = [
+        "nbsp": "&#160;", "iexcl": "&#161;", "cent": "&#162;", "pound": "&#163;", "curren": "&#164;", "yen": "&#165;",
+        "brvbar": "&#166;", "sect": "&#167;", "uml": "&#168;", "copy": "&#169;", "ordf": "&#170;", "laquo": "&#171;",
+        "not": "&#172;", "shy": "&#173;", "reg": "&#174;", "macr": "&#175;", "deg": "&#176;", "plusmn": "&#177;",
+        "sup2": "&#178;", "sup3": "&#179;", "acute": "&#180;", "micro": "&#181;", "para": "&#182;", "middot": "&#183;",
+        "cedil": "&#184;", "sup1": "&#185;", "ordm": "&#186;", "raquo": "&#187;", "frac14": "&#188;",
+        "frac12": "&#189;",
+        "frac34": "&#190;", "iquest": "&#191;",
+        "Agrave": "&#192;", "Aacute": "&#193;", "Acirc": "&#194;", "Atilde": "&#195;", "Auml": "&#196;",
+        "Aring": "&#197;", "AElig": "&#198;",
+        "Ccedil": "&#199;", "Egrave": "&#200;", "Eacute": "&#201;", "Ecirc": "&#202;", "Euml": "&#203;",
+        "Igrave": "&#204;", "Iacute": "&#205;", "Icirc": "&#206;", "Iuml": "&#207;",
+        "ETH": "&#208;", "Ntilde": "&#209;", "Ograve": "&#210;", "Oacute": "&#211;", "Ocirc": "&#212;",
+        "Otilde": "&#213;", "Ouml": "&#214;", "Oslash": "&#216;",
+        "Ugrave": "&#217;", "Uacute": "&#218;", "Ucirc": "&#219;", "Uuml": "&#220;", "Yacute": "&#221;",
+        "THORN": "&#222;", "szlig": "&#223;",
+        "agrave": "&#224;", "aacute": "&#225;", "acirc": "&#226;", "atilde": "&#227;", "auml": "&#228;",
+        "aring": "&#229;", "aelig": "&#230;",
+        "ccedil": "&#231;", "egrave": "&#232;", "eacute": "&#233;", "ecirc": "&#234;", "euml": "&#235;",
+        "igrave": "&#236;", "iacute": "&#237;", "icirc": "&#238;", "iuml": "&#239;",
+        "eth": "&#240;", "ntilde": "&#241;", "ograve": "&#242;", "oacute": "&#243;", "ocirc": "&#244;",
+        "otilde": "&#245;", "ouml": "&#246;", "oslash": "&#248;",
+        "ugrave": "&#249;", "uacute": "&#250;", "ucirc": "&#251;", "uuml": "&#252;", "yacute": "&#253;",
+        "thorn": "&#254;", "yuml": "&#255;",
+        "ndash": "&#8211;", "mdash": "&#8212;", "lsquo": "&#8216;", "rsquo": "&#8217;", "sbquo": "&#8218;",
+        "ldquo": "&#8220;", "rdquo": "&#8221;", "bdquo": "&#8222;", "dagger": "&#8224;", "Dagger": "&#8225;",
+        "bull": "&#8226;", "hellip": "&#8230;", "permil": "&#8240;", "prime": "&#8242;", "Prime": "&#8243;",
+        "lsaquo": "&#8249;", "rsaquo": "&#8250;", "euro": "&#8364;", "trade": "&#8482;",
+        "larr": "&#8592;", "uarr": "&#8593;", "rarr": "&#8594;", "darr": "&#8595;", "harr": "&#8596;",
+        "crarr": "&#8629;", "infin": "&#8734;", "asymp": "&#8776;", "ne": "&#8800;", "le": "&#8804;", "ge": "&#8805;",
+        "times": "&#215;", "divide": "&#247;",
+    ]
+
+    /// Extracts the encoding declared in an XML prolog, if present (#1148).
+    static func declaredEncoding(in data: Data) -> String.Encoding? {
+        let trimmed = data.drop { [0x20, 0x09, 0x0A, 0x0D].contains($0) }
+        guard trimmed.starts(with: Data("<?xml".utf8)) else { return nil }
+        let prefix = trimmed.prefix(1024)
+        guard let endRange = prefix.range(of: Data("?>".utf8)) else { return nil }
+        let declData = prefix[..<endRange.upperBound]
+        guard
+            let declString = String(data: declData, encoding: .ascii)
+                ?? String(data: declData, encoding: .isoLatin1)
+        else {
+            return nil
+        }
+        guard
+            let match = declString.range(
+                of: #"(?i)\bencoding\s*=\s*['"]([^'"]+)['"]"#, options: .regularExpression)
+        else {
+            return nil
+        }
+        let matchedStr = declString[match]
+        guard let eqIndex = matchedStr.firstIndex(of: "=") else { return nil }
+        let encName = matchedStr[matchedStr.index(after: eqIndex)...].trimmingCharacters(
+            in: CharacterSet(charactersIn: "\"' \t"))
+        return stringEncoding(for: encName)
+    }
+
+    static func detectBOMEncoding(in data: Data) -> String.Encoding? {
+        if data.starts(with: [0x00, 0x00, 0xFE, 0xFF]) { return .utf32BigEndian }
+        if data.starts(with: [0xFF, 0xFE, 0x00, 0x00]) { return .utf32LittleEndian }
+        if data.starts(with: [0xFE, 0xFF]) { return .utf16BigEndian }
+        if data.starts(with: [0xFF, 0xFE]) { return .utf16LittleEndian }
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) { return .utf8 }
+        if data.starts(with: [0x3C, 0x00, 0x3F, 0x00]) { return .utf16LittleEndian }
+        if data.starts(with: [0x00, 0x3C, 0x00, 0x3F]) { return .utf16BigEndian }
+        return nil
+    }
+
+    private static func nextSpecialBlock(
+        data: Data, currentIndex: Data.Index,
+        nextCData: inout Range<Data.Index>?, nextComment: inout Range<Data.Index>?
+    ) -> (range: Range<Data.Index>, isCData: Bool)? {
+        let cdataStart = Data("<![CDATA[".utf8)
+        let commentStart = Data("<!--".utf8)
+        if let range = nextCData, range.lowerBound < currentIndex {
+            nextCData = data[currentIndex...].range(of: cdataStart)
+        }
+        if let range = nextComment, range.lowerBound < currentIndex {
+            nextComment = data[currentIndex...].range(of: commentStart)
+        }
+        switch (nextCData, nextComment) {
+        case (.some(let cd), .some(let cm)):
+            return cd.lowerBound <= cm.lowerBound ? (cd, true) : (cm, false)
+        case (.some(let cd), .none):
+            return (cd, true)
+        case (.none, .some(let cm)):
+            return (cm, false)
+        case (.none, .none):
+            return nil
+        }
+    }
+
+    /// Rewrites the encoding attribute in an XML prolog declaration to UTF-8 (#1148).
+    private static func rewritePrologEncodingToUTF8(in text: String) -> String {
+        guard let prologRange = text.range(of: #"^\s*<\?xml[^>]*\?>"#, options: .regularExpression) else {
+            return text
+        }
+        let prolog = String(text[prologRange])
+        let updatedProlog = prolog.replacingOccurrences(
+            of: #"(?i)encoding\s*=\s*["'][^"']+["']"#,
+            with: "encoding=\"UTF-8\"",
+            options: .regularExpression
+        )
+        var result = text
+        result.replaceSubrange(prologRange, with: updatedProlog)
+        return result
+    }
+
+    private static func repairNonUTF8(data: Data, bom: String.Encoding) -> Data? {
+        guard let decoded = String(bytes: data, encoding: bom) else { return nil }
+        let repaired = repairXML(data: Data(decoded.utf8), overrideEncoding: .utf8)
+        if bom == .utf32BigEndian || bom == .utf32LittleEndian {
+            let text = String(bytes: repaired, encoding: .utf8) ?? ""
+            return Data(rewritePrologEncodingToUTF8(in: text).utf8)
+        }
+        return (String(bytes: repaired, encoding: .utf8) ?? "").data(using: bom) ?? data
+    }
+
+    /// Repairs publisher XML defects (bare ampersands, common HTML entities, invalid control characters,
+    /// invalid UTF-8 bytes) outside CDATA sections and comments (#1148).
+    static func repairXML(data: Data) -> Data {
+        repairXML(data: data, overrideEncoding: nil)
+    }
+
+    private static func repairXML(data: Data, overrideEncoding: String.Encoding?) -> Data {
+        if overrideEncoding == nil, let bom = detectBOMEncoding(in: data), bom != .utf8 {
+            if let repaired = repairNonUTF8(data: data, bom: bom) {
+                return repaired
+            }
+        }
+        let cdataStart = Data("<![CDATA[".utf8)
+        let commentStart = Data("<!--".utf8)
+        let cdataEnd = Data("]]>".utf8)
+        let commentEnd = Data("-->".utf8)
+
+        var result = Data()
+        result.reserveCapacity(data.count + 128)
+        let encoding = overrideEncoding ?? declaredEncoding(in: data) ?? .utf8
+        var currentIndex = data.startIndex
+        var nextCData = data.range(of: cdataStart)
+        var nextComment = data.range(of: commentStart)
+
+        while currentIndex < data.endIndex {
+            guard
+                let (specialRange, isCData) = nextSpecialBlock(
+                    data: data, currentIndex: currentIndex,
+                    nextCData: &nextCData, nextComment: &nextComment
+                )
+            else {
+                let outsideData = data[currentIndex...]
+                if !outsideData.isEmpty {
+                    result.append(contentsOf: sanitizeOutside(outsideData, encoding: encoding))
+                }
+                break
+            }
+
+            let outsideData = data[currentIndex..<specialRange.lowerBound]
+            if !outsideData.isEmpty {
+                result.append(contentsOf: sanitizeOutside(outsideData, encoding: encoding))
+            }
+            let closeMarker = isCData ? cdataEnd : commentEnd
+            let searchStart = specialRange.upperBound
+            if let closeRange = data[searchStart...].range(of: closeMarker) {
+                result.append(data[specialRange.lowerBound..<closeRange.upperBound])
+                currentIndex = closeRange.upperBound
+            } else {
+                result.append(data[specialRange.lowerBound...])
+                break
+            }
+        }
+        return result
+    }
+
+    private static func isValidNumericEntity(_ content: Substring) -> Bool {
+        guard content.hasPrefix("#") else { return false }
+        let body = content.dropFirst()
+        let isHex = body.hasPrefix("x")
+        let digits = isHex ? body.dropFirst() : body
+        guard !digits.isEmpty,
+            digits.utf8.allSatisfy({
+                ($0 >= 0x30 && $0 <= 0x39) || (isHex && (($0 | 0x20) >= 0x61 && ($0 | 0x20) <= 0x66))
+            }),
+            let value = UInt32(digits, radix: isHex ? 16 : 10)
+        else { return false }
+        switch value {
+        case 0x9, 0xA, 0xD, 0x20...0xD7FF, 0xE000...0xFFFD, 0x10000...0x10FFFF: return true
+        default: return false
+        }
+    }
+
+    private static func stripInvalidXMLControlChars(_ text: String) -> String {
+        var stripped = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            let val = scalar.value
+            let isDisallowed =
+                (val <= 0x08) || (val >= 0x0B && val <= 0x0C) || (val >= 0x0E && val <= 0x1F) || (val == 0x7F)
+            if !isDisallowed {
+                stripped.append(scalar)
+            }
+        }
+        return String(stripped)
+    }
+
+    private static func repairAmpersands(in cleaned: String) -> String {
+        var result = ""
+        result.reserveCapacity(cleaned.count + 16)
+        var idx = cleaned.startIndex
+
+        while idx < cleaned.endIndex {
+            guard cleaned[idx] == "&" else {
+                result.append(cleaned[idx])
+                idx = cleaned.index(after: idx)
+                continue
+            }
+
+            let nextIdx = cleaned.index(after: idx)
+            var semicolonIdx: String.Index? = nil
+            var searchIdx = nextIdx
+            var count = 0
+            while searchIdx < cleaned.endIndex && count < 32 {
+                let c = cleaned[searchIdx]
+                if c == ";" {
+                    semicolonIdx = searchIdx
+                    break
+                }
+                if c.isWhitespace || c == "<" || c == ">" || c == "&" || c == "\"" || c == "'" {
+                    break
+                }
+                searchIdx = cleaned.index(after: searchIdx)
+                count += 1
+            }
+
+            if let semi = semicolonIdx {
+                let entity = String(cleaned[nextIdx..<semi])
+                if ["amp", "lt", "gt", "quot", "apos"].contains(entity) {
+                    result.append("&")
+                    result.append(contentsOf: cleaned[nextIdx...semi])
+                    idx = cleaned.index(after: semi)
+                } else if isValidNumericEntity(cleaned[nextIdx..<semi]) {
+                    result.append("&")
+                    result.append(contentsOf: cleaned[nextIdx...semi])
+                    idx = cleaned.index(after: semi)
+                } else if let numeric = htmlEntityToNumeric[entity] {
+                    result.append(numeric)
+                    idx = cleaned.index(after: semi)
+                } else {
+                    result.append("&amp;")
+                    idx = nextIdx
+                }
+            } else {
+                result.append("&amp;")
+                idx = nextIdx
+            }
+        }
+        return result
+    }
+
+    private static func decodeLossyUTF8(_ data: Data) -> String {
+        if let text = String(bytes: data, encoding: .utf8) { return text }
+        var codec = UTF8()
+        var iterator = data.makeIterator()
+        var scalars = [UnicodeScalar]()
+        while true {
+            switch codec.decode(&iterator) {
+            case .scalarValue(let scalar):
+                scalars.append(scalar)
+            case .emptyInput:
+                return String(String.UnicodeScalarView(scalars))
+            case .error:
+                scalars.append("\u{FFFD}")
+            }
+        }
+    }
+
+    private static func sanitizeOutside(_ data: Data, encoding: String.Encoding) -> Data {
+        let text: String
+        if encoding == .utf8 {
+            text = decodeLossyUTF8(data)
+        } else {
+            text = String(bytes: data, encoding: encoding) ?? decodeLossyUTF8(data)
+        }
+        let cleaned = stripInvalidXMLControlChars(text)
+        let repaired = repairAmpersands(in: cleaned)
+        return repaired.data(using: encoding) ?? Data(repaired.utf8)
     }
 }
