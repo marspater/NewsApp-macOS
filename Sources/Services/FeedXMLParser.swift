@@ -607,6 +607,14 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             feedImage: itemImageUrl.isEmpty ? nil : resolvedURL(itemImageUrl, baseURL: itemBaseURL), title: itemTitle)
     }
 
+    func parser(
+        _ parser: XMLParser, foundAttributeDeclarationWithName _: String, forElement _: String,
+        type _: String?, defaultValue _: String?
+    ) {
+        parseError = "XML attribute list declarations are not allowed"
+        parser.abortParsing()
+    }
+
     func parser(_ parser: XMLParser, foundInternalEntityDeclarationWithName _: String, value _: String?) {
         parser.abortParsing()
     }
@@ -740,6 +748,15 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         (isAtom && elementStack.contains("source")) || elementStack.contains { $0.hasPrefix("ext:") }
     }
 
+    private func prefixUndeclared(_ name: String, qualifiedName: String?) -> String {
+        for prefix in ["media:", "dc:", "content:"] {
+            if qualifiedName?.hasPrefix(prefix) == true || name.hasPrefix(prefix) {
+                return name.hasPrefix(prefix) ? name : prefix + name
+            }
+        }
+        return name
+    }
+
     private func normalizedElement(_ name: String, namespaceURI: String?, qualifiedName: String? = nil) -> String {
         switch namespaceURI {
         // Publishers also declare these without the trailing slash.
@@ -749,15 +766,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         case "http://purl.org/dc/elements/1.1/", "http://purl.org/dc/elements/1.1": return "dc:" + name
         // RSS 2.0 has no namespace; Atom, RSS 1.0, RDF and XHTML content elements keep their local names.
         case nil, "":
-            if let qualifiedName {
-                if qualifiedName.hasPrefix("media:") { return name.hasPrefix("media:") ? name : "media:" + name }
-                if qualifiedName.hasPrefix("dc:") { return name.hasPrefix("dc:") ? name : "dc:" + name }
-                if qualifiedName.hasPrefix("content:") { return name.hasPrefix("content:") ? name : "content:" + name }
-            }
-            if name.hasPrefix("media:") || name.hasPrefix("dc:") || name.hasPrefix("content:") {
-                return name
-            }
-            return name
+            return prefixUndeclared(name, qualifiedName: qualifiedName)
         case "http://www.w3.org/2005/Atom", "http://purl.org/atom/ns#", "http://purl.org/rss/1.0/",
             "http://my.netscape.com/rdf/simple/0.9/", "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
             "http://www.w3.org/1999/xhtml":
@@ -937,87 +946,173 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         return stringEncoding(for: encName)
     }
 
+    static func detectBOMEncoding(in data: Data) -> String.Encoding? {
+        if data.starts(with: [0x00, 0x00, 0xFE, 0xFF]) { return .utf32BigEndian }
+        if data.starts(with: [0xFF, 0xFE, 0x00, 0x00]) { return .utf32LittleEndian }
+        if data.starts(with: [0xFE, 0xFF]) { return .utf16BigEndian }
+        if data.starts(with: [0xFF, 0xFE]) { return .utf16LittleEndian }
+        if data.starts(with: [0xEF, 0xBB, 0xBF]) { return .utf8 }
+        return nil
+    }
+
+    private static func nextSpecialBlock(
+        data: Data, currentIndex: Data.Index,
+        nextCData: inout Range<Data.Index>?, nextComment: inout Range<Data.Index>?
+    ) -> (range: Range<Data.Index>, isCData: Bool)? {
+        let cdataStart = Data("<![CDATA[".utf8)
+        let commentStart = Data("<!--".utf8)
+        if let range = nextCData, range.lowerBound < currentIndex {
+            nextCData = data[currentIndex...].range(of: cdataStart)
+        }
+        if let range = nextComment, range.lowerBound < currentIndex {
+            nextComment = data[currentIndex...].range(of: commentStart)
+        }
+        switch (nextCData, nextComment) {
+        case (.some(let cd), .some(let cm)):
+            return cd.lowerBound <= cm.lowerBound ? (cd, true) : (cm, false)
+        case (.some(let cd), .none):
+            return (cd, true)
+        case (.none, .some(let cm)):
+            return (cm, false)
+        case (.none, .none):
+            return nil
+        }
+    }
+
     /// Repairs publisher XML defects (bare ampersands, common HTML entities, invalid control characters,
     /// invalid UTF-8 bytes) outside CDATA sections and comments (#1148).
     static func repairXML(data: Data) -> Data {
+        if let bom = detectBOMEncoding(in: data), bom != .utf8 {
+            if let decoded = String(bytes: data, encoding: bom) {
+                let repaired = repairXML(data: Data(decoded.utf8))
+                return String(decoding: repaired, as: UTF8.self).data(using: bom) ?? data
+            }
+        }
         let cdataStart = Data("<![CDATA[".utf8)
-        let cdataEnd = Data("]]>".utf8)
         let commentStart = Data("<!--".utf8)
+        let cdataEnd = Data("]]>".utf8)
         let commentEnd = Data("-->".utf8)
 
         var result = Data()
         result.reserveCapacity(data.count + 128)
-
         let encoding = declaredEncoding(in: data) ?? .utf8
         var currentIndex = data.startIndex
+        var nextCData = data.range(of: cdataStart)
+        var nextComment = data.range(of: commentStart)
 
         while currentIndex < data.endIndex {
-            let remainder = data[currentIndex...]
-            let nextCData = remainder.range(of: cdataStart)
-            let nextComment = remainder.range(of: commentStart)
-
-            let nextSpecial: (range: Range<Data.Index>, isCData: Bool)?
-            switch (nextCData, nextComment) {
-            case (.some(let cd), .some(let cm)):
-                if cd.lowerBound <= cm.lowerBound {
-                    nextSpecial = (cd, true)
-                } else {
-                    nextSpecial = (cm, false)
-                }
-            case (.some(let cd), .none):
-                nextSpecial = (cd, true)
-            case (.none, .some(let cm)):
-                nextSpecial = (cm, false)
-            case (.none, .none):
-                nextSpecial = nil
-            }
-
-            if let (specialRange, isCData) = nextSpecial {
-                let outsideData = data[currentIndex..<specialRange.lowerBound]
-                if !outsideData.isEmpty {
-                    result.append(contentsOf: sanitizeOutside(outsideData, encoding: encoding))
-                }
-
-                if isCData {
-                    let searchStart = specialRange.upperBound
-                    if let closeRange = data[searchStart...].range(of: cdataEnd) {
-                        result.append(data[specialRange.lowerBound..<closeRange.upperBound])
-                        currentIndex = closeRange.upperBound
-                    } else {
-                        result.append(data[specialRange.lowerBound...])
-                        currentIndex = data.endIndex
-                    }
-                } else {
-                    let searchStart = specialRange.upperBound
-                    if let closeRange = data[searchStart...].range(of: commentEnd) {
-                        result.append(data[specialRange.lowerBound..<closeRange.upperBound])
-                        currentIndex = closeRange.upperBound
-                    } else {
-                        result.append(data[specialRange.lowerBound...])
-                        currentIndex = data.endIndex
-                    }
-                }
-            } else {
+            guard
+                let (specialRange, isCData) = nextSpecialBlock(
+                    data: data, currentIndex: currentIndex,
+                    nextCData: &nextCData, nextComment: &nextComment
+                )
+            else {
                 let outsideData = data[currentIndex...]
                 if !outsideData.isEmpty {
                     result.append(contentsOf: sanitizeOutside(outsideData, encoding: encoding))
                 }
-                currentIndex = data.endIndex
+                break
+            }
+
+            let outsideData = data[currentIndex..<specialRange.lowerBound]
+            if !outsideData.isEmpty {
+                result.append(contentsOf: sanitizeOutside(outsideData, encoding: encoding))
+            }
+            let closeMarker = isCData ? cdataEnd : commentEnd
+            let searchStart = specialRange.upperBound
+            if let closeRange = data[searchStart...].range(of: closeMarker) {
+                result.append(data[specialRange.lowerBound..<closeRange.upperBound])
+                currentIndex = closeRange.upperBound
+            } else {
+                result.append(data[specialRange.lowerBound...])
+                break
             }
         }
-
         return result
     }
 
     private static func isValidNumericEntity(_ content: Substring) -> Bool {
         guard content.hasPrefix("#") else { return false }
         let body = content.dropFirst()
-        if body.hasPrefix("x") || body.hasPrefix("X") {
-            let hex = body.dropFirst()
-            return !hex.isEmpty && hex.allSatisfy { $0.isHexDigit }
-        } else {
-            return !body.isEmpty && body.allSatisfy { $0.isNumber }
+        let isHex = body.hasPrefix("x")
+        let digits = isHex ? body.dropFirst() : body
+        guard !digits.isEmpty,
+            digits.utf8.allSatisfy({
+                ($0 >= 0x30 && $0 <= 0x39) || (isHex && (($0 | 0x20) >= 0x61 && ($0 | 0x20) <= 0x66))
+            }),
+            let value = UInt32(digits, radix: isHex ? 16 : 10)
+        else { return false }
+        switch value {
+        case 0x9, 0xA, 0xD, 0x20...0xD7FF, 0xE000...0xFFFD, 0x10000...0x10FFFF: return true
+        default: return false
         }
+    }
+
+    private static func stripInvalidXMLControlChars(_ text: String) -> String {
+        var stripped = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars {
+            let val = scalar.value
+            let isDisallowed =
+                (val <= 0x08) || (val >= 0x0B && val <= 0x0C) || (val >= 0x0E && val <= 0x1F) || (val == 0x7F)
+            if !isDisallowed {
+                stripped.append(scalar)
+            }
+        }
+        return String(stripped)
+    }
+
+    private static func repairAmpersands(in cleaned: String) -> String {
+        var result = ""
+        result.reserveCapacity(cleaned.count + 16)
+        var idx = cleaned.startIndex
+
+        while idx < cleaned.endIndex {
+            guard cleaned[idx] == "&" else {
+                result.append(cleaned[idx])
+                idx = cleaned.index(after: idx)
+                continue
+            }
+
+            let nextIdx = cleaned.index(after: idx)
+            var semicolonIdx: String.Index? = nil
+            var searchIdx = nextIdx
+            var count = 0
+            while searchIdx < cleaned.endIndex && count < 32 {
+                let c = cleaned[searchIdx]
+                if c == ";" {
+                    semicolonIdx = searchIdx
+                    break
+                }
+                if c.isWhitespace || c == "<" || c == ">" || c == "&" || c == "\"" || c == "'" {
+                    break
+                }
+                searchIdx = cleaned.index(after: searchIdx)
+                count += 1
+            }
+
+            if let semi = semicolonIdx {
+                let entity = String(cleaned[nextIdx..<semi])
+                if ["amp", "lt", "gt", "quot", "apos"].contains(entity) {
+                    result.append("&")
+                    result.append(contentsOf: cleaned[nextIdx...semi])
+                    idx = cleaned.index(after: semi)
+                } else if isValidNumericEntity(cleaned[nextIdx..<semi]) {
+                    result.append("&")
+                    result.append(contentsOf: cleaned[nextIdx...semi])
+                    idx = cleaned.index(after: semi)
+                } else if let numeric = htmlEntityToNumeric[entity] {
+                    result.append(numeric)
+                    idx = cleaned.index(after: semi)
+                } else {
+                    result.append("&amp;")
+                    idx = nextIdx
+                }
+            } else {
+                result.append("&amp;")
+                idx = nextIdx
+            }
+        }
+        return result
     }
 
     private static func sanitizeOutside(_ data: Data, encoding: String.Encoding) -> Data {
@@ -1025,70 +1120,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if encoding == .utf8 {
             text = String(decoding: data, as: UTF8.self)
         } else {
-            text = String(data: data, encoding: encoding) ?? String(decoding: data, as: UTF8.self)
+            text = String(bytes: data, encoding: encoding) ?? String(decoding: data, as: UTF8.self)
         }
-
-        var strippedScalars = String.UnicodeScalarView()
-        for scalar in text.unicodeScalars {
-            let val = scalar.value
-            let isDisallowed =
-                (val <= 0x08) || (val >= 0x0B && val <= 0x0C) || (val >= 0x0E && val <= 0x1F) || (val == 0x7F)
-            if !isDisallowed {
-                strippedScalars.append(scalar)
-            }
-        }
-        let cleaned = String(strippedScalars)
-
-        var result = ""
-        result.reserveCapacity(cleaned.count + 16)
-        var idx = cleaned.startIndex
-
-        while idx < cleaned.endIndex {
-            if cleaned[idx] == "&" {
-                let nextIdx = cleaned.index(after: idx)
-                var semicolonIdx: String.Index? = nil
-                var searchIdx = nextIdx
-                var count = 0
-                while searchIdx < cleaned.endIndex && count < 32 {
-                    let c = cleaned[searchIdx]
-                    if c == ";" {
-                        semicolonIdx = searchIdx
-                        break
-                    }
-                    if c.isWhitespace || c == "<" || c == ">" || c == "&" || c == "\"" || c == "'" {
-                        break
-                    }
-                    searchIdx = cleaned.index(after: searchIdx)
-                    count += 1
-                }
-
-                if let semi = semicolonIdx {
-                    let entity = String(cleaned[nextIdx..<semi])
-                    if ["amp", "lt", "gt", "quot", "apos"].contains(entity) {
-                        result.append("&")
-                        result.append(contentsOf: cleaned[nextIdx...semi])
-                        idx = cleaned.index(after: semi)
-                    } else if isValidNumericEntity(cleaned[nextIdx..<semi]) {
-                        result.append("&")
-                        result.append(contentsOf: cleaned[nextIdx...semi])
-                        idx = cleaned.index(after: semi)
-                    } else if let numeric = htmlEntityToNumeric[entity] {
-                        result.append(numeric)
-                        idx = cleaned.index(after: semi)
-                    } else {
-                        result.append("&amp;")
-                        idx = nextIdx
-                    }
-                } else {
-                    result.append("&amp;")
-                    idx = nextIdx
-                }
-            } else {
-                result.append(cleaned[idx])
-                idx = cleaned.index(after: idx)
-            }
-        }
-
-        return result.data(using: encoding) ?? Data(result.utf8)
+        let cleaned = stripInvalidXMLControlChars(text)
+        let repaired = repairAmpersands(in: cleaned)
+        return repaired.data(using: encoding) ?? Data(repaired.utf8)
     }
 }
