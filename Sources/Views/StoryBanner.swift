@@ -152,9 +152,15 @@ final class StoryBannerPresenter {
     }
     private var shown: Shown?
     private var dismissal: Task<Void, Never>?
+    /// Current banner owns its image request; replacing or closing it cancels obsolete work.
+    private var photoTask: Task<Void, Never>?
     private var visibility: AnyCancellable?
+    private let photoLoader: @MainActor @Sendable (URL?, CGFloat) async -> CGImage?
 
-    init() {
+    init(
+        photoLoader: @escaping @MainActor @Sendable (URL?, CGFloat) async -> CGImage? = StoryBannerPresenter.photo
+    ) {
+        self.photoLoader = photoLoader
         // The banner follows the window: it leaves when News hides or its last window closes or goes to the Dock.
         let center = NotificationCenter.default
         visibility = Publishers.MergeMany(
@@ -192,25 +198,33 @@ final class StoryBannerPresenter {
             "present \(banner.id, privacy: .private(mask: .hash)): active=\(NSApp?.isActive ?? false, privacy: .public) window=\(window != nil, privacy: .public)"
         )
         guard let window, let screen = window.screen ?? NSScreen.main else { return false }
+        photoTask?.cancel()
+        photoTask = nil
         shown = Shown(banner: banner)
         guard show(banner, on: screen) else {
             // Clears an earlier banner and its timer too, so it can't stay beside the system banner.
             dismiss()
             return false
         }
-        Task { [weak self] in
-            // A banner replaced or closed while its photo loaded keeps no photo.
-            guard let photo = await Self.photo(at: banner.imageURL, scale: screen.backingScaleFactor),
-                let self, self.shown?.banner.id == banner.id
-            else { return }
-            self.shown?.photo = photo
-            self.render()
+        if let imageURL = banner.imageURL {
+            let bannerID = banner.id
+            let scale = screen.backingScaleFactor
+            let loader = photoLoader
+            photoTask = Task { [weak self] in
+                guard let photo = await loader(imageURL, scale), !Task.isCancelled,
+                    let self, self.shown?.banner.id == bannerID
+                else { return }
+                self.shown?.photo = photo
+                self.render()
+            }
         }
         return true
     }
 
     func dismiss() {
         dismissal?.cancel()
+        photoTask?.cancel()
+        photoTask = nil
         shown = nil
         guard let panel, panel.isVisible else { return }
         NSAnimationContext.runAnimationGroup { context in
@@ -236,7 +250,17 @@ final class StoryBannerPresenter {
             }
             return nil
         }
-        let photo = await Task.detached(priority: .userInitiated) { bannerPhoto(image, scale: scale) }.value
+        guard !Task.isCancelled else { return nil }
+        let cropTask = Task.detached(priority: .userInitiated) {
+            guard !Task.isCancelled else { return nil }
+            return bannerPhoto(image, scale: scale)
+        }
+        let photo = await withTaskCancellationHandler {
+            await cropTask.value
+        } onCancel: {
+            cropTask.cancel()
+        }
+        guard !Task.isCancelled else { return nil }
         if photo == nil {
             log.error(
                 "banner photo failed: stage=crop size=\(image.width, privacy: .public)x\(image.height, privacy: .public)"
