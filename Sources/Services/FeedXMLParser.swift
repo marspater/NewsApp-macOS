@@ -835,9 +835,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     /// Detects UTF-8 or UTF-16 byte order marks at the beginning of XML data (#1149).
     static func hasByteOrderMark(_ data: Data) -> Bool {
-        data.starts(with: [0xEF, 0xBB, 0xBF])
-            || data.starts(with: [0xFE, 0xFF])
-            || data.starts(with: [0xFF, 0xFE])
+        detectBOMEncoding(in: data) != nil
     }
 
     /// Detects whether an XML prolog explicitly specifies an encoding attribute (#1149).
@@ -985,7 +983,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if let bom = detectBOMEncoding(in: data), bom != .utf8 {
             if let decoded = String(bytes: data, encoding: bom) {
                 let repaired = repairXML(data: Data(decoded.utf8))
-                return String(decoding: repaired, as: UTF8.self).data(using: bom) ?? data
+                return (String(bytes: repaired, encoding: .utf8) ?? "").data(using: bom) ?? data
             }
         }
         let cdataStart = Data("<![CDATA[".utf8)
@@ -1115,12 +1113,18 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         return result
     }
 
+    private static func decodeLossyUTF8(_ data: Data) -> String {
+        if let text = String(bytes: data, encoding: .utf8) { return text }
+        let bytes = [UInt8](data)
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
     private static func sanitizeOutside(_ data: Data, encoding: String.Encoding) -> Data {
         let text: String
         if encoding == .utf8 {
-            text = String(decoding: data, as: UTF8.self)
+            text = decodeLossyUTF8(data)
         } else {
-            text = String(bytes: data, encoding: encoding) ?? String(decoding: data, as: UTF8.self)
+            text = String(bytes: data, encoding: encoding) ?? decodeLossyUTF8(data)
         }
         let cleaned = stripInvalidXMLControlChars(text)
         let repaired = repairAmpersands(in: cleaned)
