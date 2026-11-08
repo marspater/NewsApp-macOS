@@ -1115,8 +1115,19 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     private static func decodeLossyUTF8(_ data: Data) -> String {
         if let text = String(bytes: data, encoding: .utf8) { return text }
-        let bytes = [UInt8](data)
-        return String(decoding: bytes, as: UTF8.self)
+        var codec = UTF8()
+        var iterator = data.makeIterator()
+        var scalars = [UnicodeScalar]()
+        while true {
+            switch codec.decode(&iterator) {
+            case .scalarValue(let scalar):
+                scalars.append(scalar)
+            case .emptyInput:
+                return String(String.UnicodeScalarView(scalars))
+            case .error:
+                scalars.append("\u{FFFD}")
+            }
+        }
     }
 
     private static func sanitizeOutside(_ data: Data, encoding: String.Encoding) -> Data {
