@@ -1684,6 +1684,34 @@ extension NativeSuites.FeedParsingSuite {
                 "https://cdn.example.com/second.jpg",
             ],
             "CDATA image attributes decode once and an over-long candidate is skipped before decoding (#1082)")
+
+        // #1082: a relative image resolves against the xml:base of the field that holds it.
+        let fieldBaseXML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <feed xmlns="http://www.w3.org/2005/Atom">
+                <title>Field Bases</title>
+                <entry xml:base="https://cdn.example.com/entry/">
+                    <title>Summary Base</title><id>base-1</id><link href="https://feeds.example.com/1"/>
+                    <summary type="html" xml:base="https://cdn.example.com/summary/"><![CDATA[<img src="lead.jpg"/>]]></summary>
+                </entry>
+                <entry xml:base="https://cdn.example.com/entry/">
+                    <title>Content Base</title><id>base-2</id><link href="https://feeds.example.com/2"/>
+                    <content type="html" xml:base="https://cdn.example.com/content/"><![CDATA[<img src="body.jpg"/>]]></content>
+                </entry>
+                <entry xml:base="https://cdn.example.com/entry/">
+                    <title>Entry Base</title><id>base-3</id><link href="https://feeds.example.com/3"/>
+                    <summary type="html"><![CDATA[<img src="plain.jpg"/>]]></summary>
+                </entry>
+            </feed>
+            """.data(using: .utf8)!
+        expectEqual(
+            FeedXMLParser(data: fieldBaseXML, feedURL: "https://feeds.example.com/atom.xml").parse().map(\.imageUrl),
+            [
+                "https://cdn.example.com/summary/lead.jpg",
+                "https://cdn.example.com/content/body.jpg",
+                "https://cdn.example.com/entry/plain.jpg",
+            ],
+            "A field's own xml:base wins over the entry's, which still applies without one (#1082)")
     }
 
     static func testJSONParsing() async {

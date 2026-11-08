@@ -59,6 +59,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     private var itemTitle = ""
     private var itemDescription = ""
+    private var itemDescriptionBaseURL: URL?
     private var itemLink = ""
     private var itemGuid = ""
     private var itemGuidIsPermalink = true
@@ -68,6 +69,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private var itemContentIsXHTML = false
     private var itemCategory = ""
     private var itemContentEncoded = ""
+    private var itemContentBaseURL: URL?
     private var isCollectingContentEncoded = false
     private var activeTextField: (depth: Int, field: String)?
 
@@ -218,6 +220,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if (elementName == "content:encoded" || elementName == "content") && contentDepth == nil {
             isCollectingContentEncoded = true
             itemContentEncoded = ""
+            itemContentBaseURL = baseURLs.last.flatMap { $0 }
             contentDepth = currentNestingDepth
             itemContentIsPlainText = elementName == "content" && (attributeDict["type"] ?? "text") == "text"
             itemContentIsXHTML = elementName == "content" && attributeDict["type"] == "xhtml"
@@ -365,7 +368,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private func clearItemField(for field: String) {
         switch field {
         case "title": itemTitle = ""
-        case "description", "summary": itemDescription = ""
+        case "description", "summary":
+            itemDescription = ""
+            itemDescriptionBaseURL = baseURLs.last.flatMap { $0 }
         case "guid", "id": itemGuid = ""
         case "pubDate", "published": itemPubDate = ""
         case "updated": itemUpdated = ""
@@ -444,8 +449,12 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let guid = itemGuid.trimmingCharacters(in: .whitespacesAndNewlines)
         let link = itemDocumentLink(guid: guid)
         let content = itemContent(articleLink: link)
-        if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemDescription, baseURL: itemBaseURL) ?? "" }
-        if itemImageUrl.isEmpty { itemImageUrl = extractImageFromHTML(itemContentEncoded, baseURL: itemBaseURL) ?? "" }
+        if itemImageUrl.isEmpty {
+            itemImageUrl = extractImageFromHTML(itemDescription, baseURL: itemDescriptionBaseURL) ?? ""
+        }
+        if itemImageUrl.isEmpty {
+            itemImageUrl = extractImageFromHTML(itemContentEncoded, baseURL: itemContentBaseURL) ?? ""
+        }
         let category = itemCategory.components(separatedBy: .newlines)
             .map {
                 ContentExtractionPipeline.shared.decodeHTMLEntities($0).trimmingCharacters(in: .whitespacesAndNewlines)
