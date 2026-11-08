@@ -1967,7 +1967,7 @@ extension NativeSuites.FeedParsingSuite {
         let utf32BodyParsed = FeedXMLParser(data: utf32BodyData, feedURL: "https://example.com/rss").parse()
         expectEqual(utf32BodyParsed.count, 1, "UTF-32 feed with encoding declaration in body parses (#1148)")
         expectTrue(
-            utf32BodyParsed.first?.body.contains("encoding=\"gzip\"") == true,
+            utf32BodyParsed.first?.description.contains("encoding=\"gzip\"") == true,
             "Body encoding attribute remains intact (#1148)")
 
         // #1148: Disallowed numeric entities (control chars, surrogates) are escaped
