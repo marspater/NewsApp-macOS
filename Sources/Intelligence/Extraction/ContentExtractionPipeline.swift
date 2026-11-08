@@ -649,18 +649,39 @@ final class DOMElementNode: Sendable {
         return ReaderBlock(kind: .embed, text: host ?? "Embedded media", imageURL: link)
     }
 
+    private static let srcsetCandidatesRegex =
+        loggedExtraction("compileSrcsetCandidatesRegex") {
+            try NSRegularExpression(
+                pattern:
+                    #"\s*([^\s,]+(?:,[^\s,]+)*)(?:\s+([^\s,]+))?\s*(?:,|$)"#)
+        } ?? NSRegularExpression()
+
     var readerImageSource: String? {
         // ponytail: bounded responsive candidates for a 1200 px reader; no media-query engine.
         for key in ["data-srcset", "srcset"] {
-            let candidates = (attributes[key] ?? "").split(separator: ",").prefix(32).compactMap {
-                item -> (String, Double)? in
-                let parts = item.split(whereSeparator: { $0.isWhitespace })
-                guard let url = parts.first else { return nil }
-                let descriptor = parts.count > 1 ? String(parts[1]) : "1x"
+            let raw = attributes[key] ?? ""
+            var matches: [NSTextCheckingResult] = []
+            Self.srcsetCandidatesRegex.enumerateMatches(
+                in: raw, range: NSRange(raw.startIndex..., in: raw)
+            ) { match, _, stop in
+                guard let match else { return }
+                matches.append(match)
+                if matches.count == 32 { stop.pointee = true }
+            }
+            let candidates = matches.compactMap { match -> (String, Double)? in
+                guard let urlRange = Range(match.range(at: 1), in: raw) else { return nil }
+                let url = String(raw[urlRange])
+                guard !url.isEmpty else { return nil }
+                let descriptor: String
+                if let descRange = Range(match.range(at: 2), in: raw) {
+                    descriptor = String(raw[descRange])
+                } else {
+                    descriptor = "1x"
+                }
                 guard let size = Double(descriptor.dropLast()), size > 0, size.isFinite,
                     descriptor.hasSuffix("w") || descriptor.hasSuffix("x")
                 else { return nil }
-                return (String(url), descriptor.hasSuffix("x") ? size * 600 : size)
+                return (url, descriptor.hasSuffix("x") ? size * 600 : size)
             }.sorted { $0.1 < $1.1 }
             if let chosen = candidates.first(where: { $0.1 >= 1200 }) ?? candidates.last { return chosen.0 }
         }
