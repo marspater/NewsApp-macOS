@@ -935,6 +935,36 @@ extension NewsTests {
         assertTrue(
             ContentExtractionPipeline.readerImageURL("https://user:secret@example.com/image.png", baseURL: nil) == nil,
             "Credential-bearing image URLs are rejected")
+        assertEqual(
+            ContentExtractionPipeline.readerImageURL(
+                "https://assets.science.nasa.gov/photo.jpg?w=2048&#038;h=1365&amp;fit=clip", baseURL: nil),
+            "https://assets.science.nasa.gov/photo.jpg?w=2048&h=1365&fit=clip",
+            "Image candidate URLs decode &#038; and &amp; before URL parsing (#1082)")
+        let entityImagesHTML = """
+            <html><head><title>Entity Image Attributes</title>
+            <meta property="og:image" content="https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672&#038;h=940&amp;crop=1">
+            </head><body><article>
+            <figure><img width="1672" height="940" src="https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672&#038;h=940" srcset="https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672&#038;h=940&amp;dpr=2 1672w"></figure>
+            <p>\(prose)</p><p>Second paragraph. \(prose)</p><p>Third paragraph. \(prose)</p>
+            </article></body></html>
+            """
+        if case .success(_, let entityLead, let entityDoc) = pipeline.extractFromHTML(
+            entityImagesHTML, baseUrl: "https://science.nasa.gov/earth/earth-observatory/goosenecks/")
+        {
+            assertEqual(
+                entityLead,
+                "https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672&h=940&dpr=2",
+                "Body figure srcset decodes &#038; and &amp; before URL parsing (#1082)")
+            assertEqual(
+                entityDoc?.images?.map(\.url),
+                [
+                    "https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672&h=940&dpr=2",
+                    "https://www.nasa.gov/wp-content/uploads/2026/11/goosenecks.jpg?w=1672&h=940&crop=1",
+                ],
+                "Both body image and og:image decode &#038; and &amp; without %23038; mangling (#1082)")
+        } else {
+            assertTrue(false, "Entity image fixture must extract")
+        }
         let manyFigures = (0..<20).map { "<figure><img src='/media/\($0).png'></figure>" }.joined()
         guard
             case .success(_, _, let bounded) = pipeline.extractFromHTML(

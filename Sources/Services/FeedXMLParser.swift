@@ -703,7 +703,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func resolvedURL(_ value: String, baseURL: URL? = nil) -> String {
-        let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = ContentExtractionPipeline.shared.decodeHTMLEntities(value)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return "" }
         return URL(string: value, relativeTo: baseURL ?? baseURLs.last.flatMap { $0 } ?? URL(string: feedURL))?
             .absoluteURL.absoluteString ?? value

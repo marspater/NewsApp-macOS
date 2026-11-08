@@ -1613,6 +1613,29 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(article.imageUrl, "https://cdn.arstechnica.net/m5-hero.jpg", "Image enclosure URL should be parsed")
         expectEqual(article.category, "Hardware", "Category should match")
         expectEqual(article.source, "Ars Technica & News", "Decoded channel title should be assigned as source")
+
+        // #1082: HTML entities in RSS item image URLs decode before URL parsing.
+        let entityImageXML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+            <channel>
+                <title>Entity Images</title>
+                <item>
+                    <title>Entity Image Item</title>
+                    <link>https://feeds.example.com/post-1</link>
+                    <guid isPermaLink="false">ent-1</guid>
+                    <description><![CDATA[<p>Lead</p><img src="https://cdn.example.com/hero.jpg?w=1200&#038;h=800&amp;fit=crop"/>]]></description>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .utf8)!
+        let entityArticles = FeedXMLParser(
+            data: entityImageXML, feedURL: "https://feeds.example.com/rss.xml"
+        ).parse()
+        expectEqual(
+            entityArticles.first?.imageUrl,
+            "https://cdn.example.com/hero.jpg?w=1200&h=800&fit=crop",
+            "HTML entities &#038; and &amp; in RSS <img> attributes decode before URL resolution (#1082)")
     }
 
     static func testJSONParsing() async {
