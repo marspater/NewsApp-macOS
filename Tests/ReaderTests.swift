@@ -999,6 +999,22 @@ extension NewsTests {
         } else {
             assertTrue(false, "Sectioned article fixture must extract")
         }
+        let separateStoriesHTML = """
+            <html><head><title>Two Stories Above A Related List</title></head><body><main>
+            <article><p>Harbor story. \(prose)</p><p>Harbor detail. \(prose)</p></article>
+            <article><p>Orchard story. \(prose)</p><p>Orchard detail. \(prose)</p><p>Orchard close. \(prose)</p></article>
+            <div class="hds-content-lists-inner">\(relatedLinks)</div>
+            </main></body></html>
+            """
+        if case .success(let separateText, _, _) = pipeline.extractFromHTML(
+            separateStoriesHTML, baseUrl: "https://science.nasa.gov/earth/two-stories/")
+        {
+            assertFalse(
+                separateText.contains("Harbor story") && separateText.contains("Orchard story"),
+                "A related list beside separate articles still counts against their wrapper (#1081)")
+        } else {
+            assertTrue(false, "Separate stories fixture must extract")
+        }
         let srcsetCommaHTML = """
             <html><head><title>NASA Announces X-70 Experimental Aircraft</title></head><body><article>
             <figure><img width="1672" height="940" src="https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg" srcset="https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?scale=.5 .5x, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg 1672w, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=300,169 300w, https://www.nasa.gov/wp-content/uploads/2026/11/x70.jpg?resize=1200,675 1200w"></figure>

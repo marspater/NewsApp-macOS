@@ -749,9 +749,15 @@ final class DOMElementNode: Sendable {
                 let child = node.children[index]
                 return !child.isReaderExcluded && child.readingBlocks().contains(where: { $0.isCitedProse })
             }
+            // Sections share one body, so it runs to the end of the node; side-by-side articles are separate stories.
+            let holdsSections =
+                proseIndices.count >= 2 && !proseIndices.contains(where: { node.children[$0].tag == "article" })
+            let bodyEnd = holdsSections ? node.children.count : proseIndices.last
             return node.children.enumerated().reduce(0) { total, entry in
                 let (index, child) = entry
-                if child.isReaderExcluded, proseIndices.count >= 2, let first = proseIndices.first, first < index {
+                if child.isReaderExcluded, let first = proseIndices.first, let bodyEnd,
+                    first < index && index < bodyEnd
+                {
                     return total
                 }
                 return total + navigationLinkText(child)
