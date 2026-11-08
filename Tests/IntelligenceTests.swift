@@ -116,6 +116,10 @@ extension NewsTests {
             ("testCanonicalClassificationDisambiguation", { await testCanonicalClassificationDisambiguation() }),
             ("testOverviewSourcesFollowTheSentence", { testOverviewSourcesFollowTheSentence() }),
             (
+                "testOverviewInlineSourcesWithSpecialCharacterIDs",
+                { await testOverviewInlineSourcesWithSpecialCharacterIDs() }
+            ),
+            (
                 "testHybridSearchSemanticRetrievalAndSnippets",
                 { try await testHybridSearchSemanticRetrievalAndSnippets() }
             ),
@@ -4942,11 +4946,95 @@ extension NewsTests {
             "Sources keep citation order")
         let links = text.runs.compactMap(\.link)
         assertEqual(
-            links.map(\.absoluteString), ["news-citation://cite/c_1", "news-citation://cite/c_2"],
-            "Each source run links to its citation; the sentence itself is not a link")
+            links.map(\.absoluteString), ["news-citation://0", "news-citation://1"],
+            "Each source run links to its citation by position; the sentence itself is not a link")
         assertTrue(text.runs.first?.link == nil, "The sentence run carries no link")
         let bare = EventOverviewReaderView.sourcedAttributedString("Alone.", sources: [], scale: 1, contrast: .standard)
         assertEqual(String(bare.characters), "Alone.", "No source, no run")
+    }
+
+    /// #1143: Inline overview sources open correctly when the story ID contains ?, #, or a percent escape.
+    @MainActor
+    static func testOverviewInlineSourcesWithSpecialCharacterIDs() {
+        print("  - Testing inline overview sources with ?, #, and %20 in citation ID (#1143)...")
+        let specialID = "cite?query=1#frag%20space"
+        let text = EventOverviewReaderView.sourcedAttributedString(
+            "Routes are open.",
+            sources: [(id: specialID, label: "The Hindu")],
+            scale: 1,
+            contrast: .standard
+        )
+        let plain = String(text.characters)
+        assertTrue(plain.contains("\u{00A0}The Hindu\u{00A0}"), "Source label is included in the run")
+        let links = text.runs.compactMap(\.link)
+        assertEqual(
+            links.map(\.absoluteString), ["news-citation://0"],
+            "Inline source links by index position rather than embedding the raw unescaped ID"
+        )
+
+        let citation = OverviewCitation(
+            id: specialID,
+            articleID: "art_special",
+            passageID: "pass_special",
+            passageFingerprint: "fp_special",
+            quote: "Routes are open across the corridor.",
+            source: OverviewSourceMetadata(
+                title: "Special Report",
+                name: "The Hindu",
+                url: "https://example.com/special?query=1#frag%20space",
+                publishedAt: Date()
+            )
+        )
+        let article = FeedArticle(
+            storedID: "art_special",
+            title: "Special Report",
+            link: "https://example.com/special?query=1#frag%20space",
+            guid: "guid_special",
+            description: "Routes are open across the corridor.",
+            pubDate: Date(),
+            source: "The Hindu"
+        )
+        let overview = EventOverviewDocument(
+            eventID: "ev_special",
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "hash_special"),
+            content: OverviewContent(
+                title: "Transit Overview",
+                summary: "Transit operations resumed.",
+                citations: [citation]
+            )
+        )
+
+        var selectedCitation: OverviewCitation?
+        var selectedArticle: FeedArticle?
+        let view = EventOverviewReaderView(
+            overview: overview,
+            memberArticles: [article],
+            onSelectArticle: { _ in },
+            onSelectCitation: { cit, art in
+                selectedCitation = cit
+                selectedArticle = art
+            }
+        )
+        let handler = view.citationOpenURLAction([citation])
+        if let linkURL = links.first {
+            handler(linkURL)
+        }
+        assertEqual(
+            selectedCitation?.id, specialID, "Handler resolves citation by index even with special character ID")
+        assertEqual(selectedArticle?.id, article.id, "Handler resolves matching article for selected citation")
+
+        // Non-citation URLs keep system behaviour
+        var unhandledTriggered = false
+        let unhandledView = EventOverviewReaderView(
+            overview: overview,
+            memberArticles: [article],
+            onSelectArticle: { _ in },
+            onSelectCitation: { _, _ in unhandledTriggered = true }
+        )
+        let unhandledHandler = unhandledView.citationOpenURLAction([citation])
+        unhandledHandler(URL(string: "https://example.com")!)
+        unhandledHandler(URL(string: "news-citation://999")!)
+        assertFalse(unhandledTriggered, "Non-matching and out-of-range URLs do not trigger selection")
     }
 
     static func testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: String = "example.com") async throws

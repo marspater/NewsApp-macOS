@@ -777,7 +777,7 @@ struct EventOverviewReaderView: View {
     }
 
     /// A sentence with its cited publishers as linked runs at its end, so a source never sits on a line of its own
-    /// (#993). Each run links to `news-citation://cite/<id>`; VoiceOver reads the sentence, then the sources, and the
+    /// (#993). Each run links to `news-citation://<index>`; VoiceOver reads the sentence, then the sources, and the
     /// enclosing row's `sourcedSentenceActions` open them.
     private func sourcedSentence(_ text: String, citations: [OverviewCitation], fallback: String? = nil) -> some View {
         let sources = citations.map { (id: $0.id, label: inlineSourceLabel($0, fallback: fallback)) }
@@ -810,14 +810,15 @@ struct EventOverviewReaderView: View {
         }
     }
 
-    /// Opens the citation a `news-citation://cite/<id>` link names; every other link keeps the system behaviour.
-    private func citationOpenURLAction(_ citations: [OverviewCitation]) -> OpenURLAction {
+    /// Opens the citation a `news-citation://<index>` link names; every other link keeps the system behaviour.
+    func citationOpenURLAction(_ citations: [OverviewCitation]) -> OpenURLAction {
         OpenURLAction { url in
-            guard url.scheme == Self.citationScheme, url.host == "cite",
-                let citation = citations.first(where: {
-                    $0.id == url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-                })
+            guard url.scheme == Self.citationScheme,
+                let index = url.host.flatMap(Int.init)
+                    ?? Int(url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))),
+                citations.indices.contains(index)
             else { return .systemAction }
+            let citation = citations[index]
             onSelectCitation(citation, matchingArticle(for: citation))
             return .handled
         }
@@ -829,9 +830,9 @@ struct EventOverviewReaderView: View {
         _ text: String, sources: [(id: String, label: String)], scale: CGFloat, contrast: ColorSchemeContrast
     ) -> AttributedString {
         var result = AttributedString(text)
-        for source in sources {
+        for (index, source) in sources.enumerated() {
             var run = AttributedString("\u{00A0}\(source.label)\u{00A0}")
-            run.link = URL(string: "\(citationScheme)://cite/\(source.id)")
+            run.link = URL(string: "\(citationScheme)://\(index)")
             run.font = AppTypography.overviewFont(.eyebrow, scale: scale).weight(.semibold)
             run.foregroundColor = TagView.textColor(tint: AppColor.accent, contrast: contrast)
             run.backgroundColor = TagView.fill(tint: AppColor.accent, contrast: contrast)
