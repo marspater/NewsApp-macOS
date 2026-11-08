@@ -168,7 +168,13 @@ enum NotificationActionRouter {
         readManager: ReadManager
     ) async {
         if let id = target.articleID {
-            readManager.markAsRead(id)
+            if store.articles.contains(where: { $0.id == id }) {
+                readManager.markAsRead(id)
+            } else if let resolved = try? await store.articleForNavigation(
+                .init(articleID: id, link: target.articleLink ?? "")
+            ) {
+                readManager.markAsRead(resolved.id)
+            }
         } else if let link = target.articleLink,
             let article = store.articles.first(where: {
                 $0.link == link || $0.normalizedLink == ArticleIdentity.canonicalizeURL(link)
