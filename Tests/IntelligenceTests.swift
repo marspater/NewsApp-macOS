@@ -5107,6 +5107,25 @@ extension NewsTests {
             !statements("Mayor Elena Rostova said that demonstrators shouted “Stop.” Officials rejected the claim.")
                 .contains { $0.contains("Officials") }, "A quote that ends its sentence ends the statement")
         assertEqual(
+            statements("Mayor Elena Rostova said that “the plan will fail next year” and left."),
+            ["“the plan will fail next year” and left"], "A statement led by a whole quotation is retained (#1142)")
+        assertEqual(
+            statements("Mayor Elena Rostova said that “We will never go home now!” today."),
+            ["“We will never go home now!” today"], "A quoted exclamation stays whole in a short statement (#1142)")
+        assertTrue(
+            statements("Mayor Elena Rostova said that prices rose.").isEmpty,
+            "A statement under 15 characters is still rejected (#1142)")
+        // #1142: overlapping alternatives made both inputs exponential; the patterns run on untrusted text.
+        for adversarial in [
+            "Officials said that " + String(repeating: "“a” ", count: 20) + String(repeating: "x ", count: 300),
+            "Officials reviewed " + String(repeating: "A.1 ", count: 24) + String(repeating: "x ", count: 20),
+        ] {
+            let clock = ContinuousClock()
+            let started = clock.now
+            _ = statements(adversarial)
+            assertTrue(clock.now - started < .seconds(2), "Attribution patterns do not backtrack exponentially")
+        }
+        assertEqual(
             OverviewComposer.displayStatement(
                 participant: "Constitutional Tribunal", position: tribunalPerspectives.first?.position ?? ""),
             "Constitutional Tribunal said its longest-serving judge Anna Korwin-Piotrowska had suspended Bogdan Swieczkowski, the tribunal's president and an appointee of Mr. Tusk's hard-right predecessor, and was now in charge of the court.",

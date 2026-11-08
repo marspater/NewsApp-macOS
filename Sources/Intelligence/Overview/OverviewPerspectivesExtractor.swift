@@ -602,8 +602,11 @@ struct OverviewPerspectivesExtractor: Sendable {
         // the statement stops inside it and the unbalanced quote is rejected, as before.
         let sentenceEnd = #"(?:(?<![.!?][”"])|(?!\s+\p{Lu}|\s*$))"#
         // The endpoint must reject the same nonterminal dots as the body, even when the length cap forces backtracking.
+        // Each iteration is atomic: a quoted phrase matches whole or character by character, and retrying both on
+        // untrusted text is exponential (#1142). A whole phrase is one iteration, so the 15-character floor cannot be
+        // the lower bound here; `attributedMatches` applies it to the matched span.
         let statementTail =
-            #"(?:“[^”\n]{1,120}”\#(sentenceEnd)|"[^"\n]{1,120}"\#(sentenceEnd)|[^.!?\n]|\#(nonTerminalDot)){15,400}(?!\#(nonTerminalDot))(?=[.!?\n]|$)"#
+            #"(?>“[^”\n]{1,120}”\#(sentenceEnd)|"[^"\n]{1,120}"\#(sentenceEnd)|[^.!?\n]|\#(nonTerminalDot)){1,400}(?!\#(nonTerminalDot))(?=[.!?\n]|$)"#
         // Pattern 2: [Participant] (said that|stated that|announced that|argued that|warned that|noted that|confirmed that) [Statement].
         // A statement runs to the end of its sentence (up to 400 characters) or there is no match: a plain length
         // cap cut "…an appointee of Mr. Tusk's predecessor…" to "…appointee of Mr" (#994).
@@ -622,9 +625,10 @@ struct OverviewPerspectivesExtractor: Sendable {
         // the Gaza health ministry.", "…, Peskov told reporters on Monday." The tag must end the sentence.
         // A dateline ("PARIS: ") is not part of the statement.
         // Full stops inside a number ("3.48"), an initialism ("U.S.") or an abbreviation ("Oct. 29", "Mr.") do not end
-        // it, and it may quote a phrase ("…was “seriously wounded” but stable").
+        // it, and it may quote a phrase ("…was “seriously wounded” but stable"). Each iteration is atomic because the
+        // dot alternatives overlap on "A.1" (#1142).
         let sentence =
-            #"(?:^|(?<=[.!?]\s)(?<!\b(?:Mr|Mrs|Ms|Dr|St|Gen|Gov|Sen|Rep|Lt|Col)\.\s))(?:\p{Lu}{2,}(?:\s\p{Lu}{2,})*:\s+)?(\p{Lu}(?:[^.\n"“”]|\.(?=\d)|(?<=\b\p{Lu})\.|(?<=\b(?:Jan|Feb|Mar|Apr|Aug|Sep|Sept|Oct|Nov|Dec|Mr|Mrs|Ms|Dr|St|No))\.|“[^”\n]{1,120}”|"[^"\n]{1,120}"){15,300}?)"#
+            #"(?:^|(?<=[.!?]\s)(?<!\b(?:Mr|Mrs|Ms|Dr|St|Gen|Gov|Sen|Rep|Lt|Col)\.\s))(?:\p{Lu}{2,}(?:\s\p{Lu}{2,})*:\s+)?(\p{Lu}(?>[^.\n"“”]|\.(?=\d)|(?<=\b\p{Lu})\.|(?<=\b(?:Jan|Feb|Mar|Apr|Aug|Sep|Sept|Oct|Nov|Dec|Mr|Mrs|Ms|Dr|St|No))\.|“[^”\n]{1,120}”|"[^"\n]{1,120}"){15,300}?)"#
         // Up to eight words without a comma; `isCompleteSpeaker` decides whether they name someone ("the club's
         // sporting director Max Eberl", "the interior ministry"), so "authorities" or "he" yield nothing.
         let tagSpeaker =
@@ -833,6 +837,10 @@ struct OverviewPerspectivesExtractor: Sendable {
         return matches.compactMap { match -> AttributedMatch? in
             guard match.numberOfRanges >= 3 else { return nil }
             if isInsideOpenQuote(at: match.range.location, in: nsString) {
+                return nil
+            }
+            // An unquoted statement spans at least 15 characters; the regex counts a quoted phrase as one iteration.
+            if minimumStatementLength > 0, match.range(at: statementGroup).length < 15 {
                 return nil
             }
             var participantRange = match.range(at: participantGroup)
