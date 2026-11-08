@@ -25,7 +25,7 @@ script/test_failure_report.sh     # A failed assertion or a thrown test no longe
 xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' -testPlan Development -only-testing:NewsTests # The native Swift Testing suites (Tests/Native, one per ported domain); -testPlan Integration runs the .integration-tagged suites with coverage, -testPlan Release the whole bundle as CI does; nothing is launched
 xcodebuild build-for-testing -project News.xcodeproj -scheme News -destination 'platform=macOS' -only-testing:NewsUITests # Compiles the UI smoke flows (Tests/UITests). They run in CI through -testPlan UITests against the Debug app on a fresh library (NEWS_LIBRARY_NAME) and a fixture feed (NEWS_FIXTURE_FEED); do not run them on a Mac in use, they drive the app window
 script/measure_build.sh           # Build-time medians (cold, incremental, NewsTests) in a scratch DerivedData per docs/audits/2026-11-07-build-measurement-protocol.md; refuses to start while another build or measurement runs on this Mac
-PROFILE_DRY_RUN=1 script/profile_signposts.sh DIR # Builds the Debug app and prints the xctrace command the weekly profile.yml run uses; the recording itself runs only in CI
+PROFILE_DRY_RUN=1 script/profile_signposts.sh # Builds the Debug app into a fresh temporary directory and prints the xctrace command the weekly profile.yml run uses; pass a directory only if it is empty, since the build replaces its News.app; the recording itself runs only in CI
 ./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
 script/format.sh --check          # Strict repository-wide Swift formatting lint
