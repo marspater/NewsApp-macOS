@@ -2884,7 +2884,7 @@ extension NewsTests {
                 }, imageFinder: .unavailable, now: { clock ?? Date() })
             await manager.fetchFeedsAsync()
             // The pass runs on after the refresh returns; this waits for its banners before reading them.
-            await manager.notificationPass?.value
+            _ = await manager.notificationPass?.value
             manager.stopBackgroundWork()
             return Set(store.articles.filter { manager.notifiedStoryIDs.contains($0.id) }.map(\.title))
         }
@@ -2998,7 +2998,7 @@ extension NewsTests {
                     await service.triageAndNotify(newArticles: articles, delivery: delivery)
                 }, imageFinder: .unavailable)
             await manager.fetchFeedsAsync()
-            await manager.notificationPass?.value
+            _ = await manager.notificationPass?.value
             manager.stopBackgroundWork()
         }
 

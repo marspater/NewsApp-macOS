@@ -1,0 +1,1 @@
+- Resolves Xcode compiler warnings across test suites and eliminates runtime AppKit and SwiftUI transaction and window key warnings.

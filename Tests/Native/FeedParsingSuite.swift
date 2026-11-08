@@ -36,8 +36,8 @@ import dnssd
 extension NativeSuites {
     /// The runner's FeedParsingTests atom, test by test (#1070); the runner copy stays until CI shows parity.
     @Suite(.tags(.feedParsing, .integration)) struct FeedParsingSuite {
-        @Test func feedErrorHierarchy() async throws { try await Self.testFeedErrorHierarchy() }
-        @Test func dateParsing() async throws { try await Self.testDateParsing() }
+        @Test func feedErrorHierarchy() async { await Self.testFeedErrorHierarchy() }
+        @Test func dateParsing() async { await Self.testDateParsing() }
         @Test func conditionalFeedRequests() async throws {
             try await Self.testConditionalFeedRequests(fixtureRoot: NewsTests.defaultFixtureRoot)
         }
@@ -48,14 +48,14 @@ extension NativeSuites {
         @Test func feedHealth() async throws { try await Self.testFeedHealth() }
         @Test func undatedArticleOrdering() async throws { try await Self.testUndatedArticleOrdering() }
         @Test func futureDatedItems() async throws { try await Self.testFutureDatedItems() }
-        @Test func xMLParsing() async throws { try await Self.testXMLParsing() }
-        @Test func jSONParsing() async throws { try await Self.testJSONParsing() }
-        @Test func escapeXML() async throws { try await Self.testEscapeXML() }
-        @Test func oPMLParsingAndExporting() async throws { try await Self.testOPMLParsingAndExporting() }
-        @Test func oPMLHostileInput() async throws { try await Self.testOPMLHostileInput() }
-        @Test func articleIdentityDeep() async throws { try await Self.testArticleIdentityDeep() }
+        @Test func xMLParsing() async { await Self.testXMLParsing() }
+        @Test func jSONParsing() async { await Self.testJSONParsing() }
+        @Test func escapeXML() async { await Self.testEscapeXML() }
+        @Test func oPMLParsingAndExporting() async { await Self.testOPMLParsingAndExporting() }
+        @Test func oPMLHostileInput() async { await Self.testOPMLHostileInput() }
+        @Test func articleIdentityDeep() async { await Self.testArticleIdentityDeep() }
         @Test func publisherTitleAliases() async throws { try await Self.testPublisherTitleAliases() }
-        @Test func newsletterStrip() async throws { try await Self.testNewsletterStrip() }
+        @Test func newsletterStrip() { Self.testNewsletterStrip() }
         @Test func canonicalArticleIngestion() async throws {
             try await Self.testCanonicalArticleIngestion(fixtureRoot: NewsTests.defaultFixtureRoot)
         }

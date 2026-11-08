@@ -442,9 +442,10 @@ struct MainView: View {
             let article = try await articleStore.articleForNavigation(request)
             guard !Task.isCancelled, articleStore.pendingNavigation == request else { return }
             if let article {
-                articlePath = NavigationPath()
                 readManager.markAsRead(article.id)
-                articlePath.append(FeedArticleWrap(article: article))
+                var path = NavigationPath()
+                path.append(FeedArticleWrap(article: article))
+                articlePath = path
             } else {
                 articleStore.operationError = "This story is no longer available in your archive."
             }

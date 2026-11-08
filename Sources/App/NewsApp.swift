@@ -612,7 +612,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             }
         }
 
-        NewsShortcuts.updateAppShortcutParameters()
+        #if !DEBUG
+            NewsShortcuts.updateAppShortcutParameters()
+        #endif
 
         Task { @MainActor in
             await UpdateChecker.shared.checkForUpdates(userInitiated: false)
