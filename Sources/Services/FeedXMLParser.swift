@@ -83,11 +83,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             bom == .utf32BigEndian || bom == .utf32LittleEndian,
             let text = String(bytes: data, encoding: bom)
         {
-            let utf8Text = text.replacingOccurrences(
-                of: #"encoding\s*=\s*["'][^"']+["']"#,
-                with: "encoding=\"UTF-8\"",
-                options: .regularExpression
-            )
+            let utf8Text = Self.rewritePrologEncodingToUTF8(in: text)
             self.data = Data(utf8Text.utf8)
         } else if let textEncodingName,
             !Self.hasByteOrderMark(data),
@@ -989,17 +985,43 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
     }
 
+    /// Rewrites the encoding attribute in an XML prolog declaration to UTF-8 (#1148).
+    private static func rewritePrologEncodingToUTF8(in text: String) -> String {
+        guard let prologRange = text.range(of: #"^\s*<\?xml[^>]*\?>"#, options: .regularExpression) else {
+            return text
+        }
+        let prolog = String(text[prologRange])
+        let updatedProlog = prolog.replacingOccurrences(
+            of: #"(?i)encoding\s*=\s*["'][^"']+["']"#,
+            with: "encoding=\"UTF-8\"",
+            options: .regularExpression
+        )
+        var result = text
+        result.replaceSubrange(prologRange, with: updatedProlog)
+        return result
+    }
+
+    private static func repairNonUTF8(data: Data, bom: String.Encoding) -> Data? {
+        guard let decoded = String(bytes: data, encoding: bom) else { return nil }
+        let repaired = repairXML(data: Data(decoded.utf8), overrideEncoding: .utf8)
+        if bom == .utf32BigEndian || bom == .utf32LittleEndian {
+            let text = String(bytes: repaired, encoding: .utf8) ?? ""
+            return Data(rewritePrologEncodingToUTF8(in: text).utf8)
+        }
+        return (String(bytes: repaired, encoding: .utf8) ?? "").data(using: bom) ?? data
+    }
+
     /// Repairs publisher XML defects (bare ampersands, common HTML entities, invalid control characters,
     /// invalid UTF-8 bytes) outside CDATA sections and comments (#1148).
     static func repairXML(data: Data) -> Data {
-        if let bom = detectBOMEncoding(in: data), bom != .utf8,
-            let decoded = String(bytes: data, encoding: bom)
-        {
-            let repaired = repairXML(data: Data(decoded.utf8))
-            if bom == .utf32BigEndian || bom == .utf32LittleEndian {
+        repairXML(data: data, overrideEncoding: nil)
+    }
+
+    private static func repairXML(data: Data, overrideEncoding: String.Encoding?) -> Data {
+        if overrideEncoding == nil, let bom = detectBOMEncoding(in: data), bom != .utf8 {
+            if let repaired = repairNonUTF8(data: data, bom: bom) {
                 return repaired
             }
-            return (String(bytes: repaired, encoding: .utf8) ?? "").data(using: bom) ?? data
         }
         let cdataStart = Data("<![CDATA[".utf8)
         let commentStart = Data("<!--".utf8)
@@ -1008,7 +1030,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
         var result = Data()
         result.reserveCapacity(data.count + 128)
-        let encoding = declaredEncoding(in: data) ?? .utf8
+        let encoding = overrideEncoding ?? declaredEncoding(in: data) ?? .utf8
         var currentIndex = data.startIndex
         var nextCData = data.range(of: cdataStart)
         var nextComment = data.range(of: commentStart)
