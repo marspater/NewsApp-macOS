@@ -960,6 +960,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if data.starts(with: [0xFE, 0xFF]) { return .utf16BigEndian }
         if data.starts(with: [0xFF, 0xFE]) { return .utf16LittleEndian }
         if data.starts(with: [0xEF, 0xBB, 0xBF]) { return .utf8 }
+        if data.starts(with: [0x3C, 0x00, 0x3F, 0x00]) { return .utf16LittleEndian }
+        if data.starts(with: [0x00, 0x3C, 0x00, 0x3F]) { return .utf16BigEndian }
         return nil
     }
 
@@ -990,14 +992,14 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     /// Repairs publisher XML defects (bare ampersands, common HTML entities, invalid control characters,
     /// invalid UTF-8 bytes) outside CDATA sections and comments (#1148).
     static func repairXML(data: Data) -> Data {
-        if let bom = detectBOMEncoding(in: data), bom != .utf8 {
-            if let decoded = String(bytes: data, encoding: bom) {
-                let repaired = repairXML(data: Data(decoded.utf8))
-                if bom == .utf32BigEndian || bom == .utf32LittleEndian {
-                    return repaired
-                }
-                return (String(bytes: repaired, encoding: .utf8) ?? "").data(using: bom) ?? data
+        if let bom = detectBOMEncoding(in: data), bom != .utf8,
+            let decoded = String(bytes: data, encoding: bom)
+        {
+            let repaired = repairXML(data: Data(decoded.utf8))
+            if bom == .utf32BigEndian || bom == .utf32LittleEndian {
+                return repaired
             }
+            return (String(bytes: repaired, encoding: .utf8) ?? "").data(using: bom) ?? data
         }
         let cdataStart = Data("<![CDATA[".utf8)
         let commentStart = Data("<!--".utf8)
