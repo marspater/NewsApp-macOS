@@ -32,6 +32,14 @@ func expectFalse(_ condition: Bool, _ message: String = "", sourceLocation: Sour
     #expect(!condition, Comment(rawValue: message), sourceLocation: sourceLocation)
 }
 
+func expectNil<T>(
+    _ value: T?,
+    _ message: String = "",
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    #expect(value == nil, Comment(rawValue: message), sourceLocation: sourceLocation)
+}
+
 /// The checkout root, for fixtures the runner reads relative to its working directory: xctest runs elsewhere.
 let nativeRepositoryRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     .deletingLastPathComponent().deletingLastPathComponent()
