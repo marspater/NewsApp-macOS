@@ -79,7 +79,17 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private let maxArticlesPerFeed = 500
 
     init(data: Data, feedURL: String = "", textEncodingName: String? = nil) {
-        if let textEncodingName,
+        if let bom = Self.detectBOMEncoding(in: data),
+            bom == .utf32BigEndian || bom == .utf32LittleEndian,
+            let text = String(bytes: data, encoding: bom)
+        {
+            let utf8Text = text.replacingOccurrences(
+                of: #"encoding\s*=\s*["'][^"']+["']"#,
+                with: "encoding=\"UTF-8\"",
+                options: .regularExpression
+            )
+            self.data = Data(utf8Text.utf8)
+        } else if let textEncodingName,
             !Self.hasByteOrderMark(data),
             !Self.declaresEncoding(data),
             let transcoded = Self.transcodeToUTF8(data: data, encodingName: textEncodingName)
@@ -983,6 +993,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         if let bom = detectBOMEncoding(in: data), bom != .utf8 {
             if let decoded = String(bytes: data, encoding: bom) {
                 let repaired = repairXML(data: Data(decoded.utf8))
+                if bom == .utf32BigEndian || bom == .utf32LittleEndian {
+                    return repaired
+                }
                 return (String(bytes: repaired, encoding: .utf8) ?? "").data(using: bom) ?? data
             }
         }
