@@ -1712,6 +1712,270 @@ extension NativeSuites.FeedParsingSuite {
                 "https://cdn.example.com/second.jpg",
             ],
             "CDATA image attributes decode once and an over-long candidate is skipped before decoding (#1082)")
+
+        // #1150: undeclared media: and dc: prefixes preserve the item's image and byline.
+        let undeclaredPrefixXML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+            <channel>
+                <title>Undeclared Prefixes</title>
+                <item>
+                    <title>Undeclared Item</title>
+                    <link>https://example.com/undeclared</link>
+                    <media:thumbnail url="https://example.com/undeclared-thumb.jpg"/>
+                    <dc:creator>Jane Doe</dc:creator>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .utf8)!
+        let undeclaredArticles = FeedXMLParser(data: undeclaredPrefixXML, feedURL: "https://example.com/rss").parse()
+        expectEqual(undeclaredArticles.count, 1, "Should parse undeclared-prefix item")
+        expectEqual(
+            undeclaredArticles.first?.imageUrl,
+            "https://example.com/undeclared-thumb.jpg",
+            "Undeclared media:thumbnail preserves item image (#1150)")
+        expectEqual(
+            undeclaredArticles.first?.author,
+            "Jane Doe",
+            "Undeclared dc:creator preserves item byline (#1150)")
+
+        // #1150: prefixes bound to an unrelated namespace are treated as foreign elements, not well-known ones.
+        let unrelatedNamespaceXML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0" xmlns:media="http://example.com/other-media" xmlns:dc="http://example.com/other-dc">
+            <channel>
+                <title>Unrelated Namespaces</title>
+                <item>
+                    <title>Unrelated Item</title>
+                    <link>https://example.com/unrelated</link>
+                    <media:thumbnail url="https://example.com/unrelated-thumb.jpg"/>
+                    <dc:creator>Other Creator</dc:creator>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .utf8)!
+        let unrelatedArticles = FeedXMLParser(data: unrelatedNamespaceXML, feedURL: "https://example.com/rss").parse()
+        expectEqual(unrelatedArticles.count, 1, "Should parse unrelated-namespace item")
+        expectNil(
+            unrelatedArticles.first?.imageUrl,
+            "Prefix bound to unrelated namespace is not treated as well-known media:thumbnail (#1150)")
+        expectNil(
+            unrelatedArticles.first?.author,
+            "Prefix bound to unrelated namespace is not treated as well-known dc:creator (#1150)")
+
+        // #1149: Latin-1 feed with no XML encoding declaration transcoded using charset header.
+        let latin1NoDeclXML = """
+            <rss version="2.0">
+            <channel>
+                <title>Café des Nouvelles</title>
+                <item>
+                    <title>Édition Spéciale</title>
+                    <link>https://example.com/edition</link>
+                    <guid>edition-1</guid>
+                    <description>Résumé des événements.</description>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .isoLatin1)!
+        let parsedNoDecl = FeedXMLParser(
+            data: latin1NoDeclXML, feedURL: "https://example.com/rss", textEncodingName: "iso-8859-1"
+        ).parse()
+        expectEqual(parsedNoDecl.count, 1, "Latin-1 feed with charset header parses successfully (#1149)")
+        expectEqual(
+            parsedNoDecl.first?.title, "Édition Spéciale",
+            "Article title with Latin-1 characters is transcoded (#1149)")
+        expectEqual(
+            parsedNoDecl.first?.source, "Café des Nouvelles",
+            "Channel title with Latin-1 characters is preserved (#1149)")
+
+        // #1149: XML declaration in the document takes precedence over the header charset.
+        let latin1WithDeclXML = """
+            <?xml version="1.0" encoding="ISO-8859-1"?>
+            <rss version="2.0">
+            <channel>
+                <title>Théâtre Français</title>
+                <item>
+                    <title>Représentation</title>
+                    <link>https://example.com/theatre</link>
+                    <guid>theatre-1</guid>
+                    <description>Détails du spectacle.</description>
+                </item>
+            </channel>
+            </rss>
+            """.data(using: .isoLatin1)!
+        let parsedWithDecl = FeedXMLParser(
+            data: latin1WithDeclXML, feedURL: "https://example.com/rss", textEncodingName: "utf-8"
+        ).parse()
+        expectEqual(
+            parsedWithDecl.count, 1,
+            "Document encoding declaration takes precedence over conflicting header (#1149)")
+        expectEqual(
+            parsedWithDecl.first?.title, "Représentation",
+            "Article title parses using document's declared encoding (#1149)")
+
+        // #1149: FeedFetcher end-to-end Latin-1 feed with Content-Type charset and no XML declaration
+        let client = NewsTests.mockHTTPClient(
+            configuration: {
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [MockURLProtocol.self]
+                return config
+            }())
+        defer { MockURLProtocol.requestHandler = nil }
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/rss+xml; charset=iso-8859-1"])!,
+                latin1NoDeclXML
+            )
+        }
+        let fetcherResult = await FeedFetcher(client: client).fetchSingleFeed(
+            urlString: "https://example.com/latin1.xml")
+        expectEqual(fetcherResult.error, nil, "Latin-1 feed with Content-Type header fetches and parses (#1149)")
+        expectEqual(
+            fetcherResult.articles?.first?.title, "Édition Spéciale",
+            "FeedFetcher extracts and transcodes Latin-1 feed with charset header (#1149)")
+
+        // #1149: FeedFetcher end-to-end document declaration precedence over header
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/rss+xml; charset=utf-8"])!,
+                latin1WithDeclXML
+            )
+        }
+        let fetcherPrecedenceResult = await FeedFetcher(client: client).fetchSingleFeed(
+            urlString: "https://example.com/declared.xml")
+        expectEqual(
+            fetcherPrecedenceResult.error, nil,
+            "FeedFetcher respects document encoding declaration over conflicting header (#1149)")
+        expectEqual(
+            fetcherPrecedenceResult.articles?.first?.title, "Représentation",
+            "FeedFetcher parses title via declared encoding (#1149)")
+
+        // #1149: Parameter boundary check ignores prefix such as xcharset and matches true charset
+        let xcharsetResp = HTTPURLResponse(
+            url: URL(string: "https://example.com")!, statusCode: 200, httpVersion: nil,
+            headerFields: ["Content-Type": "application/rss+xml; xcharset=utf-8; charset=iso-8859-1"])!
+        expectEqual(
+            FeedFetcher.extractCharset(from: xcharsetResp), "iso-8859-1",
+            "xcharset prefix is ignored in favor of complete charset parameter boundary (#1149)")
+
+        let quotedResp = HTTPURLResponse(
+            url: URL(string: "https://example.com")!, statusCode: 200, httpVersion: nil,
+            headerFields: ["Content-Type": "application/rss+xml; charset=\"iso-8859-1\""])!
+        expectEqual(
+            FeedFetcher.extractCharset(from: quotedResp), "iso-8859-1",
+            "Quoted charset parameter value is extracted cleanly (#1149)")
+
+        // #1148: Publisher XML defects (bare ampersand, HTML entities, control characters, invalid UTF-8) repaired outside CDATA.
+        var defectXML = Data(
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+            <!-- Comment with bare & and &nbsp; -->
+            <channel>
+                <title>Publisher & Network &nbsp;</title>
+                <item>
+                    <title>Q&A with AT&T &copy; &mdash; \u{0007}</title>
+                    <link>https://example.com/qa</link>
+                    <guid>qa-1</guid>
+                    <description><![CDATA[Preserve & and <tags> and &nbsp; verbatim]]></description>
+                </item>
+                <item>
+                    <title>Item with bad UTF-8: 
+            """.utf8)
+        defectXML.append(contentsOf: [0xFF, 0xFE])
+        defectXML.append(
+            contentsOf: """
+                </title>
+                        <link>https://example.com/bad-utf8</link>
+                        <guid>bad-1</guid>
+                    </item>
+                </channel>
+                </rss>
+                """.utf8)
+
+        let defectArticles = FeedXMLParser(data: defectXML, feedURL: "https://example.com/rss").parse()
+        expectEqual(defectArticles.count, 2, "Feeds with publisher defects parse all items (#1148)")
+        expectEqual(
+            defectArticles.first?.title, "Q&A with AT&T © —",
+            "Bare ampersands, HTML entities, and control characters are repaired (#1148)")
+        let cdataSample = "<![CDATA[Preserve & and <tags> and &nbsp; verbatim]]>".data(using: .utf8)!
+        expectEqual(
+            FeedXMLParser.repairXML(data: cdataSample), cdataSample,
+            "CDATA sections with ampersands and markup remain unchanged (#1148)")
+        expectTrue(
+            defectArticles.last?.title.contains("Item with bad UTF-8") ?? false,
+            "Invalid UTF-8 sequences are replaced and item is preserved (#1148)")
+
+        // #1148: Entity and DTD declarations are still refused before repair.
+        let hostileEntity = """
+            <!DOCTYPE rss [<!ENTITY test "payload">]>
+            <rss version="2.0"><channel><item><title>&test;</title></item></channel></rss>
+            """.data(using: .utf8)!
+        let hostileParser = FeedXMLParser(data: hostileEntity, feedURL: "https://example.com/rss")
+        expectTrue(hostileParser.parse().isEmpty, "Entity declarations remain refused (#1148)")
+        expectEqual(
+            hostileParser.parseError, "XML entity declarations are not allowed",
+            "Entity rejection error is preserved (#1148)")
+
+        // #1148: Attribute list declarations rejected by parser delegate
+        let hostileAttlist = """
+            <!DOCTYPE rss [<!ATTLIST item id CDATA #IMPLIED>]>
+            <rss version="2.0"><channel><item><title>Test</title></item></channel></rss>
+            """.data(using: .utf8)!
+        let attlistParser = FeedXMLParser(data: hostileAttlist, feedURL: "https://example.com/rss")
+        expectTrue(attlistParser.parse().isEmpty, "Attlist declarations refused (#1148)")
+        expectEqual(
+            attlistParser.parseError, "XML attribute list declarations are not allowed",
+            "Attlist error message set (#1148)")
+
+        // #1148: Valid UTF-16 and UTF-32 feeds with BOM are preserved during repair
+        let utf16XML = """
+            <?xml version="1.0" encoding="UTF-16"?>
+            <rss version="2.0"><channel><title>UTF16 &amp; Feed</title><item><title>Item 1</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+            """
+        var utf16Data = Data([0xFF, 0xFE])  // UTF-16 LE BOM
+        utf16Data.append(utf16XML.data(using: .utf16LittleEndian)!)
+        let utf16Parsed = FeedXMLParser(data: utf16Data, feedURL: "https://example.com/rss").parse()
+        expectEqual(utf16Parsed.count, 1, "UTF-16 feed with BOM parses correctly (#1148)")
+
+        var utf32Data = Data([0xFF, 0xFE, 0x00, 0x00])  // UTF-32 LE BOM
+        utf32Data.append(utf16XML.data(using: .utf32LittleEndian)!)
+        let utf32Parsed = FeedXMLParser(data: utf32Data, feedURL: "https://example.com/rss").parse()
+        expectEqual(utf32Parsed.count, 1, "UTF-32 feed with BOM parses correctly (#1148)")
+
+        // #1148: UTF-16 with bare ampersand and declared encoding repairs and parses correctly
+        let utf16BareAmpXML = """
+            <?xml version="1.0" encoding="UTF-16"?>
+            <rss version="2.0"><channel><title>AT&T News</title><item><title>Item 1</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+            """
+        var utf16BareAmpData = Data([0xFF, 0xFE])
+        utf16BareAmpData.append(utf16BareAmpXML.data(using: .utf16LittleEndian)!)
+        let utf16BareAmpParsed = FeedXMLParser(data: utf16BareAmpData, feedURL: "https://example.com/rss").parse()
+        expectEqual(utf16BareAmpParsed.count, 1, "UTF-16 feed with bare ampersand repairs and parses (#1148)")
+
+        // #1148: UTF-32 feed with encoding in body/CDATA leaves body text intact
+        let utf32BodyXML = """
+            <?xml version="1.0" ENCODING="UTF-32"?>
+            <rss version="2.0"><channel><title>Test</title><item><title>Code</title><description><![CDATA[use encoding="gzip" here]]></description><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+            """
+        var utf32BodyData = Data([0xFF, 0xFE, 0x00, 0x00])
+        utf32BodyData.append(utf32BodyXML.data(using: .utf32LittleEndian)!)
+        let utf32BodyParsed = FeedXMLParser(data: utf32BodyData, feedURL: "https://example.com/rss").parse()
+        expectEqual(utf32BodyParsed.count, 1, "UTF-32 feed with encoding declaration in body parses (#1148)")
+        expectTrue(
+            utf32BodyParsed.first?.description.contains("encoding=\"gzip\"") == true,
+            "Body encoding attribute remains intact (#1148)")
+
+        // #1148: Disallowed numeric entities (control chars, surrogates) are escaped
+        let badEntityXML = """
+            <rss version="2.0"><channel><title>Test</title><item><title>Bad &#0; and &#xD800; and &#X41; and &amp;</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>
+            """.data(using: .utf8)!
+        let badEntityParsed = FeedXMLParser(data: badEntityXML, feedURL: "https://example.com/rss").parse()
+        expectEqual(badEntityParsed.count, 1, "Feed with disallowed numeric entities parses after escaping (#1148)")
     }
 
     static func testJSONParsing() async {

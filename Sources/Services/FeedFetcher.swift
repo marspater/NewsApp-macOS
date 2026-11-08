@@ -72,7 +72,8 @@ actor FeedFetcher {
                     return (urlString, nil, .parseFailed("Malformed JSON Feed"), nil)
                 }
             } else {
-                let xmlParser = FeedXMLParser(data: data, feedURL: urlString)
+                let charset = Self.extractCharset(from: response)
+                let xmlParser = FeedXMLParser(data: data, feedURL: urlString, textEncodingName: charset)
                 let parsed = xmlParser.parse()
                 try Task.checkCancellation()  // an aborted parse is not a malformed feed
                 if let error = xmlParser.parseError {
@@ -91,6 +92,31 @@ actor FeedFetcher {
     /// Feed-supplied links are opened in the browser and fetched for the reader, so an item whose link is not a web
     /// address (`smb:`, `file:`, another app's URL scheme) never enters the library (#799). Items without a link keep
     /// their GUID identity.
+    /// Extracts the charset parameter from the Content-Type header or falls back to textEncodingName (#1149).
+    static func extractCharset(from response: HTTPURLResponse) -> String? {
+        if let contentType = response.value(forHTTPHeaderField: "Content-Type")
+            ?? (response.allHeaderFields["Content-Type"] as? String)
+        {
+            if let match = contentType.range(
+                of: #"(?i)(?:^|[;\s])\s*charset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^'";\s]+))"#,
+                options: .regularExpression)
+            {
+                let extracted = contentType[match]
+                if let eqIndex = extracted.firstIndex(of: "=") {
+                    let raw = extracted[extracted.index(after: eqIndex)...].trimmingCharacters(
+                        in: CharacterSet(charactersIn: "\"' \t"))
+                    if !raw.isEmpty { return raw }
+                }
+            }
+        }
+        if let encodingName = response.textEncodingName?.trimmingCharacters(
+            in: CharacterSet(charactersIn: "\"' \t")), !encodingName.isEmpty
+        {
+            return encodingName
+        }
+        return nil
+    }
+
     static func webArticles(_ articles: [FeedArticle]) -> [FeedArticle] {
         articles.filter { article in
             article.link.isEmpty || WebLink.url(article.link) != nil

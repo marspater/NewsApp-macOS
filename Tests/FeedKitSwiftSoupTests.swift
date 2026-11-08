@@ -224,6 +224,37 @@ enum FeedKitSwiftSoupTests {
             nestedArticles.last?.readerDocument?.images?.first?.credit == "Second photographer",
             "Separate item media credits remain associated with their own images")
 
+        // #1150: undeclared media: and dc: prefixes preserve the item's image and byline.
+        let undeclaredXML = """
+            <rss version="2.0"><channel><title>Undeclared</title><item>
+            <title>Story</title><link>https://example.com/story</link>
+            <media:thumbnail url="https://example.com/undeclared.jpg"/>
+            <dc:creator>Jane Doe</dc:creator>
+            </item></channel></rss>
+            """
+        let undeclaredParsed = FeedXMLParser(data: Data(undeclaredXML.utf8), feedURL: base).parse().first
+        check(
+            undeclaredParsed?.imageUrl == "https://example.com/undeclared.jpg",
+            "Undeclared media:thumbnail preserves item image (#1150)")
+        check(
+            undeclaredParsed?.author == "Jane Doe",
+            "Undeclared dc:creator preserves item byline (#1150)")
+
+        let unrelatedXML = """
+            <rss version="2.0" xmlns:media="http://example.com/other" xmlns:dc="http://example.com/other"><channel><title>Unrelated</title><item>
+            <title>Story</title><link>https://example.com/story</link>
+            <media:thumbnail url="https://example.com/unrelated.jpg"/>
+            <dc:creator>Other Author</dc:creator>
+            </item></channel></rss>
+            """
+        let unrelatedParsed = FeedXMLParser(data: Data(unrelatedXML.utf8), feedURL: base).parse().first
+        check(
+            unrelatedParsed?.imageUrl == nil,
+            "Prefix bound to unrelated namespace is not treated as well-known media:thumbnail (#1150)")
+        check(
+            unrelatedParsed?.author == nil,
+            "Prefix bound to unrelated namespace is not treated as well-known dc:creator (#1150)")
+
         let rdf = """
             <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/"
             xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>RDF Publisher</title></channel>
@@ -341,6 +372,41 @@ enum FeedKitSwiftSoupTests {
                 parser.parse().isEmpty && parser.parseError == "XML entity declarations are not allowed",
                 "Entity prolog detection does not depend on UTF-8 decoding")
         }
+        // #1149: Latin-1 feeds without encoding declarations use textEncodingName to transcode.
+        let latin1Undeclared =
+            "<rss version=\"2.0\"><channel><title>Café</title><item><title>Étude</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>"
+        let latin1Data = latin1Undeclared.data(using: .isoLatin1)!
+        let unrepairedArticle = FeedXMLParser(data: latin1Data, feedURL: base).parse().first
+        check(
+            unrepairedArticle?.title != "Étude",
+            "Latin-1 feed without encoding declaration does not decode Latin-1 without charset")
+        let transcodedArticle = FeedXMLParser(data: latin1Data, feedURL: base, textEncodingName: "iso-8859-1").parse()
+            .first
+        check(
+            transcodedArticle?.title == "Étude" && transcodedArticle?.source == "Café",
+            "Latin-1 feed transcodes to UTF-8 using textEncodingName (#1149)")
+        let declaredLatin1 =
+            "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><rss version=\"2.0\"><channel><title>Théâtre</title><item><title>Pièce</title><link>https://example.com/2</link><guid>2</guid></item></channel></rss>"
+        let declaredLatin1Data = declaredLatin1.data(using: .isoLatin1)!
+        let declaredArticle = FeedXMLParser(data: declaredLatin1Data, feedURL: base, textEncodingName: "utf-8").parse()
+            .first
+        check(
+            declaredArticle?.title == "Pièce",
+            "Document encoding declaration takes precedence over textEncodingName (#1149)")
+        // #1148: Single publisher defects do not reject the whole feed
+        var defectiveFeed = Data(
+            """
+            <rss version="2.0"><channel><title>Defects & Network &nbsp;</title>
+            <item><title>Bare &amp; and bare & and &copy; and \u{0007}</title><link>https://example.com/1</link><guid>1</guid><description><![CDATA[Raw & and <markup> untouched]]></description></item>
+            <item><title>Invalid bytes: 
+            """.utf8)
+        defectiveFeed.append(contentsOf: [0xFF, 0xFE])
+        defectiveFeed.append(
+            contentsOf: "</title><link>https://example.com/2</link><guid>2</guid></item></channel></rss>".utf8)
+        let repairedArticles = FeedXMLParser(data: defectiveFeed, feedURL: base).parse()
+        check(repairedArticles.count == 2, "Defective publisher feed keeps all items (#1148)")
+        let cdataSample = "<![CDATA[Raw & and <markup> and &nbsp; untouched]]>".data(using: .utf8)!
+        check(FeedXMLParser.repairXML(data: cdataSample) == cdataSample, "CDATA content remains unchanged (#1148)")
         let deep =
             "<rss><channel>" + String(repeating: "<x>", count: 65) + String(repeating: "</x>", count: 65)
             + "</channel></rss>"

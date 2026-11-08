@@ -59,6 +59,10 @@ extension NewsTests {
             ("testUpdateCheckerVersionComparisonAndErrors", { await testUpdateCheckerVersionComparisonAndErrors() }),
             ("testUpdateCheckerAdversarialEdgeCases", { await testUpdateCheckerAdversarialEdgeCases() }),
             ("testNotificationActionsAndRouting", { await testNotificationActionsAndRouting() }),
+            (
+                "testMarkReadPrunedStoryBannerRaisesNoOperationError",
+                { await testMarkReadPrunedStoryBannerRaisesNoOperationError() }
+            ),
             ("testNotificationModeTriageAndGrammar", { await testNotificationModeTriageAndGrammar() }),
             ("testFeedRemovalAndShutdown", { try await testFeedRemovalAndShutdown() }),
             ("testSleepAndWakeRefresh", { try await testSleepAndWakeRefresh() }),
@@ -3518,6 +3522,46 @@ extension NewsTests {
         assertEqual(
             errorStore.operationError, "The notification story could not be loaded. Please try again.",
             "Storage lookup failure is distinguished from a pruned story")
+
+        // 8. Mark as read on a deleted or pruned story returns quietly without error (#1144)
+        store.operationError = nil
+        let deletedID = "deleted-story-id"
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.markRead,
+            userInfo: ["articleID": deletedID, "articleLink": "https://example.com/deleted"],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        await readManager.waitForPendingChanges()
+        assertFalse(readManager.isRead(deletedID), "Pruned story is not marked as read")
+        assertTrue(store.operationError == nil, "Mark as read on a deleted story raises no operationError (#1144)")
+        await db.close()
+    }
+
+    /// #1144: Mark as Read on a banner for a deleted story returns quietly without operationError.
+    @MainActor
+    static func testMarkReadPrunedStoryBannerRaisesNoOperationError() async {
+        print("  - Testing Mark as Read on a banner for a deleted story raises no error (#1144)...")
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let readManager = ReadManager(articleStore: store)
+        let savedManager = SavedStoriesManager(articleStore: store)
+
+        store.operationError = nil
+        await NotificationActionRouter.route(
+            actionIdentifier: NotificationActionIdentifier.markRead,
+            userInfo: ["articleID": "nonexistent-id", "articleLink": "https://example.com/nonexistent"],
+            articleStore: store,
+            readManager: readManager,
+            savedStories: savedManager,
+            activateApp: {}
+        )
+        await readManager.waitForPendingChanges()
+        assertFalse(readManager.isRead("nonexistent-id"), "Nonexistent story is not marked as read")
+        assertTrue(store.operationError == nil, "Mark as read for an ID with no row raises no operationError (#1144)")
         await db.close()
     }
 
