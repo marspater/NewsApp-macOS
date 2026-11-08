@@ -372,6 +372,26 @@ enum FeedKitSwiftSoupTests {
                 parser.parse().isEmpty && parser.parseError == "XML entity declarations are not allowed",
                 "Entity prolog detection does not depend on UTF-8 decoding")
         }
+        // #1149: Latin-1 feeds without encoding declarations use textEncodingName to transcode.
+        let latin1Undeclared =
+            "<rss version=\"2.0\"><channel><title>Café</title><item><title>Étude</title><link>https://example.com/1</link><guid>1</guid></item></channel></rss>"
+        let latin1Data = latin1Undeclared.data(using: .isoLatin1)!
+        check(
+            FeedXMLParser(data: latin1Data, feedURL: base).parse().isEmpty,
+            "Latin-1 feed without encoding declaration fails without charset")
+        let transcodedArticle = FeedXMLParser(data: latin1Data, feedURL: base, textEncodingName: "iso-8859-1").parse()
+            .first
+        check(
+            transcodedArticle?.title == "Étude" && transcodedArticle?.source == "Café",
+            "Latin-1 feed transcodes to UTF-8 using textEncodingName (#1149)")
+        let declaredLatin1 =
+            "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><rss version=\"2.0\"><channel><title>Théâtre</title><item><title>Pièce</title><link>https://example.com/2</link><guid>2</guid></item></channel></rss>"
+        let declaredLatin1Data = declaredLatin1.data(using: .isoLatin1)!
+        let declaredArticle = FeedXMLParser(data: declaredLatin1Data, feedURL: base, textEncodingName: "utf-8").parse()
+            .first
+        check(
+            declaredArticle?.title == "Pièce",
+            "Document encoding declaration takes precedence over textEncodingName (#1149)")
         let deep =
             "<rss><channel>" + String(repeating: "<x>", count: 65) + String(repeating: "</x>", count: 65)
             + "</channel></rss>"
