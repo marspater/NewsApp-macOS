@@ -302,7 +302,8 @@ enum NotificationAttachmentTests {
             if await probe.snapshot().completions == 1 { break }
             try? await Task.sleep(for: .milliseconds(10))
         }
-        precondition((await probe.snapshot()).completions == 1, "The cancelled image loader completes")
+        let completed = await probe.snapshot()
+        precondition(completed.completions == 1, "The cancelled image loader completes")
         for _ in 0..<20 { await Task.yield() }
         precondition(!isolated.hasPresentedPhoto, "A cancelled image must not appear on the reopened banner")
 
