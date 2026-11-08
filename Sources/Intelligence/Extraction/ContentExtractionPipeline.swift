@@ -859,20 +859,25 @@ enum HTMLDOMBuilder {
     /// it builds, so 150 KB of nested tables takes 10 seconds, growing with the square of the depth, and a parse cannot
     /// be cancelled. Markup is read as SwiftSoup's tokenizer reads it, so comments, attribute values and raw text
     /// cannot close elements here that stay open there.
-    /// ponytail: a tag count, so end tags the tree builder would ignore can hide depth from it; bound SwiftSoup itself
-    /// if that happens.
+    /// ponytail: an estimate of the tree builder's rules, not a copy of them; bound SwiftSoup itself if a page gets past
+    /// it (scinfu/SwiftSoup#473 removes the quadratic rebuild).
     static func nestsTooDeeply(_ html: String, limit: Int = 2048) -> Bool {
         let bytes = Array(html.utf8)
         var depth = 0
-        var open: [String: Int] = [:]
+        // For each name, the order in which its still-open elements were opened.
+        var open: [String: [Int]] = [:]
+        var scopes: [Int] = []
+        var opened = 0
         var index = 0
         while let start = bytes[index...].firstIndex(of: UInt8(ascii: "<")) {
             let tag = scanTag(bytes, at: start)
             index = min(tag.next, bytes.count)
             guard !tag.name.isEmpty else { continue }
             if tag.isEnd {
-                if let count = open[tag.name], count > 0 {
-                    open[tag.name] = count - 1
+                // The tree builder ignores an end tag beyond the nearest scope boundary, as `</div>` inside a table.
+                if let position = open[tag.name]?.last, position >= scopes.last ?? 0 {
+                    open[tag.name]?.removeLast()
+                    if position == scopes.last { scopes.removeLast() }
                     depth -= 1
                 }
             } else if tag.selfClosed || implicitlyClosedTags.contains(tag.name) {
@@ -880,7 +885,9 @@ enum HTMLDOMBuilder {
             } else if rawTextTags.contains(tag.name) {
                 index = endOfRawText(bytes, name: tag.name, from: index)
             } else {
-                open[tag.name, default: 0] += 1
+                open[tag.name, default: []].append(opened)
+                if scopeBoundaryTags.contains(tag.name) { scopes.append(opened) }
+                opened += 1
                 depth += 1
                 if depth > limit { return true }
             }
@@ -989,6 +996,7 @@ enum HTMLDOMBuilder {
 
     private static let htmlWhitespace: Set<UInt8> = [0x09, 0x0A, 0x0C, 0x0D, 0x20]
     private static let tagNameEnds = htmlWhitespace.union([UInt8(ascii: "/"), UInt8(ascii: ">")])
+    private static let scopeBoundaryTags: Set<String> = ["applet", "caption", "table", "marquee", "object"]
     private static let rawTextTags: Set<String> = [
         "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "plaintext",
     ]

@@ -71,6 +71,12 @@ extension NativeSuites {
             #expect(DateParser.parse("Sun, 08 Nov 2026") == Date(timeIntervalSince1970: 1_794_096_000))
         }
 
+        @Test func impossibleDatesAreRejectedAndOffsetsApplied() {
+            #expect(DateParser.parse("Sun, 31 Feb 2026 10:00:00 GMT") == nil)
+            #expect(DateParser.parse("Sun, 08 Nov 2026 25:00:00 GMT") == nil)
+            #expect(DateParser.parse("2026-11-08 10:00:00 +0100") == Date(timeIntervalSince1970: 1_794_128_400))
+        }
+
         @Test func strayTextAroundTheDocumentIsNotFatal() {
             let rss = String(decoding: Self.rss("<dc:creator>J</dc:creator>"), as: UTF8.self)
             let parsers = [
@@ -95,6 +101,20 @@ extension NativeSuites {
                 <media:thumbnail url="https://cdn.example.com/a.jpg"/></item></channel></rss>
                 """.utf8)
             #expect(Self.parse(feed)?.imageUrl == "https://cdn.example.com/a.jpg")
+        }
+
+        @Test func dublinCoreAndContentNamespacesWithoutATrailingSlashAreRecognized() {
+            let feed = Data(
+                """
+                <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1" \
+                xmlns:content="http://purl.org/rss/1.0/modules/content"><channel><title>T</title><item>\
+                <title>H</title><link>https://example.com/a</link><dc:creator>Jane</dc:creator>\
+                <content:encoded><![CDATA[<p>The encoded body of the story.</p>]]></content:encoded></item>\
+                </channel></rss>
+                """.utf8)
+            let article = Self.parse(feed)
+            #expect(article?.author == "Jane")
+            #expect(article?.fullContent?.contains("The encoded body of the story.") == true)
         }
 
         @Test(arguments: [
@@ -133,6 +153,20 @@ extension NativeSuites {
             #expect(elapsed < .seconds(30), "Without the bound this parse runs for hours")
         }
 
+        @Test func endTagsOutsideTheirScopeReachNeitherEntryPoint() {
+            let bomb = String(repeating: "<div><table><tr><td></div></table>", count: 3_000)
+            let elapsed = ContinuousClock().measure {
+                #expect(ContentExtractionPipeline.shared.extractFromHTML(bomb).content == nil)
+                #expect(ContentExtractionPipeline.shared.extractLeadImages(from: bomb).isEmpty)
+            }
+            #expect(elapsed < .seconds(30))
+        }
+
+        @Test func aBalancedTableInsideADivIsNotDeep() {
+            let page = String(repeating: "<div><table><tr><td><div>x</div></td></tr></table></div>", count: 3_000)
+            #expect(!HTMLDOMBuilder.nestsTooDeeply(page))
+        }
+
         @Test func nestingEstimateIgnoresPagesThatAreNot() {
             #expect(!HTMLDOMBuilder.nestsTooDeeply(String(repeating: "<div>a</div><p>b<br><li>c", count: 20_000)))
             let script = "<script>" + String(repeating: "for(i=0;i<n;i++)'<div>';", count: 20_000) + "</script><p>x"
@@ -145,6 +179,7 @@ extension NativeSuites {
         @Test(arguments: [
             "<div><!-- </div> -->", "<div><!-- </div> --!>", #"<div title="</div>">"#, "<div title='</div>'>",
             "<div><!--!></div>-->", "<div><!---!></div>-->", "<div><!----!></div>-->",
+            "<div><table><tr><td></div></table>", "<div><object></div></object>", "<div><marquee></div></marquee>",
             "<div><textarea></div></textarea>", "<div><title></div></title>", "<x-a></x-b>", "<div a=/>",
             #"<div a=b"></div">"#,
         ])
