@@ -14,6 +14,7 @@
 
 import FeedKit
 import Foundation
+import SwiftSoup
 
 /// Checks shared by every XML document the app reads from outside: feeds and OPML imports (#928).
 enum XMLInputGuard {
@@ -738,15 +739,27 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             options: .caseInsensitive)
     }()
 
+    /// `&#038;` is the longest reference feeds use for one URL byte, so a candidate that fits the 8,192-byte
+    /// image URL limit once decoded always passes this bound.
+    private static let maxEncodedImageAttributeBytes = 8192 * 6
+
+    /// Regex captures from CDATA markup never met an HTML parser, so they decode here, once, under attribute
+    /// rules: `decodeHTMLEntities` would also unwrap `&amp;#38;`, and text rules would eat `&copy=` in a query.
+    private static func decodedImageAttribute(_ raw: Substring) -> String? {
+        guard raw.utf8.count <= maxEncodedImageAttributeBytes else { return nil }
+        let raw = String(raw)
+        return (try? SwiftSoup.Parser.unescapeEntities(raw, true)) ?? raw
+    }
+
     private func extractImageFromHTML(_ html: String, baseURL: URL? = nil) -> String? {
         // Avoid repeated compilation of regex per parsed item
         guard let regex = Self.imageRegex else { return nil }
         let range = NSRange(html.startIndex..., in: html)
         // The first picture the feed gate accepts: not vector artwork, a tracking pixel or a site mark.
         return regex.matches(in: html, range: range).lazy
-            .compactMap {
-                Range($0.range(at: 1), in: html).map { self.resolvedURL(String(html[$0]), baseURL: baseURL) }
-            }
+            .compactMap { Range($0.range(at: 1), in: html) }
+            .compactMap { Self.decodedImageAttribute(html[$0]) }
+            .map { self.resolvedURL($0, baseURL: baseURL) }
             .first { ReaderImageCandidate.usable(url: $0) }
     }
 }

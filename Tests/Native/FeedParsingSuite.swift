@@ -1648,6 +1648,42 @@ extension NativeSuites.FeedParsingSuite {
             relativeArticles[1].imageUrl,
             "https://cdn.example.com/assets/featured.png?w=800",
             "Root-relative <img> in content:encoded resolves against item xml:base (#1134)")
+
+        // #1082: HTML references in CDATA <img> attributes decode once, under attribute rules, before URL resolution.
+        let overlongImage = "https://cdn.example.com/long.jpg?" + String(repeating: "&#0000000038;", count: 4000)
+        func entityItem(_ html: String) -> String {
+            """
+            <item xml:base="https://cdn.example.com/stories/2026/">
+                <title>Entity Image Item</title>
+                <link>https://feeds.example.com/post</link>
+                <description><![CDATA[\(html)]]></description>
+            </item>
+            """
+        }
+        let entityImageXML = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <rss version="2.0">
+            <channel>
+                <title>Entity Images</title>
+                \(entityItem(#"<p>Lead</p><img src="https://cdn.example.com/hero.jpg?w=1200&#038;h=800&amp;fit=crop"/>"#))
+                \(entityItem(#"<img src="images/hero.jpg?size=1200&amp;format=webp"/>"#))
+                \(entityItem(#"<img src="https://cdn.example.com/signed.jpg?token=a&amp;amp;b"/>"#))
+                \(entityItem(#"<img src="https://cdn.example.com/query.jpg?a=1&copy=2"/>"#))
+                \(entityItem("<img src=\"\(overlongImage)\"/><img src=\"https://cdn.example.com/second.jpg\"/>"))
+            </channel>
+            </rss>
+            """.data(using: .utf8)!
+        let entityArticles = FeedXMLParser(data: entityImageXML, feedURL: "https://feeds.example.com/rss.xml").parse()
+        expectEqual(
+            entityArticles.map(\.imageUrl),
+            [
+                "https://cdn.example.com/hero.jpg?w=1200&h=800&fit=crop",
+                "https://cdn.example.com/stories/2026/images/hero.jpg?size=1200&format=webp",
+                "https://cdn.example.com/signed.jpg?token=a&amp;b",
+                "https://cdn.example.com/query.jpg?a=1&copy=2",
+                "https://cdn.example.com/second.jpg",
+            ],
+            "CDATA image attributes decode once and an over-long candidate is skipped before decoding (#1082)")
     }
 
     static func testJSONParsing() async {
