@@ -1647,6 +1647,29 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(art.id, "df-item-9982", "id should resolve to guid")
         expectEqual(art.source, "Daring Fireball", "Source should match feed title")
         expectEqual(art.imageUrl, "https://daringfireball.net/images/df-header.png", "Image URL should match")
+
+        // #1133: UTF-8 BOM-prefixed JSON Feeds are routed to JSONFeedParser by FeedFetcher instead of FeedXMLParser.
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = NewsTests.mockHTTPClient(configuration: config)
+        defer { MockURLProtocol.requestHandler = nil }
+        var bomPayload = Data([0xEF, 0xBB, 0xBF])
+        bomPayload.append(sampleJSON)
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/feed+json"])!,
+                bomPayload
+            )
+        }
+        let bomFeedURL = NewsTests.defaultFixtureRoot.appendingPathComponent("feed.json").absoluteString
+        let bomResult = await FeedFetcher(client: client).fetchSingleFeed(
+            urlString: bomFeedURL)
+        expectEqual(bomResult.error, nil, "UTF-8 BOM JSON Feed must not fail sniffing (#1133)")
+        expectEqual(
+            bomResult.articles?.map(\.title), ["Swift 6 Concurrency Everywhere"],
+            "UTF-8 BOM JSON Feed parses its items through FeedFetcher (#1133)")
     }
 
     static func testEscapeXML() async {
