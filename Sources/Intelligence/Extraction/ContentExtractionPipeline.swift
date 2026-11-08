@@ -503,8 +503,8 @@ final class DOMElementNode: Sendable {
 
     private func computeReadingBlocks(allowDivFallback: Bool) -> [DOMElementNode] {
         guard !isReaderExcluded else { return [] }
-        if let special = readingBlocksForSpecialTag() { return special }
         if let lineBreaks = readingBlocksForLineBreaks() { return lineBreaks }
+        if let special = readingBlocksForSpecialTag() { return special }
         return readingBlocksFromChildren(allowDivFallback: allowDivFallback)
     }
 

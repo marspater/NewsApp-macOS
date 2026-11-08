@@ -1400,14 +1400,17 @@ extension NewsTests {
 
         // 5. #1151: Task cancellation returns contentParsingFailed rather than incomplete content
         let cancelTask = Task { () -> ExtractionOutcome in
-            pipeline.extractFromHTML(nestedHTML)
+            withUnsafeCurrentTask { $0?.cancel() }
+            return pipeline.extractFromHTML(nestedHTML)
         }
-        cancelTask.cancel()
         let cancelledOutcome = await cancelTask.value
-        if case .contentParsingFailed(let reason) = cancelledOutcome {
+        switch cancelledOutcome {
+        case .contentParsingFailed(let reason):
             assertTrue(
                 reason.contains("cancelled") || reason.contains("Extraction"),
                 "Cancelled extraction reports cancellation (#1151)")
+        default:
+            assertTrue(false, "Expected .contentParsingFailed for cancelled extraction (#1151)")
         }
     }
 
