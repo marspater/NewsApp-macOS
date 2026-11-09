@@ -54,9 +54,12 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
         case right
     }
 
-    /// The pair's position, the two passages it joins. A unique lead names a right passage no left passage chose, so
-    /// no two pairs of a session share one.
-    public var id: String { "\(leftPassageIndex)-\(rightPassageIndex)" }
+    /// The pair's position, the two passages it joins, and for a unique lead the side it belongs to: a left unique
+    /// lead names its closest right passage only for reference, so that passage can be the right report's own unique
+    /// lead, and the two pairs of one position are told apart by their side. No two pairs of a session share an id.
+    public var id: String {
+        "\(leftPassageIndex)-\(rightPassageIndex)" + (uniqueSide.map { "-\($0.rawValue)" } ?? "")
+    }
     public let leftPassageIndex: Int
     public let rightPassageIndex: Int
     public let leftSnippet: String
