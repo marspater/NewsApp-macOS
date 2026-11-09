@@ -327,11 +327,38 @@ enum ArticleTextAnswer {
 
 // MARK: - Intelligence Domain Models
 
-public enum EntityType: String, Sendable, Codable, Hashable {
+public enum EntityType: String, Sendable, Codable, Hashable, CaseIterable {
     case person
     case organization
+    case location
     case place
     case unknown
+
+    public var displayIcon: String {
+        switch self {
+        case .person:
+            return "person.fill"
+        case .organization:
+            return "building.2.fill"
+        case .location, .place:
+            return "mappin.and.ellipse"
+        case .unknown:
+            return "questionmark.circle"
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .person:
+            return "Person"
+        case .organization:
+            return "Organization"
+        case .location, .place:
+            return "Location"
+        case .unknown:
+            return "Unknown"
+        }
+    }
 }
 
 public struct EntityResult: Sendable, Equatable, Codable, Hashable {

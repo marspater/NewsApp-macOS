@@ -90,7 +90,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 35
+    static let schemaVersion = 36
     /// The longest text a publisher update keeps of what it replaced (#712): a cut text would show invented changes.
     static let maximumRevisionTextLength = 50_000
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
@@ -2035,6 +2035,50 @@ actor DatabaseEngine {
                     try executeSimple("ALTER TABLE feeds ADD COLUMN \(column) \(type);")
                 }
                 try setUserVersion(35)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                throw error
+            }
+        }
+        if version < 36 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // On-device entity dossiers and context cards (W2 #716).
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS entities (
+                        id TEXT PRIMARY KEY,
+                        canonical_name TEXT NOT NULL,
+                        entity_type TEXT NOT NULL,
+                        mention_count INTEGER DEFAULT 1,
+                        first_seen TEXT NOT NULL,
+                        last_seen TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS entity_mentions (
+                        id TEXT PRIMARY KEY,
+                        entity_id TEXT NOT NULL,
+                        article_id TEXT NOT NULL,
+                        publisher_id TEXT NOT NULL,
+                        published_at TEXT NOT NULL,
+                        passage_offset INTEGER,
+                        confidence REAL NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS entity_co_occurrences (
+                        entity_a TEXT NOT NULL,
+                        entity_b TEXT NOT NULL,
+                        count INTEGER DEFAULT 1,
+                        last_seen TEXT NOT NULL,
+                        PRIMARY KEY (entity_a, entity_b)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity_published ON entity_mentions(entity_id, published_at DESC);
+                    CREATE INDEX IF NOT EXISTS idx_entity_mentions_article ON entity_mentions(article_id);
+                    CREATE INDEX IF NOT EXISTS idx_entities_type_mentions ON entities(entity_type, mention_count DESC);
+                    """
+                )
+                try Task.checkCancellation()
+                try setUserVersion(36)
                 try commitTransaction()
             } catch {
                 loggedOptional("rollbackTransaction") { try rollbackTransaction() }
