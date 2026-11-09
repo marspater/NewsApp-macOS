@@ -82,7 +82,7 @@ struct EditorialCaptures {
             -> PassageContrastPair
         {
             PassageContrastPair(
-                id: "\(l)-\(r)", leftPassageIndex: l, rightPassageIndex: r, leftSnippet: left[l],
+                leftPassageIndex: l, rightPassageIndex: r, leftSnippet: left[l],
                 rightSnippet: right[r],
                 similarityScore: similarity, contrastType: type, uniqueSide: side)
         }

@@ -35,8 +35,6 @@ struct GlobalHotspotMapView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.appearsActive) private var appearsActive
 
-    private let projection = HotspotProjectionService()
-
     /// The pulse stops under Reduce Motion, in an inactive window and while the app is in the background, as the
     /// flame in the sheet header does.
     private var pulses: Bool { !reduceMotion && scenePhase == .active && appearsActive }
@@ -61,10 +59,13 @@ struct GlobalHotspotMapView: View {
             Divider()
             ZStack(alignment: .bottom) {
                 GeometryReader { geometry in
+                    let viewport = HotspotViewport.fitting(
+                        regions.map(\.centroid) + clusterPins.map(\.coordinate),
+                        aspect: geometry.size.width / max(geometry.size.height, 1))
                     ZStack {
-                        coastlines
-                        ForEach(regions) { regionMarker($0, in: geometry.size) }
-                        ForEach(clusterPins) { pinMarker($0, in: geometry.size) }
+                        coastlines(in: viewport)
+                        ForEach(regions) { regionMarker($0, viewport: viewport, in: geometry.size) }
+                        ForEach(clusterPins) { pinMarker($0, viewport: viewport, in: geometry.size) }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
                 }
@@ -123,27 +124,57 @@ struct GlobalHotspotMapView: View {
 
     // MARK: - Coastlines
 
-    private var coastlines: some View {
+    private func coastlines(in viewport: HotspotViewport) -> some View {
         Canvas { context, size in
+            // The equator and the prime meridian, where the viewport holds them.
             var graticule = Path()
-            graticule.move(to: CGPoint(x: 0, y: size.height / 2))
-            graticule.addLine(to: CGPoint(x: size.width, y: size.height / 2))
-            graticule.move(to: CGPoint(x: size.width / 2, y: 0))
-            graticule.addLine(to: CGPoint(x: size.width / 2, y: size.height))
+            let equator = viewport.project(GeographicCoordinate(latitude: 0, longitude: 0), in: size)
+            if (0...size.height).contains(equator.y) {
+                graticule.move(to: CGPoint(x: 0, y: equator.y))
+                graticule.addLine(to: CGPoint(x: size.width, y: equator.y))
+            }
+            if (0...size.width).contains(equator.x) {
+                graticule.move(to: CGPoint(x: equator.x, y: 0))
+                graticule.addLine(to: CGPoint(x: equator.x, y: size.height))
+            }
             context.stroke(graticule, with: .color(AppColor.mapGraticule), lineWidth: AppLayout.hairline)
             for coastline in Self.landmasses {
-                var path = Path()
-                for (index, point) in coastline.enumerated() {
-                    let projected = projection.projectEquirectangular(
-                        coordinate: GeographicCoordinate(latitude: point.lat, longitude: point.lon), canvasSize: size)
-                    if index == 0 { path.move(to: projected) } else { path.addLine(to: projected) }
-                }
-                path.closeSubpath()
-                context.fill(path, with: .color(AppColor.mapLand))
+                context.fill(Self.path(of: coastline, in: viewport, size: size), with: .color(AppColor.mapLand))
+            }
+            for water in Self.inlandWaters {
+                context.fill(Self.path(of: water, in: viewport, size: size), with: .color(AppColor.mapWater))
             }
         }
         .accessibilityHidden(true)
     }
+
+    private static func path(of ring: [(lat: Double, lon: Double)], in viewport: HotspotViewport, size: CGSize) -> Path
+    {
+        var path = Path()
+        for (index, point) in ring.enumerated() {
+            let projected = viewport.project(GeographicCoordinate(latitude: point.lat, longitude: point.lon), in: size)
+            if index == 0 { path.move(to: projected) } else { path.addLine(to: projected) }
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    /// Inland seas and the Gulf, painted over the land so they read as water at the zoom the map fits to.
+    private static let inlandWaters: [[(lat: Double, lon: Double)]] = [
+        // Black Sea
+        [
+            (41.2, 29.1), (43.2, 28.0), (44.2, 28.7), (45.2, 29.7), (46.6, 31.0), (46.0, 33.5), (44.4, 33.6),
+            (45.0, 36.5), (44.6, 37.8), (43.6, 39.8), (41.65, 41.65), (41.0, 39.5), (41.3, 36.3), (42.0, 35.2),
+            (41.9, 32.5),
+        ],
+        // Caspian Sea
+        [
+            (47.0, 49.5), (45.5, 53.0), (42.0, 52.8), (40.0, 53.0), (37.0, 54.0), (37.0, 50.0), (39.0, 49.0),
+            (41.5, 50.2), (43.0, 47.5), (45.5, 47.0),
+        ],
+        // Persian Gulf
+        [(30.0, 48.5), (29.5, 50.5), (27.0, 52.0), (26.0, 56.0), (24.0, 54.0), (25.0, 51.5), (28.0, 49.5)],
+    ]
 
     /// Simplified coastlines as (latitude, longitude) rings, projected with the same equirectangular projection as the
     /// markers so that glows and pins sit on the landmass they name.
@@ -216,12 +247,16 @@ struct GlobalHotspotMapView: View {
             }
     }
 
-    /// A region is a button, so it takes keyboard focus and VoiceOver activation as well as a click.
-    private func regionMarker(_ region: HotspotRegion, in size: CGSize) -> some View {
+    /// A region is a button, so it takes keyboard focus and VoiceOver activation as well as a click. Its ring grows with
+    /// its tension, so the level shows by size as well as by color, and the number stays for the places inside it.
+    private func regionMarker(_ region: HotspotRegion, viewport: HotspotViewport, in size: CGSize) -> some View {
         let isSelected = selectedRegionId == region.id
         let color = AppColor.hotspot(region.tensionLevel)
         let glow = isSelected ? AppLayout.hotspotGlowSelectedSize : AppLayout.hotspotGlowSize
-        let ring = isSelected ? AppLayout.hotspotRingSelectedSize : AppLayout.hotspotRingSize
+        let ring =
+            AppLayout.hotspotRingSize + AppLayout.hotspotRingGrowth
+            * CGFloat(min(max(region.tensionScore, 0), 100) / 100)
+            + (isSelected ? AppLayout.hotspotPinSelectedGrowth : 0)
         return Button {
             selectRegion(region)
         } label: {
@@ -239,13 +274,11 @@ struct GlobalHotspotMapView: View {
                         lineWidth: isSelected ? AppLayout.hotspotTagStrokeStrong : AppLayout.hotspotTagStroke
                     )
                     .frame(width: ring, height: ring)
-                scoreTag(region.tensionScore, color: color)
-                    .offset(y: ring)
             }
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .position(projection.projectEquirectangular(coordinate: region.centroid, canvasSize: size))
+        .position(viewport.project(region.centroid, in: size))
         .accessibilityLabel(
             "\(region.name), \(region.tensionLevel.displayName), headline cue index \(Int(region.tensionScore)) of 100, \(region.articleCount) headlines"
         )
@@ -269,7 +302,7 @@ struct GlobalHotspotMapView: View {
         .accessibilityHidden(true)
     }
 
-    private func pinMarker(_ pin: HotspotClusterPin, in size: CGSize) -> some View {
+    private func pinMarker(_ pin: HotspotClusterPin, viewport: HotspotViewport, in size: CGSize) -> some View {
         let isSelected = selectedPinId == pin.id
         let color = AppColor.hotspot(pin.tensionLevel)
         let diameter = Self.pinSize(for: pin)
@@ -287,7 +320,7 @@ struct GlobalHotspotMapView: View {
             }
         }
         .buttonStyle(.plain)
-        .position(projection.projectEquirectangular(coordinate: pin.coordinate, canvasSize: size))
+        .position(viewport.project(pin.coordinate, in: size))
         .accessibilityLabel(
             "\(pin.title)\(pin.isApproximate ? ", country or sea" : ""), headline cue index \(Int(pin.tensionScore)) of 100, \(pin.storyCount) headlines"
         )

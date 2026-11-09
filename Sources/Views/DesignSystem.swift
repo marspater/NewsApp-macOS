@@ -225,6 +225,7 @@ enum AppLayout {
     /// Hotspot markers (W4 #718): a region's ring and glow at rest and chosen, a pin between its smallest and largest
     /// size (it grows with its coverage and its tension), and the strokes of a marker's score tag.
     static let hotspotRingSize: CGFloat = 16
+    static let hotspotRingGrowth: CGFloat = 12
     static let hotspotRingSelectedSize: CGFloat = 24
     static let hotspotGlowSize: CGFloat = 60
     static let hotspotGlowSelectedSize: CGFloat = 90

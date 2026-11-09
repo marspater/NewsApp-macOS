@@ -75,6 +75,41 @@ extension NativeSuites {
                     == AppLayout.hotspotPinMinimumSize)
         }
 
+        @Test func theViewportFitsTheMarkedPlacesAtTheCanvasAspect() {
+            let aspect = 532.0 / 320.0
+            let theater = ["Kyiv", "Gaza", "Sudan", "Red Sea"].compactMap { service.resolveCoordinate(for: $0) }
+            let viewport = HotspotViewport.fitting(theater, aspect: aspect)
+            #expect(viewport != .world)
+            #expect(theater.allSatisfy { viewport.contains($0) })
+            let width = viewport.maxLongitude - viewport.minLongitude
+            let height = viewport.maxLatitude - viewport.minLatitude
+            #expect(abs(width / height - aspect) < 1e-9, "A degree is as wide as it is tall")
+            #expect(viewport.minLatitude >= -90 && viewport.maxLatitude <= 90)
+            #expect(viewport.minLongitude >= -180 && viewport.maxLongitude <= 180)
+            // The corners of the viewport are the corners of the canvas.
+            let size = CGSize(width: 532, height: 320)
+            let topLeft = viewport.project(
+                GeographicCoordinate(latitude: viewport.maxLatitude, longitude: viewport.minLongitude), in: size)
+            #expect(abs(topLeft.x) < 1e-9 && abs(topLeft.y) < 1e-9)
+        }
+
+        @Test func placesSpreadAcrossTheWorldShowTheWholeWorld() {
+            let spread = ["Kyiv", "Taipei", "Washington", "Sydney"].compactMap { service.resolveCoordinate(for: $0) }
+            #expect(spread.count == 4)
+            #expect(HotspotViewport.fitting(spread, aspect: 532.0 / 320.0) == .world)
+            #expect(HotspotViewport.fitting([], aspect: 1.6) == .world)
+        }
+
+        @Test func onePlaceIsNotMagnifiedBeyondTheMinimumSpan() {
+            let kyiv = [GeographicCoordinate(latitude: 50.45, longitude: 30.52)]
+            let viewport = HotspotViewport.fitting(kyiv, aspect: 2)
+            #expect(viewport.maxLatitude - viewport.minLatitude >= HotspotViewport.minimumLatitudeSpan)
+            #expect(viewport.contains(kyiv[0]))
+            // Near a pole or the date line the viewport slides inside the world instead of leaving it.
+            let north = HotspotViewport.fitting([GeographicCoordinate(latitude: 88, longitude: 179)], aspect: 2)
+            #expect(north.maxLatitude <= 90 && north.maxLongitude <= 180)
+        }
+
         @Test func headlinesAboutAnAreaMakeAnApproximatePin() {
             let reading = WorldTensionReading(
                 evaluatedAt: Date(timeIntervalSince1970: 1_793_300_435), inputHash: "area", modelGeneration: "test",
