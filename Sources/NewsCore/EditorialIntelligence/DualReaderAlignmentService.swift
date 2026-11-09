@@ -42,6 +42,8 @@ public actor DualReaderAlignmentService {
         }
     }
 
+    private static let closingQuotes = CharacterSet(charactersIn: "\"'\u{201D}\u{2019}\u{00BB})]")
+
     private let logger = Logger(subsystem: "com.marspater.news", category: "DualReaderAlignmentService")
 
     public init() {}
@@ -167,8 +169,11 @@ public actor DualReaderAlignmentService {
         let rawParagraphs = content.components(separatedBy: "\n\n")
             .flatMap { $0.components(separatedBy: "\n") }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            // A sentence stays ("He resigned."); a label such as "Read more" or "Share" does not.
-            .filter { $0.split(whereSeparator: \.isWhitespace).count >= 3 || ".!?".contains($0.last ?? " ") }
+            // A sentence stays ("He resigned.", also in quotes); a label such as "Read more" or "Share" does not.
+            .filter {
+                $0.split(whereSeparator: \.isWhitespace).count >= 3
+                    || ".!?".contains($0.trimmingCharacters(in: Self.closingQuotes).last ?? " ")
+            }
 
         for paragraph in rawParagraphs {
             // Filter common RSS/feed boilerplate
