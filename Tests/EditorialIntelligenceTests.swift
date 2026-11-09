@@ -264,6 +264,8 @@ enum EditorialIntelligenceTests {
         check(!session.passageAlignments.isEmpty, "Dual reader alignments generated")
         check(session.consensusCount >= 1, "Consensus detected for identical opening statement")
         check(session.consensusScore > 0, "Consensus score is positive")
+        let blankPassages = await service.extractPassages(title: "  ", content: "short")
+        check(blankPassages.isEmpty, "A blank article yields no passages, so no 100% blank match")
         check(DualReaderLayoutMode.mode(for: 1300) == .sideBySide, "Adaptive layout side-by-side above 1200pt")
         check(DualReaderLayoutMode.mode(for: 900) == .stacked, "Adaptive layout stacked below 1200pt")
     }

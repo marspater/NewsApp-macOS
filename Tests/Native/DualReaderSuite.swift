@@ -36,6 +36,18 @@ extension NativeSuites {
             #expect(!passages.contains { $0.contains("All rights reserved") })
         }
 
+        @Test func blankArticleYieldsNoPassagesAndEmptySession() async {
+            let service = DualReaderAlignmentService()
+            #expect(await service.extractPassages(title: "  ", content: "short").isEmpty)
+
+            let blank = DualReaderAlignmentService.ArticleInput(
+                id: "blank", title: " ", content: "", publisher: "Blank Wire")
+            let other = DualReaderAlignmentService.ArticleInput(
+                id: "other", title: " ", content: "", publisher: "Other Wire")
+            let session = await service.align(left: blank, right: other)
+            #expect(session.passageAlignments.isEmpty)
+        }
+
         @Test func lexicalVectorEmbedding() async {
             let service = DualReaderAlignmentService()
             let vector = await service.fallbackLexicalVector(

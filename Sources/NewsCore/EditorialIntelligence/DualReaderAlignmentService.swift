@@ -180,7 +180,7 @@ public actor DualReaderAlignmentService {
             results.append(paragraph)
         }
 
-        return results.isEmpty ? [title] : results
+        return results
     }
 
     private func embedPassages(_ passages: [String]) async -> [[Float]] {
