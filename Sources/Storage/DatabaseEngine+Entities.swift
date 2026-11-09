@@ -141,10 +141,13 @@ extension DatabaseEngine {
     }
 
     /// Rebuilds the aggregates from the mentions: drops mentions of stories now reconciled as duplicates, recounts
-    /// every entity, rebuilds the typed adjacency list and stores each entity's global centrality. Background
-    /// maintenance only; a dossier never runs it (#716). Nil, with nothing written, when derived data was cleared
-    /// since the pass began.
-    func refreshEntityGraph(now: Date = Date(), expectedGeneration: Int) throws -> EntityGraphReport? {
+    /// every entity and rebuilds the typed adjacency list. `withCentrality` also stores each entity's global
+    /// centrality, a PageRank over the whole graph that only a background maintenance pass asks for: any other pass
+    /// leaves the centrality of the last one in place, and a dossier never computes it (#716). Nil, with nothing
+    /// written, when derived data was cleared since the pass began.
+    func refreshEntityGraph(now: Date = Date(), expectedGeneration: Int, withCentrality: Bool) throws
+        -> EntityGraphReport?
+    {
         try requireWritable()
         return try inEventTransaction { () throws -> EntityGraphReport? in
             if expectedGeneration != analysisGeneration { return nil }
@@ -181,20 +184,24 @@ extension DatabaseEngine {
                 FROM (SELECT * FROM entity_edges WHERE source < target);
                 """)
 
-            let edges = try eventRows("SELECT source, target, weight FROM entity_edges;")
-            var adjacency: EntityGraph.Adjacency = [:]
-            for row in edges {
-                guard let source = row[0], let target = row[1], let weight = row[2].flatMap(Double.init) else {
-                    continue
-                }
-                adjacency[source, default: []].append((target, weight))
-            }
-            try eventRows("UPDATE entities SET centrality = 0;")
-            for (id, rank) in EntityGraph.pageRank(adjacency) {
-                try eventRows("UPDATE entities SET centrality = ? WHERE id = ?;", [.real(rank), .text(id)])
-            }
+            if withCentrality { try storeGlobalCentrality() }
             let entityCount = try eventRows("SELECT count(*) FROM entities;").first?[0].flatMap(Int.init) ?? 0
-            return EntityGraphReport(entities: entityCount, edges: edges.count)
+            let edgeCount = try eventRows("SELECT count(*) FROM entity_edges;").first?[0].flatMap(Int.init) ?? 0
+            return EntityGraphReport(entities: entityCount, edges: edgeCount)
+        }
+    }
+
+    /// PageRank over the stored adjacency list, written to every entity (zero for one with no relationship). Runs
+    /// inside the graph refresh's transaction.
+    private func storeGlobalCentrality() throws {
+        var adjacency: EntityGraph.Adjacency = [:]
+        for row in try eventRows("SELECT source, target, weight FROM entity_edges;") {
+            guard let source = row[0], let target = row[1], let weight = row[2].flatMap(Double.init) else { continue }
+            adjacency[source, default: []].append((target, weight))
+        }
+        try eventRows("UPDATE entities SET centrality = 0;")
+        for (id, rank) in EntityGraph.pageRank(adjacency) {
+            try eventRows("UPDATE entities SET centrality = ? WHERE id = ?;", [.real(rank), .text(id)])
         }
     }
 

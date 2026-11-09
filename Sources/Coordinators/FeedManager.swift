@@ -426,7 +426,8 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     /// The entity graph's weights follow the calendar, so the system's maintenance windows rebuild it even when no feed
-    /// brought news; global centrality is computed here and never when a dossier opens (#716).
+    /// brought news. Global centrality is computed here and nowhere else: not after a feed, never when a dossier opens
+    /// (#716).
     private func startEntityMaintenance() {
         entityMaintenance?.invalidate()
         let activity = NSBackgroundActivityScheduler(identifier: "com.marspater.news.entity-maintenance")
@@ -444,7 +445,9 @@ class FeedManager: NSObject, ObservableObject {
                     completion(.deferred)
                     return
                 }
-                self.indexEntitiesInBackground(refreshGraph: true)
+                // An ordinary pass in flight would swallow this request without computing centrality: let it finish.
+                while let running = self.entityIndexTask { await running.value }
+                self.indexEntitiesInBackground(maintenance: true)
                 await self.entityIndexTask?.value
                 completion(.finished)
             }
@@ -1034,16 +1037,17 @@ class FeedManager: NSObject, ObservableObject {
     // MARK: - Entity Index
 
     /// Reads the entities of stories the index has not seen and keeps the co-reporting graph current. Off the main
-    /// actor at utility priority and never part of a refresh; a pass already running covers the request. Intelligence
-    /// off, Low Power Mode and thermal pressure leave the backlog for a later pass (#716).
-    func indexEntitiesInBackground(refreshGraph: Bool = false) {
+    /// actor at utility priority and never part of a refresh; a pass already running covers an ordinary request, and
+    /// the maintenance window waits for it (`startEntityMaintenance`). Intelligence off, Low Power Mode and thermal
+    /// pressure leave the backlog for a later pass (#716).
+    func indexEntitiesInBackground(maintenance: Bool = false) {
         guard !isStopped, entityIndexTask == nil, appSettings.aiEnabled, allowsBackgroundWork() else { return }
         let database = articleStore.database
         let runID = UUID()
         entityIndexRunID = runID
         entityIndexTask = Task { [weak self] in
             let work = Task.detached(priority: .utility) {
-                try await EntityIndexer.shared.run(in: database, refreshGraph: refreshGraph)
+                try await EntityIndexer.shared.run(in: database, maintenance: maintenance)
             }
             let result = await withTaskCancellationHandler {
                 await work.result
