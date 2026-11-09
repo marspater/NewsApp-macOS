@@ -54,8 +54,8 @@ struct WorldTensionHotspots: Equatable, Sendable {
         }.sorted { ($1.tensionScore, $1.storyCount, $1.id) < ($0.tensionScore, $0.storyCount, $0.id) }
 
         var regionTotals: [String: Total] = [:]
-        for place in places.values {
-            guard let region = service.closestRegion(for: place.coordinate) else { continue }
+        for (name, place) in places {
+            guard let region = service.theater(forLocationNamed: name) else { continue }
             regionTotals[region.id, default: Total()].pins += 1
             regionTotals[region.id]?.stories += place.headlines.count
             regionTotals[region.id]?.weight += place.weight
@@ -73,9 +73,13 @@ struct WorldTensionHotspots: Equatable, Sendable {
         _ headline: WorldTensionHeadline, pin: HotspotClusterPin?, region: HotspotRegion?,
         service: HotspotProjectionService = HotspotProjectionService()
     ) -> Bool {
-        guard let place = service.resolveLocation(for: headline.title) else { return false }
+        // Only current, tension-relevant headlines produced a marker. A neutral or
+        // prior-week item at the same place must not leak into the filtered evidence.
+        guard headline.id.hasPrefix("C"), WorldTensionAssessment.weight(of: headline) > 0,
+            let place = service.resolveLocation(for: headline.title)
+        else { return false }
         if let pin { return place.name == pin.id }
-        if let region { return service.closestRegion(for: place.coordinate)?.id == region.id }
+        if let region { return service.theater(forLocationNamed: place.name)?.id == region.id }
         return true
     }
 }
