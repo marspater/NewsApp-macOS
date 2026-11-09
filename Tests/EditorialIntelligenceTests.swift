@@ -29,12 +29,10 @@ enum EditorialIntelligenceTests {
 
     static func run() async {
         fputs("Running EditorialIntelligenceTests...\n", stderr)
-        await testEntityExtraction()
+        testEntityGraph()
         await testDualReaderAlignment()
         do {
-            try await testEntityStorePersistence()
-            try await testEntityDossierAssembly()
-            try await testPublisherQualityFilter()
+            try await testEntityIndexAndDossier()
         } catch {
             failures += 1
             fputs("❌ Editorial intelligence unexpected error: \(error)\n", stderr)
@@ -47,186 +45,47 @@ enum EditorialIntelligenceTests {
         }
     }
 
-    private static func testEntityExtraction() async {
-        let service = EntityExtractionService()
-        let text = "Microsoft CEO Satya Nadella visited Google in New York today."
-        let result = await service.extractEntities(
-            from: text,
-            articleId: "art-test-1",
-            publisherId: "test-wire",
-            publishedAt: Date()
-        )
-        let entities = result.entities
-        let mentions = result.mentions
-        let coOccurrences = result.coOccurrences
+    private static func testEntityGraph() {
+        check(EntityGraph.slug(name: "São Paulo", type: .place) == "place:sao-paulo", "Slugs fold diacritics")
+        let graph: EntityGraph.Adjacency = ["H": [("A", 2), ("B", 2)], "A": [("H", 2)], "B": [("H", 2)]]
+        let rank = EntityGraph.pageRank(graph)
+        check(abs(rank.values.reduce(0, +) - 1) < 1e-9, "PageRank sums to one")
+        check(rank["H"]! > rank["A"]!, "The hub is the most central entity")
+    }
 
-        check(!entities.isEmpty, "Entities extracted from sample sentence")
-        check(!mentions.isEmpty, "Mentions created from sample sentence")
-
-        let slugs = Set(entities.map(\.id))
-        check(
-            slugs.contains("person:satya-nadella") || entities.contains { $0.canonicalName.contains("Satya Nadella") },
-            "Person entity extracted")
-        check(
-            slugs.contains("organization:microsoft") || entities.contains { $0.canonicalName.contains("Microsoft") },
-            "Organization entity extracted")
-        check(
-            slugs.contains("location:new-york") || entities.contains { $0.canonicalName.contains("New York") },
-            "Location entity extracted")
-
-        if entities.count >= 2 {
-            check(!coOccurrences.isEmpty, "Co-occurrences calculated across entities in same article")
+    private static func testEntityIndexAndDossier() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-entity-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
+        try await database.open()
+        let now = Date(timeIntervalSince1970: 1_793_372_400)
+        let keys: [String] = ["one", "two", "three"]  // typed: `guid:` would make the literal `[String?]`
+        let articles = keys.enumerated().map { index, key in
+            FeedArticle(
+                title: "Story \(key)", link: "https://example.com/\(key)", guid: key, description: "Dek \(key)",
+                pubDate: now.addingTimeInterval(-Double(index + 1) * 86_400), source: "Publisher \(index)",
+                fullContent: "Body of \(key)")
         }
-    }
-
-    private static func testEntityStorePersistence() async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("news-entity-store-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let dbURL = tempDir.appendingPathComponent("test.sqlite3")
-        let database = DatabaseEngine(path: dbURL.path)
-        try await database.open()
-
-        let now = Date()
-        let entity = EntityRecord(
-            id: "person:satya-nadella",
-            canonicalName: "Satya Nadella",
-            entityType: .person,
-            mentionCount: 3,
-            firstSeen: now,
-            lastSeen: now
-        )
-        let mention = EntityMention(
-            id: "m-1",
-            entityId: "person:satya-nadella",
-            articleId: "art-101",
-            publisherId: "Reuters",
-            publishedAt: now,
-            passageOffset: 12,
-            confidence: 0.92
-        )
-
-        try await database.saveEntities(
-            entities: [entity],
-            mentions: [mention],
-            coOccurrences: []
-        )
-
-        let fetched = try await database.fetchEntity(id: "person:satya-nadella")
-        check(fetched != nil, "Fetched saved entity from database")
-        check(fetched?.canonicalName == "Satya Nadella", "Canonical name preserved")
-        check(fetched?.mentionCount == 3, "Mention count preserved")
-
-        let topPersons = try await database.fetchTopEntities(type: .person, limit: 10)
-        check(topPersons.count == 1, "Top person query returns 1 item")
-        check(topPersons.first?.id == "person:satya-nadella", "Top person matches inserted ID")
-    }
-
-    private static func testEntityDossierAssembly() async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("news-dossier-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let dbURL = tempDir.appendingPathComponent("test.sqlite3")
-        let database = DatabaseEngine(path: dbURL.path)
-        try await database.open()
-
-        let now = Date()
-        let entity1 = EntityRecord(
-            id: "person:satya-nadella",
-            canonicalName: "Satya Nadella",
-            entityType: .person,
-            mentionCount: 5,
-            firstSeen: now,
-            lastSeen: now
-        )
-        let entity2 = EntityRecord(
-            id: "organization:microsoft",
-            canonicalName: "Microsoft",
-            entityType: .organization,
-            mentionCount: 10,
-            firstSeen: now,
-            lastSeen: now
-        )
-
-        let m1 = EntityMention(
-            id: "m-101",
-            entityId: "person:satya-nadella",
-            articleId: "art-1",
-            publisherId: "Reuters",
-            publishedAt: now,
-            passageOffset: 0,
-            confidence: 0.95
-        )
-        let m2 = EntityMention(
-            id: "m-102",
-            entityId: "person:satya-nadella",
-            articleId: "art-2",
-            publisherId: "Bloomberg",
-            publishedAt: now,
-            passageOffset: 15,
-            confidence: 0.90
-        )
-
-        let co = EntityCoOccurrence(
-            sourceEntityId: "person:satya-nadella",
-            targetEntityId: "organization:microsoft",
-            targetCanonicalName: "Microsoft",
-            targetEntityType: .organization,
-            coOccurrenceCount: 4
-        )
-
-        try await database.saveEntities(
-            entities: [entity1, entity2],
-            mentions: [m1, m2],
-            coOccurrences: [co]
-        )
-
-        let dossier = try await database.fetchEntityDossier(entityId: "person:satya-nadella", referenceDate: now)
-        check(dossier != nil, "Dossier assembled successfully")
-        check(dossier?.publisherBreakdown.count == 2, "Publisher breakdown contains 2 publishers")
-        check(!dossier!.coverage30Days.isEmpty, "Coverage timeline contains buckets")
-
-        let totalShare = dossier?.publisherBreakdown.reduce(0.0) { $0 + $1.share } ?? 0.0
-        check(abs(totalShare - 1.0) < 0.001, "Publisher shares sum to 1.0")
-
-        let dossierB = try await database.fetchEntityDossier(entityId: "organization:microsoft", referenceDate: now)
-        check(dossierB != nil, "Dossier for target entity assembled successfully")
-        check(
-            dossierB?.coOccurringEntities.first?.targetEntityId == "person:satya-nadella",
-            "Target entity sees reverse co-occurrence")
-    }
-
-    private static func testPublisherQualityFilter() async throws {
-        let service = EntityExtractionService()
-        let tempDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("news-health-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: tempDir) }
-
-        let dbURL = tempDir.appendingPathComponent("test.sqlite3")
-        let database = DatabaseEngine(path: dbURL.path)
-        try await database.open()
-
-        let paywalledArticle = FeedArticle(
-            title: "Exclusive Report",
-            link: "https://wsj.com/story",
-            guid: "art-paywalled",
-            description: "Paywalled snippet",
-            pubDate: Date(),
-            source: "WSJ",
-            fullContent: "Full paywalled text"
-        )
-        try await database.recordReaderBarrier(.subscriber, articleID: paywalledArticle.id)
-
-        let extracted = try await service.extractAndStore(article: paywalledArticle, database: database)
-        check(!extracted, "Article with reader barrier was excluded from extraction")
-
-        let allEntities = try await database.fetchTopEntities(limit: 10)
-        check(allEntities.isEmpty, "No entities stored for paywalled article")
+        try await database.upsertArticles(articles)
+        let harbour = IndexedEntity(name: "Harbour Authority", type: .organization, score: 4)
+        let maria = IndexedEntity(name: "Maria Ortega", type: .person, score: 5)
+        let candidates = try await database.entityIndexCandidates(limit: 10)
+        check(candidates.count == 3, "Every stored story waits for the index")
+        let batch = candidates.map { ($0, $0.title == "Story three" ? [harbour] : [harbour, maria]) }
+        let generation = await database.analysisGeneration
+        let saved = try await database.saveEntityIndex(batch, expectedGeneration: generation)
+        check(saved, "The index batch is written")
+        check(try await database.entityIndexCandidates(limit: 10).isEmpty, "A story is read once")
+        _ = try await database.refreshEntityGraph(now: now, expectedGeneration: generation)
+        let dossier = try await database.fetchEntityDossier(id: "organization:harbour-authority", now: now)
+        check(dossier?.coverage.count == 30, "A dossier covers 30 days")
+        check(dossier?.storiesInWindow == 3, "Three stories name Harbour Authority")
+        check(dossier?.related.map(\.entity.id) == ["person:maria-ortega"], "Related entities share stories")
+        check(dossier?.related.first?.sharedStories == 2, "A relationship cites its stories")
+        try await database.clearArticleEnrichment()
+        check(try await database.fetchEntity(id: "organization:harbour-authority") == nil, "Clear removes entities")
     }
 
     private static func testDualReaderAlignment() async {

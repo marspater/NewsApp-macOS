@@ -275,26 +275,9 @@ struct ArticleDetailView: View {
                     },
                     onSelectRelatedEvent: { related in
                         Task {
-                            do {
-                                guard
-                                    let article = try await articleStore.database.fetchArticles(
-                                        limit: 1, id: related.articleID
-                                    ).first
-                                else {
-                                    articleStore.operationError = "This story is no longer available in your archive."
-                                    return
-                                }
-                                guard !Task.isCancelled else { return }
-                                // The same sequence as moving to the next story; the earlier event opens on its overview.
-                                resetReaderState()
-                                currentOverview = nil
-                                eventMemberArticles = []
-                                overviewRequestedArticleID = article.id
-                                activeArticle = article
-                                // Opening an event from here counts as seeing it, as it does from the feed.
+                            // Opening an event from here counts as seeing it, as it does from the feed.
+                            if await openStory(id: related.articleID) {
                                 await articleStore.markEventSeen(related.eventID)
-                            } catch {
-                                articleStore.operationError = "This story could not be opened. Please try again."
                             }
                         }
                     },
@@ -307,7 +290,9 @@ struct ArticleDetailView: View {
                             relatedStories = nil
                             await loadEventOverviewForActiveArticle()
                         }
-                    }
+                    },
+                    entitySource: articleStore.entitySource,
+                    onOpenEntityStory: { id in Task { _ = await openStory(id: id) } }
                 )
                 .id(overview.id)
                 .focusEffectDisabled(false)
@@ -500,6 +485,13 @@ struct ArticleDetailView: View {
                         fallbackStateView(reason: reason)
                     case .publisherOnly(let subscriber):
                         publisherOnlyView(subscriber: subscriber)
+                    }
+
+                    // The people, organizations and places the story names, each opening a dossier (W2 #716).
+                    if case .ready = contentState {
+                        EntityChipRow(
+                            articleIDs: [currentArticle.id], source: articleStore.entitySource,
+                            onSelectStory: { id in Task { _ = await openStory(id: id) } })
                     }
 
                     // Terminal Affordance: "Read original article on <source>", once the story is there.
@@ -2070,6 +2062,28 @@ struct ArticleDetailView: View {
         guard article.id != activeArticle.id else { return }
         resetReaderState()
         activeArticle = article
+    }
+
+    /// Opens another story by id with fresh reader state, as moving to the next story does; a story that belongs to an
+    /// event opens on its overview. False, with a notice, when the story is gone or the library cannot be read.
+    @discardableResult
+    private func openStory(id: String) async -> Bool {
+        do {
+            guard let article = try await articleStore.database.fetchArticles(limit: 1, id: id).first else {
+                articleStore.operationError = "This story is no longer available in your archive."
+                return false
+            }
+            guard !Task.isCancelled else { return false }
+            resetReaderState()
+            currentOverview = nil
+            eventMemberArticles = []
+            overviewRequestedArticleID = article.id
+            activeArticle = article
+            return true
+        } catch {
+            articleStore.operationError = "This story could not be opened. Please try again."
+            return false
+        }
     }
 
     private func resetReaderState() {
