@@ -1324,6 +1324,13 @@ extension NewsTests {
         assertEqual(
             BriefingPriorityData.isWireCopy(text: "Israeli-occupied town reopens", publisher: "Daily Example"), false,
             "A headline with \"occupied\" is not UPI wire copy")
+        assertEqual(
+            BriefingPriorityData.isWireCopy(text: "UPI: Town reopens", publisher: "Daily Example"), true,
+            "A UPI credit is wire copy")
+        assertEqual(
+            BriefingRanking.signal(
+                reports: [("A", "(AP) - x"), ("B", "(AP) - x"), ("C", "(Reuters) x")], importance: nil
+            ).originalCount, 2, "Two agencies' dispatches count twice, copies of one count once")
         let wireSignal = BriefingRanking.signal(reports: wireCopies, importance: nil)
         assertEqual(wireSignal.originalCount, 1, "Six copies of one wire dispatch count once")
         assertEqual(

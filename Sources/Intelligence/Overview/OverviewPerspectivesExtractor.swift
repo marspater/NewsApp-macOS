@@ -257,7 +257,7 @@ struct OverviewPerspectivesExtractor: Sendable {
         ("Associated Press", ["(ap)", "associated press", "— ap", "by associated press", "ap news"]),
         ("AFP", ["(afp)", "agence france-presse", "— afp", "by afp"]),
         ("Bloomberg", ["bloomberg news", "bloomberg", "— bloomberg"]),
-        ("UPI", ["united press international", "(upi)", "— upi", "by upi"]),
+        ("UPI", ["united press international", "(upi)", "— upi", "by upi", "upi:", "upi -", "upi —"]),
         ("PR Newswire", ["pr newswire", "(pr newswire)"]),
         ("Business Wire", ["business wire", "(business wire)"]),
     ]

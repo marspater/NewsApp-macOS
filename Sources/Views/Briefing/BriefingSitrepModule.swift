@@ -29,18 +29,20 @@ struct BriefingRanking: Equatable, Sendable {
     /// By entry id. A story without a signal (before the load finishes, or a single article) ranks by its publishers.
     var signals: [String: Signal] = [:]
 
-    /// Distinct publishers with an original report, plus one for all wire copies together.
+    /// Distinct publishers with an original report, plus one per wire agency whose dispatch was copied.
     static func signal(reports: [(publisher: String, text: String)], importance: StoryImportance?) -> Signal {
         var originals = Set<String>()
-        var hasWireCopy = false
+        var wires = Set<String>()
         for report in reports {
             if BriefingPriorityData.isWireCopy(text: report.text, publisher: report.publisher) {
-                hasWireCopy = true
+                let zone = String(report.text.prefix(BriefingPriorityData.attributionZoneLength))
+                wires.insert(
+                    OverviewPerspectivesExtractor.detectWireSource(in: zone, articleSource: report.publisher) ?? "")
             } else {
                 originals.insert(report.publisher)
             }
         }
-        return Signal(originalCount: originals.count + (hasWireCopy ? 1 : 0), importance: importance)
+        return Signal(originalCount: originals.count + wires.count, importance: importance)
     }
 
     /// Best first; an unrated story ranks below a rated one, and equal stories keep edition order.
