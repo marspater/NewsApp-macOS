@@ -187,9 +187,9 @@ final class NewsSmokeUITests: XCTestCase {
         XCTAssertTrue(walkAccessibilityTree().contains("Image credit: Fixture Photo Desk"))
     }
 
-    /// A story whose lead image never finishes loading (fixture URL containing `stall`).
+    /// The lighthouse story: its lead image never finishes loading (fixture URL containing `stall`).
     func test08AccessibilityTreeWithImageStillLoading() {
-        openHeadline("Ferry Timetable Change Waits On Slow Harbour Photo")
+        openHeadline()
         XCTAssertTrue(
             app.descendants(matching: .any)["Loading story image"].waitForExistence(timeout: 20),
             "The loading placeholder did not appear")
