@@ -38,7 +38,7 @@ Both draws are stratified by shared headline words, so paraphrased pairs are sca
 
 ## Candidate
 
-An evidence head: `same` against the rest, logistic over the cosine and the time gap (capped at 96 h), fitted on Stage 1. For two publishers within 36 h, a probability at or above the cutoff makes the pair a match, overriding `titleNumbers`, `weekday`, `places`, `headlinePlaces` and `differentAct` and the shared-name requirement. Weights −7.7861, 13.4012, −10.2524; cutoff 0.78, the lowest with out-of-fold precision ≥ 0.95 (79 of 108 `same`, 4 others), frozen before validation. At 0.78 the tune replay (44 / 0 / 49), the authored matcher regressions (24 / 0) and the story regressions are unchanged; at 0.05 they break (42 / 7 on tune, 26 / 6 authored), so the setting reached them.
+An evidence head: `same` against the rest, logistic over the cosine and the time gap (capped at 96 h), fitted on Stage 1. For two publishers within 36 h, a probability at or above the cutoff makes the pair a match, overriding `titleNumbers`, `weekday`, `places`, `headlinePlaces` and `differentAct` and the shared-name requirement. Weights −7.7861, 13.4012, −10.2524; cutoff 0.78, the lowest with out-of-fold precision ≥ 0.95 (79 of 108 `same`, 4 others), frozen before validation. The fitting script first read that rule as "this and every higher cutoff keep 0.95", which one high-scoring `later` pair turned into 0.99 (6 of 108 `same`); the rule was changed to the plan's wording before validation was scored. At 0.78 the tune replay (44 / 0 / 49), the authored matcher regressions (24 / 0) and the story regressions are unchanged; at 0.05 they break (42 / 7 on tune, 26 / 6 authored), so the setting reached them.
 
 The plan on #737 named the falsifiers before any run.
 
