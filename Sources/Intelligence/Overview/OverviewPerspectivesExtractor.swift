@@ -254,7 +254,7 @@ struct OverviewPerspectivesExtractor: Sendable {
     /// Recognized syndicated wire news agencies.
     private static let recognizedWireServices: [(name: String, markers: [String])] = [
         ("Reuters", ["(reuters)", "reuters", "— reuters", "by reuters"]),
-        ("Associated Press", ["(ap)", "associated press", "— ap", "by associated press", "ap news"]),
+        ("Associated Press", ["(ap)", "associated press", "— ap", "by associated press", " ap news", "(ap news)"]),
         ("AFP", ["(afp)", "agence france-presse", "— afp", "by afp"]),
         ("Bloomberg", ["bloomberg news", "bloomberg", "— bloomberg"]),
         ("UPI", ["united press international", "(upi)", "— upi", "by upi", "upi:", "upi -", "upi —"]),
