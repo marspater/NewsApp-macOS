@@ -58,9 +58,15 @@ struct EntityDossierPopover: View {
 struct EntityDossierView: View {
     let dossier: EntityDossier
     var canGoBack = false
-    var onBack: () -> Void = {}
-    var onSelectRelated: (EntityRecord) -> Void = { _ in }
-    var onOpenStory: (String) -> Void = { _ in }
+    var onBack: () -> Void = {
+        // A dossier opened on its own has nothing to go back to; the popover passes its trail.
+    }
+    var onSelectRelated: (EntityRecord) -> Void = { _ in
+        // A dossier opened on its own follows no related entity; the popover passes its handler.
+    }
+    var onOpenStory: (String) -> Void = { _ in
+        // A dossier opened on its own opens no story; the reader and the overview pass theirs.
+    }
 
     var body: some View {
         ScrollView {
@@ -239,8 +245,13 @@ struct EntityDossierView: View {
     }
 
     #Preview("Entity chips", traits: .modifier(PreviewEnvironment())) {
-        EntityChipRow(articleIDs: ["preview"], source: PreviewFixtures.entitySource, onSelectStory: { _ in })
-            .padding(AppLayout.pageInset)
-            .frame(width: AppLayout.readingMeasure)
+        EntityChipRow(
+            articleIDs: ["preview"], source: PreviewFixtures.entitySource,
+            onSelectStory: { _ in
+                // A preview opens nothing.
+            }
+        )
+        .padding(AppLayout.pageInset)
+        .frame(width: AppLayout.readingMeasure)
     }
 #endif
