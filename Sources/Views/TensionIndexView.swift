@@ -50,6 +50,8 @@ struct TensionIndexView: View {
     }
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDay: Date?
+    @State private var selectedRegion: HotspotRegion?
+    @State private var selectedPin: HotspotClusterPin?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +64,19 @@ struct TensionIndexView: View {
                         group("Assessment") {
                             readingHeader(reading)
                             summary(reading)
+                        }
+                        group("Global Hotspot Intelligence") {
+                            GlobalHotspotMapView(
+                                onSelectRegion: { region in
+                                    selectedRegion = region
+                                    selectedPin = nil
+                                },
+                                onSelectPin: { pin in
+                                    selectedPin = pin
+                                    selectedRegion = nil
+                                }
+                            )
+                            .frame(height: AppLayout.hotspotMapHeight)
                         }
                         drivers(reading)
                         group {
@@ -95,7 +110,7 @@ struct TensionIndexView: View {
                                 "Today has no reading yet. These publisher headlines are what the next assessment reads."
                             )
                             .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
-                            headlineTable(state.panelHeadlines)
+                            headlineTable(filteredHeadlines(state.panelHeadlines))
                         }
                     }
                     footer
@@ -305,12 +320,47 @@ struct TensionIndexView: View {
                 VStack(alignment: .leading, spacing: AppSpacing.sm) {
                     Text("C: last 24 hours · P: preceding six days").font(AppTypography.caption).foregroundStyle(
                         AppColor.secondaryText)
-                    headlineTable(reading.headlines)
+                    headlineTable(filteredHeadlines(reading.headlines))
                 }.padding(.top, AppSpacing.sm)
             } label: {
-                groupTitle("All Panel Headlines")
+                groupTitle(selectedTheaterTitle)
             }
         }
+    }
+
+    private var selectedTheaterTitle: String {
+        if let pin = selectedPin {
+            return "Headlines: \(pin.title)"
+        } else if let region = selectedRegion {
+            return "Headlines: \(region.name)"
+        } else {
+            return "All Panel Headlines"
+        }
+    }
+
+    private func filteredHeadlines(_ headlines: [WorldTensionHeadline]) -> [WorldTensionHeadline] {
+        if let pin = selectedPin {
+            let matched = headlines.filter { h in
+                h.title.localizedCaseInsensitiveContains(pin.title)
+                    || pin.topPublisherIds.contains(h.publisher)
+            }
+            return matched.isEmpty ? headlines : matched
+        }
+        if let region = selectedRegion {
+            let service = HotspotProjectionService()
+            let matched = headlines.filter { h in
+                if h.title.localizedCaseInsensitiveContains(region.name) { return true }
+                if let coord = service.resolveCoordinate(for: h.title),
+                    let closest = service.closestRegion(for: coord),
+                    closest.id == region.id
+                {
+                    return true
+                }
+                return false
+            }
+            return matched.isEmpty ? headlines : matched
+        }
+        return headlines
     }
 
     private var footer: some View {

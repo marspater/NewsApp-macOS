@@ -133,88 +133,93 @@ public struct HotspotProjectionService: Sendable {
 
     // MARK: - Location Coordinate Resolution
 
+    private static let locationCentroids: [String: GeographicCoordinate] = [
+        // Eastern Europe
+        "ukraine": GeographicCoordinate(latitude: 49.0, longitude: 31.0),
+        "kyiv": GeographicCoordinate(latitude: 50.45, longitude: 30.52),
+        "crimea": GeographicCoordinate(latitude: 45.3, longitude: 34.4),
+        "donetsk": GeographicCoordinate(latitude: 48.0, longitude: 37.8),
+        "kharkiv": GeographicCoordinate(latitude: 49.99, longitude: 36.23),
+        "poland": GeographicCoordinate(latitude: 52.0, longitude: 19.0),
+        "warsaw": GeographicCoordinate(latitude: 52.23, longitude: 21.01),
+
+        // Middle East & Levant
+        "israel": GeographicCoordinate(latitude: 31.5, longitude: 34.8),
+        "gaza": GeographicCoordinate(latitude: 31.5, longitude: 34.45),
+        "jerusalem": GeographicCoordinate(latitude: 31.77, longitude: 35.21),
+        "tel aviv": GeographicCoordinate(latitude: 32.08, longitude: 34.78),
+        "lebanon": GeographicCoordinate(latitude: 33.85, longitude: 35.86),
+        "beirut": GeographicCoordinate(latitude: 33.89, longitude: 35.50),
+        "iran": GeographicCoordinate(latitude: 32.42, longitude: 53.68),
+        "tehran": GeographicCoordinate(latitude: 35.68, longitude: 51.38),
+        "saudi arabia": GeographicCoordinate(latitude: 23.88, longitude: 45.07),
+        "yemen": GeographicCoordinate(latitude: 15.55, longitude: 48.51),
+        "red sea": GeographicCoordinate(latitude: 20.0, longitude: 38.5),
+
+        // East Asia
+        "taiwan": GeographicCoordinate(latitude: 23.69, longitude: 120.96),
+        "taipei": GeographicCoordinate(latitude: 25.03, longitude: 121.56),
+        "taiwan strait": GeographicCoordinate(latitude: 24.0, longitude: 119.5),
+        "china": GeographicCoordinate(latitude: 35.86, longitude: 104.19),
+        "beijing": GeographicCoordinate(latitude: 39.90, longitude: 116.40),
+        "south china sea": GeographicCoordinate(latitude: 16.0, longitude: 114.0),
+        "korea": GeographicCoordinate(latitude: 38.0, longitude: 127.5),
+        "seoul": GeographicCoordinate(latitude: 37.56, longitude: 126.97),
+        "tokyo": GeographicCoordinate(latitude: 35.68, longitude: 139.69),
+        "japan": GeographicCoordinate(latitude: 36.20, longitude: 138.25),
+
+        // Western Europe & Americas
+        "united states": GeographicCoordinate(latitude: 37.09, longitude: -95.71),
+        "washington": GeographicCoordinate(latitude: 38.90, longitude: -77.03),
+        "new york": GeographicCoordinate(latitude: 40.71, longitude: -74.00),
+        "united kingdom": GeographicCoordinate(latitude: 55.37, longitude: -3.43),
+        "london": GeographicCoordinate(latitude: 51.50, longitude: -0.12),
+        "france": GeographicCoordinate(latitude: 46.22, longitude: 2.21),
+        "paris": GeographicCoordinate(latitude: 48.85, longitude: 2.35),
+        "germany": GeographicCoordinate(latitude: 51.16, longitude: 10.45),
+        "berlin": GeographicCoordinate(latitude: 52.52, longitude: 13.40),
+        "geneva": GeographicCoordinate(latitude: 46.20, longitude: 6.14),
+        "switzerland": GeographicCoordinate(latitude: 46.81, longitude: 8.22),
+        "india": GeographicCoordinate(latitude: 20.59, longitude: 78.96),
+        "new delhi": GeographicCoordinate(latitude: 28.61, longitude: 77.20),
+    ]
+
     /// Resolves canonical location name to known geographic coordinates.
     public func resolveCoordinate(for locationName: String) -> GeographicCoordinate? {
-        let clean = locationName.lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .components(separatedBy: CharacterSet.punctuationCharacters)
-            .joined()
+        let separators = CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines)
+        let words = locationName.lowercased()
+            .components(separatedBy: separators)
+            .filter { !$0.isEmpty }
 
-        let dictionary: [String: GeographicCoordinate] = [
-            // Eastern Europe
-            "ukraine": GeographicCoordinate(latitude: 49.0, longitude: 31.0),
-            "kyiv": GeographicCoordinate(latitude: 50.45, longitude: 30.52),
-            "crimea": GeographicCoordinate(latitude: 45.3, longitude: 34.4),
-            "donetsk": GeographicCoordinate(latitude: 48.0, longitude: 37.8),
-            "kharkiv": GeographicCoordinate(latitude: 49.99, longitude: 36.23),
-            "poland": GeographicCoordinate(latitude: 52.0, longitude: 19.0),
-            "warsaw": GeographicCoordinate(latitude: 52.23, longitude: 21.01),
+        guard !words.isEmpty else { return nil }
 
-            // Middle East & Levant
-            "israel": GeographicCoordinate(latitude: 31.5, longitude: 34.8),
-            "gaza": GeographicCoordinate(latitude: 31.5, longitude: 34.45),
-            "jerusalem": GeographicCoordinate(latitude: 31.77, longitude: 35.21),
-            "tel aviv": GeographicCoordinate(latitude: 32.08, longitude: 34.78),
-            "lebanon": GeographicCoordinate(latitude: 33.85, longitude: 35.86),
-            "beirut": GeographicCoordinate(latitude: 33.89, longitude: 35.50),
-            "iran": GeographicCoordinate(latitude: 32.42, longitude: 53.68),
-            "tehran": GeographicCoordinate(latitude: 35.68, longitude: 51.38),
-            "saudi arabia": GeographicCoordinate(latitude: 23.88, longitude: 45.07),
-            "yemen": GeographicCoordinate(latitude: 15.55, longitude: 48.51),
-            "red sea": GeographicCoordinate(latitude: 20.0, longitude: 38.5),
-
-            // East Asia
-            "taiwan": GeographicCoordinate(latitude: 23.69, longitude: 120.96),
-            "taipei": GeographicCoordinate(latitude: 25.03, longitude: 121.56),
-            "taiwan strait": GeographicCoordinate(latitude: 24.0, longitude: 119.5),
-            "china": GeographicCoordinate(latitude: 35.86, longitude: 104.19),
-            "beijing": GeographicCoordinate(latitude: 39.90, longitude: 116.40),
-            "south china sea": GeographicCoordinate(latitude: 16.0, longitude: 114.0),
-            "korea": GeographicCoordinate(latitude: 38.0, longitude: 127.5),
-            "seoul": GeographicCoordinate(latitude: 37.56, longitude: 126.97),
-            "tokyo": GeographicCoordinate(latitude: 35.68, longitude: 139.69),
-            "japan": GeographicCoordinate(latitude: 36.20, longitude: 138.25),
-
-            // Western Europe & Americas
-            "united states": GeographicCoordinate(latitude: 37.09, longitude: -95.71),
-            "washington": GeographicCoordinate(latitude: 38.90, longitude: -77.03),
-            "new york": GeographicCoordinate(latitude: 40.71, longitude: -74.00),
-            "united kingdom": GeographicCoordinate(latitude: 55.37, longitude: -3.43),
-            "london": GeographicCoordinate(latitude: 51.50, longitude: -0.12),
-            "france": GeographicCoordinate(latitude: 46.22, longitude: 2.21),
-            "paris": GeographicCoordinate(latitude: 48.85, longitude: 2.35),
-            "germany": GeographicCoordinate(latitude: 51.16, longitude: 10.45),
-            "berlin": GeographicCoordinate(latitude: 52.52, longitude: 13.40),
-            "geneva": GeographicCoordinate(latitude: 46.20, longitude: 6.14),
-            "switzerland": GeographicCoordinate(latitude: 46.81, longitude: 8.22),
-            "india": GeographicCoordinate(latitude: 20.59, longitude: 78.96),
-            "new delhi": GeographicCoordinate(latitude: 28.61, longitude: 77.20),
-        ]
-
-        if let exact = dictionary[clean] {
-            return exact
-        }
-
-        // Fuzzy prefix/suffix match
-        for (key, coord) in dictionary {
-            if clean.contains(key) || key.contains(clean) {
-                return coord
+        // Longest n-gram first at each start position, in input order.
+        for start in words.indices {
+            for end in stride(from: words.count, to: start, by: -1) {
+                let candidate = words[start..<end].joined(separator: " ")
+                if let hit = Self.locationCentroids[candidate] {
+                    return hit
+                }
             }
         }
 
         return nil
     }
 
-    /// Finds the closest matching standard region for a given coordinate.
-    public func closestRegion(for coordinate: GeographicCoordinate) -> HotspotRegion? {
+    /// Finds the closest matching standard region for a given coordinate within maxDegrees.
+    public func closestRegion(
+        for coordinate: GeographicCoordinate,
+        maxDegrees: Double = 25.0
+    ) -> HotspotRegion? {
         var closest: HotspotRegion?
-        var minDistance: Double = .greatestFiniteMagnitude
+        var minDistance: Double = maxDegrees * maxDegrees
 
         for region in Self.standardRegions {
             let dLat = region.centroid.latitude - coordinate.latitude
-            let dLon = region.centroid.longitude - coordinate.longitude
+            var dLon = abs(region.centroid.longitude - coordinate.longitude)
+            if dLon > 180.0 { dLon = 360.0 - dLon }
             let distance = dLat * dLat + dLon * dLon
-            if distance < minDistance {
+            if distance <= minDistance {
                 minDistance = distance
                 closest = region
             }

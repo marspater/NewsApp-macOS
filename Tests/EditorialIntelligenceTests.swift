@@ -284,8 +284,17 @@ enum EditorialIntelligenceTests {
         check(kyivCoord != nil, "Resolved location coordinate for Kyiv")
         check(kyivCoord?.latitude ?? 0 > 40.0, "Kyiv latitude is in Northern hemisphere")
 
+        let telAviv = service.resolveCoordinate(for: "Tel-Aviv")
+        check(telAviv != nil, "Resolved location coordinate for Tel-Aviv")
+
+        let indiana = service.resolveCoordinate(for: "Indiana")
+        check(indiana == nil, "Unrelated substring Indiana returns nil")
+
         let closest = service.closestRegion(for: GeographicCoordinate(latitude: 49.0, longitude: 31.0))
         check(closest?.id == "UA", "Matched closest hotspot region UA for Ukraine coordinate")
+
+        let sydney = GeographicCoordinate(latitude: -33.86, longitude: 151.2)
+        check(service.closestRegion(for: sydney) == nil, "Distant coordinate outside standard regions returns nil")
 
         check(HotspotTensionLevel.level(for: 80.0) == .critical, "Tension score 80 is critical")
         check(HotspotTensionLevel.level(for: 50.0) == .significant, "Tension score 50 is significant")

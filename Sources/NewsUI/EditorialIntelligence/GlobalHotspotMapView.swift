@@ -72,7 +72,7 @@ public struct GlobalHotspotMapView: View {
             }
         }
         .background(Color(NSColor.windowBackgroundColor))
-        .frame(minWidth: 700, minHeight: 450)
+        .frame(minHeight: 280)
     }
 
     // MARK: - Header & Legend
@@ -92,8 +92,8 @@ public struct GlobalHotspotMapView: View {
             // Tension Legend
             HStack(spacing: 12) {
                 legendItem(color: .green, label: "Elevated (<35)")
-                legendItem(color: .orange, label: "Significant (35-70)")
-                legendItem(color: .red, label: "Critical (>70)")
+                legendItem(color: .orange, label: "Significant (35-69)")
+                legendItem(color: .red, label: "Critical (70-100)")
             }
 
             if selectedRegionId != nil || selectedPinId != nil {
@@ -149,64 +149,28 @@ public struct GlobalHotspotMapView: View {
         }
     }
 
-    private func drawContinentPaths(in context: inout GraphicsContext, size: CGSize, color: Color) {
-        // Simplified polygon landmasses for 100% offline projection
-        let continents: [[CGPoint]] = [
-            // North America
-            [
-                projectNormalized(x: 0.12, y: 0.15, size: size),
-                projectNormalized(x: 0.28, y: 0.15, size: size),
-                projectNormalized(x: 0.32, y: 0.35, size: size),
-                projectNormalized(x: 0.24, y: 0.52, size: size),
-                projectNormalized(x: 0.18, y: 0.45, size: size),
-                projectNormalized(x: 0.10, y: 0.30, size: size),
-            ],
-            // South America
-            [
-                projectNormalized(x: 0.26, y: 0.55, size: size),
-                projectNormalized(x: 0.36, y: 0.58, size: size),
-                projectNormalized(x: 0.33, y: 0.85, size: size),
-                projectNormalized(x: 0.27, y: 0.88, size: size),
-                projectNormalized(x: 0.24, y: 0.65, size: size),
-            ],
-            // Europe
-            [
-                projectNormalized(x: 0.46, y: 0.18, size: size),
-                projectNormalized(x: 0.58, y: 0.18, size: size),
-                projectNormalized(x: 0.56, y: 0.38, size: size),
-                projectNormalized(x: 0.44, y: 0.38, size: size),
-            ],
-            // Africa
-            [
-                projectNormalized(x: 0.46, y: 0.42, size: size),
-                projectNormalized(x: 0.60, y: 0.42, size: size),
-                projectNormalized(x: 0.58, y: 0.78, size: size),
-                projectNormalized(x: 0.50, y: 0.78, size: size),
-                projectNormalized(x: 0.42, y: 0.52, size: size),
-            ],
-            // Asia
-            [
-                projectNormalized(x: 0.60, y: 0.15, size: size),
-                projectNormalized(x: 0.88, y: 0.18, size: size),
-                projectNormalized(x: 0.82, y: 0.55, size: size),
-                projectNormalized(x: 0.68, y: 0.52, size: size),
-                projectNormalized(x: 0.60, y: 0.35, size: size),
-            ],
-            // Australia
-            [
-                projectNormalized(x: 0.78, y: 0.68, size: size),
-                projectNormalized(x: 0.90, y: 0.68, size: size),
-                projectNormalized(x: 0.88, y: 0.85, size: size),
-                projectNormalized(x: 0.78, y: 0.85, size: size),
-            ],
-        ]
+    private static let continentPolygons: [[[Double]]] = [
+        // North America
+        [[0.12, 0.15], [0.28, 0.15], [0.32, 0.35], [0.24, 0.52], [0.18, 0.45], [0.10, 0.30]],
+        // South America
+        [[0.26, 0.55], [0.36, 0.58], [0.33, 0.85], [0.27, 0.88], [0.24, 0.65]],
+        // Europe
+        [[0.46, 0.18], [0.58, 0.18], [0.56, 0.38], [0.44, 0.38]],
+        // Africa
+        [[0.46, 0.42], [0.60, 0.42], [0.58, 0.78], [0.50, 0.78], [0.42, 0.52]],
+        // Asia
+        [[0.60, 0.15], [0.88, 0.18], [0.82, 0.55], [0.68, 0.52], [0.60, 0.35]],
+        // Australia
+        [[0.78, 0.68], [0.90, 0.68], [0.88, 0.85], [0.78, 0.85]],
+    ]
 
-        for poly in continents {
+    private func drawContinentPaths(in context: inout GraphicsContext, size: CGSize, color: Color) {
+        for poly in Self.continentPolygons {
             var path = Path()
             guard let first = poly.first else { continue }
-            path.move(to: first)
+            path.move(to: projectNormalized(x: first[0], y: first[1], size: size))
             for pt in poly.dropFirst() {
-                path.addLine(to: pt)
+                path.addLine(to: projectNormalized(x: pt[0], y: pt[1], size: size))
             }
             path.closeSubpath()
             context.fill(path, with: .color(color))
@@ -244,6 +208,16 @@ public struct GlobalHotspotMapView: View {
                 .frame(width: isSelected ? 24 : 16, height: isSelected ? 24 : 16)
         }
         .position(pt)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(region.name), \(region.tensionLevel.displayName), tension \(Int(region.tensionScore)) of 100"
+        )
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction {
+            selectedRegionId = region.id
+            selectedPinId = nil
+            onSelectRegion?(region)
+        }
         .onTapGesture {
             selectedRegionId = region.id
             selectedPinId = nil
@@ -260,6 +234,7 @@ public struct GlobalHotspotMapView: View {
         )
         let isSelected = selectedPinId == pin.id
         let color = tensionColor(for: pin.tensionScore)
+        let textColor: Color = (pin.tensionScore >= 35.0 && pin.tensionScore < 70.0) ? .black : .white
 
         return VStack(spacing: 2) {
             Image(systemName: "mappin.circle.fill")
@@ -269,13 +244,23 @@ public struct GlobalHotspotMapView: View {
 
             Text("\(Int(pin.tensionScore))")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(textColor)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
                 .background(color)
                 .cornerRadius(4)
         }
         .position(pt)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "\(pin.title), tension \(Int(pin.tensionScore)) of 100, \(pin.storyCount) stories"
+        )
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction {
+            selectedPinId = pin.id
+            selectedRegionId = nil
+            onSelectPin?(pin)
+        }
         .onTapGesture {
             selectedPinId = pin.id
             selectedRegionId = nil
@@ -285,16 +270,23 @@ public struct GlobalHotspotMapView: View {
 
     // MARK: - Selection Detail Drawer
 
-    private var activeSelectionSummary: (title: String, subtitle: String, tension: Double, count: Int)? {
+    private struct HotspotSelectionSummary {
+        let title: String
+        let subtitle: String
+        let tension: Double
+        let count: Int
+    }
+
+    private var activeSelectionSummary: HotspotSelectionSummary? {
         if let pinId = selectedPinId, let pin = clusterPins.first(where: { $0.id == pinId }) {
-            return (
+            return HotspotSelectionSummary(
                 title: pin.title,
                 subtitle: "Active Event Cluster • \(pin.storyCount) stories",
                 tension: pin.tensionScore,
                 count: pin.storyCount
             )
         } else if let regionId = selectedRegionId, let region = regions.first(where: { $0.id == regionId }) {
-            return (
+            return HotspotSelectionSummary(
                 title: region.name,
                 subtitle: "\(region.activeClusterCount) active clusters • \(region.articleCount) stories",
                 tension: region.tensionScore,
@@ -304,9 +296,7 @@ public struct GlobalHotspotMapView: View {
         return nil
     }
 
-    private func selectionDetailBar(summary: (title: String, subtitle: String, tension: Double, count: Int))
-        -> some View
-    {
+    private func selectionDetailBar(summary: HotspotSelectionSummary) -> some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(summary.title)
@@ -338,12 +328,10 @@ public struct GlobalHotspotMapView: View {
     }
 
     private func tensionColor(for score: Double) -> Color {
-        if score >= 70.0 {
-            return .red
-        } else if score >= 35.0 {
-            return .orange
-        } else {
-            return .green
+        switch HotspotTensionLevel.level(for: score) {
+        case .critical: return .red
+        case .significant: return .orange
+        case .elevated: return .green
         }
     }
 }

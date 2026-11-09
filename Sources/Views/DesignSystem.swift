@@ -200,6 +200,7 @@ enum AppLayout {
     static let tensionSheetHeight: CGFloat = 660
     static let tensionChartHeight: CGFloat = 160
     static let tensionScaleHeight: CGFloat = 8
+    static let hotspotMapHeight: CGFloat = 320
     /// The centered rule between sections of a story in the reader.
     static let readerSectionRuleWidth: CGFloat = 120
     /// A decoded image narrower than this keeps its own width; wider ones fill the measure.

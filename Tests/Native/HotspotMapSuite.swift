@@ -83,6 +83,12 @@ extension NativeSuites {
             #expect(taipei != nil)
             #expect(taipei?.longitude ?? 0 > 115.0)
 
+            let telAviv = service.resolveCoordinate(for: "Tel-Aviv")
+            #expect(telAviv != nil)
+
+            let indiana = service.resolveCoordinate(for: "Indiana")
+            #expect(indiana == nil)
+
             let unknown = service.resolveCoordinate(for: "NonexistentFantasyLand99")
             #expect(unknown == nil)
         }
@@ -101,6 +107,11 @@ extension NativeSuites {
             let ukraineCoord = GeographicCoordinate(latitude: 49.5, longitude: 32.0)
             let closest = service.closestRegion(for: ukraineCoord)
             #expect(closest?.id == "UA")
+
+            // Distant coordinate returns nil when no region is within threshold
+            let sydney = GeographicCoordinate(latitude: -33.86, longitude: 151.2)
+            let farRegion = service.closestRegion(for: sydney)
+            #expect(farRegion == nil)
         }
     }
 }
