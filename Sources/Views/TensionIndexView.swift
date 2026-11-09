@@ -50,6 +50,10 @@ struct TensionIndexView: View {
     }
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDay: Date?
+    @State private var selectedRegion: HotspotRegion?
+    @State private var selectedPin: HotspotClusterPin?
+    @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,6 +67,8 @@ struct TensionIndexView: View {
                             readingHeader(reading)
                             summary(reading)
                         }
+                        nearYou(reading)
+                        hotspotMap(reading)
                         drivers(reading)
                         group {
                             DisclosureGroup {
@@ -71,7 +77,6 @@ struct TensionIndexView: View {
                                 groupTitle("Factor Breakdown")
                             }
                         }
-                        evidence(reading)
                         if trend.count > 1 {
                             group("Past 30 Days") { TensionTrendChart(readings: trend, selection: $selectedDay) }
                         }
@@ -104,6 +109,11 @@ struct TensionIndexView: View {
             }
         }
         .frame(width: AppLayout.tensionSheetWidth, height: AppLayout.tensionSheetHeight)
+        // Another reading, or none, starts without a place filter; a selection never outlives its map.
+        .onChange(of: selected?.id) {
+            selectedRegion = nil
+            selectedPin = nil
+        }
     }
 
     /// The sheet title carries the page's one intelligence glyph; how the reading was made is a caption under it
@@ -162,6 +172,13 @@ struct TensionIndexView: View {
                         Text(comparison).font(AppTypography.callout).foregroundStyle(AppColor.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    if let near = reading.assessment.nearYou {
+                        Text(
+                            "World \(near.worldScore)° · Near you in \(near.region) +\(reading.assessment.score - near.worldScore)°"
+                        )
+                        .font(AppTypography.callout).foregroundStyle(AppColor.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
                     Text(updated(reading)).font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
                 }
                 Spacer()
@@ -170,8 +187,31 @@ struct TensionIndexView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
                 "World tension \(reading.assessment.score) degrees, \(reading.level.rawValue)"
+                    + (reading.assessment.nearYou.map {
+                        ", \(reading.assessment.score - $0.worldScore) of them near you in \($0.region)"
+                    } ?? "")
                     + (reading.assessment.isEstimate == true ? ", keyword estimate" : ""))
             TensionScaleBar(score: reading.assessment.score)
+        }
+    }
+
+    /// What the reader's own library says about what is near them, with the reasons for each part (the Near you lens).
+    @ViewBuilder
+    private func nearYou(_ reading: WorldTensionReading) -> some View {
+        if let near = reading.assessment.nearYou {
+            group("Near You") {
+                if let line = near.neighbourReason {
+                    Text(line).font(AppTypography.body).fixedSize(horizontal: false, vertical: true)
+                }
+                if let line = near.domesticReason {
+                    Text(line).font(AppTypography.body).fixedSize(horizontal: false, vertical: true)
+                }
+                Text(
+                    "Counted by keyword in the stories of your library in the week before this day, up to \(WorldTensionNearYou.cap)°; the on-device model does not read them. It follows your Mac's region."
+                )
+                .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -299,18 +339,59 @@ struct TensionIndexView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func evidence(_ reading: WorldTensionReading) -> some View {
-        group {
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                    Text("C: last 24 hours · P: preceding six days").font(AppTypography.caption).foregroundStyle(
-                        AppColor.secondaryText)
-                    headlineTable(reading.headlines)
-                }.padding(.top, AppSpacing.sm)
-            } label: {
-                groupTitle("All Panel Headlines")
+    /// The offline map of the places this reading's headlines name; selecting one shows the headlines that name it under
+    /// the map, and never the whole panel.
+    @ViewBuilder
+    private func hotspotMap(_ reading: WorldTensionReading) -> some View {
+        let hotspots = WorldTensionHotspots(reading: reading)
+        group("Global Hotspot Intelligence") {
+            if hotspots.isEmpty {
+                Text("No current headline names a mapped place with a tension cue.")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+            } else {
+                GlobalHotspotMapView(
+                    regions: hotspots.regions,
+                    clusterPins: hotspots.pins,
+                    onSelectRegion: { region in
+                        selectedRegion = region
+                        selectedPin = nil
+                    },
+                    onSelectPin: { pin in
+                        selectedPin = pin
+                        selectedRegion = nil
+                    }
+                )
+                .frame(height: AppLayout.hotspotMapHeight)
+                .id(reading.id)
+                if let place = selectedPlace {
+                    selectedHeadlines(reading, place: place)
+                }
             }
         }
+    }
+
+    /// The headlines that name the selected place, under the map.
+    private func selectedHeadlines(_ reading: WorldTensionReading, place: String) -> some View {
+        let matching = reading.headlines.filter {
+            WorldTensionHotspots.matches($0, pin: selectedPin, region: selectedRegion)
+        }
+        return VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Divider()
+            groupTitle("Headlines: \(place)")
+            if matching.isEmpty {
+                Text("No current tension-related headline matches this selection.")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+            } else {
+                Text("C: last 24 hours · P: preceding six days")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                headlineTable(matching)
+            }
+        }
+    }
+
+    /// The title of the place chosen on the map, or nil while none is.
+    private var selectedPlace: String? {
+        selectedPin?.title ?? selectedRegion?.name
     }
 
     private var footer: some View {
@@ -321,7 +402,7 @@ struct TensionIndexView: View {
             .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
             DisclosureGroup("How World Tension Is Assessed") {
                 Text(
-                    "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Before an assessment is saved, every place, person and figure it names is checked against the supplied headlines. Royal, celebrity, sport and lifestyle stories are left out. The reading shown is the weighted average of the past seven days' assessments, plus up to 9° when the assessment rose on consecutive days. When no assessment exists for the day, a labelled keyword estimate of the current headlines is shown as it is and never enters the average. It is not saved while the model is unavailable; when the model declines the headlines, it is kept as the day's reading until new headlines or Reassess bring an assessment."
+                    "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Before an assessment is saved, every place, person and figure it names is checked against the supplied headlines. Royal, celebrity, sport and lifestyle stories are left out. The reading shown is the weighted average of the past seven days' assessments, plus up to 9° when the assessment rose on consecutive days. When no assessment exists for the day, a labelled keyword estimate of the current headlines is shown as it is and never enters the average. It is not saved while the model is unavailable; when the model declines the headlines, it is kept as the day's reading until new headlines or Reassess bring an assessment. Near you: where your Mac's region has a war next door, the reading adds up to 15° for the past week's stories in your library that name that war with fighting or attacks, or your own country with a crisis, a protest, an attack or a security cue, counted by keyword and shown beside the world reading."
                 )
                 .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)

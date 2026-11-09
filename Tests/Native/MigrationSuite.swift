@@ -257,7 +257,9 @@ extension NativeSuites.MigrationSuite {
 
         let counts = try await db.counts()
         expectEqual(counts.total, 200, "Migrated fixture preserves all 200 articles")
-        expectEqual(counts.unread, 150, "Migrated fixture preserves unread count (150)")
+        expectEqual(
+            try await db.fetchArticles(isRead: false, limit: nil).count, 150,
+            "Migrated fixture preserves unread reports (150)")
         expectEqual(counts.saved, 20, "Migrated fixture preserves saved count (20)")
 
         let fetched = try await db.fetchArticles(limit: 500)

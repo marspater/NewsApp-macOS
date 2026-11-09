@@ -273,8 +273,8 @@ Help › Show Sample Notification and Settings › Notifications › Send Test N
 photo when it has one, through `NotificationService.postSample`: the real path (image attachment, category, the Full-mode gate before
 the download and the post), outside triage, its limits and the delivery log, under the identifier `news-sample`. The
 Settings button then shows one status line from `sampleStatus`: the Full-mode gate, macOS's refusal with its domain
-and code, or the reader's authorization, alert and preview settings (#926). Settings also offers Export Diagnostics
-next to it.
+and code, or the reader's authorization, alert and preview settings (#926). The line springs in, takes the accent and
+clears itself after 30 seconds. Export Diagnostics is in Settings › Storage, at the bottom.
 
 ## What this supersedes
 

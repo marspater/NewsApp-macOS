@@ -48,6 +48,8 @@ extension NewsTests {
             ("testStoryImages", { try await testStoryImages(fixtureRoot: fixtureRoot) }),
             ("testFiniteBriefing", { try await testFiniteBriefing() }),
             ("testDockBadgeCount", { testDockBadgeCount() }),
+            ("testSidebarUnreadBadgeCopy", { testSidebarUnreadBadgeCopy() }),
+            ("testThemeBindingWritesOnlyChanges", { await testThemeBindingWritesOnlyChanges() }),
             ("testBriefingBoardLayout", { testBriefingBoardLayout() }),
             ("testDesignSystemAndArticleFilter", { await testDesignSystemAndArticleFilter() }),
             ("testNewsURLParserAndSchemeRouting", { await testNewsURLParserAndSchemeRouting() }),
@@ -62,6 +64,38 @@ extension NewsTests {
             ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
         ]
         try await runSuite(tests)
+    }
+
+    static func testSidebarUnreadBadgeCopy() {
+        print("  - Testing the sidebar Unread badge copy...")
+        assertEqual(AppSettings.unreadBadgeCopy(0), nil, "Nothing unread shows no badge")
+        assertEqual(AppSettings.unreadBadgeCopy(7), "7", "A small count shows as it is")
+        assertEqual(AppSettings.unreadBadgeCopy(99), "99", "The cap itself shows")
+        assertEqual(AppSettings.unreadBadgeCopy(100), "99+", "A backlog past the cap reads 99+")
+        assertEqual(AppSettings.unreadBadgeCopy(1013), "99+", "However large it is")
+    }
+
+    @MainActor
+    static func testThemeBindingWritesOnlyChanges() async {
+        print("  - Testing that the theme bindings publish only a change...")
+        let suite = testDefaultsSuite("test.theme-binding")
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { removeTestDefaults(suite) }
+        let theme = ThemeManager(defaults: defaults)
+        var publishes = 0
+        let observation = theme.objectWillChange.sink { publishes += 1 }
+        defer { observation.cancel() }
+        let appearance = theme.binding(\.appearance)
+        appearance.wrappedValue = .system
+        assertEqual(publishes, 0, "Restating the current appearance publishes nothing")
+        appearance.wrappedValue = .dark
+        assertEqual(theme.appearance, .dark, "A new appearance is written")
+        assertTrue(publishes > 0, "A new appearance publishes")
+        publishes = 0
+        theme.binding(\.autoHideRead).wrappedValue = false
+        assertEqual(publishes, 0, "Restating Auto-Hide Read publishes nothing")
+        theme.binding(\.autoHideRead).wrappedValue = true
+        assertTrue(theme.autoHideRead, "A new Auto-Hide Read is written")
     }
 
     @MainActor

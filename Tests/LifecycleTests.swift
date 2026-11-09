@@ -232,7 +232,7 @@ extension NewsTests {
         assertEqual(checker.releaseNotes, "Release notes", "New release notes are retained")
         assertTrue(checker.verifiedReleaseURL != nil, "A trusted release link is retained")
         MockURLProtocol.requestHandler = { _ in
-            assertTrue(false, "Automatic checks within six hours must not make another request")
+            assertTrue(false, "Automatic checks within 72 hours must not make another request")
             throw URLError(.cancelled)
         }
         await checker.checkForUpdates()
@@ -931,7 +931,7 @@ extension NewsTests {
 
     @MainActor
     static func testUpdateCheckerThrottleWithClock() async {
-        print("  - Testing UpdateChecker 6-Hour Throttle Advancement with TestClock...")
+        print("  - Testing UpdateChecker 72-Hour Throttle Advancement with TestClock...")
 
         let baseEpoch = Date(timeIntervalSince1970: 1_700_000_000)
         let testClock = TestClock(baseEpoch)
@@ -979,17 +979,17 @@ extension NewsTests {
         assertFalse(checker.updateAvailable, "v2.0.0 matches currentAppVersion 2.0.0 -> no update")
         assertEqual(checker.statusMessage, "NewsApp is up to date (v2.0.0)", "Status confirms up to date")
 
-        // 2. Check at +5h59m is skipped (throttled)
-        testClock.advance(by: (5 * 3600) + (59 * 60))  // +21,540s
+        // 2. Check one minute before the window ends is skipped (throttled)
+        testClock.advance(by: UpdateChecker.automaticCheckInterval - 60)
         MockURLProtocol.requestHandler = { _ in
-            assertTrue(false, "Throttled automatic check within 6 hours must not make network request")
+            assertTrue(false, "Throttled automatic check within 72 hours must not make network request")
             throw URLError(.cancelled)
         }
         await checker.checkForUpdates(userInitiated: false)
         assertEqual(networkRequestCount, 1, "Network request count remains 1 (skipped)")
         assertEqual(checker.lastCheckDate, baseEpoch, "lastCheckDate remains baseEpoch when throttled")
 
-        // 3. User-initiated check at +5h59m executes immediately
+        // 3. User-initiated check inside the window executes immediately
         let userCheckTime = testClock.now
         MockURLProtocol.requestHandler = { request in
             networkRequestCount += 1
@@ -1004,11 +1004,11 @@ extension NewsTests {
             )
         }
         await checker.checkForUpdates(userInitiated: true)
-        assertEqual(networkRequestCount, 2, "User-initiated check bypasses 6-hour throttle")
+        assertEqual(networkRequestCount, 2, "User-initiated check bypasses 72-hour throttle")
         assertEqual(checker.lastCheckDate, userCheckTime, "User check updates lastCheckDate to current time")
 
-        // 4. Automatic check at +6h01m executes
-        testClock.advance(by: (6 * 3600) + 60)  // +21,660s past userCheckTime
+        // 4. Automatic check one minute after the window executes
+        testClock.advance(by: UpdateChecker.automaticCheckInterval + 60)
         let nextCheckTime = testClock.now
         MockURLProtocol.requestHandler = { request in
             networkRequestCount += 1
@@ -1023,11 +1023,11 @@ extension NewsTests {
             )
         }
         await checker.checkForUpdates(userInitiated: false)
-        assertEqual(networkRequestCount, 3, "Automatic check after 6h01m executes network request")
+        assertEqual(networkRequestCount, 3, "Automatic check after the window executes network request")
         assertEqual(checker.lastCheckDate, nextCheckTime, "lastCheckDate updates to new check time")
 
         // 5. Automatic check when update is available updates state non-modally
-        testClock.advance(by: (6 * 3600) + 1)
+        testClock.advance(by: UpdateChecker.automaticCheckInterval + 1)
         let updateCheckTime = testClock.now
         MockURLProtocol.requestHandler = { request in
             networkRequestCount += 1
@@ -1042,7 +1042,7 @@ extension NewsTests {
             )
         }
         await checker.checkForUpdates(userInitiated: false)
-        assertEqual(networkRequestCount, 4, "Automatic check after 6h executes network request")
+        assertEqual(networkRequestCount, 4, "Automatic check after the window executes network request")
         assertEqual(checker.lastCheckDate, updateCheckTime, "lastCheckDate updates on successful update detection")
         assertTrue(checker.updateAvailable, "Automatic check detects newer release v2.1.0")
         assertEqual(checker.latestVersionString, "v2.1.0", "Latest version string set")
@@ -1087,12 +1087,12 @@ extension NewsTests {
         await relaunched.checkForUpdates(userInitiated: true)
         assertEqual(requests, 2, "A manual check still bypasses the throttle after a failure")
 
-        clock.advance(by: 6 * 3600 + 1)
+        clock.advance(by: UpdateChecker.automaticCheckInterval + 1)
         await relaunched.checkForUpdates(userInitiated: false)
         assertEqual(requests, 3, "The next automatic check runs once the window has passed")
 
         // A backward clock correction leaves the saved attempt in the future; it counts as expired.
-        clock.advance(by: -3 * 86400)
+        clock.advance(by: -(UpdateChecker.automaticCheckInterval + 86400))
         await relaunched.checkForUpdates(userInitiated: false)
         assertEqual(requests, 4, "A saved attempt in the future does not suppress checks")
 
@@ -1127,7 +1127,7 @@ extension NewsTests {
         MockURLProtocol.requestHandler = { request in
             (HTTPURLResponse(url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil)!, Data())
         }
-        clock.advance(by: 7 * 3600)
+        clock.advance(by: UpdateChecker.automaticCheckInterval + 3600)
         await finder.checkForUpdates(userInitiated: false)
         let withdrawn = UpdateChecker(
             httpClient: client, now: { clock.now }, currentAppVersion: "2.0.0", defaults: foundDefaults)
@@ -1516,10 +1516,10 @@ extension NewsTests {
         assertEqual(networkRequestCount, 1, "Automatic check is throttled during 1-hour backward DST drift")
         assertEqual(checker.lastCheckDate, baseEpoch, "lastCheckDate remains unchanged during backward drift")
 
-        // Clock advances to 6h01m past baseEpoch (+25261s from current -1h time)
-        testClock.advance(by: 3600 + 21601)
+        // Clock advances one second past the window after baseEpoch (from the current -1h time)
+        testClock.advance(by: 3600 + UpdateChecker.automaticCheckInterval + 1)
         await checker.checkForUpdates(userInitiated: false)
-        assertEqual(networkRequestCount, 2, "Automatic check executes once clock advances past 6-hour threshold")
+        assertEqual(networkRequestCount, 2, "Automatic check executes once clock advances past 72-hour threshold")
 
         // 1b. Severe backward leap (30 days in the past)
         testClock.advance(by: -(30 * 86400))
@@ -1528,7 +1528,7 @@ extension NewsTests {
         assertEqual(networkRequestCount, 3, "A saved attempt far in the future counts as expired")
         assertEqual(checker.lastCheckDate, rolledBackTime, "lastCheckDate resynchronizes to the rolled-back clock")
 
-        // Check within 6 hours of new rolled-back time is throttled
+        // Check within 72 hours of new rolled-back time is throttled
         testClock.advance(by: 3600)
         await checker.checkForUpdates(userInitiated: false)
         assertEqual(networkRequestCount, 3, "Subsequent check is throttled relative to resynchronized clock")
@@ -1575,7 +1575,7 @@ extension NewsTests {
         // 4. Concurrent Checks & In-Flight Gate Deduplication
         // ====================================================================
 
-        testClock.advance(by: 7 * 3600)  // Expire throttle
+        testClock.advance(by: UpdateChecker.automaticCheckInterval + 3600)  // Expire throttle
         let gateSemaphore = DispatchSemaphore(value: 0)
 
         MockURLProtocol.requestHandler = { request in
@@ -1624,7 +1624,7 @@ extension NewsTests {
         // 5. Immediate Foregrounding Loops
         // ====================================================================
 
-        testClock.advance(by: 7 * 3600)  // Expire throttle
+        testClock.advance(by: UpdateChecker.automaticCheckInterval + 3600)  // Expire throttle
         MockURLProtocol.requestHandler = { request in
             networkRequestCount += 1
             return (

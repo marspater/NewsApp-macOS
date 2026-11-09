@@ -362,6 +362,13 @@ final class AppSettings: ObservableObject {
         return String(head[..<colon])
     }
 
+    /// The sidebar Unread badge: the count up to 99, then "99+", and nothing for zero. A backlog past 99 is not a number
+    /// anyone acts on; VoiceOver still hears the exact count.
+    nonisolated static func unreadBadgeCopy(_ unread: Int) -> String? {
+        guard unread > 0 else { return nil }
+        return unread > 99 ? "99+" : String(unread)
+    }
+
     /// The menu bar item's label count: the bare number, or nil when nothing is unread.
     nonisolated static func menuBarBadgeCopy(unread: Int) -> String? {
         unread > 0 ? "\(unread)" : nil

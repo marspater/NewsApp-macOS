@@ -52,6 +52,10 @@ extension NativeSuites {
         @Test func unreadCountAndSavedStateCoverTheLibrary() async throws {
             try await Self.testUnreadCountAndSavedStateCoverTheLibrary()
         }
+        @Test func unreadCountsStoriesNotReports() async throws { try await Self.testUnreadCountsStoriesNotReports() }
+        @Test @MainActor func libraryStatusFollowsTheOpenState() async throws {
+            try await Self.testLibraryStatusFollowsTheOpenState()
+        }
         @Test func databaseHealthAndDerivedRetention() async throws {
             try await Self.testDatabaseHealthAndDerivedRetention()
         }
@@ -314,6 +318,80 @@ extension NativeSuites.StorageSuite {
         expectEqual(withPanelRead.total, withPanelUnread.total + 1, "An unread collection-only story leaves the total")
         expectEqual(withPanelRead.unread, withPanelUnread.unread, "It never joins the unread count")
         await db.close()
+    }
+
+    /// The unread count is the Unread list's cards: a story several reports cover counts once, a report no story
+    /// groups counts on its own, and reading the last unread report of a story clears its card.
+    static func testUnreadCountsStoriesNotReports() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let stories = (0..<6).map { index in
+            FeedArticle(
+                title: "Card story \(index)", link: "https://other.org/card-\(index)", guid: "card-\(index)",
+                description: "", pubDate: Date(timeIntervalSince1970: 1_700_000_000 - Double(index) * 60),
+                source: "Publisher \(index)")
+        }
+        try await db.upsertArticles(stories)
+        // Stories 0, 1 and 2 are one story, 3 and 4 another, and 5 stands alone.
+        _ = try await db.applyEventMatch(
+            stories[0].id, .create(with: [stories[1].id, stories[2].id]), matcherVersion: EventMatcher.version)
+        _ = try await db.applyEventMatch(
+            stories[3].id, .create(with: [stories[4].id]), matcherVersion: EventMatcher.version)
+        let counts = try await db.counts()
+        expectEqual(counts.unread, 3, "Two stories and a single report are three cards")
+        expectEqual(counts.total, 6, "The total still counts reports")
+        let list = try await db.fetchArticles(section: "Unread", isRead: false, limit: nil)
+        let cards = EventFeedGrouping.entries(
+            for: list, events: try await db.eventFeedSummaries(forArticles: list.map(\.id)), mode: .events)
+        expectEqual(cards.count, counts.unread, "The badge equals the cards the list shows")
+
+        try await db.markRead(articleId: stories[0].id, isRead: true)
+        expectEqual(try await db.counts().unread, 3, "A story with unread reports left is still one unread card")
+        try await db.markReadBatch(articleIds: [stories[1].id, stories[2].id], isRead: true)
+        expectEqual(try await db.counts().unread, 2, "Reading the last report of a story clears its card")
+        try await db.markRead(articleId: stories[5].id, isRead: true)
+        expectEqual(try await db.counts().unread, 1, "A report no story groups moves the count by one")
+        try await db.markRead(articleId: stories[3].id, isRead: true)
+        expectEqual(try await db.counts().unread, 1, "The story's other report keeps its card unread")
+        try await db.markRead(articleId: stories[4].id, isRead: true)
+        expectEqual(try await db.counts().unread, 0, "Nothing is left to read")
+        try await db.markRead(articleId: stories[4].id, isRead: false)
+        expectEqual(try await db.counts().unread, 1, "One unread report brings its story back as one card")
+        try await db.markRead(articleId: stories[1].id, isRead: false)
+        try await db.markRead(articleId: stories[2].id, isRead: false)
+        expectEqual(try await db.counts().unread, 2, "A second story's reports are one card, not two")
+        await db.close()
+    }
+
+    /// What Settings › Storage says about the library follows the store: opening, then active, read-only or
+    /// unavailable.
+    @MainActor static func testLibraryStatusFollowsTheOpenState() async throws {
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
+        expectEqual(store.libraryStatus, .opening, "The library is opening until startup finishes")
+        await store.waitForStartup()
+        expectEqual(store.libraryStatus, .active, "An opened, loaded library is active")
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "news-library-status-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("library.sqlite3").path
+        let seed = DatabaseEngine(path: path)
+        try await seed.open()
+        await seed.close()
+        var handle: OpaquePointer?
+        expectEqual(sqlite3_open(path, &handle), SQLITE_OK, "Open the seeded library")
+        sqlite3_exec(handle, "PRAGMA user_version = \(DatabaseEngine.schemaVersion + 1);", nil, nil, nil)
+        sqlite3_close(handle)
+        let newer = ArticleStore(database: DatabaseEngine(path: path), spotlightIndexer: MockSpotlightIndexer())
+        await newer.waitForStartup()
+        expectEqual(newer.libraryStatus, .readOnly, "A library saved by a newer build opens read-only")
+
+        // A path under a file cannot be opened at all.
+        let broken = ArticleStore(
+            database: DatabaseEngine(path: "/dev/null/library.sqlite3"), spotlightIndexer: MockSpotlightIndexer())
+        await broken.waitForStartup()
+        expectEqual(broken.libraryStatus, .unavailable, "A library that cannot be opened is unavailable")
     }
 
     /// #785: the unread count is one SQL count over the whole library with muting applied, and saved state has no

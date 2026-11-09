@@ -90,7 +90,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 35
+    static let schemaVersion = 36
     /// The longest text a publisher update keeps of what it replaced (#712): a cut text would show invented changes.
     static let maximumRevisionTextLength = 50_000
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
@@ -2041,6 +2041,59 @@ actor DatabaseEngine {
                 throw error
             }
         }
+        if version < 36 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // On-device entity index, co-reporting graph and dossiers (W2 #716). `entity_mentions` is the evidence,
+                // one row per story and entity; `entities` and `entity_edges` are aggregates of it that background
+                // maintenance rebuilds, so the clear of derived data below and a retention prune (the cascade) leave
+                // nothing stale. `entity_index` remembers which publisher-text revision of a story the index has read.
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS entities (
+                        id TEXT PRIMARY KEY,
+                        canonical_name TEXT NOT NULL,
+                        entity_type TEXT NOT NULL,
+                        story_count INTEGER NOT NULL DEFAULT 0,
+                        first_seen REAL NOT NULL,
+                        last_seen REAL NOT NULL,
+                        centrality REAL NOT NULL DEFAULT 0
+                    );
+                    CREATE TABLE IF NOT EXISTS entity_mentions (
+                        entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                        article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        publisher TEXT NOT NULL,
+                        published_at REAL NOT NULL,
+                        score INTEGER NOT NULL,
+                        PRIMARY KEY (entity_id, article_id)
+                    ) WITHOUT ROWID;
+                    CREATE INDEX IF NOT EXISTS idx_entity_mentions_article ON entity_mentions(article_id);
+                    CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity_date ON entity_mentions(entity_id, published_at);
+                    CREATE TABLE IF NOT EXISTS entity_edges (
+                        source TEXT NOT NULL,
+                        relation TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        weight REAL NOT NULL,
+                        evidence INTEGER NOT NULL,
+                        last_seen REAL NOT NULL,
+                        PRIMARY KEY (source, relation, target)
+                    ) WITHOUT ROWID;
+                    CREATE TABLE IF NOT EXISTS entity_index (
+                        article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                        revision INTEGER NOT NULL
+                    ) WITHOUT ROWID;
+                    CREATE INDEX IF NOT EXISTS idx_entities_story_count ON entities(story_count DESC);
+                    """
+                )
+                try Task.checkCancellation()
+                try setUserVersion(36)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                throw error
+            }
+        }
     }
 
     /// Muting predicates for list queries (`MuteRules`); both are pure functions of their arguments.
@@ -3419,7 +3472,9 @@ actor DatabaseEngine {
         // Only a cache for the current scope: a scope change moves no SQLite token.
         var adjusted = countsCache.flatMap { $0.changes == before && $0.scope == collectionOnlyFeedURLs ? $0 : nil }
         let wasRead = adjusted.flatMap { countedReadState(of: articleId, muting: $0.muting) }
-        if wasRead == nil { adjusted = nil }
+        // The unread count counts story cards: a report in a group moves it only when it is the group's last or first
+        // unread report, which this adjustment does not model, so the next count is taken afresh.
+        if wasRead == nil || isInStoryGroup(articleId) { adjusted = nil }
 
         let now = Date().timeIntervalSince1970
         sqlite3_bind_text(stmt, 1, articleId, -1, Self.sqliteTransient)
@@ -4198,6 +4253,11 @@ actor DatabaseEngine {
     /// SQLite's rollback, so a clear that fails leaves both as they were (#984).
     private func deleteAnalysisRows() throws {
         try executeSimple("DELETE FROM article_enrichment;")
+        // The entity index is derived from publisher text (W2 #716); the pass that reads it starts over.
+        try executeSimple("DELETE FROM entity_edges;")
+        try executeSimple("DELETE FROM entity_index;")
+        try executeSimple("DELETE FROM entity_mentions;")
+        try executeSimple("DELETE FROM entities;")
         try clearEventOverviews()
         // Sitrep lines restate overview highlights, so they go with the overviews.
         try executeSimple("DELETE FROM briefing_sitrep;")
@@ -4368,8 +4428,9 @@ actor DatabaseEngine {
 
     // MARK: - Counts & Diagnostics
 
-    /// Totals over the visible library. `unread` leaves out stories `muting` hides, as the Unread list does, so the
-    /// sidebar, the menu bar and the list agree (#785).
+    /// Totals over the visible library. `unread` counts the cards the Unread list shows: a story several reports cover
+    /// is one, however many of its reports are unread, and it leaves out stories `muting` hides, so the sidebar, the
+    /// menu bar and the list agree (#785). `saved` and `total` count reports.
     func counts(muting: MuteRules = MuteRules()) throws -> (unread: Int, saved: Int, total: Int) {
         guard let db = db else {
             throw NSError(
@@ -4384,16 +4445,13 @@ actor DatabaseEngine {
             return cache.value
         }
         var total = 0
-        var unread = 0
         var saved = 0
 
         var stmt: OpaquePointer?
         let scope = collectionScope()
-        let muted = muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle
         let sql = """
             SELECT
                 count(a.id) as total_count,
-                coalesce(sum(case when s.is_read = 0\(muted) then 1 else 0 end), 0) as unread_count,
                 coalesce(sum(case when s.is_saved = 1 then 1 else 0 end), 0) as saved_count
             FROM articles a
             JOIN article_state s ON s.article_id = a.id
@@ -4403,15 +4461,44 @@ actor DatabaseEngine {
             throw sqliteError(db, "Cannot count stories")
         }
         defer { sqlite3_finalize(stmt) }
-        bind((muting.isEmpty ? [] : Self.mutingParameters(muting)) + scope.params, to: stmt)
+        bind(scope.params, to: stmt)
         guard sqlite3_step(stmt) == SQLITE_ROW else { throw sqliteError(db, "Cannot count stories") }
         total = Int(sqlite3_column_int(stmt, 0))
-        unread = Int(sqlite3_column_int(stmt, 1))
-        saved = Int(sqlite3_column_int(stmt, 2))
+        saved = Int(sqlite3_column_int(stmt, 1))
+        let unread = try unreadStoryCount(muting: muting)
         if let changes {
             countsCache = (changes, collectionOnlyFeedURLs, muting, (unread: unread, saved: saved, total: total))
         }
         return (unread: unread, saved: saved, total: total)
+    }
+
+    /// The Unread list's cards: a story that two or more visible reports group counts once, a report outside any group
+    /// counts on its own. The list's own conditions (scope, unread, `muting`), so the badge equals what the list shows.
+    private func unreadStoryCount(muting: MuteRules) throws -> Int {
+        try listAggregates(
+            "count(DISTINCT CASE WHEN g.reports >= 2 THEN 'story:' || g.story ELSE 'article:' || a.id END)",
+            joins: Self.storyGroupJoins, section: "Unread", isRead: false, isSaved: nil, search: nil,
+            searchVector: nil, filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
+            filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))[0]
+    }
+
+    /// Whether two or more visible reports group the story `articleId` is in; a story of one counts as a card of its
+    /// own. A read toggle moves the unread count by one only when the story is no group.
+    private func isInStoryGroup(_ articleId: String) -> Bool {
+        guard let db = db else { return false }
+        let sql = """
+            SELECT 1 FROM event_members m JOIN events e ON e.id = m.event_id
+            WHERE m.article_id = ? AND (
+                SELECT count(*) FROM event_members gm JOIN events ge ON ge.id = gm.event_id
+                    JOIN articles a ON a.id = gm.article_id
+                WHERE coalesce(ge.story_id, ge.id) = coalesce(e.story_id, e.id) AND \(Self.visibleArticle)) >= 2
+            LIMIT 1;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return true }
+        defer { sqlite3_finalize(stmt) }
+        bind([("text", articleId)], to: stmt)
+        return sqlite3_step(stmt) == SQLITE_ROW
     }
 
     /// A story's read state and whether the counts under `muting` include it, or nil when it is outside the visible
@@ -4476,18 +4563,22 @@ actor DatabaseEngine {
     ) throws -> (stories: Int, events: Int) {
         let totals = try listAggregates(
             "count(*), count(DISTINCT CASE WHEN g.reports >= 2 THEN g.story END)",
-            joins: """
-                 LEFT JOIN event_members m ON m.article_id = a.id LEFT JOIN events e ON e.id = m.event_id
-                 LEFT JOIN (SELECT coalesce(ge.story_id, ge.id) AS story, count(*) AS reports FROM event_members gm
-                     JOIN events ge ON ge.id = gm.event_id JOIN articles a ON a.id = gm.article_id
-                     WHERE \(Self.visibleArticle) GROUP BY 1) g ON g.story = coalesce(e.story_id, e.id)
-                """,
+            joins: Self.storyGroupJoins,
             section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
             searchVector: searchVector,
             filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
             filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))
         return (totals[0], totals[1])
     }
+
+    /// Joins each report to the story that groups it: `g.reports` counts the story's visible reports, and a story of one
+    /// report is no group. Used with `listAggregates`, whose `a` is the report.
+    private static let storyGroupJoins = """
+         LEFT JOIN event_members m ON m.article_id = a.id LEFT JOIN events e ON e.id = m.event_id
+         LEFT JOIN (SELECT coalesce(ge.story_id, ge.id) AS story, count(*) AS reports FROM event_members gm
+             JOIN events ge ON ge.id = gm.event_id JOIN articles a ON a.id = gm.article_id
+             WHERE \(visibleArticle) GROUP BY 1) g ON g.story = coalesce(e.story_id, e.id)
+        """
 
     /// One row of integer aggregates over the stories of a list or search, under the list's own filters plus
     /// `filter`.
