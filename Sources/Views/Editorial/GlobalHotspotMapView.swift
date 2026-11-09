@@ -21,8 +21,12 @@ import SwiftUI
 struct GlobalHotspotMapView: View {
     let regions: [HotspotRegion]
     let clusterPins: [HotspotClusterPin]
-    var onSelectRegion: (HotspotRegion?) -> Void = { _ in }
-    var onSelectPin: (HotspotClusterPin?) -> Void = { _ in }
+    var onSelectRegion: (HotspotRegion?) -> Void = { _ in
+        // The map filters nothing by itself; the sheet passes the handler that narrows its headline table.
+    }
+    var onSelectPin: (HotspotClusterPin?) -> Void = { _ in
+        // The map filters nothing by itself; the sheet passes the handler that narrows its headline table.
+    }
 
     @State private var selectedRegionId: String?
     @State private var selectedPinId: String?
