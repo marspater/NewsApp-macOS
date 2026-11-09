@@ -45,32 +45,33 @@ struct BriefingRanking: Equatable, Sendable {
 
     /// Best first; an unrated story ranks below a rated one, and equal stories keep edition order.
     func order(_ entries: [FeedEntry]) -> [FeedEntry] {
-        func key(_ entry: FeedEntry) -> (Int, Int, Int) {
-            let signal = signals[entry.id]
-            return (
-                signal?.originalCount ?? entry.publisherCount, signal?.importance?.rawValue ?? -1, entry.publisherCount
-            )
-        }
-        return entries.enumerated().sorted {
-            let (lhs, rhs) = (key($0.element), key($1.element))
+        entries.enumerated().sorted {
+            let (lhs, rhs) = (sortKey($0.element), sortKey($1.element))
             return lhs != rhs ? lhs > rhs : $0.offset < $1.offset
         }.map(\.element)
+    }
+
+    private func sortKey(_ entry: FeedEntry) -> (Int, Int, Int) {
+        let signal = signals[entry.id]
+        return (signal?.originalCount ?? entry.publisherCount, signal?.importance?.rawValue ?? -1, entry.publisherCount)
     }
 
     /// Reads each event's members and the stored ratings, off the main actor (the database is an actor and the wire
     /// detection runs here); the cards never load member text.
     nonisolated static func load(entries: [FeedEntry], database: DatabaseEngine) async -> Self {
-        let events = entries.filter { if case .event = $0 { true } else { false } }
-        guard !events.isEmpty else { return Self() }
-        let priorities = (try? await database.briefingPriorities(articleIDs: events.map(\.representative.id))) ?? [:]
+        var events: [(id: String, eventID: String, representativeID: String)] = []
+        for entry in entries {
+            guard case .event(let summary, let representative, _) = entry else { continue }
+            events.append((entry.id, summary.eventID, representative.id))
+        }
         var ranking = Self()
-        for entry in events {
-            guard !Task.isCancelled, case .event(let summary, _, _) = entry,
-                let members = try? await database.fetchArticles(limit: nil, eventID: summary.eventID)
-            else { continue }
-            ranking.signals[entry.id] = signal(
+        guard !events.isEmpty else { return ranking }
+        let priorities = (try? await database.briefingPriorities(articleIDs: events.map(\.representativeID))) ?? [:]
+        for event in events where !Task.isCancelled {
+            guard let members = try? await database.fetchArticles(limit: nil, eventID: event.eventID) else { continue }
+            ranking.signals[event.id] = signal(
                 reports: members.map { ($0.publisherName, BriefingPriorityData.reportText($0)) },
-                importance: priorities[entry.representative.id]?.importance)
+                importance: priorities[event.representativeID]?.importance)
         }
         return ranking
     }
