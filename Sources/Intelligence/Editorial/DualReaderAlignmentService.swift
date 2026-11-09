@@ -48,8 +48,16 @@ public actor DualReaderAlignmentService {
     private static let closingQuotes = CharacterSet(charactersIn: "\"'\u{201D}\u{2019}\u{00BB})]")
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "DualReaderAlignmentService")
+    /// One passage's neural vector, or nil when the embedder is not available; a test passes its own.
+    private let embed: @Sendable (String) async -> [Float]?
 
-    public init() {}
+    public init() {
+        embed = { await SentenceEmbedder.shared.embed($0) }
+    }
+
+    init(embed: @escaping @Sendable (String) async -> [Float]?) {
+        self.embed = embed
+    }
 
     /// Aligns passages between two articles and categorizes contrast types.
     public func align(
@@ -72,7 +80,7 @@ public actor DualReaderAlignmentService {
         }
 
         // Compute vector embeddings in a shared embedding space
-        let allVectors = await embedPassages(leftPassages + rightPassages)
+        let (allVectors, usesLexicalFallback) = await embedPassages(leftPassages + rightPassages)
         // A cancelled comparison has no vectors to align and shows nothing.
         guard allVectors.count == leftPassages.count + rightPassages.count else {
             return DualReaderSession(
@@ -95,7 +103,8 @@ public actor DualReaderAlignmentService {
             rightArticleId: right.id,
             leftPublisherName: left.publisher,
             rightPublisherName: right.publisher,
-            passageAlignments: alignments
+            passageAlignments: alignments,
+            usesLexicalFallback: usesLexicalFallback
         )
     }
 
@@ -205,20 +214,21 @@ public actor DualReaderAlignmentService {
         return results
     }
 
-    private func embedPassages(_ passages: [String]) async -> [[Float]] {
+    /// The passages' vectors and whether the lexical fallback made them: one embedding space for the whole session, so a
+    /// single passage the neural embedder cannot read switches every vector to the fallback.
+    private func embedPassages(_ passages: [String]) async -> (vectors: [[Float]], usesLexicalFallback: Bool) {
         var vectors: [[Float]] = []
         vectors.reserveCapacity(passages.count)
 
         for passage in passages {
             // Embedding is the slow part; a closed sheet stops it between passages.
-            if Task.isCancelled { return [] }
-            guard let neuralVec = await SentenceEmbedder.shared.embed(passage) else {
-                // Keep one embedding space for all passages in the session.
-                return passages.map { fallbackLexicalVector(for: $0) }
+            if Task.isCancelled { return ([], false) }
+            guard let neuralVec = await embed(passage) else {
+                return (passages.map { fallbackLexicalVector(for: $0) }, true)
             }
             vectors.append(neuralVec)
         }
-        return vectors
+        return (vectors, false)
     }
 
     /// On-device normalized term-frequency hashing vector when CoreML neural weights are not present.

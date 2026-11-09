@@ -58,7 +58,7 @@ struct DualReaderView: View {
                     tint: Self.tint(for: type))
             }
             Spacer(minLength: AppSpacing.md)
-            Text("Compared by meaning on this Mac")
+            Text(Self.methodCaption(usesLexicalFallback: session.usesLexicalFallback))
                 .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
         }
         .padding(.horizontal, AppLayout.pageInset)
@@ -72,6 +72,14 @@ struct DualReaderView: View {
         case .divergence: return session.divergenceCount
         case .uniqueLead: return session.uniqueLeadCount
         }
+    }
+
+    /// How the comparison was made, once per sheet: by meaning with the neural embedder, by shared words when it was not
+    /// available (the labels then show overlap, not a judgment of meaning).
+    static func methodCaption(usesLexicalFallback: Bool) -> String {
+        usesLexicalFallback
+            ? "Compared by shared words on this Mac; the meaning model was not available"
+            : "Compared by meaning on this Mac"
     }
 
     static func summaryText(_ type: PerspectiveContrastType, count: Int) -> String {
