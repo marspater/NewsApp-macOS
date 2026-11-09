@@ -35,7 +35,7 @@
       <link>https://example.com/news/ferry-timetable</link>
       <guid>https://example.com/news/ferry-timetable</guid>
       <pubDate>{{PUBDATE}}</pubDate>
-      <category>Entertainment</category>
+      <category>Science</category>
       <description>The new timetable starts next month on all island routes.</description>
       <media:content url="https://example.com/images/stall-ferry.jpg" medium="image" type="image/jpeg" width="1200" height="800"/>
     </item>
