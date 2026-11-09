@@ -97,15 +97,16 @@ public actor DualReaderAlignmentService {
             rightVectors: rightVectors
         )
 
-        return DualReaderSession(
+        var session = DualReaderSession(
             clusterId: clusterId,
             leftArticleId: left.id,
             rightArticleId: right.id,
             leftPublisherName: left.publisher,
             rightPublisherName: right.publisher,
-            passageAlignments: alignments,
-            usesLexicalFallback: usesLexicalFallback
+            passageAlignments: alignments
         )
+        session.usesLexicalFallback = usesLexicalFallback
+        return session
     }
 
     private func computeAlignments(
