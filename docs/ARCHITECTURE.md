@@ -1,6 +1,6 @@
 # Architecture
 
-Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md), and App Store preparation in [XCODE_AND_APP_REVIEW.md](XCODE_AND_APP_REVIEW.md).
+Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](design/DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md), and App Store preparation in [XCODE_AND_APP_REVIEW.md](XCODE_AND_APP_REVIEW.md).
 
 > [!IMPORTANT]
 > Nothing leaves the Mac except feed, article and image requests and the update check (one GitHub releases request, see PRIVACY §2), all through the protected gateway. No cloud backend, remote AI, telemetry or analytics SDKs, and no custom AI models except CoreML models this project builds, measures and ships itself (#520).
@@ -13,7 +13,7 @@ Native macOS, local-first RSS reader. This page is the contract for technology a
 | Apple frameworks | Foundation, Network, SQLite3 (WAL + FTS5), NaturalLanguage, CoreML, conditional FoundationModels, OSLog/signposts, Swift Concurrency. |
 | Packages (SwiftPM, static archive) | **SwiftSoup**: CSS metadata selection and bounded HTML5 repair. **FeedKit**: typed RSS/Atom/JSON models behind the app's own XML safety boundary. New dependencies need a requirement with no reasonable native answer. |
 | Builds | arm64, ad-hoc signed, App Sandbox + Hardened Runtime. Intel/universal and notarization are out of current scope. |
-| UI rules | Native keyboard/trackpad, accessibility, semantic tokens, restrained Liquid Glass ([DESIGN.md](DESIGN.md)). |
+| UI rules | Native keyboard/trackpad, accessibility, semantic tokens, restrained Liquid Glass ([DESIGN.md](design/DESIGN.md)). |
 
 ## System map
 
