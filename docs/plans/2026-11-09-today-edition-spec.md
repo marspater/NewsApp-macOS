@@ -39,13 +39,13 @@ Lane names are Title Case (DESIGN.md 17). Descriptions never claim completeness:
 
 ### 2.2 Quality bars
 
-Each conditional lane has a minimum count, a quality threshold and a minimum assignment confidence. A story below any of them falls through to the next lane in order and ends in The Latest. A lane whose survivors number fewer than its minimum is hidden and its survivors fall through too. No filler, no padding.
+Each conditional lane has a minimum count, a quality threshold and a minimum assignment confidence. A story below any of them falls through to the next lane in order and ends in The Latest. A lane whose survivors number fewer than its minimum is hidden and its survivors fall through too. A lane with more survivors than its cap keeps the highest `score`, breaking ties by the newest report and then the story id; the rest fall through to the next lane in order, as if they had missed this lane's bar, and end in The Latest if no later lane takes them. No filler, no padding.
 
 Scores are on Z2's 0–1 scale (`score` = editorial relevance, `confidence` = how sure the module is of the placement).
 
 | Lane | Minimum count | Cap | Threshold | Minimum confidence | Signals (existing first) |
 | --- | --- | --- | --- | --- | --- |
-| The Lead | 1 | 5 | Slide 1: the top-ranked story, always. Slides 2–5: `score` ≥ 0.60 and at least two original reports, or one original report and `score` ≥ 0.75 | 0.50 | Original report count (`originalCount`, wire copy counted once), `BriefingPriorityModule.assessImportance` (coverage, severity, momentum), the NL importance score, publisher affinity |
+| The Lead | 1 | 5 | Slide 1: the top-ranked story, always. Slides 2–5: `score` ≥ 0.60 and at least two original reports, or one original report and `score` ≥ 0.75 | 0.50, slides 2–5 only | Original report count (`originalCount`, wire copy counted once), `BriefingPriorityModule.assessImportance` (coverage, severity, momentum), the NL importance score, publisher affinity |
 | In Motion | 3 | 12 | A material update in the last 24 h: `EventFeedSummary.hasSubstantiveUpdate` (new facts or a correction, not a reprint) and rising momentum | 0.70 | Event membership versions, report rate, headline novelty against the event's known headlines |
 | Your Beat | 3 | 12 | Interest match ≥ 0.50 against the 30-day profile (read +1, saved +3), a starred feed, or publisher affinity in the top quartile | 0.60 | `briefingInterests`, starred feeds, publisher affinity |
 | The Deep Read | 3 | 8 | Reading time ≥ 8 min (about 1,800 words of extracted text), or a content-type classification (investigation, explainer, opinion) at ≥ 0.70; the content-type label on the card shows only from the classification, never from length alone | 0.60 | Extracted text length, on-device content-type classification (new in Z2) |
@@ -56,7 +56,7 @@ Rules the bars share:
 
 - **Publisher count is not confirmation.** Original reports weigh; wire copies count once.
 - **Editorial and notification importance are separate decisions.** They may share evidence, never a threshold.
-- **The Lead is never padded.** A library with one qualifying story shows one slide and no dots. The first slide is the top-ranked story even when its score is low, so The Lead always exists when Today has any story.
+- **The Lead is never padded.** A library with one qualifying story shows one slide and no dots. The first slide is the top-ranked story even when its score or confidence is low, so The Lead always exists when Today has any story.
 - **Coverage card gate.** The Coverage variant appears only when the event grouping is confident: ≥ 3 publishers, ≥ 2 original reports and grouping confidence ≥ 0.80. Below that the story shows its plain variant for the lane.
 - **Developing pill.** Uses the Briefing definition (`BriefingView.isDeveloping`: a report joined in the last hour) so one word means one thing across the app.
 
@@ -103,7 +103,7 @@ The `reason` field from Z2 is never shown as reader copy; it is for tests and th
 One buffer, one button, one apply. The existing `FeedUpdateBuffer` holds the refreshed assignment; the leading toolbar shows "Show N New Stories" (U; "Show Updates" when only placements changed) with the existing tooltip and VoiceOver announcement. N counts stories new to Today across every lane.
 
 - **Until the click, nothing moves.** No lane appears, hides, reorders or changes its slides; a card whose content refreshed in place (read state, a new image, more coverage) updates in place, as today.
-- **On apply**, every lane updates at once: new stories enter at the leading edge of their lane (newest first), stories whose placement changed move lanes, lanes appear or hide, and The Lead takes its new ranking. The page scrolls to the masthead and every row to its leading edge, with `AppMotion.hover`, `nil` under Reduce Motion.
+- **On apply**, every lane updates at once: new stories enter at the leading edge of their lane (newest first), stories whose placement changed move lanes, lanes appear or hide, and The Lead takes its new ranking. The page scrolls to the masthead and every row to its leading edge, with `AppMotion.hover`, `nil` under Reduce Motion. When a card keeps keyboard focus through the apply, keeping it visible takes priority: the page and that card's row scroll only as far as needed to show it, and every other row returns to its leading edge.
 - **The existing Today exception stays.** When every listed story is from an earlier day (the cache at launch the next morning), the refresh replaces the edition at once instead of waiting behind the button.
 - **Closing a story** applies an update that a subscription's first refresh produced while the reader was open (#782), as today.
 
@@ -125,7 +125,7 @@ Where focus goes when the edition changes under it (only on apply, section 5):
 
 - The focused card is still in the edition: focus follows its id, also when it moved to another lane; the lane scrolls to show it.
 - The card is gone but its lane remains: focus lands on the card now at the same index in that lane (the last card when the index is past the end).
-- The lane is gone: focus lands on the first card of the next lane below in reading order; The Latest always exists, so this is always defined.
+- The lane is gone: focus lands on the first card of the next lane below in reading order that holds cards. The Latest can be empty, so when no later lane holds a card, focus lands on the last card of the nearest earlier lane. When the edition has no card left, no card holds focus.
 - A lane appears: focus does not move.
 
 After closing a story, focus returns to the same card id by the rules above, and the row scrolls to show it (#936 acceptance). Opening from The Lead returns to The Lead with that slide shown and rotation paused until focus and hover clear.
