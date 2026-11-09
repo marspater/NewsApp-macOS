@@ -1058,6 +1058,8 @@ class FeedManager: NSObject, ObservableObject {
             guard let self, self.entityIndexRunID == runID else { return }
             self.entityIndexTask = nil
             self.entityIndexRunID = nil
+            // Batches commit one by one, so even a pass that ended early may have changed what the chips can show.
+            self.articleStore.entityIndexChanged()
             if case .failure(let error) = result, !(error is CancellationError) {
                 self.logger.error("Entity indexing failed: \(error.localizedDescription)")
             }

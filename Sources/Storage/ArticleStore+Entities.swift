@@ -17,6 +17,8 @@ import Foundation
 /// Where entity chips and dossiers read from (W2 #716). Previews and harnesses pass their own, or none, so a view
 /// that shows entities never needs the library.
 struct EntitySource: Sendable {
+    /// The index's revision when the source was made: a view that reads through it asks again when it changes.
+    var revision: UInt64 = 0
     /// The entities worth a chip for these stories, the ones most of them name first.
     let entities: @Sendable ([String]) async -> [EntityRecord]
     let dossier: @Sendable (String) async -> EntityDossier?
@@ -26,6 +28,7 @@ extension ArticleStore {
     /// Chips and dossiers read the entity index; empty or nil, with a log line, when the library cannot be read.
     var entitySource: EntitySource {
         EntitySource(
+            revision: entityRevision,
             entities: { [self] ids in
                 do { return try await database.entities(forArticles: ids, limit: 8) } catch {
                     logger.error("Failed to read entities: \(error.localizedDescription)")
