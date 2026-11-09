@@ -58,6 +58,7 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var databaseHealthNotice: String?
     /// Set when opening the library or loading its stories failed, so "unavailable" is a fact and not the absence of one.
     @Published private(set) var startupFailed = false
+    private var retryingStartup = false
 
     /// What Settings › Storage says about the library database; it follows the open state as that changes.
     enum LibraryStatus: Equatable {
@@ -222,10 +223,14 @@ final class ArticleStore: ObservableObject {
             if analysisClearsInProgress == 0, self.analysisGeneration != dbAnalysisGen {
                 self.analysisGeneration = dbAnalysisGen
             }
-            // A refresh that publishes after a failed startup means the library can be read: it is no longer unavailable.
-            if published, startupFailed {
-                startupFailed = false
-                isReady = true
+            // A refresh that publishes after a failed startup means the library can be read again: startup runs once
+            // more in full (migration, readiness and the Spotlight rebuild), never just flips the flags.
+            if published, startupFailed, !retryingStartup {
+                retryingStartup = true
+                Task { [weak self] in
+                    await self?.initialize()
+                    self?.retryingStartup = false
+                }
             }
             if !published {
                 logger.error("Refresh kept being overtaken by read or save changes; trying again shortly")
