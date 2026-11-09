@@ -542,7 +542,9 @@ struct OverviewPerspectivesExtractor: Sendable {
         let lowerSource = articleSource?.lowercased() ?? ""
 
         for wire in recognizedWireServices {
-            if lowerSource.contains(wire.name.lowercased()) {
+            if lowerSource.contains(wire.name.lowercased())
+                || (wire.name == "Associated Press" && lowerSource == "ap news")
+            {
                 return wire.name
             }
             for marker in wire.markers where startsWord(marker, in: lowerText) {
