@@ -1,6 +1,6 @@
 # Apple News practices and Liquid Glass on macOS 27 — 9 October 2026
 
-Base: `origin/main` at `4eaf39c`. This study reads Apple's current design guidance, developer documentation and session transcripts, published reports on Apple News and other apps, and the News source. It is a documentation and code review, not a hands-on visual audit: no build, launch or macOS 27 screenshot was taken in this session. The resulting rules are in [DESIGN.md](../DESIGN.md) and the work in the [adoption plan](../plans/2026-10-09-design-language-adoption.md).
+Base: `origin/main` at `4eaf39c`. This study reads Apple's current design guidance, developer documentation and session transcripts, published reports on Apple News and other apps, and the News source. It is a documentation and code review, not a hands-on visual audit: no build, launch or macOS 27 screenshot was taken in this session. The resulting rules are in [DESIGN.md](../design/DESIGN.md) and the work in the [adoption plan](../plans/2026-10-09-design-language-adoption.md).
 
 ## Conclusion
 
