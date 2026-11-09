@@ -151,13 +151,12 @@ public struct DualReaderView: View {
                                     let pair = session.passageAlignments.first { $0.leftPassageIndex == index }
                                     passageCard(
                                         text: passage,
-                                        index: index,
                                         pair: pair,
                                         isSelected: pair != nil && pair?.id == selectedAlignmentId
                                     )
                                     .id("left_\(index)")
                                     .accessibilityElement(children: .combine)
-                                    .accessibilityAddTraits(pair == nil ? [] : .isButton)
+                                    .accessibilityAddTraits(pair?.hasCounterpart == true ? .isButton : [])
                                     .accessibilityAction(named: "Show matching passage") {
                                         selectPassage(
                                             pair: pair,
@@ -190,13 +189,12 @@ public struct DualReaderView: View {
                                     let pair = session.passageAlignments.first { $0.rightPassageIndex == index }
                                     passageCard(
                                         text: passage,
-                                        index: index,
                                         pair: pair,
                                         isSelected: pair != nil && pair?.id == selectedAlignmentId
                                     )
                                     .id("right_\(index)")
                                     .accessibilityElement(children: .combine)
-                                    .accessibilityAddTraits(pair == nil ? [] : .isButton)
+                                    .accessibilityAddTraits(pair?.hasCounterpart == true ? .isButton : [])
                                     .accessibilityAction(named: "Show matching passage") {
                                         selectPassage(
                                             pair: pair,
@@ -256,16 +254,19 @@ public struct DualReaderView: View {
     }
 
     private func singlePassageList(title: String, passages: [String], isLeft: Bool) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 12) {
-                ForEach(Array(passages.enumerated()), id: \.offset) { index, passage in
-                    let pair = session.passageAlignments.first {
-                        isLeft ? $0.leftPassageIndex == index : $0.rightPassageIndex == index
+        VStack(alignment: .leading, spacing: 8) {
+            columnHeader(title: title, icon: isLeft ? "doc.text" : "doc.text.fill")
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(passages.enumerated()), id: \.offset) { index, passage in
+                        let pair = session.passageAlignments.first {
+                            isLeft ? $0.leftPassageIndex == index : $0.rightPassageIndex == index
+                        }
+                        passageCard(text: passage, pair: pair, isSelected: false)
                     }
-                    passageCard(text: passage, index: index, pair: pair, isSelected: false)
                 }
+                .padding(16)
             }
-            .padding(16)
         }
     }
 
@@ -276,7 +277,7 @@ public struct DualReaderView: View {
         scrollTo targetId: String,
         proxy: ScrollViewProxy
     ) {
-        guard let pair = pair else { return }
+        guard let pair = pair, pair.hasCounterpart else { return }
         selectedAlignmentId = pair.id
         withAnimation(.easeInOut(duration: 0.2)) {
             proxy.scrollTo(targetId, anchor: .center)
@@ -297,7 +298,6 @@ public struct DualReaderView: View {
 
     private func passageCard(
         text: String,
-        index: Int,
         pair: PassageContrastPair?,
         isSelected: Bool
     ) -> some View {
@@ -311,9 +311,11 @@ public struct DualReaderView: View {
 
                     Spacer()
 
-                    Text("\(Int(pair.similarityScore * 100))% match")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                    if pair.hasCounterpart {
+                        Text("\(Int(pair.similarityScore * 100))% match")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
@@ -348,7 +350,7 @@ public struct DualReaderView: View {
 
                 Spacer()
 
-                Text("Similarity: \(Int(pair.similarityScore * 100))%")
+                Text(pair.hasCounterpart ? "Similarity: \(Int(pair.similarityScore * 100))%" : "No matching passage")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
