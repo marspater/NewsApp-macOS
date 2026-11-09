@@ -28,7 +28,7 @@ Saving, marking as read and opening are buttons on the banner (on hover; always 
 it by touch, and a click opens the story, creating the main window when none is on screen. Notifications an earlier
 build left in Notification Center still act on a click.
 
-Known limit: banners post at least five minutes apart and one shows at a time, so an Alerts-style banner that the reader
+Known limit: the banners of one delivery pass post at least five minutes apart and one shows at a time (a test banner shows at once), so an Alerts-style banner that the reader
 has not closed is replaced by the next one, where the system would have stacked them.
 
 ## Separation of concerns
@@ -235,8 +235,9 @@ pass had not yet posted are dropped. A banner whose post fails is not recorded a
 
 ## What other features read
 
-- **Story actions** (#560): a story's own banner carries Save, Mark as Read and Open. Grouped, Minimal and Private
-  banners stand for several stories or none and carry none; clicking one brings the app's window forward.
+- **Story actions** (#560): a story's own banner carries Save, Mark as Read and Open. Grouped, Minimal and Private-mode
+  banners stand for several stories or none and carry none; clicking one brings the app's window forward. A story
+  banner redacted by Show Previews Never has no actions either, but keeps its story, so a click opens it.
 - **Notified stories** (#584): `FeedManager.notifiedStoryIDs` holds every story a posted banner covered since launch:
   an individual banner's story, a grouped starred banner's pending stories and a grouped priority banner's stories.
   It is in memory only and resets at launch. Minimal and Privacy modes add nothing to it.
