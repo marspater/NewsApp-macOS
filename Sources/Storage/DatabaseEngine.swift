@@ -2045,36 +2045,45 @@ actor DatabaseEngine {
             try beginTransaction()
             do {
                 try Task.checkCancellation()
-                // On-device entity dossiers and context cards (W2 #716).
+                // On-device entity index, co-reporting graph and dossiers (W2 #716). `entity_mentions` is the evidence,
+                // one row per story and entity; `entities` and `entity_edges` are aggregates of it that background
+                // maintenance rebuilds, so the clear of derived data below and a retention prune (the cascade) leave
+                // nothing stale. `entity_index` remembers which publisher-text revision of a story the index has read.
                 try executeSimple(
                     """
                     CREATE TABLE IF NOT EXISTS entities (
                         id TEXT PRIMARY KEY,
                         canonical_name TEXT NOT NULL,
                         entity_type TEXT NOT NULL,
-                        mention_count INTEGER DEFAULT 1,
-                        first_seen TEXT NOT NULL,
-                        last_seen TEXT NOT NULL
+                        story_count INTEGER NOT NULL DEFAULT 0,
+                        first_seen REAL NOT NULL,
+                        last_seen REAL NOT NULL,
+                        centrality REAL NOT NULL DEFAULT 0
                     );
                     CREATE TABLE IF NOT EXISTS entity_mentions (
-                        id TEXT PRIMARY KEY,
-                        entity_id TEXT NOT NULL,
-                        article_id TEXT NOT NULL,
-                        publisher_id TEXT NOT NULL,
-                        published_at TEXT NOT NULL,
-                        passage_offset INTEGER,
-                        confidence REAL NOT NULL
-                    );
-                    CREATE TABLE IF NOT EXISTS entity_co_occurrences (
-                        entity_a TEXT NOT NULL,
-                        entity_b TEXT NOT NULL,
-                        count INTEGER DEFAULT 1,
-                        last_seen TEXT NOT NULL,
-                        PRIMARY KEY (entity_a, entity_b)
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity_published ON entity_mentions(entity_id, published_at DESC);
+                        entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                        article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        publisher TEXT NOT NULL,
+                        published_at REAL NOT NULL,
+                        score INTEGER NOT NULL,
+                        PRIMARY KEY (entity_id, article_id)
+                    ) WITHOUT ROWID;
                     CREATE INDEX IF NOT EXISTS idx_entity_mentions_article ON entity_mentions(article_id);
-                    CREATE INDEX IF NOT EXISTS idx_entities_type_mentions ON entities(entity_type, mention_count DESC);
+                    CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity_date ON entity_mentions(entity_id, published_at);
+                    CREATE TABLE IF NOT EXISTS entity_edges (
+                        source TEXT NOT NULL,
+                        relation TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        weight REAL NOT NULL,
+                        evidence INTEGER NOT NULL,
+                        last_seen REAL NOT NULL,
+                        PRIMARY KEY (source, relation, target)
+                    ) WITHOUT ROWID;
+                    CREATE TABLE IF NOT EXISTS entity_index (
+                        article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                        revision INTEGER NOT NULL
+                    ) WITHOUT ROWID;
+                    CREATE INDEX IF NOT EXISTS idx_entities_story_count ON entities(story_count DESC);
                     """
                 )
                 try Task.checkCancellation()
@@ -4242,8 +4251,10 @@ actor DatabaseEngine {
     /// SQLite's rollback, so a clear that fails leaves both as they were (#984).
     private func deleteAnalysisRows() throws {
         try executeSimple("DELETE FROM article_enrichment;")
+        // The entity index is derived from publisher text (W2 #716); the pass that reads it starts over.
+        try executeSimple("DELETE FROM entity_edges;")
+        try executeSimple("DELETE FROM entity_index;")
         try executeSimple("DELETE FROM entity_mentions;")
-        try executeSimple("DELETE FROM entity_co_occurrences;")
         try executeSimple("DELETE FROM entities;")
         try clearEventOverviews()
         // Sitrep lines restate overview highlights, so they go with the overviews.
