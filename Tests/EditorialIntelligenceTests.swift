@@ -30,6 +30,7 @@ enum EditorialIntelligenceTests {
     static func run() async {
         fputs("Running EditorialIntelligenceTests...\n", stderr)
         testEntityGraph()
+        await testDualReaderAlignment()
         do {
             try await testEntityIndexAndDossier()
         } catch {
@@ -85,5 +86,51 @@ enum EditorialIntelligenceTests {
         check(dossier?.related.first?.sharedStories == 2, "A relationship counts its shared stories")
         try await database.clearArticleEnrichment()
         check(try await database.fetchEntity(id: "organization:harbour-authority") == nil, "Clear removes entities")
+    }
+
+    private static func testDualReaderAlignment() async {
+        let service = DualReaderAlignmentService()
+        let leftTitle = "Global Energy Agreement Signed"
+        let leftBody = """
+            Participating nations agreed on formal emissions reductions targets during Friday's Geneva summit.
+
+            Small businesses expressed anxiety about transitioning operational facilities before 2030 deadlines.
+            """
+
+        let rightTitle = "Global Energy Agreement Signed"
+        let rightBody = """
+            Participating nations agreed on formal emissions reductions targets during Friday's Geneva summit.
+
+            Industry trade groups applauded the regulatory certainty provided by the new energy standards.
+            """
+
+        let session = await service.align(
+            left: .init(
+                id: "left-101",
+                title: leftTitle,
+                content: leftBody,
+                publisher: "Times Wire"
+            ),
+            right: .init(
+                id: "right-101",
+                title: rightTitle,
+                content: rightBody,
+                publisher: "Market Gazette"
+            ),
+            clusterId: "cluster-55"
+        )
+
+        check(!session.passageAlignments.isEmpty, "Dual reader alignments generated")
+        check(session.consensusCount >= 1, "Consensus detected for identical opening statement")
+        check(session.consensusScore > 0, "Consensus score is positive")
+        let blankPassages = await service.extractPassages(title: "  ", content: "short")
+        check(blankPassages.isEmpty, "A blank article yields no passages, so no 100% blank match")
+        let shortPassages = await service.extractPassages(
+            title: "Resignation", content: "The president resigned.\n\nHe resigned.\n\nRead more")
+        check(
+            shortPassages == ["Resignation", "The president resigned.", "He resigned."],
+            "Short sentences stay, labels go")
+        check(DualReaderLayoutMode.mode(for: 1300) == .sideBySide, "Adaptive layout side-by-side above 1200pt")
+        check(DualReaderLayoutMode.mode(for: 900) == .stacked, "Adaptive layout stacked below 1200pt")
     }
 }

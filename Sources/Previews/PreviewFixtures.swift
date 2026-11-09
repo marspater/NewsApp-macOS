@@ -233,6 +233,42 @@
         /// Chips and dossiers without a library.
         static let entitySource = EntitySource(
             entities: { _ in [entity] + relatedEntities.map(\.entity) }, dossier: { _ in entityDossier })
+
+        // MARK: Compare Perspectives (W3 #717)
+
+        static let comparisonLeft = [
+            "Harbour authority reopens the northern channel after storm damage",
+            "Ferries resume a reduced timetable while divers inspect the breakwater.",
+            "The authority said the channel will stay closed to freight until Friday.",
+            "Residents on the quay were told to expect noise from repair crews overnight.",
+        ]
+
+        static let comparisonRight = [
+            "Northern channel reopens to ferries after storm repairs",
+            "A reduced ferry timetable starts today as divers check the breakwater for cracks.",
+            "A port spokesperson blamed the delay on a late delivery of replacement bollards.",
+        ]
+
+        /// Hand-built alignment: two passages both reports have, one they word differently and one only the left has.
+        /// Previews never run the embedder, so nothing here is computed.
+        static let comparisonSession = DualReaderSession(
+            clusterId: "preview", leftArticleId: "left", rightArticleId: "right", leftPublisherName: "Reuters",
+            rightPublisherName: "Metro Desk",
+            passageAlignments: [
+                PassageContrastPair(
+                    leftPassageIndex: 0, rightPassageIndex: 0, leftSnippet: comparisonLeft[0],
+                    rightSnippet: comparisonRight[0], similarityScore: 0.86, contrastType: .consensus),
+                PassageContrastPair(
+                    leftPassageIndex: 1, rightPassageIndex: 1, leftSnippet: comparisonLeft[1],
+                    rightSnippet: comparisonRight[1], similarityScore: 0.83, contrastType: .consensus),
+                PassageContrastPair(
+                    leftPassageIndex: 2, rightPassageIndex: 2, leftSnippet: comparisonLeft[2],
+                    rightSnippet: comparisonRight[2], similarityScore: 0.61, contrastType: .divergence),
+                PassageContrastPair(
+                    leftPassageIndex: 3, rightPassageIndex: 2, leftSnippet: comparisonLeft[3],
+                    rightSnippet: comparisonRight[2], similarityScore: 0.2, contrastType: .uniqueLead,
+                    uniqueSide: .left),
+            ])
     }
 
     /// The stores a previewed view reads from the environment, built once per preview session: an in-memory library,
