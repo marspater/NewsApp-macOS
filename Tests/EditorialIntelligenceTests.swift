@@ -301,5 +301,16 @@ enum EditorialIntelligenceTests {
         check(HotspotTensionLevel.level(for: 80.0) == .critical, "Tension score 80 is critical")
         check(HotspotTensionLevel.level(for: 50.0) == .significant, "Tension score 50 is significant")
         check(HotspotTensionLevel.level(for: 20.0) == .elevated, "Tension score 20 is elevated")
+
+        let reading = WorldTensionReading(
+            evaluatedAt: Date(timeIntervalSince1970: 1_793_300_435), inputHash: "hotspots", modelGeneration: "test",
+            headlines: [
+                WorldTensionHeadline(id: "C1", title: "Airstrike hits Kyiv overnight", publisher: "Wire A"),
+                WorldTensionHeadline(id: "C2", title: "Weather mild in Paris this week", publisher: "Wire C"),
+            ],
+            assessment: WorldTensionAssessment(score: 50, summary: "", reasons: []))
+        let hotspots = WorldTensionHotspots(reading: reading)
+        check(hotspots.pins.map(\.id) == ["kyiv"], "Hotspot pins come from tension-cue headlines that name a place")
+        check(hotspots.regions.map(\.id) == ["UA"], "A region no headline reaches is absent, not fixed")
     }
 }

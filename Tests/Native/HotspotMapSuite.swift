@@ -93,6 +93,48 @@ extension NativeSuites {
             #expect(unknown == nil)
         }
 
+        @Test func hotspotsComeFromTheReadingsOwnHeadlines() {
+            func headline(_ id: String, _ title: String, _ publisher: String) -> WorldTensionHeadline {
+                WorldTensionHeadline(id: id, title: title, publisher: publisher)
+            }
+            let reading = WorldTensionReading(
+                evaluatedAt: Date(timeIntervalSince1970: 1_793_300_435), inputHash: "hotspots",
+                modelGeneration: "test",
+                headlines: [
+                    headline("C1", "Airstrike hits Kyiv overnight", "Wire A"),
+                    headline("C2", "Troops fight near Kyiv", "Wire B"),
+                    headline("C3", "Weather mild in Paris this week", "Wire C"),
+                    headline("P1", "Airstrike on Gaza kills dozens", "Wire A"),
+                ],
+                assessment: WorldTensionAssessment(score: 50, summary: "", reasons: []))
+            let hotspots = WorldTensionHotspots(reading: reading)
+
+            // Only a current headline that names a mapped place and carries a tension cue counts.
+            #expect(hotspots.pins.map(\.id) == ["kyiv"])
+            #expect(hotspots.pins.first?.storyCount == 2)
+            #expect(hotspots.pins.first?.topPublisherIds == ["Wire A", "Wire B"])
+            #expect((hotspots.pins.first?.tensionScore ?? 0) > 0)
+
+            // Regions no headline reaches are absent, not shown with a fixed score.
+            #expect(hotspots.regions.map(\.id) == ["UA"])
+            #expect(hotspots.regions.first?.articleCount == 2)
+            #expect(hotspots.regions.first?.activeClusterCount == 1)
+            #expect(hotspots.regions.first?.tensionScore == hotspots.pins.first?.tensionScore)
+
+            // The same title decides the table filter.
+            let kyiv = hotspots.pins[0]
+            #expect(WorldTensionHotspots.matches(reading.headlines[0], pin: kyiv, region: nil))
+            #expect(!WorldTensionHotspots.matches(reading.headlines[2], pin: kyiv, region: nil))
+            #expect(WorldTensionHotspots.matches(reading.headlines[0], pin: nil, region: hotspots.regions[0]))
+
+            // A reading with no placed tension cue has an empty map.
+            let quiet = WorldTensionReading(
+                evaluatedAt: reading.evaluatedAt, inputHash: "quiet", modelGeneration: "test",
+                headlines: [headline("C1", "Weather mild in Paris this week", "Wire C")],
+                assessment: WorldTensionAssessment(score: 5, summary: "", reasons: []))
+            #expect(WorldTensionHotspots(reading: quiet).isEmpty)
+        }
+
         @Test func hotspotRegionTensionClassification() {
             let critical = HotspotTensionLevel.level(for: 85.0)
             #expect(critical == .critical)

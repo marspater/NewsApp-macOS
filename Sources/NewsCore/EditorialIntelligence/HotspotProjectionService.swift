@@ -20,73 +20,36 @@ import Foundation
 public struct HotspotProjectionService: Sendable {
     public init() {}
 
-    // MARK: - Standard Geopolitical Regions
+    // MARK: - Geopolitical Region Anchors
 
-    public static let standardRegions: [HotspotRegion] = [
+    /// The theaters the map groups places into. They carry geography only: coverage and tension are computed from a
+    /// reading's headlines (`WorldTensionReading.hotspots`), never stored here.
+    public static let regionAnchors: [HotspotRegion] = [
         HotspotRegion(
-            id: "UA",
-            name: "Eastern Europe",
-            centroid: GeographicCoordinate(latitude: 49.0, longitude: 31.0),
-            tensionScore: 78.0,
-            activeClusterCount: 12,
-            articleCount: 45
-        ),
+            id: "UA", name: "Eastern Europe", centroid: GeographicCoordinate(latitude: 49.0, longitude: 31.0),
+            tensionScore: 0, activeClusterCount: 0, articleCount: 0),
         HotspotRegion(
-            id: "ME",
-            name: "Middle East",
-            centroid: GeographicCoordinate(latitude: 29.5, longitude: 45.0),
-            tensionScore: 82.0,
-            activeClusterCount: 18,
-            articleCount: 62
-        ),
+            id: "ME", name: "Middle East", centroid: GeographicCoordinate(latitude: 29.5, longitude: 45.0),
+            tensionScore: 0, activeClusterCount: 0, articleCount: 0),
         HotspotRegion(
-            id: "TW",
-            name: "Taiwan Strait & East Asia",
+            id: "TW", name: "Taiwan Strait & East Asia",
             centroid: GeographicCoordinate(latitude: 24.0, longitude: 121.0),
-            tensionScore: 68.0,
-            activeClusterCount: 8,
-            articleCount: 30
-        ),
+            tensionScore: 0, activeClusterCount: 0, articleCount: 0),
         HotspotRegion(
-            id: "EU",
-            name: "Western Europe",
-            centroid: GeographicCoordinate(latitude: 48.0, longitude: 10.0),
-            tensionScore: 32.0,
-            activeClusterCount: 14,
-            articleCount: 50
-        ),
+            id: "EU", name: "Western Europe", centroid: GeographicCoordinate(latitude: 48.0, longitude: 10.0),
+            tensionScore: 0, activeClusterCount: 0, articleCount: 0),
         HotspotRegion(
-            id: "US",
-            name: "North America",
-            centroid: GeographicCoordinate(latitude: 38.0, longitude: -97.0),
-            tensionScore: 28.0,
-            activeClusterCount: 22,
-            articleCount: 85
-        ),
+            id: "US", name: "North America", centroid: GeographicCoordinate(latitude: 38.0, longitude: -97.0),
+            tensionScore: 0, activeClusterCount: 0, articleCount: 0),
         HotspotRegion(
-            id: "CN",
-            name: "South China Sea",
-            centroid: GeographicCoordinate(latitude: 16.0, longitude: 114.0),
-            tensionScore: 64.0,
-            activeClusterCount: 7,
-            articleCount: 24
-        ),
+            id: "CN", name: "South China Sea", centroid: GeographicCoordinate(latitude: 16.0, longitude: 114.0),
+            tensionScore: 0, activeClusterCount: 0, articleCount: 0),
         HotspotRegion(
-            id: "IN",
-            name: "South Asia",
-            centroid: GeographicCoordinate(latitude: 21.0, longitude: 78.0),
-            tensionScore: 42.0,
-            activeClusterCount: 6,
-            articleCount: 20
-        ),
+            id: "IN", name: "South Asia", centroid: GeographicCoordinate(latitude: 21.0, longitude: 78.0),
+            tensionScore: 0, activeClusterCount: 0, articleCount: 0),
         HotspotRegion(
-            id: "KR",
-            name: "Korean Peninsula",
-            centroid: GeographicCoordinate(latitude: 38.0, longitude: 127.5),
-            tensionScore: 58.0,
-            activeClusterCount: 4,
-            articleCount: 16
-        ),
+            id: "KR", name: "Korean Peninsula", centroid: GeographicCoordinate(latitude: 38.0, longitude: 127.5),
+            tensionScore: 0, activeClusterCount: 0, articleCount: 0),
     ]
 
     // MARK: - Coordinate Projection
@@ -186,6 +149,11 @@ public struct HotspotProjectionService: Sendable {
 
     /// Resolves canonical location name to known geographic coordinates.
     public func resolveCoordinate(for locationName: String) -> GeographicCoordinate? {
+        resolveLocation(for: locationName)?.coordinate
+    }
+
+    /// The first known place a text names (lower-cased lookup key and its centroid), in word order.
+    public func resolveLocation(for locationName: String) -> (name: String, coordinate: GeographicCoordinate)? {
         let separators = CharacterSet.punctuationCharacters.union(.whitespacesAndNewlines)
         let words = locationName.lowercased()
             .components(separatedBy: separators)
@@ -198,7 +166,7 @@ public struct HotspotProjectionService: Sendable {
             for end in stride(from: words.count, to: start, by: -1) {
                 let candidate = words[start..<end].joined(separator: " ")
                 if let hit = Self.locationCentroids[candidate] {
-                    return hit
+                    return (candidate, hit)
                 }
             }
         }
@@ -214,7 +182,7 @@ public struct HotspotProjectionService: Sendable {
         var closest: HotspotRegion?
         var minDistance: Double = maxDegrees * maxDegrees
 
-        for region in Self.standardRegions {
+        for region in Self.regionAnchors {
             let dLat = region.centroid.latitude - coordinate.latitude
             var dLon = abs(region.centroid.longitude - coordinate.longitude)
             if dLon > 180.0 { dLon = 360.0 - dLon }

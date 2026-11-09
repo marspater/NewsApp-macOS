@@ -52,6 +52,8 @@ struct TensionIndexView: View {
     @State private var selectedDay: Date?
     @State private var selectedRegion: HotspotRegion?
     @State private var selectedPin: HotspotClusterPin?
+    @State private var headlinesExpanded = false
+    @Environment(\.effectiveContrast) private var contrast
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,19 +67,7 @@ struct TensionIndexView: View {
                             readingHeader(reading)
                             summary(reading)
                         }
-                        group("Global Hotspot Intelligence") {
-                            GlobalHotspotMapView(
-                                onSelectRegion: { region in
-                                    selectedRegion = region
-                                    selectedPin = nil
-                                },
-                                onSelectPin: { pin in
-                                    selectedPin = pin
-                                    selectedRegion = nil
-                                }
-                            )
-                            .frame(height: AppLayout.hotspotMapHeight)
-                        }
+                        hotspotMap(reading)
                         drivers(reading)
                         group {
                             DisclosureGroup {
@@ -110,7 +100,7 @@ struct TensionIndexView: View {
                                 "Today has no reading yet. These publisher headlines are what the next assessment reads."
                             )
                             .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
-                            headlineTable(filteredHeadlines(state.panelHeadlines))
+                            headlineTable(state.panelHeadlines)
                         }
                     }
                     footer
@@ -119,6 +109,12 @@ struct TensionIndexView: View {
             }
         }
         .frame(width: AppLayout.tensionSheetWidth, height: AppLayout.tensionSheetHeight)
+        // Another reading, or none, starts without a place filter; a selection never outlives its map.
+        .onChange(of: selected?.id) {
+            selectedRegion = nil
+            selectedPin = nil
+            headlinesExpanded = false
+        }
     }
 
     /// The sheet title carries the page's one intelligence glyph; how the reading was made is a caption under it
@@ -316,7 +312,7 @@ struct TensionIndexView: View {
 
     private func evidence(_ reading: WorldTensionReading) -> some View {
         group {
-            DisclosureGroup {
+            DisclosureGroup(isExpanded: $headlinesExpanded) {
                 VStack(alignment: .leading, spacing: AppSpacing.sm) {
                     Text("C: last 24 hours · P: preceding six days").font(AppTypography.caption).foregroundStyle(
                         AppColor.secondaryText)
@@ -325,6 +321,45 @@ struct TensionIndexView: View {
             } label: {
                 groupTitle(selectedTheaterTitle)
             }
+        }
+    }
+
+    /// The offline map of the places this reading's headlines name; selecting one narrows the headline table to it.
+    @ViewBuilder
+    private func hotspotMap(_ reading: WorldTensionReading) -> some View {
+        let hotspots = WorldTensionHotspots(reading: reading)
+        group("Global Hotspot Intelligence") {
+            if hotspots.isEmpty {
+                Text("No current headline names a mapped place with a tension cue.")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+            } else {
+                GlobalHotspotMapView(
+                    regions: hotspots.regions,
+                    clusterPins: hotspots.pins,
+                    levelColor: Self.hotspotColor,
+                    contrast: contrast,
+                    onSelectRegion: { region in
+                        selectedRegion = region
+                        selectedPin = nil
+                        headlinesExpanded = region != nil
+                    },
+                    onSelectPin: { pin in
+                        selectedPin = pin
+                        selectedRegion = nil
+                        headlinesExpanded = pin != nil
+                    }
+                )
+                .frame(height: AppLayout.hotspotMapHeight)
+                .id(reading.id)
+            }
+        }
+    }
+
+    private static func hotspotColor(_ level: HotspotTensionLevel) -> Color {
+        switch level {
+        case .elevated: return AppColor.success
+        case .significant: return AppColor.caution
+        case .critical: return AppColor.danger
         }
     }
 
@@ -339,28 +374,10 @@ struct TensionIndexView: View {
     }
 
     private func filteredHeadlines(_ headlines: [WorldTensionHeadline]) -> [WorldTensionHeadline] {
-        if let pin = selectedPin {
-            let matched = headlines.filter { h in
-                h.title.localizedCaseInsensitiveContains(pin.title)
-                    || pin.topPublisherIds.contains(h.publisher)
-            }
-            return matched.isEmpty ? headlines : matched
+        guard selectedPin != nil || selectedRegion != nil else { return headlines }
+        return headlines.filter {
+            WorldTensionHotspots.matches($0, pin: selectedPin, region: selectedRegion)
         }
-        if let region = selectedRegion {
-            let service = HotspotProjectionService()
-            let matched = headlines.filter { h in
-                if h.title.localizedCaseInsensitiveContains(region.name) { return true }
-                if let coord = service.resolveCoordinate(for: h.title),
-                    let closest = service.closestRegion(for: coord),
-                    closest.id == region.id
-                {
-                    return true
-                }
-                return false
-            }
-            return matched.isEmpty ? headlines : matched
-        }
-        return headlines
     }
 
     private var footer: some View {

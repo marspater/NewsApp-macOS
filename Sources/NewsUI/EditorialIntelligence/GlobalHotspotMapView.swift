@@ -20,6 +20,10 @@ public struct GlobalHotspotMapView: View {
     public let clusterPins: [HotspotClusterPin]
     public let onSelectRegion: ((HotspotRegion?) -> Void)?
     public let onSelectPin: ((HotspotClusterPin?) -> Void)?
+    /// The app's design-system colors for each tension band, and its in-app Increase Contrast setting; NewsUI cannot
+    /// see either, so the host passes them in.
+    public let levelColor: (HotspotTensionLevel) -> Color
+    public let contrast: ColorSchemeContrast
 
     @State private var selectedRegionId: String?
     @State private var selectedPinId: String?
@@ -28,16 +32,22 @@ public struct GlobalHotspotMapView: View {
     private let projectionService = HotspotProjectionService()
 
     public init(
-        regions: [HotspotRegion] = HotspotProjectionService.standardRegions,
-        clusterPins: [HotspotClusterPin] = [],
+        regions: [HotspotRegion],
+        clusterPins: [HotspotClusterPin],
+        levelColor: @escaping (HotspotTensionLevel) -> Color,
+        contrast: ColorSchemeContrast = .standard,
         onSelectRegion: ((HotspotRegion?) -> Void)? = nil,
         onSelectPin: ((HotspotClusterPin?) -> Void)? = nil
     ) {
         self.regions = regions
         self.clusterPins = clusterPins
+        self.levelColor = levelColor
+        self.contrast = contrast
         self.onSelectRegion = onSelectRegion
         self.onSelectPin = onSelectPin
     }
+
+    private var isHighContrast: Bool { contrast == .increased }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -91,9 +101,9 @@ public struct GlobalHotspotMapView: View {
 
             // Tension Legend
             HStack(spacing: 12) {
-                legendItem(color: .green, label: "Elevated (<35)")
-                legendItem(color: .orange, label: "Significant (35-69)")
-                legendItem(color: .red, label: "Critical (70-100)")
+                legendItem(color: levelColor(.elevated), label: "Elevated (<35)")
+                legendItem(color: levelColor(.significant), label: "Significant (35-69)")
+                legendItem(color: levelColor(.critical), label: "Critical (70-100)")
             }
 
             if selectedRegionId != nil || selectedPinId != nil {
@@ -190,12 +200,13 @@ public struct GlobalHotspotMapView: View {
         )
         let isSelected = selectedRegionId == region.id
         let color = tensionColor(for: region.tensionScore)
+        let glow = isHighContrast ? 0.2 : 0.0
 
         return ZStack {
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [color.opacity(isSelected ? 0.45 : 0.25), color.opacity(0.0)],
+                        colors: [color.opacity((isSelected ? 0.45 : 0.25) + glow), color.opacity(0.0)],
                         center: .center,
                         startRadius: 2,
                         endRadius: isSelected ? 45 : 30
@@ -204,7 +215,10 @@ public struct GlobalHotspotMapView: View {
                 .frame(width: isSelected ? 90 : 60, height: isSelected ? 90 : 60)
 
             Circle()
-                .stroke(color.opacity(isSelected ? 0.9 : 0.5), lineWidth: isSelected ? 2 : 1)
+                .stroke(
+                    color.opacity(isSelected || isHighContrast ? 0.9 : 0.5),
+                    lineWidth: (isSelected ? 2 : 1) + (isHighContrast ? 1 : 0)
+                )
                 .frame(width: isSelected ? 24 : 16, height: isSelected ? 24 : 16)
         }
         .position(pt)
@@ -234,21 +248,21 @@ public struct GlobalHotspotMapView: View {
         )
         let isSelected = selectedPinId == pin.id
         let color = tensionColor(for: pin.tensionScore)
-        let textColor: Color = (pin.tensionScore >= 35.0 && pin.tensionScore < 70.0) ? .black : .white
 
         return VStack(spacing: 2) {
             Image(systemName: "mappin.circle.fill")
-                .font(isSelected ? .title2 : .body)
+                .font(.system(size: Self.pinSize(for: pin) + (isSelected ? 4 : 0)))
                 .foregroundColor(color)
                 .shadow(color: color.opacity(0.6), radius: isSelected ? 4 : 2)
 
+            // Primary text on the window background keeps its contrast on every band; the band shows in the outline.
             Text("\(Int(pin.tensionScore))")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundColor(textColor)
+                .foregroundColor(.primary)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 1)
-                .background(color)
-                .cornerRadius(4)
+                .background(Color(NSColor.windowBackgroundColor), in: Capsule())
+                .overlay(Capsule().stroke(color, lineWidth: isHighContrast ? 2 : 1))
         }
         .position(pt)
         .accessibilityElement(children: .ignore)
@@ -327,11 +341,14 @@ public struct GlobalHotspotMapView: View {
         .background(.ultraThinMaterial)
     }
 
+    /// A pin grows with its coverage (up to ten stories) and its tension, between 14 and 30 pt.
+    static func pinSize(for pin: HotspotClusterPin) -> CGFloat {
+        let coverage = min(Double(pin.storyCount), 10.0) / 10.0
+        let tension = min(max(pin.tensionScore, 0.0), 100.0) / 100.0
+        return CGFloat(14.0 + 8.0 * coverage + 8.0 * tension)
+    }
+
     private func tensionColor(for score: Double) -> Color {
-        switch HotspotTensionLevel.level(for: score) {
-        case .critical: return .red
-        case .significant: return .orange
-        case .elevated: return .green
-        }
+        levelColor(HotspotTensionLevel.level(for: score))
     }
 }
