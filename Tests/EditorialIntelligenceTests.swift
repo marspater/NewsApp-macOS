@@ -31,6 +31,7 @@ enum EditorialIntelligenceTests {
         fputs("Running EditorialIntelligenceTests...\n", stderr)
         await testEntityExtraction()
         await testDualReaderAlignment()
+        testHotspotMapProjection()
         do {
             try await testEntityStorePersistence()
             try await testEntityDossierAssembly()
@@ -266,5 +267,28 @@ enum EditorialIntelligenceTests {
         check(session.consensusScore > 0, "Consensus score is positive")
         check(DualReaderLayoutMode.mode(for: 1300) == .sideBySide, "Adaptive layout side-by-side above 1200pt")
         check(DualReaderLayoutMode.mode(for: 900) == .stacked, "Adaptive layout stacked below 1200pt")
+    }
+
+    private static func testHotspotMapProjection() {
+        let service = HotspotProjectionService()
+        let canvas = CGSize(width: 1000, height: 500)
+
+        let origin = service.projectEquirectangular(
+            coordinate: GeographicCoordinate(latitude: 0, longitude: 0),
+            canvasSize: canvas
+        )
+        check(abs(origin.x - 500.0) < 0.1, "Equirectangular center X matches 500")
+        check(abs(origin.y - 250.0) < 0.1, "Equirectangular center Y matches 250")
+
+        let kyivCoord = service.resolveCoordinate(for: "Kyiv")
+        check(kyivCoord != nil, "Resolved location coordinate for Kyiv")
+        check(kyivCoord?.latitude ?? 0 > 40.0, "Kyiv latitude is in Northern hemisphere")
+
+        let closest = service.closestRegion(for: GeographicCoordinate(latitude: 49.0, longitude: 31.0))
+        check(closest?.id == "UA", "Matched closest hotspot region UA for Ukraine coordinate")
+
+        check(HotspotTensionLevel.level(for: 80.0) == .critical, "Tension score 80 is critical")
+        check(HotspotTensionLevel.level(for: 50.0) == .significant, "Tension score 50 is significant")
+        check(HotspotTensionLevel.level(for: 20.0) == .elevated, "Tension score 20 is elevated")
     }
 }
