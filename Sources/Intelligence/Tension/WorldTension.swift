@@ -54,6 +54,9 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
     /// Today's own assessed score when `score` is the history-aware reading of methodology v3 (#585); nil in stored
     /// readings and whenever the two agree. Never saved: the history keeps the assessed scores.
     var assessedScore: Int? = nil
+    /// What was near the reader that week, already added to `score` (the Near you lens); nil in stored readings, where
+    /// the history keeps the assessed scores, and for a reader with no war next door.
+    var nearYou: WorldTensionNearYou? = nil
 
     private static let labels = WorldTensionFactor.allCases.map(\.rawValue) + ["Lead", "Summary", "Drivers", "Score"]
 
@@ -96,7 +99,10 @@ struct WorldTensionAssessment: Codable, Equatable, Sendable {
                 drivers: drivers.isEmpty ? nil : drivers)
         }
         guard value.isValid(headlines: headlines) else { return nil }
-        return value
+        // The Near you lens is the app's addition to a reading, never a field the model can set.
+        var parsed = value
+        parsed.nearYou = nil
+        return parsed
     }
 
     func isValid(headlines: [WorldTensionHeadline]) -> Bool {
@@ -671,7 +677,8 @@ struct WorldTensionState: Equatable, Sendable {
 
     var aiEnabled = true
     var collectionEnabled = true
-    /// Readings as shown (methodology v3), oldest first.
+    /// Readings as shown (methodology v3, and where the Mac's region has a war next door, raised by what was near the
+    /// reader that week), oldest first.
     var history: [WorldTensionReading] = []
     /// When the state was loaded; its UTC day decides whether the newest reading is today's.
     var loadedAt = Date()
@@ -772,7 +779,7 @@ struct WorldTensionState: Equatable, Sendable {
     /// Only cancellation throws.
     static func load(
         service: WorldTensionService, database: DatabaseEngine, now: Date, aiEnabled: Bool, collectionEnabled: Bool,
-        force: Bool = false
+        force: Bool = false, region: WorldTensionNearYou.Region? = nil
     ) async throws -> Self {
         var state = Self(aiEnabled: aiEnabled, collectionEnabled: collectionEnabled, loadedAt: now)
         guard aiEnabled, collectionEnabled else { return state }
@@ -795,6 +802,16 @@ struct WorldTensionState: Equatable, Sendable {
             }
         }
         try Task.checkCancellation()
+        // The Near you lens reads the reader's own library, so a failure leaves the world reading as it is.
+        if let region, !state.history.isEmpty {
+            let reach = Double(WorldTensionNearYou.shownDays - 1 + WorldTensionNearYou.windowDays) * 86400
+            let since = TensionMethodology.day(containing: now).start.addingTimeInterval(-reach)
+            let words = WorldTensionNearYou.neighbourWords + region.words
+            if let stories = try? await database.tensionLocalStories(since: since, words: words) {
+                state.history = WorldTensionNearYou.apply(
+                    to: state.history, stories: stories, region: region, now: now)
+            }
+        }
         return state
     }
 }

@@ -414,7 +414,8 @@ struct MainView: View {
         do {
             let loaded = try await WorldTensionState.load(
                 service: .shared, database: articleStore.database, now: Date(), aiEnabled: aiEnabled,
-                collectionEnabled: collectionEnabled, force: requested > handledTensionReassessments)
+                collectionEnabled: collectionEnabled, force: requested > handledTensionReassessments,
+                region: .current())
             // A reload cancelled while resuming on the main actor must not overwrite the newer one.
             guard !Task.isCancelled else { return }
             handledTensionReassessments = requested
