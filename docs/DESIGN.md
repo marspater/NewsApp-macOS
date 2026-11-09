@@ -207,7 +207,7 @@ The toolbar holds Back, the title "Briefing" with its edition line (date, editio
 
 ### 8.6 Grouped content in sheets
 
-A sheet that presents several kinds of information (World Tension: the reading, what drives it, the panel headlines, the past 30 days) groups them into titled cards, never a flat stack of headings. Each group has a title in `AppTypography.sectionTitle` with the header trait, `AppSpacing.md` inside and `AppSpacing.lg` between groups, on the story card surface (`AppColor.surface`, card radius, separator hairline) or in a native `GroupBox`; no literal strokes or opacities. Rows that repeat (drivers, panel headlines) align their columns in a `Grid`: badge (`TagView`), publisher, headline. The sheet title carries the page's one intelligence glyph (section 9); "Assessed on this Mac" is a plain caption under it.
+A sheet that presents several kinds of information (World Tension: the reading, what is near the reader, the map, what drives it, the past 30 days) groups them into titled cards, never a flat stack of headings. Each group has a title in `AppTypography.sectionTitle` with the header trait, `AppSpacing.md` inside and `AppSpacing.lg` between groups, on the story card surface (`AppColor.surface`, card radius, separator hairline) or in a native `GroupBox`; no literal strokes or opacities. Rows that repeat (drivers, panel headlines) align their columns in a `Grid`: badge (`TagView`), publisher, headline. The sheet title carries the page's one intelligence glyph (section 9); "Assessed on this Mac" is a plain caption under it.
 
 ### 8.7 Notification banners
 

@@ -346,8 +346,23 @@ extension OverviewCaptures {
                     headlines: last.headlines, assessment: assessment))
         }
         let waiting = Array(history.last?.headlines.filter { $0.id.hasPrefix("C") }.prefix(4) ?? [])
+        // The Near you lens (#1172) over fictional stories: ten publishers on the war next door, six on a crisis at home.
+        let nearStories =
+            (0..<10).map {
+                TensionLocalStory(
+                    title: "Russian drone attack hits Kharkiv", publisher: "Wire \($0)",
+                    date: now.addingTimeInterval(-3_600))
+            }
+            + (0..<6).map {
+                TensionLocalStory(
+                    title: "Polish coalition crisis deepens", publisher: "Home \($0)",
+                    date: now.addingTimeInterval(-7_200))
+            }
+        let nearYou = WorldTensionNearYou.apply(
+            to: shown, stories: nearStories, region: .current(Locale(identifier: "pl_PL")), now: now)
         let states: [(name: String, state: WorldTensionState)] = [
             ("assessed", WorldTensionState(history: shown, loadedAt: now)),
+            ("near-you", WorldTensionState(history: nearYou, loadedAt: now)),
             ("estimate", WorldTensionState(history: WorldTensionSmoothing.displayed(estimate), loadedAt: now)),
             (
                 "stale",
@@ -384,7 +399,7 @@ extension OverviewCaptures {
                     .environment(model),
                     name: "tension-sidebar-\(name)-\(appearance)", size: NSSize(width: 240, height: 64), dark: dark,
                     into: output)
-                guard ["assessed", "stale", "ai-off"].contains(name) else { continue }
+                guard ["assessed", "near-you", "stale", "ai-off"].contains(name) else { continue }
                 // 1,000 pt list measure less the page insets, and the 900 pt window's detail column less them.
                 for width in [952, 632] {
                     failures += render(

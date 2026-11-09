@@ -45,6 +45,7 @@ extension NewsTests {
             ("testWorldTension", { try await testWorldTension() }),
             ("testWorldTensionSmoothing", { testWorldTensionSmoothing() }),
             ("testWorldTensionState", { try await testWorldTensionState() }),
+            ("testWorldTensionNearYou", { try await testWorldTensionNearYou() }),
             (
                 "testOverviewDocumentModelBoundToInputsAndVersions",
                 { try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost) }
@@ -326,6 +327,105 @@ extension NewsTests {
         assertEqual(
             deferred.explanation, WorldTensionError.deferred.errorDescription, "Low Power Mode says it is paused")
         await database.close()
+    }
+
+    static func testWorldTensionNearYou() async throws {
+        print("  - Testing the Near you lens on the World Tension reading...")
+        guard let poland = WorldTensionNearYou.Region.current(Locale(identifier: "pl_PL")) else {
+            assertTrue(false, "Poland has a war next door")
+            return
+        }
+        assertEqual(poland.name, "Poland", "The Mac's Region setting names the country")
+        assertTrue(
+            WorldTensionNearYou.Region.current(Locale(identifier: "en_US")) == nil, "No war is next door to the US")
+        let now = Date(timeIntervalSince1970: 1_793_372_400)
+        func story(_ title: String, _ publisher: String, daysAgo: Double = 1) -> TensionLocalStory {
+            TensionLocalStory(title: title, publisher: publisher, date: now.addingTimeInterval(-daysAgo * 86400))
+        }
+        func war(_ publishers: Int, daysAgo: Double = 1) -> [TensionLocalStory] {
+            (0..<publishers).map { story("Russian drone attack hits Kharkiv", "Publisher \($0)", daysAgo: daysAgo) }
+        }
+        func home(_ publishers: Int) -> [TensionLocalStory] {
+            (0..<publishers).map { story("Polish coalition crisis deepens", "Home \($0)") }
+        }
+        func degrees(_ stories: [TensionLocalStory]) -> Int? {
+            WorldTensionNearYou.evidence(stories, region: poland, endingAt: now, worldScore: 30)?.degrees
+        }
+        assertEqual(degrees([]), nil, "No stories add nothing")
+        assertEqual([1, 3, 5, 8].map { degrees(war($0)) }, [3, 6, 9, 12], "A war next door adds a step by publishers")
+        assertEqual([1, 3, 6].map { degrees(home($0)) }, [1, 2, 3], "A crisis at home adds a smaller step")
+        assertEqual(degrees(war(8) + home(6)), 15, "Both together reach the cap")
+        assertEqual(
+            WorldTensionNearYou(
+                region: "Poland", worldScore: 30, neighbourDegrees: 12, neighbourStories: 9, neighbourPublishers: 9,
+                domesticDegrees: 12, domesticStories: 9, domesticPublishers: 9
+            ).degrees, WorldTensionNearYou.cap, "Nothing adds more than the cap")
+        assertEqual(
+            degrees(Array(repeating: story("Russian drone attack hits Kharkiv", "One Wire"), count: 5)), 3,
+            "One publisher is one step however often it repeats")
+        assertEqual(degrees(war(8, daysAgo: 8)), nil, "A story older than seven days does not count")
+        assertEqual(degrees(war(8, daysAgo: -1)), nil, "Nor does one after the reading's end")
+        assertEqual(
+            degrees([story("Norway bumped to let Russia compete at world juniors", "Sport")]), nil,
+            "A story that names Russia without fighting adds nothing")
+        assertEqual(
+            degrees([story("Prussian blue show attacks its critics", "Art")]), nil, "A whole word, not Prussian")
+        assertEqual(degrees([story("Warsaw hosts a fashion week", "Style")]), nil, "Poland named without a crisis cue")
+        let both = WorldTensionNearYou.evidence(war(10) + home(10), region: poland, endingAt: now, worldScore: 31)
+        assertTrue(
+            both?.reasons.count == 2 && both?.reasons.first?.contains("10 publishers") == true,
+            "The sheet says what was counted")
+
+        let reasons = WorldTensionFactor.allCases.map {
+            WorldTensionAssessment.Reason(factor: $0, explanation: "A fictional reason for the test.")
+        }
+        func reading(_ day: Int, _ score: Int) -> WorldTensionReading {
+            WorldTensionReading(
+                evaluatedAt: now.addingTimeInterval(Double(day) * 86400), inputHash: "near-\(day)",
+                modelGeneration: "generation",
+                headlines: [WorldTensionHeadline(id: "C1", title: "Headline", publisher: "Panel")],
+                assessment: WorldTensionAssessment(
+                    score: score, summary: "A fictional summary for the test.", reasons: reasons))
+        }
+        let history = [reading(-40, 20), reading(-1, 30), reading(0, 95)]
+        let shown = WorldTensionNearYou.apply(to: history, stories: war(10), region: poland, now: now)
+        assertEqual(shown.map(\.assessment.score), [20, 42, 100], "Recent readings rise; an old one and a clamp stand")
+        assertEqual(shown[2].assessment.nearYou?.worldScore, 95, "The world reading stays beside the total")
+        assertEqual(
+            WorldTensionNearYou.apply(to: history, stories: war(10), region: nil, now: now), history,
+            "Without a region nothing changes")
+
+        // The lens is the app's addition to a reading: a model that encodes one gets it stripped.
+        var claimed = WorldTensionAssessment(
+            score: 40, summary: "A fictional summary for the test.", reasons: reasons)
+        claimed.nearYou = both
+        let encoded = String(bytes: try JSONEncoder().encode(claimed), encoding: .utf8) ?? ""
+        let parsed = WorldTensionAssessment.parse(
+            encoded, headlines: [WorldTensionHeadline(id: "C1", title: "Headline", publisher: "Panel")])
+        assertTrue(parsed != nil, "The assessment itself is valid")
+        assertEqual(parsed?.nearYou, nil, "The model cannot set the lens")
+
+        // The library: only titles that can matter come back, newest last, and the lens reads them.
+        let database = DatabaseEngine(path: ":memory:")
+        try await database.open()
+        var articles = (0..<9).map { index in
+            FeedArticle(
+                title: "Russian missile strike hits Odesa \(index)", link: "https://example.com/war-\(index)",
+                guid: "war-\(index)", description: "", pubDate: now.addingTimeInterval(-3600), source: "Wire \(index)")
+        }
+        articles.append(
+            FeedArticle(
+                title: "A quiet week in the garden", link: "https://example.com/garden", guid: "garden",
+                description: "",
+                pubDate: now.addingTimeInterval(-3600), source: "Garden Weekly"))
+        try await database.upsertArticles(articles)
+        let words = WorldTensionNearYou.neighbourWords + poland.words
+        let found = try await database.tensionLocalStories(since: now.addingTimeInterval(-7 * 86400), words: words)
+        assertEqual(found.count, 9, "The library returns the titles that name a place of the lens")
+        assertEqual(
+            WorldTensionNearYou.apply(to: [reading(0, 40)], stories: found, region: poland, now: now)[0].assessment
+                .score,
+            52, "Nine publishers at war next door add twelve degrees")
     }
 
     static func testWorldTension() async throws {
