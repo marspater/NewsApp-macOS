@@ -337,11 +337,6 @@ struct TensionIndexView: View {
                 GlobalHotspotMapView(
                     regions: hotspots.regions,
                     clusterPins: hotspots.pins,
-                    levelColor: Self.hotspotColor,
-                    contrast: contrast,
-                    reduceMotion: reduceMotion,
-                    labelColor: AppColor.primaryText,
-                    labelBackground: AppColor.background,
                     onSelectRegion: { region in
                         selectedRegion = region
                         selectedPin = nil

@@ -50,7 +50,7 @@ struct WorldTensionHotspots: Equatable, Sendable {
                 id: name, title: name.capitalized, coordinate: place.coordinate,
                 tensionScore: scale(place.weight),
                 topPublisherIds: Array(Set(place.headlines.map(\.publisher))).sorted(),
-                storyCount: place.headlines.count)
+                storyCount: place.headlines.count, isApproximate: service.isApproximate(name))
         }.sorted { ($1.tensionScore, $1.storyCount, $1.id) < ($0.tensionScore, $0.storyCount, $0.id) }
 
         var regionTotals: [String: Total] = [:]

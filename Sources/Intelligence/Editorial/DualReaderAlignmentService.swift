@@ -22,6 +22,9 @@ public actor DualReaderAlignmentService {
     public static let consensusThreshold: Float = 0.82
     public static let divergenceThreshold: Float = 0.40
     public static let vectorDimension = 384
+    /// The most passages one report contributes: the title and the opening of the story. A live blog of hundreds of
+    /// paragraphs would otherwise cost hundreds of embeddings for a comparison nobody reads to the end.
+    public static let maximumPassages = 40
 
     public struct ArticleInput: Sendable {
         public let id: String
@@ -54,8 +57,8 @@ public actor DualReaderAlignmentService {
         right: ArticleInput,
         clusterId: String = ""
     ) async -> DualReaderSession {
-        let leftPassages = extractPassages(title: left.title, content: left.content)
-        let rightPassages = extractPassages(title: right.title, content: right.content)
+        let leftPassages = boundedPassages(title: left.title, content: left.content)
+        let rightPassages = boundedPassages(title: right.title, content: right.content)
 
         guard !leftPassages.isEmpty && !rightPassages.isEmpty else {
             return DualReaderSession(
@@ -70,6 +73,12 @@ public actor DualReaderAlignmentService {
 
         // Compute vector embeddings in a shared embedding space
         let allVectors = await embedPassages(leftPassages + rightPassages)
+        // A cancelled comparison has no vectors to align and shows nothing.
+        guard allVectors.count == leftPassages.count + rightPassages.count else {
+            return DualReaderSession(
+                clusterId: clusterId, leftArticleId: left.id, rightArticleId: right.id,
+                leftPublisherName: left.publisher, rightPublisherName: right.publisher, passageAlignments: [])
+        }
         let leftVectors = Array(allVectors[..<leftPassages.count])
         let rightVectors = Array(allVectors[leftPassages.count...])
 
@@ -105,12 +114,14 @@ public actor DualReaderAlignmentService {
             matchedRightIndices.insert(bestRightIdx)
             alignments.append(
                 PassageContrastPair(
+                    id: "\(leftIdx)-\(bestRightIdx)",
                     leftPassageIndex: leftIdx,
                     rightPassageIndex: bestRightIdx,
                     leftSnippet: leftPassage,
                     rightSnippet: rightPassages[bestRightIdx],
                     similarityScore: bestSim,
-                    contrastType: classifyContrast(similarity: bestSim)
+                    contrastType: classifyContrast(similarity: bestSim),
+                    uniqueSide: classifyContrast(similarity: bestSim) == .uniqueLead ? .left : nil
                 )
             )
         }
@@ -121,12 +132,14 @@ public actor DualReaderAlignmentService {
             if maxSim < Self.divergenceThreshold {
                 alignments.append(
                     PassageContrastPair(
+                        id: "\(closestLeftIdx)-\(rightIdx)",
                         leftPassageIndex: closestLeftIdx,
                         rightPassageIndex: rightIdx,
                         leftSnippet: leftPassages[closestLeftIdx],
                         rightSnippet: rightPassage,
                         similarityScore: maxSim,
-                        contrastType: .uniqueLead
+                        contrastType: .uniqueLead,
+                        uniqueSide: .right
                     )
                 )
             }
@@ -156,6 +169,11 @@ public actor DualReaderAlignmentService {
         } else {
             return .uniqueLead
         }
+    }
+
+    /// The passages a comparison reads: `extractPassages`, at most `maximumPassages`.
+    public func boundedPassages(title: String, content: String) -> [String] {
+        Array(extractPassages(title: title, content: content).prefix(Self.maximumPassages))
     }
 
     /// Splits an article into distinct paragraphs/passages, stripping boilerplate.
@@ -194,6 +212,8 @@ public actor DualReaderAlignmentService {
         vectors.reserveCapacity(passages.count)
 
         for passage in passages {
+            // Embedding is the slow part; a closed sheet stops it between passages.
+            if Task.isCancelled { return [] }
             guard let neuralVec = await SentenceEmbedder.shared.embed(passage) else {
                 // Keep one embedding space for all passages in the session.
                 return passages.map { fallbackLexicalVector(for: $0) }
