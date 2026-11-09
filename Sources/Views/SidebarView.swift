@@ -153,13 +153,15 @@ struct SidebarView: View {
     /// A native sidebar row (DESIGN.md 6): the list's selection handles clicks and arrow keys, the system draws
     /// the badge, and row size follows the person's sidebar size setting.
     @ViewBuilder
-    private func topicRow(title: String, icon: String, badge: Int? = nil, isLoading: Bool = false) -> some View {
+    private func topicRow(
+        title: String, icon: String, badge: Int? = nil, capsBadge: Bool = false, isLoading: Bool = false
+    ) -> some View {
         let count = badge ?? 0
         let badgeValue = count > 0 ? String(count) : ""
         // The filled variant marks the selected row only, as Mail and Notes do.
         Label(title, systemImage: icon.replacingOccurrences(of: ".fill", with: ""))
             .symbolVariant((selectedTopic ?? "Today") == title ? .fill : .none)
-            .badge(badge ?? 0)
+            .badge((capsBadge ? AppSettings.unreadBadgeCopy(count) : count > 0 ? String(count) : nil).map { Text($0) })
             .overlay(alignment: .trailing) {
                 if isLoading { ProgressView().controlSize(.mini) }
             }
@@ -176,12 +178,13 @@ struct SidebarView: View {
     private var inboxSection: some View {
         Section("Inbox") {
             topicRow(title: "Today", icon: "newspaper", isLoading: feedManager.isAnyFeedLoading)
-            topicRow(title: "Unread", icon: "circle.circle", badge: unreadBadge)
+            topicRow(title: "Unread", icon: "circle.circle", badge: unreadBadge, capsBadge: true)
             topicRow(title: "Briefing", icon: "text.book.closed")
         }
     }
 
-    /// Unread stories the Unread list can show, counted across the whole library with muting applied (#785).
+    /// Unread story cards the Unread list shows, counted across the whole library with muting applied (#785); a story
+    /// several reports cover is one.
     private var unreadBadge: Int { articleStore.unreadCount }
 
     private var librarySection: some View {
@@ -244,6 +247,8 @@ struct SidebarView: View {
                 .buttonStyle(.plain)
                 .help("New Smart Binder")
                 .accessibilityLabel("New Smart Binder")
+                // Ends where the count badges of the rows below end, not at the header's wider edge.
+                .padding(.trailing, AppLayout.sidebarHeaderActionInset)
             }
         }
     }

@@ -88,7 +88,7 @@ struct GitHubReleasePayload: Codable, Sendable {
 /// Security & Architecture Constraints:
 /// - Informational only: NEVER downloads, executes, replaces, or installs application binaries.
 /// - Validates remote release URLs strictly against `https://github.com/marspater/NewsApp-macOS/releases/*`.
-/// - Enforces 6-hour automatic throttling after every attempt, failed or not, while allowing manual bypass.
+/// - Enforces 72-hour automatic throttling after every attempt, failed or not, while allowing manual bypass.
 /// - Validates strict SemVer before flagging updates.
 @MainActor
 final class UpdateChecker: ObservableObject {
@@ -144,19 +144,20 @@ final class UpdateChecker: ObservableObject {
     }
 
     private let logger = Logger(subsystem: "com.marspater.news", category: "UpdateChecker")
-    private let minimumCheckInterval: TimeInterval = 6 * 3600  // 6 hours
+    /// How long after an attempt, successful or not, an automatic check waits. A manual check never does.
+    static let automaticCheckInterval: TimeInterval = 72 * 3600
 
     var currentAppVersion: String {
         customAppVersion ?? (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")
     }
 
     /// Checks for newer releases on GitHub.
-    /// - Parameter userInitiated: If true, bypasses the 6-hour cache.
+    /// - Parameter userInitiated: If true, bypasses the 72-hour cache.
     func checkForUpdates(userInitiated: Bool = false) async {
         if !userInitiated, let last = lastAttemptDate,
-            case let elapsed = now().timeIntervalSince(last), abs(elapsed) < minimumCheckInterval
+            case let elapsed = now().timeIntervalSince(last), abs(elapsed) < Self.automaticCheckInterval
         {
-            logger.debug("Skipping automatic update check; cached within 6-hour window.")
+            logger.debug("Skipping automatic update check; cached within 72-hour window.")
             return
         }
 

@@ -229,6 +229,11 @@ enum AppLayout {
     static let tensionScaleMarkerHeight: CGFloat = 16
     static let pageInset: CGFloat = 24.0
     static let sidebarInset: CGFloat = 12.0
+    /// How far in from the sidebar's trailing edge a section header's button sits so it ends where the count badges of
+    /// the rows below end: a header runs wider than a row, whose badge sits inside the selection capsule. Measured
+    /// offscreen on macOS 27 by `Tests/Harness/SidebarCaptures.swift` (the badge ends 21.5 pt, a bare header button
+    /// 4.5 pt from the edge of a 240 pt sidebar).
+    static let sidebarHeaderActionInset: CGFloat = 17.0
     static let cardGap: CGFloat = 16.0
     /// Reader and event-overview column width at text scale 1 (DESIGN.md 9).
     static let readingMeasure: CGFloat = 720.0
@@ -515,6 +520,9 @@ enum AppMotion {
     static let hover = Animation.easeOut(duration: 0.12)
     static let state = Animation.smooth(duration: 0.24)
     static let navigation = Animation.smooth(duration: 0.3)
+    /// A result the person's own action brings in, such as the test notification's outcome: a short spring that settles
+    /// at once (DESIGN.md 13).
+    static let spring = Animation.spring(duration: 0.45, bounce: 0.3)
 
     // Aliases for backward compatibility
     static let quick = hover

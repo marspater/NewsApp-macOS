@@ -96,6 +96,8 @@ struct SettingsView: View {
     @State private var notificationInterests: [String] = []
     /// What the last test banner did (#926); nil until one is sent.
     @State private var testNotificationStatus: String?
+    /// Clears the test banner's result after `testNotificationStatusSeconds`; a newer result replaces it.
+    @State private var testNotificationDismissal: Task<Void, Never>?
     @State private var isSendingTestNotification = false
     @State private var confirmsUnmuteAll = false
     @State private var inferredInterests: [String: Int] = [:]
@@ -186,7 +188,7 @@ struct SettingsView: View {
             }
 
             Section(header: sectionHeader("Reading Behavior")) {
-                Toggle("Auto-Hide Read Stories", isOn: $themeManager.autoHideRead)
+                Toggle("Auto-Hide Read Stories", isOn: themeManager.binding(\.autoHideRead))
                 Text("Stories will disappear from filtered views once marked as read.")
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
@@ -720,26 +722,22 @@ struct SettingsView: View {
                     }
                 }
             }
-            Section(header: sectionHeader("Test")) {
-                HStack(spacing: AppSpacing.sm) {
-                    Button("Send Test Notification") { Task { await sendTestNotification() } }
-                        .disabled(isSendingTestNotification)
-                    Button("Export Diagnostics…") {
-                        DiagnosticsExport.run(
-                            settings: appSettings, feedManager: feedManager, articleStore: articleStore)
-                    }
-                }
+            Section {
+                Button("Send Test Notification") { Task { await sendTestNotification() } }
+                    .disabled(isSendingTestNotification)
                 Text(
-                    "Posts one random story from your list, with its photo when it has one, through the same path as a real notification. The diagnostics zip holds this launch's log, including each banner's route, with story titles and addresses removed."
+                    "Posts one random story from your list, with its photo when it has one, through the same path as a real notification."
                 )
                 .font(AppTypography.caption)
                 .foregroundStyle(AppColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 if let testNotificationStatus {
+                    // The result springs in, takes the accent and leaves by itself (DESIGN.md 11, 13).
                     Text(testNotificationStatus)
                         .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
+                        .foregroundStyle(AppColor.accentText)
                         .fixedSize(horizontal: false, vertical: true)
+                        .transition(.scale(scale: 0.92, anchor: .topLeading).combined(with: .opacity))
                         .accessibilityLabel("Test notification result: \(testNotificationStatus)")
                 }
             }
@@ -761,7 +759,7 @@ struct SettingsView: View {
         isSendingTestNotification = true
         defer { isSendingTestNotification = false }
         guard let story = NotificationService.sampleStory(from: articleStore.articles) else {
-            testNotificationStatus = "No stories in your list yet. Refresh first."
+            showTestNotificationStatus("No stories in your list yet. Refresh first.")
             return
         }
         let outcome = await NotificationService.shared.postSample(story) {
@@ -771,9 +769,24 @@ struct SettingsView: View {
         }
         // Read after posting: permission granted while the sample was on its way is what the line reports.
         let settings = await UNUserNotificationCenter.current().notificationSettings()
-        testNotificationStatus = NotificationService.sampleStatus(
-            outcome, authorization: settings.authorizationStatus, alert: settings.alertSetting,
-            style: settings.alertStyle, previews: settings.showPreviewsSetting)
+        showTestNotificationStatus(
+            NotificationService.sampleStatus(
+                outcome, authorization: settings.authorizationStatus, alert: settings.alertSetting,
+                style: settings.alertStyle, previews: settings.showPreviewsSetting))
+    }
+
+    /// How long the test banner's result stays under the button.
+    static let testNotificationStatusSeconds = 30
+
+    /// Springs the result in and clears it after `testNotificationStatusSeconds`; sending again restarts the clock.
+    private func showTestNotificationStatus(_ text: String) {
+        withAnimation(reduceMotion ? nil : AppMotion.spring) { testNotificationStatus = text }
+        testNotificationDismissal?.cancel()
+        testNotificationDismissal = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(Self.testNotificationStatusSeconds))
+            guard !Task.isCancelled else { return }
+            withAnimation(reduceMotion ? nil : AppMotion.spring) { testNotificationStatus = nil }
+        }
     }
 
     /// The full-mode rule in one sentence, with the interests it currently reads (#588, #665).
@@ -855,7 +868,7 @@ struct SettingsView: View {
                 .padding(.vertical, AppSpacing.xxs)
             }
 
-            Section(header: sectionHeader("World Tension Index (Experiment)")) {
+            Section(header: sectionHeader("World Tension Index")) {
                 Toggle(
                     "Collect Panel Feeds for Tension Indicator",
                     isOn: Binding(
@@ -950,7 +963,7 @@ struct SettingsView: View {
     private var appearanceTab: some View {
         Form {
             Section(header: sectionHeader("App Appearance")) {
-                Picker("Interface Style", selection: $themeManager.appearance) {
+                Picker("Interface Style", selection: themeManager.binding(\.appearance)) {
                     ForEach(AppAppearance.allCases) { app in
                         Text(app.rawValue).tag(app)
                     }
@@ -965,7 +978,7 @@ struct SettingsView: View {
             }
 
             Section(header: sectionHeader("Reading")) {
-                Picker("Reading Style", selection: $themeManager.articleTheme) {
+                Picker("Reading Style", selection: themeManager.binding(\.articleTheme)) {
                     ForEach(ArticleThemeType.allCases) { theme in
                         Text(theme.displayName).tag(theme)
                     }
@@ -1037,10 +1050,8 @@ struct SettingsView: View {
                     description:
                         "Subscriptions, read history, saved stories and the search index, in \(DatabaseEngine.defaultLibraryURL.lastPathComponent)."
                 ) {
-                    TagView(
-                        title: articleStore.databaseHealthNotice == nil ? "Active" : "Read-Only",
-                        tint: articleStore.databaseHealthNotice == nil ? AppColor.secondaryText : AppColor.warning
-                    )
+                    libraryStatusTag
+                        .animation(reduceMotion ? nil : AppMotion.state, value: articleStore.libraryStatus)
                 }
                 if let healthNotice = articleStore.databaseHealthNotice {
                     NoticeView(tint: AppColor.warning) {
@@ -1086,6 +1097,19 @@ struct SettingsView: View {
                     Button("Clear All…", role: .destructive) { pendingClear = .all }
                 }
             }
+
+            Section {
+                storageRow(
+                    "Export Diagnostics", detail: nil,
+                    description:
+                        "Saves a zip with this launch's log, including each banner's route, with story titles and addresses removed."
+                ) {
+                    Button("Export Diagnostics…") {
+                        DiagnosticsExport.run(
+                            settings: appSettings, feedManager: feedManager, articleStore: articleStore)
+                    }
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: Self.paneWidth)
@@ -1103,6 +1127,18 @@ struct SettingsView: View {
             }
         } message: { target in
             Text(target.consequence)
+        }
+    }
+
+    /// The library database's state as it is now: the accent while it works, yellow when read-only, red when it
+    /// could not be opened or read.
+    @ViewBuilder
+    private var libraryStatusTag: some View {
+        switch articleStore.libraryStatus {
+        case .opening: TagView(title: "Opening")
+        case .active: TagView(title: "Active", tint: AppColor.accent)
+        case .readOnly: TagView(title: "Read-Only", tint: AppColor.warning)
+        case .unavailable: TagView(title: "Unavailable", tint: AppColor.danger)
         }
     }
 
@@ -1249,7 +1285,7 @@ struct SettingsView: View {
                 Text("Software Updates")
             } footer: {
                 Text(
-                    "News checks GitHub Releases at launch and at most every 6 hours while it runs, sending its version in the User-Agent and standard request headers, nothing that identifies you or your Mac. Opening a release shows its download page; News never replaces itself automatically."
+                    "News checks GitHub Releases at launch and at most every 72 hours while it runs, sending its version in the User-Agent and standard request headers, nothing that identifies you or your Mac. Opening a release shows its download page; News never replaces itself automatically."
                 )
             }
         }

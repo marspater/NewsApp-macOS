@@ -71,6 +71,17 @@ final class ThemeManager: ObservableObject {
         set { storedReaderTextScale = Double(ReaderTextSize.normalized(newValue)) }
     }
 
+    /// A binding that writes only a change. A control that restates its own selection while SwiftUI updates a view (a
+    /// menu or segmented Picker) would otherwise publish from within the update ("Publishing changes from within view
+    /// updates is not allowed"), and every publish redraws every view that reads the theme.
+    func binding<Value: Equatable>(_ keyPath: ReferenceWritableKeyPath<ThemeManager, Value>) -> Binding<Value> {
+        Binding(
+            get: { self[keyPath: keyPath] },
+            set: { newValue in
+                if self[keyPath: keyPath] != newValue { self[keyPath: keyPath] = newValue }
+            })
+    }
+
     init(defaults: UserDefaults = .standard) {
         _appearance = AppStorage(wrappedValue: .system, "appAppearance", store: defaults)
         _articleTheme = AppStorage(wrappedValue: .casper, "articleTheme", store: defaults)
