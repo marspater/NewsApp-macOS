@@ -231,7 +231,10 @@ final class StoryBannerPresenter {
         if app.isHidden { app.unhide(nil) }
         if let window = mainWindow, window.isMiniaturized {
             window.deminiaturize(nil)
-        } else if mainWindow?.isVisible != true {
+        } else if let window = mainWindow, window.isVisible {
+            // Open but behind other windows, or on another Space: in front of them, so the story is seen.
+            window.makeKeyAndOrderFront(nil)
+        } else {
             NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: .init())
         }
         app.activate()
