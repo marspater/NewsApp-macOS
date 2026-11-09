@@ -90,7 +90,7 @@ actor DatabaseEngine {
     /// then left alone too, so nothing beside the database changes either.
     private(set) var isReadOnly = false
     /// The newest schema `migrateSchemaIfNeeded` writes; a library above it came from a newer build (#747).
-    static let schemaVersion = 35
+    static let schemaVersion = 36
     /// The longest text a publisher update keeps of what it replaced (#712): a cut text would show invented changes.
     static let maximumRevisionTextLength = 50_000
     /// How long a statement waits for another connection's lock before SQLite reports it busy.
@@ -2035,6 +2035,59 @@ actor DatabaseEngine {
                     try executeSimple("ALTER TABLE feeds ADD COLUMN \(column) \(type);")
                 }
                 try setUserVersion(35)
+                try commitTransaction()
+            } catch {
+                loggedOptional("rollbackTransaction") { try rollbackTransaction() }
+                throw error
+            }
+        }
+        if version < 36 {
+            try beginTransaction()
+            do {
+                try Task.checkCancellation()
+                // On-device entity index, co-reporting graph and dossiers (W2 #716). `entity_mentions` is the evidence,
+                // one row per story and entity; `entities` and `entity_edges` are aggregates of it that background
+                // maintenance rebuilds, so the clear of derived data below and a retention prune (the cascade) leave
+                // nothing stale. `entity_index` remembers which publisher-text revision of a story the index has read.
+                try executeSimple(
+                    """
+                    CREATE TABLE IF NOT EXISTS entities (
+                        id TEXT PRIMARY KEY,
+                        canonical_name TEXT NOT NULL,
+                        entity_type TEXT NOT NULL,
+                        story_count INTEGER NOT NULL DEFAULT 0,
+                        first_seen REAL NOT NULL,
+                        last_seen REAL NOT NULL,
+                        centrality REAL NOT NULL DEFAULT 0
+                    );
+                    CREATE TABLE IF NOT EXISTS entity_mentions (
+                        entity_id TEXT NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+                        article_id TEXT NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+                        publisher TEXT NOT NULL,
+                        published_at REAL NOT NULL,
+                        score INTEGER NOT NULL,
+                        PRIMARY KEY (entity_id, article_id)
+                    ) WITHOUT ROWID;
+                    CREATE INDEX IF NOT EXISTS idx_entity_mentions_article ON entity_mentions(article_id);
+                    CREATE INDEX IF NOT EXISTS idx_entity_mentions_entity_date ON entity_mentions(entity_id, published_at);
+                    CREATE TABLE IF NOT EXISTS entity_edges (
+                        source TEXT NOT NULL,
+                        relation TEXT NOT NULL,
+                        target TEXT NOT NULL,
+                        weight REAL NOT NULL,
+                        evidence INTEGER NOT NULL,
+                        last_seen REAL NOT NULL,
+                        PRIMARY KEY (source, relation, target)
+                    ) WITHOUT ROWID;
+                    CREATE TABLE IF NOT EXISTS entity_index (
+                        article_id TEXT PRIMARY KEY REFERENCES articles(id) ON DELETE CASCADE,
+                        revision INTEGER NOT NULL
+                    ) WITHOUT ROWID;
+                    CREATE INDEX IF NOT EXISTS idx_entities_story_count ON entities(story_count DESC);
+                    """
+                )
+                try Task.checkCancellation()
+                try setUserVersion(36)
                 try commitTransaction()
             } catch {
                 loggedOptional("rollbackTransaction") { try rollbackTransaction() }
@@ -4198,6 +4251,11 @@ actor DatabaseEngine {
     /// SQLite's rollback, so a clear that fails leaves both as they were (#984).
     private func deleteAnalysisRows() throws {
         try executeSimple("DELETE FROM article_enrichment;")
+        // The entity index is derived from publisher text (W2 #716); the pass that reads it starts over.
+        try executeSimple("DELETE FROM entity_edges;")
+        try executeSimple("DELETE FROM entity_index;")
+        try executeSimple("DELETE FROM entity_mentions;")
+        try executeSimple("DELETE FROM entities;")
         try clearEventOverviews()
         // Sitrep lines restate overview highlights, so they go with the overviews.
         try executeSimple("DELETE FROM briefing_sitrep;")

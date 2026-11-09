@@ -191,6 +191,48 @@
                 try await Task.sleep(for: .seconds(86_400 * 365))
             }
         }
+
+        // MARK: Entity dossier (W2 #716)
+
+        static let entity = EntityRecord(
+            id: "organization:harbour-authority", canonicalName: "Harbour Authority", entityType: .organization,
+            storyCount: 21, firstSeen: now.addingTimeInterval(-26 * 86_400), lastSeen: now, centrality: 0.004)
+
+        static let relatedEntities: [RelatedEntity] = [
+            RelatedEntity(
+                entity: EntityRecord(
+                    id: "place:northern-channel", canonicalName: "Northern Channel", entityType: .place, storyCount: 9,
+                    firstSeen: now.addingTimeInterval(-20 * 86_400), lastSeen: now, centrality: 0.002),
+                sharedStories: 8, score: 0.31),
+            RelatedEntity(
+                entity: EntityRecord(
+                    id: "person:maria-ortega", canonicalName: "Maria Ortega", entityType: .person, storyCount: 6,
+                    firstSeen: now.addingTimeInterval(-12 * 86_400), lastSeen: now, centrality: 0.001),
+                sharedStories: 4, score: 0.22),
+        ]
+
+        /// Thirty days of coverage with a quiet start and a busy last week.
+        static let entityDossier = EntityDossier(
+            entity: entity,
+            coverage: [0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 0, 3, 1, 0, 0, 2, 0, 1, 0, 0, 4, 2, 1, 0, 1, 3, 2, 1, 2]
+                .enumerated().map { day, count in
+                    EntityCoverageDay(
+                        day: DatabaseEngine.windowStart(now: now).addingTimeInterval(Double(day) * 86_400),
+                        storyCount: count)
+                },
+            publishers: [
+                EntityPublisherShare(publisher: "Reuters", storyCount: 9, share: 0.43),
+                EntityPublisherShare(publisher: "Associated Press", storyCount: 7, share: 0.33),
+                EntityPublisherShare(publisher: "Metro Desk", storyCount: 5, share: 0.24),
+            ],
+            recentStories: articles.map {
+                EntityStoryReference(id: $0.id, title: $0.title, publisher: $0.source, date: $0.pubDate)
+            },
+            related: relatedEntities)
+
+        /// Chips and dossiers without a library.
+        static let entitySource = EntitySource(
+            entities: { _ in [entity] + relatedEntities.map(\.entity) }, dossier: { _ in entityDossier })
     }
 
     /// The stores a previewed view reads from the environment, built once per preview session: an in-memory library,

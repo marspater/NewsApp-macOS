@@ -44,6 +44,9 @@ struct EventOverviewReaderView: View {
     let onSelectRelatedEvent: (RelatedStoryEvent) -> Void
     /// "Same Event": the reader says a related event reports this one (#524); nil hides the action.
     let onCombineRelatedEvent: ((RelatedStoryEvent) -> Void)?
+    /// The entity index behind the "In this story" chips (W2 #716); nil, as in harnesses, shows none.
+    let entitySource: EntitySource?
+    let onOpenEntityStory: (String) -> Void
 
     init(
         overview: EventOverviewDocument,
@@ -57,7 +60,11 @@ struct EventOverviewReaderView: View {
         onSelectRelatedEvent: @escaping (RelatedStoryEvent) -> Void = { _ in
             // Callers without navigation (harnesses, previews) pass no related events, so nothing calls this.
         },
-        onCombineRelatedEvent: ((RelatedStoryEvent) -> Void)? = nil
+        onCombineRelatedEvent: ((RelatedStoryEvent) -> Void)? = nil,
+        entitySource: EntitySource? = nil,
+        onOpenEntityStory: @escaping (String) -> Void = { _ in
+            // Callers without an entity index (harnesses, previews) show no chips, so nothing calls this.
+        }
     ) {
         self.overview = overview
         self.memberArticles = memberArticles
@@ -69,6 +76,8 @@ struct EventOverviewReaderView: View {
         self.onSelectCitation = onSelectCitation
         self.onSelectRelatedEvent = onSelectRelatedEvent
         self.onCombineRelatedEvent = onCombineRelatedEvent
+        self.entitySource = entitySource
+        self.onOpenEntityStory = onOpenEntityStory
     }
 
     @Environment(\.effectiveContrast) private var contrast
@@ -527,7 +536,14 @@ struct EventOverviewReaderView: View {
                         earlierInStorySection
                     }
 
-                    // 6. Sources: one list that reads each publication here or opens it on the publisher's site
+                    // 6. The people, organizations and places the reports name, each opening a dossier (W2 #716)
+                    if let entitySource, !memberArticles.isEmpty {
+                        EntityChipRow(
+                            articleIDs: memberArticles.map(\.id), source: entitySource, onSelectStory: onOpenEntityStory
+                        )
+                    }
+
+                    // 7. Sources: one list that reads each publication here or opens it on the publisher's site
                     if !memberArticles.isEmpty {
                         compactSourcesSection
                     }
