@@ -1328,6 +1328,9 @@ extension NewsTests {
             BriefingPriorityData.isWireCopy(text: "Weekly recap news from the town", publisher: "Daily Example"), false,
             "A headline with \"recap news\" is not AP wire copy")
         assertEqual(
+            BriefingPriorityData.isWireCopy(text: "AP News: Town reopens", publisher: "Daily Example"), true,
+            "An AP News credit at the start is wire copy")
+        assertEqual(
             BriefingPriorityData.isWireCopy(text: "UPI: Town reopens", publisher: "Daily Example"), true,
             "A UPI credit is wire copy")
         assertEqual(

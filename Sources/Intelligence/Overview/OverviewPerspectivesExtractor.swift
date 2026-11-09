@@ -254,7 +254,7 @@ struct OverviewPerspectivesExtractor: Sendable {
     /// Recognized syndicated wire news agencies.
     private static let recognizedWireServices: [(name: String, markers: [String])] = [
         ("Reuters", ["(reuters)", "reuters", "— reuters", "by reuters"]),
-        ("Associated Press", ["(ap)", "associated press", "— ap", "by associated press", " ap news", "(ap news)"]),
+        ("Associated Press", ["(ap)", "associated press", "— ap", "by associated press", "ap news"]),
         ("AFP", ["(afp)", "agence france-presse", "— afp", "by afp"]),
         ("Bloomberg", ["bloomberg news", "bloomberg", "— bloomberg"]),
         ("UPI", ["united press international", "(upi)", "— upi", "by upi", "upi:", "upi -", "upi —"]),
@@ -545,11 +545,23 @@ struct OverviewPerspectivesExtractor: Sendable {
             if lowerSource.contains(wire.name.lowercased()) {
                 return wire.name
             }
-            for marker in wire.markers where lowerText.contains(marker) {
+            for marker in wire.markers where startsWord(marker, in: lowerText) {
                 return wire.name
             }
         }
         return nil
+    }
+
+    /// Whether `marker` occurs in `text` not inside a longer word ("ap news" is not in "recap news").
+    private static func startsWord(_ marker: String, in text: String) -> Bool {
+        var searchStart = text.startIndex
+        while let range = text.range(of: marker, range: searchStart..<text.endIndex) {
+            if range.lowerBound == text.startIndex || !text[text.index(before: range.lowerBound)].isLetter {
+                return true
+            }
+            searchStart = range.upperBound
+        }
+        return false
     }
 
     /// One compiled attribution pattern with its capture groups and minimum statement length.
