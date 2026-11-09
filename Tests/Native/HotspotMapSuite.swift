@@ -152,10 +152,10 @@ extension NativeSuites {
             func headline(_ id: String, _ title: String) -> WorldTensionHeadline {
                 WorldTensionHeadline(id: id, title: title, publisher: "Same Publisher")
             }
-            let inUkraine = headline("C1", "Missile attack near Kyiv overnight")
-            let inKorea = headline("C2", "Missile launch near Seoul alarms residents")
-            let inChina = headline("C3", "Missile drill near Beijing raises fears")
-            let priorUkraine = headline("P1", "Missile attack near Kyiv last week")
+            let inUkraine = headline("C1", "Airstrike hits Kyiv overnight")
+            let inKorea = headline("C2", "Missile test near Seoul alarms residents")
+            let inChina = headline("C3", "Military drills near Beijing raise fears")
+            let priorUkraine = headline("P1", "Airstrike hits Kyiv last week")
             let neutralUkraine = headline("C4", "Sunny skies in Kyiv this morning")
             let reading = WorldTensionReading(
                 evaluatedAt: Date(timeIntervalSince1970: 1_793_300_435), inputHash: "theaters",
