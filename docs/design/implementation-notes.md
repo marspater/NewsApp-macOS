@@ -12,7 +12,7 @@ Platform workarounds, AppKit bridges, known bugs and OS-version restrictions beh
 
 **Affected versions.** #466 records none. It was reproduced on the macOS release in use in October 2026. Check again on each major macOS release before relaxing the rule.
 
-**Regression protection.** `script/design_lint.sh` rejects such labels across a modifier chain and self-tests that check on every run. This is a static check: no runtime test exercises the crash path yet. A UI test that opens a story with a credit and a loading image while reading the accessibility tree is the missing piece.
+**Regression protection.** `script/design_lint.sh` rejects such labels across a modifier chain and self-tests that check on every run. `NewsSmokeUITests.test07AccessibilityTreeWithImageCredit` and `test08AccessibilityTreeWithImageStillLoading` (#466) open a fixture story whose lead image has a credit and one whose image never finishes loading, then read every element label in the window, so the loop crashes the test. Fixtures: `Tests/Fixtures/ui-smoke/feed.xml` and `AppContainer.fixtureImageLoader` (an image URL containing `stall` never finishes at reader size). **Versions.** CI runs them in the UI Tests step of `ci.yml` on `macos-26` and on CircleCI `test-macos`; compiled locally only (`build-for-testing`) on macOS 27.2 with Xcode 27.0. The tests have not been run on macOS 27, and none was confirmed to fail with the labels restored.
 
 ## Notifications
 

@@ -41,6 +41,9 @@ final class NewsSmokeUITests: XCTestCase {
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
         return try String(contentsOf: url, encoding: .utf8)
             .replacingOccurrences(of: "{{PUBDATE}}", with: formatter.string(from: Date()))
+            // An hour older, so this story is never the Today lead whose full-size image the launch waits for.
+            .replacingOccurrences(
+                of: "{{EARLIER_PUBDATE}}", with: formatter.string(from: Date(timeIntervalSinceNow: -3600)))
     }
 
     /// The Debug app built beside the test runner (`NewsUITests-Runner.app`).
@@ -97,7 +100,7 @@ final class NewsSmokeUITests: XCTestCase {
     }
 
     /// Searches the archive for the fixture headline and returns its first result.
-    func searchHeadline() -> XCUIElement {
+    func searchHeadline(_ headline: String = headline) -> XCUIElement {
         let field = app.searchFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10), "No search field in the toolbar")
         // The toolbar field rests collapsed; ⌘F expands and focuses it, after which typing goes to the app.
@@ -105,19 +108,19 @@ final class NewsSmokeUITests: XCTestCase {
         let focused = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "hasKeyboardFocus == true"), object: field)
         XCTAssertEqual(XCTWaiter.wait(for: [focused], timeout: 5), .completed, "The search field did not take focus")
-        app.typeText("Lighthouse Restoration\n")
-        let result = story()
+        app.typeText(headline + "\n")
+        let result = story(headline)
         XCTAssertTrue(result.waitForExistence(timeout: 60), "The fixture headline was not found")
         return result
     }
 
     /// A story card: one button whose label starts with the headline, followed by source, date and state.
-    func story() -> XCUIElement {
-        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", Self.headline)).firstMatch
+    func story(_ headline: String = headline) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", headline)).firstMatch
     }
 
-    func openHeadline() {
-        searchHeadline().click()
+    func openHeadline(_ headline: String = headline) {
+        searchHeadline(headline).click()
         XCTAssertTrue(
             app.buttons["Save Story"].waitForExistence(timeout: 20)
                 || app.buttons["Remove from Saved Stories"].exists,
@@ -163,5 +166,36 @@ final class NewsSmokeUITests: XCTestCase {
         settingsWindow.typeKey("w", modifierFlags: .command)
         XCTAssertFalse(settingsWindow.waitForExistence(timeout: 2), "Settings did not close")
         XCTAssertTrue(sidebarRow("Today").waitForExistence(timeout: 10), "The main window did not return")
+    }
+
+    /// Reads every element's label, which makes the app resolve each accessibility label as VoiceOver would. A label
+    /// set on an AppKit-backed view (spinner, selectable text) once looped until the app crashed (#466); the app
+    /// dying here fails the test.
+    func walkAccessibilityTree() -> [String] {
+        let labels = app.windows.firstMatch.descendants(matching: .any).allElementsBoundByIndex.map(\.label)
+        XCTAssertEqual(app.state, .runningForeground, "The app stopped while its accessibility tree was read")
+        return labels
+    }
+
+    /// A story whose lead image loaded and has a credit (fixture `media:credit`).
+    func test07AccessibilityTreeWithImageCredit() {
+        openHeadline("Coastal Survey Maps Tidal Flats From The Air")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["Image credit: Fixture Photo Desk"].waitForExistence(timeout: 20),
+            "The credit line did not appear")
+        // The image decoded: its loading placeholder is gone, so the walk covers the loaded state.
+        let loading = app.descendants(matching: .any)["Loading story image"]
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: loading)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 20), .completed, "The lead image did not finish loading")
+        XCTAssertTrue(walkAccessibilityTree().contains("Image credit: Fixture Photo Desk"))
+    }
+
+    /// A story whose lead image never finishes loading (fixture URL containing `stall`).
+    func test08AccessibilityTreeWithImageStillLoading() {
+        openHeadline("Ferry Timetable Change Waits On Slow Harbour Photo")
+        XCTAssertTrue(
+            app.descendants(matching: .any)["Loading story image"].waitForExistence(timeout: 20),
+            "The loading placeholder did not appear")
+        XCTAssertTrue(walkAccessibilityTree().contains("Loading story image"))
     }
 }

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
   <channel>
     <title>UI Smoke Wire</title>
     <link>https://example.com/</link>
@@ -19,6 +19,25 @@
       <pubDate>{{PUBDATE}}</pubDate>
       <category>Entertainment</category>
       <description>Six open-air concerts will take place in the city park from June to August.</description>
+    </item>
+    <item>
+      <title>Coastal Survey Maps Tidal Flats From The Air</title>
+      <link>https://example.com/news/tidal-survey</link>
+      <guid>https://example.com/news/tidal-survey</guid>
+      <pubDate>{{PUBDATE}}</pubDate>
+      <category>Science</category>
+      <description>Drone flights charted the flats at low tide for the first time.</description>
+      <media:content url="https://example.com/images/tidal-survey.jpg" medium="image" type="image/jpeg" width="1200" height="800"/>
+      <media:credit>Fixture Photo Desk</media:credit>
+    </item>
+    <item>
+      <title>Ferry Timetable Change Waits On Slow Harbour Photo</title>
+      <link>https://example.com/news/ferry-timetable</link>
+      <guid>https://example.com/news/ferry-timetable</guid>
+      <pubDate>{{EARLIER_PUBDATE}}</pubDate>
+      <category>Science</category>
+      <description>The new timetable starts next month on all island routes.</description>
+      <media:content url="https://example.com/images/stall-ferry.jpg" medium="image" type="image/jpeg" width="1200" height="800"/>
     </item>
   </channel>
 </rss>

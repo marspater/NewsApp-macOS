@@ -26,9 +26,10 @@ extension Notification.Name {
 // The default loader retains the protected network path; native harnesses can supply an offline image. The second
 // argument bounds the decoded image's longer side in pixels.
 private struct ReaderImageLoaderKey: EnvironmentKey {
-    static let defaultValue: @Sendable (URL, Int) async throws -> CGImage = {
-        try await SecureHTTPClient.shared.fetchReaderImage(from: $0, maxPixelSize: $1)
-    }
+    static let defaultValue: @Sendable (URL, Int) async throws -> CGImage =
+        AppContainer.fixtureImageLoader() ?? {
+            try await SecureHTTPClient.shared.fetchReaderImage(from: $0, maxPixelSize: $1)
+        }
 }
 
 extension EnvironmentValues {
