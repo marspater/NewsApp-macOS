@@ -322,6 +322,25 @@ extension NativeSuites {
                 "A seed edge counted twice would move every score")
         }
 
+        /// A chip row reads again when an indexing pass or a clear changes the index, though its stories did not change.
+        @Test @MainActor func theEntitySourceCarriesTheIndexRevisionSoChipsAskAgain() async {
+            let store = ArticleStore(
+                database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
+            await store.waitForStartup()
+            let before = store.entitySource.revision
+            #expect(store.entitySource.revision == before, "Nothing changed, so the row keeps its reading")
+            store.entityIndexChanged()
+            let after = store.entitySource.revision
+            #expect(after != before, "A pass that ended changes the revision")
+            #expect(
+                EntityChipRow.Query(articleIDs: ["a"], revision: before)
+                    != EntityChipRow.Query(articleIDs: ["a"], revision: after),
+                "The row's task id changes with it")
+            #expect(
+                EntityChipRow.Query(articleIDs: ["a"], revision: after)
+                    == EntityChipRow.Query(articleIDs: ["a"], revision: after))
+        }
+
         @Test func clearingDerivedDataEmptiesTheIndexAndRefusesStaleWrites() async throws {
             let (database, directory, _) = try await Self.library()
             defer { try? FileManager.default.removeItem(at: directory) }
