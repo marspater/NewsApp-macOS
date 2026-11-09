@@ -152,16 +152,24 @@ public struct DualReaderView: View {
                                         text: passage,
                                         index: index,
                                         pair: pair,
-                                        isSelected: pair?.id == selectedAlignmentId
+                                        isSelected: pair != nil && pair?.id == selectedAlignmentId
                                     )
                                     .id("left_\(index)")
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityAddTraits(pair == nil ? [] : .isButton)
+                                    .accessibilityAction(named: "Show matching passage") {
+                                        selectPassage(
+                                            pair: pair,
+                                            scrollTo: "right_\(pair?.rightPassageIndex ?? 0)",
+                                            proxy: rightProxy
+                                        )
+                                    }
                                     .onTapGesture {
-                                        if let pair = pair {
-                                            selectedAlignmentId = pair.id
-                                            withAnimation(.easeInOut(duration: 0.2)) {
-                                                rightProxy.scrollTo("right_\(pair.rightPassageIndex)", anchor: .center)
-                                            }
-                                        }
+                                        selectPassage(
+                                            pair: pair,
+                                            scrollTo: "right_\(pair?.rightPassageIndex ?? 0)",
+                                            proxy: rightProxy
+                                        )
                                     }
                                 }
                             }
@@ -183,16 +191,24 @@ public struct DualReaderView: View {
                                         text: passage,
                                         index: index,
                                         pair: pair,
-                                        isSelected: pair?.id == selectedAlignmentId
+                                        isSelected: pair != nil && pair?.id == selectedAlignmentId
                                     )
                                     .id("right_\(index)")
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityAddTraits(pair == nil ? [] : .isButton)
+                                    .accessibilityAction(named: "Show matching passage") {
+                                        selectPassage(
+                                            pair: pair,
+                                            scrollTo: "left_\(pair?.leftPassageIndex ?? 0)",
+                                            proxy: leftProxy
+                                        )
+                                    }
                                     .onTapGesture {
-                                        if let pair = pair {
-                                            selectedAlignmentId = pair.id
-                                            withAnimation(.easeInOut(duration: 0.2)) {
-                                                leftProxy.scrollTo("left_\(pair.leftPassageIndex)", anchor: .center)
-                                            }
-                                        }
+                                        selectPassage(
+                                            pair: pair,
+                                            scrollTo: "left_\(pair?.leftPassageIndex ?? 0)",
+                                            proxy: leftProxy
+                                        )
                                     }
                                 }
                             }
@@ -253,6 +269,18 @@ public struct DualReaderView: View {
     }
 
     // MARK: - Subviews
+
+    private func selectPassage(
+        pair: PassageContrastPair?,
+        scrollTo targetId: String,
+        proxy: ScrollViewProxy
+    ) {
+        guard let pair = pair else { return }
+        selectedAlignmentId = pair.id
+        withAnimation(.easeInOut(duration: 0.2)) {
+            proxy.scrollTo(targetId, anchor: .center)
+        }
+    }
 
     private func columnHeader(title: String, icon: String) -> some View {
         HStack {

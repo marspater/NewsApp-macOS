@@ -65,14 +65,18 @@ extension NativeSuites {
                 """
 
             let session = await service.align(
-                leftArticleId: "left-1",
-                leftTitle: "Emissions Accord Signed",
-                leftContent: leftText,
-                leftPublisher: "Global News",
-                rightArticleId: "right-1",
-                rightTitle: "Emissions Accord Signed",
-                rightContent: rightText,
-                rightPublisher: "Industry Daily",
+                left: .init(
+                    id: "left-1",
+                    title: "Emissions Accord Signed",
+                    content: leftText,
+                    publisher: "Global News"
+                ),
+                right: .init(
+                    id: "right-1",
+                    title: "Emissions Accord Signed",
+                    content: rightText,
+                    publisher: "Industry Daily"
+                ),
                 clusterId: "cluster-77"
             )
 

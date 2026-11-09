@@ -246,14 +246,18 @@ enum EditorialIntelligenceTests {
             """
 
         let session = await service.align(
-            leftArticleId: "left-101",
-            leftTitle: leftTitle,
-            leftContent: leftBody,
-            leftPublisher: "Times Wire",
-            rightArticleId: "right-101",
-            rightTitle: rightTitle,
-            rightContent: rightBody,
-            rightPublisher: "Market Gazette",
+            left: .init(
+                id: "left-101",
+                title: leftTitle,
+                content: leftBody,
+                publisher: "Times Wire"
+            ),
+            right: .init(
+                id: "right-101",
+                title: rightTitle,
+                content: rightBody,
+                publisher: "Market Gazette"
+            ),
             clusterId: "cluster-55"
         )
 
