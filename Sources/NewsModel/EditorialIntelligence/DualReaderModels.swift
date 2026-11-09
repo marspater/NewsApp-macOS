@@ -70,6 +70,9 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
         self.similarityScore = similarityScore
         self.contrastType = contrastType
     }
+
+    /// A unique lead names the closest passage of the other article only for reference; it is not a match.
+    public var hasCounterpart: Bool { contrastType != .uniqueLead }
 }
 
 /// Complete dual-reader alignment session comparing two articles in an event cluster.

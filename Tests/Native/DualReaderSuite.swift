@@ -55,6 +55,16 @@ extension NativeSuites {
             #expect(passages == ["Resignation", "The president resigned."])
         }
 
+        @Test func uniqueLeadHasNoCounterpart() {
+            func pair(_ type: PerspectiveContrastType) -> PassageContrastPair {
+                PassageContrastPair(
+                    leftPassageIndex: 0, rightPassageIndex: 1, leftSnippet: "a", rightSnippet: "b",
+                    similarityScore: 0.1, contrastType: type)
+            }
+            #expect(!pair(.uniqueLead).hasCounterpart)
+            #expect(pair(.divergence).hasCounterpart && pair(.consensus).hasCounterpart)
+        }
+
         @Test func lexicalVectorEmbedding() async {
             let service = DualReaderAlignmentService()
             let vector = await service.fallbackLexicalVector(
