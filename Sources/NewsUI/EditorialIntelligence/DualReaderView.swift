@@ -114,6 +114,7 @@ public struct DualReaderView: View {
                     .font(.title3)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Close comparison")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
