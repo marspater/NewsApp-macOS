@@ -252,7 +252,7 @@ public struct GlobalHotspotMapView: View {
     /// The tension number beside a marker, so the level never rests on color alone; the band shows in its outline.
     private func scoreTag(_ score: Double, color: Color) -> some View {
         Text("\(Int(score))")
-            .font(.system(size: 9, weight: .bold))
+            .font(.caption2.weight(.bold))
             .foregroundStyle(labelColor)
             .padding(.horizontal, 4)
             .padding(.vertical, 1)
@@ -333,7 +333,9 @@ public struct GlobalHotspotMapView: View {
         } label: {
             VStack(spacing: 2) {
                 Image(systemName: "mappin.circle.fill")
-                    .font(.system(size: Self.pinSize(for: pin) + (isSelected ? 4 : 0)))
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: Self.pinSize(for: pin) + (isSelected ? 4 : 0))
                     .foregroundColor(color)
                     .shadow(color: color.opacity(0.6), radius: isSelected ? 4 : 2)
                     .background { pulseRing(color: color, diameter: Self.pinSize(for: pin)) }
