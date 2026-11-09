@@ -234,6 +234,35 @@
         static let entitySource = EntitySource(
             entities: { _ in [entity] + relatedEntities.map(\.entity) }, dossier: { _ in entityDossier })
 
+        // MARK: Hotspot map (W4 #718)
+
+        /// Five places from the bundled lookup: two cities, a territory, a country and a sea, which draw differently.
+        static let hotspotPins: [HotspotClusterPin] = {
+            let service = HotspotProjectionService()
+            func pin(_ name: String, tension: Double, stories: Int) -> HotspotClusterPin? {
+                guard let place = service.resolveLocation(for: name) else { return nil }
+                return HotspotClusterPin(
+                    id: place.name, title: place.name.capitalized, coordinate: place.coordinate, tensionScore: tension,
+                    topPublisherIds: ["Reuters"], storyCount: stories, isApproximate: service.isApproximate(place.name))
+            }
+            return [
+                pin("Kyiv", tension: 82, stories: 6), pin("Gaza", tension: 74, stories: 5),
+                pin("Sudan", tension: 55, stories: 3), pin("Taipei", tension: 38, stories: 2),
+                pin("Red Sea", tension: 31, stories: 2),
+            ].compactMap { $0 }
+        }()
+
+        static let hotspotRegions: [HotspotRegion] = [("UA", 82.0, 1, 6), ("ME", 74.0, 1, 5), ("TW", 38.0, 1, 2)]
+            .compactMap {
+                id, tension, places, stories in
+                HotspotProjectionService.regionAnchors.first { $0.id == id }.map {
+                    HotspotRegion(
+                        id: $0.id, name: $0.name, centroid: $0.centroid, tensionScore: tension,
+                        activeClusterCount: places,
+                        articleCount: stories)
+                }
+            }
+
         // MARK: Compare Perspectives (W3 #717)
 
         static let comparisonLeft = [
