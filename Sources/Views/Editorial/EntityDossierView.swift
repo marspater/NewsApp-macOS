@@ -117,12 +117,12 @@ struct EntityDossierView: View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
             sectionTitle("Coverage")
             Chart(Array(dossier.coverage.enumerated()), id: \.offset) { index, day in
-                BarMark(x: .value("Day", index), y: .value("Stories", day.storyCount), width: .ratio(0.8))
+                // The default bar width: a `.ratio` width on a numeric axis draws no bars at all.
+                BarMark(x: .value("Day", index), y: .value("Stories", day.storyCount))
                     .foregroundStyle(AppColor.accent)
                     .accessibilityLabel(Self.dayText(day.day))
                     .accessibilityValue(Self.storiesText(day.storyCount))
             }
-            .chartXScale(domain: -0.5...Double(dossier.coverage.count) - 0.5)
             .chartXAxis {
                 AxisMarks(values: .stride(by: 7)) { value in
                     AxisTick()
