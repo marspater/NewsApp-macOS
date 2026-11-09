@@ -1,6 +1,6 @@
 # Design language
 
-The single design language for News on macOS. It applies to every change that adds or modifies UI, by any contributor or agent. Where it is silent, follow Apple's [Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines) (HIG); where it conflicts with the HIG, this document wins until it is changed. Technology constraints stay in [ARCHITECTURE.md](ARCHITECTURE.md); the evidence behind these rules is in the [Apple News and Liquid Glass study](audits/2026-10-09-apple-news-liquid-glass-study.md), and the migration of existing code is in the [adoption plan](plans/2026-10-09-design-language-adoption.md).
+The single design language for News on macOS. It applies to every change that adds or modifies UI, by any contributor or agent. Where it is silent, follow Apple's [Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines) (HIG); where it conflicts with the HIG, this document wins until it is changed. Technology constraints stay in [ARCHITECTURE.md](../ARCHITECTURE.md); the evidence behind these rules is in the [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md), and the migration of existing code is in the [adoption plan](../plans/2026-10-09-design-language-adoption.md).
 
 **Must** and **never** are requirements. **Should** allows a documented exception in the PR description. Code that predates this document is migrated by the adoption plan; a change that touches a view must not add a new deviation and should fix the deviations in the lines it edits.
 
@@ -16,7 +16,7 @@ The single design language for News on macOS. It applies to every change that ad
 
 ## 2. Platform baseline
 
-- Deployment target macOS 15; build with Xcode 27 and the macOS 27 SDK ([ARCHITECTURE.md](ARCHITECTURE.md)).
+- Deployment target macOS 15; build with Xcode 27 and the macOS 27 SDK ([ARCHITECTURE.md](../ARCHITECTURE.md)).
 - **macOS 26 and later:** Liquid Glass through system components first, then the glass APIs in section 3. Gate with `if #available(macOS 26, *)`, never with `#if canImport(...)` or other SDK proxies.
 - **macOS 27:** refinements are automatic and must not be fought: the Liquid Glass transparency slider (clear to tinted), sidebars extending to the window edges with semibold selection, glass on bordered toolbar items over the sidebar, hard scroll edges when free-floating title text is in the title bar, interactive glass tuned for the pointer and dimming of inactive windows. Never assume a particular transparency level; check legibility at both ends of the slider.
 - **macOS 15:** the same layout and components with system materials and standard controls. Never imitate glass with gradients, specular strokes or stacked materials on any version.
@@ -221,7 +221,7 @@ A sheet that presents several kinds of information (World Tension: the reading, 
 
 ### 8.8 Today edition
 
-Today is an edition, not one list (epic Z, #932; the specification is [`docs/plans/2026-11-09-today-edition-spec.md`](plans/2026-11-09-today-edition-spec.md)). The layout submitted for sign-off lives in the "Today Edition" canvas (https://claude.ai/artifact/WhMdQEpLNzChu1ztS8cwwa); `docs/mocks/today_edition.md` summarizes it. When this section and the canvas disagree on the look, the canvas wins. Unread, Saved Stories, History, Smart Binders and search keep the list and grid of 8.2.
+Today is an edition, not one list (epic Z, #932; the specification is [`docs/plans/2026-11-09-today-edition-spec.md`](../plans/2026-11-09-today-edition-spec.md)). The layout submitted for sign-off lives in the "Today Edition" canvas (https://claude.ai/artifact/WhMdQEpLNzChu1ztS8cwwa); `docs/mocks/today_edition.md` summarizes it. When this section and the canvas disagree on the look, the canvas wins. Unread, Saved Stories, History, Smart Binders and search keep the list and grid of 8.2.
 
 **Lanes**, in assignment order. One story enters exactly one lane, the first whose quality bar it clears.
 
