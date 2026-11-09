@@ -48,6 +48,19 @@ extension NativeSuites {
                 PerspectiveReports.candidates(from: [withFeedSummaryOnly]).count == 1, "A feed summary can stand in")
         }
 
+        @Test func theTaskKeyChangesWhenAMembersTextArrives() {
+            let before = Self.article("a", publisher: "Alpha Wire", words: 10)
+            let after = Self.article("a", publisher: "Alpha Wire", words: 80)
+            let other = Self.article("b", publisher: "Beta Post", words: 80)
+            #expect(PerspectiveReports.inputs(of: [before, other]) == PerspectiveReports.inputs(of: [before, other]))
+            #expect(
+                PerspectiveReports.inputs(of: [before, other]) != PerspectiveReports.inputs(of: [after, other]),
+                "The same members with more text are read again")
+            #expect(
+                PerspectiveReports.candidates(from: [before, other]).count == 1
+                    && PerspectiveReports.candidates(from: [after, other]).count == 2)
+        }
+
         @Test func contrastCopyJudgesNeitherPublisherAndKeepsSparklesForGeneratedText() {
             let types = PerspectiveContrastType.allCases
             #expect(!types.map(\.systemIcon).contains("sparkles"))

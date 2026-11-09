@@ -97,6 +97,9 @@ public struct DualReaderSession: Identifiable, Hashable, Sendable {
     public let leftPublisherName: String
     public let rightPublisherName: String
     public let passageAlignments: [PassageContrastPair]
+    /// The neural embedder was not available for at least one passage, so every vector is a hashed word count: the
+    /// scores measure shared words, not meaning, and the thresholds were not set for them.
+    public let usesLexicalFallback: Bool
 
     public init(
         id: String = UUID().uuidString,
@@ -105,7 +108,8 @@ public struct DualReaderSession: Identifiable, Hashable, Sendable {
         rightArticleId: String,
         leftPublisherName: String,
         rightPublisherName: String,
-        passageAlignments: [PassageContrastPair]
+        passageAlignments: [PassageContrastPair],
+        usesLexicalFallback: Bool = false
     ) {
         self.id = id
         self.clusterId = clusterId
@@ -114,6 +118,7 @@ public struct DualReaderSession: Identifiable, Hashable, Sendable {
         self.leftPublisherName = leftPublisherName
         self.rightPublisherName = rightPublisherName
         self.passageAlignments = passageAlignments
+        self.usesLexicalFallback = usesLexicalFallback
     }
 
     public var consensusCount: Int {
