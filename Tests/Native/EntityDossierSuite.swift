@@ -234,6 +234,98 @@ extension NativeSuites {
             #expect(graph == nil)
         }
 
+        /// Opt-in (`NEWS_ENTITY_PERF=1`, an idle Mac): the dossier's non-graph path on 5,000 stories and 40,000 mentions
+        /// against the 15 ms budget of #716, with the graph path reported beside it.
+        @Test(.enabled(if: ProcessInfo.processInfo.environment["NEWS_ENTITY_PERF"] == "1"))
+        func dossierPathMeetsItsBudgetOnAFiveThousandStoryLibrary() async throws {
+            struct Generator: RandomNumberGenerator {
+                var state: UInt64
+                mutating func next() -> UInt64 {
+                    state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+                    return state
+                }
+            }
+            var random = Generator(state: 42)
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "news-entity-perf-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
+            try await database.open()
+            let stories = 5_000
+            let articles = (0..<stories).map { n in
+                FeedArticle(
+                    title: "Story \(n)", link: "https://example.com/\(n)", guid: "g\(n)", description: "Dek \(n)",
+                    pubDate: Self.now.addingTimeInterval(-Double.random(in: 0..<(30 * 86_400), using: &random)),
+                    source: "Publisher \(n % 40)", fullContent: "Body \(n)")
+            }
+            for start in stride(from: 0, to: stories, by: 500) {
+                try await database.upsertArticles(Array(articles[start..<min(start + 500, stories)]))
+            }
+            // 1,500 entities, a few of them in many stories: an entity's chance falls with its number.
+            let picks: [[Int]] = (0..<stories).map { _ in
+                var chosen = Set<Int>()
+                while chosen.count < 8 {
+                    chosen.insert(Int(pow(Double.random(in: 0..<1, using: &random), 2.5) * 1_500))
+                }
+                return chosen.sorted()
+            }
+            while true {
+                let candidates = try await database.entityIndexCandidates(limit: DatabaseEngine.entityIndexBatch)
+                if candidates.isEmpty { break }
+                let batch = candidates.map {
+                    candidate -> (candidate: EntityIndexCandidate, entities: [IndexedEntity]) in
+                    let story = Int(candidate.title.dropFirst("Story ".count)) ?? 0
+                    return (
+                        candidate,
+                        picks[story].map { IndexedEntity(name: "Entity \($0)", type: .organization, score: 3) }
+                    )
+                }
+                _ = try await database.saveEntityIndex(batch, expectedGeneration: database.analysisGeneration)
+            }
+            let clock = ContinuousClock()
+            let built = try await clock.measure {
+                _ = try await database.refreshEntityGraph(
+                    now: Self.now, expectedGeneration: database.analysisGeneration)
+            }
+
+            func milliseconds(_ duration: Duration) -> Double {
+                Double(duration.components.seconds) * 1_000 + Double(duration.components.attoseconds) / 1e15
+            }
+            func median(_ values: [Double]) -> Double { values.sorted()[values.count / 2] }
+            var report: [String: Double] = ["graph_build_ms": milliseconds(built)]
+            for rank in [0, 10, 300] {
+                let id = "organization:entity-\(rank)"
+                var nonGraph: [Double] = []
+                var whole: [Double] = []
+                for _ in 0..<30 {
+                    let window = DatabaseEngine.EventValue.real(
+                        DatabaseEngine.windowStart(now: Self.now).timeIntervalSince1970)
+                    nonGraph.append(
+                        milliseconds(
+                            try await clock.measure {
+                                _ = try await database.fetchEntity(id: id)
+                                _ = try await database.eventRows(DatabaseEngine.entityCoverageSQL, [.text(id), window])
+                                _ = try await database.eventRows(
+                                    DatabaseEngine.entityPublishersSQL, [.text(id), window])
+                                _ = try await database.eventRows(DatabaseEngine.entityStoriesSQL, [.text(id)])
+                            }))
+                    whole.append(
+                        milliseconds(
+                            try await clock.measure { _ = try await database.fetchEntityDossier(id: id, now: Self.now) }
+                        ))
+                }
+                report["entity_\(rank)_non_graph_median_ms"] = median(nonGraph)
+                report["entity_\(rank)_non_graph_max_ms"] = nonGraph.max() ?? 0
+                report["entity_\(rank)_dossier_median_ms"] = median(whole)
+                #expect(median(nonGraph) < 15, "entity \(rank): \(median(nonGraph)) ms")
+            }
+            let json = (try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])).flatMap {
+                String(bytes: $0, encoding: .utf8)
+            }
+            print("ENTITY_DOSSIER_REPORT \(json ?? "{}")")
+        }
+
         @Test func dossierQueriesAreAnsweredByIndexes() async throws {
             let (database, directory, _) = try await Self.library()
             defer { try? FileManager.default.removeItem(at: directory) }

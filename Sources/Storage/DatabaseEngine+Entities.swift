@@ -216,7 +216,7 @@ extension DatabaseEngine {
     }
 
     private static func jsonArray(_ ids: [String]) -> String {
-        String(decoding: (try? JSONEncoder().encode(ids)) ?? Data("[]".utf8), as: UTF8.self)
+        (try? JSONEncoder().encode(ids)).flatMap { String(bytes: $0, encoding: .utf8) } ?? "[]"
     }
 
     func fetchEntity(id: String) throws -> EntityRecord? {
@@ -316,13 +316,18 @@ extension DatabaseEngine {
     /// 40 + 40 × 12 edges, ranked against the global centrality background maintenance stored. Only entities that
     /// share stories with this one are shown, so every relationship has the stories as its provenance.
     private func relatedEntities(to entity: EntityRecord) throws -> [RelatedEntity] {
-        func neighbours(of id: String, limit: Int) throws -> [(id: String, weight: Double, evidence: Int)] {
+        struct Neighbour {
+            let id: String
+            let weight: Double
+            let evidence: Int
+        }
+        func neighbours(of id: String, limit: Int) throws -> [Neighbour] {
             try eventRows(Self.entityNeighboursSQL, [.text(id), .text(EntityGraph.coReported), .integer(limit)])
                 .compactMap { row in
                     guard let target = row[0], let weight = row[1].flatMap(Double.init),
                         let evidence = row[2].flatMap(Int.init)
                     else { return nil }
-                    return (target, weight, evidence)
+                    return Neighbour(id: target, weight: weight, evidence: evidence)
                 }
         }
         let direct = try neighbours(of: entity.id, limit: Self.neighbourBreadth)
