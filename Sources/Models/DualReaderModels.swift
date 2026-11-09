@@ -54,7 +54,9 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
         case right
     }
 
-    public let id: String
+    /// The pair's position, the two passages it joins. A unique lead names a right passage no left passage chose, so
+    /// no two pairs of a session share one.
+    public var id: String { "\(leftPassageIndex)-\(rightPassageIndex)" }
     public let leftPassageIndex: Int
     public let rightPassageIndex: Int
     public let leftSnippet: String
@@ -65,7 +67,6 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
     public let uniqueSide: Side?
 
     public init(
-        id: String = UUID().uuidString,
         leftPassageIndex: Int,
         rightPassageIndex: Int,
         leftSnippet: String,
@@ -74,7 +75,6 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
         contrastType: PerspectiveContrastType,
         uniqueSide: Side? = nil
     ) {
-        self.id = id
         self.leftPassageIndex = leftPassageIndex
         self.rightPassageIndex = rightPassageIndex
         self.leftSnippet = leftSnippet

@@ -114,7 +114,6 @@ public actor DualReaderAlignmentService {
             matchedRightIndices.insert(bestRightIdx)
             alignments.append(
                 PassageContrastPair(
-                    id: "\(leftIdx)-\(bestRightIdx)",
                     leftPassageIndex: leftIdx,
                     rightPassageIndex: bestRightIdx,
                     leftSnippet: leftPassage,
@@ -132,7 +131,6 @@ public actor DualReaderAlignmentService {
             if maxSim < Self.divergenceThreshold {
                 alignments.append(
                     PassageContrastPair(
-                        id: "\(closestLeftIdx)-\(rightIdx)",
                         leftPassageIndex: closestLeftIdx,
                         rightPassageIndex: rightIdx,
                         leftSnippet: leftPassages[closestLeftIdx],
