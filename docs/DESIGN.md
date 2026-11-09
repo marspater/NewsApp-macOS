@@ -55,7 +55,7 @@ The single design language for News on macOS. It applies to every change that ad
 - Leave the scroll edge effect on `automatic`. Do not force `.soft` or `.hard` globally; macOS chooses hard where title text or controls without backgrounds sit over content.
 - Content that must stay pinned above a scroll view uses `safeAreaBar(edge:)` on macOS 26 and later (`safeAreaInset` on macOS 15), so the edge effect extends beneath it. One edge effect style per scroll view; never stack soft and hard.
 - Editorial content (the masthead) scrolls with the content; it is not pinned.
-- Hero imagery that sits next to the sidebar may extend beneath it with `backgroundExtensionEffect()` (macOS 26+), applied to the image only, with text and controls layered above it. The image must touch the leading and trailing edges of the column. Inset cards inside a scroll view (the lead story card) never use it: the effect bleeds the image into the toolbar while the inset leaves the toolbar edges uncovered.
+- Hero imagery that sits next to the sidebar may extend beneath it with `backgroundExtensionEffect()` (macOS 26+), applied to the image only, with text and controls layered above it. The image must touch the leading and trailing edges of the column. The Lead of the Today edition (section 8.8) is such a hero: its image spans the column edge to edge and continues under the sidebar, with its text and controls layered above it; macOS 15 shows the same full-width image without the extension. Inset cards inside a scroll view never use it: the effect bleeds the image into the toolbar while the inset leaves the toolbar edges uncovered. Today's inset lead story card is replaced by The Lead when Z3 (#935) lands.
 
 ## 4. Window structure and navigation
 
@@ -188,7 +188,7 @@ The toolbar holds Back, the title "Briefing" with its edition line (date, editio
 **Back**: in Briefing the list toolbar carries the reader's Back control (`.navigation`, `chevron.left`, "Back to [section]"), returning to the section shown before the Briefing, Today if none; Navigate › Back does the same.
 
 **Carousel Motion Rules**:
-- The hero carousel is the **only auto-advancing motion permitted in the app**.
+- The Briefing hero carousel and The Lead of the Today edition (section 8.8) are the **only auto-advancing motion permitted in the app**. They share these rules and one component, and are never on screen together: Briefing and Today are different sections.
 - Rotates to the next slide every **45 seconds** using a slow cross-fade transition (`AppMotion.state`, duration ~0.6 s).
 - Auto-advance **pauses immediately on pointer hover** and **on keyboard focus**. It resumes when hover and focus clear.
 - Auto-advance **never runs while a story is open** in the reader or a modal sheet.
@@ -218,6 +218,42 @@ A sheet that presents several kinds of information (World Tension: the reading, 
 - **Behind another app, no Notification Center entry.** macOS asks the app about a banner only while News is the active app. With its window on screen behind another app, News decides when it posts (#926): it draws the story banner and does not add the notification, since macOS has no way to file one in Notification Center without its own banner. The story stays in Today and Unread; a story whose banner sounds plays the reader's alert sound. Focus has no public signal for the app, so a story arriving during Focus can still show the app banner, in front or behind.
 - The approved render, light and dark, is `docs/mocks/story_banner_render.webp`. When this section and the render disagree on the look, the render wins.
 - **Hidden, the system draws the banner.** With News hidden, minimized to the Dock or without a window on screen, macOS draws every banner and places the attachment as its thumbnail. The app renders that attachment itself: a tall crop (portrait, 2:3) of the story image, sharp and opaque at the trailing edge where the system pins it, with an alpha fade and a progressive blur toward the leading edge. The transparent side shows the banner's own material, so the same PNG suits light and dark. A source smaller than the crop falls back to the plain square. PNG, at most 10 MB. macOS still places and may crop the thumbnail; the change that adds the fade (#589) records how macOS 26 and 27 show it.
+
+### 8.8 Today edition
+
+Today is an edition, not one list (epic Z, #932; the specification is [`docs/plans/2026-11-09-today-edition-spec.md`](plans/2026-11-09-today-edition-spec.md)). The approved layout lives in the "Today Edition" canvas (https://claude.ai/artifact/WhMdQEpLNzChu1ztS8cwwa); `docs/mocks/today_edition.md` summarizes it. When this section and the canvas disagree on the look, the canvas wins. Unread, Saved Stories, History, Smart Binders and search keep the list and grid of 8.2.
+
+**Lanes**, in assignment order. One story enters exactly one lane, the first whose quality bar it clears.
+
+| Lane | Description, shown under the name | Display | Card |
+| --- | --- | --- | --- |
+| The Lead | Today's most important stories from your publishers. | Always, one to five slides | Lead |
+| In Motion | Ongoing stories with new reporting. | Enough stories clear the bar | Developing |
+| Your Beat | Stories close to what you read, save and follow. | Enough strong matches | Standard; Coverage when the grouping is confident |
+| The Deep Read | Long reads: investigations, explainers and opinion. | Enough qualifying long-form stories | Feature |
+| Outside Your Usual | Stories from your publishers beyond your usual reading. | Enough worthwhile discovery candidates | Standard |
+| The Latest | Everything else from your publishers, newest first. | Always | Compact, in the vertical grid |
+
+**Rules:**
+
+1. Chronological within every lane. The Lead follows its rank.
+2. No topic lanes: sections belong to the sidebar.
+3. No Briefing duplication: no assessments, gauges, strategic impact or weak signals. The Lead ranks by the editorial score, not by publisher count.
+4. One story, one lane, by the order above. Lanes hold stories (#581), never single reports, so an event cannot appear twice.
+5. Subscriptions are the candidate pool; publisher affinity raises rank. There is no "From your sources" lane.
+6. The Latest is the safety net: personalisation never hides an ordinary story.
+
+**Conditional lanes.** Each has a quality bar (a threshold and a minimum assignment confidence, in the specification) and a minimum of three stories. A lane below its bar is absent: no empty rail, no filler, and The Lead is never padded to five. Lanes appear and hide only when the reader applies an update.
+
+**Anatomy.** The masthead (8.1) first. Then The Lead: a full-bleed hero of `AppLayout.leadStoryHeight` whose image touches both column edges and extends under the sidebar (3.4), its text and controls above the image on `AppColor.leadScrim`, rotating as the Briefing hero carousel does (8.4) through the same component. Then each lane: a header (the lane name in `AppTypography.sectionTitle` with the heading trait, the description in `caption` and the secondary color, no count) and one horizontal `ScrollView` of cards with `AppLayout.cardGap` between them, view-aligned, whose cards slide under the glass sidebar and which never scrolls by itself. Then The Latest: a header and the existing vertical grid, paged as Today pages now.
+
+**Card variants** are presentations of the one story card (8.2), chosen by the lane; the card logic is shared. Lead: the full-bleed image, `leadStoryHeadline`, the publisher's summary, a coverage indicator and the position. Developing: an Updated tag, the latest report's time, one line of event context and, with three or more report days, a compact progress strip. Feature: image-led at 400 pt, reading time, a content-type label from the classification only. Compact: a 56 pt thumbnail or none, a dense headline and one metadata line. Coverage: publisher count and original reports, up to three monograms and one attributed differing account; only when the grouping is confident, otherwise the lane's plain variant. Every variant uses `DesignSystem.swift` tokens only and works in light, dark, Increase Contrast and Reduce Motion.
+
+**Updates.** One buffer and the one "Show N New Stories" button (8.5, 17) serve every lane. Until the click nothing moves: no lane appears, hides or reorders, and The Lead keeps its slides. On the click every lane updates at once and the page returns to the masthead. Today's exception stays: an edition made only of earlier days' stories is replaced at once.
+
+**Focus.** ↑ and ↓ move between lanes, ← and → within a lane, J and K through every story in reading order (15). Each lane remembers its last focused card. Focus follows a card's id across an update, falls to the same index when the card is gone, to the first card of the next lane when the lane is gone, and returns to the same card after closing a story. VoiceOver: one container per lane labelled with its name and description, a "Lanes" rotor, and cards as one element each (16).
+
+**Honesty.** A lane header never shows a count, and no lane copy claims completeness, because clustering recall is partial (#737). The reason behind a placement is never reader copy.
 
 ## 9. Reader
 
@@ -289,7 +325,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Use `AppMotion` (hover, state, navigation) or the system's own animation. Every explicit animation is `nil` when `effectiveReduceMotion` is true; symbol effects stop too.
 - Animate state the person caused (expand, save, mode switch, applying queued updates). Never animate content arriving from a refresh while the person is reading.
 - Launch is one settle transition: the cached snapshot appears with `AppMotion.navigation` once its first page and that page's card images are ready (`nil` under Reduce Motion), and nothing moves again until the person acts. No per-card pop-in and no progress animation over the list; fetching, clustering and image lookup start after that first frame.
-- Glass morphs only between related controls in one container. No parallax, auto-playing motion, confetti or attention-seeking pulses; a card never cycles through an event's images on hover. The Briefing hero carousel is the one permitted auto-advancing motion in the app: it rotates top stories every 45 s with a slow cross-fade, pauses on hover and keyboard focus, halts completely while any story is open, and disables rotation under Reduce Motion (displaying the first story only, per section 8.4). Nothing else auto-advances.
+- Glass morphs only between related controls in one container. No parallax, auto-playing motion, confetti or attention-seeking pulses; a card never cycles through an event's images on hover. The Briefing hero carousel and The Lead of the Today edition (sections 8.4 and 8.8) are the two permitted auto-advancing motions in the app: each rotates its top stories every 45 s with a slow cross-fade, pauses on hover and keyboard focus, halts completely while any story or sheet is open, and disables rotation under Reduce Motion (displaying the first story only). Nothing else auto-advances, and a lane never scrolls by itself.
 
 ## 14. Symbols and menus
 
@@ -304,6 +340,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Single-key shortcuts (J, K, M, S, O and the others in the shortcuts list) work only while the list or reader has focus and never with ⌘, ⌃ or ⌥ held.
 - Story lists and grid: Space (or Story › Quick Look, ⌘Y) opens the native Quick Look panel on the focused story without leaving the list or moving its scroll position. While it is open, ↑/↓ and J/K move the focus and the preview follows; Return opens the story in the reader; Space or Esc closes the preview. The preview is a PDF drawn from local text and an already decoded image, never fetched.
 - One click opens. A single click on a card, a member row or a search result opens it and selects it; the first click on an inactive window performs the action as well as activating the window (`acceptsFirstMouse`). Double-click carries no extra meaning on cards. An event card opens its overview; the lead report is one more click away, never two.
+- Today edition lanes (section 8.8): ↑ and ↓ move between lanes, ← and → within a lane (and between the slides of The Lead while it has focus); J, K, ⌘J and ⌘K keep moving through every story in reading order, lane by lane; every other single-key command keeps its meaning. No new shortcut reuses a standard one.
 - A sidebar row and its shortcut (⌘1–⌘4) always return to that section's list, also when the section is already selected while a story is open; they take the same path as Back and Esc.
 - Every icon-only control has `.help`. Hover and focus states come from the system or the card tokens; never remove the focus ring without providing the card focus state.
 - Drag and drop: OPML files and feed URLs onto the window or sidebar; feedback through the drop-target highlight and the result notice rules in section 6.
@@ -329,6 +366,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Check for Updates (#992) on a story's overview: tooltip "Check feeds for new reports in this story", Story › Check for Updates, ⌥⌘R. Its result is one status line under the overview header metadata that appears on the click as "Checking your feeds…" and then changes in place: "N new reports joined this story" (never "since you last read": the baseline is the click), "No new reports from your sources", "No new reports yet. Some story matching waits while the Mac saves energy or cools down" when matching was held back, " · N feeds could not be checked" appended when feeds failed, and "Refresh is off." with the reason when the library is read-only.
 - The story layer (#581) groups related events into one card; "story" stays the word for what the person opens, and it opens the overview of its newest event of two or more reports (by first report), so a later development's reports are what the card opens to; the story keeps the identity of its earliest event, and a report that joined the story alone never opens it. The story's other events keep the word "event" (no new term such as "act"): those that began before the open event are listed under "Earlier in This Story": every earlier event of the story first, then up to three other rows, lexical relation links before related-act links, each group newest first; each row shows the date of its first report and its headline and opens that event's own overview. "Timeline" stays the dated statements of the open event's overview.
 - Event overview headings and evidence labels (Epic T): "Highlights", "Timeline", "Perspectives", "Industry Impact", "Earlier in This Story", "Sources (N)". Industry Impact uses exact standard sector names from the documented list: Energy, Financial Services, Healthcare, Technology, Transportation, Agriculture, Manufacturing, Retail & E-commerce, Media & Entertainment, Telecommunications, Real Estate, Defense & Aerospace. In the timeline, publication-only dates prefix with "Reported [date]"; future planned events show the "Plan" tag with VoiceOver announcing "Planned". Perspectives attribution uses "via [publisher]" or "via [wire] syndicate".
+- Today edition lanes (section 8.8): "The Lead", "In Motion", "Your Beat", "The Deep Read", "Outside Your Usual", "The Latest", each with its one-line description in sentence case under the name. A lane never claims completeness: "new reporting", never "every development"; no count in a lane header.
 - No exclamation marks, no marketing adjectives, no "AI magic".
 
 ## 18. Components
@@ -346,6 +384,8 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 | Grouped sheet content | `TensionIndexView.swift` until a second sheet needs it | Titled groups and aligned rows in sheets (section 8.6) |
 | Masthead | `ArticleListView.swift` | List title and status line |
 | Updates button | `ArticleListView.swift` | Leading toolbar queued-update control |
+| Lane | Z4 (#936) adds one lane view beside `ArticleListView.swift` | The Today edition's lane header and horizontal row; one implementation for every lane (section 8.8) |
+| Story card variants | `ArticleCardView.swift` (Z6, #938) | Lead, Developing, Feature, Compact and Coverage presentations of the one story card (section 8.8) |
 | Notice | `NoticeView` in `DesignSystem.swift` | Inline callouts in content |
 | Reading column | `ReadingColumn` in `DesignSystem.swift` | Measure and insets for reader and overview |
 | Empty states | `ContentUnavailableView` | All empty, error and no-result states |
@@ -364,7 +404,7 @@ Copy into the PR description for UI changes and tick only what was checked.
 - [ ] Narrow (900 pt) and wide windows checked; keyboard path works.
 - [ ] Copy follows section 17; one `sparkles` glyph per page, with the generated-content labels and captions of section 9.
 - [ ] A single click opens; clipped images take no clicks outside their frame; every event card expands.
-- [ ] Nothing moves at launch or on refresh beyond section 13; no auto-advancing motion outside section 8.4.
+- [ ] Nothing moves at launch or on refresh beyond section 13; no auto-advancing motion outside sections 8.4 and 8.8.
 - [ ] `script/design_lint.sh` passes: literal fonts, colours, uppercasing and labels on AppKit-backed views stay at zero; literal spacing, frames, opacity and strokes, raw `colorSchemeContrast`/`accessibilityReduceMotion`, `foregroundColor`, legacy aliases and "article" copy only go down (lower the baseline with `--update` when they do).
 
 ## 20. Changing this document
