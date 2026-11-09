@@ -30,6 +30,7 @@ enum EditorialIntelligenceTests {
     static func run() async {
         fputs("Running EditorialIntelligenceTests...\n", stderr)
         await testEntityExtraction()
+        await testDualReaderAlignment()
         do {
             try await testEntityStorePersistence()
             try await testEntityDossierAssembly()
@@ -226,5 +227,40 @@ enum EditorialIntelligenceTests {
 
         let allEntities = try await database.fetchTopEntities(limit: 10)
         check(allEntities.isEmpty, "No entities stored for paywalled article")
+    }
+
+    private static func testDualReaderAlignment() async {
+        let service = DualReaderAlignmentService()
+        let leftTitle = "Global Energy Agreement Signed"
+        let leftBody = """
+            Participating nations agreed on formal emissions reductions targets during Friday's Geneva summit.
+
+            Small businesses expressed anxiety about transitioning operational facilities before 2030 deadlines.
+            """
+
+        let rightTitle = "Global Energy Agreement Signed"
+        let rightBody = """
+            Participating nations agreed on formal emissions reductions targets during Friday's Geneva summit.
+
+            Industry trade groups applauded the regulatory certainty provided by the new energy standards.
+            """
+
+        let session = await service.align(
+            leftArticleId: "left-101",
+            leftTitle: leftTitle,
+            leftContent: leftBody,
+            leftPublisher: "Times Wire",
+            rightArticleId: "right-101",
+            rightTitle: rightTitle,
+            rightContent: rightBody,
+            rightPublisher: "Market Gazette",
+            clusterId: "cluster-55"
+        )
+
+        check(!session.passageAlignments.isEmpty, "Dual reader alignments generated")
+        check(session.consensusCount >= 1, "Consensus detected for identical opening statement")
+        check(session.consensusScore > 0, "Consensus score is positive")
+        check(DualReaderLayoutMode.mode(for: 1300) == .sideBySide, "Adaptive layout side-by-side above 1200pt")
+        check(DualReaderLayoutMode.mode(for: 900) == .stacked, "Adaptive layout stacked below 1200pt")
     }
 }
