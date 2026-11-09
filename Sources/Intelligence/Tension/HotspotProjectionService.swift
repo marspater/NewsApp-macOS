@@ -58,12 +58,13 @@ public struct HotspotProjectionService: Sendable {
     /// without a defensible theater remains a pin with no region aggregate.
     private static let locationTheaters: [String: String] = [
         "ukraine": "UA", "kyiv": "UA", "crimea": "UA", "donetsk": "UA", "kharkiv": "UA",
+        "odesa": "UA", "odessa": "UA", "lviv": "UA", "zaporizhzhia": "UA", "kherson": "UA", "mariupol": "UA",
         "israel": "ME", "gaza": "ME", "jerusalem": "ME", "tel aviv": "ME",
         "lebanon": "ME", "beirut": "ME", "iran": "ME", "tehran": "ME",
         "saudi arabia": "ME", "yemen": "ME", "red sea": "ME",
         "taiwan": "TW", "taipei": "TW", "taiwan strait": "TW",
         "south china sea": "CN",
-        "korea": "KR", "seoul": "KR",
+        "korea": "KR", "north korea": "KR", "south korea": "KR", "seoul": "KR", "pyongyang": "KR",
         "united states": "US", "washington": "US", "new york": "US",
         "united kingdom": "EU", "london": "EU", "france": "EU", "paris": "EU",
         "germany": "EU", "berlin": "EU", "geneva": "EU", "switzerland": "EU",
