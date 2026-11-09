@@ -38,71 +38,81 @@ extension DatabaseEngine {
     ) throws {
         try requireWritable()
         try inEventTransaction {
-            for entity in entities {
-                let firstSeenStr = Self.formatISO8601(entity.firstSeen)
-                let lastSeenStr = Self.formatISO8601(entity.lastSeen)
-                try eventRows(
-                    """
-                    INSERT INTO entities (id, canonical_name, entity_type, mention_count, first_seen, last_seen)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        canonical_name = excluded.canonical_name,
-                        mention_count = entities.mention_count + excluded.mention_count,
-                        last_seen = CASE WHEN excluded.last_seen > entities.last_seen THEN excluded.last_seen ELSE entities.last_seen END;
-                    """,
-                    [
-                        .text(entity.id),
-                        .text(entity.canonicalName),
-                        .text(entity.entityType.rawValue),
-                        .integer(entity.mentionCount),
-                        .text(firstSeenStr),
-                        .text(lastSeenStr),
-                    ]
-                )
-            }
+            try saveEntityRecords(entities)
+            try saveEntityMentions(mentions)
+            try saveEntityCoOccurrences(coOccurrences)
+        }
+    }
 
-            for mention in mentions {
-                let publishedStr = Self.formatISO8601(mention.publishedAt)
-                let offsetVal: EventValue = mention.passageOffset.map { .integer($0) } ?? .null
-                try eventRows(
-                    """
-                    INSERT OR REPLACE INTO entity_mentions (id, entity_id, article_id, publisher_id, published_at, passage_offset, confidence)
-                    VALUES (?, ?, ?, ?, ?, ?, ?);
-                    """,
-                    [
-                        .text(mention.id),
-                        .text(mention.entityId),
-                        .text(mention.articleId),
-                        .text(mention.publisherId),
-                        .text(publishedStr),
-                        offsetVal,
-                        .real(Double(mention.confidence)),
-                    ]
-                )
-            }
+    private func saveEntityRecords(_ entities: [EntityRecord]) throws {
+        for entity in entities {
+            let firstSeenStr = Self.formatISO8601(entity.firstSeen)
+            let lastSeenStr = Self.formatISO8601(entity.lastSeen)
+            try eventRows(
+                """
+                INSERT INTO entities (id, canonical_name, entity_type, mention_count, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    canonical_name = excluded.canonical_name,
+                    mention_count = entities.mention_count + excluded.mention_count,
+                    last_seen = CASE WHEN excluded.last_seen > entities.last_seen THEN excluded.last_seen ELSE entities.last_seen END;
+                """,
+                [
+                    .text(entity.id),
+                    .text(entity.canonicalName),
+                    .text(entity.entityType.rawValue),
+                    .integer(entity.mentionCount),
+                    .text(firstSeenStr),
+                    .text(lastSeenStr),
+                ]
+            )
+        }
+    }
 
-            for co in coOccurrences {
-                let (entityA, entityB) =
-                    co.targetEntityId < co.targetCanonicalName
-                    ? (co.targetEntityId, co.targetCanonicalName)
-                    : (co.targetCanonicalName, co.targetEntityId)
-                let nowStr = Self.formatISO8601(Date())
-                try eventRows(
-                    """
-                    INSERT INTO entity_co_occurrences (entity_a, entity_b, count, last_seen)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(entity_a, entity_b) DO UPDATE SET
-                        count = entity_co_occurrences.count + excluded.count,
-                        last_seen = excluded.last_seen;
-                    """,
-                    [
-                        .text(entityA),
-                        .text(entityB),
-                        .integer(co.coOccurrenceCount),
-                        .text(nowStr),
-                    ]
-                )
-            }
+    private func saveEntityMentions(_ mentions: [EntityMention]) throws {
+        for mention in mentions {
+            let publishedStr = Self.formatISO8601(mention.publishedAt)
+            let offsetVal: EventValue = mention.passageOffset.map { .integer($0) } ?? .null
+            try eventRows(
+                """
+                INSERT OR REPLACE INTO entity_mentions (id, entity_id, article_id, publisher_id, published_at, passage_offset, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                [
+                    .text(mention.id),
+                    .text(mention.entityId),
+                    .text(mention.articleId),
+                    .text(mention.publisherId),
+                    .text(publishedStr),
+                    offsetVal,
+                    .real(Double(mention.confidence)),
+                ]
+            )
+        }
+    }
+
+    private func saveEntityCoOccurrences(_ coOccurrences: [EntityCoOccurrence]) throws {
+        for co in coOccurrences {
+            let (entityA, entityB) =
+                co.sourceEntityId < co.targetEntityId
+                ? (co.sourceEntityId, co.targetEntityId)
+                : (co.targetEntityId, co.sourceEntityId)
+            let nowStr = Self.formatISO8601(Date())
+            try eventRows(
+                """
+                INSERT INTO entity_co_occurrences (entity_a, entity_b, count, last_seen)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(entity_a, entity_b) DO UPDATE SET
+                    count = entity_co_occurrences.count + excluded.count,
+                    last_seen = excluded.last_seen;
+                """,
+                [
+                    .text(entityA),
+                    .text(entityB),
+                    .integer(co.coOccurrenceCount),
+                    .text(nowStr),
+                ]
+            )
         }
     }
 
@@ -224,30 +234,42 @@ extension DatabaseEngine {
         guard let entity = try fetchEntity(id: entityId) else { return nil }
 
         let thirtyDaysAgo = Calendar.current.date(byAdding: .day, value: -30, to: referenceDate) ?? referenceDate
-        let thirtyDaysAgoStr = Self.formatISO8601(thirtyDaysAgo)
+        let coverageTimeline = try fetchCoverageTimeline(entityId: entityId, since: thirtyDaysAgo)
+        let coOccurrences = try fetchCoOccurringEntities(entityId: entityId)
+        let publisherBreakdown = try fetchPublisherBreakdown(entityId: entityId)
+        let recentArticleIds = try fetchRecentArticleIds(entityId: entityId)
 
-        // 1. 30-Day Coverage Timeline
-        let coverageRows = try eventRows(
+        return EntityDossier(
+            entity: entity,
+            coverage30Days: coverageTimeline,
+            coOccurringEntities: coOccurrences,
+            publisherBreakdown: publisherBreakdown,
+            recentArticleIds: recentArticleIds
+        )
+    }
+
+    private func fetchCoverageTimeline(entityId: String, since: Date) throws -> [EntityCoverageTimeseriesBucket] {
+        let sinceStr = Self.formatISO8601(since)
+        let rows = try eventRows(
             """
             SELECT substr(published_at, 1, 10) AS date_bucket, count(*) AS bucket_count
             FROM entity_mentions
             WHERE entity_id = ? AND published_at >= ?
             GROUP BY date_bucket
-            ORDER BY date_bucket ASC
-            LIMIT 30;
+            ORDER BY date_bucket ASC;
             """,
-            [.text(entityId), .text(thirtyDaysAgoStr)]
+            [.text(entityId), .text(sinceStr)]
         )
-
-        let coverageTimeline = coverageRows.compactMap { row -> EntityCoverageTimeseriesBucket? in
+        return rows.compactMap { row in
             guard let bucket = row[0],
                 let countStr = row[1], let count = Int(countStr)
             else { return nil }
             return EntityCoverageTimeseriesBucket(dateBucket: bucket, mentionCount: count)
         }
+    }
 
-        // 2. Co-occurring Entities
-        let coRows = try eventRows(
+    private func fetchCoOccurringEntities(entityId: String) throws -> [EntityCoOccurrence] {
+        let rows = try eventRows(
             """
             SELECT
                 CASE WHEN c.entity_a = ? THEN c.entity_b ELSE c.entity_a END AS target_id,
@@ -269,8 +291,7 @@ extension DatabaseEngine {
                 .text(entityId),
             ]
         )
-
-        let coOccurrences = coRows.compactMap { row -> EntityCoOccurrence? in
+        return rows.compactMap { row in
             guard let targetId = row[0],
                 let name = row[1],
                 let typeStr = row[2],
@@ -278,15 +299,17 @@ extension DatabaseEngine {
             else { return nil }
             let type = EntityType(rawValue: typeStr) ?? .organization
             return EntityCoOccurrence(
+                sourceEntityId: entityId,
                 targetEntityId: targetId,
                 targetCanonicalName: name,
                 targetEntityType: type,
                 coOccurrenceCount: count
             )
         }
+    }
 
-        // 3. Publisher Distribution
-        let pubRows = try eventRows(
+    private func fetchPublisherBreakdown(entityId: String) throws -> [EntityPublisherDistribution] {
+        let rows = try eventRows(
             """
             SELECT publisher_id, count(*) AS mention_count
             FROM entity_mentions
@@ -297,17 +320,15 @@ extension DatabaseEngine {
             """,
             [.text(entityId)]
         )
-
         var totalMentions = 0
         var rawDistributions: [(id: String, count: Int)] = []
-        for row in pubRows {
+        for row in rows {
             if let pubId = row[0], let cntStr = row[1], let cnt = Int(cntStr) {
                 rawDistributions.append((pubId, cnt))
                 totalMentions += cnt
             }
         }
-
-        let publisherBreakdown = rawDistributions.map { item -> EntityPublisherDistribution in
+        return rawDistributions.map { item in
             let share = totalMentions > 0 ? Double(item.count) / Double(totalMentions) : 0.0
             return EntityPublisherDistribution(
                 publisherId: item.id,
@@ -316,9 +337,10 @@ extension DatabaseEngine {
                 share: share
             )
         }
+    }
 
-        // 4. Recent Article IDs
-        let articleRows = try eventRows(
+    private func fetchRecentArticleIds(entityId: String) throws -> [String] {
+        let rows = try eventRows(
             """
             SELECT DISTINCT article_id
             FROM entity_mentions
@@ -328,15 +350,7 @@ extension DatabaseEngine {
             """,
             [.text(entityId)]
         )
-        let recentArticleIds = articleRows.compactMap { $0[0] }
-
-        return EntityDossier(
-            entity: entity,
-            coverage30Days: coverageTimeline,
-            coOccurringEntities: coOccurrences,
-            publisherBreakdown: publisherBreakdown,
-            recentArticleIds: recentArticleIds
-        )
+        return rows.compactMap { $0[0] }
     }
 
     /// Fetches the reader barrier recorded for an article, if any.

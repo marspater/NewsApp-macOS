@@ -49,12 +49,15 @@ enum EditorialIntelligenceTests {
     private static func testEntityExtraction() async {
         let service = EntityExtractionService()
         let text = "Microsoft CEO Satya Nadella visited Google in New York today."
-        let (entities, mentions, coOccurrences) = await service.extractEntities(
+        let result = await service.extractEntities(
             from: text,
             articleId: "art-test-1",
             publisherId: "test-wire",
             publishedAt: Date()
         )
+        let entities = result.entities
+        let mentions = result.mentions
+        let coOccurrences = result.coOccurrences
 
         check(!entities.isEmpty, "Entities extracted from sample sentence")
         check(!mentions.isEmpty, "Mentions created from sample sentence")
@@ -168,8 +171,9 @@ enum EditorialIntelligenceTests {
         )
 
         let co = EntityCoOccurrence(
-            targetEntityId: "person:satya-nadella",
-            targetCanonicalName: "organization:microsoft",
+            sourceEntityId: "person:satya-nadella",
+            targetEntityId: "organization:microsoft",
+            targetCanonicalName: "Microsoft",
             targetEntityType: .organization,
             coOccurrenceCount: 4
         )
@@ -187,6 +191,12 @@ enum EditorialIntelligenceTests {
 
         let totalShare = dossier?.publisherBreakdown.reduce(0.0) { $0 + $1.share } ?? 0.0
         check(abs(totalShare - 1.0) < 0.001, "Publisher shares sum to 1.0")
+
+        let dossierB = try await database.fetchEntityDossier(entityId: "organization:microsoft", referenceDate: now)
+        check(dossierB != nil, "Dossier for target entity assembled successfully")
+        check(
+            dossierB?.coOccurringEntities.first?.targetEntityId == "person:satya-nadella",
+            "Target entity sees reverse co-occurrence")
     }
 
     private static func testPublisherQualityFilter() async throws {

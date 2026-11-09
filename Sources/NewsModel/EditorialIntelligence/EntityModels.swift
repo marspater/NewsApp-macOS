@@ -68,17 +68,20 @@ public struct EntityMention: Identifiable, Hashable, Codable, Sendable {
 }
 
 public struct EntityCoOccurrence: Hashable, Codable, Sendable {
+    public let sourceEntityId: String
     public let targetEntityId: String
     public let targetCanonicalName: String
     public let targetEntityType: EntityType
     public let coOccurrenceCount: Int
 
     public init(
+        sourceEntityId: String = "",
         targetEntityId: String,
         targetCanonicalName: String,
         targetEntityType: EntityType,
         coOccurrenceCount: Int
     ) {
+        self.sourceEntityId = sourceEntityId
         self.targetEntityId = targetEntityId
         self.targetCanonicalName = targetCanonicalName
         self.targetEntityType = targetEntityType

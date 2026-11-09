@@ -4242,6 +4242,9 @@ actor DatabaseEngine {
     /// SQLite's rollback, so a clear that fails leaves both as they were (#984).
     private func deleteAnalysisRows() throws {
         try executeSimple("DELETE FROM article_enrichment;")
+        try executeSimple("DELETE FROM entity_mentions;")
+        try executeSimple("DELETE FROM entity_co_occurrences;")
+        try executeSimple("DELETE FROM entities;")
         try clearEventOverviews()
         // Sitrep lines restate overview highlights, so they go with the overviews.
         try executeSimple("DELETE FROM briefing_sitrep;")

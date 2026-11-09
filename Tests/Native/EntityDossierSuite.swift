@@ -20,12 +20,15 @@ extension NativeSuites {
         @Test func entityExtractionAndNormalization() async {
             let service = EntityExtractionService()
             let text = "Microsoft CEO Satya Nadella visited Google in New York today."
-            let (entities, mentions, coOccurrences) = await service.extractEntities(
+            let result = await service.extractEntities(
                 from: text,
                 articleId: "art-test-1",
                 publisherId: "test-wire",
                 publishedAt: Date()
             )
+            let entities = result.entities
+            let mentions = result.mentions
+            let coOccurrences = result.coOccurrences
 
             #expect(!entities.isEmpty)
             #expect(!mentions.isEmpty)
@@ -93,8 +96,9 @@ extension NativeSuites {
             )
 
             let coOccurrence = EntityCoOccurrence(
-                targetEntityId: "person:satya-nadella",
-                targetCanonicalName: "organization:microsoft",
+                sourceEntityId: "person:satya-nadella",
+                targetEntityId: "organization:microsoft",
+                targetCanonicalName: "Microsoft",
                 targetEntityType: .organization,
                 coOccurrenceCount: 4
             )
@@ -134,6 +138,15 @@ extension NativeSuites {
             // Verify publisher share sum
             let totalShare = dossier?.publisherBreakdown.reduce(0.0) { $0 + $1.share } ?? 0.0
             #expect(abs(totalShare - 1.0) < 0.001)
+
+            // Test Reverse Co-occurrence
+            let dossierB = try await database.fetchEntityDossier(entityId: "organization:microsoft", referenceDate: now)
+            #expect(dossierB?.coOccurringEntities.first?.targetEntityId == "person:satya-nadella")
+
+            // Test AI analysis clear removes entities
+            try await database.clearArticleEnrichment()
+            let clearedEntity = try await database.fetchEntity(id: "person:satya-nadella")
+            #expect(clearedEntity == nil)
         }
 
         @Test func publisherHealthQualityFilter() async throws {

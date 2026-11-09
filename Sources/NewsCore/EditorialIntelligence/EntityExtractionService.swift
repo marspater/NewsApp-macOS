@@ -39,24 +39,82 @@ public actor EntityExtractionService {
             .trimmingCharacters(in: .punctuationCharacters)
     }
 
+    public struct ExtractionResult: Sendable {
+        public let entities: [EntityRecord]
+        public let mentions: [EntityMention]
+        public let coOccurrences: [EntityCoOccurrence]
+
+        public init(
+            entities: [EntityRecord],
+            mentions: [EntityMention],
+            coOccurrences: [EntityCoOccurrence]
+        ) {
+            self.entities = entities
+            self.mentions = mentions
+            self.coOccurrences = coOccurrences
+        }
+    }
+
+    private struct RawMention {
+        let entityId: String
+        let name: String
+        let type: EntityType
+        let offset: Int
+    }
+
     /// Extracts Person, Organization, and Location entities from the provided text.
     public func extractEntities(
         from text: String,
         articleId: String,
         publisherId: String,
         publishedAt: Date
-    ) -> (entities: [EntityRecord], mentions: [EntityMention], coOccurrences: [EntityCoOccurrence]) {
+    ) -> ExtractionResult {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return ([], [], [])
+            return ExtractionResult(entities: [], mentions: [], coOccurrences: [])
         }
 
+        let rawMentions = collectRawMentions(from: text)
+        let (entities, mentions) = buildEntitiesAndMentions(
+            from: rawMentions,
+            articleId: articleId,
+            publisherId: publisherId,
+            publishedAt: publishedAt
+        )
+        let coOccurrences = buildCoOccurrences(from: entities)
+
+        return ExtractionResult(
+            entities: entities,
+            mentions: mentions,
+            coOccurrences: coOccurrences
+        )
+    }
+
+    private func mapTag(_ tag: NLTag) -> EntityType? {
+        switch tag {
+        case .personalName: return .person
+        case .organizationName: return .organization
+        case .placeName: return .location
+        default: return nil
+        }
+    }
+
+    private func cleanName(_ rawString: String) -> String? {
+        var cleanedName = Self.cleanCanonicalName(rawString)
+        let prefixes = ["CEO ", "President ", "Dr. ", "Mr. ", "Ms. ", "Mrs. ", "Senator ", "Governor "]
+        for prefix in prefixes where cleanedName.hasPrefix(prefix) {
+            cleanedName = String(cleanedName.dropFirst(prefix.count)).trimmingCharacters(
+                in: .whitespacesAndNewlines)
+        }
+        guard cleanedName.count >= 2, let firstChar = cleanedName.first, firstChar.isUppercase else { return nil }
+        if cleanedName.allSatisfy({ $0.isNumber || $0.isPunctuation }) { return nil }
+        return cleanedName
+    }
+
+    private func collectRawMentions(from text: String) -> [RawMention] {
         let tagger = NLTagger(tagSchemes: [.nameType])
         tagger.string = text
-
         let options: NLTagger.Options = [.omitPunctuation, .omitWhitespace, .joinNames]
-        let relevantTags: [NLTag] = [.personalName, .organizationName, .placeName]
-
-        var rawMentions: [(entityId: String, name: String, type: EntityType, offset: Int)] = []
+        var rawMentions: [RawMention] = []
 
         tagger.enumerateTags(
             in: text.startIndex..<text.endIndex,
@@ -64,43 +122,22 @@ public actor EntityExtractionService {
             scheme: .nameType,
             options: options
         ) { tag, tokenRange in
-            guard let tag = tag, relevantTags.contains(tag) else { return true }
-
-            let rawString = String(text[tokenRange])
-            var cleanedName = Self.cleanCanonicalName(rawString)
-            let prefixes = ["CEO ", "President ", "Dr. ", "Mr. ", "Ms. ", "Mrs. ", "Senator ", "Governor "]
-            for prefix in prefixes {
-                if cleanedName.hasPrefix(prefix) {
-                    cleanedName = String(cleanedName.dropFirst(prefix.count)).trimmingCharacters(
-                        in: .whitespacesAndNewlines)
-                }
-            }
-            guard cleanedName.count >= 2, let firstChar = cleanedName.first, firstChar.isUppercase else { return true }
-
-            let entityType: EntityType
-            switch tag {
-            case .personalName:
-                entityType = .person
-            case .organizationName:
-                entityType = .organization
-            case .placeName:
-                entityType = .location
-            default:
-                return true
-            }
-
-            // Exclude single numbers or pure punctuation
-            if cleanedName.allSatisfy({ $0.isNumber || $0.isPunctuation }) {
-                return true
-            }
-
+            guard let tag = tag, let entityType = mapTag(tag) else { return true }
+            guard let cleanedName = cleanName(String(text[tokenRange])) else { return true }
             let slug = Self.canonicalSlug(name: cleanedName, type: entityType)
             let offset = text.distance(from: text.startIndex, to: tokenRange.lowerBound)
-            rawMentions.append((slug, cleanedName, entityType, offset))
+            rawMentions.append(RawMention(entityId: slug, name: cleanedName, type: entityType, offset: offset))
             return true
         }
+        return rawMentions
+    }
 
-        // Aggregate mentions per entity to compute confidence and mention count
+    private func buildEntitiesAndMentions(
+        from rawMentions: [RawMention],
+        articleId: String,
+        publisherId: String,
+        publishedAt: Date
+    ) -> ([EntityRecord], [EntityMention]) {
         var mentionCounts: [String: Int] = [:]
         var canonicalNames: [String: String] = [:]
         var entityTypes: [String: EntityType] = [:]
@@ -116,7 +153,6 @@ public actor EntityExtractionService {
         var mentions: [EntityMention] = []
         for raw in rawMentions {
             let count = mentionCounts[raw.entityId] ?? 1
-            // Confidence formula: base 0.85 + boost for repeated occurrences, bounded at 0.99
             let confidence = min(0.99, 0.85 + Float(count - 1) * 0.03)
             let mention = EntityMention(
                 id: "\(articleId):\(raw.offset):\(raw.entityId)",
@@ -143,30 +179,30 @@ public actor EntityExtractionService {
             )
             entities.append(record)
         }
+        return (entities, mentions)
+    }
 
-        // Calculate co-occurrences between unique entities in this article
-        let uniqueEntitySlugs = Array(entities.map(\.id)).sorted()
+    private func buildCoOccurrences(from entities: [EntityRecord]) -> [EntityCoOccurrence] {
+        let sortedEntities = entities.sorted { $0.id < $1.id }
+        guard sortedEntities.count >= 2 else { return [] }
+
         var coOccurrences: [EntityCoOccurrence] = []
-        if uniqueEntitySlugs.count >= 2 {
-            for i in 0..<uniqueEntitySlugs.count {
-                for j in (i + 1)..<uniqueEntitySlugs.count {
-                    let a = uniqueEntitySlugs[i]
-                    let b = uniqueEntitySlugs[j]
-                    let targetName = canonicalNames[b] ?? b
-                    let targetType = entityTypes[b] ?? .organization
-                    coOccurrences.append(
-                        EntityCoOccurrence(
-                            targetEntityId: a,
-                            targetCanonicalName: targetName,
-                            targetEntityType: targetType,
-                            coOccurrenceCount: 1
-                        )
+        for i in 0..<sortedEntities.count {
+            for j in (i + 1)..<sortedEntities.count {
+                let a = sortedEntities[i]
+                let b = sortedEntities[j]
+                coOccurrences.append(
+                    EntityCoOccurrence(
+                        sourceEntityId: a.id,
+                        targetEntityId: b.id,
+                        targetCanonicalName: b.canonicalName,
+                        targetEntityType: b.entityType,
+                        coOccurrenceCount: 1
                     )
-                }
+                )
             }
         }
-
-        return (entities, mentions, coOccurrences)
+        return coOccurrences
     }
 
     /// Extracts entities from a FeedArticle and persists them to the database if the article passes quality checks.
@@ -184,19 +220,19 @@ public actor EntityExtractionService {
         guard !fullText.isEmpty else { return false }
 
         let publisher = article.source.isEmpty ? (article.identityFeedURL ?? "unknown") : article.source
-        let (entities, mentions, coOccurrences) = extractEntities(
+        let extraction = extractEntities(
             from: fullText,
             articleId: article.id,
             publisherId: publisher,
             publishedAt: article.pubDate
         )
 
-        guard !entities.isEmpty else { return false }
+        guard !extraction.entities.isEmpty else { return false }
 
         try await database.saveEntities(
-            entities: entities,
-            mentions: mentions,
-            coOccurrences: coOccurrences
+            entities: extraction.entities,
+            mentions: extraction.mentions,
+            coOccurrences: extraction.coOccurrences
         )
         return true
     }
