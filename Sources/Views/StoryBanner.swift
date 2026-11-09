@@ -140,8 +140,13 @@ struct StoryBannerView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, open)
         .accessibilityAction(named: "Close", close)
-        .accessibilityAction(named: "Save") { if banner.actions { act(NotificationActionIdentifier.save) } }
-        .accessibilityAction(named: "Mark as Read") { if banner.actions { act(NotificationActionIdentifier.markRead) } }
+        // Only a story's own banner carries these, so only it offers them to VoiceOver.
+        .accessibilityActions {
+            if banner.actions {
+                Button("Save") { act(NotificationActionIdentifier.save) }
+                Button("Mark as Read") { act(NotificationActionIdentifier.markRead) }
+            }
+        }
     }
 
     private var actionRow: some View {
