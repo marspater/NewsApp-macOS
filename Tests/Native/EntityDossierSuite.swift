@@ -67,18 +67,37 @@ extension NativeSuites {
 
         // MARK: Extraction
 
-        @Test func indexerReadsReaderTagsWithoutThePublisherItself() async {
-            let candidate = EntityIndexCandidate(
-                articleID: "a", title: "Satya Nadella visits Microsoft campus in Seattle",
-                description: "Reuters reports that Satya Nadella toured the Microsoft campus.",
-                text: "Satya Nadella said Microsoft will hire in Seattle. Nadella thanked Reuters for the coverage.",
-                publisher: "Reuters", publishedAt: Self.now, revision: 1)
-            let entities = await EntityIndexer.shared.entities(of: candidate)
-            #expect(!entities.isEmpty)
+        /// The names a model would find in `nadellaStory`, fixed: NaturalLanguage output differs between macOS versions.
+        private struct FixedExtractor: EntityExtracting {
+            func extractEntities(from text: String) async -> [EntityResult] {
+                [
+                    EntityResult(name: "Satya Nadella", type: .person, confidence: 0.9),
+                    EntityResult(name: "Microsoft", type: .organization, confidence: 0.9),
+                    EntityResult(name: "Seattle", type: .place, confidence: 0.9),
+                    EntityResult(name: "Reuters", type: .organization, confidence: 0.9),
+                ]
+            }
+        }
+
+        private static let nadellaStory = EntityIndexCandidate(
+            articleID: "a", title: "Satya Nadella visits Microsoft campus in Seattle",
+            description: "Reuters reports that Satya Nadella toured the Microsoft campus.",
+            text: "Satya Nadella said Microsoft will hire in Seattle. Nadella thanked Reuters for the coverage.",
+            publisher: "Reuters", publishedAt: Self.now, revision: 1)
+
+        @Test func indexerKeepsTheReaderTagsMostMentionedFirstWithoutThePublisher() async {
+            let entities = await EntityIndexer(extractor: FixedExtractor()).entities(of: Self.nadellaStory)
+            #expect(entities.map(\.name) == ["Satya Nadella", "Microsoft", "Seattle"], "Reuters is the publisher")
+            #expect(entities.map(\.type) == [.person, .organization, .place])
+            #expect(zip(entities, entities.dropFirst()).allSatisfy { $0.score > $1.score })
+        }
+
+        /// Whatever the model finds on this Mac, the shared indexer keeps its bounds.
+        @Test func theSharedIndexerKeepsItsBoundsWhateverTheModelFinds() async {
+            let entities = await EntityIndexer.shared.entities(of: Self.nadellaStory)
             #expect(entities.count <= EntityGraph.maximumEntitiesPerStory)
-            #expect(entities.contains { $0.name.contains("Nadella") })
             #expect(!entities.contains { $0.name == "Reuters" })
-            #expect(entities == entities.sorted { $0.score > $1.score })
+            #expect(zip(entities, entities.dropFirst()).allSatisfy { $0.score >= $1.score })
         }
 
         // MARK: Store
@@ -174,7 +193,7 @@ extension NativeSuites {
                     ]))
 
             let report = try await database.refreshEntityGraph(
-                now: Self.now, expectedGeneration: database.analysisGeneration)
+                now: Self.now, expectedGeneration: database.analysisGeneration, withCentrality: true)
             // Harbour–Maria (stories one, two) and Harbour–Channel (two, three) are relationships; Maria–Channel shares
             // only story two. Each is stored in both directions.
             #expect(report?.entities == 4)
@@ -192,7 +211,7 @@ extension NativeSuites {
             #expect(Set(dossier.publishers.map(\.publisher)) == ["Reuters", "Associated Press", "Metro Desk"])
             #expect(dossier.recentStories.map(\.id) == [ids["one"]!, ids["two"]!, ids["three"]!], "Newest first")
             #expect(Set(dossier.related.map(\.entity.id)) == ["person:maria-ortega", "place:northern-channel"])
-            #expect(dossier.related.allSatisfy { $0.sharedStories == 2 }, "Every relationship cites its stories")
+            #expect(dossier.related.allSatisfy { $0.sharedStories == 2 }, "Each relationship rests on two stories")
 
             // The day a story was published lands in that UTC day's bar.
             let oneDay = Int(
@@ -213,6 +232,52 @@ extension NativeSuites {
             #expect(try await database.fetchEntityDossier(id: "person:nobody", now: Self.now) == nil)
         }
 
+        @Test func onlyAMaintenancePassComputesGlobalCentrality() async throws {
+            let (database, directory, _) = try await Self.library()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            func story(_ key: String, _ title: String, _ publisher: String) -> FeedArticle {
+                FeedArticle(
+                    title: title, link: "https://example.com/\(key)", guid: key, description: title,
+                    pubDate: Self.now.addingTimeInterval(-3_600), source: publisher,
+                    fullContent: "Satya Nadella said Microsoft will hire. Nadella thanked Microsoft staff.")
+            }
+            func centralities() async throws -> [Double] {
+                var values: [Double] = []
+                for id in ["person:satya-nadella", "organization:microsoft"] {
+                    values.append(try await database.fetchEntity(id: id)?.centrality ?? -1)
+                }
+                return values
+            }
+            try await database.upsertArticles([
+                story("visit", "Satya Nadella visits Microsoft", "Metro Desk"),
+                story("host", "Microsoft hosts Satya Nadella", "Associated Press"),
+            ])
+            let indexer = EntityIndexer(extractor: FixedExtractor())
+
+            // After a feed: the stories are read and the edges follow, but centrality waits for the maintenance window.
+            let ordinary = try await indexer.run(in: database, allowsEnergy: { true })
+            #expect(ordinary.indexedStories == 6, "Four library stories and the two new ones")
+            #expect(ordinary.graph?.edges == 2, "Two stories name both, so they are related")
+            #expect(try await centralities() == [0, 0])
+            let idle = try await indexer.run(in: database, allowsEnergy: { true })
+            #expect(idle.graph == nil, "Nothing new, and not a maintenance window")
+
+            // The maintenance window computes it, even though no story is new.
+            let maintenance = try await indexer.run(in: database, maintenance: true, allowsEnergy: { true })
+            #expect(maintenance.indexedStories == 0)
+            #expect(maintenance.graph?.edges == 2)
+            let computed = try await centralities()
+            #expect(computed.allSatisfy { $0 > 0 })
+            #expect(abs(computed.reduce(0, +) - 1) < 1e-6, "A PageRank over the two related entities sums to one")
+
+            // The next ordinary pass rebuilds the edges and keeps the centrality of the window before.
+            try await database.upsertArticles([story("lab", "Nadella and Microsoft open a lab", "Reuters")])
+            let later = try await indexer.run(in: database, allowsEnergy: { true })
+            #expect(later.indexedStories == 1)
+            #expect(later.graph?.edges == 2)
+            #expect(try await centralities() == computed)
+        }
+
         @Test func clearingDerivedDataEmptiesTheIndexAndRefusesStaleWrites() async throws {
             let (database, directory, _) = try await Self.library()
             defer { try? FileManager.default.removeItem(at: directory) }
@@ -230,7 +295,8 @@ extension NativeSuites {
                 [(candidates[0], [Self.harbour])], expectedGeneration: before)
             #expect(!stale)
             #expect(try await database.topEntities().isEmpty)
-            let graph = try await database.refreshEntityGraph(now: Self.now, expectedGeneration: before)
+            let graph = try await database.refreshEntityGraph(
+                now: Self.now, expectedGeneration: before, withCentrality: true)
             #expect(graph == nil)
         }
 
@@ -286,7 +352,7 @@ extension NativeSuites {
             let clock = ContinuousClock()
             let built = try await clock.measure {
                 _ = try await database.refreshEntityGraph(
-                    now: Self.now, expectedGeneration: database.analysisGeneration)
+                    now: Self.now, expectedGeneration: database.analysisGeneration, withCentrality: true)
             }
 
             func milliseconds(_ duration: Duration) -> Double {

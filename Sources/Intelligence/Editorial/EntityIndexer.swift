@@ -26,19 +26,26 @@ actor EntityIndexer {
     /// What one pass did.
     struct Report: Sendable, Equatable {
         let indexedStories: Int
-        /// Nil when the pass changed nothing and was not asked to refresh the graph.
+        /// Nil when the pass changed nothing and was not a maintenance pass.
         let graph: DatabaseEngine.EntityGraphReport?
     }
 
-    private let extractor = NaturalLanguageEntityExtractor()
+    private let extractor: any EntityExtracting
 
-    /// Indexes the waiting stories, newest first, in batches that each commit alone, then rebuilds the aggregates once
-    /// when the index changed or `refreshGraph` asks for it (the scheduled maintenance pass, which also moves the
-    /// recency weights). Stops between batches when cancelled, in Low Power Mode or under thermal pressure; the
-    /// backlog stays for the next pass. Clearing derived data mid-pass ends it, and the next pass starts over.
+    /// The shared indexer reads with the reader's NaturalLanguage extractor. A test passes a fixed one, because the
+    /// names the model finds differ between macOS versions.
+    init(extractor: any EntityExtracting = NaturalLanguageEntityExtractor()) {
+        self.extractor = extractor
+    }
+
+    /// Indexes the waiting stories, newest first, in batches that each commit alone, then rebuilds the aggregates and
+    /// the edges once when the index changed. A `maintenance` pass (the system's scheduled window) also rebuilds when
+    /// no story is new, which moves the recency weights, and is the only pass that computes global centrality (#716).
+    /// Stops between batches when cancelled, in Low Power Mode or under thermal pressure; the backlog stays for the
+    /// next pass. Clearing derived data mid-pass ends it, and the next pass starts over.
     @discardableResult
     func run(
-        in database: DatabaseEngine, refreshGraph: Bool = false,
+        in database: DatabaseEngine, maintenance: Bool = false,
         allowsEnergy: @Sendable () -> Bool = { IntelligencePolicy.allowsEnergy() }
     ) async throws -> Report {
         let generation = await database.analysisGeneration
@@ -58,8 +65,8 @@ actor EntityIndexer {
             indexed += batch.count
         }
         try Task.checkCancellation()
-        guard indexed > 0 || refreshGraph else { return Report(indexedStories: 0, graph: nil) }
-        let graph = try await database.refreshEntityGraph(expectedGeneration: generation)
+        guard indexed > 0 || maintenance else { return Report(indexedStories: 0, graph: nil) }
+        let graph = try await database.refreshEntityGraph(expectedGeneration: generation, withCentrality: maintenance)
         return Report(indexedStories: indexed, graph: graph)
     }
 
