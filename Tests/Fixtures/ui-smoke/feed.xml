@@ -11,7 +11,6 @@
       <pubDate>{{PUBDATE}}</pubDate>
       <category>Science</category>
       <description>The council voted to restore the old lighthouse on the north pier, with work starting in spring.</description>
-      <media:content url="https://example.com/images/stall-lighthouse.jpg" medium="image" type="image/jpeg" width="1200" height="800"/>
     </item>
     <item>
       <title>Regional Orchestra Announces Free Summer Concert Series</title>
@@ -30,6 +29,15 @@
       <description>Drone flights charted the flats at low tide for the first time.</description>
       <media:content url="https://example.com/images/tidal-survey.jpg" medium="image" type="image/jpeg" width="1200" height="800"/>
       <media:credit>Fixture Photo Desk</media:credit>
+    </item>
+    <item>
+      <title>Ferry Timetable Change Waits On Slow Harbour Photo</title>
+      <link>https://example.com/news/ferry-timetable</link>
+      <guid>https://example.com/news/ferry-timetable</guid>
+      <pubDate>{{EARLIER_PUBDATE}}</pubDate>
+      <category>Science</category>
+      <description>The new timetable starts next month on all island routes.</description>
+      <media:content url="https://example.com/images/stall-ferry.jpg" medium="image" type="image/jpeg" width="1200" height="800"/>
     </item>
   </channel>
 </rss>

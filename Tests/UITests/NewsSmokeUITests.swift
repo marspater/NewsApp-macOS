@@ -41,6 +41,9 @@ final class NewsSmokeUITests: XCTestCase {
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss 'GMT'"
         return try String(contentsOf: url, encoding: .utf8)
             .replacingOccurrences(of: "{{PUBDATE}}", with: formatter.string(from: Date()))
+            // An hour older, so this story is never the Today lead whose full-size image the launch waits for.
+            .replacingOccurrences(
+                of: "{{EARLIER_PUBDATE}}", with: formatter.string(from: Date(timeIntervalSinceNow: -3600)))
     }
 
     /// The Debug app built beside the test runner (`NewsUITests-Runner.app`).
@@ -187,9 +190,9 @@ final class NewsSmokeUITests: XCTestCase {
         XCTAssertTrue(walkAccessibilityTree().contains("Image credit: Fixture Photo Desk"))
     }
 
-    /// The lighthouse story: its lead image never finishes loading (fixture URL containing `stall`).
+    /// A story whose lead image never finishes loading (fixture URL containing `stall`).
     func test08AccessibilityTreeWithImageStillLoading() {
-        openHeadline()
+        openHeadline("Ferry Timetable Change Waits On Slow Harbour Photo")
         XCTAssertTrue(
             app.descendants(matching: .any)["Loading story image"].waitForExistence(timeout: 20),
             "The loading placeholder did not appear")
