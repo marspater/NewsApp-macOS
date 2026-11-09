@@ -123,6 +123,38 @@ extension NativeSuites {
             #expect(session.consensusScore > 0)
         }
 
+        /// A left passage nothing on the right resembles names its closest right passage only for reference; that right
+        /// passage, which no left passage resembles either, is a unique lead of the right report with its own pair.
+        @Test func aUniqueLeadDoesNotClaimItsClosestPassageOfTheOtherReport() async {
+            let dimension = DualReaderAlignmentService.vectorDimension
+            func unit(_ weights: [Int: Float]) -> [Float] {
+                var vector = [Float](repeating: 0, count: dimension)
+                for (index, weight) in weights { vector[index] = weight }
+                return vector
+            }
+            let shared = "Passage shared by both reports here."
+            let leftOnly = "Left only passage about harbour dredging."
+            let rightOnly = "Right only passage about ferry timetables."
+            // Titles and the shared passage match exactly; the two exclusive passages share 0.3 of their direction.
+            let vectors: [String: [Float]] = [
+                "Left title": unit([3: 1]), "Right title": unit([3: 1]), shared: unit([0: 1]),
+                leftOnly: unit([1: 1]), rightOnly: unit([1: 0.3, 2: 0.9539392]),
+            ]
+            let service = DualReaderAlignmentService(embed: { vectors[$0] })
+            let session = await service.align(
+                left: .init(id: "l", title: "Left title", content: "\(shared)\n\n\(leftOnly)", publisher: "Left Wire"),
+                right: .init(
+                    id: "r", title: "Right title", content: "\(shared)\n\n\(rightOnly)", publisher: "Right Wire"))
+            #expect(!session.usesLexicalFallback)
+            #expect(session.consensusCount == 2, "The titles and the shared passage match")
+            #expect(session.uniqueLeadCount == 2, "Each report has one passage the other lacks")
+            #expect(session.pair(forLeft: 2)?.uniqueSide == .left)
+            #expect(session.pair(forRight: 2)?.uniqueSide == .right, "The right passage has a pair of its own")
+            #expect(
+                Set(session.passageAlignments.map(\.id)).count == session.passageAlignments.count,
+                "The two unique leads of one position are two pairs with two ids")
+        }
+
         @Test func aSessionSaysWhenTheLexicalFallbackMadeTheVectors() async {
             func input(_ id: String) -> DualReaderAlignmentService.ArticleInput {
                 .init(
