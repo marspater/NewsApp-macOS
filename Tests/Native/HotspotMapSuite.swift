@@ -72,8 +72,8 @@ extension NativeSuites {
             let service = HotspotProjectionService()
 
             let kyiv = service.resolveCoordinate(for: "Kyiv, Ukraine")
-            #expect(kyiv != nil)
-            #expect(kyiv?.latitude ?? 0 > 45.0)
+            // The first place in word order wins: Kyiv's own centroid, not Ukraine's.
+            #expect(kyiv == GeographicCoordinate(latitude: 50.45, longitude: 30.52))
 
             let gaza = service.resolveCoordinate(for: "Gaza City")
             #expect(gaza != nil)
