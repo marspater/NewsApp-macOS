@@ -487,15 +487,15 @@ struct ArticleDetailView: View {
                         publisherOnlyView(subscriber: subscriber)
                     }
 
-                    // The people, organizations and places the story names, each opening a dossier (W2 #716).
+                    // Once the story is there: the people, organizations and places it names, each opening a dossier
+                    // (W2 #716), then the terminal affordance, "Read original article on <source>". One child, not two:
+                    // this column is at the ten children a ViewBuilder takes on the Xcode 26 SDK that CI builds with.
                     if case .ready = contentState {
                         EntityChipRow(
                             articleIDs: [currentArticle.id], source: articleStore.entitySource,
                             onSelectStory: { id in Task { _ = await openStory(id: id) } })
+                        terminalAffordance
                     }
-
-                    // Terminal Affordance: "Read original article on <source>", once the story is there.
-                    if case .ready = contentState { terminalAffordance }
 
                 }
                 .modifier(ReadingColumn(textScale: readerTextScale))
