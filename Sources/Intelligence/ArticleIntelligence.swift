@@ -332,6 +332,25 @@ public enum EntityType: String, Sendable, Codable, Hashable {
     case organization
     case place
     case unknown
+
+    /// The SF Symbol an entity chip and a dossier show for the type (DESIGN.md 14: one symbol per concept).
+    public var symbol: String {
+        switch self {
+        case .person: return "person"
+        case .organization: return "building.2"
+        case .place: return "mappin.and.ellipse"
+        case .unknown: return "questionmark.circle"
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .person: return "Person"
+        case .organization: return "Organization"
+        case .place: return "Place"
+        case .unknown: return "Entity"
+        }
+    }
 }
 
 public struct EntityResult: Sendable, Equatable, Codable, Hashable {
@@ -381,6 +400,13 @@ extension EntityResult {
     public static func readerTags(
         from entities: [EntityResult], title: String, description: String, text: String
     ) -> [EntityResult] {
+        scoredTags(from: entities, title: title, description: description, text: text).map(\.entity)
+    }
+
+    /// `readerTags` with the score that earned each tag, which the entity index (W2 #716) stores as its weight.
+    public static func scoredTags(
+        from entities: [EntityResult], title: String, description: String, text: String
+    ) -> [(entity: EntityResult, score: Int)] {
         let scored = readerTags(from: entities).enumerated().map { offset, entity in
             let words = entity.name.split(separator: " ")
             let term =
@@ -390,7 +416,7 @@ extension EntityResult {
         }
         return scored.filter { $0.score >= 2 }
             .sorted { ($0.score, $1.offset) > ($1.score, $0.offset) }
-            .map(\.entity)
+            .map { (entity: $0.entity, score: $0.score) }
     }
 
     /// Whole-word occurrences of `term` in `text`, case-sensitive so a surname like Price is not the word "price".

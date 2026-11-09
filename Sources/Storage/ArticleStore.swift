@@ -78,6 +78,9 @@ final class ArticleStore: ObservableObject {
     }
     /// Bumped when AI analysis or article caches are purged so views reload fresh state (#901).
     @Published private(set) var analysisGeneration: Int = 0
+    /// Bumped when an indexing pass has changed the entity index and when Clear AI Analysis has emptied it, so the chips
+    /// of a story that is open ask again (#716).
+    @Published private(set) var entityRevision: UInt64 = 0
 
     init(
         database: DatabaseEngine? = nil,
@@ -222,6 +225,7 @@ final class ArticleStore: ObservableObject {
             // A clear in progress publishes the generation itself, once its reset handler has finished.
             if analysisClearsInProgress == 0, self.analysisGeneration != dbAnalysisGen {
                 self.analysisGeneration = dbAnalysisGen
+                entityRevision &+= 1
             }
             // A refresh that publishes after a failed startup means the library can be read again: startup runs once
             // more in full (migration, readiness and the Spotlight rebuild), never just flips the flags.
@@ -697,8 +701,12 @@ final class ArticleStore: ObservableObject {
         analysisClearsInProgress -= 1
         guard analysisClearsInProgress == 0 else { return }
         analysisGeneration = await database.analysisGeneration
+        entityRevision &+= 1
         await refreshState()
     }
+
+    /// An indexing pass ended: what the entity chips can show may have changed.
+    func entityIndexChanged() { entityRevision &+= 1 }
 
     /// Remembers why a story's page refused its text, for feed health (#715). Losing this costs one sample, so a failed
     /// write is only logged.

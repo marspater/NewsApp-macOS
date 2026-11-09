@@ -110,6 +110,27 @@ enum AppColor {
         })
     static let critical = Color(NSColor.systemPurple)
 
+    // The hotspot map of the World Tension sheet (W4 #718): three bands, a sea, land and graticule that stay quiet.
+    static func hotspot(_ level: HotspotTensionLevel) -> Color {
+        switch level {
+        case .elevated: return success
+        case .significant: return caution
+        case .critical: return danger
+        }
+    }
+    static let mapWater = background
+    static let mapLand = Color(NSColor.separatorColor).opacity(0.4)
+    static let mapGraticule = Color(NSColor.separatorColor)
+    /// A region's glow and ring: stronger when chosen and with Increase Contrast, so the band shows without color's help.
+    static func hotspotGlow(_ color: Color, selected: Bool, contrast: ColorSchemeContrast) -> Color {
+        color.opacity((selected ? 0.45 : 0.25) + (contrast == .increased ? 0.2 : 0))
+    }
+    static func hotspotRing(_ color: Color, selected: Bool, contrast: ColorSchemeContrast) -> Color {
+        color.opacity(selected || contrast == .increased ? 0.9 : 0.5)
+    }
+    /// The pulse ring fades as it expands (`phase` runs 0 ..< 1).
+    static func hotspotPulse(_ color: Color, phase: Double) -> Color { color.opacity(0.6 * (1 - phase)) }
+
     /// The World Tension scale from Zen to Boiling, for the gauge, glyph and trend points.
     static let tensionScale = Gradient(colors: [success, warning, caution, danger, critical])
     /// The mild glyph's breathing halo.
@@ -200,6 +221,22 @@ enum AppLayout {
     static let tensionSheetHeight: CGFloat = 660
     static let tensionChartHeight: CGFloat = 160
     static let tensionScaleHeight: CGFloat = 8
+    static let hotspotMapHeight: CGFloat = 320
+    /// Hotspot markers (W4 #718): a region's ring and glow at rest and chosen, a pin between its smallest and largest
+    /// size (it grows with its coverage and its tension), and the strokes of a marker's score tag.
+    static let hotspotRingSize: CGFloat = 16
+    static let hotspotRingGrowth: CGFloat = 12
+    static let hotspotRingSelectedSize: CGFloat = 24
+    static let hotspotGlowSize: CGFloat = 60
+    static let hotspotGlowSelectedSize: CGFloat = 90
+    static let hotspotPinMinimumSize: CGFloat = 14
+    static let hotspotPinGrowth: CGFloat = 8
+    static let hotspotPinSelectedGrowth: CGFloat = 4
+    /// A country or a sea draws larger and dashed, so its center is never read as a place.
+    static let hotspotApproximateScale: CGFloat = 1.5
+    static let hotspotTagStroke: CGFloat = 1
+    static let hotspotTagStrokeStrong: CGFloat = 2
+    static let hotspotPulseStroke: CGFloat = 2
     /// The centered rule between sections of a story in the reader.
     static let readerSectionRuleWidth: CGFloat = 120
     /// A decoded image narrower than this keeps its own width; wider ones fill the measure.
@@ -250,6 +287,15 @@ enum AppLayout {
     static let unreadDotSize: CGFloat = 6.0
     /// Sidebar and reader popovers.
     static let popoverWidth: CGFloat = 280.0
+    /// The entity dossier popover (W2 #716): its width, the tallest it grows before it scrolls, and the 30-day chart.
+    static let entityDossierWidth: CGFloat = 360
+    static let entityDossierMaxHeight: CGFloat = 520
+    static let entityChartHeight: CGFloat = 96
+    /// The Compare Perspectives sheet (W3 #717): wide enough for two columns, never narrower than the stacked layout.
+    static let dualReaderSheetWidth: CGFloat = 1240
+    static let dualReaderSheetHeight: CGFloat = 760
+    static let dualReaderSheetMinimumWidth: CGFloat = 720
+    static let dualReaderSheetMinimumHeight: CGFloat = 520
     static let keyboardShortcutsPopoverWidth: CGFloat = 380
     static let searchSuggestionIconWidth: CGFloat = 16
     static let publisherMonogramSize: CGFloat = 32
@@ -523,6 +569,10 @@ enum AppMotion {
     /// A result the person's own action brings in, such as the test notification's outcome: a short spring that settles
     /// at once (DESIGN.md 13).
     static let spring = Animation.spring(duration: 0.45, bounce: 0.3)
+    /// The hotspot pins' pulse (DESIGN.md 13): one slow ring every two seconds, drawn at 20 frames a second, and
+    /// stopped under Reduce Motion, in an inactive window and while the app is not active.
+    static let pulsePeriod: TimeInterval = 2.0
+    static let pulseFrameInterval: TimeInterval = 1.0 / 20.0
 
     // Aliases for backward compatibility
     static let quick = hover

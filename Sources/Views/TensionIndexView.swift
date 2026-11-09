@@ -50,6 +50,10 @@ struct TensionIndexView: View {
     }
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDay: Date?
+    @State private var selectedRegion: HotspotRegion?
+    @State private var selectedPin: HotspotClusterPin?
+    @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -63,6 +67,7 @@ struct TensionIndexView: View {
                             readingHeader(reading)
                             summary(reading)
                         }
+                        hotspotMap(reading)
                         drivers(reading)
                         group {
                             DisclosureGroup {
@@ -71,7 +76,6 @@ struct TensionIndexView: View {
                                 groupTitle("Factor Breakdown")
                             }
                         }
-                        evidence(reading)
                         if trend.count > 1 {
                             group("Past 30 Days") { TensionTrendChart(readings: trend, selection: $selectedDay) }
                         }
@@ -104,6 +108,11 @@ struct TensionIndexView: View {
             }
         }
         .frame(width: AppLayout.tensionSheetWidth, height: AppLayout.tensionSheetHeight)
+        // Another reading, or none, starts without a place filter; a selection never outlives its map.
+        .onChange(of: selected?.id) {
+            selectedRegion = nil
+            selectedPin = nil
+        }
     }
 
     /// The sheet title carries the page's one intelligence glyph; how the reading was made is a caption under it
@@ -299,18 +308,59 @@ struct TensionIndexView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func evidence(_ reading: WorldTensionReading) -> some View {
-        group {
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                    Text("C: last 24 hours · P: preceding six days").font(AppTypography.caption).foregroundStyle(
-                        AppColor.secondaryText)
-                    headlineTable(reading.headlines)
-                }.padding(.top, AppSpacing.sm)
-            } label: {
-                groupTitle("All Panel Headlines")
+    /// The offline map of the places this reading's headlines name; selecting one shows the headlines that name it under
+    /// the map, and never the whole panel.
+    @ViewBuilder
+    private func hotspotMap(_ reading: WorldTensionReading) -> some View {
+        let hotspots = WorldTensionHotspots(reading: reading)
+        group("Global Hotspot Intelligence") {
+            if hotspots.isEmpty {
+                Text("No current headline names a mapped place with a tension cue.")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+            } else {
+                GlobalHotspotMapView(
+                    regions: hotspots.regions,
+                    clusterPins: hotspots.pins,
+                    onSelectRegion: { region in
+                        selectedRegion = region
+                        selectedPin = nil
+                    },
+                    onSelectPin: { pin in
+                        selectedPin = pin
+                        selectedRegion = nil
+                    }
+                )
+                .frame(height: AppLayout.hotspotMapHeight)
+                .id(reading.id)
+                if let place = selectedPlace {
+                    selectedHeadlines(reading, place: place)
+                }
             }
         }
+    }
+
+    /// The headlines that name the selected place, under the map.
+    private func selectedHeadlines(_ reading: WorldTensionReading, place: String) -> some View {
+        let matching = reading.headlines.filter {
+            WorldTensionHotspots.matches($0, pin: selectedPin, region: selectedRegion)
+        }
+        return VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Divider()
+            groupTitle("Headlines: \(place)")
+            if matching.isEmpty {
+                Text("No current tension-related headline matches this selection.")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+            } else {
+                Text("C: last 24 hours · P: preceding six days")
+                    .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                headlineTable(matching)
+            }
+        }
+    }
+
+    /// The title of the place chosen on the map, or nil while none is.
+    private var selectedPlace: String? {
+        selectedPin?.title ?? selectedRegion?.name
     }
 
     private var footer: some View {
