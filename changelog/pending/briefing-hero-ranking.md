@@ -1,0 +1,1 @@
+- The Briefing hero carousel, executive sitrep, priority developments and source footprint rank stories by original reports first (copies of one wire dispatch count once), then stored importance, then publisher count, so copied wire text no longer outranks independent reporting. Stories tied on all three keep edition order.

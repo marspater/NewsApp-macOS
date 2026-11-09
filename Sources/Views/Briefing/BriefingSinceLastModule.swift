@@ -89,7 +89,7 @@ struct BriefingSinceLastData: Equatable, Sendable {
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
         guard let startedAt = context.briefing?.startedAt else { return nil }
         var current: [Current] = []
-        for thread in BriefingThread.ranked(context.entries) {
+        for thread in BriefingThread.ranked(context.entries, ranking: context.ranking) {
             let overview = try? await store.fetchEventOverview(eventID: thread.summary.eventID)
             current.append(
                 Current(

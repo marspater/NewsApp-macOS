@@ -62,7 +62,8 @@ struct BriefingFootprintData: Equatable, Sendable {
 
     /// nil hides the module: the lead thread needs two publishers.
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
-        guard let lead = BriefingThread.ranked(context.entries).first, lead.publisherCount > 1,
+        guard let lead = BriefingThread.ranked(context.entries, ranking: context.ranking).first,
+            lead.publisherCount > 1,
             let members = try? await store.eventMemberArticles(eventID: lead.summary.eventID)
         else { return nil }
         let data = make(members.map { ($0.publisherName, BriefingPriorityData.reportText($0)) })

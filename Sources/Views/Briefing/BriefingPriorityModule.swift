@@ -15,7 +15,7 @@
 import Foundation
 import SwiftUI
 
-/// Priority developments: impact, momentum, original reports and the reported fact of the most-covered threads (#849).
+/// Priority developments: impact, momentum, original reports and the reported fact of the top-ranked threads (#849).
 struct BriefingPriorityData: Equatable, Sendable {
     enum Momentum: Equatable, Sendable {
         case rising, steady, fading
@@ -173,7 +173,7 @@ struct BriefingPriorityData: Equatable, Sendable {
 
     /// nil hides the module.
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
-        let threads = Array(BriefingThread.ranked(context.entries).prefix(3))
+        let threads = Array(BriefingThread.ranked(context.entries, ranking: context.ranking).prefix(3))
         guard !threads.isEmpty else { return nil }
         let priorities =
             (try? await store.database.briefingPriorities(articleIDs: threads.map(\.representative.id))) ?? [:]
@@ -342,7 +342,7 @@ struct BriefingPriorityModuleView: View {
     }
 
     var body: some View {
-        BriefingModuleCard(title: "Priority developments", caption: "The most-covered threads") {
+        BriefingModuleCard(title: "Priority developments", caption: "The top-ranked threads") {
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: Metrics.cardMinimum), spacing: AppSpacing.md, alignment: .top)],
                 alignment: .leading, spacing: AppSpacing.md

@@ -15,23 +15,87 @@
 import Foundation
 import SwiftUI
 
-/// The edition's event threads, most publishers first; executive sitrep, priority developments and source footprint
-/// share this ranking (#849).
+/// What orders the Briefing's stories: original reports first, wire copies counting once, then stored importance where
+/// a rating exists, then distinct publishers, then edition order. Publisher count alone let one copied wire dispatch
+/// outrank independent reporting. The hero carousel, executive sitrep, priority developments, source footprint and
+/// since-last rows share it, so the lead story is the same everywhere. Selection reads stored ratings and never
+/// requests one.
+struct BriefingRanking: Equatable, Sendable {
+    struct Signal: Equatable, Sendable {
+        var originalCount: Int
+        var importance: StoryImportance?
+    }
+
+    /// By entry id. A story without a signal (before the load finishes, or a single article) ranks by its publishers.
+    var signals: [String: Signal] = [:]
+
+    /// Distinct publishers with an original report, plus one per wire agency whose dispatch was copied.
+    static func signal(reports: [(publisher: String, text: String)], importance: StoryImportance?) -> Signal {
+        var originals = Set<String>()
+        var wires = Set<String>()
+        for report in reports {
+            if BriefingPriorityData.isWireCopy(text: report.text, publisher: report.publisher) {
+                let zone = String(report.text.prefix(BriefingPriorityData.attributionZoneLength))
+                wires.insert(
+                    OverviewPerspectivesExtractor.detectWireSource(in: zone, articleSource: report.publisher) ?? "")
+            } else {
+                originals.insert(report.publisher)
+            }
+        }
+        return Signal(originalCount: originals.count + wires.count, importance: importance)
+    }
+
+    /// Best first; an unrated story ranks below a rated one, and equal stories keep edition order.
+    func order(_ entries: [FeedEntry]) -> [FeedEntry] {
+        entries.enumerated().sorted {
+            let (lhs, rhs) = (sortKey($0.element), sortKey($1.element))
+            return lhs != rhs ? rhs.lexicographicallyPrecedes(lhs) : $0.offset < $1.offset
+        }.map(\.element)
+    }
+
+    /// Original reports, importance (-1 unrated), publishers; larger sorts first.
+    private func sortKey(_ entry: FeedEntry) -> [Int] {
+        let signal = signals[entry.id]
+        return [
+            signal?.originalCount ?? entry.publisherCount, signal?.importance?.rawValue ?? -1, entry.publisherCount,
+        ]
+    }
+
+    /// Reads each event's members and the stored ratings, off the main actor (the database is an actor and the wire
+    /// detection runs here); the cards never load member text.
+    nonisolated static func load(entries: [FeedEntry], database: DatabaseEngine) async -> Self {
+        var ranking = Self()
+        var events: [FeedEntry] = []
+        for entry in entries {
+            if case .event = entry { events.append(entry) }
+        }
+        guard !events.isEmpty else { return ranking }
+        let priorities = (try? await database.briefingPriorities(articleIDs: events.map(\.representative.id))) ?? [:]
+        for entry in events where !Task.isCancelled {
+            guard case .event(let summary, let representative, _) = entry,
+                let members = try? await database.fetchArticles(limit: nil, eventID: summary.eventID)
+            else { continue }
+            ranking.signals[entry.id] = signal(
+                reports: members.map { ($0.publisherName, BriefingPriorityData.reportText($0)) },
+                importance: priorities[representative.id]?.importance)
+        }
+        return ranking
+    }
+}
+
+/// The edition's event threads in `BriefingRanking` order; executive sitrep, priority developments and source
+/// footprint share this ranking (#849).
 struct BriefingThread: Equatable, Sendable {
     let summary: EventFeedSummary
     let representative: FeedArticle
     let publisherCount: Int
 
-    static func ranked(_ entries: [FeedEntry]) -> [BriefingThread] {
-        let threads = entries.compactMap { entry -> BriefingThread? in
+    static func ranked(_ entries: [FeedEntry], ranking: BriefingRanking = BriefingRanking()) -> [BriefingThread] {
+        ranking.order(entries).compactMap { entry -> BriefingThread? in
             guard case .event(let summary, let representative, _) = entry else { return nil }
             return BriefingThread(
                 summary: summary, representative: representative, publisherCount: entry.publisherCount)
         }
-        // Stable: equal counts keep edition order.
-        return threads.enumerated().sorted {
-            ($0.element.publisherCount, -$0.offset) > ($1.element.publisherCount, -$1.offset)
-        }.map(\.element)
     }
 
     /// The headline cut at a word boundary, for the short serif titles.
@@ -52,7 +116,7 @@ struct BriefingThread: Equatable, Sendable {
     }
 }
 
-/// Executive sitrep: three lines from the three most-covered threads (#849).
+/// Executive sitrep: three lines from the three top-ranked threads (#849).
 struct BriefingSitrepData: Equatable, Sendable {
     struct Line: Equatable, Sendable, Identifiable {
         let id: String
@@ -71,7 +135,7 @@ struct BriefingSitrepData: Equatable, Sendable {
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
         let model: NewsTextModel = AppSettings.shared.aiEnabled ? .onDevice : .unavailable
         var lines: [Line] = []
-        for thread in BriefingThread.ranked(context.entries).prefix(3) {
+        for thread in BriefingThread.ranked(context.entries, ranking: context.ranking).prefix(3) {
             let eventID = thread.summary.eventID
             guard let overview = try? await store.fetchEventOverview(eventID: eventID), !overview.facts.isEmpty
             else { continue }
@@ -133,7 +197,7 @@ struct BriefingSitrepModuleView: View {
     }
 
     var body: some View {
-        BriefingModuleCard(title: "Executive sitrep", caption: "From the \(data.lines.count) most-covered threads") {
+        BriefingModuleCard(title: "Executive sitrep", caption: "From the \(data.lines.count) top-ranked threads") {
             // Side by side when each line gets its minimum width, else stacked.
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: AppSpacing.md) { lineViews(minWidth: Metrics.lineMinimum) }
