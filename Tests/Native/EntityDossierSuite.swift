@@ -278,6 +278,50 @@ extension NativeSuites {
             #expect(try await centralities() == computed)
         }
 
+        /// The walk counts the seed's edge once from each neighbour, though the neighbour's own strongest edges hold it
+        /// too: the dossier ranks its related entities exactly as Personalized PageRank over the stored graph does.
+        @Test func dossierRankingCountsTheSeedEdgeOnce() async throws {
+            let (database, directory, _) = try await Self.library()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            #expect(
+                try await Self.index(
+                    database,
+                    [
+                        "one": [Self.harbour, Self.maria, Self.channel], "two": [Self.harbour, Self.maria],
+                        "three": [Self.harbour, Self.channel], "old": [Self.maria, Self.channel],
+                    ]))
+            _ = try await database.refreshEntityGraph(
+                now: Self.now, expectedGeneration: database.analysisGeneration, withCentrality: true)
+            let seed = "organization:harbour-authority"
+            func edges(_ id: String) async throws -> [(id: String, weight: Double)] {
+                try await database.eventRows(
+                    "SELECT target, weight FROM entity_edges WHERE source = ? ORDER BY weight DESC, target LIMIT 40;",
+                    [.text(id)]
+                ).compactMap { row in
+                    guard let target = row[0], let weight = row[1].flatMap(Double.init) else { return nil }
+                    return (target, weight)
+                }
+            }
+            let direct = try await edges(seed)
+            var adjacency: EntityGraph.Adjacency = [seed: direct.map { ($0.id, $0.weight) }]
+            var centrality: [String: Double] = [:]
+            for neighbour in direct {
+                adjacency[neighbour.id] = try await edges(neighbour.id).map { ($0.id, $0.weight) }
+            }
+            for id in adjacency.keys { centrality[id] = try await database.fetchEntity(id: id)?.centrality ?? 0 }
+            let total = try await database.eventRows("SELECT count(*) FROM entities;").first?[0].flatMap(Int.init) ?? 1
+            let expected = EntityGraph.related(
+                to: seed, in: adjacency, centrality: centrality, floor: 1 / Double(max(total, 1)), limit: 100
+            ).filter { item in direct.contains { $0.id == item.id } }
+
+            let dossier = try #require(try await database.fetchEntityDossier(id: seed, now: Self.now))
+            #expect(!dossier.related.isEmpty)
+            #expect(dossier.related.map(\.entity.id) == expected.prefix(8).map(\.id))
+            #expect(
+                zip(dossier.related, expected).allSatisfy { abs($0.score - $1.score) < 1e-9 },
+                "A seed edge counted twice would move every score")
+        }
+
         @Test func clearingDerivedDataEmptiesTheIndexAndRefusesStaleWrites() async throws {
             let (database, directory, _) = try await Self.library()
             defer { try? FileManager.default.removeItem(at: directory) }

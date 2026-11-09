@@ -342,7 +342,9 @@ extension DatabaseEngine {
         var adjacency: EntityGraph.Adjacency = [entity.id: direct.map { ($0.id, $0.weight) }]
         for neighbour in direct {
             let onward = try neighbours(of: neighbour.id, limit: Self.secondOrderBreadth)
-            adjacency[neighbour.id] = [(entity.id, neighbour.weight)] + onward.map { ($0.id, $0.weight) }
+            // The neighbour's own strongest edges usually hold the seed again: the back-edge counts once.
+            adjacency[neighbour.id] =
+                [(entity.id, neighbour.weight)] + onward.filter { $0.id != entity.id }.map { ($0.id, $0.weight) }
         }
         let nodes = Array(Set(adjacency.keys).union(adjacency.values.flatMap { $0.map(\.id) }))
         let records = try eventRows(
