@@ -316,7 +316,13 @@ struct TensionIndexView: View {
                 VStack(alignment: .leading, spacing: AppSpacing.sm) {
                     Text("C: last 24 hours · P: preceding six days").font(AppTypography.caption).foregroundStyle(
                         AppColor.secondaryText)
-                    headlineTable(filteredHeadlines(reading.headlines))
+                    let matching = filteredHeadlines(reading.headlines)
+                    if matching.isEmpty {
+                        Text("No current tension-related headline matches this selection.")
+                            .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
+                    } else {
+                        headlineTable(matching)
+                    }
                 }.padding(.top, AppSpacing.sm)
             } label: {
                 groupTitle(selectedTheaterTitle)

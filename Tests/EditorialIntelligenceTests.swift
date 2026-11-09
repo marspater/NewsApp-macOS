@@ -297,6 +297,10 @@ enum EditorialIntelligenceTests {
 
         let sydney = GeographicCoordinate(latitude: -33.86, longitude: 151.2)
         check(service.closestRegion(for: sydney) == nil, "Distant coordinate outside standard regions returns nil")
+        check(service.theater(forLocationNamed: "kyiv")?.id == "UA", "Kyiv belongs to Eastern Europe")
+        check(service.theater(forLocationNamed: "seoul")?.id == "KR", "Seoul belongs to Korean Peninsula")
+        check(service.theater(forLocationNamed: "beijing") == nil, "Beijing is not assigned to Korean Peninsula")
+        check(service.theater(forLocationNamed: "warsaw") == nil, "Warsaw is not assigned to Western Europe")
 
         check(HotspotTensionLevel.level(for: 80.0) == .critical, "Tension score 80 is critical")
         check(HotspotTensionLevel.level(for: 50.0) == .significant, "Tension score 50 is significant")

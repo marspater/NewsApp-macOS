@@ -135,6 +135,47 @@ extension NativeSuites {
             #expect(WorldTensionHotspots(reading: quiet).isEmpty)
         }
 
+        @Test func editorialTheatersDoNotGuessByNearestCountry() {
+            let service = HotspotProjectionService()
+            #expect(service.theater(forLocationNamed: "kyiv")?.id == "UA")
+            #expect(service.theater(forLocationNamed: "gaza")?.id == "ME")
+            #expect(service.theater(forLocationNamed: "taipei")?.id == "TW")
+            #expect(service.theater(forLocationNamed: "seoul")?.id == "KR")
+            #expect(service.theater(forLocationNamed: "london")?.id == "EU")
+            #expect(service.theater(forLocationNamed: "new delhi")?.id == "IN")
+            #expect(service.theater(forLocationNamed: "beijing") == nil)
+            #expect(service.theater(forLocationNamed: "tokyo") == nil)
+            #expect(service.theater(forLocationNamed: "warsaw") == nil)
+        }
+
+        @Test func evidenceFiltersCurrentTensionCuesWithoutCrossTheaterLeakage() {
+            func headline(_ id: String, _ title: String) -> WorldTensionHeadline {
+                WorldTensionHeadline(id: id, title: title, publisher: "Same Publisher")
+            }
+            let inUkraine = headline("C1", "Missile attack near Kyiv overnight")
+            let inKorea = headline("C2", "Missile launch near Seoul alarms residents")
+            let inChina = headline("C3", "Missile drill near Beijing raises fears")
+            let priorUkraine = headline("P1", "Missile attack near Kyiv last week")
+            let neutralUkraine = headline("C4", "Sunny skies in Kyiv this morning")
+            let reading = WorldTensionReading(
+                evaluatedAt: Date(timeIntervalSince1970: 1_793_300_435), inputHash: "theaters",
+                modelGeneration: "test",
+                headlines: [inUkraine, inKorea, inChina, priorUkraine, neutralUkraine],
+                assessment: WorldTensionAssessment(score: 58, summary: "", reasons: []))
+            let hotspots = WorldTensionHotspots(reading: reading)
+            let ukraine = hotspots.regions.first { $0.id == "UA" }
+            let korea = hotspots.regions.first { $0.id == "KR" }
+            #expect(ukraine?.articleCount == 1)
+            #expect(korea?.articleCount == 1)
+            #expect(hotspots.regions.allSatisfy { $0.id != "CN" })
+            #expect(hotspots.pins.contains { $0.id == "beijing" })
+            #expect(WorldTensionHotspots.matches(inUkraine, pin: nil, region: ukraine))
+            #expect(!WorldTensionHotspots.matches(inKorea, pin: nil, region: ukraine))
+            #expect(!WorldTensionHotspots.matches(priorUkraine, pin: nil, region: ukraine))
+            #expect(!WorldTensionHotspots.matches(neutralUkraine, pin: nil, region: ukraine))
+            #expect(!WorldTensionHotspots.matches(inChina, pin: nil, region: korea))
+        }
+
         @Test func hotspotRegionTensionClassification() {
             let critical = HotspotTensionLevel.level(for: 85.0)
             #expect(critical == .critical)

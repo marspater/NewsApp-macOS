@@ -295,14 +295,14 @@ public struct GlobalHotspotMapView: View {
         if let pinId = selectedPinId, let pin = clusterPins.first(where: { $0.id == pinId }) {
             return HotspotSelectionSummary(
                 title: pin.title,
-                subtitle: "Active Event Cluster • \(pin.storyCount) stories",
+                subtitle: "\(pin.storyCount) headlines about this place",
                 tension: pin.tensionScore,
                 count: pin.storyCount
             )
         } else if let regionId = selectedRegionId, let region = regions.first(where: { $0.id == regionId }) {
             return HotspotSelectionSummary(
                 title: region.name,
-                subtitle: "\(region.activeClusterCount) active clusters • \(region.articleCount) stories",
+                subtitle: "\(region.activeClusterCount) mapped places • \(region.articleCount) headlines",
                 tension: region.tensionScore,
                 count: region.articleCount
             )
@@ -323,7 +323,7 @@ public struct GlobalHotspotMapView: View {
             Spacer()
 
             HStack(spacing: 6) {
-                Text("Tension Index:")
+                Text("Headline cue index:")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Text("\(Int(summary.tension))/100")

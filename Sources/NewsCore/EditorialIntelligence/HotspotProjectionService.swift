@@ -52,6 +52,32 @@ public struct HotspotProjectionService: Sendable {
             tensionScore: 0, activeClusterCount: 0, articleCount: 0),
     ]
 
+
+    // MARK: - Editorial theaters
+
+    /// Geopolitical theater is a classification, not a nearest-point lookup. A place
+    /// without a defensible theater remains a pin with no region aggregate.
+    private static let locationTheaters: [String: String] = [
+        "ukraine": "UA", "kyiv": "UA", "crimea": "UA", "donetsk": "UA", "kharkiv": "UA",
+        "israel": "ME", "gaza": "ME", "jerusalem": "ME", "tel aviv": "ME",
+        "lebanon": "ME", "beirut": "ME", "iran": "ME", "tehran": "ME",
+        "saudi arabia": "ME", "yemen": "ME", "red sea": "ME",
+        "taiwan": "TW", "taipei": "TW", "taiwan strait": "TW",
+        "south china sea": "CN",
+        "korea": "KR", "seoul": "KR",
+        "united states": "US", "washington": "US", "new york": "US",
+        "united kingdom": "EU", "london": "EU", "france": "EU", "paris": "EU",
+        "germany": "EU", "berlin": "EU", "geneva": "EU", "switzerland": "EU",
+        "india": "IN", "new delhi": "IN",
+    ]
+
+    /// Returns only a known editorial theater. China is not automatically the South
+    /// China Sea; Japan is not Korea; Poland is not Western Europe.
+    public func theater(forLocationNamed name: String) -> HotspotRegion? {
+        guard let id = Self.locationTheaters[name.lowercased()] else { return nil }
+        return Self.regionAnchors.first { $0.id == id }
+    }
+
     // MARK: - Coordinate Projection
 
     /// Projects a geographic latitude/longitude coordinate to a 2D canvas point using Equirectangular projection.
