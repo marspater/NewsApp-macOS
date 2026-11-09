@@ -167,8 +167,8 @@ public actor DualReaderAlignmentService {
         let rawParagraphs = content.components(separatedBy: "\n\n")
             .flatMap { $0.components(separatedBy: "\n") }
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            // Three words keep a short sentence ("The president resigned.") and drop labels such as "Read more".
-            .filter { $0.split(whereSeparator: \.isWhitespace).count >= 3 }
+            // A sentence stays ("He resigned."); a label such as "Read more" or "Share" does not.
+            .filter { $0.split(whereSeparator: \.isWhitespace).count >= 3 || ".!?".contains($0.last ?? " ") }
 
         for paragraph in rawParagraphs {
             // Filter common RSS/feed boilerplate

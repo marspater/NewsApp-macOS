@@ -148,29 +148,7 @@ public struct DualReaderView: View {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 12) {
                                 ForEach(Array(leftPassages.enumerated()), id: \.offset) { index, passage in
-                                    let pair = session.passageAlignments.first { $0.leftPassageIndex == index }
-                                    passageCard(
-                                        text: passage,
-                                        pair: pair,
-                                        isSelected: pair != nil && pair?.id == selectedAlignmentId
-                                    )
-                                    .id("left_\(index)")
-                                    .accessibilityElement(children: .combine)
-                                    .accessibilityAddTraits(pair?.hasCounterpart == true ? .isButton : [])
-                                    .accessibilityAction(named: "Show matching passage") {
-                                        selectPassage(
-                                            pair: pair,
-                                            scrollTo: "right_\(pair?.rightPassageIndex ?? 0)",
-                                            proxy: rightProxy
-                                        )
-                                    }
-                                    .onTapGesture {
-                                        selectPassage(
-                                            pair: pair,
-                                            scrollTo: "right_\(pair?.rightPassageIndex ?? 0)",
-                                            proxy: rightProxy
-                                        )
-                                    }
+                                    passageRow(passage, index: index, isLeft: true, otherColumn: rightProxy)
                                 }
                             }
                             .padding(16)
@@ -186,29 +164,7 @@ public struct DualReaderView: View {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 12) {
                                 ForEach(Array(rightPassages.enumerated()), id: \.offset) { index, passage in
-                                    let pair = session.passageAlignments.first { $0.rightPassageIndex == index }
-                                    passageCard(
-                                        text: passage,
-                                        pair: pair,
-                                        isSelected: pair != nil && pair?.id == selectedAlignmentId
-                                    )
-                                    .id("right_\(index)")
-                                    .accessibilityElement(children: .combine)
-                                    .accessibilityAddTraits(pair?.hasCounterpart == true ? .isButton : [])
-                                    .accessibilityAction(named: "Show matching passage") {
-                                        selectPassage(
-                                            pair: pair,
-                                            scrollTo: "left_\(pair?.leftPassageIndex ?? 0)",
-                                            proxy: leftProxy
-                                        )
-                                    }
-                                    .onTapGesture {
-                                        selectPassage(
-                                            pair: pair,
-                                            scrollTo: "left_\(pair?.leftPassageIndex ?? 0)",
-                                            proxy: leftProxy
-                                        )
-                                    }
+                                    passageRow(passage, index: index, isLeft: false, otherColumn: leftProxy)
                                 }
                             }
                             .padding(16)
@@ -218,6 +174,35 @@ public struct DualReaderView: View {
                 }
             }
         }
+    }
+
+    /// One passage of a column. A passage with a real counterpart is a button, so it takes keyboard focus and
+    /// VoiceOver activation as well as a click, and scrolls the other column to its match; a unique lead is plain.
+    private func passageRow(
+        _ passage: String, index: Int, isLeft: Bool, otherColumn: ScrollViewProxy
+    ) -> some View {
+        let pair = session.passageAlignments.first {
+            isLeft ? $0.leftPassageIndex == index : $0.rightPassageIndex == index
+        }
+        let card = passageCard(
+            text: passage, pair: pair, isSelected: pair != nil && pair?.id == selectedAlignmentId)
+        return VStack(spacing: 0) {
+            if let match = pair, match.hasCounterpart {
+                Button {
+                    selectPassage(
+                        pair: match,
+                        scrollTo: isLeft ? "right_\(match.rightPassageIndex)" : "left_\(match.leftPassageIndex)",
+                        proxy: otherColumn)
+                } label: {
+                    card
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows the matching passage in the other column")
+            } else {
+                card.accessibilityElement(children: .combine)
+            }
+        }
+        .id("\(isLeft ? "left" : "right")_\(index)")
     }
 
     // MARK: - Stacked Presentation (< 1200pt)

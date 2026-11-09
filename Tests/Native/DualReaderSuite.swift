@@ -51,8 +51,8 @@ extension NativeSuites {
         @Test func shortSentencesStayAndLabelsGo() async {
             let service = DualReaderAlignmentService()
             let passages = await service.extractPassages(
-                title: "Resignation", content: "The president resigned.\n\nRead more\n\nShare")
-            #expect(passages == ["Resignation", "The president resigned."])
+                title: "Resignation", content: "The president resigned.\n\nHe resigned.\n\nRead more\n\nShare")
+            #expect(passages == ["Resignation", "The president resigned.", "He resigned."])
         }
 
         @Test func uniqueLeadHasNoCounterpart() {

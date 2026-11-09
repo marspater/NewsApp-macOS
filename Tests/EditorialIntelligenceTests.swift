@@ -268,8 +268,10 @@ enum EditorialIntelligenceTests {
         let blankPassages = await service.extractPassages(title: "  ", content: "short")
         check(blankPassages.isEmpty, "A blank article yields no passages, so no 100% blank match")
         let shortPassages = await service.extractPassages(
-            title: "Resignation", content: "The president resigned.\n\nRead more")
-        check(shortPassages == ["Resignation", "The president resigned."], "Short sentences stay, labels go")
+            title: "Resignation", content: "The president resigned.\n\nHe resigned.\n\nRead more")
+        check(
+            shortPassages == ["Resignation", "The president resigned.", "He resigned."],
+            "Short sentences stay, labels go")
         check(DualReaderLayoutMode.mode(for: 1300) == .sideBySide, "Adaptive layout side-by-side above 1200pt")
         check(DualReaderLayoutMode.mode(for: 900) == .stacked, "Adaptive layout stacked below 1200pt")
     }
