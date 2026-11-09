@@ -719,7 +719,7 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// Other conflicts stay absolute. Nil: every cross-pair must be conflict-free (default).
     var vetoMinimum: Int?
     var vetoShare: Double?
-    var vetoThreshold: Bool { vetoMinimum != nil || vetoShare != nil }
+    var vetoThreshold: Bool { vetoMinimum != nil || vetoShare != nil || evidenceHead?.vetoShare != nil }
     /// Borderline floor for the two-thirds rule (#737, evaluation): a pair the pair model scored below this, and that
     /// is no match, counts as compatible only when it shares at least `borderlineNames` specific names. Nil turns it off.
     var borderlineFloor: Double?
@@ -732,7 +732,33 @@ struct EventMatchPolicy: Sendable, Equatable {
     /// through its best matched pair alone, its other items raising no veto, and it does not count toward the two-thirds
     /// rule of other reports. Off: an edition is a report like any other.
     var editionAdmission = false
+    /// Evidence head (#737, evaluation): a learned decision over the cosine and the time gap of a pair, fitted on
+    /// reviewed labels by `script/evaluation/fit_evidence_head.py`. Nil turns it off (default).
+    var evidenceHead: PairEvidenceHead?
     static let standard = EventMatchPolicy()
+}
+
+/// The evidence head (#737): the probability that two reports from different publishers describe one occurrence, from
+/// the sentence-embedding cosine and the hours between them. At or above `cutoff` the pair is a match whatever the
+/// outvotable fact checks say (`EventMatcher.evidenceOverridable`) and without a shared specific name: on reviewed
+/// pairs those checks fire on true pairs (a rising toll, a weekday named as background) and strong evidence is right
+/// more often than they are (docs/audits/2026-11-09-evidence-head.md).
+struct PairEvidenceHead: Sendable, Equatable {
+    var bias: Double
+    var cosine: Double
+    /// Weight of the gap in units of `gapScale` hours, the widest gap of the training pairs.
+    var gap: Double
+    var cutoff: Double
+    /// With the head on, a `titleNumbers` or `weekday` conflict from a cross-pair is outvoted like a `places` or
+    /// `semanticDivergence` one: it blocks admission only when more than this share of the cross-pairs raise a
+    /// conflict. Nil leaves admission as it is.
+    var vetoShare: Double?
+    static let gapScale = 96.0
+
+    func probability(cosine similarity: Double, gapHours: Double) -> Double {
+        let scaled = min(max(gapHours, 0), Self.gapScale) / Self.gapScale
+        return 1 / (1 + exp(-(bias + cosine * similarity + gap * scaled)))
+    }
 }
 
 /// Bounded calibration of the pair model's cutoff from the reader's verdicts (#629): a logistic layer over
@@ -827,6 +853,8 @@ struct EventPairAssessment: Sendable, Equatable {
     /// Under `editionAdmission` (#737): the joining report, or the event member it is assessed against, is an edition.
     var rowIsEdition = false
     var memberIsEdition = false
+    /// The evidence head (#737) judged the pair one occurrence; it stands in for a shared specific name in admission.
+    var strongEvidence = false
 }
 
 enum EventMatcher {
@@ -945,7 +973,19 @@ enum EventMatcher {
         let score = 0.4 * what + 0.4 * entity + 0.2 * time
 
         var conflict = pairConflict(a, b, gap: gap, maximumTimeGap: policy.maximumTimeGap, sameSeries: sameSeries)
-        let masksAbsolute = conflict == .places && policy.vetoThreshold && headlineOrActConflict(a, b) != nil
+        // Strong evidence (#737) settles a pair of two publishers before the outvotable fact checks do.
+        let strongEvidence =
+            !samePublisher && !sameSeries && gap <= policy.maximumTimeGap
+            && (conflict.map { evidenceOverridable.contains($0) } ?? true)
+            && policy.evidenceHead.flatMap { head in
+                embeddingSimilarity.map { head.probability(cosine: $0, gapHours: gap / 3600) >= head.cutoff }
+            } == true
+        if strongEvidence { conflict = nil }
+        // A tolerated `weekday` or `titleNumbers` veto was found before the headline and act checks ran.
+        let masksAbsolute =
+            policy.vetoThreshold && headlineOrActConflict(a, b) != nil
+            && (conflict == .places
+                || (policy.evidenceHead?.vetoShare != nil && (conflict == .weekday || conflict == .titleNumbers)))
         let sharedSpecific = a.specificAnchors.intersection(b.specificAnchors).union(crossSpecific).count
         let sharedEvidence =
             sharedKeywords
@@ -970,11 +1010,13 @@ enum EventMatcher {
             conflict == nil && !primaryDisjoint && sharedSpecific >= 2
             && (embeddingSimilarity ?? 0) >= policy.twoAnchorRescueThreshold && gap <= policy.maximumTimeGap
 
-        let isMatch = ruleMatch || semanticRescue || twoAnchorRescue
+        let isMatch = ruleMatch || semanticRescue || twoAnchorRescue || strongEvidence
         let isCompatible =
-            conflict == nil && !primaryDisjoint && sharedSpecific >= 1
-            && (score >= policy.compatibilityScore || (embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold)
-            && (!policy.compatibleRequiresMatch || isMatch)
+            strongEvidence
+            || (conflict == nil && !primaryDisjoint && sharedSpecific >= 1
+                && (score >= policy.compatibilityScore
+                    || (embeddingSimilarity ?? 0) >= policy.semanticFragmentThreshold)
+                && (!policy.compatibleRequiresMatch || isMatch))
         let anchorlessCandidate =
             sharedAnchors == 0 && embeddingSimilarity != nil
             && (embeddingSimilarity ?? 0) >= policy.anchorlessModelCosine
@@ -991,8 +1033,14 @@ enum EventMatcher {
             sharedSpecificAnchors: sharedSpecific, sharedKeywords: sharedKeywords,
             isMatch: isMatch, isCompatible: isCompatible, embeddingCosine: embeddingSimilarity,
             neuralEligible: neuralEligible, anchorlessModelCandidate: anchorlessCandidate,
-            masksAbsoluteConflict: masksAbsolute)
+            masksAbsoluteConflict: masksAbsolute, strongEvidence: strongEvidence)
     }
+
+    /// The fact checks strong evidence (#737) overrides for a pair of two publishers. Language, dates, the time gap,
+    /// periods, years, calendar days, editions and storm names stay absolute.
+    static let evidenceOverridable: Set<EventConflict> = [
+        .titleNumbers, .weekday, .places, .headlinePlaces, .differentAct,
+    ]
 
     /// The newsletter edition's title and body for the pair model (#737): a trailing ` | <series>` suffix of one to six
     /// words without a digit marks the edition; its sign-up call to action and the first paragraph's "Plus …" teaser are dropped.
@@ -1129,7 +1177,7 @@ enum EventMatcher {
         guard pairs.count < policy.maximumEventSize else { return nil }
         let pairs = admissionPairs(pairs, policy: policy)
         guard !pairs.isEmpty, !conflictsBlock(pairs, policy: policy),
-            pairs.allSatisfy({ $0.sharedSpecificAnchors >= 1 || $0.modelConfirmed }),
+            pairs.allSatisfy({ $0.sharedSpecificAnchors >= 1 || $0.modelConfirmed || $0.strongEvidence }),
             pairs.contains(where: \.isMatch)
         else { return nil }
         let required = Int((Double(pairs.count) * policy.compatibleShare).rounded(.up))
@@ -1145,13 +1193,16 @@ enum EventMatcher {
     /// (`vetoMinimum`, `vetoShare`, #737) a `semanticDivergence` or `places` conflict only when enough pairs raise one.
     static func conflictsBlock(_ pairs: [EventPairAssessment], policy: EventMatchPolicy = .standard) -> Bool {
         guard policy.vetoThreshold else { return pairs.contains { $0.conflict != nil } }
-        if pairs.contains(where: { $0.masksAbsoluteConflict || $0.conflict.map { !outvotable.contains($0) } ?? false })
-        {
+        // The evidence head's veto share (#737) also outvotes the two fact checks that fire on true pairs.
+        let tolerated =
+            policy.evidenceHead?.vetoShare == nil ? outvotable : outvotable.union([.titleNumbers, .weekday])
+        if pairs.contains(where: { $0.masksAbsoluteConflict || $0.conflict.map { !tolerated.contains($0) } ?? false }) {
             return true
         }
         let vetoes = pairs.filter { $0.conflict != nil }.count
+        let share = policy.vetoShare ?? policy.evidenceHead?.vetoShare
         return policy.vetoMinimum.map { vetoes >= $0 } == true
-            || policy.vetoShare.map { Double(vetoes) / Double(max(pairs.count, 1)) > $0 } == true
+            || share.map { Double(vetoes) / Double(max(pairs.count, 1)) > $0 } == true
     }
 
     /// The borderline floor (#737, evaluation): a pair that is no match, scored by the pair model below

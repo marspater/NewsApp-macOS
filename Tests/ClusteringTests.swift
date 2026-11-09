@@ -1144,6 +1144,42 @@ extension NewsTests {
             EventMatcher.eventScore(pairs: [pair, pair, weekday], policy: vetoMinimum) == nil,
             "Other conflicts stay absolute under the veto threshold")
 
+        // Evidence head (#737, evaluation): strong cosine-and-gap evidence settles a pair of two publishers before the
+        // outvotable fact checks do, and a weekday veto is outvoted only under the head's veto share.
+        var headPolicy = EventMatchPolicy.standard
+        headPolicy.evidenceHead = PairEvidenceHead(bias: -7.7861, cosine: 13.4012, gap: -10.2524, cutoff: 0.78)
+        assertTrue(
+            EventMatcher.assess(kyivBlaze, lyonBlaze, policy: headPolicy, embeddingSimilarity: 0.9).isMatch
+                && EventMatcher.assess(kyivBlaze, lyonBlaze, policy: headPolicy, embeddingSimilarity: 0.9)
+                    .strongEvidence,
+            "Strong evidence overrides a places veto")
+        assertEqual(
+            EventMatcher.assess(kyivBlaze, lyonBlaze, policy: headPolicy, embeddingSimilarity: 0.6).conflict, .places,
+            "Evidence under the cutoff leaves the veto")
+        assertEqual(
+            EventMatcher.assess(kyivBlaze, lyonBlaze, policy: headPolicy, embeddingSimilarity: 0.9, samePublisher: true)
+                .conflict, .places, "The head never decides two reports of one publisher")
+        assertFalse(
+            EventMatcher.assess(kyivBlaze, lyonBlaze, embeddingSimilarity: 0.9).strongEvidence,
+            "The head is off by default")
+        var lateBlaze = lyonBlaze
+        lateBlaze.date = now.addingTimeInterval(30 * 3600)
+        assertFalse(
+            EventMatcher.assess(kyivBlaze, lateBlaze, policy: headPolicy, embeddingSimilarity: 0.9).strongEvidence,
+            "The same cosine a day later is not strong evidence")
+        var strong = pair
+        (strong.sharedSpecificAnchors, strong.strongEvidence) = (0, true)
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, strong], policy: headPolicy) != nil,
+            "Strong evidence stands in for a shared specific name in admission")
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, weekday], policy: headPolicy) == nil,
+            "Without a veto share the head leaves admission alone")
+        headPolicy.evidenceHead?.vetoShare = 0.34
+        assertTrue(
+            EventMatcher.eventScore(pairs: [pair, pair, weekday], policy: headPolicy) != nil,
+            "One weekday veto in three is outvoted under the head's veto share")
+
         // Borderline floor (#737, evaluation): a compatible borderline pair the pair model scores low needs three names.
         var borderline = pair
         borderline.isMatch = false

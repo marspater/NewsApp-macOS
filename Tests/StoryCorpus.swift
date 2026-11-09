@@ -276,6 +276,15 @@ enum StoryCorpus {
         }
         if environment["NEWS_PAIR_STRIP_NEWSLETTER"] == "1" { policy.pairModelStripsNewsletter = true }
         if environment["NEWS_EDITION_ADMISSION"] == "1" { policy.editionAdmission = true }
+        // The evidence head (#737): "bias,cosine,gap,cutoff" as `fit_evidence_head.py` prints them, and its veto share.
+        if let values = environment["NEWS_EVIDENCE_HEAD"]?.split(separator: ",").map({ Double($0) }),
+            values.count == 4, let bias = values[0], let cosine = values[1], let gap = values[2], let cutoff = values[3]
+        {
+            policy.evidenceHead = PairEvidenceHead(bias: bias, cosine: cosine, gap: gap, cutoff: cutoff)
+            if let share = environment["NEWS_EVIDENCE_VETO_SHARE"].flatMap(Double.init), (0...1).contains(share) {
+                policy.evidenceHead?.vetoShare = share
+            }
+        }
         // The semantic veto and rescue cutoffs (#628), swept when the sentence encoder changes.
         if let value = environment["NEWS_SEMANTIC_VETO"].flatMap(Double.init), value.isFinite {
             policy.semanticVetoThreshold = value
