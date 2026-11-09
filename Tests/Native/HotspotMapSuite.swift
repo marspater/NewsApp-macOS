@@ -105,6 +105,7 @@ extension NativeSuites {
                     headline("C2", "Troops fight near Kyiv", "Wire B"),
                     headline("C3", "Weather mild in Paris this week", "Wire C"),
                     headline("P1", "Airstrike on Gaza kills dozens", "Wire A"),
+                    headline("P2", "Airstrike hits Kyiv overnight", "Wire A"),
                 ],
                 assessment: WorldTensionAssessment(score: 50, summary: "", reasons: []))
             let hotspots = WorldTensionHotspots(reading: reading)
@@ -124,6 +125,8 @@ extension NativeSuites {
             // The same title decides the table filter.
             let kyiv = hotspots.pins[0]
             #expect(WorldTensionHotspots.matches(reading.headlines[0], pin: kyiv, region: nil))
+            // The table also lists the preceding six days: a P headline naming the place matches.
+            #expect(WorldTensionHotspots.matches(reading.headlines[4], pin: kyiv, region: nil))
             #expect(!WorldTensionHotspots.matches(reading.headlines[2], pin: kyiv, region: nil))
             #expect(WorldTensionHotspots.matches(reading.headlines[0], pin: nil, region: hotspots.regions[0]))
 

@@ -59,7 +59,7 @@ public struct GlobalHotspotMapView: View {
                     let canvasSize = geometry.size
                     ZStack {
                         // Offline Map Background & Continents
-                        offlineVectorMap(size: canvasSize)
+                        offlineVectorMap
 
                         // Hotspot Regional Tension Glows
                         ForEach(regions) { region in
@@ -135,7 +135,7 @@ public struct GlobalHotspotMapView: View {
 
     // MARK: - Offline Vector Map Canvas
 
-    private func offlineVectorMap(size: CGSize) -> some View {
+    private var offlineVectorMap: some View {
         Canvas { context, canvasSize in
             // Map Water Background
             let bgRect = CGRect(origin: .zero, size: canvasSize)
@@ -155,40 +155,63 @@ public struct GlobalHotspotMapView: View {
 
             // Offline Simplified Continent Outlines
             let continentColor = Color(NSColor.separatorColor).opacity(0.4)
-            drawContinentPaths(in: &context, size: canvasSize, color: continentColor)
+            drawLandmasses(in: &context, size: canvasSize, color: continentColor)
         }
     }
 
-    private static let continentPolygons: [[[Double]]] = [
+    /// Simplified coastlines as (latitude, longitude) rings, projected with the same equirectangular projection as the
+    /// markers so that glows and pins sit on the landmass they name.
+    private static let landmasses: [[(lat: Double, lon: Double)]] = [
         // North America
-        [[0.12, 0.15], [0.28, 0.15], [0.32, 0.35], [0.24, 0.52], [0.18, 0.45], [0.10, 0.30]],
+        [
+            (66, -168), (71, -156), (70, -128), (68, -96), (60, -94), (58, -78), (62, -70), (52, -56), (47, -53),
+            (44, -66), (40, -74), (35, -76), (30, -81), (25, -80), (25, -97), (19, -96), (21, -87), (16, -88),
+            (10, -84), (8, -78), (8, -81), (15, -93), (20, -105), (23, -110), (32, -117), (40, -124), (48, -124),
+            (55, -130), (60, -145), (57, -158), (64, -166),
+        ],
         // South America
-        [[0.26, 0.55], [0.36, 0.58], [0.33, 0.85], [0.27, 0.88], [0.24, 0.65]],
-        // Europe
-        [[0.46, 0.18], [0.58, 0.18], [0.56, 0.38], [0.44, 0.38]],
+        [
+            (12, -72), (10, -62), (5, -52), (0, -50), (-7, -35), (-13, -38), (-23, -42), (-35, -57), (-41, -62),
+            (-52, -68), (-55, -68), (-50, -75), (-40, -73), (-30, -71), (-18, -70), (-5, -81), (1, -80), (8, -77),
+        ],
+        // Eurasia
+        [
+            (71, 28), (70, 60), (73, 80), (76, 105), (73, 130), (70, 160), (66, 180), (60, 163), (52, 156), (51, 141),
+            (43, 132), (39, 128), (35, 129), (39, 121), (37, 122), (31, 122), (22, 114), (21, 108), (10, 107), (9, 105),
+            (13, 100), (8, 100), (2, 104), (16, 94), (22, 91), (16, 82), (8, 77), (21, 72), (25, 66), (25, 57),
+            (22, 60), (12, 45), (15, 42), (28, 34), (31, 34), (36, 36), (37, 27), (40, 26), (38, 22), (40, 18),
+            (45, 13), (44, 8), (43, 3), (37, -1), (36, -6), (37, -9), (43, -9), (48, -5), (51, 2), (54, 8), (57, 10),
+            (55, 13), (59, 18), (65, 22), (63, 10), (70, 23),
+        ],
         // Africa
-        [[0.46, 0.42], [0.60, 0.42], [0.58, 0.78], [0.50, 0.78], [0.42, 0.52]],
-        // Asia
-        [[0.60, 0.15], [0.88, 0.18], [0.82, 0.55], [0.68, 0.52], [0.60, 0.35]],
+        [
+            (37, 10), (37, -2), (35, -6), (28, -13), (21, -17), (15, -17), (5, -8), (5, 8), (4, 10), (-5, 12),
+            (-12, 14), (-22, 14), (-34, 18), (-34, 26), (-27, 33), (-16, 40), (-5, 40), (5, 48), (12, 51), (11, 43),
+            (18, 39), (28, 33), (31, 32),
+        ],
+        // Great Britain and Ireland
+        [(58, -5), (57, -2), (53, 0), (51, 1), (50, -5), (53, -4), (55, -6)],
+        // Japan
+        [(45, 142), (41, 142), (35, 140), (34, 135), (31, 131), (34, 130), (37, 137), (40, 140)],
         // Australia
-        [[0.78, 0.68], [0.90, 0.68], [0.88, 0.85], [0.78, 0.85]],
+        [
+            (-11, 131), (-12, 142), (-19, 147), (-28, 153), (-38, 150), (-38, 141), (-35, 135), (-32, 127), (-34, 115),
+            (-22, 114), (-15, 124),
+        ],
     ]
 
-    private func drawContinentPaths(in context: inout GraphicsContext, size: CGSize, color: Color) {
-        for poly in Self.continentPolygons {
+    private func drawLandmasses(in context: inout GraphicsContext, size: CGSize, color: Color) {
+        for coastline in Self.landmasses {
             var path = Path()
-            guard let first = poly.first else { continue }
-            path.move(to: projectNormalized(x: first[0], y: first[1], size: size))
-            for pt in poly.dropFirst() {
-                path.addLine(to: projectNormalized(x: pt[0], y: pt[1], size: size))
+            for (index, point) in coastline.enumerated() {
+                let projected = projectionService.projectEquirectangular(
+                    coordinate: GeographicCoordinate(latitude: point.lat, longitude: point.lon),
+                    canvasSize: size)
+                if index == 0 { path.move(to: projected) } else { path.addLine(to: projected) }
             }
             path.closeSubpath()
             context.fill(path, with: .color(color))
         }
-    }
-
-    private func projectNormalized(x: CGFloat, y: CGFloat, size: CGSize) -> CGPoint {
-        CGPoint(x: x * size.width, y: y * size.height)
     }
 
     // MARK: - Hotspot Region Glows
