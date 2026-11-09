@@ -1,6 +1,6 @@
 # Design language adoption plan — 9 October 2026
 
-Status: implemented and accepted (10 October 2026). Planned from `origin/main` at `4eaf39c`. Rules: [DESIGN.md](../DESIGN.md). Evidence and line references: [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md).
+Status: implemented and accepted (10 October 2026). Planned from `origin/main` at `4eaf39c`. Rules: [DESIGN.md](../design/DESIGN.md). Evidence and line references: [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md).
 
 ## Progress — 10 October 2026
 

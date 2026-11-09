@@ -15,7 +15,7 @@
 
 ## 1. Architectural Guardrails & Invariants
 
-All features in this roadmap adhere strictly to [docs/ARCHITECTURE.md](../ARCHITECTURE.md) and [docs/DESIGN.md](../DESIGN.md):
+All features in this roadmap adhere strictly to [docs/ARCHITECTURE.md](../ARCHITECTURE.md) and [docs/DESIGN.md](../design/DESIGN.md):
 1. **Zero External Network Exfiltration:** No remote LLMs, no analytics SDKs, no cloud sync backends. All network requests flow strictly through the local loopback gateway with DNS verification and pinned public IP literals.
 2. **Apple HIG & macOS Citizenship:** Information density, precision pointer ergonomics, keyboard-driven navigation, system accessibility traits, and restrained Liquid Glass for floating controls only.
 3. **Verified, Cited Data Only:** Highlights, summaries, and overviews must use cited publisher sentences or verified deterministic extractions. Zero hallucinatory generative prose.

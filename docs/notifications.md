@@ -1,7 +1,8 @@
 # Notification delivery rules (#665)
 
 These rules decide which new stories become banners in **Full** notification mode. They are written before the code
-and are the contract the tests check. Minimal and Privacy modes are unchanged: one summary banner per delivery pass,
+and are the contract the tests check. How a banner looks and when it may interrupt is in
+[docs/design/notifications.md](design/notifications.md). Minimal and Privacy modes are unchanged: one summary banner per delivery pass,
 not counted by any lane.
 
 ## Separation of concerns

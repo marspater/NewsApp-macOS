@@ -149,7 +149,7 @@ This section maps News directly against Apple's **App Store Review Guidelines**.
 ### Guideline 4: Design & Human Interface Guidelines (HIG)
 
 * **4.1 Originality & System Citizenship**:
-  - Follows Apple's macOS Sequoia design language and the project's [docs/DESIGN.md](DESIGN.md):
+  - Follows Apple's macOS Sequoia design language and the project's [docs/DESIGN.md](design/DESIGN.md):
     - Unified window toolbar styling (`.windowToolbarStyle(.unified)`).
     - Standard macOS window controls (traffic lights) remain unobstructed.
     - System materials (`.ultraThinMaterial`, `NSVisualEffectView`) for sidebars and popovers.
