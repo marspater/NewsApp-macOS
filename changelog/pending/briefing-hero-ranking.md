@@ -1,1 +1,1 @@
-The Briefing hero carousel, sitrep and source footprint rank stories by original reports first (copies of one wire dispatch count once), then stored importance, then publisher count, so syndicated text no longer pushes a story to the top.
+- The Briefing hero carousel, executive sitrep, priority developments and source footprint rank stories by original reports first (copies of one wire dispatch count once), then stored importance, then publisher count, so syndicated text no longer pushes a story to the top.

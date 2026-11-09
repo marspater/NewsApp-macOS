@@ -1321,6 +1321,9 @@ extension NewsTests {
         // Original reports first (wire copies count once), then stored importance, then publishers, then edition order.
         let wireCopies = (0..<6).map { (publisher: "Daily \($0)", text: "(AP) - Same dispatch") }
         let independent = (0..<3).map { (publisher: "Paper \($0)", text: "Own reporting \($0)") }
+        assertEqual(
+            BriefingPriorityData.isWireCopy(text: "Israeli-occupied town reopens", publisher: "Daily Example"), false,
+            "A headline with \"occupied\" is not UPI wire copy")
         let wireSignal = BriefingRanking.signal(reports: wireCopies, importance: nil)
         assertEqual(wireSignal.originalCount, 1, "Six copies of one wire dispatch count once")
         assertEqual(

@@ -24,7 +24,7 @@ Every module is optional, ordered by the reader, and hidden when it has nothing 
 - **Hero carousel**: top 3–5 stories by publisher count, 45 s auto-advance. Source: `BriefingHeroCarouselView`, `bestCardImage`.
 - **World Tension**: score of 100, level, 7-day change, rising risk types, coverage sufficiency, gold "Assessed on this Mac" label. Source: `WorldTensionModel` and the tension methodology's type scores and coverage.
 - **Since your last briefing**: new events, more publishers, easing or escalation since the last opened edition. Source: a new edition snapshot (event id, membership version, publisher count, escalation signal).
-- **Executive sitrep**: three lines from the three most-covered threads, each linked. Source: overview highlights, on-device model with plain text output, extractive fallback.
+- **Executive sitrep**: three lines from the three top-ranked threads (the hero carousel order), each linked. Source: overview highlights, on-device model with plain text output, extractive fallback.
 
 ### 2. Intelligence assessment: What does the reporting show?
 

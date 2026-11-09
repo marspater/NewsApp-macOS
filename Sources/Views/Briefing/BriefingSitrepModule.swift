@@ -109,7 +109,7 @@ struct BriefingThread: Equatable, Sendable {
     }
 }
 
-/// Executive sitrep: three lines from the three most-covered threads (#849).
+/// Executive sitrep: three lines from the three top-ranked threads (#849).
 struct BriefingSitrepData: Equatable, Sendable {
     struct Line: Equatable, Sendable, Identifiable {
         let id: String
@@ -190,7 +190,7 @@ struct BriefingSitrepModuleView: View {
     }
 
     var body: some View {
-        BriefingModuleCard(title: "Executive sitrep", caption: "From the \(data.lines.count) most-covered threads") {
+        BriefingModuleCard(title: "Executive sitrep", caption: "From the \(data.lines.count) top-ranked threads") {
             // Side by side when each line gets its minimum width, else stacked.
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: AppSpacing.md) { lineViews(minWidth: Metrics.lineMinimum) }
