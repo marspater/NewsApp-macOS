@@ -24,10 +24,12 @@ public struct GlobalHotspotMapView: View {
     /// see either, so the host passes them in.
     public let levelColor: (HotspotTensionLevel) -> Color
     public let contrast: ColorSchemeContrast
+    /// Score-tag text and fill; the host passes its design-system tokens.
+    public let labelColor: Color
+    public let labelBackground: Color
 
     @State private var selectedRegionId: String?
     @State private var selectedPinId: String?
-    @State private var hoverPinId: String?
 
     private let projectionService = HotspotProjectionService()
 
@@ -36,6 +38,8 @@ public struct GlobalHotspotMapView: View {
         clusterPins: [HotspotClusterPin],
         levelColor: @escaping (HotspotTensionLevel) -> Color,
         contrast: ColorSchemeContrast = .standard,
+        labelColor: Color = .primary,
+        labelBackground: Color = Color(NSColor.windowBackgroundColor),
         onSelectRegion: ((HotspotRegion?) -> Void)? = nil,
         onSelectPin: ((HotspotClusterPin?) -> Void)? = nil
     ) {
@@ -43,6 +47,8 @@ public struct GlobalHotspotMapView: View {
         self.clusterPins = clusterPins
         self.levelColor = levelColor
         self.contrast = contrast
+        self.labelColor = labelColor
+        self.labelBackground = labelBackground
         self.onSelectRegion = onSelectRegion
         self.onSelectPin = onSelectPin
     }
@@ -216,6 +222,29 @@ public struct GlobalHotspotMapView: View {
 
     // MARK: - Hotspot Region Glows
 
+    private func selectRegion(_ region: HotspotRegion) {
+        selectedRegionId = region.id
+        selectedPinId = nil
+        onSelectRegion?(region)
+    }
+
+    private func selectPin(_ pin: HotspotClusterPin) {
+        selectedPinId = pin.id
+        selectedRegionId = nil
+        onSelectPin?(pin)
+    }
+
+    /// The tension number beside a marker, so the level never rests on color alone; the band shows in its outline.
+    private func scoreTag(_ score: Double, color: Color) -> some View {
+        Text("\(Int(score))")
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(labelColor)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(labelBackground, in: Capsule())
+            .overlay(Capsule().stroke(color, lineWidth: isHighContrast ? 2 : 1))
+    }
+
     private func regionGlowView(region: HotspotRegion, canvasSize: CGSize) -> some View {
         let pt = projectionService.projectEquirectangular(
             coordinate: region.centroid,
@@ -225,41 +254,40 @@ public struct GlobalHotspotMapView: View {
         let color = tensionColor(for: region.tensionScore)
         let glow = isHighContrast ? 0.2 : 0.0
 
-        return ZStack {
-            Circle()
-                .fill(
-                    RadialGradient(
-                        colors: [color.opacity((isSelected ? 0.45 : 0.25) + glow), color.opacity(0.0)],
-                        center: .center,
-                        startRadius: 2,
-                        endRadius: isSelected ? 45 : 30
+        // A button, so it takes keyboard focus and VoiceOver activation as well as a click.
+        return Button {
+            selectRegion(region)
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [color.opacity((isSelected ? 0.45 : 0.25) + glow), color.opacity(0.0)],
+                            center: .center,
+                            startRadius: 2,
+                            endRadius: isSelected ? 45 : 30
+                        )
                     )
-                )
-                .frame(width: isSelected ? 90 : 60, height: isSelected ? 90 : 60)
+                    .frame(width: isSelected ? 90 : 60, height: isSelected ? 90 : 60)
 
-            Circle()
-                .stroke(
-                    color.opacity(isSelected || isHighContrast ? 0.9 : 0.5),
-                    lineWidth: (isSelected ? 2 : 1) + (isHighContrast ? 1 : 0)
-                )
-                .frame(width: isSelected ? 24 : 16, height: isSelected ? 24 : 16)
+                Circle()
+                    .stroke(
+                        color.opacity(isSelected || isHighContrast ? 0.9 : 0.5),
+                        lineWidth: (isSelected ? 2 : 1) + (isHighContrast ? 1 : 0)
+                    )
+                    .frame(width: isSelected ? 24 : 16, height: isSelected ? 24 : 16)
+
+                scoreTag(region.tensionScore, color: color)
+                    .offset(y: isSelected ? 22 : 18)
+            }
+            .contentShape(Circle())
         }
+        .buttonStyle(.plain)
         .position(pt)
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "\(region.name), \(region.tensionLevel.displayName), tension \(Int(region.tensionScore)) of 100"
         )
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction {
-            selectedRegionId = region.id
-            selectedPinId = nil
-            onSelectRegion?(region)
-        }
-        .onTapGesture {
-            selectedRegionId = region.id
-            selectedPinId = nil
-            onSelectRegion?(region)
-        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Cluster Pins
@@ -272,37 +300,24 @@ public struct GlobalHotspotMapView: View {
         let isSelected = selectedPinId == pin.id
         let color = tensionColor(for: pin.tensionScore)
 
-        return VStack(spacing: 2) {
-            Image(systemName: "mappin.circle.fill")
-                .font(.system(size: Self.pinSize(for: pin) + (isSelected ? 4 : 0)))
-                .foregroundColor(color)
-                .shadow(color: color.opacity(0.6), radius: isSelected ? 4 : 2)
+        return Button {
+            selectPin(pin)
+        } label: {
+            VStack(spacing: 2) {
+                Image(systemName: "mappin.circle.fill")
+                    .font(.system(size: Self.pinSize(for: pin) + (isSelected ? 4 : 0)))
+                    .foregroundColor(color)
+                    .shadow(color: color.opacity(0.6), radius: isSelected ? 4 : 2)
 
-            // Primary text on the window background keeps its contrast on every band; the band shows in the outline.
-            Text("\(Int(pin.tensionScore))")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundColor(.primary)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-                .background(Color(NSColor.windowBackgroundColor), in: Capsule())
-                .overlay(Capsule().stroke(color, lineWidth: isHighContrast ? 2 : 1))
+                scoreTag(pin.tensionScore, color: color)
+            }
         }
+        .buttonStyle(.plain)
         .position(pt)
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             "\(pin.title), tension \(Int(pin.tensionScore)) of 100, \(pin.storyCount) stories"
         )
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction {
-            selectedPinId = pin.id
-            selectedRegionId = nil
-            onSelectPin?(pin)
-        }
-        .onTapGesture {
-            selectedPinId = pin.id
-            selectedRegionId = nil
-            onSelectPin?(pin)
-        }
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Selection Detail Drawer
