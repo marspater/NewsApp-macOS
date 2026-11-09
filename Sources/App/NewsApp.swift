@@ -454,7 +454,7 @@ struct ListViewCommands: Commands {
                 .keyboardShortcut("0", modifiers: .command)
                 .disabled(readerActions == nil)
             if let actions = readerActions {
-                Picker("Reading Style", selection: $themeManager.articleTheme) {
+                Picker("Reading Style", selection: themeManager.binding(\.articleTheme)) {
                     ForEach(ArticleThemeType.allCases) { Text($0.displayName).tag($0) }
                 }
                 Button("Reading Options…", action: actions.showReadingOptions)

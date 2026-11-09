@@ -555,31 +555,33 @@ enum EpicNE2ETests {
         print("\n--- Running Tier 2: Boundary & Corner Cases (≥30 tests) ---")
 
         // F1 Boundaries: Update Check (5 tests)
-        // 31. Clock advanced by exactly 5h 59m: check skipped
+        // The window is the privacy policy's 72 hours, not whatever the constant says: a change must change this too.
+        expectEqual(UpdateChecker.automaticCheckInterval, 72 * 3600, "The automatic check waits 72 hours (PRIVACY.md)")
+        // 31. Clock advanced to one minute before the 72-hour window ends: check skipped
         let testClock = TestClock(Date(timeIntervalSince1970: 1_000_000_000))
         let h31 = EpicNContracts.UpdateCheckerHarness(clock: { testClock.now }, currentAppVersion: "2.0.0")
         await h31.checkForUpdates(userInitiated: true, mockResponseTag: "v2.0.0")
         expectEqual(h31.lastCheckDate, testClock.now, "Initial check sets lastCheckDate")
 
-        testClock.advance(by: 5 * 3600 + 59 * 60)
+        testClock.advance(by: UpdateChecker.automaticCheckInterval - 60)
         await h31.checkForUpdates(userInitiated: false, mockResponseTag: "v2.1.0")
-        expectFalse(h31.updateAvailable, "Check at 5h 59m is skipped (throttled)")
+        expectFalse(h31.updateAvailable, "Check one minute before the window ends is skipped (throttled)")
         passedCount += 1
 
-        // 32. Clock advanced by exactly 6h 00m: check executes
-        testClock.advance(by: 60)  // exactly 6h 00m after the first check
+        // 32. Clock advanced by exactly the window: check executes
+        testClock.advance(by: 60)  // exactly 72 h after the first check
         await h31.checkForUpdates(userInitiated: false, mockResponseTag: "v2.1.0")
-        expectTrue(h31.updateAvailable, "Check at exactly 6h 00m executes")
-        expectEqual(h31.latestVersionString, "v2.1.0", "New release detected at 6h throttle expiry")
+        expectTrue(h31.updateAvailable, "Check exactly 72 h after the first executes")
+        expectEqual(h31.latestVersionString, "v2.1.0", "New release detected at the throttle expiry")
         passedCount += 1
 
-        // 33. Clock advanced by 12h: check executes
+        // 33. Clock advanced past the window by 12h: check executes
         let h33 = EpicNContracts.UpdateCheckerHarness(clock: { testClock.now }, currentAppVersion: "2.0.0")
         await h33.checkForUpdates(userInitiated: true, mockResponseTag: "v2.0.0")
-        testClock.advance(by: 12 * 3600)
+        testClock.advance(by: UpdateChecker.automaticCheckInterval + 12 * 3600)
         await h33.checkForUpdates(userInitiated: false, mockResponseTag: "v2.2.0")
-        expectTrue(h33.updateAvailable, "Check at 12h executes successfully")
-        expectEqual(h33.latestVersionString, "v2.2.0", "Release detected after 12h interval")
+        expectTrue(h33.updateAvailable, "Check 12 h past the window executes successfully")
+        expectEqual(h33.latestVersionString, "v2.2.0", "Release detected after the interval")
         passedCount += 1
 
         // 34. Remote version with invalid SemVer (leading zeros v02.0.0, missing patch 2.0): rejected

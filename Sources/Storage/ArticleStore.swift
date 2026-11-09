@@ -56,6 +56,26 @@ final class ArticleStore: ObservableObject {
     @Published var overviewRevision: UInt64 = 0
     @Published var operationError: String?
     @Published private(set) var databaseHealthNotice: String?
+    /// Set when opening the library or loading its stories failed, so "unavailable" is a fact and not the absence of one.
+    @Published private(set) var startupFailed = false
+    private var retryingStartup = false
+
+    /// What Settings › Storage says about the library database; it follows the open state as that changes.
+    enum LibraryStatus: Equatable {
+        /// The startup open has not finished.
+        case opening
+        case active
+        /// A health notice (an integrity issue, a newer schema, a failed pre-migration copy): open, never written.
+        case readOnly
+        /// The library could not be opened or its stories could not be loaded.
+        case unavailable
+    }
+
+    var libraryStatus: LibraryStatus {
+        if startupFailed { return .unavailable }
+        if databaseHealthNotice != nil { return .readOnly }
+        return isReady ? .active : .opening
+    }
     /// Bumped when AI analysis or article caches are purged so views reload fresh state (#901).
     @Published private(set) var analysisGeneration: Int = 0
     /// Bumped when an indexing pass has changed the entity index and when Clear AI Analysis has emptied it, so the chips
@@ -119,7 +139,10 @@ final class ArticleStore: ObservableObject {
             }
             let loaded = await refreshState()
             self.isReady = loaded
-            if !loaded { operationError = "Stored articles could not be loaded. Please try again." }
+            startupFailed = !loaded
+            if !loaded {
+                operationError = "Stored articles could not be loaded. Please try again."
+            }
             // Only the app's own library owns the Spotlight domain; a restore relaunches into this path (#812).
             // It runs after startup is signalled, so a large saved library never delays the first refresh.
             if loaded, database === DatabaseEngine.shared {
@@ -128,6 +151,7 @@ final class ArticleStore: ObservableObject {
         } catch {
             self.databaseHealthNotice = await database.databaseHealthNotice()
             isReady = false
+            startupFailed = true
             operationError = "Article storage could not be opened. Please try again."
             logger.error("Failed to initialize ArticleStore: \(error.localizedDescription)")
         }
@@ -153,7 +177,7 @@ final class ArticleStore: ObservableObject {
     }
 
     /// Counts under the current rules and publishes only if they did not change meanwhile.
-    private func recountUnread() async {
+    func recountUnread() async {
         let generation = newCountRequest()
         guard let counts = try? await database.counts(muting: muting), generation == countSequence else { return }
         unreadCount = counts.unread
@@ -202,6 +226,15 @@ final class ArticleStore: ObservableObject {
             if analysisClearsInProgress == 0, self.analysisGeneration != dbAnalysisGen {
                 self.analysisGeneration = dbAnalysisGen
                 entityRevision &+= 1
+            }
+            // A refresh that publishes after a failed startup means the library can be read again: startup runs once
+            // more in full (migration, readiness and the Spotlight rebuild), never just flips the flags.
+            if published, startupFailed, !retryingStartup {
+                retryingStartup = true
+                Task { [weak self] in
+                    await self?.initialize()
+                    self?.retryingStartup = false
+                }
             }
             if !published {
                 logger.error("Refresh kept being overtaken by read or save changes; trying again shortly")

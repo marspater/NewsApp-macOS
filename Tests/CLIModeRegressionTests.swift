@@ -238,7 +238,9 @@ extension NewsTests {
 
         let counts = try await db.counts()
         assertEqual(counts.total, 200, "Migrated fixture preserves all 200 articles")
-        assertEqual(counts.unread, 150, "Migrated fixture preserves unread count (150)")
+        assertEqual(
+            try await db.fetchArticles(isRead: false, limit: nil).count, 150,
+            "Migrated fixture preserves unread reports (150)")
         assertEqual(counts.saved, 20, "Migrated fixture preserves saved count (20)")
 
         let fetched = try await db.fetchArticles(limit: 500)
