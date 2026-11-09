@@ -555,6 +555,8 @@ enum EpicNE2ETests {
         print("\n--- Running Tier 2: Boundary & Corner Cases (≥30 tests) ---")
 
         // F1 Boundaries: Update Check (5 tests)
+        // The window is the privacy policy's 72 hours, not whatever the constant says: a change must change this too.
+        expectEqual(UpdateChecker.automaticCheckInterval, 72 * 3600, "The automatic check waits 72 hours (PRIVACY.md)")
         // 31. Clock advanced to one minute before the 72-hour window ends: check skipped
         let testClock = TestClock(Date(timeIntervalSince1970: 1_000_000_000))
         let h31 = EpicNContracts.UpdateCheckerHarness(clock: { testClock.now }, currentAppVersion: "2.0.0")
