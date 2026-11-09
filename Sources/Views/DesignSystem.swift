@@ -245,6 +245,10 @@ enum AppLayout {
     static let unreadDotSize: CGFloat = 6.0
     /// Sidebar and reader popovers.
     static let popoverWidth: CGFloat = 280.0
+    /// The entity dossier popover (W2 #716): its width, the tallest it grows before it scrolls, and the 30-day chart.
+    static let entityDossierWidth: CGFloat = 360
+    static let entityDossierMaxHeight: CGFloat = 520
+    static let entityChartHeight: CGFloat = 96
     static let keyboardShortcutsPopoverWidth: CGFloat = 380
     static let searchSuggestionIconWidth: CGFloat = 16
     static let publisherMonogramSize: CGFloat = 32

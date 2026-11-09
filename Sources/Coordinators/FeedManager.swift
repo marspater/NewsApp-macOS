@@ -76,6 +76,9 @@ class FeedManager: NSObject, ObservableObject {
         [UUID: (scheduledRunID: UUID, continuation: CheckedContinuation<Void, Never>)] = [:]
     private var enrichmentTask: Task<Void, Never>?
     private var overviewWarmupTask: Task<Void, Never>?
+    /// The entity index and co-reporting graph (W2 #716), read in the background after clustering; one pass at a time.
+    private var entityIndexTask: Task<Void, Never>?
+    private var entityIndexRunID: UUID?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
     private var imageLookupTask: Task<Void, Never>?
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
@@ -84,6 +87,8 @@ class FeedManager: NSObject, ObservableObject {
     private var needsClusteringPass = false
     private var backgroundTimer: Timer?
     private var backgroundActivity: NSBackgroundActivityScheduler?
+    /// Rebuilds the entity graph and its centrality in the system's maintenance windows (W2 #716).
+    private var entityMaintenance: NSBackgroundActivityScheduler?
     private var powerObservers: [AnyCancellable] = []
     private var wakeTask: Task<Void, Never>?
     private var refreshInterruptedBySleep = false
@@ -417,6 +422,34 @@ class FeedManager: NSObject, ObservableObject {
             }
         }
         self.backgroundActivity = activity
+        startEntityMaintenance()
+    }
+
+    /// The entity graph's weights follow the calendar, so the system's maintenance windows rebuild it even when no feed
+    /// brought news; global centrality is computed here and never when a dossier opens (#716).
+    private func startEntityMaintenance() {
+        entityMaintenance?.invalidate()
+        let activity = NSBackgroundActivityScheduler(identifier: "com.marspater.news.entity-maintenance")
+        activity.repeats = true
+        activity.interval = 6 * 3600
+        activity.tolerance = 3600
+        activity.qualityOfService = .utility
+        activity.schedule { [weak self] completion in
+            Task { @MainActor in
+                guard let self, !self.isStopped else {
+                    completion(.finished)
+                    return
+                }
+                if self.entityMaintenance?.shouldDefer == true {
+                    completion(.deferred)
+                    return
+                }
+                self.indexEntitiesInBackground(refreshGraph: true)
+                await self.entityIndexTask?.value
+                completion(.finished)
+            }
+        }
+        entityMaintenance = activity
     }
 
     private func scheduleForegroundTimer() {
@@ -509,6 +542,11 @@ class FeedManager: NSObject, ObservableObject {
         backgroundTimer = nil
         backgroundActivity?.invalidate()
         backgroundActivity = nil
+        entityMaintenance?.invalidate()
+        entityMaintenance = nil
+        entityIndexTask?.cancel()
+        entityIndexTask = nil
+        entityIndexRunID = nil
         wakeTask?.cancel()
         wakeTask = nil
         cancelRefresh()
@@ -538,6 +576,9 @@ class FeedManager: NSObject, ObservableObject {
         clusteringTask?.cancel()
         clusteringTask = nil
         clusteringRunID = nil
+        entityIndexTask?.cancel()
+        entityIndexTask = nil
+        entityIndexRunID = nil
         await enrichmentQueue.analysisCleared()
         await OverviewGenerationCoordinator.shared.analysisCleared()
         await WorldTensionService.shared.analysisCleared()
@@ -986,6 +1027,36 @@ class FeedManager: NSObject, ObservableObject {
                 }
             }
             self.lookUpStoryImages()
+            self.indexEntitiesInBackground()
+        }
+    }
+
+    // MARK: - Entity Index
+
+    /// Reads the entities of stories the index has not seen and keeps the co-reporting graph current. Off the main
+    /// actor at utility priority and never part of a refresh; a pass already running covers the request. Intelligence
+    /// off, Low Power Mode and thermal pressure leave the backlog for a later pass (#716).
+    func indexEntitiesInBackground(refreshGraph: Bool = false) {
+        guard !isStopped, entityIndexTask == nil, appSettings.aiEnabled, allowsBackgroundWork() else { return }
+        let database = articleStore.database
+        let runID = UUID()
+        entityIndexRunID = runID
+        entityIndexTask = Task { [weak self] in
+            let work = Task.detached(priority: .utility) {
+                try await EntityIndexer.shared.run(in: database, refreshGraph: refreshGraph)
+            }
+            let result = await withTaskCancellationHandler {
+                await work.result
+            } onCancel: {
+                work.cancel()
+            }
+            // A pass that was cancelled or replaced since leaves its successor's state alone.
+            guard let self, self.entityIndexRunID == runID else { return }
+            self.entityIndexTask = nil
+            self.entityIndexRunID = nil
+            if case .failure(let error) = result, !(error is CancellationError) {
+                self.logger.error("Entity indexing failed: \(error.localizedDescription)")
+            }
         }
     }
 
