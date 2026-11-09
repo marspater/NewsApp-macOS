@@ -174,7 +174,7 @@ final class ArticleStore: ObservableObject {
     }
 
     /// Counts under the current rules and publishes only if they did not change meanwhile.
-    private func recountUnread() async {
+    func recountUnread() async {
         let generation = newCountRequest()
         guard let counts = try? await database.counts(muting: muting), generation == countSequence else { return }
         unreadCount = counts.unread

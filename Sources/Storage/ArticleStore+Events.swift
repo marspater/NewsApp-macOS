@@ -20,6 +20,8 @@ extension ArticleStore {
 
     func noteEventsChanged() {
         eventRevision &+= 1
+        // Grouping decides how many cards Unread holds, so the badge follows it.
+        Task { await recountUnread() }
     }
 
     func eventFeedSummaries(for articleIDs: [String]) async throws -> [EventFeedSummary] {
@@ -77,7 +79,7 @@ extension ArticleStore {
     func separateArticle(_ articleID: String, fromEvent eventID: String) async -> Bool {
         do {
             try await database.separateArticle(articleID, fromEvent: eventID)
-            eventRevision &+= 1
+            noteEventsChanged()
             return true
         } catch {
             operationError = "This article could not be separated from the event. Please try again."
@@ -92,7 +94,7 @@ extension ArticleStore {
         do {
             // The reader made this change: the database marks it seen, so it is no new reporting to flag as "Updated".
             try await database.includeEvent(relatedEventID, inEvent: eventID)
-            eventRevision &+= 1
+            noteEventsChanged()
             return true
         } catch {
             operationError = "These events could not be combined. Please try again."
