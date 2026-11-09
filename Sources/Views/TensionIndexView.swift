@@ -54,6 +54,7 @@ struct TensionIndexView: View {
     @State private var selectedPin: HotspotClusterPin?
     @State private var headlinesExpanded = false
     @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.effectiveReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
@@ -338,6 +339,7 @@ struct TensionIndexView: View {
                     clusterPins: hotspots.pins,
                     levelColor: Self.hotspotColor,
                     contrast: contrast,
+                    reduceMotion: reduceMotion,
                     labelColor: AppColor.primaryText,
                     labelBackground: AppColor.background,
                     onSelectRegion: { region in

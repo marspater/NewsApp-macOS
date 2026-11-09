@@ -24,6 +24,9 @@ public struct GlobalHotspotMapView: View {
     /// see either, so the host passes them in.
     public let levelColor: (HotspotTensionLevel) -> Color
     public let contrast: ColorSchemeContrast
+    /// The in-app Reduce Motion setting, which the system environment cannot see; the pulse also stops in an
+    /// inactive window.
+    public let reduceMotion: Bool
     /// Score-tag text and fill; the host passes its design-system tokens.
     public let labelColor: Color
     public let labelBackground: Color
@@ -38,6 +41,7 @@ public struct GlobalHotspotMapView: View {
         clusterPins: [HotspotClusterPin],
         levelColor: @escaping (HotspotTensionLevel) -> Color,
         contrast: ColorSchemeContrast = .standard,
+        reduceMotion: Bool = false,
         labelColor: Color = .primary,
         labelBackground: Color = Color(NSColor.windowBackgroundColor),
         onSelectRegion: ((HotspotRegion?) -> Void)? = nil,
@@ -47,6 +51,7 @@ public struct GlobalHotspotMapView: View {
         self.clusterPins = clusterPins
         self.levelColor = levelColor
         self.contrast = contrast
+        self.reduceMotion = reduceMotion
         self.labelColor = labelColor
         self.labelBackground = labelBackground
         self.onSelectRegion = onSelectRegion
@@ -54,6 +59,16 @@ public struct GlobalHotspotMapView: View {
     }
 
     private var isHighContrast: Bool { contrast == .increased }
+    @Environment(\.controlActiveState) private var controlActiveState
+    private var pulses: Bool { !reduceMotion && controlActiveState != .inactive }
+
+    static let pulsePeriod: TimeInterval = 2.0
+
+    /// Where a pin's pulse is in its cycle, 0 ..< 1.
+    static func pulsePhase(at time: TimeInterval) -> Double {
+        let phase = (time / pulsePeriod).truncatingRemainder(dividingBy: 1.0)
+        return phase < 0 ? phase + 1.0 : phase
+    }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -292,6 +307,19 @@ public struct GlobalHotspotMapView: View {
 
     // MARK: - Cluster Pins
 
+    /// An expanding ring behind a pin, sized from the pin; static (invisible) with Reduce Motion or an inactive window.
+    private func pulseRing(color: Color, diameter: CGFloat) -> some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0, paused: !pulses)) { timeline in
+            let phase = pulses ? Self.pulsePhase(at: timeline.date.timeIntervalSinceReferenceDate) : 0
+            Circle()
+                .stroke(color.opacity(pulses ? 0.6 * (1 - phase) : 0), lineWidth: 2)
+                .frame(width: diameter, height: diameter)
+                .scaleEffect(1 + phase)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
     private func clusterPinView(pin: HotspotClusterPin, canvasSize: CGSize) -> some View {
         let pt = projectionService.projectEquirectangular(
             coordinate: pin.coordinate,
@@ -308,6 +336,7 @@ public struct GlobalHotspotMapView: View {
                     .font(.system(size: Self.pinSize(for: pin) + (isSelected ? 4 : 0)))
                     .foregroundColor(color)
                     .shadow(color: color.opacity(0.6), radius: isSelected ? 4 : 2)
+                    .background { pulseRing(color: color, diameter: Self.pinSize(for: pin)) }
 
                 scoreTag(pin.tensionScore, color: color)
             }

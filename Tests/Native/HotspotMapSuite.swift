@@ -138,6 +138,14 @@ extension NativeSuites {
             #expect(WorldTensionHotspots(reading: quiet).isEmpty)
         }
 
+        @Test func pulsePhaseStaysInOneCycle() {
+            for time in [0.0, 0.5, 1.99, 2.0, 123_456.789, -0.5] {
+                let phase = GlobalHotspotMapView.pulsePhase(at: time)
+                #expect(phase >= 0.0 && phase < 1.0)
+            }
+            #expect(GlobalHotspotMapView.pulsePhase(at: 1.0) == 0.5)
+        }
+
         @Test func hotspotRegionTensionClassification() {
             let critical = HotspotTensionLevel.level(for: 85.0)
             #expect(critical == .critical)
