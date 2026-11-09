@@ -2074,6 +2074,12 @@ struct ArticleDetailView: View {
                 return false
             }
             guard !Task.isCancelled else { return false }
+            // The open story: an unchanged id would not restart the content and overview tasks after a reset, and
+            // would leave the reader loading. From the overview it opens that story's own view.
+            guard article.id != activeArticle.id else {
+                if experienceMode == .eventOverview { experienceMode = .sourcePublication }
+                return true
+            }
             resetReaderState()
             currentOverview = nil
             eventMemberArticles = []
