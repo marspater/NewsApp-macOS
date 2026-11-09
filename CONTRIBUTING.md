@@ -53,7 +53,6 @@ NEWS_READING_FULL_APP=1 ./script/native_performance_baseline.sh # Live: sandboxe
 ./script/test_voiceover_live_qa.sh --smoke     # Parked (#268): isolated production views and offline image/render evidence
 ./script/test_voiceover_live_qa.sh --live      # Parked (#268): rendered AX tree, actions/persistence and production update notifications
 ./script/test_voiceover_live_qa.sh --manual    # Parked (#268): interactive isolated fixture for spoken VoiceOver/rotor traversal
-./script/test_notification_live.sh DIR # Opt-in real OS notifications with synthetic reports, temporary settings and in-memory SQLite; existing News authorization required
 ./script/test_native_ui_qa.sh        # Automated Native UI QA checks with system settings overrides (#155, #123)
 ./script/appearance_matrix.sh [DIR]  # Window captures of list, grid, reader and overview in light, dark and Increase Contrast; needs Screen Recording
 NEWS_NATIVE_HARNESS=Tests/Harness/OverviewCaptures.swift script/native_performance_baseline.sh DIR # Story Overview with every Epic T section rendered offscreen (no window, no Screen Recording) at 900 and 1,400 pt, text size 1.0 and 1.3, light, dark and Increase Contrast, each also in gray

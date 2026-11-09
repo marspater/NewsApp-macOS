@@ -58,7 +58,7 @@ extension NewsTests {
             ("testSpotlightSavedStoriesIndexing", { try await testSpotlightSavedStoriesIndexing() }),
             ("testMenuBarExtraSettingsAndUnreadCount", { await testMenuBarExtraSettingsAndUnreadCount() }),
             ("testOnboardingAndPermissionTiming", { await testOnboardingAndPermissionTiming() }),
-            ("testStoryBannerRoute", { try await testStoryBannerRoute() }),
+            ("testBannerGate", { try await testBannerGate() }),
             ("testFeedArticleWrapContextNavigation", { await testFeedArticleWrapContextNavigation() }),
             ("testCardImagePrefetchFirstPaint", { await testCardImagePrefetchFirstPaint() }),
             ("testStoryQuickLookPreview", { await testStoryQuickLookPreview() }),
@@ -2771,123 +2771,50 @@ extension NewsTests {
         quietManager.stopBackgroundWork()
     }
 
-    /// #926: macOS asks `willPresent` only while News is active, so a story posted while News is behind another app
-    /// is offered to the app's banner at post time. Exactly one banner either way: drawn means not added.
-    static func testStoryBannerRoute() async throws {
-        print("  - Testing the story banner route: app banner behind another app, never both (#926)...")
-        assertTrue(
-            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .always),
-            "Banners with previews are the app's")
-        assertTrue(
-            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .whenAuthenticated),
-            "Previews when unlocked still allow the app banner")
-        assertFalse(
-            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .alert, previews: .always),
-            "The Alerts style stays with the system")
-        assertFalse(
-            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .none, previews: .always),
-            "Alert style None draws nothing from the app")
-        assertFalse(
-            StoryBannerRoute.allowsAppBanner(alert: .disabled, style: .banner, previews: .always),
-            "Banners off draw nothing from the app")
-        assertFalse(
-            StoryBannerRoute.allowsAppBanner(alert: .enabled, style: .banner, previews: .never),
-            "Hidden previews stay with the system, which redacts them")
+    /// #926: the app draws every banner, so System Settings and Focus decide only whether and how: nothing for denied
+    /// permission, alerts off, style None or a Focus; redacted for hidden previews; persistent for the Alerts style.
+    static func testBannerGate() async throws {
+        print("  - Testing the banner gate: System Settings and Focus decide, the app draws (#926)...")
+        func decide(
+            _ authorization: UNAuthorizationStatus = .authorized, alert: UNNotificationSetting = .enabled,
+            style: UNAlertStyle = .banner, previews: UNShowPreviewsSetting = .always, focused: Bool? = false
+        ) -> BannerGate {
+            BannerGate.decide(
+                authorization: authorization, alert: alert, style: style, previews: previews, focused: focused)
+        }
+        assertEqual(decide(), .show(redacted: false, persistent: false), "Banners with previews show as they are")
+        assertEqual(
+            decide(previews: .whenAuthenticated), .show(redacted: false, persistent: false),
+            "Previews when unlocked show the story")
+        assertEqual(
+            decide(previews: .never), .show(redacted: true, persistent: false),
+            "Hidden previews redact the banner, which the app still draws")
+        assertEqual(
+            decide(style: .alert), .show(redacted: false, persistent: true), "The Alerts style stays until closed")
+        assertEqual(decide(.provisional), .show(redacted: false, persistent: false), "Provisional permission shows")
+        assertEqual(decide(.denied), .suppress(.notAuthorized), "Denied permission draws nothing")
+        assertEqual(decide(.notDetermined), .suppress(.notAuthorized), "Permission not asked yet draws nothing")
+        assertEqual(decide(alert: .disabled), .suppress(.alertsOff), "Alerts off draw nothing")
+        assertEqual(decide(style: .none), .suppress(.styleNone), "Alert style None draws nothing")
+        assertEqual(decide(focused: true), .suppress(.focus), "A Focus keeps the banner away")
+        assertEqual(
+            decide(focused: nil), .show(redacted: false, persistent: false),
+            "An unknown Focus (status not shared) counts as none")
+        assertEqual(decide(.denied, focused: true), .suppress(.notAuthorized), "Permission is checked before Focus")
 
-        func request(story: Bool) -> UNNotificationRequest {
-            let content = UNMutableNotificationContent()
-            content.title = "Publisher"
-            content.subtitle = "Headline"
-            if story { content.categoryIdentifier = NotificationActionIdentifier.category }
-            return UNNotificationRequest(identifier: "news-route", content: content, trigger: nil)
-        }
-        final class Calls: @unchecked Sendable {
-            var presented = 0
-            var added = 0
-            var settingsRead = 0
-        }
-        func route(
-            story: Bool = true, active: Bool, drawn: Bool = true,
-            settings: (UNNotificationSetting, UNAlertStyle, UNShowPreviewsSetting) = (.enabled, .banner, .always)
-        ) async throws -> (StoryBannerRoute, Calls) {
-            let calls = Calls()
-            let result = try await StoryBannerRoute.deliver(
-                request(story: story), active: active,
-                settings: {
-                    calls.settingsRead += 1
-                    return settings
-                },
-                present: { _ in
-                    calls.presented += 1
-                    return drawn
-                },
-                add: { _ in calls.added += 1 })
-            return (result, calls)
-        }
-
-        // Behind another app with a window on screen: the app draws it and nothing is added (log of 3 November).
-        var (result, calls) = try await route(active: false)
-        assertEqual(result, .appBanner, "Inactive story banners are drawn by the app")
-        assertEqual(calls.presented, 1, "The presenter is asked once")
-        assertEqual(calls.added, 0, "A drawn banner is not also added: never both banners")
-        // No window on screen (hidden, in the Dock): the presenter declines and the system banner shows.
-        (result, calls) = try await route(active: false, drawn: false)
-        assertEqual(result, .notificationCenter, "A declined banner goes to the system")
-        assertEqual(calls.added, 1, "A declined banner is added exactly once")
-        // Active: the post adds it and `willPresent` draws it, as before.
-        (result, calls) = try await route(active: true)
-        assertEqual(result, .notificationCenter, "Active posts are added for willPresent")
-        assertEqual(calls.presented + calls.settingsRead, 0, "An active post neither presents nor reads settings")
-        assertEqual(calls.added, 1, "An active post is added once")
-        // Grouped and summary banners always stay with the system.
-        (result, calls) = try await route(story: false, active: false)
-        assertEqual(result, .notificationCenter, "Grouped banners stay with the system")
-        assertEqual(calls.presented, 0, "A grouped banner is never offered to the app")
-        // Alerts style or hidden previews: the system draws it, the app does not.
-        for settings: (UNNotificationSetting, UNAlertStyle, UNShowPreviewsSetting) in [
-            (.enabled, .alert, .always), (.enabled, .banner, .never), (.disabled, .banner, .always),
-        ] {
-            (result, calls) = try await route(active: false, settings: settings)
-            assertEqual(result, .notificationCenter, "Settings the app does not draw under go to the system")
-            assertEqual(calls.presented, 0, "The presenter is not asked under those settings")
-            assertEqual(calls.added, 1, "Those posts are added once")
-        }
-        // A refused add still throws to the caller, which logs it and does not record the banner.
-        struct Refused: Error {}
-        var threw = false
-        do {
-            _ = try await StoryBannerRoute.deliver(
-                request(story: true), active: true, settings: { (.enabled, .banner, .always) },
-                present: { _ in true }, add: { _ in throw Refused() })
-        } catch is Refused {
-            threw = true
-        }
-        assertTrue(threw, "A refused add surfaces as a failed post")
-        // Without an app (tests, helpers) no presenter is installed, so nothing is drawn.
-        assertTrue(await MainActor.run { NotificationService.presentAppBanner == nil }, "No presenter outside the app")
-        // The hop to the main actor re-checks activity: a post made as News became active is added, not drawn.
-        guard let banner = StoryBanner(request(story: true)) else {
-            return assertTrue(false, "A story request makes a banner")
-        }
-        let offered = await MainActor.run {
-            var received: (StoryBanner, Bool)?
-            let presenter: (StoryBanner, Bool) -> Bool = { banner, sounds in
-                received = (banner, sounds)
-                return true
-            }
-            let drawn = StoryBannerRoute.offer(banner, sounds: true, active: false, presenter: presenter)
-            let declined = StoryBannerRoute.offer(banner, sounds: true, active: true, presenter: presenter)
-            let absent = StoryBannerRoute.offer(banner, sounds: true, active: false, presenter: nil)
-            return (drawn, declined, absent, received)
-        }
-        assertTrue(offered.0, "Inactive: the presenter draws the copied banner")
-        assertEqual(offered.3?.0, banner, "The presenter receives the banner copied out of the request")
-        assertEqual(offered.3?.1, true, "The presenter is told the banner asks for a sound")
-        assertFalse(offered.1, "Became active meanwhile: declined, so the add files it for willPresent")
-        assertFalse(offered.2, "No presenter installed: nothing is drawn")
-        // The request form copies the banner out and hops to the main actor; without a presenter it declines.
-        assertFalse(await StoryBannerRoute.offer(request(story: true)), "No presenter: a story request is declined")
-        assertFalse(await StoryBannerRoute.offer(request(story: false)), "A grouped request makes no banner")
+        // A story banner redacts to the private copy: no headline, summary, photo or actions, but a click still opens.
+        let story = StoryBanner(
+            id: "news-1", title: "Publisher", headline: "Headline", body: "Summary", articleID: "1",
+            articleLink: "https://example.com/1", imageURLs: [URL(string: "https://example.com/1.jpg")!],
+            thread: "t", sound: true, actions: true)
+        let redacted = story.redacted
+        assertTrue(
+            redacted.headline.isEmpty && redacted.imageURLs.isEmpty && !redacted.actions
+                && !redacted.body.contains("Summary") && redacted.title == "News Update",
+            "A redacted banner carries nothing of the story")
+        assertEqual(redacted.userInfo, story.userInfo, "A redacted banner still opens its story")
+        assertTrue(redacted.sound, "A redacted banner keeps its sound")
+        assertTrue(StoryBanner(id: "g", title: "Group").userInfo.isEmpty, "A summary banner names no story")
     }
 
     static func testFeedArticleWrapContextNavigation() async {

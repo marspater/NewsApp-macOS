@@ -83,8 +83,8 @@ fresh holdout, as the audits describe.
 
 - Automated, part of `./test.sh`: `testNotificationDedupeAcrossRefreshes` and the "notification deduplication beyond the
   snapshot" test in `Tests/LifecycleTests.swift`, plus `Tests/NotificationAttachmentTests.swift`.
-- Optional, needs a user-authorized News: `./script/test_notification_live.sh DIR` for real OS notifications with
-  synthetic reports. Manual: after a refresh on the installed build, no story banner repeats.
+- Manual, on the installed build: after a refresh no story banner repeats, and one banner shows in each window state
+  (active, behind another app, hidden, minimized, no window open). Help › Show Sample Notification shows one.
 
 ## 5. Reader and Briefing E2E
 

@@ -510,7 +510,7 @@ struct KeyboardShortcutsCommands: Commands {
                 openWindow(id: Self.windowID)
             }
             Button("Show Sample Notification") {
-                // A random story with a photo, posted through the real path: in front, the app draws its banner.
+                // A random story with a photo, through the real path: the app draws its banner.
                 guard let story = NotificationService.sampleStory(from: ArticleStore.shared.articles) else { return }
                 Task {
                     await NotificationService.shared.postSample(story) {
@@ -589,27 +589,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         CacheManager.shared.configureOfflineCache()
         NotificationActionIdentifier.registerCategories()
         UNUserNotificationCenter.current().delegate = self
-        // Behind another app macOS never asks `willPresent`; the post itself offers a story banner to the app (#926).
-        NotificationService.presentAppBanner = { banner, sounds in
-            guard StoryBannerPresenter.shared.present(banner) else { return false }
-            // Nothing is added, so the system plays no sound. A requested sound is not permission to play one:
-            // honor the reader's current notification sound setting before using the reader's alert sound.
-            if sounds {
-                Task { @MainActor in
-                    let settings = await UNUserNotificationCenter.current().notificationSettings()
-                    guard settings.soundSetting == .enabled else { return }
-                    NSSound.beep()
-                }
-            }
-            return true
-        }
         // Permission is asked once stories have arrived, not at launch (#562).
         notificationPermission = NotificationPermissionRequest(
             feedManager: AppContainer.shared.feedManager, settings: AppSettings.shared
         ) {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
-                // Delivery checks the authorization when it posts; the answer itself needs no handling here.
+                // The banner reads the settings when it is drawn; the answer itself needs no handling here.
             }
+            // The only way to honour Focus; the banner reads the answer when it is drawn.
+            FocusStatus.requestAuthorization()
         }
 
         #if !DEBUG
@@ -654,37 +642,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         // Asynchronous checkpoint and optimize completes in applicationShouldTerminate.
     }
 
-    // While a News window is open on screen, active or not, a story banner is the app's own (DESIGN.md 8.7); every other
-    // banner, and every banner while News is hidden or only in the Dock, is the system's. macOS asks this delegate only
-    // while News is active: the story is then filed in Notification Center without the system banner. Behind another
-    // app the post decides instead (`StoryBannerRoute.deliver`, #926), never both.
-    nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        let log = StoryBannerPresenter.log
-        let request = notification.request
-        log.notice(
-            "willPresent \(request.identifier, privacy: .private(mask: .hash)) category=\(request.content.categoryIdentifier, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
-        )
-        // A reader who set News's alert style to None gets no banner from the app either.
-        guard let banner = StoryBanner(request) else { return [.banner, .list, .sound] }
-        let settings = await center.notificationSettings()
-        log.notice(
-            "settings alert=\(settings.alertSetting.rawValue, privacy: .public) style=\(settings.alertStyle.rawValue, privacy: .public) previews=\(settings.showPreviewsSetting.rawValue, privacy: .public)"
-        )
-        // Only the banner style is the app's: Alerts stay until dismissed and hidden previews redact, both as the system
-        // draws them. Focus has no public signal here, so a story arriving during Focus can still show this banner.
-        guard
-            StoryBannerRoute.allowsAppBanner(
-                alert: settings.alertSetting, style: settings.alertStyle, previews: settings.showPreviewsSetting)
-        else { return [.banner, .list, .sound] }
-        let drawn = await StoryBannerPresenter.shared.present(banner)
-        log.notice(
-            "willPresent \(request.identifier, privacy: .private(mask: .hash)) drawn by app=\(drawn, privacy: .public)")
-        return drawn ? [.list, .sound] : [.banner, .list, .sound]
-    }
-
-    // Handle notification actions and default click (#560)
+    // A click or action on a notification an earlier build left in Notification Center (#560); News adds none now.
     nonisolated func userNotificationCenter(
         _ _: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void

@@ -4,6 +4,32 @@ These rules decide which new stories become banners in **Full** notification mod
 and are the contract the tests check. Minimal and Privacy modes are unchanged: one summary banner per delivery pass,
 not counted by any lane.
 
+## Delivery path
+
+The app draws every banner itself, in a floating panel (DESIGN.md 8.7), in every window state while News is running:
+active, behind another app, hidden, minimized and with no window open. `UNUserNotificationCenter` is used only to ask
+for permission and to read the reader's settings (`notificationSettings()`); News never calls `add`, so a story never
+shows twice, and nothing is filed in Notification Center. Before each banner `BannerGate` reads:
+
+- permission: not allowed, or not asked yet → no banner;
+- alerts off, or the alert style None → no banner;
+- Focus (`INFocusStatusCenter`) on → no banner; Focus unknown (the reader has not allowed Focus status, or shares none)
+  counts as off;
+- Show Previews Never → the banner is drawn as Private: "News Update", no publisher, headline, summary, photo or
+  actions; a click still opens the story;
+- the Alerts style → the banner stays until closed; the Banners style leaves after 6 s.
+
+A banner the gate holds back is **not recorded**: it counts toward no limit and announces no event, since the reader did
+not see it, and the pass goes on to its next banner. A banner that cannot be drawn (no screen) is not recorded either.
+A banner with sound plays the reader's alert sound when System Settings allows sound for News.
+
+Saving, marking as read and opening are buttons on the banner (on hover; always for the Alerts style), a swipe closes
+it by touch, and a click opens the story, creating the main window when none is on screen. Notifications an earlier
+build left in Notification Center still act on a click.
+
+Known limit: banners post at least five minutes apart and one shows at a time, so an Alerts-style banner that the reader
+has not closed is replaced by the next one, where the system would have stacked them.
+
 ## Separation of concerns
 
 - Ingestion stores every fetched story. Clustering groups stories into events. Delivery only reads.
@@ -208,8 +234,8 @@ pass had not yet posted are dropped. A banner whose post fails is not recorded a
 
 ## What other features read
 
-- **Story actions** (#560): a story's own banner carries the `ARTICLE_ACTIONS` category (Save, Mark as Read, Open).
-  Grouped banners stand for several stories and carry none; clicking one opens the app.
+- **Story actions** (#560): a story's own banner carries Save, Mark as Read and Open. Grouped, Minimal and Private
+  banners stand for several stories or none and carry none; clicking one brings the app's window forward.
 - **Notified stories** (#584): `FeedManager.notifiedStoryIDs` holds every story a posted banner covered since launch:
   an individual banner's story, a grouped starred banner's pending stories and a grouped priority banner's stories.
   It is in memory only and resets at launch. Minimal and Privacy modes add nothing to it.
@@ -241,8 +267,10 @@ delivered in the last hour.
 News does not ask for notification permission at launch (#562). `NotificationPermissionRequest` asks once per launch,
 when a refresh has completed and the library holds stories, the first-launch sheet has closed and notifications are
 on. Whichever comes last triggers it: a later refresh that brings the first stories, the sheet closing, or turning
-notifications on. Notification categories and the delegate are still set up at launch, so
-banner actions keep working. macOS shows the prompt only once; later requests return the saved answer.
+notifications on. The same request asks for Focus status (`INFocusStatusCenter.requestAuthorization`, one more
+macOS prompt); without it Focus is unknown and banners show during a Focus. macOS shows each prompt only once; later
+requests return the saved answer. The notification delegate and categories are still set up at launch, so a
+notification an earlier build left in Notification Center keeps its actions.
 
 ## Relaunch
 
@@ -269,12 +297,12 @@ section 17, and the PR carries the DESIGN.md checklist.
 
 ## Test banner
 
-Help › Show Sample Notification and Settings › Notifications › Send Test Notification post one random story, with a
-photo when it has one, through `NotificationService.postSample`: the real path (image attachment, category, the Full-mode gate before
-the download and the post), outside triage, its limits and the delivery log, under the identifier `news-sample`. The
-Settings button then shows one status line from `sampleStatus`: the Full-mode gate, macOS's refusal with its domain
-and code, or the reader's authorization, alert and preview settings (#926). The line springs in, takes the accent and
-clears itself after 30 seconds. Export Diagnostics is in Settings › Storage, at the bottom.
+Help › Show Sample Notification and Settings › Notifications › Send Test Notification show one random story, with a
+photo when it has one, through `NotificationService.postSample`: the real path (the gate, the Full-mode check before the
+banner), outside triage, its limits and the delivery log, under the identifier `news-sample`. The Settings button then
+shows one status line from `sampleStatus`: the Full-mode gate, why the settings or a Focus held it back, or how the
+reader's alert style and previews shaped it (#926). The line springs in, takes the accent and clears itself after 30
+seconds. Export Diagnostics is in Settings › Storage, at the bottom.
 
 ## What this supersedes
 
