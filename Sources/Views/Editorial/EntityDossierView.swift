@@ -47,7 +47,10 @@ struct EntityDossierPopover: View {
         .frame(width: AppLayout.entityDossierWidth)
         .task(id: current.id) {
             isLoading = true
-            dossier = await source.dossier(current.id)
+            let result = await source.dossier(current.id)
+            // A lookup cancelled by a newer one (follow, then Back) must not replace the dossier on screen.
+            guard !Task.isCancelled else { return }
+            dossier = result
             isLoading = false
         }
     }
