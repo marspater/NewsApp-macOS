@@ -93,4 +93,28 @@ final class AppContainer: ObservableObject {
             return [(url, FeedFetcher.webArticles(FeedXMLParser(data: data, feedURL: url).parse()), nil, nil)]
         }
     }
+
+    /// With `NEWS_FIXTURE_FEED` set, the development build serves reader images from memory instead of the network:
+    /// a URL whose path contains `stall` never finishes (the "still loading" state), any other is a solid image. UI
+    /// tests read stories in both states (#466). Any other bundle, or no variable, loads through the protected path.
+    nonisolated static func fixtureImageLoader(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        bundleIdentifier: String? = Bundle.main.bundleIdentifier
+    ) -> (@Sendable (URL, Int) async throws -> CGImage)? {
+        guard LogWindowModel.isAvailable(bundleIdentifier: bundleIdentifier), environment["NEWS_FIXTURE_FEED"] != nil
+        else { return nil }
+        return { url, _ in
+            if url.path.contains("stall") {
+                try await Task.sleep(for: .seconds(3600))
+                throw URLError(.timedOut)
+            }
+            guard
+                let context = CGContext(
+                    data: nil, width: 120, height: 80, bitsPerComponent: 8, bytesPerRow: 0,
+                    space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+                let image = context.makeImage()
+            else { throw URLError(.cannotDecodeContentData) }
+            return image
+        }
+    }
 }
