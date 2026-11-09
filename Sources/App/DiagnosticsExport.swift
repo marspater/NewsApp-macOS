@@ -452,7 +452,7 @@ enum DiagnosticsExport {
     }
 
     /// Notifications: the system settings, the delivery tables of the last 24 hours and the routes this launch's log
-    /// recorded (app banner, Notification Center, refusals with domain and code).
+    /// recorded (app banner, banners the settings or a Focus held back, failures with domain and code).
     static func notifications(
         _ database: DatabaseEngine, settings: [String], log: [LogLine], now: Date
     ) async throws -> String {

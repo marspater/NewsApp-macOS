@@ -800,9 +800,13 @@ extension NewsTests {
             assertTrue(plist is [String: Any], "Distribution manifest must be a valid property list: \(file)")
         }
 
-        assertEqual(
-            Int64(NotificationService.attachmentLimit), SecureHTTPClient.defaultImageLimit,
-            "The notification attachment ceiling equals the image fetch limit")
+        let infoPlist = fileManager.contents(atPath: (currentDir as NSString).appendingPathComponent("Info.plist"))
+            .flatMap {
+                try? PropertyListSerialization.propertyList(from: $0, options: [], format: nil) as? [String: Any]
+            }
+        assertTrue(
+            (infoPlist?["NSFocusStatusUsageDescription"] as? String)?.isEmpty == false,
+            "Info.plist explains the Focus status request, or macOS aborts the app when it asks")
 
         guard let data = fileManager.contents(atPath: entitlementsPath) else {
             assertEqual(true, false, "Failed to read News.entitlements data")
@@ -2292,20 +2296,18 @@ extension NewsTests {
 
         // 5. Banners arrive one at a time, a pause apart, threaded per story (#587): two new reports of one event are
         // one banner; three events are three spaced banners with their own threads. A breaking story is an active
-        // alert with sound; a lesser one is passive and silent.
+        // banner with sound; a lesser one is silent.
         struct Posted: Sendable {
             let at = ContinuousClock.now
             let thread: String
-            let active: Bool
             let sound: Bool
             let body: String
-            let category: String
-            init(_ request: UNNotificationRequest) {
-                thread = request.content.threadIdentifier
-                active = request.content.interruptionLevel == .active
-                sound = request.content.sound != nil
-                body = request.content.body
-                category = request.content.categoryIdentifier
+            let actions: Bool
+            init(_ banner: StoryBanner) {
+                thread = banner.thread
+                sound = banner.sound
+                body = banner.body
+                actions = banner.actions
             }
         }
         actor Recorder {
@@ -2334,32 +2336,29 @@ extension NewsTests {
         assertTrue(
             zip(posted, posted.dropFirst()).allSatisfy { $1.at - $0.at >= .milliseconds(60) },
             "Banners of one refresh are posted at least the spacing apart")
-        assertTrue(posted.allSatisfy { $0.active && $0.sound }, "Breaking stories are active alerts with sound")
-        assertTrue(
-            posted.allSatisfy { $0.category == NotificationActionIdentifier.category },
-            "A story's banner carries Save, Mark as Read and Open (#560)")
+        assertTrue(posted.allSatisfy(\.sound), "Breaking stories are banners with sound")
+        assertTrue(posted.allSatisfy(\.actions), "A story's banner carries Save, Mark as Read and Open (#560)")
         // Banners are minutes apart, so the pass asks before each one whether full banners are still allowed.
         let haltedRecorder = Recorder()
         let halted = NotificationService(post: { await haltedRecorder.record(Posted($0)) }, spacing: .zero)
         var haltedDelivery = NotificationDelivery(mode: .full, events: pairEvents)
         let asked = TestCounter()
-        // Allowed for the first banner's two checks (before its image download and before its post), refused
-        // from then on.
+        // Allowed for the first banner's check (right before it shows), refused from then on.
         haltedDelivery.continues = {
             await asked.increment()
-            return await asked.value <= 2
+            return await asked.value <= 1
         }
         await halted.triageAndNotify(newArticles: [quiet, loud, fourth, fifth], delivery: haltedDelivery)
         assertEqual(
             (await haltedRecorder.posted).count, 1,
             "Once the settings no longer allow full banners, the pass stops after the banner already posting")
-        assertEqual(await asked.value, 3, "A halt ends the pass: no further gap is waited out and asked again")
+        assertEqual(await asked.value, 2, "A halt ends the pass: no further gap is waited out and asked again")
         let quietRecorder = Recorder()
         let quietService = NotificationService(post: { await quietRecorder.record(Posted($0)) }, spacing: .zero)
         await quietService.triageAndNotify(newArticles: [quiet], delivery: .init(mode: .full))
         assertTrue(
-            (await quietRecorder.posted).allSatisfy { !$0.active && !$0.sound },
-            "A story below the breaking score is passive and silent when it notifies")
+            (await quietRecorder.posted).allSatisfy { !$0.sound },
+            "A story below the breaking score is silent when it notifies")
         let minimalRecorder = Recorder()
         let minimal = NotificationService(post: { await minimalRecorder.record(Posted($0)) }, spacing: .zero)
         await minimal.triageAndNotify(
@@ -2367,7 +2366,7 @@ extension NewsTests {
         assertEqual(
             (await minimalRecorder.posted).first?.body, "2 new articles across 2 sources",
             "Summary modes count one report per event too")
-        assertEqual((await minimalRecorder.posted).first?.category, "", "A summary banner has no story actions")
+        assertFalse((await minimalRecorder.posted).first?.actions ?? true, "A summary banner has no story actions")
 
         // 6. Normal lane (#588, #665): of 100 new stories, three are breaking, every fourth is Technology (a top
         // interest) and every tenth event has three publishers. At most five normal banners in the rolling hour.
@@ -2735,24 +2734,25 @@ extension NewsTests {
             NotificationService.sampleStatus(
                 outcome, authorization: authorization, alert: alert, style: style, previews: previews)
         }
-        assertTrue(status(.halted).hasPrefix("Not sent:"), "A halted test names the mode setting")
+        assertTrue(status(.halted).hasPrefix("Not shown:"), "A halted test names the mode setting")
         assertTrue(
-            status(.failed(domain: UNErrorDomain, code: UNError.Code.notificationsNotAllowed.rawValue))
-                .contains("not allowed"), "A refused post names the permission")
+            status(.failed(domain: "Other", code: 7)).contains("Other 7"),
+            "A banner that cannot draw shows domain and code")
         assertTrue(
-            status(.failed(domain: "Other", code: 7)).contains("Other 7"), "Any other refusal shows domain and code")
+            status(.suppressed(.notAuthorized), authorization: .denied).contains("turned off"),
+            "Denied permission is named")
         assertTrue(
-            status(.posted, authorization: .denied).contains("turned off"), "Denied permission is named after a post")
+            status(.suppressed(.notAuthorized), authorization: .notDetermined).contains("not asked"),
+            "Permission not yet asked is named")
+        assertTrue(status(.suppressed(.styleNone), style: .none).contains("None"), "Alert style None is named")
         assertTrue(
-            status(.posted, authorization: .notDetermined).contains("not asked"),
-            "Permission not yet asked is named after a post")
-        assertTrue(status(.posted, style: .none).contains("None"), "Alert style None is named")
-        assertTrue(status(.posted, alert: .disabled).contains("alerts for News are off"), "Alerts off is named")
+            status(.suppressed(.alertsOff), alert: .disabled).contains("alerts for News are off"), "Alerts off is named"
+        )
+        assertTrue(status(.suppressed(.focus)).contains("Focus"), "A Focus is named")
         assertTrue(status(.posted, previews: .never).contains("story hidden"), "Hidden previews are named")
         assertTrue(
-            status(.posted, style: .alert, previews: .never).contains("story hidden"),
-            "Hidden previews are named for the Alerts style too")
-        assertTrue(status(.posted).hasPrefix("Sent."), "A plain success says so")
+            status(.posted, style: .alert).contains("until you close it"), "The Alerts style is named after a banner")
+        assertEqual(status(.posted), "Shown.", "A plain success says so")
     }
 
     /// #790: a banner for a report outside any event records the report itself. When another outlet's report later
@@ -2857,15 +2857,13 @@ extension NewsTests {
             let title: String
             let body: String
             let thread: String
-            let category: String
+            let actions: Bool
         }
         actor Recorder {
             var posted: [Posted] = []
-            func record(_ request: UNNotificationRequest) {
+            func record(_ banner: StoryBanner) {
                 posted.append(
-                    Posted(
-                        title: request.content.title, body: request.content.body,
-                        thread: request.content.threadIdentifier, category: request.content.categoryIdentifier))
+                    Posted(title: banner.title, body: banner.body, thread: banner.thread, actions: banner.actions))
             }
         }
         let recorder = Recorder()
@@ -2926,8 +2924,7 @@ extension NewsTests {
         let single = await recorder.posted.dropFirst(before)
         assertEqual(single.map(\.title), ["Starred Daily"], "The feed's first new story is one starred banner")
         assertEqual(
-            single.map(\.category), [NotificationActionIdentifier.category],
-            "A starred story's banner has story actions")
+            single.map(\.actions), [true], "A starred story's banner has story actions")
         let burst = (0..<20).map { story("burst-\($0)", "Starred note \($0) about orchards", source: "Starred Daily") }
         let burstNotified = await refresh(starred: burst, at: Date().addingTimeInterval(21 * 60))
         assertEqual(burstNotified, Set(burst.map(\.title)), "A grouped banner's stories all count as notified")
@@ -2937,7 +2934,7 @@ extension NewsTests {
         assertTrue(
             grouped.first?.body.hasPrefix("20 new stories\n") == true,
             "The burst counts every story: \(grouped.first?.body ?? "")")
-        assertEqual(grouped.first?.category, "", "A grouped banner has no story actions")
+        assertEqual(grouped.first?.actions, false, "A grouped banner has no story actions")
         await store.database.close()
     }
 
@@ -2987,7 +2984,7 @@ extension NewsTests {
         }
         let recorder = Recorder()
         let service = NotificationService(
-            post: { await recorder.record($0.content.threadIdentifier) }, spacing: .zero)
+            post: { await recorder.record($0.thread) }, spacing: .zero)
         // Each refresh is a manager over the same library whose feeds carry the first `count` reports, one per feed.
         func refresh(_ count: Int) async {
             let manager = FeedManager(

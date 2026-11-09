@@ -91,7 +91,7 @@ enum NotificationActionRouter {
         articleStore: ArticleStore,
         readManager: ReadManager,
         savedStories: SavedStoriesManager,
-        activateApp: @MainActor () -> Void = { NSApp?.activate() }
+        activateApp: @MainActor () -> Void = { StoryBannerPresenter.showMainWindow() }
     ) async {
         guard let target = resolveTarget(from: userInfo) else { return }
         switch actionIdentifier {

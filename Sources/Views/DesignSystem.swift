@@ -345,6 +345,8 @@ enum AppLayout {
     static let bannerPhotoHeight: CGFloat = 128
     static let bannerTextTrailingInset: CGFloat = 52
     static let bannerMargin: CGFloat = 16
+    /// A sideways swipe this far closes the banner, the touch path for the hover-only close button.
+    static let bannerSwipeDistance: CGFloat = 60
 }
 
 // MARK: - App Spacing

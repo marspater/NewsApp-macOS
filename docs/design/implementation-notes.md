@@ -16,9 +16,8 @@ Platform workarounds, AppKit bridges, known bugs and OS-version restrictions beh
 
 ## Notifications
 
-- **Target delivery.** The panel has to survive every window state: it sets `canHide = false` and stops dismissing on `didHide` and last-window close. `UNUserNotificationCenter.add`, the `willPresent` path, `removeDeliveredNotifications` and the attachment renderer go. `requestAuthorization` and `notificationSettings()` stay.
-- **Focus gate.** With the system path gone, `INFocusStatusCenter` is the only way to honour Focus. It is available from macOS 12 and requires the person's authorization (`requestAuthorization`); Apple's page names no entitlement. Whether it works in this sandboxed build is unverified. Verify it before removing notification-center delivery.
-- **Current delivery, until the target lands.** News active with a window on screen: the story's entry is filed without the system banner and the app draws its own. Behind another app with a window on screen: the app draws and adds nothing (#926), because `willPresent` runs only while News is active and macOS cannot file an entry without its own banner outside it. Hidden, minimized or without a window: the system draws. Grouped and summary banners stay with the system.
+- **Delivery.** The panel (`StoryBannerPresenter`) is the only path: `canHide = false`, and nothing dismisses it on hide, miniaturize or window close. `UNUserNotificationCenter` is used for `requestAuthorization` and `notificationSettings()` only; there is no `add`, `willPresent` or attachment renderer. `BannerGate` reads permission, alert style, previews and Focus before each banner, and a click brings News's window forward through `MainWindowMarker` and a reopen (`NSWorkspace.openApplication`).
+- **Focus gate.** `INFocusStatusCenter` is the only way to honour Focus. Probed on 9 November 2026 in a sandboxed, ad-hoc-signed app: it works with `NSFocusStatusUsageDescription` in `Info.plist` and no entitlement (without the key, macOS aborts the app on the request); authorization came back authorized and `isFocused` non-nil. `isFocused == true` was not observed. It is asked next to the notification permission.
 - **Banner photo.** Core Image alpha fade and progressive blur (`maskedVariableBlur`), baked once per banner in `NotificationImage`.
 
 ## Glass and rendering

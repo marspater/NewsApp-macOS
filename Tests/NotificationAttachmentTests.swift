@@ -18,7 +18,6 @@ import Foundation
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
-import UserNotifications
 
 /// Offline loader with controlled completion, including a cancelled request that ignores cancellation.
 private actor BannerPhotoLoadProbe {
@@ -92,27 +91,21 @@ enum NotificationAttachmentTests {
             precondition(FeedArticle.attachmentImages(for: bare).isEmpty, "No image means no candidates")
         }
 
-        // Valid 1x1 WebP: accepted by ImageIO, rejected when attached directly as .webp (UNErrorDomain 101).
+        // Valid 1x1 WebP: the reader decodes it, so the banner photo path takes it too.
         let webp = Data(base64Encoded: "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA")!
         do {
-            let attachment = try NotificationService.makeImageAttachment(data: webp)
-            precondition(attachment.type == UTType.png.identifier, "Unsupported WebP must become a supported PNG")
-            let png = try Data(contentsOf: attachment.url)
-            let source = CGImageSourceCreateWithData(png as CFData, nil)
-            precondition(source != nil, "The framework-owned attachment must remain readable")
-            precondition(
-                CGImageSourceGetType(source!) as String? == UTType.png.identifier, "Attachment bytes must be PNG")
-            let second = try NotificationService.makeImageAttachment(data: png)
-            precondition(second.type == UTType.png.identifier, "Existing PNG images remain supported")
-        } catch { fatalError("Notification image conversion failed: \(error)") }
+            let decoded = try SecureHTTPClient.decodeReaderImage(webp)
+            precondition(decoded.width == 1 && decoded.height == 1, "A WebP the reader decodes stays usable")
+        } catch { fatalError("WebP decode failed: \(error)") }
         do {
-            _ = try NotificationService.makeImageAttachment(data: Data("not an image".utf8), contentType: "text/html")
-            fatalError("Malformed images must not become notification attachments")
+            _ = try SecureHTTPClient.decodeReaderImage(Data("not an image".utf8))
+            fatalError("Malformed images must not decode")
         } catch {
             // The log names the stage and what the host sent (#1010); a request error reads as the fetch stage.
             precondition(
-                ImageLoadFailure.describe(error).hasPrefix("stage=decode type=text/html bytes=12"),
-                "Decode failure names its stage, got \(error)")
+                ImageLoadFailure.describe(
+                    ImageLoadFailure(stage: .decode, contentType: "text/html", bytes: 12, underlying: nil)
+                ).hasPrefix("stage=decode type=text/html bytes=12"), "Decode failure names its stage")
             precondition(
                 ImageLoadFailure.describe(URLError(.cannotDecodeContentData))
                     == "stage=fetch type=unknown bytes=unknown domain=NSURLErrorDomain code=-1016")
@@ -123,82 +116,37 @@ enum NotificationAttachmentTests {
                 "Cancelled loads stay out of the log; other request errors do not")
         }
 
-        // An 8-bit colormap PNG (#1010) decodes for the reader and becomes the tall crop attachment.
+        // An 8-bit colormap PNG (#1010) decodes for the reader and becomes the banner photo.
         do {
             let palette = palettePNG(width: 962, height: 548)
             precondition(palette[25] == 3, "The fixture is a palette PNG (IHDR colour type 3), got \(palette[25])")
             let decoded = try SecureHTTPClient.decodeReaderImage(palette)
             precondition(decoded.width == 962 && decoded.height == 548, "Palette PNG decodes at its size")
-            let attachment = try NotificationService.makeImageAttachment(data: palette, contentType: "image/png")
-            let image = CGImageSourceCreateImageAtIndex(
-                CGImageSourceCreateWithData(try Data(contentsOf: attachment.url) as CFData, nil)!, 0, nil)!
-            precondition(
-                image.width == 366 && image.height == 548,
-                "Palette PNG becomes the 2:3 crop, got \(image.width) × \(image.height)")
-            precondition(alpha(image, x: 360, y: 274) == 255, "Palette crop is opaque at the trailing edge")
             precondition(StoryBannerPresenter.bannerPhoto(decoded, scale: 2) != nil, "Palette banner photo renders")
             // The host serves the named PNG, not a `Vary: Accept` WebP or AVIF variant, to an image request (#1010).
             precondition(
                 SecureHTTPClient.imageAccept.hasPrefix("image/png,")
                     && !SecureHTTPClient.imageAccept.contains("webp") && !SecureHTTPClient.imageAccept.contains("avif"),
                 "Image requests do not invite WebP or AVIF variants")
-        } catch { fatalError("Palette PNG notification image failed: \(error)") }
-
-        // The tall fading crop (#589): a 1200 × 1200 source becomes a 600 × 900 portrait PNG with alpha,
-        // transparent at the leading edge and opaque at the trailing edge; the same input renders the same bytes,
-        // and a small source keeps its own size.
-        do {
-            let landscape = png(width: 1200, height: 1200)
-            let tall = try NotificationService.makeImageAttachment(data: landscape)
-            let bytes = try Data(contentsOf: tall.url)
-            precondition(bytes.count <= 10_000_000, "Attachment stays within the notification size limit")
-            let source = CGImageSourceCreateWithData(bytes as CFData, nil)!
-            let image = CGImageSourceCreateImageAtIndex(source, 0, nil)!
-            precondition(
-                image.width == 600 && image.height == 900,
-                "Tall crop is 600 × 900, got \(image.width) × \(image.height)")
-            precondition(
-                image.alphaInfo != .none && image.alphaInfo != .noneSkipLast && image.alphaInfo != .noneSkipFirst,
-                "Crop carries alpha")
-            precondition(alpha(image, x: 1, y: 450) < 16, "Leading edge fades to transparent")
-            precondition(alpha(image, x: 580, y: 450) == 255, "Trailing side is opaque")
-            // x = 300 is past the fade (45%) but inside the blur ramp (60%), where an unclamped blur thins the edges.
-            precondition(alpha(image, x: 300, y: 0) == 255, "Blur keeps the top edge opaque")
-            precondition(alpha(image, x: 300, y: 899) == 255, "Blur keeps the bottom edge opaque")
-            let again = try Data(contentsOf: try NotificationService.makeImageAttachment(data: landscape).url)
-            precondition(again == bytes, "The same source renders the same bytes")
-            let small = try NotificationService.makeImageAttachment(data: png(width: 200, height: 200))
-            let smallSource = CGImageSourceCreateWithData(try Data(contentsOf: small.url) as CFData, nil)!
-            let smallImage = CGImageSourceCreateImageAtIndex(smallSource, 0, nil)!
-            precondition(smallImage.width == 200 && smallImage.height == 200, "Small sources keep their size")
-        } catch { fatalError("Notification image crop failed: \(error)") }
-        print("✅ Notification attachment format regressions passed")
+        } catch { fatalError("Palette PNG banner photo failed: \(error)") }
+        print("✅ Banner photo regressions passed")
     }
 
-    /// The app-drawn story banner (DESIGN.md 8.7): only a story's request becomes one, its photo dissolves toward the
-    /// text, and the rendered banner shows the photo to its trailing edge inside the banner's own corners. Set
-    /// NEWS_BANNER_CAPTURES to a folder to keep the light and dark renders.
+    /// The app-drawn banner (DESIGN.md 8.7): every notification is one, a story's carries actions and photos, the rest
+    /// carry no story, the photo dissolves toward the text, and the rendered banner shows the photo to its trailing
+    /// edge inside the banner's own corners. Set NEWS_BANNER_CAPTURES to a folder to keep the light and dark renders.
     @MainActor static func runBanner() async {
-        let content = UNMutableNotificationContent()
-        content.title = "Culture"
-        content.subtitle = "Romeo + Juliet at 30: how Baz Luhrmann's film still burns"
-        content.body =
-            "The maximalist, heart over head adaptation of the romantic tragedy made stars of its leads and became "
-            + "a defining film of its decade."
-        content.categoryIdentifier = NotificationActionIdentifier.category
-        content.userInfo = [
-            "articleID": "story-1", "articleLink": "https://example.com/a", "imageURL": "https://example.com/a.jpg",
-        ]
-        guard
-            let banner = StoryBanner(UNNotificationRequest(identifier: "news-story-1", content: content, trigger: nil))
-        else { fatalError("A story request becomes an app-drawn banner") }
-        precondition(banner.headline == content.subtitle && banner.title == "Culture", "Banner keeps the copy")
-        precondition(banner.imageURL?.absoluteString == "https://example.com/a.jpg", "Banner finds the photo")
+        let banner = StoryBanner(
+            id: "news-story-1", title: "Culture", headline: "Romeo + Juliet at 30: how Baz Luhrmann's film still burns",
+            body:
+                "The maximalist, heart over head adaptation of the romantic tragedy made stars of its leads and became "
+                + "a defining film of its decade.",
+            articleID: "story-1", articleLink: "https://example.com/a",
+            imageURLs: [URL(string: "https://example.com/a.jpg")!], thread: "story-1", sound: true, actions: true)
         precondition(banner.userInfo == ["articleID": "story-1", "articleLink": "https://example.com/a"])
-        content.categoryIdentifier = ""
-        precondition(
-            StoryBanner(UNNotificationRequest(identifier: "grouped", content: content, trigger: nil)) == nil,
-            "Grouped and summary banners stay with the system")
+        precondition(banner.actions, "A story's banner carries Save, Mark as Read and Open")
+        let group = StoryBanner(id: "group", title: "Major news", body: "3 more major stories")
+        precondition(group.userInfo.isEmpty && !group.actions && group.imageURLs.isEmpty, "A group names no story")
 
         let data = png(width: 1200, height: 800)
         let source = CGImageSourceCreateImageAtIndex(CGImageSourceCreateWithData(data as CFData, nil)!, 0, nil)!
@@ -253,10 +201,10 @@ enum NotificationAttachmentTests {
         // Nothing is ordered on screen: the headless suite opens no window or banner panel on the desktop (#991).
         precondition(StoryBannerPresenter.openWindow() == initialWindow, "A window never ordered in is not open")
         let presenter = StoryBannerPresenter.shared
-        if initialWindow == nil { precondition(!presenter.present(banner), "No window on screen, no app-drawn banner") }
         presenter.isHeadless = true
         defer { presenter.isHeadless = false }
-        precondition(presenter.present(banner), "Banner presents when a window is open")
+        precondition(presenter.present(banner), "A banner presents whatever the window state")
+        precondition(presenter.panelForTesting?.canHide == false, "The panel stays when the app hides")
         precondition(!testWindow.isVisible, "Headless presentation orders no window on screen (#991)")
 
         // Replacing or dismissing a banner must cancel its in-flight image request (#1161).
@@ -273,14 +221,7 @@ enum NotificationAttachmentTests {
         }
         let first = await probe.snapshot()
         precondition(first.starts == 1, "The first banner starts one image request")
-        let replacementContent = UNMutableNotificationContent()
-        replacementContent.categoryIdentifier = NotificationActionIdentifier.category
-        replacementContent.title = "Replacement"
-        replacementContent.subtitle = "Without an image"
-        guard
-            let replacement = StoryBanner(
-                UNNotificationRequest(identifier: "news-story-2", content: replacementContent, trigger: nil))
-        else { fatalError("A second story request becomes a banner") }
+        let replacement = StoryBanner(id: "news-story-2", title: "Replacement", headline: "Without an image")
         precondition(isolated.present(replacement), "Replacement banner presents offscreen")
         for _ in 0..<200 {
             if await probe.snapshot().cancellations == 1 { break }
@@ -340,10 +281,18 @@ enum NotificationAttachmentTests {
         await dismissedPhotoTask.value
         precondition(!isolated.hasPresentedPhoto, "Dismissing the banner clears its image")
 
-        // Notification handlers
+        // The banner outlives its windows: hiding the app, closing or minimizing a window takes none down.
+        precondition(presenter.present(banner), "A banner presents for the window checks")
         NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: NSWindow())
         NotificationCenter.default.post(name: NSWindow.didMiniaturizeNotification, object: testWindow)
         NotificationCenter.default.post(name: NSApplication.didHideNotification, object: nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        precondition(presenter.isShowing, "No window event dismisses a banner")
+        // An Alert-style banner stays until closed: no timer.
+        precondition(presenter.present(banner, persistent: true), "A persistent banner presents")
+        precondition(!presenter.hasDismissalTimer, "A persistent banner has no dismissal timer")
+        precondition(presenter.present(banner), "A banner without the Alerts style presents")
+        precondition(presenter.hasDismissalTimer, "A passing banner leaves after its lifetime")
 
         StoryBannerPresenter.shared.dismiss()
         testWindow.close()

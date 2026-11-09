@@ -14,6 +14,7 @@
 
 import AppKit
 import Foundation
+import Intents
 import NaturalLanguage
 import UserNotifications
 import os
@@ -120,71 +121,105 @@ struct PlannedBanner: Sendable {
     var stories: [String] { article.map { [$0.id] } ?? members }
 }
 
-/// Where a story banner is drawn (#926, DESIGN.md 8.7). macOS asks `willPresent` only while News is the active app, so
-/// with a News window on screen behind another app the decision is made here, when the notification is posted.
-enum StoryBannerRoute: Equatable, Sendable {
-    /// The app drew the banner and nothing was added: macOS has no API to file a notification in Notification Center
-    /// without its banner outside `willPresent`. The story stays in Today and Unread.
-    case appBanner
-    /// Added to the notification center: the system draws the banner, or `willPresent` hands it to the app while
-    /// News is active.
-    case notificationCenter
+/// Why a banner was not drawn.
+enum BannerSuppression: String, Sendable, Equatable {
+    /// Permission is not granted: denied, or macOS has not asked yet.
+    case notAuthorized
+    case alertsOff
+    case styleNone
+    /// A Focus is on, so News draws nothing until it ends.
+    case focus
+}
 
-    /// The reader's settings under which the app may draw a story banner: banners on, in the Banners style (an Alert
-    /// stays until dismissed, as the system draws it) and with previews shown (hidden previews redact).
-    static func allowsAppBanner(
-        alert: UNNotificationSetting, style: UNAlertStyle, previews: UNShowPreviewsSetting
-    ) -> Bool {
-        alert == .enabled && style == .banner && previews != .never
-    }
+/// Thrown by a post that drew nothing on purpose; the banner is not recorded, so its story may notify again.
+struct BannerSuppressed: Error, Equatable {
+    let reason: BannerSuppression
+}
 
-    /// Delivers one request. Only a story's own banner (the one carrying Save, Mark as Read and Open), posted while
-    /// News is not active, is offered to `present`, which draws it when a News window is open on screen; anything it
-    /// declines is added, so there is always exactly one banner.
-    static func deliver(
-        _ request: UNNotificationRequest, active: Bool,
-        settings: @Sendable () async -> (UNNotificationSetting, UNAlertStyle, UNShowPreviewsSetting),
-        present: @Sendable (UNNotificationRequest) async -> Bool,
-        add: @Sendable (UNNotificationRequest) async throws -> Void
-    ) async throws -> StoryBannerRoute {
-        if !active, request.content.categoryIdentifier == NotificationActionIdentifier.category {
-            let (alert, style, previews) = await settings()
-            if allowsAppBanner(alert: alert, style: style, previews: previews), await present(request) {
-                return .appBanner
-            }
-        }
-        try await add(request)
-        return .notificationCenter
-    }
+/// What the reader's System Settings and Focus make of a banner (#926). The app draws every banner itself; the
+/// notification center is only asked for permission and its settings, never to deliver, since a second path shows
+/// every story twice.
+enum BannerGate: Equatable, Sendable {
+    /// Draw it. `redacted` when previews are hidden, `persistent` in the Alerts style, which stays until closed.
+    case show(redacted: Bool, persistent: Bool)
+    case suppress(BannerSuppression)
 
-    /// Offers a story request to the app's presenter. The banner's fields are copied out first, so only a Sendable
-    /// value crosses to the main actor, where the installed presenter and the app's activity decide.
-    static func offer(_ request: UNNotificationRequest) async -> Bool {
-        guard let banner = StoryBanner(request) else { return false }
-        let sounds = request.content.sound != nil
-        return await MainActor.run {
-            offer(
-                banner, sounds: sounds, active: NSApplication.shared.isActive,
-                presenter: NotificationService.presentAppBanner)
-        }
-    }
-
-    /// Offers a story banner to the app's presenter on the main actor. News became active between the post and this
-    /// hop: it is declined, so the add files the notification and `willPresent` draws it, never both banners.
-    @MainActor static func offer(
-        _ banner: StoryBanner, sounds: Bool, active: Bool, presenter: ((StoryBanner, Bool) -> Bool)?
-    ) -> Bool {
-        guard !active else { return false }
-        return presenter?(banner, sounds) ?? false
+    static func decide(
+        authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle,
+        previews: UNShowPreviewsSetting, focused: Bool?
+    ) -> BannerGate {
+        guard authorization == .authorized || authorization == .provisional else { return .suppress(.notAuthorized) }
+        guard alert == .enabled else { return .suppress(.alertsOff) }
+        guard style != .none else { return .suppress(.styleNone) }
+        // Unknown (Focus status not shared with News) counts as not focused.
+        if focused == true { return .suppress(.focus) }
+        return .show(redacted: previews == .never, persistent: style == .alert)
     }
 }
 
-/// Manages NLP-based notification triage, rich image attachments, and alert scheduling.
+/// The only way to honour Focus: macOS gives an app no notification callback, so the banner asks `INFocusStatusCenter`.
+/// It works in the sandbox with `NSFocusStatusUsageDescription` and no entitlement.
+enum FocusStatus {
+    /// Asks once; macOS remembers the answer.
+    static func requestAuthorization() {
+        INFocusStatusCenter.default.requestAuthorization { _ in
+            // The answer is read when a banner is drawn.
+        }
+    }
+
+    /// Whether a Focus is on; nil while the reader has not allowed it or shares no Focus status.
+    static var isFocused: Bool? {
+        let center = INFocusStatusCenter.default
+        guard center.authorizationStatus == .authorized else { return nil }
+        return center.focusStatus.isFocused
+    }
+}
+
+extension NotificationService {
+    /// Draws one banner when the reader's settings allow it. Nothing is added to the notification center. A banner the
+    /// settings or a Focus refuse throws `BannerSuppressed`; one that cannot be drawn throws the failure.
+    static func deliver(_ banner: StoryBanner) async throws {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        let log = StoryBannerPresenter.log
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let sounds = settings.soundSetting == .enabled
+        let gate = await MainActor.run {
+            BannerGate.decide(
+                authorization: settings.authorizationStatus, alert: settings.alertSetting,
+                style: settings.alertStyle, previews: settings.showPreviewsSetting, focused: FocusStatus.isFocused)
+        }
+        switch gate {
+        case .suppress(let reason):
+            // `route=` is what Export Diagnostics counts.
+            log.notice(
+                "deliver \(banner.id, privacy: .private(mask: .hash)) route=suppressed_\(reason.rawValue, privacy: .public)"
+            )
+            throw BannerSuppressed(reason: reason)
+        case .show(let redacted, let persistent):
+            let drawn = await MainActor.run {
+                StoryBannerPresenter.shared.present(redacted ? banner.redacted : banner, persistent: persistent)
+            }
+            guard drawn else {
+                throw NSError(
+                    domain: "com.marspater.news.banner", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "The banner could not be drawn."])
+            }
+            log.notice(
+                "deliver \(banner.id, privacy: .private(mask: .hash)) route=appBanner redacted=\(redacted, privacy: .public)"
+            )
+            // Nothing is added, so the system plays no sound: a banner that sounds plays the reader's alert sound,
+            // when the reader's settings allow sound.
+            if banner.sound, sounds { await MainActor.run { NSSound.beep() } }
+        }
+    }
+}
+
+/// Manages NLP-based notification triage and the app-drawn banners.
 final class NotificationService: Sendable {
     static let shared = NotificationService()
     private let logger = Logger(subsystem: "com.marspater.news", category: "NotificationService")
-    /// Posts one request; the default goes to the user notification center and skips unbundled test processes.
-    private let post: @Sendable (UNNotificationRequest) async throws -> Void
+    /// Draws one banner; the default is the app's own panel and skips unbundled test processes.
+    private let post: @Sendable (StoryBanner) async throws -> Void
     /// Pause between two banners of one refresh, so a refresh reads as a trickle of stories, not one burst.
     private let spacing: Duration
     /// Five minutes (#587, docs/notifications.md); a pass of five normal banners takes 20 minutes.
@@ -195,8 +230,6 @@ final class NotificationService: Sendable {
     static let breakingScore = 0.6
     /// An interest story needs this many publishers on its event before it notifies.
     static let interestPublishers = 3
-    /// Largest encoded notification image attachment in bytes; the same ceiling as the image fetch, so the two agree.
-    static let attachmentLimit = Int(SecureHTTPClient.defaultImageLimit)
     /// Normal banners in any rolling 60 minutes (#665).
     static let normalLimit = 5
     /// Individual priority banners in any rolling 30 minutes, plus one grouped banner.
@@ -205,36 +238,8 @@ final class NotificationService: Sendable {
     /// A starred feed gets at most one banner per window.
     static let starredWindow: TimeInterval = 20 * 60
 
-    /// Draws a story banner in the app and says whether it did; installed by the app delegate, which owns the
-    /// presenter. Nil (tests, helper processes) leaves every banner to the system.
-    /// The second argument says whether the story's banner asks for a sound.
-    @MainActor static var presentAppBanner: ((StoryBanner, Bool) -> Bool)?
-
-    init(
-        post: (@Sendable (UNNotificationRequest) async throws -> Void)? = nil, spacing: Duration = bannerSpacing
-    ) {
-        self.post =
-            post ?? { request in
-                guard Bundle.main.bundleIdentifier != nil else { return }
-                let log = Logger(subsystem: "com.marspater.news", category: "StoryBanner")
-                let active = await MainActor.run { NSApplication.shared.isActive }
-                log.notice(
-                    "post \(request.identifier, privacy: .private(mask: .hash)) active=\(active, privacy: .public) level=\(request.content.interruptionLevel.rawValue, privacy: .public)"
-                )
-                // macOS skipped `willPresent` for a post made while News was behind another app (#926, log of
-                // 3 November), so the app decides here.
-                let route = try await StoryBannerRoute.deliver(
-                    request, active: active,
-                    settings: {
-                        let settings = await UNUserNotificationCenter.current().notificationSettings()
-                        return (settings.alertSetting, settings.alertStyle, settings.showPreviewsSetting)
-                    },
-                    present: { request in await StoryBannerRoute.offer(request) },
-                    add: { try await UNUserNotificationCenter.current().add($0) })
-                log.notice(
-                    "posted \(request.identifier, privacy: .private(mask: .hash)) route=\(String(describing: route), privacy: .public)"
-                )
-            }
+    init(post: (@Sendable (StoryBanner) async throws -> Void)? = nil, spacing: Duration = bannerSpacing) {
+        self.post = post ?? { try await NotificationService.deliver($0) }
         self.spacing = spacing
     }
 
@@ -409,8 +414,8 @@ final class NotificationService: Sendable {
     /// Posts one story banner now, outside triage and its limits (Help > Show Sample Notification, Settings >
     /// Notifications > Send Test Notification), so the banner can be checked without waiting for a refresh. Nothing is
     /// recorded in the delivery log, and its own identifier keeps it from replacing or clearing the story's real banner.
-    /// `continues` is asked before the image download and the post, as for a real banner, so a reader outside Full
-    /// mode gets no headline and no image request.
+    /// `continues` is asked right before the banner shows, as for a real banner, so a reader outside Full mode gets
+    /// no headline and no image request.
     @discardableResult
     func postSample(_ article: FeedArticle, continues: @Sendable () async -> Bool) async -> PostOutcome {
         let banner = PlannedBanner(lane: .normal, grouped: false, article: article, thread: "news-sample", sound: false)
@@ -430,8 +435,8 @@ final class NotificationService: Sendable {
         return (withPhoto.isEmpty ? stories : withPhoto).randomElement()
     }
 
-    /// What Settings says after a test banner: why nothing was sent, why macOS refused it, or what the reader's
-    /// notification settings make of it. Sentence case, no claim beyond what the outcome and settings show.
+    /// What Settings says after a test banner: why nothing showed, or how the reader's notification settings shaped
+    /// it. Sentence case, no claim beyond what the outcome and settings show.
     static func sampleStatus(
         _ outcome: PostOutcome, authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle,
         previews: UNShowPreviewsSetting
@@ -440,41 +445,25 @@ final class NotificationService: Sendable {
         switch outcome {
         case .halted:
             return
-                "Not sent: notifications are off or not at Full detail. Turn on Enable Notifications and choose Full."
+                "Not shown: notifications are off or not at Full detail. Turn on Enable Notifications and choose Full."
         case .failed(let domain, let code):
-            if domain == UNErrorDomain, code == UNError.Code.notificationsNotAllowed.rawValue {
-                return "macOS refused it: notifications for News are not allowed. Allow them in \(systemSettings)."
+            return "The banner could not be drawn (\(domain) \(code)). Help › Export Diagnostics has the log."
+        case .suppressed(let reason):
+            switch reason {
+            case .notAuthorized:
+                return authorization == .notDetermined
+                    ? "Not shown: macOS has not asked for permission yet. News asks after the first refresh with stories."
+                    : "Not shown: notifications for News are turned off. Allow them in \(systemSettings)."
+            case .alertsOff: return "Not shown: alerts for News are off. Turn them on in \(systemSettings)."
+            case .styleNone:
+                return "Not shown: the alert style is None. Choose Banners or Alerts in \(systemSettings)."
+            case .focus: return "Not shown: a Focus is on. News draws no banner until it ends."
             }
-            return "macOS refused it (\(domain) \(code)). Help › Export Diagnostics has the log."
         case .posted:
-            return deliveryStatus(authorization: authorization, alert: alert, style: style, previews: previews)
+            if previews == .never { return "Shown with the story hidden, as Show Previews asks in \(systemSettings)." }
+            return style == .alert
+                ? "Shown. It stays until you close it, as the Alerts style asks in \(systemSettings)." : "Shown."
         }
-    }
-
-    /// What the reader's notification settings make of a banner macOS accepted.
-    private static func deliveryStatus(
-        authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle,
-        previews: UNShowPreviewsSetting
-    ) -> String {
-        let systemSettings = "System Settings › Notifications › News"
-        switch authorization {
-        case .denied: return "Sent, but notifications for News are turned off. Allow them in \(systemSettings)."
-        case .notDetermined:
-            return "Sent, but macOS has not asked for permission yet. News asks after the first refresh with stories."
-        default: break
-        }
-        if alert != .enabled { return "Sent, but alerts for News are off. Turn them on in \(systemSettings)." }
-        let hiddenPreviews = previews == .never ? " with the story hidden until you open it" : ""
-        switch style {
-        case .none: return "Sent, but the alert style is None, so nothing shows. Choose Banners in \(systemSettings)."
-        case .alert: return "Sent. macOS shows it as an alert that stays until dismissed\(hiddenPreviews)."
-        default: break
-        }
-        if previews == .never {
-            return "Sent. macOS shows it as a banner\(hiddenPreviews); News does not draw its own banner then."
-        }
-        return
-            "Sent. With News in front, or a News window open behind another app, News draws the banner itself; otherwise macOS shows it."
     }
 
     /// Stable across launches, so a story replaces its earlier banner; `hashValue` is reseeded per process.
@@ -495,43 +484,33 @@ final class NotificationService: Sendable {
     }
 
     private func triggerMinimalNotification(for articles: [FeedArticle]) async {
-        let content = UNMutableNotificationContent()
-        content.title = "News Update"
-
         // Deduplicate unique sources
         let sources = Set(
             articles.map {
                 ($0.source.components(separatedBy: "\n").first ?? $0.source)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             }.filter { !$0.isEmpty })
-
-        content.body = Self.formatMinimalSummary(
-            articleCount: articles.count, uniqueSourcesCount: max(1, sources.count))
-        content.sound = .default
-
-        let identifier = "news-minimal-summary"
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
-        do {
-            try await post(request)
-            logger.debug("Successfully scheduled minimal notification: \(identifier)")
-        } catch {
-            logger.error("Failed to schedule minimal notification '\(identifier)': \(error.localizedDescription)")
-        }
+        let banner = StoryBanner(
+            id: "news-minimal-summary", title: "News Update",
+            body: Self.formatMinimalSummary(articleCount: articles.count, uniqueSourcesCount: max(1, sources.count)),
+            sound: true)
+        await postSummary(banner)
     }
 
     private func triggerPrivateNotification() async {
-        let content = UNMutableNotificationContent()
-        content.title = "News Update"
-        content.body = "You have new articles available. Open to read."
-        content.sound = .default
+        let banner = StoryBanner(
+            id: "news-generic-update", title: "News Update", body: "You have new articles available. Open to read.",
+            sound: true)
+        await postSummary(banner)
+    }
 
-        let identifier = "news-generic-update"
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+    /// A summary banner: no story, no headline and no photo, from Minimal or Private mode.
+    private func postSummary(_ banner: StoryBanner) async {
         do {
-            try await post(request)
-            logger.debug("Successfully scheduled private notification: \(identifier)")
+            try await post(banner)
+            logger.debug("Showed summary banner: \(banner.id)")
         } catch {
-            logger.error("Failed to schedule private notification '\(identifier)': \(error.localizedDescription)")
+            logger.error("Failed to show summary banner '\(banner.id)': \(error.localizedDescription)")
         }
     }
 
@@ -542,84 +521,56 @@ final class NotificationService: Sendable {
         return ([count] + banner.headlines.prefix(2)).joined(separator: "\n")
     }
 
-    /// Posts one banner. The thread groups later reports of the same story under it in Notification Center; a banner
-    /// with sound interrupts like any alert, one without is passive (listed, no sound, no wake).
-    /// Posts one full-mode banner; `continues` is asked again right before the post, after the image download,
-    /// so a reader who switched to Privacy or turned notifications off during the download sees no headline.
-    /// How one banner ended: posted, refused by the notification center, or halted because the pass may not go on.
+    /// How one banner ended: shown, refused on purpose (settings or Focus), failed to draw, or halted because the pass
+    /// may not go on.
     enum PostOutcome: Equatable, Sendable {
         case posted, halted
+        case suppressed(BannerSuppression)
         /// The error's domain and code, public in the log as well (#926).
         case failed(domain: String, code: Int)
     }
 
+    /// Draws one full-mode banner. The thread groups later reports of the same story under it; a banner with sound
+    /// plays the reader's alert sound, one without is silent. `continues` is asked right before the banner shows, so a
+    /// reader who switched to Privacy or turned notifications off meanwhile sees no headline; Private and Minimal banners
+    /// are never photos, and a story banner asks the photo from the reader's image cache only once it shows.
     private func triggerFullNotification(
         _ banner: PlannedBanner, at now: Date, identifier sampleIdentifier: String? = nil,
         continues: @Sendable () async -> Bool = { true }
     ) async -> PostOutcome {
-        let content = UNMutableNotificationContent()
-        content.sound = banner.sound ? .default : nil
-        content.threadIdentifier = banner.thread
-        // The Help sample is active: macOS may deliver a passive notification without asking the app (#926).
-        content.interruptionLevel = banner.sound || sampleIdentifier != nil ? .active : .passive
-        let identifier: String
+        var content: StoryBanner
         if let article = banner.article {
-            content.title = Self.sourceName(article)
-            content.subtitle = article.title
-            content.body = article.description.isEmpty ? "" : String(article.description.prefix(200))
-            content.userInfo = ["articleLink": article.link, "articleID": article.id]
-            // Save, Mark as Read and Open (#560) act on one story, so only a story's own banner carries them.
-            content.categoryIdentifier = NotificationActionIdentifier.category
-            // No image request once the reader has left Full mode (PRIVACY.md): asked right before the download.
-            guard await continues(), !Task.isCancelled else { return .halted }
-            // The lead, then the other candidates (#1010): a lead that decodes as a page is not the only photo.
-            for imageUrl in FeedArticle.attachmentImages(for: article).prefix(3) {
-                guard await continues(), !Task.isCancelled else { return .halted }
-                guard let attachment = await downloadNotificationAttachment(from: imageUrl) else { continue }
-                content.attachments = [attachment]
-                // The app-drawn banner loads the photo again through the reader's image cache.
-                content.userInfo["imageURL"] = imageUrl.absoluteString
-                break
-            }
-            identifier = sampleIdentifier ?? Self.notificationIdentifier(for: article)
+            content = StoryBanner(
+                id: sampleIdentifier ?? Self.notificationIdentifier(for: article), title: Self.sourceName(article),
+                headline: article.title,
+                body: article.description.isEmpty ? "" : String(article.description.prefix(200)),
+                articleID: article.id, articleLink: article.link,
+                // The lead, then the other candidates (#1010): a lead that decodes as a page is not the only photo.
+                imageURLs: Array(FeedArticle.attachmentImages(for: article).prefix(3)), actions: true)
         } else {
-            content.title = banner.title
-            content.body = Self.groupedBody(banner)
             // Each group is its own banner; a later group must not replace an earlier one.
-            identifier = "\(banner.thread)-\(Int(now.timeIntervalSince1970))"
+            content = StoryBanner(
+                id: "\(banner.thread)-\(Int(now.timeIntervalSince1970))", title: banner.title,
+                body: Self.groupedBody(banner))
         }
-        // Every banner, grouped ones included, asks right before posting: the image download swallows
-        // cancellation, and the settings can change while it runs or while the banner was prepared. Cancellation
-        // is read again after the callback, which may have suspended across a stop.
+        content.thread = banner.thread
+        content.sound = banner.sound
+        // Asked right before the banner shows: the settings can change while the pass waits.
         guard await continues(), !Task.isCancelled else { return .halted }
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         do {
-            try await post(request)
-            logger.debug(
-                "Successfully scheduled full notification: \(identifier); attachments=\(content.attachments.count)")
+            try await post(content)
+            logger.debug("Showed full banner: \(content.id)")
             return .posted
+        } catch let suppressed as BannerSuppressed {
+            logger.notice("Banner '\(content.id)' not shown: \(suppressed.reason.rawValue, privacy: .public)")
+            return .suppressed(suppressed.reason)
         } catch {
-            // The domain and code are public, so `log show` says why macOS refused it (#926); the identifier is not.
+            // The domain and code are public, so `log show` says why it failed (#926); the identifier is not.
             let error = error as NSError
             logger.error(
-                "Failed to schedule full notification '\(identifier)': domain=\(error.domain, privacy: .public) code=\(error.code, privacy: .public) \(error.localizedDescription)"
+                "Failed to show full banner '\(content.id)': domain=\(error.domain, privacy: .public) code=\(error.code, privacy: .public) \(error.localizedDescription)"
             )
             return .failed(domain: error.domain, code: error.code)
-        }
-    }
-
-    private func downloadNotificationAttachment(from url: URL) async -> UNNotificationAttachment? {
-        do {
-            let (data, response) = try await SecureHTTPClient.shared.fetchImage(from: url, allowHTTP: false)
-            try Task.checkCancellation()
-            return try Self.makeImageAttachment(data: data, contentType: response.mimeType)
-        } catch {
-            // Stage, content type and byte count are public; the URL is not logged (#1010). Cancelled work is silent.
-            if !ImageLoadFailure.isCancellation(error) {
-                logger.error(
-                    "Notification image attachment failed: \(ImageLoadFailure.describe(error), privacy: .public)")
-            }
-            return nil
         }
     }
 }

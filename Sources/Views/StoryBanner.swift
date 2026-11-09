@@ -13,42 +13,41 @@
 // limitations under the License.
 
 import AppKit
-import Combine
 import SwiftUI
-import UserNotifications
 import os
 
-/// A story notification as the app draws it while it is in front (DESIGN.md 8.7). The system banner cannot show the
-/// photo edge to edge, so the notification is filed in Notification Center without a system banner and this one shows.
+/// A notification as the app draws it (DESIGN.md 8.7): the app's own panel is the only delivery path, so every
+/// banner is this value, from a story's own banner to the summary and the private one.
 struct StoryBanner: Sendable, Equatable {
     var id: String
     var title: String
-    var headline: String
-    var body: String
+    var headline = ""
+    var body = ""
     var articleID: String?
     var articleLink: String?
-    var imageURL: URL?
+    /// The story photos to try in order; empty for grouped, summary and private banners.
+    var imageURLs: [URL] = []
+    /// Reports of one story share a thread; a banner replaces the one on screen either way.
+    var thread = ""
+    /// Whether the banner asks for the reader's alert sound.
+    var sound = false
+    /// Only a story's own banner carries Save, Mark as Read and Open (#560).
+    var actions = false
 
-    /// Only a story's own banner (the one carrying Save, Mark as Read and Open) is redrawn; grouped and summary banners
-    /// have no photo and stay with the system.
-    init?(_ request: UNNotificationRequest) {
-        let content = request.content
-        guard content.categoryIdentifier == NotificationActionIdentifier.category else { return nil }
-        id = request.identifier
-        title = content.title
-        headline = content.subtitle
-        body = content.body
-        articleID = content.userInfo["articleID"] as? String
-        articleLink = content.userInfo["articleLink"] as? String
-        imageURL = (content.userInfo["imageURL"] as? String).flatMap { URL(string: $0) }
-    }
-
-    /// What the notification router reads, as a click on the system banner hands it over.
+    /// What the router reads, as a click on a system banner handed it over.
     var userInfo: [String: String] {
         var info: [String: String] = [:]
         info["articleID"] = articleID
         info["articleLink"] = articleLink
         return info
+    }
+
+    /// The banner as hidden previews show it: no publisher, headline, summary, photo or actions. A click still opens
+    /// the story, as it does on a system banner with hidden previews.
+    var redacted: StoryBanner {
+        StoryBanner(
+            id: id, title: "News Update", body: "You have new articles available. Open to read.",
+            articleID: articleID, articleLink: articleLink, thread: thread, sound: sound)
     }
 }
 
@@ -59,14 +58,23 @@ struct StoryBannerView: View {
     let photo: CGImage?
     /// Set by the panel's own tracking area, which follows the pointer while News is not the active app as well.
     var hovering = false
-    // The presenter supplies both; an offscreen render has nothing to open or close.
+    /// An Alert-style banner stays until closed, so its close button and actions show without a pointer.
+    var persistent = false
+    // The presenter supplies these; an offscreen render has nothing to open, close or act on.
     var open: () -> Void = {
         // Nothing to open offscreen.
     }
     var close: () -> Void = {
         // Nothing to close offscreen.
     }
+    /// Save, Mark as Read or Open, by `NotificationActionIdentifier`.
+    var act: (String) -> Void = { _ in
+        // Nothing to act on offscreen.
+    }
     @Environment(\.effectiveReduceMotion) private var reduceMotion
+
+    /// Whether the pointer is over the banner or it waits for the reader: the close button and actions show.
+    private var revealed: Bool { hovering || persistent }
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: AppRadius.banner, style: .continuous) }
 
@@ -78,10 +86,11 @@ struct StoryBannerView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(banner.title).foregroundStyle(AppColor.secondaryText)
-                Text(banner.headline)
+                if !banner.headline.isEmpty { Text(banner.headline) }
                 if !banner.body.isEmpty {
                     Text(banner.body).font(.body).lineLimit(3)
                 }
+                if banner.actions, revealed { actionRow }
             }
             .font(.headline)
             .foregroundStyle(AppColor.primaryText)
@@ -103,7 +112,7 @@ struct StoryBannerView: View {
         .clipShape(shape)
         .modifier(BannerSurface(shape: shape))
         .overlay(alignment: .topLeading) {
-            if hovering {
+            if revealed {
                 Button(action: close) {
                     Image(systemName: "xmark.circle.fill")
                         .font(.title3)
@@ -117,7 +126,13 @@ struct StoryBannerView: View {
         }
         .contentShape(shape)
         .onTapGesture(perform: open)
-        .animation(reduceMotion ? nil : AppMotion.hover, value: hovering)
+        // A touch has no hover: a swipe sideways closes the banner, as it does a system banner.
+        .gesture(
+            DragGesture(minimumDistance: AppSpacing.md).onEnded { drag in
+                if abs(drag.translation.width) > AppLayout.bannerSwipeDistance { close() }
+            }
+        )
+        .animation(reduceMotion ? nil : AppMotion.hover, value: revealed)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
             [banner.title, banner.headline, banner.body].filter { !$0.isEmpty }.joined(separator: ", ")
@@ -125,11 +140,34 @@ struct StoryBannerView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default, open)
         .accessibilityAction(named: "Close", close)
+        // Only a story's own banner carries these, so only it offers them to VoiceOver.
+        .accessibilityActions {
+            if banner.actions {
+                Button("Save") { act(NotificationActionIdentifier.save) }
+                Button("Mark as Read") { act(NotificationActionIdentifier.markRead) }
+            }
+        }
+    }
+
+    private var actionRow: some View {
+        HStack(spacing: AppSpacing.md) {
+            actionButton("Save", NotificationActionIdentifier.save)
+            actionButton("Mark as Read", NotificationActionIdentifier.markRead)
+            actionButton("Open", NotificationActionIdentifier.open)
+        }
+        .padding(.top, AppSpacing.xs)
+    }
+
+    private func actionButton(_ title: String, _ identifier: String) -> some View {
+        Button(title) { act(identifier) }
+            .buttonStyle(.plain)
+            .font(.subheadline)
+            .foregroundStyle(AppColor.accentText)
     }
 }
 
-/// Shows story banners in a floating panel while a News window is open on screen, active or not (DESIGN.md 8.7).
-/// Hidden, minimized to the Dock or without a window, the system draws the banner as before.
+/// Shows every banner in a floating panel, whatever state the app is in: active, behind another app, hidden,
+/// minimized or without a window (DESIGN.md 8.7). The panel never hides with the app and outlives its windows.
 @MainActor
 final class StoryBannerPresenter {
     static let shared = StoryBannerPresenter()
@@ -138,8 +176,8 @@ final class StoryBannerPresenter {
     /// How long a banner stays while the pointer is not over it.
     static let lifetime: Duration = .seconds(6)
 
-    /// Tests set this so the presenter's logic runs with nothing ordered on screen: any News window that can become
-    /// main counts as open whether or not it is visible, and the panel is laid out but never ordered front (#991).
+    /// Tests set this so the presenter's logic runs with nothing ordered on screen: the panel is laid out but never
+    /// ordered front (#991).
     var isHeadless = false
 
     private var panel: NSPanel?
@@ -149,16 +187,22 @@ final class StoryBannerPresenter {
         var banner: StoryBanner
         var photo: CGImage?
         var hovering = false
+        /// Stays until closed (the Alert alert style).
+        var persistent = false
+        var screen: NSScreen
     }
     private var shown: Shown?
     /// Read-only banner state for headless regression assertions.
     var hasPresentedPhoto: Bool { shown?.photo != nil }
+    var isShowing: Bool { shown != nil }
+    var panelForTesting: NSPanel? { panel }
+    /// Whether the banner on screen will leave by itself.
+    var hasDismissalTimer: Bool { dismissal.map { !$0.isCancelled } ?? false }
     /// In-flight photo task for headless regression synchronization.
     var photoTaskForTesting: Task<Void, Never>? { photoTask }
     private var dismissal: Task<Void, Never>?
     /// Current banner owns its image request; replacing or closing it cancels obsolete work.
     private var photoTask: Task<Void, Never>?
-    private var visibility: AnyCancellable?
     private let photoLoader: @MainActor @Sendable (URL?, CGFloat) async -> CGImage?
 
     init(
@@ -167,27 +211,6 @@ final class StoryBannerPresenter {
         }
     ) {
         self.photoLoader = photoLoader
-        // The banner follows the window: it leaves when News hides or its last window closes or goes to the Dock.
-        let center = NotificationCenter.default
-        visibility = Publishers.MergeMany(
-            center.publisher(for: NSApplication.didHideNotification),
-            center.publisher(for: NSWindow.willCloseNotification),
-            center.publisher(for: NSWindow.didMiniaturizeNotification)
-        )
-        .receive(on: RunLoop.main)
-        .sink { [weak self] notification in
-            if notification.name == NSWindow.willCloseNotification,
-                let window = notification.object as? NSWindow,
-                let panel = self?.panel,
-                window === panel
-            {
-                return
-            }
-            // A closing window still counts as visible while it closes; the check runs once it is gone.
-            Task { @MainActor in
-                if Self.openWindow() == nil { self?.dismiss() }
-            }
-        }
     }
 
     /// The News window on screen: visible and not minimized, with the app not hidden. It need not be the active app.
@@ -196,32 +219,57 @@ final class StoryBannerPresenter {
         return app.windows.first { $0.isVisible && !$0.isMiniaturized && $0.canBecomeMain }
     }
 
-    /// Shows the banner when a News window is open on screen, and says whether it did; the caller then files the
-    /// notification without a system banner. The text shows at once and the photo joins when it loads.
-    func present(_ banner: StoryBanner) -> Bool {
+    /// The News window, set by `MainWindowMarker`; weak, so a closed window is gone.
+    static weak var mainWindow: NSWindow?
+
+    /// Brings the News window forward for a click on a banner: unhides, restores it when minimized and, when it is
+    /// closed, asks the app to reopen as a click on its Dock icon does, which creates it again, whatever other
+    /// windows (Keyboard Shortcuts, Log) are open. The story a click names waits in `ArticleStore.pendingNavigation`
+    /// until that window loads it.
+    static func showMainWindow() {
+        guard let app = NSApp else { return }
+        if app.isHidden { app.unhide(nil) }
+        if let window = mainWindow, window.isMiniaturized {
+            window.deminiaturize(nil)
+        } else if let window = mainWindow, window.isVisible {
+            // Open but behind other windows, or on another Space: in front of them, so the story is seen.
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: .init())
+        }
+        app.activate()
+    }
+
+    /// Shows the banner and says whether it did: no screen, or a banner that measures empty, shows nothing. The text
+    /// shows at once and the photo joins when it loads. `persistent` keeps it until the reader closes it.
+    func present(_ banner: StoryBanner, persistent: Bool = false) -> Bool {
         let window = isHeadless ? NSApp?.windows.first { $0.canBecomeMain } : Self.openWindow()
         Self.log.notice(
-            "present \(banner.id, privacy: .private(mask: .hash)): active=\(NSApp?.isActive ?? false, privacy: .public) window=\(window != nil, privacy: .public)"
+            "present \(banner.id, privacy: .private(mask: .hash)): active=\(NSApp?.isActive ?? false, privacy: .public) window=\(window != nil, privacy: .public) persistent=\(persistent, privacy: .public)"
         )
-        guard let window, let screen = window.screen ?? NSScreen.main else { return false }
+        guard let screen = window?.screen ?? NSScreen.main ?? NSScreen.screens.first else { return false }
         photoTask?.cancel()
         photoTask = nil
-        shown = Shown(banner: banner)
+        shown = Shown(banner: banner, persistent: persistent, screen: screen)
         guard show(banner, on: screen) else {
-            // Clears an earlier banner and its timer too, so it can't stay beside the system banner.
             dismiss()
             return false
         }
-        if let imageURL = banner.imageURL {
+        if !banner.imageURLs.isEmpty {
             let bannerID = banner.id
             let scale = screen.backingScaleFactor
             let loader = photoLoader
+            let urls = banner.imageURLs
             photoTask = Task { [weak self] in
-                guard let photo = await loader(imageURL, scale), !Task.isCancelled,
-                    let self, self.shown?.banner.id == bannerID
-                else { return }
-                self.shown?.photo = photo
-                self.render()
+                // The first candidate that loads: a lead that is a page, or a logo the reader rejects, is not the photo.
+                for url in urls {
+                    let photo = await loader(url, scale)
+                    guard !Task.isCancelled, let self, self.shown?.banner.id == bannerID else { return }
+                    guard let photo else { continue }
+                    self.shown?.photo = photo
+                    self.render()
+                    return
+                }
             }
         }
         return true
@@ -288,17 +336,25 @@ final class StoryBannerPresenter {
             y: visible.maxY - size.height - AppLayout.bannerMargin, width: size.width, height: size.height)
     }
 
-    private func view(for banner: StoryBanner, photo: CGImage?, hovering: Bool) -> StoryBannerView {
+    private func view(for banner: StoryBanner, photo: CGImage?, hovering: Bool, persistent: Bool) -> StoryBannerView {
         StoryBannerView(
-            banner: banner, photo: photo, hovering: hovering,
+            banner: banner, photo: photo, hovering: hovering, persistent: persistent,
             open: { [weak self] in self?.open(banner) },
-            close: { [weak self] in self?.dismiss() })
+            close: { [weak self] in self?.dismiss() },
+            act: { [weak self] in self?.act($0, on: banner) })
     }
 
-    /// Redraws the banner on screen after its photo or hover state changed.
+    /// Redraws the banner on screen after its photo or hover state changed. Revealing the actions makes it taller, so
+    /// the panel follows its content and stays at the top right.
     private func render() {
-        guard let shown else { return }
-        host?.rootView = view(for: shown.banner, photo: shown.photo, hovering: shown.hovering)
+        guard let shown, let host else { return }
+        host.rootView = view(
+            for: shown.banner, photo: shown.photo, hovering: shown.hovering, persistent: shown.persistent)
+        host.layoutSubtreeIfNeeded()
+        let size = host.fittingSize
+        // A photo that arrives during the slide-in leaves the size alone, so the animation runs on.
+        guard size.width > 1, size.height > 1, let panel, size != panel.frame.size else { return }
+        panel.setFrame(Self.frame(for: size, in: shown.screen.visibleFrame), display: true)
     }
 
     /// Puts the banner on screen, or says it could not, so the caller falls back to the system banner instead of an
@@ -307,7 +363,8 @@ final class StoryBannerPresenter {
         let panel = panel ?? makePanel()
         self.panel = panel
         // The photo is the banner's background, so adding it later leaves the size measured here unchanged.
-        let host = FirstClickHostingView(rootView: view(for: banner, photo: nil, hovering: false))
+        let host = FirstClickHostingView(
+            rootView: view(for: banner, photo: nil, hovering: false, persistent: shown?.persistent ?? false))
         host.hover = { [weak self] inside in self?.hold(inside) }
         // Measured before the panel lays it out, which on a deferred, empty panel can come back empty.
         host.layoutSubtreeIfNeeded()
@@ -353,7 +410,7 @@ final class StoryBannerPresenter {
             render()
         }
         dismissal?.cancel()
-        guard !inside else { return }
+        guard !inside, shown?.persistent != true else { return }
         dismissal = Task { [weak self] in
             try? await Task.sleep(for: Self.lifetime)
             guard !Task.isCancelled else { return }
@@ -366,15 +423,23 @@ final class StoryBannerPresenter {
         if shown == nil { panel?.orderOut(nil) }
     }
 
+    /// A click: the story opens, and a banner without a story brings the app's window forward.
     private func open(_ banner: StoryBanner) {
         dismiss()
-        // A click on the system banner clears the notification from Notification Center; this one does the same.
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [banner.id])
+        guard !banner.userInfo.isEmpty else { return Self.showMainWindow() }
+        route(NotificationActionIdentifier.open, banner)
+    }
+
+    private func act(_ identifier: String, on banner: StoryBanner) {
+        dismiss()
+        route(identifier, banner)
+    }
+
+    private func route(_ identifier: String, _ banner: StoryBanner) {
         Task {
             await NotificationActionRouter.route(
-                actionIdentifier: UNNotificationDefaultActionIdentifier, userInfo: banner.userInfo,
-                articleStore: ArticleStore.shared, readManager: AppContainer.shared.readManager,
-                savedStories: AppContainer.shared.savedStories)
+                actionIdentifier: identifier, userInfo: banner.userInfo, articleStore: ArticleStore.shared,
+                readManager: AppContainer.shared.readManager, savedStories: AppContainer.shared.savedStories)
         }
     }
 
@@ -389,6 +454,8 @@ final class StoryBannerPresenter {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
+        // Hiding the app, closing or minimizing its windows must not take a banner down with them.
+        panel.canHide = false
         panel.isReleasedWhenClosed = false
         panel.becomesKeyOnlyIfNeeded = true
         return panel
@@ -422,5 +489,20 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         hover?(false)
+    }
+}
+
+/// Tells the banner which window is News, so a click can bring that one forward or create it again.
+struct MainWindowMarker: NSViewRepresentable {
+    func makeNSView(context _: Context) -> NSView { Marker() }
+    func updateNSView(_: NSView, context _: Context) {
+        // Nothing changes after the window is known.
+    }
+
+    private final class Marker: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { StoryBannerPresenter.mainWindow = window }
+        }
     }
 }

@@ -168,6 +168,7 @@ struct MainView: View {
             .onReceive(NotificationCenter.default.publisher(for: .jumpToBriefingCommand)) { _ in
                 showSection("Briefing")
             }
+            .background(MainWindowMarker())
             .task(id: pendingNavigationToken) {
                 await handlePendingNavigation()
             }
