@@ -161,7 +161,7 @@ struct SidebarView: View {
         // The filled variant marks the selected row only, as Mail and Notes do.
         Label(title, systemImage: icon.replacingOccurrences(of: ".fill", with: ""))
             .symbolVariant((selectedTopic ?? "Today") == title ? .fill : .none)
-            .badge((capsBadge ? AppSettings.unreadBadgeCopy(count) : count > 0 ? String(count) : nil).map { Text($0) })
+            .badge(Self.badgeLabel(count, capped: capsBadge))
             .overlay(alignment: .trailing) {
                 if isLoading { ProgressView().controlSize(.mini) }
             }
@@ -173,6 +173,17 @@ struct SidebarView: View {
             .simultaneousGesture(TapGesture().onEnded { selectedTopic = title })
             .tag(title)
             .accessibilityValue(isLoading ? "Refreshing" : badgeValue)
+    }
+
+    /// The badge's text: capped counts read "99+" past 99, the others are the count; nothing for zero.
+    private static func badgeLabel(_ count: Int, capped: Bool) -> Text? {
+        let copy: String?
+        if capped {
+            copy = AppSettings.unreadBadgeCopy(count)
+        } else {
+            copy = count > 0 ? String(count) : nil
+        }
+        return copy.map { Text($0) }
     }
 
     private var inboxSection: some View {

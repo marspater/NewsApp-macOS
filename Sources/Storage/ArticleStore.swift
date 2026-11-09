@@ -135,8 +135,8 @@ final class ArticleStore: ObservableObject {
             }
             let loaded = await refreshState()
             self.isReady = loaded
+            startupFailed = !loaded
             if !loaded {
-                startupFailed = true
                 operationError = "Stored articles could not be loaded. Please try again."
             }
             // Only the app's own library owns the Spotlight domain; a restore relaunches into this path (#812).
@@ -221,6 +221,11 @@ final class ArticleStore: ObservableObject {
             // A clear in progress publishes the generation itself, once its reset handler has finished.
             if analysisClearsInProgress == 0, self.analysisGeneration != dbAnalysisGen {
                 self.analysisGeneration = dbAnalysisGen
+            }
+            // A refresh that publishes after a failed startup means the library can be read: it is no longer unavailable.
+            if published, startupFailed {
+                startupFailed = false
+                isReady = true
             }
             if !published {
                 logger.error("Refresh kept being overtaken by read or save changes; trying again shortly")
