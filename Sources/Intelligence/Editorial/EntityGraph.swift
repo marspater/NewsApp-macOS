@@ -67,7 +67,8 @@ enum EntityGraph {
             let total = neighbours.reduce(0) { $0 + $1.weight }
             guard total > 0 else { return [] }
             return neighbours.compactMap { neighbour in
-                index[neighbour.id].map { ($0, neighbour.weight / total) }
+                guard let target = index[neighbour.id] else { return nil }
+                return (target, neighbour.weight / total)
             }
         }
         var rank = [Double](repeating: 1 / count, count: nodes.count)
