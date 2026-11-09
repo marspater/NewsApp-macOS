@@ -215,12 +215,16 @@ struct BriefingLoadContext: Sendable {
     let readIDs: Set<String>
     /// When the edition before this one was selected; nil while the app does not track it.
     let previousEditionStartedAt: Date?
+    /// What orders the stories; loaded with the events before the hero set is chosen.
+    var ranking = BriefingRanking()
 }
 
 /// What the board shows besides the carousel and the World Tension tile: one optional per module, nil hides it.
 struct BriefingBoardData: Equatable, Sendable {
     /// Cited facts and hero images.
     var details = BriefingStoryDetails()
+    /// The ranking the board's stories were ordered by.
+    var ranking = BriefingRanking()
     var sitrep: BriefingSitrepData?
     var sinceLast: BriefingSinceLastData?
     var priority: BriefingPriorityData?
@@ -236,6 +240,7 @@ struct BriefingBoardData: Equatable, Sendable {
     @MainActor
     static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self {
         var data = Self()
+        data.ranking = context.ranking
         data.details = await BriefingStoryDetails.load(for: context.entries, heroIDs: context.heroIDs, store: store)
         data.sitrep = await BriefingSitrepData.load(context, store: store)
         data.sinceLast = await BriefingSinceLastData.load(context, store: store)

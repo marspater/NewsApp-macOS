@@ -1318,6 +1318,27 @@ extension NewsTests {
             BriefingView.heroEntries(entries).map(\.id), ["c", "f", "b", "e", "a"],
             "The carousel shows five stories, most publishers first, edition order breaking ties")
         assertEqual(BriefingView.heroEntries(Array(entries.prefix(2))).count, 2, "Fewer stories show what there is")
+        // Original reports first (wire copies count once), then stored importance, then publishers, then edition order.
+        let wireCopies = (0..<6).map { (publisher: "Daily \($0)", text: "(AP) - Same dispatch") }
+        let independent = (0..<3).map { (publisher: "Paper \($0)", text: "Own reporting \($0)") }
+        let wireSignal = BriefingRanking.signal(reports: wireCopies, importance: nil)
+        assertEqual(wireSignal.originalCount, 1, "Six copies of one wire dispatch count once")
+        assertEqual(
+            BriefingRanking.signal(reports: independent + wireCopies, importance: .major).originalCount, 4,
+            "Independent reports count each, wire copies once together")
+        let ranking = BriefingRanking(signals: [
+            "c": wireSignal,
+            "f": BriefingRanking.signal(reports: independent, importance: nil),
+            "b": BriefingRanking.signal(reports: independent, importance: .major),
+            "e": BriefingRanking.signal(reports: independent, importance: .minor),
+        ])
+        assertEqual(
+            BriefingView.heroEntries(entries, ranking: ranking).map(\.id), ["b", "e", "f", "c", "a"],
+            "Nine publishers of wire copy lose to three of original reporting; importance breaks the tie, a rating beats none"
+        )
+        assertEqual(
+            BriefingThread.ranked(entries, ranking: ranking).first?.summary.eventID, "event-b",
+            "The sitrep and source footprint lead with the same story as the carousel")
         let sections = BriefingView.sections(entries)
         assertEqual(
             sections.map(\.title), ["World", "Business", "Technology", "Science", BriefingView.otherSection],

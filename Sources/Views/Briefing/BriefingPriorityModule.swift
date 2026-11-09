@@ -173,7 +173,7 @@ struct BriefingPriorityData: Equatable, Sendable {
 
     /// nil hides the module.
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
-        let threads = Array(BriefingThread.ranked(context.entries).prefix(3))
+        let threads = Array(BriefingThread.ranked(context.entries, ranking: context.ranking).prefix(3))
         guard !threads.isEmpty else { return nil }
         let priorities =
             (try? await store.database.briefingPriorities(articleIDs: threads.map(\.representative.id))) ?? [:]

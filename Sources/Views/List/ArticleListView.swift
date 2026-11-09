@@ -1064,10 +1064,11 @@ struct ArticleListView: View {
             .task(
                 id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision)"
             ) {
+                let ranking = await BriefingRanking.load(entries: listed, database: articleStore.database)
                 let context = BriefingLoadContext(
-                    entries: listed, heroIDs: Set(BriefingView.heroEntries(listed).map(\.id)), briefing: briefing,
-                    now: Date(), tension: tensionModel?.state ?? WorldTensionState(),
-                    readIDs: readManager.readArticles, previousEditionStartedAt: nil)
+                    entries: listed, heroIDs: Set(BriefingView.heroEntries(listed, ranking: ranking).map(\.id)),
+                    briefing: briefing, now: Date(), tension: tensionModel?.state ?? WorldTensionState(),
+                    readIDs: readManager.readArticles, previousEditionStartedAt: nil, ranking: ranking)
                 let loaded = await BriefingBoardData.load(context, store: articleStore)
                 if !Task.isCancelled { briefingData = loaded }
             }

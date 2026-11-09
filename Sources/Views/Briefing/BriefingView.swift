@@ -162,16 +162,10 @@ struct BriefingView: View {
         self.actions = actions
     }
 
-    /// The carousel's three to five stories: the most publishers first, edition order breaking ties.
-    static func heroEntries(_ entries: [FeedEntry]) -> [FeedEntry] {
-        Array(
-            entries.enumerated()
-                .sorted {
-                    $0.element.publisherCount != $1.element.publisherCount
-                        ? $0.element.publisherCount > $1.element.publisherCount : $0.offset < $1.offset
-                }
-                .map(\.element)
-                .prefix(5))
+    /// The carousel's three to five stories in `BriefingRanking` order: original reports, then stored importance, then
+    /// publishers, then edition order.
+    static func heroEntries(_ entries: [FeedEntry], ranking: BriefingRanking = BriefingRanking()) -> [FeedEntry] {
+        Array(ranking.order(entries).prefix(5))
     }
 
     /// The tiles grouped by topic: the story's category in the app's taxonomy, sections in the order their first story
@@ -349,7 +343,8 @@ struct BriefingView: View {
         switch kind {
         case .heroCarousel:
             BriefingHeroCarouselView(
-                entries: Self.heroEntries(entries.filter(boardFilter.includes)), images: data.details.images,
+                entries: Self.heroEntries(entries.filter(boardFilter.includes), ranking: data.ranking),
+                images: data.details.images,
                 readIDs: readIDs, clock: clock, isReaderOpen: isMotionPaused, onOpen: actions.open)
         case .worldTension:
             // Reads the window's World Tension model, as the sidebar does (#781).
