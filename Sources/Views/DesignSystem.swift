@@ -249,6 +249,11 @@ enum AppLayout {
     static let entityDossierWidth: CGFloat = 360
     static let entityDossierMaxHeight: CGFloat = 520
     static let entityChartHeight: CGFloat = 96
+    /// The Compare Perspectives sheet (W3 #717): wide enough for two columns, never narrower than the stacked layout.
+    static let dualReaderSheetWidth: CGFloat = 1240
+    static let dualReaderSheetHeight: CGFloat = 760
+    static let dualReaderSheetMinimumWidth: CGFloat = 720
+    static let dualReaderSheetMinimumHeight: CGFloat = 520
     static let keyboardShortcutsPopoverWidth: CGFloat = 380
     static let searchSuggestionIconWidth: CGFloat = 16
     static let publisherMonogramSize: CGFloat = 32

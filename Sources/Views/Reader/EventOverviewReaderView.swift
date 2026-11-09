@@ -86,6 +86,9 @@ struct EventOverviewReaderView: View {
     /// Collapsed until the person opens it; their choice holds for the rest of the session (DESIGN.md 9, #596).
     @MainActor static var sourcesExpandedThisSession = false
     @State private var isSourcesExpanded = Self.sourcesExpandedThisSession
+    /// The publishers whose reports are long enough to compare, and whether the comparison sheet is open (W3 #717).
+    @State private var comparableReports: [PerspectiveReport] = []
+    @State private var showsComparison = false
 
     // MARK: - Layout Metrics & Bounds
     nonisolated static let horizontalPageInset = AppLayout.pageInset
@@ -555,6 +558,12 @@ struct EventOverviewReaderView: View {
         .background(AppColor.background)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Event overview: \(overview.title)")
+        .task(id: memberArticles.map(\.id)) {
+            comparableReports = PerspectiveReports.candidates(from: memberArticles)
+        }
+        .sheet(isPresented: $showsComparison) {
+            DualReaderSheet(reports: comparableReports, eventID: overview.eventID)
+        }
     }
 
     // MARK: - Section 1: Header
@@ -612,6 +621,17 @@ struct EventOverviewReaderView: View {
                     .foregroundStyle(currentSecondaryTextColor)
                     .monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if comparableReports.count >= 2 {
+                Button {
+                    showsComparison = true
+                } label: {
+                    Label("Compare Perspectives", systemImage: "arrow.left.arrow.right")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Read two publishers' reports of this story side by side")
             }
         }
     }

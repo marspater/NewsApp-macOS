@@ -20,31 +20,40 @@ public enum PerspectiveContrastType: String, Codable, Sendable, CaseIterable {
     case divergence
     case uniqueLead
 
+    /// What a passage shows against the other report, in words that judge neither publisher (#717): both say it, they
+    /// say it differently, or only this report says it.
     public var displayName: String {
         switch self {
         case .consensus:
-            return "Consensus"
+            return "Both report"
         case .divergence:
-            return "Divergence"
+            return "Reported differently"
         case .uniqueLead:
-            return "Unique Lead"
+            return "Only in this report"
         }
     }
 
+    /// `sparkles` is reserved for generated content (DESIGN.md 9, 14); a comparison by meaning is not generated text.
     public var systemIcon: String {
         switch self {
         case .consensus:
-            return "checkmark.seal.fill"
+            return "equal.circle"
         case .divergence:
-            return "arrow.triangle.swap"
+            return "arrow.triangle.branch"
         case .uniqueLead:
-            return "sparkles"
+            return "doc.badge.plus"
         }
     }
 }
 
 /// Aligned pair of passages across two perspectives with contrast categorization.
 public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
+    /// The report a unique lead belongs to.
+    public enum Side: String, Codable, Sendable {
+        case left
+        case right
+    }
+
     public let id: String
     public let leftPassageIndex: Int
     public let rightPassageIndex: Int
@@ -52,6 +61,8 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
     public let rightSnippet: String
     public let similarityScore: Float
     public let contrastType: PerspectiveContrastType
+    /// For a unique lead, the report whose passage has no counterpart; the other index only names its closest passage.
+    public let uniqueSide: Side?
 
     public init(
         id: String = UUID().uuidString,
@@ -60,7 +71,8 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
         leftSnippet: String,
         rightSnippet: String,
         similarityScore: Float,
-        contrastType: PerspectiveContrastType
+        contrastType: PerspectiveContrastType,
+        uniqueSide: Side? = nil
     ) {
         self.id = id
         self.leftPassageIndex = leftPassageIndex
@@ -69,6 +81,7 @@ public struct PassageContrastPair: Identifiable, Hashable, Codable, Sendable {
         self.rightSnippet = rightSnippet
         self.similarityScore = similarityScore
         self.contrastType = contrastType
+        self.uniqueSide = uniqueSide
     }
 
     /// A unique lead names the closest passage of the other article only for reference; it is not a match.
@@ -123,6 +136,20 @@ public struct DualReaderSession: Identifiable, Hashable, Sendable {
     public var divergenceScore: Double {
         guard !passageAlignments.isEmpty else { return 0.0 }
         return Double(divergenceCount) / Double(passageAlignments.count)
+    }
+
+    /// How the left report's passage stands against the right report: the pair it opens, which is a unique lead when
+    /// nothing in the other report says it.
+    public func pair(forLeft index: Int) -> PassageContrastPair? {
+        passageAlignments.first { $0.leftPassageIndex == index && $0.uniqueSide != .right }
+    }
+
+    /// How the right report's passage stands against the left report: the strongest left passage that chose it, else
+    /// the unique lead that names it. A passage that is only some unmatched passage's closest guess has no pair.
+    public func pair(forRight index: Int) -> PassageContrastPair? {
+        passageAlignments.filter { $0.rightPassageIndex == index && $0.hasCounterpart }
+            .max { $0.similarityScore < $1.similarityScore }
+            ?? passageAlignments.first { $0.rightPassageIndex == index && $0.uniqueSide == .right }
     }
 }
 
