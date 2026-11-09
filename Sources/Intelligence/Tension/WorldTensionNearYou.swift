@@ -197,12 +197,16 @@ extension DatabaseEngine {
     func tensionLocalStories(since date: Date, words: [String]) throws -> [TensionLocalStory] {
         guard !words.isEmpty else { return [] }
         let clause = Array(repeating: "lower(a.title) LIKE ?", count: words.count).joined(separator: " OR ")
+        // The reader's library: stories of panel feeds the reader has not subscribed to stay out, as in every list.
+        let scope = collectionScope()
         let rows = try eventRows(
             """
             SELECT a.title, a.source, a.published_at FROM articles a
-            WHERE \(Self.visibleArticle) AND a.published_at >= ? AND (\(clause))
+            WHERE \(Self.visibleArticle) \(scope.sql) AND a.published_at >= ? AND (\(clause))
             ORDER BY a.published_at;
-            """, [.real(date.timeIntervalSince1970)] + words.map { .text("%\($0)%") })
+            """,
+            scope.params.map { .text("\($0.val)") } + [.real(date.timeIntervalSince1970)]
+                + words.map { .text("%\($0)%") })
         return rows.compactMap { row in
             guard let title = row[0], let publisher = row[1], let seconds = row[2].flatMap(Double.init) else {
                 return nil

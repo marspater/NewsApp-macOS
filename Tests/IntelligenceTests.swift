@@ -422,6 +422,17 @@ extension NewsTests {
         let words = WorldTensionNearYou.neighbourWords + poland.words
         let found = try await database.tensionLocalStories(since: now.addingTimeInterval(-7 * 86400), words: words)
         assertEqual(found.count, 9, "The library returns the titles that name a place of the lens")
+        // Stories of a panel feed the reader has not subscribed to are not the reader's library.
+        let panelURL = "https://example.com/panel-near-you.xml"
+        try await database.upsertArticles(
+            [
+                FeedArticle(
+                    title: "Russian drone attack hits Lviv", link: "https://example.com/panel-only", guid: "panel-only",
+                    description: "", pubDate: now.addingTimeInterval(-3600), source: "Panel Wire")
+            ], feedUrl: panelURL)
+        await database.setCollectionOnlyFeedURLs([panelURL])
+        let scoped = try await database.tensionLocalStories(since: now.addingTimeInterval(-7 * 86400), words: words)
+        assertEqual(scoped.count, 9, "A collection-only panel story stays out of the lens")
         assertEqual(
             WorldTensionNearYou.apply(to: [reading(0, 40)], stories: found, region: poland, now: now)[0].assessment
                 .score,
