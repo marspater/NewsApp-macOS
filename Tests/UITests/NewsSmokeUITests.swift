@@ -180,6 +180,10 @@ final class NewsSmokeUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["Image credit: Fixture Photo Desk"].waitForExistence(timeout: 20),
             "The credit line did not appear")
+        // The image decoded: its loading placeholder is gone, so the walk covers the loaded state.
+        let loading = app.descendants(matching: .any)["Loading story image"]
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: loading)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 20), .completed, "The lead image did not finish loading")
         XCTAssertTrue(walkAccessibilityTree().contains("Image credit: Fixture Photo Desk"))
     }
 
