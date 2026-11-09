@@ -219,15 +219,19 @@ final class StoryBannerPresenter {
         return app.windows.first { $0.isVisible && !$0.isMiniaturized && $0.canBecomeMain }
     }
 
-    /// Brings the app's window forward for a click on a banner: unhides, restores a minimized window and, with none
-    /// left, asks the app to reopen as a click on its Dock icon does, which creates the main window. The story a click
-    /// names waits in `ArticleStore.pendingNavigation` until that window loads it.
+    /// The News window, set by `MainWindowMarker`; weak, so a closed window is gone.
+    static weak var mainWindow: NSWindow?
+
+    /// Brings the News window forward for a click on a banner: unhides, restores it when minimized and, when it is
+    /// closed, asks the app to reopen as a click on its Dock icon does, which creates it again, whatever other
+    /// windows (Keyboard Shortcuts, Log) are open. The story a click names waits in `ArticleStore.pendingNavigation`
+    /// until that window loads it.
     static func showMainWindow() {
         guard let app = NSApp else { return }
         if app.isHidden { app.unhide(nil) }
-        let windows = app.windows.filter { $0.canBecomeMain }
-        for window in windows where window.isMiniaturized { window.deminiaturize(nil) }
-        if windows.allSatisfy({ !$0.isVisible && !$0.isMiniaturized }) {
+        if let window = mainWindow, window.isMiniaturized {
+            window.deminiaturize(nil)
+        } else if mainWindow?.isVisible != true {
             NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: .init())
         }
         app.activate()
@@ -482,5 +486,20 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         hover?(false)
+    }
+}
+
+/// Tells the banner which window is News, so a click can bring that one forward or create it again.
+struct MainWindowMarker: NSViewRepresentable {
+    func makeNSView(context _: Context) -> NSView { Marker() }
+    func updateNSView(_: NSView, context _: Context) {
+        // Nothing changes after the window is known.
+    }
+
+    private final class Marker: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { StoryBannerPresenter.mainWindow = window }
+        }
     }
 }
