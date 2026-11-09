@@ -48,6 +48,26 @@ extension NativeSuites {
             #expect(session.passageAlignments.isEmpty)
         }
 
+        @Test func shortSentencesStayAndLabelsGo() async {
+            let service = DualReaderAlignmentService()
+            let passages = await service.extractPassages(
+                title: "Resignation",
+                content: "The president resigned.\n\nHe resigned.\n\n\u{201C}He resigned.\u{201D}\n\nRead more\n\nShare"
+            )
+            #expect(
+                passages == ["Resignation", "The president resigned.", "He resigned.", "\u{201C}He resigned.\u{201D}"])
+        }
+
+        @Test func uniqueLeadHasNoCounterpart() {
+            func pair(_ type: PerspectiveContrastType) -> PassageContrastPair {
+                PassageContrastPair(
+                    leftPassageIndex: 0, rightPassageIndex: 1, leftSnippet: "a", rightSnippet: "b",
+                    similarityScore: 0.1, contrastType: type)
+            }
+            #expect(!pair(.uniqueLead).hasCounterpart)
+            #expect(pair(.divergence).hasCounterpart && pair(.consensus).hasCounterpart)
+        }
+
         @Test func lexicalVectorEmbedding() async {
             let service = DualReaderAlignmentService()
             let vector = await service.fallbackLexicalVector(

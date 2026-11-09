@@ -72,8 +72,8 @@ extension NativeSuites {
             let service = HotspotProjectionService()
 
             let kyiv = service.resolveCoordinate(for: "Kyiv, Ukraine")
-            #expect(kyiv != nil)
-            #expect(kyiv?.latitude ?? 0 > 45.0)
+            // The first place in word order wins: Kyiv's own centroid, not Ukraine's.
+            #expect(kyiv == GeographicCoordinate(latitude: 50.45, longitude: 30.52))
 
             let gaza = service.resolveCoordinate(for: "Gaza City")
             #expect(gaza != nil)
@@ -105,6 +105,7 @@ extension NativeSuites {
                     headline("C2", "Troops fight near Kyiv", "Wire B"),
                     headline("C3", "Weather mild in Paris this week", "Wire C"),
                     headline("P1", "Airstrike on Gaza kills dozens", "Wire A"),
+                    headline("P2", "Airstrike hits Kyiv overnight", "Wire A"),
                 ],
                 assessment: WorldTensionAssessment(score: 50, summary: "", reasons: []))
             let hotspots = WorldTensionHotspots(reading: reading)
@@ -124,6 +125,8 @@ extension NativeSuites {
             // The same title decides the table filter.
             let kyiv = hotspots.pins[0]
             #expect(WorldTensionHotspots.matches(reading.headlines[0], pin: kyiv, region: nil))
+            // Only current headlines produced the pin, so a preceding-six-days headline about the place is not evidence.
+            #expect(!WorldTensionHotspots.matches(reading.headlines[4], pin: kyiv, region: nil))
             #expect(!WorldTensionHotspots.matches(reading.headlines[2], pin: kyiv, region: nil))
             #expect(WorldTensionHotspots.matches(reading.headlines[0], pin: nil, region: hotspots.regions[0]))
 
@@ -174,6 +177,14 @@ extension NativeSuites {
             #expect(!WorldTensionHotspots.matches(priorUkraine, pin: nil, region: ukraine))
             #expect(!WorldTensionHotspots.matches(neutralUkraine, pin: nil, region: ukraine))
             #expect(!WorldTensionHotspots.matches(inChina, pin: nil, region: korea))
+        }
+
+        @Test func pulsePhaseStaysInOneCycle() {
+            for time in [0.0, 0.5, 1.99, 2.0, 123_456.789, -0.5] {
+                let phase = GlobalHotspotMapView.pulsePhase(at: time)
+                #expect(phase >= 0.0 && phase < 1.0)
+            }
+            #expect(GlobalHotspotMapView.pulsePhase(at: 1.0) == 0.5)
         }
 
         @Test func hotspotRegionTensionClassification() {

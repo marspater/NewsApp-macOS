@@ -63,6 +63,9 @@ public struct HotspotClusterPin: Identifiable, Hashable, Codable, Sendable {
     public let tensionScore: Double
     public let topPublisherIds: [String]
     public let storyCount: Int
+    /// True for a country, a sea or a region: the coordinate is the center of an area, never where anything happened,
+    /// and the map says so (#718).
+    public let isApproximate: Bool
 
     public init(
         id: String,
@@ -70,7 +73,8 @@ public struct HotspotClusterPin: Identifiable, Hashable, Codable, Sendable {
         coordinate: GeographicCoordinate,
         tensionScore: Double,
         topPublisherIds: [String],
-        storyCount: Int
+        storyCount: Int,
+        isApproximate: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -78,6 +82,7 @@ public struct HotspotClusterPin: Identifiable, Hashable, Codable, Sendable {
         self.tensionScore = tensionScore
         self.topPublisherIds = topPublisherIds
         self.storyCount = storyCount
+        self.isApproximate = isApproximate
     }
 
     public var tensionLevel: HotspotTensionLevel {

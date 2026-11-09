@@ -191,6 +191,113 @@
                 try await Task.sleep(for: .seconds(86_400 * 365))
             }
         }
+
+        // MARK: Entity dossier (W2 #716)
+
+        static let entity = EntityRecord(
+            id: "organization:harbour-authority", canonicalName: "Harbour Authority", entityType: .organization,
+            storyCount: 21, firstSeen: now.addingTimeInterval(-26 * 86_400), lastSeen: now, centrality: 0.004)
+
+        static let relatedEntities: [RelatedEntity] = [
+            RelatedEntity(
+                entity: EntityRecord(
+                    id: "place:northern-channel", canonicalName: "Northern Channel", entityType: .place, storyCount: 9,
+                    firstSeen: now.addingTimeInterval(-20 * 86_400), lastSeen: now, centrality: 0.002),
+                sharedStories: 8, score: 0.31),
+            RelatedEntity(
+                entity: EntityRecord(
+                    id: "person:maria-ortega", canonicalName: "Maria Ortega", entityType: .person, storyCount: 6,
+                    firstSeen: now.addingTimeInterval(-12 * 86_400), lastSeen: now, centrality: 0.001),
+                sharedStories: 4, score: 0.22),
+        ]
+
+        /// Thirty days of coverage with a quiet start and a busy last week.
+        static let entityDossier = EntityDossier(
+            entity: entity,
+            coverage: [0, 0, 1, 0, 0, 2, 1, 0, 0, 0, 1, 0, 3, 1, 0, 0, 2, 0, 1, 0, 0, 4, 2, 1, 0, 1, 3, 2, 1, 2]
+                .enumerated().map { day, count in
+                    EntityCoverageDay(
+                        day: DatabaseEngine.windowStart(now: now).addingTimeInterval(Double(day) * 86_400),
+                        storyCount: count)
+                },
+            publishers: [
+                EntityPublisherShare(publisher: "Reuters", storyCount: 9, share: 0.43),
+                EntityPublisherShare(publisher: "Associated Press", storyCount: 7, share: 0.33),
+                EntityPublisherShare(publisher: "Metro Desk", storyCount: 5, share: 0.24),
+            ],
+            recentStories: articles.map {
+                EntityStoryReference(id: $0.id, title: $0.title, publisher: $0.source, date: $0.pubDate)
+            },
+            related: relatedEntities)
+
+        /// Chips and dossiers without a library.
+        static let entitySource = EntitySource(
+            entities: { _ in [entity] + relatedEntities.map(\.entity) }, dossier: { _ in entityDossier })
+
+        // MARK: Hotspot map (W4 #718)
+
+        /// Five places from the bundled lookup: two cities, a territory, a country and a sea, which draw differently.
+        static let hotspotPins: [HotspotClusterPin] = {
+            let service = HotspotProjectionService()
+            func pin(_ name: String, tension: Double, stories: Int) -> HotspotClusterPin? {
+                guard let place = service.resolveLocation(for: name) else { return nil }
+                return HotspotClusterPin(
+                    id: place.name, title: place.name.capitalized, coordinate: place.coordinate, tensionScore: tension,
+                    topPublisherIds: ["Reuters"], storyCount: stories, isApproximate: service.isApproximate(place.name))
+            }
+            return [
+                pin("Kyiv", tension: 82, stories: 6), pin("Gaza", tension: 74, stories: 5),
+                pin("Sudan", tension: 55, stories: 3), pin("Taipei", tension: 38, stories: 2),
+                pin("Red Sea", tension: 31, stories: 2),
+            ].compactMap { $0 }
+        }()
+
+        static let hotspotRegions: [HotspotRegion] = [("UA", 82.0, 1, 6), ("ME", 74.0, 1, 5), ("TW", 38.0, 1, 2)]
+            .compactMap {
+                id, tension, places, stories in
+                HotspotProjectionService.regionAnchors.first { $0.id == id }.map {
+                    HotspotRegion(
+                        id: $0.id, name: $0.name, centroid: $0.centroid, tensionScore: tension,
+                        activeClusterCount: places,
+                        articleCount: stories)
+                }
+            }
+
+        // MARK: Compare Perspectives (W3 #717)
+
+        static let comparisonLeft = [
+            "Harbour authority reopens the northern channel after storm damage",
+            "Ferries resume a reduced timetable while divers inspect the breakwater.",
+            "The authority said the channel will stay closed to freight until Friday.",
+            "Residents on the quay were told to expect noise from repair crews overnight.",
+        ]
+
+        static let comparisonRight = [
+            "Northern channel reopens to ferries after storm repairs",
+            "A reduced ferry timetable starts today as divers check the breakwater for cracks.",
+            "A port spokesperson blamed the delay on a late delivery of replacement bollards.",
+        ]
+
+        /// Hand-built alignment: two passages both reports have, one they word differently and one only the left has.
+        /// Previews never run the embedder, so nothing here is computed.
+        static let comparisonSession = DualReaderSession(
+            clusterId: "preview", leftArticleId: "left", rightArticleId: "right", leftPublisherName: "Reuters",
+            rightPublisherName: "Metro Desk",
+            passageAlignments: [
+                PassageContrastPair(
+                    leftPassageIndex: 0, rightPassageIndex: 0, leftSnippet: comparisonLeft[0],
+                    rightSnippet: comparisonRight[0], similarityScore: 0.86, contrastType: .consensus),
+                PassageContrastPair(
+                    leftPassageIndex: 1, rightPassageIndex: 1, leftSnippet: comparisonLeft[1],
+                    rightSnippet: comparisonRight[1], similarityScore: 0.83, contrastType: .consensus),
+                PassageContrastPair(
+                    leftPassageIndex: 2, rightPassageIndex: 2, leftSnippet: comparisonLeft[2],
+                    rightSnippet: comparisonRight[2], similarityScore: 0.61, contrastType: .divergence),
+                PassageContrastPair(
+                    leftPassageIndex: 3, rightPassageIndex: 2, leftSnippet: comparisonLeft[3],
+                    rightSnippet: comparisonRight[2], similarityScore: 0.2, contrastType: .uniqueLead,
+                    uniqueSide: .left),
+            ])
     }
 
     /// The stores a previewed view reads from the environment, built once per preview session: an in-memory library,
