@@ -20,18 +20,29 @@ struct WorldTensionHotspots: Equatable, Sendable {
     let pins: [HotspotClusterPin]
     var isEmpty: Bool { pins.isEmpty }
 
+    private struct Place {
+        let coordinate: GeographicCoordinate
+        var headlines: [WorldTensionHeadline] = []
+        var weight = 0.0
+    }
+
+    private struct Total {
+        var pins = 0
+        var stories = 0
+        var weight = 0.0
+    }
+
     /// Pins are one per named place; regions group the pins that fall within reach of their anchor. A headline counts
     /// only when it names a mapped place and carries a tension cue (`WorldTensionAssessment.weight`), and a
     /// place's or region's tension is the index the calibrated scale gives the summed cue weight of its headlines.
     /// Nothing is stored or assumed: a place or region no headline reaches is absent, not zero.
     init(reading: WorldTensionReading, service: HotspotProjectionService = HotspotProjectionService()) {
         let scale = TensionWeights.calibratedV1.scaleRawScore
-        var places: [String: (coordinate: GeographicCoordinate, headlines: [WorldTensionHeadline], weight: Double)] =
-            [:]
+        var places: [String: Place] = [:]
         for headline in reading.headlines where headline.id.hasPrefix("C") {
             let weight = WorldTensionAssessment.weight(of: headline)
             guard weight > 0, let place = service.resolveLocation(for: headline.title) else { continue }
-            places[place.name, default: (place.coordinate, [], 0)].headlines.append(headline)
+            places[place.name, default: Place(coordinate: place.coordinate)].headlines.append(headline)
             places[place.name]?.weight += weight
         }
         pins = places.map { name, place in
@@ -42,10 +53,10 @@ struct WorldTensionHotspots: Equatable, Sendable {
                 storyCount: place.headlines.count)
         }.sorted { ($1.tensionScore, $1.storyCount, $1.id) < ($0.tensionScore, $0.storyCount, $0.id) }
 
-        var regionTotals: [String: (pins: Int, stories: Int, weight: Double)] = [:]
+        var regionTotals: [String: Total] = [:]
         for place in places.values {
             guard let region = service.closestRegion(for: place.coordinate) else { continue }
-            regionTotals[region.id, default: (0, 0, 0)].pins += 1
+            regionTotals[region.id, default: Total()].pins += 1
             regionTotals[region.id]?.stories += place.headlines.count
             regionTotals[region.id]?.weight += place.weight
         }
