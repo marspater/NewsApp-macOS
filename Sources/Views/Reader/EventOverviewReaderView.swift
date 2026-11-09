@@ -558,7 +558,7 @@ struct EventOverviewReaderView: View {
         .background(AppColor.background)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Event overview: \(overview.title)")
-        .task(id: memberArticles.map(\.id)) {
+        .task(id: PerspectiveReports.inputs(of: memberArticles)) {
             comparableReports = PerspectiveReports.candidates(from: memberArticles)
         }
         .sheet(isPresented: $showsComparison) {

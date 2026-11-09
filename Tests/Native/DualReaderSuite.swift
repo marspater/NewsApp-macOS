@@ -123,6 +123,40 @@ extension NativeSuites {
             #expect(session.consensusScore > 0)
         }
 
+        @Test func aSessionSaysWhenTheLexicalFallbackMadeTheVectors() async {
+            func input(_ id: String) -> DualReaderAlignmentService.ArticleInput {
+                .init(
+                    id: id, title: "Summit Concludes in Geneva",
+                    content:
+                        "Negotiators from all participating nations concluded bilateral talks in Geneva on Friday morning.",
+                    publisher: "Wire \(id)")
+            }
+            // A stand-in neural embedder: one unit vector per passage length.
+            let neural: @Sendable (String) async -> [Float]? = { text in
+                var vector = [Float](repeating: 0, count: DualReaderAlignmentService.vectorDimension)
+                vector[text.count % DualReaderAlignmentService.vectorDimension] = 1
+                return vector
+            }
+
+            let meaning = await DualReaderAlignmentService(embed: neural).align(left: input("a"), right: input("b"))
+            #expect(!meaning.passageAlignments.isEmpty)
+            #expect(!meaning.usesLexicalFallback, "A session the neural embedder read says nothing about words")
+
+            let words = await DualReaderAlignmentService(embed: { _ in nil }).align(left: input("a"), right: input("b"))
+            #expect(!words.passageAlignments.isEmpty)
+            #expect(words.usesLexicalFallback, "Every vector is a word count, and the session says so")
+
+            // One passage the embedder cannot read switches the whole session: one embedding space.
+            let partial = await DualReaderAlignmentService(embed: { text in
+                text.hasPrefix("Negotiators") ? nil : await neural(text)
+            }).align(left: input("a"), right: input("b"))
+            #expect(partial.usesLexicalFallback)
+
+            #expect(DualReaderView.methodCaption(usesLexicalFallback: false) == "Compared by meaning on this Mac")
+            #expect(DualReaderView.methodCaption(usesLexicalFallback: true).contains("shared words"))
+            #expect(!DualReaderView.methodCaption(usesLexicalFallback: true).contains("by meaning"))
+        }
+
         @Test func adaptiveLayoutMode() {
             #expect(DualReaderLayoutMode.mode(for: 1400) == .sideBySide)
             #expect(DualReaderLayoutMode.mode(for: 1200) == .sideBySide)

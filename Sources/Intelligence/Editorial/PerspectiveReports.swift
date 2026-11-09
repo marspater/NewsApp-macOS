@@ -28,13 +28,23 @@ enum PerspectiveReports {
     /// Fewer words than this compare headlines, not reporting.
     static let minimumWords = 60
 
+    private static func text(of article: FeedArticle) -> String {
+        [article.fullContent, article.description].compactMap { $0 }.first { !$0.isEmpty } ?? ""
+    }
+
+    /// What `candidates(from:)` reads, per article. A view keys its task on this, so a member whose text arrives or
+    /// changes after the overview opened is read again, not only when the set of members changes.
+    static func inputs(of articles: [FeedArticle]) -> [String] {
+        articles.map { "\($0.id):\($0.publisherName):\(text(of: $0).utf8.count)" }
+    }
+
     /// One report per publisher, the one with the most text, richest first, so the first two are the fullest accounts.
     /// A publisher counts once however many reports it has, and a report too short to compare is left out; an event
     /// with fewer than two such publishers has nothing to compare and shows no "Compare Perspectives" action.
     static func candidates(from articles: [FeedArticle]) -> [PerspectiveReport] {
         var richest: [String: PerspectiveReport] = [:]
         for article in articles {
-            let text = [article.fullContent, article.description].compactMap { $0 }.first { !$0.isEmpty } ?? ""
+            let text = text(of: article)
             let words = text.split(whereSeparator: \.isWhitespace).count
             guard words >= minimumWords else { continue }
             let report = PerspectiveReport(
