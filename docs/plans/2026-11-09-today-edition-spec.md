@@ -1,6 +1,6 @@
 # Today edition: specification for sign-off (Z1, #933)
 
-**Status:** Mars approved the mocks on 9 November 2026. Nothing in Z2–Z6 (#934–#938) starts before the design documents are approved.
+**Status:** Mars approved the mocks and signed off the design documents in `docs/design/` on 9 November 2026. Two decisions in section 4 are still open: the thresholds in section 2.2 and the order of Your Beat and The Deep Read. Z2 (#934) does not fix the lane order or the Deep Read bar before the second is decided.
 **Date:** 9 November 2026
 **Epic:** Z · Today edition (#932)
 **Presentation:** [`docs/design/today.md`](../design/today.md) owns lanes, card variants, The Lead, scrolling, focus, updates and states, with its visual references. This document keeps the quality bars, thresholds, shadow evaluation and open decisions.
@@ -34,7 +34,7 @@ Lane names are Title Case (DESIGN.md 17). Descriptions never claim completeness:
 2. **No topic lanes.** Sections stay in the sidebar.
 3. **No Briefing duplication.** No situation assessments, macro gauges, strategic impact or weak-signal analysis. The Lead and the Briefing hero will often hold the same stories; The Lead ranks them by Z2's editorial score, not by publisher count, and shows no analysis.
 4. **One story, one lane,** by the order above. The module takes story entries (the story layer, #581), never individual publisher reports, so an event cannot appear twice.
-5. **Subscriptions are the candidate pool.** Only the reader's selected publishers can enter Today. Publisher affinity raises a story's rank.
+5. **Subscriptions are the candidate pool.** Only the reader's selected publishers can enter Today. Publisher affinity raises a story's rank: with full weight in Your Beat, and as a tie-breaker only in The Lead, where it never lifts a one-report story onto a slide (Mars, 9 November 2026).
 6. **The Latest is the safety net.** Personalisation shapes discovery and ranking and never hides an ordinary story.
 
 ### 2.2 Quality bars
@@ -66,18 +66,45 @@ Z2 runs the assignment on a copy of a real library in a test-build mode and writ
 
 ## 3. Why The Latest is a vertical grid
 
-The Latest holds everything that did not place: on a 60-feed library that is most of the day's stories. A horizontal row of a hundred compact cards cannot be scanned, cannot page, and would turn the safety net into the lane people never reach. A vertical grid keeps the existing paging, the existing list/grid toolbar control (the grid shows Compact cards; the list shows today's list card) and the existing prefetch. **Decision for Mars:** the alternative is a horizontal row like the others, capped at the first page, with "Show all" opening the rest below. The mock shows the grid.
+The Latest holds everything that did not place: on a 60-feed library that is most of the day's stories. A horizontal row of a hundred compact cards cannot be scanned, cannot page, and would turn the safety net into the lane people never reach. A vertical grid keeps the existing paging, the existing list/grid toolbar control (the grid shows Compact cards; the list shows today's list card) and the existing prefetch. Mars approved the grid with the mocks on 9 November 2026.
 
-## 4. Decisions for Mars
+## 4. Decisions
 
-1. **The Latest as a vertical grid** (section 3), or a horizontal row like the other lanes.
-2. **Publisher affinity in The Lead** (Z2's open decision): full weight as rule 5 reads, or a tie-breaker in The Lead with full weight in Your Beat. The spec assumes the tie-breaker reading; affinity never lifts a one-report story into The Lead.
-3. **Coverage card at 39 % recall**: ship in Z6 behind the gate in section 2.2, or hold it until #737 improves recall.
-4. **The thresholds in section 2.2** as the starting point for Z2's shadow evaluation.
-5. **The masthead above The Lead** (as every other list), or The Lead first with "Today" layered over its image.
+Recorded on #933 on 9 November 2026.
+
+| Decision | Outcome |
+| --- | --- |
+| The Latest | A vertical grid of Compact cards, as the approved mocks show |
+| The masthead | Above The Lead, status only apart from the muted-stories menu |
+| Publisher affinity in The Lead | A tie-breaker. Full weight in Your Beat. Affinity never lifts a one-report story into The Lead |
+| Coverage card at 39 % recall | Ships with Z6 (#938) behind the gate in section 2.2. Clustering recall is worked on separately under #737 |
+| Story card radius | 16 pt, delivered by Z6 (DESIGN.md section 12) |
+| Headline typeface | The system serif. Newsreader in the mocks maps to it and the app bundles no typeface (DESIGN.md section 10) |
+| Design documents in `docs/design/` | Signed off |
+
+Still open:
+
+1. **The thresholds in section 2.2.** Each number there is a first guess at how good a story must be to enter a lane, for example "The Deep Read needs a reading time of 8 minutes or more". The question is only whether Z2 may start its measurement from these guesses. Z2 then runs them on a copy of a real library, reports what each lane would have shown, and proposes the final numbers for a second review. Nothing here ships to readers.
+2. **The order of Your Beat and The Deep Read.** Section 4.1.
+
+### 4.1 Your Beat before The Deep Read: reassessment
+
+Mars asked for this order to be reassessed on 9 November 2026. Reading the code the lanes would be built on shows three problems. The first two come from the order; the third holds in either order.
+
+1. **The two lanes measure different things, and the order makes one starve the other.** Your Beat asks whether a story is close to the reader; The Deep Read asks what kind of story it is. A story enters the first lane it clears, so with Your Beat first, a long investigation on a subject the reader follows becomes a Standard card in Your Beat. The Deep Read is left with the long reads the reader does not follow, which is the job of Outside Your Usual.
+2. **Your Beat's bar is too wide to sit in front of anything.** The interest profile (`DatabaseEngine.briefingInterests`) is a count per category over twelve categories (Technology, Science, Business, Politics, World and seven more), and a starred feed qualifies every one of its stories. "Interest match ≥ 0.50" against twelve categories matches most of a reader's library, so Your Beat fills to its cap first and whatever overflows is what the later lanes see. Publisher affinity, the third signal, does not exist in the code yet.
+3. **The Deep Read's evidence is not there when lanes are assigned.** Reading time is computed in the reader from the rendered story (`ArticleDetailView.readingTimeEstimate`). The full text is fetched only when a story is opened or an overview is generated; until then a story holds whatever its feed carried, often a teaser. Z2 is specified as one pure module over stored signals, so it cannot know that an unopened story is an 8-minute read. Fetching every candidate's page to find out is a network, battery and privacy cost that the Today load budget (Z5 #937) has not accepted.
+
+Proposal, for Mars to decide:
+
+- **Assign The Deep Read before Your Beat.** The narrow lane about the kind of story takes its few stories first; Your Beat, which is broad, takes from the rest. A long read on a subject the reader follows then shows as a Feature card in The Deep Read. The order becomes The Lead, In Motion, The Deep Read, Your Beat, Outside Your Usual, The Latest; the order on the page can stay as the mocks show it, because assignment order and page order are separate.
+- **The Deep Read uses stored evidence only.** A story qualifies from text the app already holds (a feed that carries the full story, or a story fetched earlier) or from a content-type classification of the headline, summary and feed. A story with neither is not a candidate, and the lane hides when fewer than three qualify. Fetching stories in the background to widen the lane is a separate decision, measured in Z2's shadow evaluation.
+- **Your Beat needs a finer profile than twelve categories** before its threshold means anything. Z2 defines it (for example, named topics and entities from stories read and saved) and reports how many stories clear the bar per day.
+
+The alternative that keeps the order is to make format a card variant instead of a lane rule: Your Beat shows a Feature card for a long read, and The Deep Read holds only long reads that missed Your Beat. That keeps the epic's order and leaves The Deep Read thin.
 
 ## 5. Acceptance
 
 - [x] Mars signs off the visual references in `docs/design/today.md` (light and dark; 900 pt and wide; sidebar open and closed; full, partly filled and empty; card variants).
-- [ ] Mars signs off the design documents in `docs/design/`.
-- [ ] The decisions in section 4 are recorded on #933.
+- [x] Mars signs off the design documents in `docs/design/`.
+- [ ] The decisions in section 4 are recorded on #933 (two still open).
