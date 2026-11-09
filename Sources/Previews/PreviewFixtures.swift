@@ -256,16 +256,16 @@
             rightPublisherName: "Metro Desk",
             passageAlignments: [
                 PassageContrastPair(
-                    id: "0-0", leftPassageIndex: 0, rightPassageIndex: 0, leftSnippet: comparisonLeft[0],
+                    leftPassageIndex: 0, rightPassageIndex: 0, leftSnippet: comparisonLeft[0],
                     rightSnippet: comparisonRight[0], similarityScore: 0.86, contrastType: .consensus),
                 PassageContrastPair(
-                    id: "1-1", leftPassageIndex: 1, rightPassageIndex: 1, leftSnippet: comparisonLeft[1],
+                    leftPassageIndex: 1, rightPassageIndex: 1, leftSnippet: comparisonLeft[1],
                     rightSnippet: comparisonRight[1], similarityScore: 0.83, contrastType: .consensus),
                 PassageContrastPair(
-                    id: "2-2", leftPassageIndex: 2, rightPassageIndex: 2, leftSnippet: comparisonLeft[2],
+                    leftPassageIndex: 2, rightPassageIndex: 2, leftSnippet: comparisonLeft[2],
                     rightSnippet: comparisonRight[2], similarityScore: 0.61, contrastType: .divergence),
                 PassageContrastPair(
-                    id: "3-2", leftPassageIndex: 3, rightPassageIndex: 2, leftSnippet: comparisonLeft[3],
+                    leftPassageIndex: 3, rightPassageIndex: 2, leftSnippet: comparisonLeft[3],
                     rightSnippet: comparisonRight[2], similarityScore: 0.2, contrastType: .uniqueLead,
                     uniqueSide: .left),
             ])

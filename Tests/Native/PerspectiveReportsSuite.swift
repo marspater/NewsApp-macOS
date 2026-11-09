@@ -62,7 +62,7 @@ extension NativeSuites {
                 side: PassageContrastPair.Side? = nil
             ) -> PassageContrastPair {
                 PassageContrastPair(
-                    id: "\(left)-\(right)", leftPassageIndex: left, rightPassageIndex: right, leftSnippet: "l\(left)",
+                    leftPassageIndex: left, rightPassageIndex: right, leftSnippet: "l\(left)",
                     rightSnippet: "r\(right)", similarityScore: similarity, contrastType: type, uniqueSide: side)
             }
             let session = DualReaderSession(
