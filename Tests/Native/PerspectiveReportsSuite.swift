@@ -48,6 +48,25 @@ extension NativeSuites {
                 PerspectiveReports.candidates(from: [withFeedSummaryOnly]).count == 1, "A feed summary can stand in")
         }
 
+        @Test func theTaskKeyChangesForAnEditThatKeepsTheLengthAndForATitleEdit() {
+            func report(title: String, text: String) -> FeedArticle {
+                FeedArticle(
+                    title: title, link: "https://a.example.com/story", guid: "a", description: "",
+                    pubDate: Date(timeIntervalSince1970: 1_793_372_400), source: "Alpha Wire", fullContent: text)
+            }
+            let words = Array(repeating: "word", count: 80).joined(separator: " ")
+            let sameLength = "ward" + words.dropFirst(4)
+            #expect(sameLength.count == words.count && sameLength != words)
+            let original = PerspectiveReports.inputs(of: [report(title: "Harbour reopens", text: words)])
+            #expect(original == PerspectiveReports.inputs(of: [report(title: "Harbour reopens", text: words)]))
+            #expect(
+                original != PerspectiveReports.inputs(of: [report(title: "Harbour reopens", text: sameLength)]),
+                "The same length with other words is another text")
+            #expect(
+                original != PerspectiveReports.inputs(of: [report(title: "Harbour closes", text: words)]),
+                "A title edit alone is read again")
+        }
+
         @Test func theTaskKeyChangesWhenAMembersTextArrives() {
             let before = Self.article("a", publisher: "Alpha Wire", words: 10)
             let after = Self.article("a", publisher: "Alpha Wire", words: 80)

@@ -32,10 +32,18 @@ enum PerspectiveReports {
         [article.fullContent, article.description].compactMap { $0 }.first { !$0.isEmpty } ?? ""
     }
 
-    /// What `candidates(from:)` reads, per article. A view keys its task on this, so a member whose text arrives or
-    /// changes after the overview opened is read again, not only when the set of members changes.
+    /// What `candidates(from:)` reads, per article: its id and a hash of the publisher, the title and the text. A view
+    /// keys its task on this, so a member whose text arrives or is edited after the overview opened, even to the same
+    /// length, or whose title changes, is read again, not only when the set of members changes. The hash lives for one
+    /// run of the app, which is all a task id needs.
     static func inputs(of articles: [FeedArticle]) -> [String] {
-        articles.map { "\($0.id):\($0.publisherName):\(text(of: $0).utf8.count)" }
+        articles.map { article in
+            var hasher = Hasher()
+            hasher.combine(article.publisherName)
+            hasher.combine(article.title)
+            hasher.combine(text(of: article))
+            return "\(article.id):\(hasher.finalize())"
+        }
     }
 
     /// One report per publisher, the one with the most text, richest first, so the first two are the fullest accounts.

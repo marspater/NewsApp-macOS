@@ -23,6 +23,13 @@ struct EntityChipRow: View {
     let onSelectStory: (String) -> Void
     @State private var entities: [EntityRecord] = []
 
+    /// What the row reads: the stories and the index's revision, so an indexing pass that reaches them after the reader
+    /// opened makes the chips appear without reopening the story.
+    struct Query: Hashable {
+        let articleIDs: [String]
+        let revision: UInt64
+    }
+
     var body: some View {
         Group {
             if !entities.isEmpty {
@@ -38,7 +45,9 @@ struct EntityChipRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .task(id: articleIDs) { entities = await source.entities(articleIDs) }
+        .task(id: Query(articleIDs: articleIDs, revision: source.revision)) {
+            entities = await source.entities(articleIDs)
+        }
     }
 }
 

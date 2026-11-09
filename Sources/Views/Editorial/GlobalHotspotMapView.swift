@@ -280,7 +280,7 @@ struct GlobalHotspotMapView: View {
         .buttonStyle(.plain)
         .position(viewport.project(region.centroid, in: size))
         .accessibilityLabel(
-            "\(region.name), \(region.tensionLevel.displayName), headline cue index \(Int(region.tensionScore)) of 100, \(region.articleCount) headlines"
+            "\(region.name), \(region.tensionLevel.displayName), headline cue index \(Int(region.tensionScore)) of 100, \(region.articleCount) current headlines contributing to the cue index"
         )
         .accessibilityHint("Shows only the headlines about this region")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -322,7 +322,7 @@ struct GlobalHotspotMapView: View {
         .buttonStyle(.plain)
         .position(viewport.project(pin.coordinate, in: size))
         .accessibilityLabel(
-            "\(pin.title)\(pin.isApproximate ? ", country or sea" : ""), headline cue index \(Int(pin.tensionScore)) of 100, \(pin.storyCount) headlines"
+            "\(pin.title)\(pin.isApproximate ? ", country or sea" : ""), headline cue index \(Int(pin.tensionScore)) of 100, \(pin.storyCount) current headlines contributing to the cue index"
         )
         .accessibilityHint("Shows only the headlines about this place")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -340,7 +340,7 @@ struct GlobalHotspotMapView: View {
     private var selection: Selection? {
         if let id = selectedPinId, let pin = clusterPins.first(where: { $0.id == id }) {
             return Selection(
-                title: pin.title, subtitle: "\(pin.storyCount) headlines about this place",
+                title: pin.title, subtitle: "\(pin.storyCount) current headlines contributing to the cue index",
                 note: pin.isApproximate
                     ? "The marker shows the center of the area, not where anything happened." : nil,
                 tension: pin.tensionScore)
@@ -348,7 +348,9 @@ struct GlobalHotspotMapView: View {
         if let id = selectedRegionId, let region = regions.first(where: { $0.id == id }) {
             return Selection(
                 title: region.name,
-                subtitle: "\(region.activeClusterCount) mapped places · \(region.articleCount) headlines", note: nil,
+                subtitle:
+                    "\(region.activeClusterCount) mapped places · \(region.articleCount) current headlines contributing to the cue index",
+                note: nil,
                 tension: region.tensionScore)
         }
         return nil

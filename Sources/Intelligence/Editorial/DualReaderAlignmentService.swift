@@ -121,7 +121,9 @@ public actor DualReaderAlignmentService {
         // Find best right alignment for each left passage
         for (leftIdx, leftPassage) in leftPassages.enumerated() {
             let (bestRightIdx, bestSim) = findBestMatch(vector: leftVectors[leftIdx], candidates: rightVectors)
-            matchedRightIndices.insert(bestRightIdx)
+            // A unique lead only names its closest right passage for reference: that passage is not matched, and the
+            // right-hand pass below still gives it a pair of its own when no left passage resembles it.
+            if bestSim >= Self.divergenceThreshold { matchedRightIndices.insert(bestRightIdx) }
             alignments.append(
                 PassageContrastPair(
                     leftPassageIndex: leftIdx,
