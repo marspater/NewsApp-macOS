@@ -519,6 +519,14 @@ enum StoryCorpus {
         return String(ArticleIdentity.sha256Hex("news-capture-pair-v1:" + left + "\n" + right).prefix(16))
     }
 
+    /// Whether a snapshot path leads into an app container, where the live library is. The path is checked as given
+    /// and with its symlinks resolved: a link outside the container to the live file is the live file, and so is a
+    /// container path that links elsewhere.
+    static func isLiveLibrary(_ path: String) -> Bool {
+        path.contains("/Library/Containers/")
+            || URL(fileURLWithPath: path).resolvingSymlinksInPath().path.contains("/Library/Containers/")
+    }
+
     /// A private, writable copy of a library snapshot: eval backups are kept read-only (0444), and a copy would inherit
     /// that mode, so opening it (WAL, migrations, re-clustering) would fail.
     static func writableCopy(of snapshot: String, to copy: String) throws {

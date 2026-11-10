@@ -2930,6 +2930,28 @@ extension NewsTests {
             refused = true
         }
         assertTrue(refused, "The live library is refused")
+        let container = directory.appendingPathComponent("Library/Containers/app")
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        let live = container.appendingPathComponent("news.sqlite3")
+        try Data().write(to: live)
+        let link = directory.appendingPathComponent("link.sqlite3")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: live)
+        assertTrue(StoryCorpus.isLiveLibrary(link.path), "A symlink to the live library is the live library")
+        assertTrue(!StoryCorpus.isLiveLibrary(directory.appendingPathComponent("copy.sqlite3").path), "A copy is not")
+        let outside = directory.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let linked = directory.appendingPathComponent("Library/Containers/linked")
+        try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: outside)
+        assertTrue(
+            StoryCorpus.isLiveLibrary(linked.appendingPathComponent("news.sqlite3").path),
+            "A container path that links elsewhere is still the live library")
+        var linkRefused = false
+        do {
+            _ = try await exportPairReview(snapshot: link.path, outputDirectory: directory.path)
+        } catch StoryCorpus.Failure.invalid(let message) {
+            linkRefused = message.contains("never the live file")
+        }
+        assertTrue(linkRefused, "The export refuses a symlink to the live library")
     }
 
     /// Reader verdicts (#552): "Same Event" and "Not the Same Event" pairs leave the library as weight-5 training rows
