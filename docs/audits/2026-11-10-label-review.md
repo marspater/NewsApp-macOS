@@ -25,7 +25,7 @@ The `pegged` labels exist because Mars's rulings pull apart there: on 4 October 
 2. Third pass: a third fresh reader labelled the 119 pairs where first and second pass differ on same | pegged | later | different, which includes every `pegged` pair. `topic` against `unrelated` was not counted as a difference.
 3. Two of three decide. The reviewed labels were frozen (Stage 1 SHA-256 `a0f5869d…`, validation `0a5d4e59…`) before they were joined to matcher output. The first-pass files are unchanged.
 
-All three readers are the same model family as the first pass: the review is blind, not a different judge. Mars has reviewed none of it.
+All three readers are the same model family as the first pass: the review is blind, not a different judge. Mars has reviewed none of it. The readers' logs name none of the first-pass files, the receipts folder or the sealed set. The reviewed validation file has 300 rows; the replays use 268, without the pair that shares an article with Stage 1.
 
 ## Agreement
 
@@ -60,7 +60,7 @@ The first pass had no `pegged` class and filed three quarters of those pairs und
 
 The readers marked 221 of 819 readings as close and named the same gaps independently:
 
-- Two pieces that hang on one act when neither is the act report (a reaction against an explainer, two tributes). They were labelled `later` under the shared-trigger ruling, although neither is a later act.
+- Two pieces that hang on one act when neither is the act report (a reaction against an explainer, two tributes). They were labelled `later` under the shared-trigger ruling, although neither is a later act. The readers' notes name this for 13 of the 139 `later` labels; notes were optional, so that is a floor.
 - An announcement of an imminent act against the report of the act done.
 - Whether voting, exit polls and partial counts of one election day are one act or steps.
 - Day-two reports of a disaster: more detail on the act, or a new deed.
@@ -91,7 +91,10 @@ The 553 replayed pairs of the three sets, by reviewed label, and how many the ba
 
 - Of the 108 linked labelled pairs, 86 are the same act, 5 are pegged, 13 are later developments and 4 share only a topic. Under the first-pass labels the same links read 85 same, 20 related, 3 different.
 - The matcher joins a pegged report as rarely as a later development. In practice its event is the act alone.
-- Of the 13 later developments inside an event, the pair model admitted 8 and a rule match 5.
+- Of the 13 later developments inside an event, the pair model admitted 8 and a rule match 5. Both readers called all 13 `later`; by their notes at least 2 are two sets of words after one act.
+- The larger gap is on the other side: 65 of the 151 same-act pairs are not in one event.
+
+**This revises the veto share audit.** It named later developments inside events as the next lever on first-pass counts (6 of 24 linked pairs on validation, 14 of 84 on Stage 1). Reviewed, those are 3 of 24 and 10 of 84; the rest are pegged, the same act, or topic only. The 3 November set (5 of 12) was not re-read.
 
 ## Earlier results under the reviewed labels
 
@@ -100,6 +103,9 @@ The 553 replayed pairs of the three sets, by reviewed label, and how many the ba
 
 ## Open for Mars
 
-1. Whether a pegged report (a words-only reaction, an explainer, a part of the act) belongs inside the event. It decides 50 of 700 labels, the size of the recall denominator (81 against 55 `same` pairs on validation), and whether the evidence head's own check fired.
+1. Whether a pegged report (a words-only reaction, an explainer, a part of the act) belongs inside the event. It decides 50 of 700 labels and the size of the recall denominator (81 against 55 `same` pairs on validation).
+   - **It also decides the evidence head.** Under the gate as amended in #1180, the head's rows meet all four conditions on the 3 November set (4 / 5 / 3 → 5 / 5 / 3, story 12 / 3 → 19 / 3) and on validation, with tune and the regressions unchanged. Its only remaining failure is its own 0.90 check, which reads 0.93 with pegged inside the event and 0.75 with pegged outside.
+   - The head stays off either way: the gate wording and the labels both changed after its result, and validation has been read several times. A pegged-inside ruling would call for a fresh pre-registered test on unread pairs, not for shipping it.
+   - The 3 November set and the sealed 6 November set were labelled before the `pegged` class existed. A pegged-inside ruling changes what their `same` and `related` counts measure.
 2. The five three-way splits (`splits-for-mars.txt` in the review folder).
 3. The six rubric gaps above.
