@@ -11,7 +11,7 @@ Changes to this setup are logged in the [change log](#change-log) at the end.
 3. **After each run:** log one line with its real numbers (see [Logging a run](#logging-a-run)). A run counts as done once its line is in the ledger.
 4. **Conclusions** still go on the issue, and a claim in a PR or audit names the ledger run it rests on.
 
-A session without access to Mars's Mac cannot read or write the ledger. For step 1 the coordinating session puts the runs already on record for that dataset into the session's brief (name, verdict and measures); a session that was given none asks on the issue before it runs. For step 3 it reports the same fields in its PR, or on the issue when there is no PR, and the coordinating session logs them.
+A session without access to Mars's Mac cannot read or write the ledger. For step 1 the coordinating session puts the runs already on record for that dataset into the session's brief (name, commit, the settings that distinguish it, verdict and measures); a session that was given none asks on the issue before it runs. For step 3 it reports the same fields in its PR, or on the issue when there is no PR, and the coordinating session logs them.
 
 ## What is installed
 
@@ -106,7 +106,7 @@ One name means one thing. Before adding a name, check this table and the names a
 
 ## Setting it up again
 
-On a new Mac, or after a clean install. The tools are installed with [uv](https://docs.astral.sh/uv/), which comes from Homebrew here; check that `uv --version` answers before the next step:
+On a new Mac, or after a clean install. The tools are installed with [uv](https://docs.astral.sh/uv/), which comes from [Homebrew](https://brew.sh) here (install Homebrew first where `brew` is missing); check that `uv --version` answers before the next step:
 
 ```bash
 brew install uv
