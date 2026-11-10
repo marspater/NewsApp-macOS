@@ -62,6 +62,13 @@ extension TodayEditionAssigner {
             profile: profile
         )
 
+        // Stored reading time: counted from stored text only (zero network fetches).
+        let readingTime = storedReadingTimeMinutes(
+            for: entry,
+            preloadedTexts: signals?.memberFullTexts ?? [],
+            wordsPerMinute: thresholds.deepReadWordsPerMinute
+        )
+
         return EvaluatedStory(
             entry: entry,
             score: editorialScore(of: rep, signals: signals, coverage: coverage),
@@ -73,19 +80,8 @@ extension TodayEditionAssigner {
             isDeveloping: coverage.isDeveloping,
             groupingConfidence: grouping,
             isCoverageConfident: isCoverageConfident,
-            // Stored reading time: counted from stored text only (zero network fetches).
-            readingTimeMinutes: storedReadingTimeMinutes(
-                for: entry,
-                preloadedTexts: signals?.memberFullTexts ?? [],
-                wordsPerMinute: thresholds.deepReadWordsPerMinute
-            ),
-            // On-device content-type classification from headline, summary and feed/URL cues.
-            contentType: classifyContentType(
-                title: rep.title,
-                description: rep.description,
-                category: rep.category,
-                link: rep.link
-            ),
+            readingTimeMinutes: readingTime,
+            contentType: deepReadContentType(of: rep, readingTimeMinutes: readingTime, thresholds: thresholds),
             interestMatch: interest.match,
             novelty: interest.novelty,
             hasInMotionUpdate: coverage.hasInMotionUpdate,

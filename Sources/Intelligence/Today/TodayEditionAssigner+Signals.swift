@@ -127,6 +127,23 @@ extension TodayEditionAssigner {
         return Double(maxWords) / wordsPerMinute
     }
 
+    /// The content type The Deep Read uses. A phrase found only in the feed summary does not qualify a story
+    /// whose stored text is under the length bar (#1194), so the summary is read only for a stored long read.
+    /// A short stored text says nothing about the length of the publisher's page: headline, section and URL
+    /// evidence still classify the story.
+    static func deepReadContentType(
+        of article: FeedArticle,
+        readingTimeMinutes: Double,
+        thresholds: TodayEditionThresholds
+    ) -> (type: TodayContentType, confidence: Double)? {
+        classifyContentType(
+            title: article.title,
+            description: readingTimeMinutes >= thresholds.deepReadMinimumMinutes ? article.description : "",
+            category: article.category,
+            link: article.link
+        )
+    }
+
     /// Deterministic on-device content-type classifier over headline, feed summary, section/category and URL path.
     static func classifyContentType(
         title: String,

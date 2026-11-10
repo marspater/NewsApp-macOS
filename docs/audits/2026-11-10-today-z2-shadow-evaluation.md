@@ -73,3 +73,23 @@ Before Z3 (`#935`) or Z4 (`#936`) renders these lanes in UI:
 1. **`Your Beat` publisher-affinity share:** Computing top-quartile publishers solely from the engaged set allowed high-volume news wires/dailies in the top quartile to qualify `~48 %` (`254 / 522`) of daily articles raw (capped cleanly at `12`, but high daily throughput). Confirm whether `topQuartilePublishers` should keep full weight (letting `score` select the top `12`) or tighten to a higher engagement ratio (e.g. `>= 10 %` of 30-day reads or top decile).
 2. **`In Motion` momentum requirement:** Spec §2.2 requires `rising` momentum; in the 50-event sample that rejected `7 / 9` genuine follow-up developments whose cadence had flattened to `steady` or `fading`. Decide whether to keep `rising` strict (high precision on surging stories, sparse lane of `5` in `72 h`) or allow substantive non-repeat updates after `24 h` under `steady` momentum as well.
 3. **`The Lead` multi-report threshold:** `0.60` (`>= 2` originals) and `0.75` (`1` original) yielded `5` solid Lead slides with `0` wire-only inflation (`mean originals = 6.0`, `precision@5 = 1.00`) on `library-copy.sqlite3`.
+
+## Re-run after the Deep Read rule change (#1194, 10 November 2026)
+
+Mars accepted two changes to The Deep Read on 10 November 2026 ([decision](https://github.com/marspater/NewsApp-macOS/issues/1194#issuecomment-6775855594)): over its cap the lane keeps the longest stored text, then the surer content type, then the newest report; and a phrase found only in the feed summary does not classify a story whose stored text is under 8 min. Same library copy, same pinned clock and the same labels as above; only the lines below changed.
+
+| Measure | Before | After |
+| --- | --- | --- |
+| Stories qualifying for The Deep Read | `43` | `34` |
+| Short stories only their feed summary classified (now excluded) | not counted | `9` |
+| Shown (cap `8`) | `8`: `6` by content type, `2` by stored length | `8`: all by stored length |
+| Stored reads of 8 min or more shown / dropped by the cap | `2` shown; not counted | `8` / `0` |
+| The Deep Read purity on the labelled stories | `0.80` (`4 / 5`) | `1.00` (`5 / 5`) |
+| Overall lane purity | `0.970` (`194 / 200`) | `0.975` (`195 / 200`) |
+| The Latest completeness, duplicate rate | `1`, `0` | `1`, `0` |
+
+Lane counts are unchanged (`5 / 5 / 8 / 12 / 6 / 702`).
+
+What the change costs: all `8` places now go to stored long reads, so the `26` stories that qualify by headline, section or URL alone are all dropped by the cap on this copy. Two of them are in the labelled stories, the reviewer calls both The Deep Read, and they are now in The Latest. The lane shows a headline-classified story only when fewer than eight stored long reads qualify. The short story the summary rule excluded moved to Your Beat, where the reviewer expected The Latest (Your Beat purity `1.00` to `0.875`): that is the publisher-affinity question above, not a Deep Read one.
+
+The limits above still hold: one library copy at one clock, single-pass reviewer labels, the feeds found in the copy and not the reader's subscriptions. This re-run does not pass the Z2 gate in #934.

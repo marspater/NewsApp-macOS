@@ -59,6 +59,9 @@ enum TodayShadowEvaluation {
         let deepReadBreakdown: [String: Int]
         let deepReadMissingFullContentCount: Int
         let deepReadStoredFullContentCount: Int
+        let deepReadStoredLongShown: Int
+        let deepReadStoredLongDropped: Int
+        let deepReadSummaryOnlyExcluded: Int
         let coverageMultiPublisherEvents: Int
         let coveragePassingGate: Int
         let threeRankingComparison: ThreeRankingReport
@@ -271,6 +274,22 @@ enum TodayShadowEvaluation {
                 || (context.signalsByEntryID[item.id]?.memberFullTexts.contains { $0.count > 1200 } == true)
         }.count
         let missingFullCount = max(0, assignedList.count - storedFullCount)
+        // #1194: stored long reads the lane shows, and those its cap drops to a later lane.
+        let minimumMinutes = context.thresholds.deepReadMinimumMinutes
+        let storedLongShown = deepReadEntries.filter { $0.readingTimeMinutes >= minimumMinutes }.count
+        let storedLongDropped = assignedList.filter {
+            $0.readingTimeMinutes >= minimumMinutes && ![.theLead, .inMotion, .theDeepRead].contains($0.lane)
+        }.count
+        // Short stories that only their feed summary would have classified.
+        let summaryOnlyExcluded = assignedList.filter { item in
+            let rep = item.entry.representative
+            let minimum = context.thresholds.deepReadClassificationMinimumConfidence
+            let withSummary = TodayEditionAssigner.classifyContentType(
+                title: rep.title, description: rep.description, category: rep.category, link: rep.link)
+            let used = TodayEditionAssigner.deepReadContentType(
+                of: rep, readingTimeMinutes: item.readingTimeMinutes, thresholds: context.thresholds)
+            return (withSummary?.confidence ?? 0) >= minimum && (used?.confidence ?? 0) < minimum
+        }.count
 
         // Coverage card gate breakdown.
         let multiPubEvents = assignedList.filter { $0.publisherCount >= 3 }
@@ -369,6 +388,9 @@ enum TodayShadowEvaluation {
             deepReadBreakdown: deepByType,
             deepReadMissingFullContentCount: missingFullCount,
             deepReadStoredFullContentCount: storedFullCount,
+            deepReadStoredLongShown: storedLongShown,
+            deepReadStoredLongDropped: storedLongDropped,
+            deepReadSummaryOnlyExcluded: summaryOnlyExcluded,
             coverageMultiPublisherEvents: multiPubEvents.count,
             coveragePassingGate: passingCoverage.count,
             threeRankingComparison: threeComparison,
@@ -512,11 +534,10 @@ enum TodayShadowEvaluation {
         let plan = TodayEditionAssigner.assign(entries: entries, context: context)
         let deepReadQualCount = plan.allAssignments.filter { item in
             let byType =
-                TodayEditionAssigner.classifyContentType(
-                    title: item.entry.representative.title,
-                    description: item.entry.representative.description,
-                    category: item.entry.representative.category,
-                    link: item.entry.representative.link
+                TodayEditionAssigner.deepReadContentType(
+                    of: item.entry.representative,
+                    readingTimeMinutes: item.readingTimeMinutes,
+                    thresholds: context.thresholds
                 ).map { $0.confidence >= context.thresholds.deepReadClassificationMinimumConfidence } ?? false
             return item.readingTimeMinutes >= context.thresholds.deepReadMinimumMinutes || byType
         }.count
