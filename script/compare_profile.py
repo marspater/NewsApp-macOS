@@ -9,6 +9,7 @@ Usage: compare_profile.py CURRENT_DIR [PREVIOUS_DIR] [--tolerance 0.25]
 
 # Standard library only: both inputs are JSON written by this workflow's own tools.
 import json
+import math
 import os
 import statistics
 import sys
@@ -35,9 +36,12 @@ def metric_medians(metrics):
         name = test["testIdentifier"].rsplit("/", 1)[-1]
         for run in test.get("testRuns", []):
             for metric in run.get("metrics", []):
-                if metric.get("measurements"):
+                # Finite numbers only, so one odd value cannot stop the report or skew the median.
+                measurements = metric.get("measurements") or []
+                finite = [m for m in measurements if isinstance(m, (int, float)) and math.isfinite(m)]
+                if finite:
                     key = (name, metric["displayName"], metric.get("unitOfMeasurement", ""))
-                    values[key] = statistics.median(metric["measurements"])
+                    values[key] = statistics.median(finite)
     return values
 
 

@@ -54,6 +54,10 @@ class CompareTests(unittest.TestCase):
         self.assertIn("XCTest metrics\n\nNo values in this run.", table)
         self.assertEqual(warnings, "")
 
+    def test_median_ignores_non_finite_and_non_numeric_measurements(self):
+        medians = compare_profile.metric_medians(metrics([1.0, "bad", float("nan"), 3.0]))
+        self.assertEqual(medians, {("testLaunchToMainWindow()", "Clock Monotonic Time", "s"): 2.0})
+
     def test_no_ratio_against_a_negative_baseline(self):
         rows, regressions = compare_profile.compare({("t", "m", "kB"): 10.0}, {("t", "m", "kB"): -32.0}, 0.25)
         self.assertEqual(rows, [(("t", "m", "kB"), 10.0, -32.0, None)])
