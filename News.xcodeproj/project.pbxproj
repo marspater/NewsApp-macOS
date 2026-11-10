@@ -690,6 +690,135 @@
 			};
 			name = Release;
 		};
+		0A00000000000000000000A0 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Profile;
+		};
+		0A00000000000000000000A1 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = News.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = "container-migration.plist";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.dev;
+				PRODUCT_NAME = News;
+			};
+			name = Profile;
+		};
+		0A00000000000000000000A2 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/Harness/*",
+					"Tests/Native/*",
+					"Tests/UITests/*",
+				);
+				PRODUCT_NAME = NewsTestRunner;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Profile;
+		};
+		0A00000000000000000000A3 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/*",
+					"Tests/Harness/*",
+					"Tests/Native/*",
+					"Tests/UITests/*",
+					"container-migration.plist",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INCLUDED_SOURCE_FILE_NAMES = (
+					Tests/TestDefaults.swift,
+					"$(NEWS_HARNESS)",
+				);
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.0.0;
+				NEWS_HARNESS = Tests/Harness/NativePerformanceBaseline.swift;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.harness;
+				PRODUCT_NAME = NewsHarness;
+			};
+			name = Profile;
+		};
+		0A00000000000000000000A4 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/Harness/*",
+					"Tests/UITests/*",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
+				PRODUCT_MODULE_NAME = NewsNativeTests;
+				PRODUCT_NAME = NewsTests;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Profile;
+		};
+		0A00000000000000000000A5 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ENABLE_HARDENED_RUNTIME = NO;
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/*",
+					"Tests/Harness/*",
+					"Tests/Native/*",
+				);
+				GENERATE_INFOPLIST_FILE = YES;
+				INCLUDED_SOURCE_FILE_NAMES = "Tests/UITests/*";
+				OTHER_LDFLAGS = (
+					"-framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
+				PRODUCT_NAME = NewsUITests;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Profile;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -698,6 +827,7 @@
 			buildConfigurations = (
 				0A0000000000000000000071 /* Debug */,
 				0A0000000000000000000072 /* Release */,
+				0A00000000000000000000A0 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -707,6 +837,7 @@
 			buildConfigurations = (
 				0A0000000000000000000074 /* Debug */,
 				0A0000000000000000000075 /* Release */,
+				0A00000000000000000000A1 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -716,6 +847,7 @@
 			buildConfigurations = (
 				0A0000000000000000000077 /* Debug */,
 				0A0000000000000000000078 /* Release */,
+				0A00000000000000000000A2 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -725,6 +857,7 @@
 			buildConfigurations = (
 				0A000000000000000000007A /* Debug */,
 				0A000000000000000000007B /* Release */,
+				0A00000000000000000000A3 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -734,6 +867,7 @@
 			buildConfigurations = (
 				0A0000000000000000000088 /* Debug */,
 				0A0000000000000000000089 /* Release */,
+				0A00000000000000000000A4 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -743,6 +877,7 @@
 			buildConfigurations = (
 				0A0000000000000000000098 /* Debug */,
 				0A0000000000000000000099 /* Release */,
+				0A00000000000000000000A5 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -15,8 +15,8 @@ def metrics(clock):
         {"displayName": "Clock Monotonic Time", "unitOfMeasurement": "s", "measurements": clock}]}]}]
 
 
-def summary(revision, intervals):
-    return {"meta": {"revision": revision}, "intervals": [
+def summary(revision, intervals, **meta):
+    return {"meta": {"revision": revision, **meta}, "intervals": [
         {"category": "Feeds", "name": name, "count": 1, "median_ms": ms, "p90_ms": ms} for name, ms in intervals]}
 
 
@@ -52,6 +52,17 @@ class CompareTests(unittest.TestCase):
         self.assertIn("previous revision: none found", table)
         self.assertIn("| Feeds · Refresh | ms | 120.000 | – | – |", table)
         self.assertIn("XCTest metrics\n\nNo values in this run.", table)
+        self.assertEqual(warnings, "")
+
+    def test_skips_a_previous_run_of_another_configuration(self):
+        with tempfile.TemporaryDirectory() as now, tempfile.TemporaryDirectory() as before:
+            write(now, "metrics.json", metrics([2.0]))
+            write(before, "metrics.json", metrics([1.0]))
+            write(now, "summary.json", summary("b", [("Refresh", 120.0)], configuration="Profile"))
+            write(before, "summary.json", summary("a", [("Refresh", 10.0)]))
+            table, warnings = self.run_main(now, before)
+        self.assertIn("previous run measured the Debug build, this one Profile: not compared", table)
+        self.assertIn("| testLaunchToMainWindow() · Clock Monotonic Time | s | 2.000 | – | – |", table)
         self.assertEqual(warnings, "")
 
 

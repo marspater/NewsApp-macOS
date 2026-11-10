@@ -76,8 +76,16 @@ def main(argv):
     meta = (summary or {}).get("meta", {})
     lines = ["## Profile comparison", ""] + [f"- {key}: {value}" for key, value in meta.items()]
     previous_meta = (load(previous_dir, "summary.json") or {}).get("meta", {})
+    # Runs before the Profile configuration recorded no configuration: they measured the Debug build.
+    configuration = meta.get("configuration", "Debug")
+    previous_configuration = previous_meta.get("configuration", "Debug")
+    if previous_meta and previous_configuration != configuration:
+        lines.append(
+            f"- previous run measured the {previous_configuration} build, this one {configuration}: not compared")
+        previous_dir, previous_meta = None, {}
     lines.append(f"- previous revision: {previous_meta.get('revision', 'none found')}")
-    differing = [key for key in ("hardware", "os", "xcode") if previous_meta and previous_meta.get(key) != meta.get(key)]
+    differing = [
+        key for key in ("hardware", "os", "xcode") if previous_meta and previous_meta.get(key) != meta.get(key)]
     if differing:
         lines.append(f"- previous run differs in {', '.join(differing)}: changes may come from the runner")
     lines += [f"- tolerance: warn when a median grows more than {tolerance:.0%}", ""]
