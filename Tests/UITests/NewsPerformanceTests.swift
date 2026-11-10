@@ -63,7 +63,10 @@ final class NewsPerformanceTests: XCTestCase {
         app.launch()
         let field = app.searchFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 30), "No search field in the toolbar")
-        // The fixture must be stored before timing starts: the first search waits for the refresh.
+        // The fixture must be stored before timing starts: wait for the unfiltered list, or the first search's filter
+        // check passes on an empty list and the headline gets only the short wait.
+        XCTAssertTrue(
+            story(Self.otherHeadline).waitForExistence(timeout: 60), "The fixture did not load into the story list")
         search(field)
         clear(field)
         measure(metrics: metrics, options: manualStop) {
@@ -73,8 +76,9 @@ final class NewsPerformanceTests: XCTestCase {
         }
     }
 
-    /// The fixture's other story: the unfiltered list shows it, a finished search for the headline does not.
-    static let otherHeadline = "Regional Orchestra Announces Free Summer Concert Series"
+    /// The fixture's lead story (newest, with an image): the unfiltered list shows it on top, a finished search for
+    /// the headline does not. The list renders lazily, so a story further down may never exist in the hierarchy.
+    static let otherHeadline = "Coastal Survey Maps Tidal Flats From The Air"
 
     /// ⌘F expands and focuses the collapsed toolbar field, as in `NewsSmokeUITests.searchHeadline`.
     func focus(_ field: XCUIElement) {
@@ -89,11 +93,16 @@ final class NewsPerformanceTests: XCTestCase {
         focus(field)
         app.typeText("Lighthouse Restoration\n")
         let filtered = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: app.staticTexts[Self.otherHeadline].firstMatch)
+            predicate: NSPredicate(format: "exists == false"), object: story(Self.otherHeadline))
         XCTAssertEqual(XCTWaiter.wait(for: [filtered], timeout: 60), .completed, "The search did not filter the list")
         XCTAssertTrue(
-            app.staticTexts[NewsSmokeUITests.headline].firstMatch.waitForExistence(timeout: 10),
+            story(NewsSmokeUITests.headline).waitForExistence(timeout: 10),
             "The fixture headline was not found")
+    }
+
+    /// A story card is one button labelled headline first (#1127), so no static text equals a headline.
+    func story(_ headline: String) -> XCUIElement {
+        NewsSmokeUITests.story(headline, in: app)
     }
 
     func clear(_ field: XCUIElement) {
@@ -105,7 +114,7 @@ final class NewsPerformanceTests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
         // The next measurement starts from the unfiltered list, so its end can only come from its own search.
         XCTAssertTrue(
-            app.staticTexts[Self.otherHeadline].firstMatch.waitForExistence(timeout: 30),
+            story(Self.otherHeadline).waitForExistence(timeout: 30),
             "The list did not return to the unfiltered fixture")
     }
 }

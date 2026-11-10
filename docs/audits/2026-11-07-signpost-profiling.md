@@ -6,17 +6,21 @@ Part of #577, item G of [the native integration plan](../plans/2026-11-07-native
 
 `.github/workflows/profile.yml` runs weekly (Mondays 04:17 UTC) and on manual dispatch, on GitHub's `macos-26` runner with Xcode 26.6. It never runs for pull requests. `script/profile_signposts.sh`:
 
-1. Builds the Debug app with `build.sh` as `com.marspater.news.dev` into the output directory, and refuses to launch any other bundle identifier.
+1. Builds the optimized Profile configuration with `build.sh` (Release's `-O`, whole-module, always `com.marspater.news.dev`; Debug until November 2026) into the output directory, and refuses to launch any other bundle identifier.
 2. Records it with `xctrace record --template 'Time Profiler' --instrument os_signpost --time-limit 60s`, launching the binary with `NEWS_LIBRARY_NAME=profile-<run id>` (an empty library per run) and `NEWS_FIXTURE_FEED` set to `Tests/Fixtures/ui-smoke/feed.xml` (#1121, shared with `NewsUITests`) with the current date, plus the smoke tests' argument-domain defaults (no onboarding, notifications off, one subscription). The development build answers every subscription from that document, so no run reaches the network.
 3. Exports the `os-signpost-interval` table and runs `script/summarize_signposts.py`: per category and interval name of the `com.marspater.news` subsystem (`NewsSignposts.swift`), count, median and p90 duration in milliseconds, plus revision, hardware, OS and Xcode.
 
-Artifacts (90 days): `News.trace`, `summary.json`, `summary.md`, `build.log` and `toc.xml` (the export's table of contents, for a renamed schema). The job summary shows the table.
+After the recording, `NewsPerformanceTests` measures launch and one search (XCTest clock, memory and CPU metrics); `xcresulttool get test-results metrics` writes them to `metrics.json`.
+
+Artifacts (90 days): `News.trace`, `summary.json`, `summary.md`, `metrics.json`, `comparison.md`, `build.log` and `toc.xml` (the export's table of contents, for a renamed schema), plus the performance `.xcresult` as its own artifact.
+
+The step "Compare With Previous Run" downloads the previous successful run's summary artifact (any branch) and runs `script/compare_profile.py`: the job summary shows each XCTest metric's median and each signpost interval's median beside the previous run's, and every median that grew more than 25 % becomes a warning annotation (signpost intervals under 1 ms excepted). It never fails the job, and it notes when the previous run's hardware, OS or Xcode line differs. A previous run of another configuration is not compared: runs before the Profile configuration measured the Debug build and record no `configuration` in `meta`, so the first Profile run starts a new series. There are no committed `.xcbaseline` files: Xcode keys them to one machine, and hosted runners differ between runs.
 
 `PROFILE_DRY_RUN=1` builds and prints the recording command without launching the app; that is the only mode for a developer's Mac.
 
 ## Comparing two runs
 
-Compare only runs with the same hardware model, OS and Xcode lines in `meta`. Download both `summary.json` files and compare median and p90 per category and interval; a count change means the workload changed, so check the fixture and the revision range before reading durations. For a regression, open both `News.trace` bundles in Instruments and compare the os_signpost track and the Time Profiler call tree over the interval in question. A single run is one sample; confirm a change with a second dispatched run before acting on it, as the [build measurement protocol](2026-11-07-build-measurement-protocol.md) asks for repeated samples.
+Compare only runs with the same hardware model, OS and Xcode lines in `meta`. For runs other than the immediate predecessor, download both `summary.json` files and compare median and p90 per category and interval; a count change means the workload changed, so check the fixture and the revision range before reading durations. For a regression, open both `News.trace` bundles in Instruments and compare the os_signpost track and the Time Profiler call tree over the interval in question. A single run is one sample; confirm a change with a second dispatched run before acting on it, as the [build measurement protocol](2026-11-07-build-measurement-protocol.md) asks for repeated samples.
 
 ## Baseline
 

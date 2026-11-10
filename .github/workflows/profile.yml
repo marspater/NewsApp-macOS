@@ -13,6 +13,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read  # the comparison step downloads the previous successful run's summary artifact
 
 jobs:
   signposts:
@@ -35,25 +36,13 @@ jobs:
           echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
           echo "Load: $(sysctl -n vm.loadavg)"
 
-      - name: Test Signpost Summary
-        run: python3 -m unittest discover -s script -p 'test_summarize_signposts.py'
+      - name: Test Signpost Summary and Comparison
+        run: |
+          python3 -m unittest discover -s script -p 'test_summarize_signposts.py'
+          python3 -m unittest discover -s script -p 'test_compare_profile.py'
 
       - name: Record Signposts
         run: script/profile_signposts.sh "$RUNNER_TEMP/profile"
-
-      - name: Upload Trace and Summary
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: signpost-profile-${{ github.run_id }}
-          path: |
-            ${{ runner.temp }}/profile/News.trace
-            ${{ runner.temp }}/profile/summary.json
-            ${{ runner.temp }}/profile/summary.md
-            ${{ runner.temp }}/profile/build.log
-            ${{ runner.temp }}/profile/toc.xml
-          if-no-files-found: warn
-          retention-days: 90
 
       # XCTest clock, memory and CPU metrics (#577): launch and one search on the smoke fixture. Only here, never in
       # ci.yml; the tests skip themselves unless NEWS_PERFORMANCE_TESTS reaches the runner.
@@ -61,10 +50,16 @@ jobs:
         if: always()
         run: |
           set -o pipefail
+          # -configuration Profile: the optimized development build; NewsUITests launches the News.app built beside it.
           TEST_RUNNER_NEWS_PERFORMANCE_TESTS=1 xcodebuild test -project News.xcodeproj -scheme News \
-            -testPlan UITests -destination 'platform=macOS' -derivedDataPath build/DerivedData \
+            -testPlan UITests -configuration Profile -destination 'platform=macOS' -derivedDataPath build/DerivedData \
             -only-testing:NewsUITests/NewsPerformanceTests \
             -resultBundlePath "$RUNNER_TEMP/NewsPerformanceTests.xcresult" -quiet
+          # Clock, memory and CPU measurements beside summary.json, so the next run can compare against them. The
+          # directory exists only if Record Signposts ran.
+          mkdir -p "$RUNNER_TEMP/profile"
+          xcrun xcresulttool get test-results metrics --path "$RUNNER_TEMP/NewsPerformanceTests.xcresult" \
+            > "$RUNNER_TEMP/profile/metrics.json"
           # Skipped tests exit 0: require that both measured tests actually passed.
           passed=$(xcrun xcresulttool get test-results summary --path "$RUNNER_TEMP/NewsPerformanceTests.xcresult" \
             | python3 -c 'import json, sys; print(json.load(sys.stdin)["passedTests"])')
@@ -79,6 +74,42 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-      - name: Job Summary
-        if: success()
-        run: cat "$RUNNER_TEMP/profile/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      # Medians beside the previous successful run's (any branch, same runner class), with a warning past 25 %.
+      # Warns only: hosted runners differ between runs. No committed .xcbaseline, which is keyed to one machine.
+      - name: Compare With Previous Run
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow profile.yml --status success --limit 20 \
+            --json databaseId --jq "[.[] | select(.databaseId != $GITHUB_RUN_ID)][0].databaseId // empty")
+          dir="$RUNNER_TEMP/previous"
+          if [[ -n "$previous" ]] && gh run download "$previous" --repo "$GITHUB_REPOSITORY" \
+              --name "signpost-profile-$previous" --dir "$dir"; then
+            echo "Previous successful run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$previous"
+          else
+            echo "No previous successful run with a summary artifact; showing this run alone"
+            dir=""
+          fi
+          python3 script/compare_profile.py "$RUNNER_TEMP/profile" ${dir:+"$dir"} --tolerance 0.25 \
+            > "$RUNNER_TEMP/profile/comparison.md" 2> "$RUNNER_TEMP/profile/warnings.txt"
+          cat "$RUNNER_TEMP/profile/warnings.txt"  # ::warning:: lines become annotations on stdout
+          { cat "$RUNNER_TEMP/profile/comparison.md"; echo; cat "$RUNNER_TEMP/profile/summary.md"; } \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Trace and Summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: signpost-profile-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/profile/News.trace
+            ${{ runner.temp }}/profile/summary.json
+            ${{ runner.temp }}/profile/summary.md
+            ${{ runner.temp }}/profile/metrics.json
+            ${{ runner.temp }}/profile/comparison.md
+            ${{ runner.temp }}/profile/build.log
+            ${{ runner.temp }}/profile/toc.xml
+          if-no-files-found: warn
+          retention-days: 90

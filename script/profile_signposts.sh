@@ -5,8 +5,9 @@
 #   PROFILE_DRY_RUN=1       build and prepare everything, print the xctrace command, stop before launching the app
 #   PROFILE_TIME_LIMIT      recording length (default 60s)
 #   PROFILE_RUN_ID          library suffix (default: GITHUB_RUN_ID or the current time)
-# Workload: the Debug app as com.marspater.news.dev, its own library (NEWS_LIBRARY_NAME=profile-<run id>) and every
-# subscription answered from Tests/Fixtures/ui-smoke/feed.xml (NEWS_FIXTURE_FEED, development bundle only).
+# Workload: the optimized Profile build (always com.marspater.news.dev), its own library
+# (NEWS_LIBRARY_NAME=profile-<run id>) and every subscription answered from Tests/Fixtures/ui-smoke/feed.xml
+# (NEWS_FIXTURE_FEED, development bundle only).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -19,7 +20,7 @@ mkdir -p "$OUTPUT"
 OUTPUT=$(cd "$OUTPUT" && pwd)
 APP="$OUTPUT/News.app"
 
-NEWS_CONFIGURATION=Debug NEWS_BUNDLE_ID="$BUNDLE_ID" NEWS_APP_DIR="$APP" NEWS_SENTRY_DISABLED=1 ./build.sh \
+NEWS_CONFIGURATION=Profile NEWS_BUNDLE_ID="$BUNDLE_ID" NEWS_APP_DIR="$APP" NEWS_SENTRY_DISABLED=1 ./build.sh \
     > "$OUTPUT/build.log" 2>&1 || { tail -40 "$OUTPUT/build.log" >&2; exit 1; }
 
 # Never record the real app: its container holds the user's library.
@@ -29,7 +30,10 @@ if [[ "$ACTUAL_ID" != "$BUNDLE_ID" ]]; then
     exit 1
 fi
 
-FEED=$(sed "s/{{PUBDATE}}/$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')/" Tests/Fixtures/ui-smoke/feed.xml | tr -d '\n')
+RFC822='+%a, %d %b %Y %H:%M:%S +0000'
+# Both placeholders, as NewsSmokeUITests.fixtureFeed fills them: the earlier story is an hour older.
+FEED=$(sed -e "s/{{PUBDATE}}/$(LC_ALL=C date -u "$RFC822")/" -e "s/{{EARLIER_PUBDATE}}/$(LC_ALL=C date -u -v-1H "$RFC822")/" \
+    Tests/Fixtures/ui-smoke/feed.xml | tr -d '\n')
 RECORD=(xcrun xctrace record --template 'Time Profiler' --instrument os_signpost --time-limit "$TIME_LIMIT"
     --no-prompt --output "$OUTPUT/News.trace"
     --env "NEWS_LIBRARY_NAME=profile-$RUN_ID" --env "NEWS_FIXTURE_FEED=$FEED"
@@ -56,6 +60,6 @@ xcrun xctrace export --input "$OUTPUT/News.trace" \
     --xpath '/trace-toc/run[@number="1"]/data/table[@schema="os-signpost-interval"]' \
     --output "$OUTPUT/signposts.xml"
 python3 script/summarize_signposts.py "$OUTPUT/signposts.xml" "$OUTPUT/summary" \
-    --meta "revision=$(git rev-parse HEAD)" "time_limit=$TIME_LIMIT" \
+    --meta "revision=$(git rev-parse HEAD)" "configuration=Profile" "time_limit=$TIME_LIMIT" \
     "hardware=$(sysctl -n hw.model)" "os=$(sw_vers -productVersion)" "xcode=$(xcodebuild -version | head -1)" "xctrace_exit=$STATUS"
 echo "Signpost profile: $OUTPUT"
