@@ -102,6 +102,22 @@ extension NativeSuites.StorageSuite {
         }
         expectFalse(await cancelled.value, "Cancelled Mark All as Read reports no write")
         expectTrue(try await db.getReadArticleIDs().isEmpty, "Cancellation preserves the unread story")
+
+        let cancelledDatabaseCall = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                try await db.markAllRead()
+                return false
+            } catch is CancellationError {
+                return true
+            } catch {
+                return false
+            }
+        }
+        expectTrue(
+            await cancelledDatabaseCall.value,
+            "A cancelled caller waiting for the database actor cannot begin the bulk update")
+        expectTrue(try await db.getReadArticleIDs().isEmpty, "Cancelled database updates preserve unread state")
         await db.close()
     }
 
