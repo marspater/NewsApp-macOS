@@ -26,7 +26,7 @@ In assignment order. One story enters exactly one lane: the first whose bar it c
 | 5 | Outside Your Usual | Stories from your publishers beyond your usual reading. | When ≥ 3 stories clear the bar | Standard card |
 | 6 | The Latest | Everything else from your publishers, newest first. | Always | Compact card |
 
-Lane names are Title Case (DESIGN.md 17). Descriptions never claim completeness: In Motion says "new reporting", never "every development", because clustering recall is 39 % (#737).
+Lane names are Title Case (DESIGN.md 17). Descriptions never claim completeness: In Motion says "new reporting", never "every development", because clustering does not group every report of an occurrence (#737). Earlier revisions said "clustering recall is 39 %": that figure was the share of recent stories in a multi-publisher card on the 29 October library, not recall. No single recall figure describes the feed; the measurements are in [`docs/audits/2026-11-09-evidence-head.md`](../audits/2026-11-09-evidence-head.md).
 
 ### 2.1 The six rules (from the epic)
 
@@ -77,7 +77,7 @@ Recorded on #933 on 9 November 2026.
 | The Latest | A vertical grid of Compact cards, as the approved mocks show |
 | The masthead | Above The Lead, status only apart from the muted-stories menu |
 | Publisher affinity in The Lead | A tie-breaker. Full weight in Your Beat. Affinity never lifts a one-report story into The Lead |
-| Coverage card at 39 % recall | Ships with Z6 (#938) behind the gate in section 2.2. Clustering recall is worked on separately under #737 |
+| Coverage card while clustering misses reports | Ships with Z6 (#938) behind the gate in section 2.2. Clustering is worked on separately under #737 |
 | Story card radius | 16 pt, delivered by Z6 (DESIGN.md section 12) |
 | Headline typeface | The system serif. Newsreader in the mocks maps to it and the app bundles no typeface (DESIGN.md section 10) |
 | Design documents in `docs/design/` | Signed off |
