@@ -11,7 +11,7 @@ Changes to this setup are logged in the [change log](#change-log) at the end.
 3. **After each run:** log one line with its real numbers (see [Logging a run](#logging-a-run)). A run counts as done once its line is in the ledger.
 4. **Conclusions** still go on the issue, and a claim in a PR or audit names the ledger run it rests on.
 
-A session without access to Mars's Mac skips step 3 and reports the same fields in its PR, or on the issue when there is no PR. The coordinating session logs them.
+A session without access to Mars's Mac cannot read or write the ledger. For step 1 the coordinating session puts the runs already on record for that dataset into the session's brief (name, verdict and measures); a session that was given none asks on the issue before it runs. For step 3 it reports the same fields in its PR, or on the issue when there is no PR, and the coordinating session logs them.
 
 ## What is installed
 
@@ -49,7 +49,7 @@ These files are not under version control. A change to them is recorded in the c
 | `news-ledger data COPY.sqlite3` | Datasette on a library copy; refuses the live library | `http://127.0.0.1:5739` |
 | `news-ledger backup` | Copies the ledger to `backups/` now | |
 
-Use these commands, not the tools' own. A plain `mlflow ui` or `marimo edit` writes files into the folder it starts in (an empty `mlflow.db`, a `__marimo__` folder), and on macOS port 5000, MLflow's default, belongs to AirPlay Receiver. The repository ignores those stray files.
+Use these commands, not the tools' own. A plain `marimo edit` writes a `__marimo__` folder where it starts, a plain `mlflow ui` in a shell without `env.sh` creates an empty `mlflow.db` there, and on macOS port 5000, MLflow's default, belongs to AirPlay Receiver. The repository ignores those stray files.
 
 ## Logging a run
 
@@ -106,7 +106,11 @@ One name means one thing. Before adding a name, check this table and the names a
 
 ## Setting it up again
 
-On a new Mac, or after a clean install:
+On a new Mac, or after a clean install. The tools are installed with [uv](https://docs.astral.sh/uv/), which comes from Homebrew here; check that `uv --version` answers before the next step:
+
+```bash
+brew install uv
+```
 
 ```bash
 uv tool install --python 3.13 mlflow
@@ -120,7 +124,11 @@ Then restore `~/news-eval/mlflow/` from a backup and link the command:
 ln -sf ~/news-eval/mlflow/ledger ~/.local/bin/news-ledger
 ```
 
-Optional: source `~/news-eval/mlflow/env.sh` from the shell profile, so a plain `mlflow` command also uses the ledger with usage reports off.
+Last, source `~/news-eval/mlflow/env.sh` from `~/.zshenv`, so a plain `mlflow` command in a new shell also uses the ledger with usage reports off. Mars's Mac has this line since 10 November 2026:
+
+```bash
+echo '[ -f "$HOME/news-eval/mlflow/env.sh" ] && . "$HOME/news-eval/mlflow/env.sh"' >> ~/.zshenv
+```
 
 ## Change log
 
