@@ -161,8 +161,6 @@ struct BriefingStoryDetails: Equatable, Sendable {
 struct BriefingTensionStripView: View {
     /// Opens a driving headline's story; the checked opener when nil.
     var onOpenURL: ((URL) -> Void)?
-    /// Presents Customize Briefing from the tile's options menu; no menu when nil.
-    var onCustomize: (() -> Void)?
 
     /// The window's model, so the tile cannot be handed anything but what the sidebar shows (#781).
     @Environment(WorldTensionModel.self) private var model
@@ -170,19 +168,14 @@ struct BriefingTensionStripView: View {
 
     @Environment(\.openURL) private var openURL
 
-    init(onOpenURL: ((URL) -> Void)? = nil, onCustomize: (() -> Void)? = nil) {
+    init(onOpenURL: ((URL) -> Void)? = nil) {
         self.onOpenURL = onOpenURL
-        self.onCustomize = onCustomize
     }
 
     var body: some View {
         if let reading = state.reading {
-            BriefingModuleCard(
-                title: "World Tension",
-                options: onCustomize.map { customize in
-                    { Button("Customize Briefing…", action: customize) }
-                }
-            ) {
+            // No options menu: Customize Briefing is in the toolbar and the View menu (#1201).
+            BriefingModuleCard(title: "World Tension") {
                 VStack(alignment: .leading, spacing: AppSpacing.sm) {
                     scoreRow(reading)
                     // Why the reading is an estimate, stale or not refreshed, in the sheet's words.

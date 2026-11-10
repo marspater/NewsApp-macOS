@@ -500,7 +500,6 @@ enum BriefingImpactTests {
         )
         defaultActions.onToggleRead(sampleArticle)
         defaultActions.onToggleSave(sampleArticle)
-        defaultActions.onCustomize()
 
         // 6. BriefingFootprintModuleView evaluation
         let footprintData = BriefingFootprintData.make([

@@ -1070,8 +1070,7 @@ struct ArticleListView: View {
                     onStartNewBriefing: { startNewBriefing() },
                     onBackToToday: { selectedTopic = "Today" },
                     onToggleRead: { readManager.toggleRead($0.id) },
-                    onToggleSave: { toggleSaved($0) },
-                    onCustomize: { showsCustomizeBriefing = true }
+                    onToggleSave: { toggleSaved($0) }
                 )
             )
             // Every module's data from the library; nothing is generated at render time. Reloads when the stories,

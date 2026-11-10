@@ -155,7 +155,7 @@ private struct PublisherHealthTable: View {
                         row.metrics.extractionClass == .unknown ? AppColor.secondaryText : AppColor.primaryText)
             }
             .width(AppLayout.publisherHealthTextColumnWidth)
-            TableColumn("Recommendation", sortUsing: PublisherHealthSort(.recommendation)) { row in
+            TableColumn("Status", sortUsing: PublisherHealthSort(.recommendation)) { row in
                 recommendation(row)
             }
             .width(min: AppLayout.publisherHealthRecommendationColumnMinWidth)
