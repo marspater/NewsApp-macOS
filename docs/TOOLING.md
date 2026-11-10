@@ -71,6 +71,8 @@ A value that is a number becomes a measure; anything else becomes a parameter. `
 | `source` | yes | The audit file or receipt folder that holds the evidence |
 | `commit` | when known | The commit the run was measured on |
 | `knobs`, `matcher`, `note` | optional | The setting that distinguishes this run |
+| `failed_because` | with `verdict=failed` | What made the run fail, so the row explains itself when the same numbers are `reference` elsewhere |
+| `receipt` | optional | The log or output folder of the run under `~/news-eval`, relative to it |
 
 The command refuses a run without `dataset`, `verdict` and `source`, and a verdict outside the list.
 
@@ -89,6 +91,16 @@ One name means one thing. Before adding a name, check this table and the names a
 | `tune_matched`, `tune_false`, `tune_missed` | The tune corpus: pairs matched, false pairs, pairs missed |
 | `regression_matched`, `regression_false`, `regression_missed` | The authored regression sets, likewise |
 | `same`, `wrong`, `cutoff` | The 24 October library holdout: same pairs linked and wrong links at that cutoff |
+| `same_pairs`, `story_pairs` | The denominators of strict and story recall: labelled `same` pairs, and `same` plus `related` pairs, in the replay |
+| `pass_seconds` | Clustering time of the replay, from the harness summary line |
+| `regression_event_pairs`, `regression_story_pairs` | The authored story regressions: event pairs and story pairs checked |
+| `known_gaps_event`, `known_gaps_story`, `unexpected`, `passed` | The authored story regressions: known gaps, unexpected links, and 1 when the set passed |
+| `pairs`, `scored_pairs`, `third_read_pairs` | A label review: pairs read, pairs both passes labelled without `unsure`, pairs sent to the third read |
+| `first_second_agree_pegged_same`, `first_second_agree_pegged_later` | A label review: pairs on which first and second pass agree, with `pegged` counted as `same` or as `later` |
+| `kappa_pegged_same`, `kappa_pegged_later` | A label review: Cohen's kappa of first against second pass, likewise |
+| `labels_changed`, `three_way_splits` | A label review: first-pass labels the review changed, and pairs no two reads agree on |
+
+A rescored run keeps its replay and changes only the labels; its `dataset` names the label set, for example `validation-2026-10-29+reviewed-labels-pegged-as-same`.
 
 `multi_publisher` on its own is refused: until 10 November 2026 it held the story count in some runs and the event count in others (442 and 451 against 433 and 443 on the 3 November holdout).
 
