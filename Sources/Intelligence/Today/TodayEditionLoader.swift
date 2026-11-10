@@ -26,12 +26,6 @@ extension DatabaseEngine {
         return !rows.isEmpty
     }
 
-    func todaySubscribedFeedURLs() throws -> Set<String> {
-        guard try tableExists("feeds") else { return [] }
-        let rows = try eventRows("SELECT url FROM feeds;")
-        return Set(rows.compactMap { $0[0] }.filter { !$0.isEmpty })
-    }
-
     /// Builds the 30-day finer reading-interest and publisher-affinity profile (`read +1`, `saved +3`).
     func todayUserProfile(now: Date = Date(), resetAt: Date? = nil) throws -> TodayUserProfile {
         let thirtyDaysAgo = now.addingTimeInterval(-30 * 86400)
@@ -187,56 +181,67 @@ extension DatabaseEngine {
         }
     }
 
-    /// 3. Stored `pair_assessments` grouping confidence for confirmed events.
+    /// 3. Stored `pair_assessments` grouping confidence: the mean score of every `match` and `related-act` pair
+    /// inside the story of each requested event. A card names its story by one event (the newest of two or more
+    /// reports, else the story's first), so each requested event is resolved to its story and gets that story's
+    /// mean; a sibling event's pairs count toward it and never replace it.
     private func loadTodayGroupingConfidence(
         _ index: TodaySignalIndex,
         into signals: inout [String: TodayStorySignals]
     ) throws {
         guard try tableExists("pair_assessments") else { return }
         try todayBatches(index.eventIDs, size: 200) { slice, placeholders in
+            // CROSS JOIN keeps SQLite on this join order, from the requested events through their story's members
+            // to those members' pairs; left to itself the planner starts from every `match` pair in the library.
             let rows = try eventRows(
                 """
-                SELECT coalesce(e1.story_id, m1.event_id), m1.event_id, avg(p.score)
-                FROM pair_assessments p
-                JOIN event_members m1 ON m1.article_id = p.article_id
-                JOIN event_members m2 ON m2.article_id = p.other_article_id
-                JOIN events e1 ON e1.id = m1.event_id
-                JOIN events e2 ON e2.id = m2.event_id
-                WHERE coalesce(e1.story_id, m1.event_id) = coalesce(e2.story_id, m2.event_id)
-                    AND (m1.event_id IN (\(placeholders)) OR coalesce(e1.story_id, m1.event_id) IN (\(placeholders)))
+                SELECT requested.id, avg(p.score)
+                FROM events requested
+                CROSS JOIN events e1
+                    ON e1.story_id = coalesce(requested.story_id, requested.id)
+                    OR (e1.story_id IS NULL AND e1.id = coalesce(requested.story_id, requested.id))
+                CROSS JOIN event_members m1 ON m1.event_id = e1.id
+                CROSS JOIN pair_assessments p ON p.article_id = m1.article_id
+                CROSS JOIN event_members m2 ON m2.article_id = p.other_article_id
+                CROSS JOIN events e2 ON e2.id = m2.event_id
+                WHERE requested.id IN (\(placeholders))
+                    AND coalesce(e2.story_id, e2.id) = coalesce(requested.story_id, requested.id)
                     AND p.decision IN ('match', 'related-act')
-                GROUP BY 1, 2;
+                GROUP BY requested.id;
                 """,
-                (slice + slice).map { .text($0) }
+                slice.map { .text($0) }
             )
             for row in rows {
-                guard let avgScore = row[2].flatMap({ Double($0) }) else { continue }
-                for key in [row[0], row[1]].compactMap({ $0 }) {
-                    for entryID in index.entryIDsByEventID[key] ?? [] {
-                        signals[entryID]?.groupingConfidence = avgScore
-                    }
+                guard let eventID = row[0], let average = row[1].flatMap({ Double($0) }) else { continue }
+                for entryID in index.entryIDsByEventID[eventID] ?? [] {
+                    signals[entryID]?.groupingConfidence = average
                 }
             }
         }
     }
 
-    /// 4. Stored overview sector impact.
+    /// 4. Stored overview sector impact: an overview whose Industry Impact section holds at least one item, the
+    /// test Briefing applies to the same document.
     private func loadTodaySectorImpact(
         _ index: TodaySignalIndex,
         into signals: inout [String: TodayStorySignals]
     ) throws {
         guard try tableExists("event_overviews") else { return }
         try todayBatches(index.eventIDs) { slice, placeholders in
+            // The section's key in the stored text only narrows the rows: a fact can quote the word. Each match is
+            // decoded as the reader decodes it, in either stored format.
             let rows = try eventRows(
                 """
-                SELECT event_id, facts_json
+                SELECT event_id
                 FROM event_overviews
-                WHERE event_id IN (\(placeholders));
+                WHERE event_id IN (\(placeholders)) AND instr(facts_json, 'industryImpact') > 0;
                 """,
                 slice.map { .text($0) }
             )
             for row in rows {
-                guard let eventID = row[0], let json = row[1], json.contains("industryImpact") else { continue }
+                guard let eventID = row[0],
+                    try fetchEventOverview(eventID: eventID)?.industryImpact.isEmpty == false
+                else { continue }
                 for entryID in index.entryIDsByEventID[eventID] ?? [] {
                     signals[entryID]?.hasSectorImpact = true
                 }
@@ -257,25 +262,22 @@ extension DatabaseEngine {
     }
 
     /// Loads the complete `TodayAssignmentContext` for an already-grouped list of `FeedEntry` values.
+    ///
+    /// `subscribedFeedURLs` is the reader's subscription list (`AppSettings.feedURLs`). The caller supplies it
+    /// because the library does not hold it: the `feeds` table is fetch state, and its row outlives a removed
+    /// subscription, so reading it would let a removed feed's stories into Today. An empty list admits no story.
     func loadTodayAssignmentContext(
         entries: [FeedEntry],
         now: Date = Date(),
         starredFeedURLs: Set<String> = [],
-        subscribedFeedURLs: Set<String>? = nil,
+        subscribedFeedURLs: Set<String>,
         resetAt: Date? = nil
     ) throws -> TodayAssignmentContext {
-        let subscriptions: Set<String>?
-        if let subscribedFeedURLs {
-            subscriptions = subscribedFeedURLs
-        } else {
-            let dbFeeds = try todaySubscribedFeedURLs()
-            subscriptions = dbFeeds.isEmpty ? nil : dbFeeds
-        }
         let profile = try todayUserProfile(now: now, resetAt: resetAt)
         let signals = try todayStorySignals(for: entries)
         return TodayAssignmentContext(
             now: now,
-            subscribedFeedURLs: subscriptions,
+            subscribedFeedURLs: subscribedFeedURLs,
             starredFeedURLs: starredFeedURLs,
             profile: profile,
             signalsByEntryID: signals

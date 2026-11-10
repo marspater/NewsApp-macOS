@@ -36,6 +36,8 @@ extension NewsTests {
             ("testCoverageGateAndDevelopingPill", { testTodayCoverageGateAndDevelopingPill() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
+            ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
+            ("testLoaderSectorImpactNeedsStoredSection", { try await testTodayLoaderSectorImpactNeedsStoredSection() }),
         ]
         try await runSuite(tests)
     }
@@ -793,10 +795,14 @@ extension NewsTests {
 
         let now = Date()
         let subURL = "https://global.example/rss"
-        try await db.eventRows(
-            "INSERT OR IGNORE INTO feeds (id, url, created_at) VALUES (?, ?, ?);",
-            [.text("feed-1"), .text(subURL), .real(now.timeIntervalSince1970)]
-        )
+        // A removed subscription keeps its fetch-state row and its stories; neither makes it a subscription.
+        let removedURL = "https://removed.example/rss"
+        for (id, url) in [("feed-1", subURL), ("feed-2", removedURL)] {
+            try await db.eventRows(
+                "INSERT OR IGNORE INTO feeds (id, url, created_at) VALUES (?, ?, ?);",
+                [.text(id), .text(url), .real(now.timeIntervalSince1970)]
+            )
+        }
 
         let read1 = makeArticle(
             id: "hist-1", title: "CERN collider upgrade passes safety review",
@@ -806,7 +812,10 @@ extension NewsTests {
             id: "cand-1", title: "CERN schedules next collider beam test",
             source: "Science Journal", feedURL: subURL, category: "Science",
             pubDate: now.addingTimeInterval(-600))
-        try await db.upsertArticles([read1, candidate1])
+        let removed1 = makeArticle(
+            id: "removed-1", title: "Harbor authority reviews ferry timetable",
+            source: "Removed Gazette", feedURL: removedURL, pubDate: now.addingTimeInterval(-900))
+        try await db.upsertArticles([read1, candidate1, removed1])
         try await db.markRead(articleId: "hist-1", isRead: true)
 
         // Index entity cleanly for both stories so finer entity profile populates.
@@ -827,14 +836,109 @@ extension NewsTests {
                 ),
             ], expectedGeneration: gen)
 
-        let entries: [FeedEntry] = [.article(candidate1)]
-        let ctx1 = try await db.loadTodayAssignmentContext(entries: entries, now: now)
-        let ctx2 = try await db.loadTodayAssignmentContext(entries: entries, now: now)
+        let entries: [FeedEntry] = [.article(candidate1), .article(removed1)]
+        let ctx1 = try await db.loadTodayAssignmentContext(entries: entries, now: now, subscribedFeedURLs: [subURL])
+        let ctx2 = try await db.loadTodayAssignmentContext(entries: entries, now: now, subscribedFeedURLs: [subURL])
         let plan1 = TodayEditionAssigner.assign(entries: entries, context: ctx1)
         let plan2 = TodayEditionAssigner.assign(entries: entries, context: ctx2)
         assertEqual(plan1, plan2, "Repeated database loads and assignments are strictly deterministic")
         assertTrue(
             ctx1.profile.hasHistory || ctx1.profile.entityWeights["organization:cern"] != nil,
             "Database loader populates fine entity profile from stored entity_mentions")
+        assertEqual(
+            plan1.allAssignments.map(\.id), ["cand-1"],
+            "A removed feed's story stays out of Today although the feed keeps its fetch-state row")
+        let unsubscribed = try await db.loadTodayAssignmentContext(entries: entries, now: now, subscribedFeedURLs: [])
+        assertTrue(
+            TodayEditionAssigner.assign(entries: entries, context: unsubscribed).allAssignments.isEmpty,
+            "An empty subscription list admits no story")
+    }
+
+    static func testTodayLoaderGroupingConfidenceCoversStory() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        defer { Task { await db.close() } }
+
+        // One story of two events (`ev-a` names it) and a second story, `ev-x`.
+        let now = Date()
+        let stamp = now.timeIntervalSince1970
+        let memberEvents = [("a1", "ev-a"), ("a2", "ev-a"), ("b1", "ev-b"), ("b2", "ev-b"), ("x1", "ev-x")]
+        try await db.upsertArticles(
+            memberEvents.map { makeArticle(id: $0.0, title: "Port strike report \($0.0)", pubDate: now) })
+        for (event, story) in [("ev-a", "ev-a"), ("ev-b", "ev-a"), ("ev-x", "ev-x")] {
+            try await db.eventRows(
+                "INSERT INTO events (id, created_at, updated_at, story_id) VALUES (?, ?, ?, ?);",
+                [.text(event), .real(stamp), .real(stamp), .text(story)])
+        }
+        for (article, event) in memberEvents {
+            try await db.eventRows(
+                "INSERT INTO event_members (article_id, event_id, joined_version) VALUES (?, ?, 1);",
+                [.text(article), .text(event)])
+        }
+        let pairs: [(String, String, String, Double)] = [
+            ("a1", "a2", "match", 0.9), ("b1", "b2", "match", 0.5), ("a1", "b1", "related-act", 0.7),
+            ("a2", "b2", "vetoed", 0.1), ("a1", "x1", "match", 1.0),
+        ]
+        try await db.upsertPairDecisions(
+            pairs.map {
+                DatabaseEngine.PairDecision(
+                    articleID: $0.0, otherArticleID: $0.1, decision: $0.2, reason: "test", score: $0.3)
+            }, matcherVersion: 1)
+
+        func entry(_ eventID: String, _ members: [String]) -> FeedEntry {
+            makeEventEntry(
+                eventID: eventID,
+                members: members.map { ($0, "Outlet \($0)", "Port strike report \($0)", "Detail", now, "") })
+        }
+        let signals = try await db.todayStorySignals(
+            for: [entry("ev-a", ["a1", "a2"]), entry("ev-b", ["b1", "b2"]), entry("ev-x", ["x1"])])
+        // (0.9 + 0.5 + 0.7) / 3: the vetoed pair and the pair that leaves the story do not count.
+        for id in ["a1", "b1"] {
+            assertTrue(
+                abs((signals[id]?.groupingConfidence ?? -1) - 0.7) < 1e-9,
+                "Grouping confidence of \(id) is the mean of the whole story's matched pairs")
+        }
+        assertEqual(
+            signals["x1"]?.groupingConfidence, nil, "A story without a matched pair of its own has no stored confidence"
+        )
+    }
+
+    static func testTodayLoaderSectorImpactNeedsStoredSection() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        defer { Task { await db.close() } }
+
+        // Both stored formats: a bare fact array, and the envelope an overview with evidence sections is saved in.
+        let quoting = [OverviewFact(id: "f1", text: "Analysts dispute the industryImpact label.", citationIDs: [])]
+        let sections: [String: OverviewEvidenceSections?] = [
+            "ev-quote": nil,
+            "ev-timeline": OverviewEvidenceSections(
+                timeline: [OverviewTimelineItem(dateText: "Monday", summary: "Talks opened.")]),
+            "ev-impact": OverviewEvidenceSections(
+                industryImpact: [OverviewIndustryImpact(industry: "Energy", implication: "Costs rose.")]),
+        ]
+        for (eventID, evidence) in sections {
+            let stored = try await db.recordEventOverview(
+                EventOverviewDocument(
+                    eventID: eventID,
+                    version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "input"),
+                    content: OverviewContent(title: "Story", summary: "", facts: quoting, evidenceSections: evidence),
+                    provenance: OverviewProvenance(memberArticleIDs: [], kind: .synthesized)))
+            assertTrue(stored, "The overview of \(eventID) is stored")
+        }
+
+        let now = Date()
+        let signals = try await db.todayStorySignals(
+            for: sections.keys.sorted().map { eventID in
+                makeEventEntry(
+                    eventID: eventID,
+                    members: [("m-\(eventID)", "Outlet", "Tariff ruling \(eventID)", "Detail", now, "")])
+            })
+        assertEqual(
+            signals["m-ev-quote"]?.hasSectorImpact, false, "A fact that quotes the word is not a sector impact")
+        assertEqual(
+            signals["m-ev-timeline"]?.hasSectorImpact, false,
+            "Evidence sections without an Industry Impact item are not a sector impact")
+        assertEqual(signals["m-ev-impact"]?.hasSectorImpact, true, "A stored Industry Impact item is a sector impact")
     }
 }

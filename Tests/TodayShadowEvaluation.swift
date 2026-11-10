@@ -33,6 +33,9 @@ enum TodayShadowEvaluation {
     struct ShadowReport: Encodable {
         let nowTimestamp: Double
         let candidateWindowHours: Double
+        /// `NEWS_TODAY_FEEDS` when the run was given the subscription list, else `feeds-table`.
+        let subscriptionSource: String
+        let subscribedFeedCount: Int
         let loaderDurationMs: Double
         let assignDurationMs: Double
         let candidatesTotal: Int
@@ -173,8 +176,10 @@ enum TodayShadowEvaluation {
         let summaries = try await db.eventFeedSummaries(forArticles: windowArticles.map(\.id))
         let entries = EventFeedGrouping.entries(for: windowArticles, events: summaries, mode: .events)
 
+        let subscriptions = try await subscribedFeeds(env, database: db)
         let loaderStart = CFAbsoluteTimeGetCurrent()
-        let context = try await db.loadTodayAssignmentContext(entries: entries, now: now)
+        let context = try await db.loadTodayAssignmentContext(
+            entries: entries, now: now, subscribedFeedURLs: subscriptions.urls)
         let loaderDurationMs = (CFAbsoluteTimeGetCurrent() - loaderStart) * 1000.0
 
         let assignStart = CFAbsoluteTimeGetCurrent()
@@ -203,7 +208,8 @@ enum TodayShadowEvaluation {
         // Your Beat daily count (last 24 h).
         let cutoff24h = now.addingTimeInterval(-24 * 3600)
         let entries24h = entries.filter { $0.representative.orderDate >= cutoff24h }
-        let context24h = try await db.loadTodayAssignmentContext(entries: entries24h, now: now)
+        let context24h = try await db.loadTodayAssignmentContext(
+            entries: entries24h, now: now, subscribedFeedURLs: subscriptions.urls)
         let plan24h = TodayEditionAssigner.assign(entries: entries24h, context: context24h)
         let yourBeat24h = plan24h.entries(for: .yourBeat).count
         let yourBeatRaw24h =
@@ -331,6 +337,8 @@ enum TodayShadowEvaluation {
         let report = ShadowReport(
             nowTimestamp: now.timeIntervalSince1970,
             candidateWindowHours: windowHours,
+            subscriptionSource: subscriptions.source,
+            subscribedFeedCount: subscriptions.urls.count,
             loaderDurationMs: loaderDurationMs,
             assignDurationMs: assignDurationMs,
             candidatesTotal: eligibleBySub.count,
@@ -437,6 +445,25 @@ enum TodayShadowEvaluation {
 
         print("TODAY_SHADOW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
+    }
+
+    /// The snapshot's subscriptions. A library holds no subscription list (it lives in the app's settings), so
+    /// `NEWS_TODAY_FEEDS` names a file with one feed URL per line; an empty file is an empty list and admits no
+    /// story. Without it the run falls back to every feed the library has fetched, which still counts the
+    /// stories of a feed removed since.
+    private static func subscribedFeeds(
+        _ environment: [String: String], database: DatabaseEngine
+    ) async throws -> (urls: Set<String>, source: String) {
+        guard let path = environment["NEWS_TODAY_FEEDS"] else {
+            let fetched = try await database.fetchedFeedURLs()
+            print("TODAY_SHADOW_NOTE NEWS_TODAY_FEEDS is not set: the \(fetched.count) fetched feeds stand in for it")
+            return (fetched, "feeds-table")
+        }
+        let listed = try String(contentsOfFile: path, encoding: .utf8)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return (Set(listed), "NEWS_TODAY_FEEDS")
     }
 
     private static func computeRawQualifyingCounts(
@@ -571,5 +598,11 @@ extension DatabaseEngine {
     fileprivate func schemaUserVersion() throws -> Int {
         let rows = try eventRows("PRAGMA user_version;")
         return rows.first?.first.flatMap { $0 }.flatMap(Int.init) ?? 0
+    }
+
+    /// Every feed the library has fetched: fetch state, not the subscription list, since a removed feed keeps
+    /// its row.
+    fileprivate func fetchedFeedURLs() throws -> Set<String> {
+        Set(try eventRows("SELECT url FROM feeds;").compactMap { $0[0] }.filter { !$0.isEmpty })
     }
 }
