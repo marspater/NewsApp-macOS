@@ -36,11 +36,27 @@ extension DatabaseEngine {
     func todayUserProfile(now: Date = Date(), resetAt: Date? = nil) throws -> TodayUserProfile {
         let thirtyDaysAgo = now.addingTimeInterval(-30 * 86400)
         let cutoff = max(thirtyDaysAgo, resetAt ?? .distantPast)
+        var history = TodayReadingHistory()
+        for row in try todayReadingHistoryRows(since: cutoff) {
+            try Task.checkCancellation()
+            history.add(row)
+        }
+        return TodayUserProfile(
+            categoryWeights: history.categoryWeights,
+            entityWeights: try todayEntityWeights(articleWeights: history.articleWeights),
+            keywordWeights: history.keywordWeights,
+            publisherWeights: history.publisherWeights,
+            interactionCount: history.totalInteractions
+        )
+    }
+
+    /// The stories read or saved since `cutoff`, newest interaction first: `id, source, canonical_url, title,
+    /// category, is_saved`.
+    private func todayReadingHistoryRows(since cutoff: Date) throws -> [[String?]] {
         let hasEnrichment = try tableExists("article_enrichment")
         let categoryExpr = hasEnrichment ? "coalesce(ae.category, a.category)" : "a.category"
         let enrichmentJoin = hasEnrichment ? "LEFT JOIN article_enrichment ae ON ae.article_id = a.id" : ""
-
-        let rows = try eventRows(
+        return try eventRows(
             """
             SELECT a.id, a.source, a.canonical_url, a.title, \(categoryExpr), s.is_saved
             FROM article_state s
@@ -54,67 +70,29 @@ extension DatabaseEngine {
             """,
             [.real(cutoff.timeIntervalSince1970)]
         )
+    }
 
-        var categoryWeights: [String: Double] = [:]
-        var keywordWeights: [String: Double] = [:]
-        var publisherWeights: [String: Double] = [:]
-        var articleWeights: [String: Double] = [:]
-        var totalInteractions = 0
-
-        for row in rows {
-            try Task.checkCancellation()
-            guard let id = row[0] else { continue }
-            let isSaved = row[5] == "1"
-            let weight = isSaved ? 3.0 : 1.0
-            totalInteractions += Int(weight)
-            articleWeights[id] = max(articleWeights[id] ?? 0.0, weight)
-
-            let publisher = FeedCatalog.publisher(forLink: row[2] ?? "") ?? row[1] ?? ""
-            let pubKey = EventFeedSummary.displaySource(publisher).lowercased()
-            if !pubKey.isEmpty {
-                publisherWeights[pubKey, default: 0.0] += weight
-            }
-
-            if let cat = row[4].flatMap(NewsCategory.match(from:))?.rawValue.lowercased() {
-                categoryWeights[cat, default: 0.0] += weight
-            }
-
-            let titleText = [row[3], row[4]].compactMap { $0 }.joined(separator: " ")
-            for token in TodayEditionAssigner.substantiveHeadlineTokens(titleText) {
-                keywordWeights[token, default: 0.0] += weight
-            }
-        }
-
+    /// Entity weights of the read and saved stories from stored `entity_mentions`.
+    private func todayEntityWeights(articleWeights: [String: Double]) throws -> [String: Double] {
         var entityWeights: [String: Double] = [:]
-        if !articleWeights.isEmpty, try tableExists("entity_mentions") {
-            let ids = Array(articleWeights.keys).sorted()
-            for start in stride(from: 0, to: ids.count, by: 400) {
-                let slice = Array(ids[start..<min(start + 400, ids.count)])
-                let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
-                let mentionRows = try eventRows(
-                    """
-                    SELECT article_id, entity_id, score
-                    FROM entity_mentions
-                    WHERE article_id IN (\(placeholders));
-                    """,
-                    slice.map { .text($0) }
-                )
-                for row in mentionRows {
-                    guard let articleID = row[0], let entityID = row[1] else { continue }
-                    let mentionScore = Double(row[2].flatMap(Int.init) ?? 1)
-                    let base = articleWeights[articleID] ?? 1.0
-                    entityWeights[entityID, default: 0.0] += base * min(3.0, max(1.0, mentionScore))
-                }
+        guard !articleWeights.isEmpty, try tableExists("entity_mentions") else { return entityWeights }
+        try todayBatches(Array(articleWeights.keys).sorted()) { slice, placeholders in
+            let mentionRows = try eventRows(
+                """
+                SELECT article_id, entity_id, score
+                FROM entity_mentions
+                WHERE article_id IN (\(placeholders));
+                """,
+                slice.map { .text($0) }
+            )
+            for row in mentionRows {
+                guard let articleID = row[0], let entityID = row[1] else { continue }
+                let mentionScore = Double(row[2].flatMap { Int($0) } ?? 1)
+                let base = articleWeights[articleID] ?? 1.0
+                entityWeights[entityID, default: 0.0] += base * min(3.0, max(1.0, mentionScore))
             }
         }
-
-        return TodayUserProfile(
-            categoryWeights: categoryWeights,
-            entityWeights: entityWeights,
-            keywordWeights: keywordWeights,
-            publisherWeights: publisherWeights,
-            interactionCount: totalInteractions
-        )
+        return entityWeights
     }
 
     /// Loads stored per-story signals (`originalReportCount`, stored member text, stored entities,
@@ -122,36 +100,25 @@ extension DatabaseEngine {
     func todayStorySignals(for entries: [FeedEntry]) throws -> [String: TodayStorySignals] {
         guard !entries.isEmpty else { return [:] }
         var signals: [String: TodayStorySignals] = [:]
-        let hasEntities = try tableExists("entity_mentions")
-        let hasPairs = try tableExists("pair_assessments")
-        let hasOverviews = try tableExists("event_overviews")
-
-        var entryByArticleID: [String: [String]] = [:]
-        var eventToEntryIDs: [String: [String]] = [:]
-
         for entry in entries {
             signals[entry.id] = TodayStorySignals()
-            var articleIDs: Set<String> = Set(entry.visibleArticles.map(\.id))
-            if case .event(let summary, _, _) = entry {
-                eventToEntryIDs[summary.eventID, default: []].append(entry.id)
-                for member in summary.members {
-                    articleIDs.insert(member.articleID)
-                }
-            }
-            for aid in articleIDs {
-                entryByArticleID[aid, default: []].append(entry.id)
-            }
         }
+        let index = TodaySignalIndex(entries: entries)
+        try loadTodayMemberTexts(index, into: &signals)
+        try loadTodayFeedURLs(index, into: &signals)
+        try loadTodayEntities(index, into: &signals)
+        try loadTodayGroupingConfidence(index, into: &signals)
+        try loadTodaySectorImpact(index, into: &signals)
+        return signals
+    }
 
-        let allArticleIDs = Array(entryByArticleID.keys).sorted()
+    /// 1. Stored member full text, publisher attribution and feed URLs, then each entry's original report count.
+    private func loadTodayMemberTexts(
+        _ index: TodaySignalIndex,
+        into signals: inout [String: TodayStorySignals]
+    ) throws {
         var textsByEntryID: [String: [(publisher: String, text: String)]] = [:]
-
-        let hasArticleFeeds = try tableExists("article_feeds")
-
-        // 1. Load stored member full text, publisher attribution, and feed URLs.
-        for start in stride(from: 0, to: allArticleIDs.count, by: 400) {
-            let slice = Array(allArticleIDs[start..<min(start + 400, allArticleIDs.count)])
-            let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
+        try todayBatches(index.articleIDs) { slice, placeholders in
             let rows = try eventRows(
                 """
                 SELECT id, source, canonical_url, title, coalesce(description, ''), coalesce(content, ''), feed_url
@@ -164,109 +131,129 @@ extension DatabaseEngine {
                 guard let id = row[0] else { continue }
                 let publisher = FeedCatalog.publisher(forLink: row[2] ?? "") ?? row[1] ?? ""
                 let combined = [row[3], row[4], row[5]].compactMap { $0 }.joined(separator: "\n")
-                for entryID in entryByArticleID[id] ?? [] {
+                for entryID in index.entryIDsByArticleID[id] ?? [] {
                     textsByEntryID[entryID, default: []].append((publisher, combined))
                     if let feedURL = row[6], !feedURL.isEmpty {
                         signals[entryID]?.feedURLs.insert(feedURL)
                     }
                 }
             }
-            if hasArticleFeeds {
-                let feedRows = try eventRows(
-                    "SELECT article_id, feed_url FROM article_feeds WHERE article_id IN (\(placeholders));",
-                    slice.map { .text($0) }
-                )
-                for row in feedRows {
-                    guard let id = row[0], let feedURL = row[1], !feedURL.isEmpty else { continue }
-                    for entryID in entryByArticleID[id] ?? [] {
-                        signals[entryID]?.feedURLs.insert(feedURL)
-                    }
-                }
-            }
         }
-
         for (entryID, reports) in textsByEntryID {
             var current = signals[entryID] ?? TodayStorySignals()
             current.originalReportCount = max(1, BriefingPriorityData.originalReports(reports))
             current.memberFullTexts = reports.map(\.text)
             signals[entryID] = current
         }
+    }
 
-        // 2. Stored entities (`entity_mentions`).
-        if hasEntities, !allArticleIDs.isEmpty {
-            for start in stride(from: 0, to: allArticleIDs.count, by: 400) {
-                let slice = Array(allArticleIDs[start..<min(start + 400, allArticleIDs.count)])
-                let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
-                let rows = try eventRows(
-                    "SELECT article_id, entity_id FROM entity_mentions WHERE article_id IN (\(placeholders));",
-                    slice.map { .text($0) }
-                )
-                for row in rows {
-                    guard let articleID = row[0], let entityID = row[1] else { continue }
-                    for entryID in entryByArticleID[articleID] ?? [] {
-                        signals[entryID]?.entityIDs.insert(entityID)
+    /// 1, continued. Every feed that carried a member (`article_feeds`), beside the `articles.feed_url` read above.
+    private func loadTodayFeedURLs(
+        _ index: TodaySignalIndex,
+        into signals: inout [String: TodayStorySignals]
+    ) throws {
+        guard try tableExists("article_feeds") else { return }
+        try todayBatches(index.articleIDs) { slice, placeholders in
+            let feedRows = try eventRows(
+                "SELECT article_id, feed_url FROM article_feeds WHERE article_id IN (\(placeholders));",
+                slice.map { .text($0) }
+            )
+            for row in feedRows {
+                guard let id = row[0], let feedURL = row[1], !feedURL.isEmpty else { continue }
+                for entryID in index.entryIDsByArticleID[id] ?? [] {
+                    signals[entryID]?.feedURLs.insert(feedURL)
+                }
+            }
+        }
+    }
+
+    /// 2. Stored entities (`entity_mentions`).
+    private func loadTodayEntities(
+        _ index: TodaySignalIndex,
+        into signals: inout [String: TodayStorySignals]
+    ) throws {
+        guard try tableExists("entity_mentions") else { return }
+        try todayBatches(index.articleIDs) { slice, placeholders in
+            let rows = try eventRows(
+                "SELECT article_id, entity_id FROM entity_mentions WHERE article_id IN (\(placeholders));",
+                slice.map { .text($0) }
+            )
+            for row in rows {
+                guard let articleID = row[0], let entityID = row[1] else { continue }
+                for entryID in index.entryIDsByArticleID[articleID] ?? [] {
+                    signals[entryID]?.entityIDs.insert(entityID)
+                }
+            }
+        }
+    }
+
+    /// 3. Stored `pair_assessments` grouping confidence for confirmed events.
+    private func loadTodayGroupingConfidence(
+        _ index: TodaySignalIndex,
+        into signals: inout [String: TodayStorySignals]
+    ) throws {
+        guard try tableExists("pair_assessments") else { return }
+        try todayBatches(index.eventIDs, size: 200) { slice, placeholders in
+            let rows = try eventRows(
+                """
+                SELECT coalesce(e1.story_id, m1.event_id), m1.event_id, avg(p.score)
+                FROM pair_assessments p
+                JOIN event_members m1 ON m1.article_id = p.article_id
+                JOIN event_members m2 ON m2.article_id = p.other_article_id
+                JOIN events e1 ON e1.id = m1.event_id
+                JOIN events e2 ON e2.id = m2.event_id
+                WHERE coalesce(e1.story_id, m1.event_id) = coalesce(e2.story_id, m2.event_id)
+                    AND (m1.event_id IN (\(placeholders)) OR coalesce(e1.story_id, m1.event_id) IN (\(placeholders)))
+                    AND p.decision IN ('match', 'related-act')
+                GROUP BY 1, 2;
+                """,
+                (slice + slice).map { .text($0) }
+            )
+            for row in rows {
+                guard let avgScore = row[2].flatMap({ Double($0) }) else { continue }
+                for key in [row[0], row[1]].compactMap({ $0 }) {
+                    for entryID in index.entryIDsByEventID[key] ?? [] {
+                        signals[entryID]?.groupingConfidence = avgScore
                     }
                 }
             }
         }
+    }
 
-        // 3. Stored `pair_assessments` grouping confidence for confirmed events.
-        let eventIDs = Array(eventToEntryIDs.keys).sorted()
-        if hasPairs, !eventIDs.isEmpty {
-            for start in stride(from: 0, to: eventIDs.count, by: 200) {
-                let slice = Array(eventIDs[start..<min(start + 200, eventIDs.count)])
-                let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
-                let rows = try eventRows(
-                    """
-                    SELECT coalesce(e1.story_id, m1.event_id), m1.event_id, avg(p.score)
-                    FROM pair_assessments p
-                    JOIN event_members m1 ON m1.article_id = p.article_id
-                    JOIN event_members m2 ON m2.article_id = p.other_article_id
-                    JOIN events e1 ON e1.id = m1.event_id
-                    JOIN events e2 ON e2.id = m2.event_id
-                    WHERE coalesce(e1.story_id, m1.event_id) = coalesce(e2.story_id, m2.event_id)
-                        AND (m1.event_id IN (\(placeholders)) OR coalesce(e1.story_id, m1.event_id) IN (\(placeholders)))
-                        AND p.decision IN ('match', 'related-act')
-                    GROUP BY 1, 2;
-                    """,
-                    (slice + slice).map { .text($0) }
-                )
-                for row in rows {
-                    guard let avgScore = row[2].flatMap(Double.init) else { continue }
-                    for key in [row[0], row[1]].compactMap({ $0 }) {
-                        for entryID in eventToEntryIDs[key] ?? [] {
-                            signals[entryID]?.groupingConfidence = avgScore
-                        }
-                    }
+    /// 4. Stored overview sector impact.
+    private func loadTodaySectorImpact(
+        _ index: TodaySignalIndex,
+        into signals: inout [String: TodayStorySignals]
+    ) throws {
+        guard try tableExists("event_overviews") else { return }
+        try todayBatches(index.eventIDs) { slice, placeholders in
+            let rows = try eventRows(
+                """
+                SELECT event_id, facts_json
+                FROM event_overviews
+                WHERE event_id IN (\(placeholders));
+                """,
+                slice.map { .text($0) }
+            )
+            for row in rows {
+                guard let eventID = row[0], let json = row[1], json.contains("industryImpact") else { continue }
+                for entryID in index.entryIDsByEventID[eventID] ?? [] {
+                    signals[entryID]?.hasSectorImpact = true
                 }
             }
         }
+    }
 
-        // 4. Stored overview sector impact.
-        if hasOverviews, !eventIDs.isEmpty {
-            for start in stride(from: 0, to: eventIDs.count, by: 400) {
-                let slice = Array(eventIDs[start..<min(start + 400, eventIDs.count)])
-                let placeholders = Array(repeating: "?", count: slice.count).joined(separator: ", ")
-                let rows = try eventRows(
-                    """
-                    SELECT event_id, facts_json
-                    FROM event_overviews
-                    WHERE event_id IN (\(placeholders));
-                    """,
-                    slice.map { .text($0) }
-                )
-                for row in rows {
-                    guard let eventID = row[0], let json = row[1] else { continue }
-                    if json.contains("industryImpact") {
-                        for entryID in eventToEntryIDs[eventID] ?? [] {
-                            signals[entryID]?.hasSectorImpact = true
-                        }
-                    }
-                }
-            }
+    /// Calls `body` with each batch of at most `size` ids and the `?, ?, …` placeholder list that binds it.
+    private func todayBatches(
+        _ ids: [String],
+        size: Int = 400,
+        _ body: (_ slice: [String], _ placeholders: String) throws -> Void
+    ) rethrows {
+        for start in stride(from: 0, to: ids.count, by: size) {
+            let slice = Array(ids[start..<min(start + size, ids.count)])
+            try body(slice, Array(repeating: "?", count: slice.count).joined(separator: ", "))
         }
-
-        return signals
     }
 
     /// Loads the complete `TodayAssignmentContext` for an already-grouped list of `FeedEntry` values.
@@ -293,5 +280,67 @@ extension DatabaseEngine {
             profile: profile,
             signalsByEntryID: signals
         )
+    }
+}
+
+/// One pass over the reader's recent read and saved stories (`read +1`, `saved +3`).
+private struct TodayReadingHistory {
+    var categoryWeights: [String: Double] = [:]
+    var keywordWeights: [String: Double] = [:]
+    var publisherWeights: [String: Double] = [:]
+    var articleWeights: [String: Double] = [:]
+    var totalInteractions = 0
+
+    /// Adds one row of `id, source, canonical_url, title, category, is_saved`.
+    mutating func add(_ row: [String?]) {
+        guard let id = row[0] else { return }
+        let isSaved = row[5] == "1"
+        let weight = isSaved ? 3.0 : 1.0
+        totalInteractions += Int(weight)
+        articleWeights[id] = max(articleWeights[id] ?? 0.0, weight)
+
+        let publisher = FeedCatalog.publisher(forLink: row[2] ?? "") ?? row[1] ?? ""
+        let pubKey = EventFeedSummary.displaySource(publisher).lowercased()
+        if !pubKey.isEmpty {
+            publisherWeights[pubKey, default: 0.0] += weight
+        }
+
+        if let cat = row[4].flatMap(NewsCategory.match(from:))?.rawValue.lowercased() {
+            categoryWeights[cat, default: 0.0] += weight
+        }
+
+        let titleText = [row[3], row[4]].compactMap { $0 }.joined(separator: " ")
+        for token in TodayEditionAssigner.substantiveHeadlineTokens(titleText) {
+            keywordWeights[token, default: 0.0] += weight
+        }
+    }
+}
+
+/// Which entries each stored article and each event belong to, so a batched query can fan its rows out.
+private struct TodaySignalIndex {
+    let entryIDsByArticleID: [String: [String]]
+    let entryIDsByEventID: [String: [String]]
+    let articleIDs: [String]
+    let eventIDs: [String]
+
+    init(entries: [FeedEntry]) {
+        var byArticle: [String: [String]] = [:]
+        var byEvent: [String: [String]] = [:]
+        for entry in entries {
+            var articleIDs: Set<String> = Set(entry.visibleArticles.map(\.id))
+            if case .event(let summary, _, _) = entry {
+                byEvent[summary.eventID, default: []].append(entry.id)
+                for member in summary.members {
+                    articleIDs.insert(member.articleID)
+                }
+            }
+            for aid in articleIDs {
+                byArticle[aid, default: []].append(entry.id)
+            }
+        }
+        entryIDsByArticleID = byArticle
+        entryIDsByEventID = byEvent
+        articleIDs = Array(byArticle.keys).sorted()
+        eventIDs = Array(byEvent.keys).sorted()
     }
 }
