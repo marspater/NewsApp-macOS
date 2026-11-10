@@ -3593,6 +3593,8 @@ actor DatabaseEngine {
     }
 
     func markAllRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) throws {
+        // The caller may have been cancelled while waiting to enter this database actor.
+        try Task.checkCancellation()
         guard let db = db else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
@@ -3624,6 +3626,8 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
         bind(params, to: stmt)
+        // Do not begin the library-wide update if cancellation arrived during preparation.
+        try Task.checkCancellation()
         guard sqlite3_step(stmt) == SQLITE_DONE else {
             throw NSError(
                 domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)),
