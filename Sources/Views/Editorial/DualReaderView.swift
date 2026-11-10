@@ -76,7 +76,7 @@ struct DualReaderView: View {
 
     /// How the comparison was made, once per sheet: by meaning with the neural embedder, by shared words when it was not
     /// available (the labels then show overlap, not a judgment of meaning).
-    static func methodCaption(usesLexicalFallback: Bool) -> String {
+    nonisolated static func methodCaption(usesLexicalFallback: Bool) -> String {
         usesLexicalFallback
             ? "Compared by shared words on this Mac; the meaning model was not available"
             : "Compared by meaning on this Mac"
