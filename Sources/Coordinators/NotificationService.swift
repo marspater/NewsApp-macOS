@@ -48,12 +48,13 @@ struct NotificationDelivery: Sendable {
     /// it starts and its banners are minutes apart, so a reader who switches to Privacy or turns notifications off
     /// meanwhile must not get the rest.
     var continues: @Sendable () async -> Bool = { true }
-    /// The photo the publisher-page lookup has recorded for a story, asked when its banner is posted. The pass keeps
-    /// each story as it was at triage and posts minutes later, so a feed without images (Al Jazeera, CNBC) had no
-    /// photo on its banner although one was recorded meanwhile (#1201).
-    var recordedPhoto: @Sendable (String) async -> String? = { _ in
-        // Without a library there is no recorded photo.
-        nil
+    /// The story with the images its card shows now, asked when its banner is posted: the library's curation drops a
+    /// publisher's repeated logo and adds the photo the page lookup recorded. The pass keeps each story as it was at
+    /// triage and posts minutes later, so a feed without images (Al Jazeera, CNBC) had no photo on its banner
+    /// although one was recorded meanwhile (#1201).
+    var curated: @Sendable (FeedArticle) async -> FeedArticle = { story in
+        // Without a library the story is shown as it came.
+        story
     }
     /// Called after each banner posts, so the pass records it before the next.
     var record: @Sendable (PlannedBanner) async -> Void = { _ in
@@ -411,12 +412,7 @@ final class NotificationService: Sendable {
                 }
                 guard !Task.isCancelled else { break }
                 var banner = banner
-                // No usable photo of its own: a missing image, or one the attachment filter refuses (a logo, a pixel).
-                if let story = banner.article, FeedArticle.attachmentImages(for: story).isEmpty,
-                    let photo = await delivery.recordedPhoto(story.id)
-                {
-                    banner.article?.imageUrl = photo
-                }
+                if let story = banner.article { banner.article = await delivery.curated(story) }
                 let outcome = await triggerFullNotification(banner, at: delivery.now, continues: delivery.continues)
                 // A halt is final: the pass must not wait out another gap and post its old banners once Full is back.
                 if outcome == .halted { break }

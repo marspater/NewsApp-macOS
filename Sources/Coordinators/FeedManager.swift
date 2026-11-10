@@ -819,7 +819,7 @@ class FeedManager: NSObject, ObservableObject {
                 delivery.continues = { [weak self] in
                     await self?.allowsFullBanners() ?? false
                 }
-                delivery.recordedPhoto = { id in (try? await database.storyImages(for: [id]))?[id] }
+                delivery.curated = { story in (try? await database.curateImages(in: [story]))?.first ?? story }
                 delivery.record = { [weak self] banner in
                     // A banner is counted only after its bookkeeping write succeeds.
                     let at = banner.lane == .starred ? posted : (await self?.currentDate() ?? posted)
