@@ -283,6 +283,17 @@ struct NewsTests {
             try await evaluateLibraryHoldout(snapshot: snapshot, holdout: holdout)
             return
         }
+        if CommandLine.arguments.contains("--pair-signals") {
+            let environment = ProcessInfo.processInfo.environment
+            guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let pairs = environment["NEWS_LIBRARY_HOLDOUT"],
+                let output = environment["NEWS_EVENT_OUTPUT"]
+            else {
+                throw StoryCorpus.Failure.invalid(
+                    "--pair-signals needs NEWS_SNAPSHOT_DB, NEWS_LIBRARY_HOLDOUT and NEWS_EVENT_OUTPUT")
+            }
+            try await exportPairSignals(snapshot: snapshot, pairs: pairs, output: output)
+            return
+        }
         if CommandLine.arguments.contains("--model-outcome-check") {
             try await checkOnDeviceModelOutcomes()
             return
@@ -2518,6 +2529,82 @@ struct NewsTests {
             failures.append("mean \(String(format: "%.2f", mean)) below \(policy.eventScore)")
         }
         return failures
+    }
+
+    /// The matcher's signals for each labelled pair of a library copy (#737): `NEWS_LIBRARY_HOLDOUT` is the pair file
+    /// `--library-holdout` reads. Writes `pair-signals.csv` (ids, label and numbers, no text) to `NEWS_EVENT_OUTPUT`: the
+    /// rule assessment as clustering computes it, the cosine, the time gap, and whether either report finds the other
+    /// in its candidate search. Nothing is clustered and the copy's events are not read
+    /// (docs/audits/2026-11-09-evidence-head.md).
+    static func exportPairSignals(snapshot: String, pairs: String, output: String) async throws {
+        guard !snapshot.contains("/Library/Containers/") else {
+            throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
+        }
+        struct Pair: Decodable {
+            let a: String, b: String, label: String
+        }
+        let labelled = try JSONDecoder().decode([Pair].self, from: Data(contentsOf: URL(fileURLWithPath: pairs)))
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let copy = directory.appendingPathComponent("library.sqlite3").path
+        try StoryCorpus.writableCopy(of: snapshot, to: copy)
+        let db = DatabaseEngine(path: copy)
+        try await db.open()
+        let ids = Array(Set(labelled.flatMap { [$0.a, $0.b] }))
+        let rows = Dictionary(
+            try await db.eventMatchRows(articleIDs: ids).map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var vectors = try await db.fetchArticleEmbeddings(articleIDs: ids, modelVersion: SentenceEmbedder.modelVersion)
+        let missing = ids.compactMap { rows[$0] }.filter { vectors[$0.id] == nil }
+        let computed = await SentenceEmbedder.shared.embedBatch(
+            missing.map { EventFeatures.matchingText(title: $0.title, description: $0.description) })
+        for (row, vector) in zip(missing, computed) { vectors[row.id] = vector }
+        let policy = StoryCorpus.policyFromEnvironment()
+        var features: [String: EventFeatures] = [:]
+        func signals(_ row: EventMatchRow) -> EventFeatures {
+            if let known = features[row.id] { return known }
+            let value = EventFeatures(title: row.title, description: row.description, date: row.date)
+            features[row.id] = value
+            return value
+        }
+        func finds(_ row: EventMatchRow, _ other: EventMatchRow) async throws -> Bool {
+            let probe = FeedArticle(
+                storedID: row.id, title: row.title, link: "", guid: nil, description: row.description,
+                pubDate: row.date, source: row.source)
+            let now = max(row.date, other.date).addingTimeInterval(3600)
+            return try await EventCandidateFinder.candidates(for: probe, in: db, now: now).contains {
+                $0.articleID == other.id
+            }
+        }
+        var lines = [
+            "a,b,label,gap_hours,same_publisher,cosine,conflict,rule_match,borderline,compatible,shared_anchors,"
+                + "shared_specific,shared_keywords,what,entity,candidate"
+        ]
+        for pair in labelled {
+            guard let a = rows[pair.a], let b = rows[pair.b] else { continue }
+            let cosine = vectors[a.id].flatMap { left in
+                vectors[b.id].map { SentenceEmbedder.cosineSimilarity(left, $0) }
+            }
+            let samePublisher = !a.source.isEmpty && a.source == b.source
+            let assessed = EventMatcher.assess(
+                signals(a), signals(b), policy: policy, embeddingSimilarity: cosine, samePublisher: samePublisher)
+            var candidate = try await finds(a, b)
+            if !candidate { candidate = try await finds(b, a) }
+            let fields: [String] = [
+                "\"\(a.id)\"", "\"\(b.id)\"", pair.label,
+                String(format: "%.2f", abs(a.date.timeIntervalSince(b.date)) / 3600), samePublisher ? "1" : "0",
+                cosine.map { String(format: "%.4f", $0) } ?? "", assessed.conflict?.rawValue ?? "",
+                assessed.isMatch ? "1" : "0", assessed.isBorderline ? "1" : "0", assessed.isCompatible ? "1" : "0",
+                String(assessed.sharedAnchors), String(assessed.sharedSpecificAnchors), String(assessed.sharedKeywords),
+                String(format: "%.4f", assessed.what), String(format: "%.4f", assessed.entity), candidate ? "1" : "0",
+            ]
+            lines.append(fields.joined(separator: ","))
+        }
+        await db.close()
+        try StoryCorpus.writePrivate(
+            Data(lines.joined(separator: "\n").utf8),
+            to: try StoryCorpus.privateDirectory(output).appendingPathComponent("pair-signals.csv"), replacing: false)
+        print("    pair signals: \(lines.count - 1) of \(labelled.count) pairs written")
     }
 
     /// The library holdout (#579): `NEWS_LIBRARY_HOLDOUT` is a JSON array of `{"a", "b", "label"}` with article ids of
