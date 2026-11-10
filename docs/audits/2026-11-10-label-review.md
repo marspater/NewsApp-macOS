@@ -84,8 +84,8 @@ The 553 replayed pairs of the three sets, by reviewed label, and how many the ba
 | Reviewed label | In one event | Share |
 | --- | --- | --- |
 | `same` | 86 of 151 | 57 % |
-| `pegged` | 5 of 40 | 12 % |
-| `later` | 13 of 104 | 12 % |
+| `pegged` | 5 of 40 | 12.5 % |
+| `later` | 13 of 104 | 12.5 % |
 | `topic` | 4 of 128 | 3 % |
 | `unrelated` | 0 of 125 | 0 % |
 
