@@ -411,8 +411,11 @@ final class NotificationService: Sendable {
                 }
                 guard !Task.isCancelled else { break }
                 var banner = banner
-                if let story = banner.article, story.imageUrl == nil {
-                    banner.article?.imageUrl = await delivery.recordedPhoto(story.id)
+                // No usable photo of its own: a missing image, or one the attachment filter refuses (a logo, a pixel).
+                if let story = banner.article, FeedArticle.attachmentImages(for: story).isEmpty,
+                    let photo = await delivery.recordedPhoto(story.id)
+                {
+                    banner.article?.imageUrl = photo
                 }
                 let outcome = await triggerFullNotification(banner, at: delivery.now, continues: delivery.continues)
                 // A halt is final: the pass must not wait out another gap and post its old banners once Full is back.
