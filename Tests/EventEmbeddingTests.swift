@@ -65,7 +65,8 @@ extension NewsTests {
             policy.storyModelThreshold = threshold
             _ = try await EventClusterer.run(
                 in: db, matchPolicy: policy, now: start.addingTimeInterval(7 * 3600), allowsEnergy: true,
-                pairProbability: { @Sendable _, _ in nil }, storyProbabilities: { @Sendable _, _ in (0.6, 0.35) })
+                scoring: EventClusterScoring(
+                    pairProbability: { @Sendable _, _ in nil }, storyProbabilities: { @Sendable _, _ in (0.6, 0.35) }))
             var ids: [String] = []
             for article in articles { ids.append(try await db.resolvedArticleID(for: article)) }
             var result: (String?, String?)?

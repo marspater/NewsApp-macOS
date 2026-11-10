@@ -112,7 +112,7 @@ actor SecureHTTPClient {
     ) {
         try await fetchData(
             from: url, maxBytes: Self.defaultFeedLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP,
-            validators: validators, reportsBackpressure: true)
+            options: FetchOptions(validators: validators, reportsBackpressure: true))
     }
 
     func fetchArticleHTML(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
@@ -122,7 +122,8 @@ actor SecureHTTPClient {
 
     /// Metadata lookup reads only the start of a page, then cancels the remaining download.
     func fetchArticleHead(from url: URL) async throws -> (Data, HTTPURLResponse) {
-        try await fetchData(from: url, maxBytes: 256 * 1024, timeout: Self.defaultTimeout, prefixOnly: true)
+        try await fetchData(
+            from: url, maxBytes: 256 * 1024, timeout: Self.defaultTimeout, options: FetchOptions(prefixOnly: true))
     }
 
     /// Image requests ask for the baseline formats: a document `Accept` that lists WebP and AVIF makes a CDN serve a
@@ -133,8 +134,8 @@ actor SecureHTTPClient {
     func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
         try await fetchData(
             from: allowHTTP ? url : Self.upgradedToHTTPS(url), maxBytes: Self.defaultImageLimit,
-            timeout: Self.defaultTimeout, allowHTTP: allowHTTP, cachePolicy: .useProtocolCachePolicy,
-            customHeaders: ["Accept": Self.imageAccept])
+            timeout: Self.defaultTimeout, allowHTTP: allowHTTP,
+            options: FetchOptions(cachePolicy: .useProtocolCachePolicy, customHeaders: ["Accept": Self.imageAccept]))
     }
 
     /// Feeds still publish `http://` image addresses that their hosts also serve over HTTPS (#794). Card, reader and
@@ -224,17 +225,27 @@ actor SecureHTTPClient {
 
     // MARK: - Core Secure Fetch
 
+    /// Per-request tweaks on top of the secure defaults.
+    struct FetchOptions {
+        var cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData
+        var validators: FeedValidators?
+        var reportsBackpressure = false
+        var customHeaders: [String: String]?
+        var prefixOnly = false
+    }
+
     func fetchData(
         from url: URL,
         maxBytes: Int64,
         timeout: TimeInterval = defaultTimeout,
         allowHTTP: Bool = false,
-        cachePolicy: URLRequest.CachePolicy = .reloadIgnoringLocalCacheData,
-        validators: FeedValidators? = nil,
-        reportsBackpressure: Bool = false,
-        customHeaders: [String: String]? = nil,
-        prefixOnly: Bool = false
+        options: FetchOptions = FetchOptions()
     ) async throws -> (Data, HTTPURLResponse) {
+        let cachePolicy = options.cachePolicy
+        let validators = options.validators
+        let reportsBackpressure = options.reportsBackpressure
+        let customHeaders = options.customHeaders
+        let prefixOnly = options.prefixOnly
         try await validateDestination(url, allowHTTP: allowHTTP)
 
         // 3. Register Task Security Policy in Delegate Coordinator

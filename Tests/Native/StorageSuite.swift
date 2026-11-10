@@ -416,7 +416,8 @@ extension NativeSuites.StorageSuite {
         expectEqual(
             try await db.counts(muting: muting).unread, 600,
             "The unread count spans the whole library, beyond the 500-story window, and leaves muted stories out")
-        let unreadList = try await db.fetchArticles(isRead: false, limit: nil, muting: muting)
+        let unreadList = try await db.fetchArticles(
+            isRead: false, limit: nil, options: ArticleFetchOptions(muting: muting))
         expectEqual(unreadList.count, 600, "The Unread list agrees with the count")
 
         let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
@@ -1388,41 +1389,47 @@ extension NativeSuites.StorageSuite {
             expectEqual(byID.count, 1, "fetchArticles by ID should return exactly 1 article")
             expectEqual(byID.first?.id, queryArticle1.id, "ID filter returned correct article")
 
-            let byIDWithOriginals = try await db.fetchArticles(id: queryArticle1.id, includingOriginals: true)
+            let byIDWithOriginals = try await db.fetchArticles(
+                id: queryArticle1.id, options: ArticleFetchOptions(includingOriginals: true))
             expectEqual(byIDWithOriginals.count, 1, "fetchArticles with includingOriginals: true returns article")
 
             let byNonexistentID = try await db.fetchArticles(id: "nonexistent-id")
             expectTrue(byNonexistentID.isEmpty, "Nonexistent ID returns empty results")
 
             // 2. Canonical URL filtering (handles unique canonical URLs and unmatched URLs)
-            let byCanonical = try await db.fetchArticles(canonicalURL: queryArticle2.normalizedLink)
+            let byCanonical = try await db.fetchArticles(
+                options: ArticleFetchOptions(canonicalURL: queryArticle2.normalizedLink))
             expectEqual(byCanonical.count, 1, "fetchArticles by canonicalURL returns matching article")
             expectEqual(byCanonical.first?.id, queryArticle2.id, "Canonical URL filter matched expected article")
 
-            let byNonexistentCanonical = try await db.fetchArticles(canonicalURL: "https://example.com/nonexistent")
+            let byNonexistentCanonical = try await db.fetchArticles(
+                options: ArticleFetchOptions(canonicalURL: "https://example.com/nonexistent"))
             expectTrue(byNonexistentCanonical.isEmpty, "Nonexistent canonical URL returns empty")
 
             // 3. Event filtering (binds event members and handles nonexistent event IDs)
             let storyEvent = try await db.createEvent(memberArticleIDs: [queryArticle1.id])
-            let byEvent = try await db.fetchArticles(eventID: storyEvent.id)
+            let byEvent = try await db.fetchArticles(options: ArticleFetchOptions(eventID: storyEvent.id))
             expectEqual(byEvent.count, 1, "fetchArticles by eventID returns event members")
             expectEqual(byEvent.first?.id, queryArticle1.id, "fetchArticles by eventID matches queryArticle1")
 
-            let byNonexistentEvent = try await db.fetchArticles(eventID: "nonexistent-event")
+            let byNonexistentEvent = try await db.fetchArticles(
+                options: ArticleFetchOptions(eventID: "nonexistent-event"))
             expectTrue(byNonexistentEvent.isEmpty, "Nonexistent event ID returns empty")
 
             // 4. Publication window filtering (inclusive bounds and parameter typing)
             let windowBoth = try await db.fetchArticles(
-                publicationWindow: Date(
-                    timeIntervalSince1970: 1_700_000_050)...Date(timeIntervalSince1970: 1_700_000_250)
+                options: ArticleFetchOptions(
+                    publicationWindow: Date(
+                        timeIntervalSince1970: 1_700_000_050)...Date(timeIntervalSince1970: 1_700_000_250))
             )
             let windowBothIDs = Set(windowBoth.map(\.id))
             expectTrue(windowBothIDs.contains(queryArticle1.id), "Window includes queryArticle1")
             expectTrue(windowBothIDs.contains(queryArticle2.id), "Window includes queryArticle2")
 
             let windowUpperOnly = try await db.fetchArticles(
-                publicationWindow: Date(
-                    timeIntervalSince1970: 1_700_000_150)...Date(timeIntervalSince1970: 1_700_000_250)
+                options: ArticleFetchOptions(
+                    publicationWindow: Date(
+                        timeIntervalSince1970: 1_700_000_150)...Date(timeIntervalSince1970: 1_700_000_250))
             )
             let windowUpperIDs = Set(windowUpperOnly.map(\.id))
             expectFalse(windowUpperIDs.contains(queryArticle1.id), "Window excludes queryArticle1 before lowerBound")
@@ -1430,7 +1437,7 @@ extension NativeSuites.StorageSuite {
 
             // 5. Cursor filtering (preserves ordering conditions and excludes cursor article)
             let cursor = ArticleQueryCursor(queryArticle2)
-            let afterCursor = try await db.fetchArticles(after: cursor)
+            let afterCursor = try await db.fetchArticles(options: ArticleFetchOptions(after: cursor))
             expectTrue(
                 afterCursor.allSatisfy { $0.id != queryArticle2.id }, "Cursor excludes the cursor article itself")
 
@@ -1438,8 +1445,9 @@ extension NativeSuites.StorageSuite {
             let combined = try await db.fetchArticles(
                 section: "Tech",
                 id: queryArticle1.id,
-                publicationWindow: Date(
-                    timeIntervalSince1970: 1_700_000_000)...Date(timeIntervalSince1970: 1_700_000_300)
+                options: ArticleFetchOptions(
+                    publicationWindow: Date(
+                        timeIntervalSince1970: 1_700_000_000)...Date(timeIntervalSince1970: 1_700_000_300))
             )
             expectEqual(combined.count, 1, "Combined criteria returns exact matching article")
             expectEqual(combined.first?.id, queryArticle1.id, "Combined criteria returned expected article")

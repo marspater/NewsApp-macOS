@@ -331,8 +331,7 @@
                 fetchBatch: { _, _ in [] },
                 notifyBatch: { _, _ in
                     // Previews post no notifications.
-                },
-                allowsBackgroundWork: { false })
+                }, dependencies: FeedManager.Dependencies(allowsBackgroundWork: { false }))
             readManager = ReadManager(articleStore: store)
             savedStories = SavedStoriesManager(articleStore: store)
             themeManager = ThemeManager(defaults: defaults)

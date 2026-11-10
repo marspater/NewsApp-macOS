@@ -185,10 +185,10 @@ final class UpdateChecker: ObservableObject {
                 from: url,
                 maxBytes: 1024 * 1024,
                 timeout: 10,
-                customHeaders: [
+                options: SecureHTTPClient.FetchOptions(customHeaders: [
                     "Accept": "application/vnd.github+json",
                     "User-Agent": "NewsApp/\(currentAppVersion)",
-                ]
+                ])
             )
             guard httpResponse.statusCode == 200 else {
                 statusMessage = "Update check failed (HTTP \(httpResponse.statusCode))"

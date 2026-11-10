@@ -184,7 +184,7 @@ enum AnalysisGenerationTests {
                 await gate.wait()
                 return []
             },
-            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+            notifyBatch: { _, _ in }, dependencies: FeedManager.Dependencies(allowsBackgroundWork: { false }))
         let scheduled = Task { await manager.fetchFeedsAsync(scheduled: true) }
         await eventually("The scheduled refresh enters collection") { await signals.wasInvoked("collecting") }
         let manual = Task {
@@ -230,7 +230,7 @@ enum AnalysisGenerationTests {
                 await gate.wait()
                 return []
             },
-            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+            notifyBatch: { _, _ in }, dependencies: FeedManager.Dependencies(allowsBackgroundWork: { false }))
         let scheduled = Task {
             await manager.fetchFeedsAsync(scheduled: true)
             await signals.finish("scheduled")
@@ -282,7 +282,7 @@ enum AnalysisGenerationTests {
                 }
                 return []
             },
-            notifyBatch: { _, _ in }, allowsBackgroundWork: { false })
+            notifyBatch: { _, _ in }, dependencies: FeedManager.Dependencies(allowsBackgroundWork: { false }))
         let scheduled = Task { await manager.fetchFeedsAsync(scheduled: true) }
         await eventually("The scheduled collection starts") { await signals.invocationCount("collecting") == 1 }
         let manual = Task {
@@ -547,7 +547,8 @@ enum AnalysisGenerationTests {
         check(behind.first?.first == "2", "Both deferred rows are marked one matcher version behind")
         try await db.eventRows("DROP TRIGGER fail_features;")
         let withEnergy = try await EventClusterer.run(
-            in: db, now: start.addingTimeInterval(6 * 3600), allowsEnergy: true, pairProbability: { _, _ in 0.99 })
+            in: db, now: start.addingTimeInterval(6 * 3600), allowsEnergy: true,
+            scoring: EventClusterScoring(pairProbability: { _, _ in 0.99 }))
         check(withEnergy.processed >= 2, "Rows deferred before a failed write are read again with energy")
         await db.close()
 

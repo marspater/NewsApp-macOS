@@ -504,8 +504,9 @@ struct ArticleListView: View {
                 if briefing == nil {
                     let candidates = try await articleStore.database.fetchArticles(
                         isRead: false, limit: FiniteBriefing.candidateLimit,
-                        publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
-                        muting: appSettings.muteRules)
+                        options: ArticleFetchOptions(
+                            publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now,
+                            muting: appSettings.muteRules))
                     try Task.checkCancellation()
                     let priorities = try await articleStore.database.briefingPriorities(
                         articleIDs: candidates.map(\.id))
@@ -664,11 +665,11 @@ struct ArticleListView: View {
         if let binder = currentSmartBinder {
             return try await articleStore.database.fetchArticles(
                 smartBinder: binder, isRead: filters.read, isSaved: filters.saved,
-                limit: 201, after: pageCursor, muting: muting)
+                limit: 201, options: ArticleFetchOptions(after: pageCursor, muting: muting))
         }
         return try await articleStore.database.fetchArticles(
             section: filters.topic, isRead: filters.read, isSaved: filters.saved,
-            limit: 201, after: pageCursor, muting: muting)
+            limit: 201, options: ArticleFetchOptions(after: pageCursor, muting: muting))
     }
 
     private func countMuted(_ muting: MuteRules, queryVector: [Float]?) async throws -> Int {

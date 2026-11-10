@@ -190,11 +190,12 @@ extension NewsTests {
         ]
         try await db.upsertArticles(stories)
         let muting = MuteRules(sources: ["example.com"], topics: ["Climate change", "art"])
-        let firstPage = try await db.fetchArticles(limit: 1, muting: muting)
+        let firstPage = try await db.fetchArticles(limit: 1, options: ArticleFetchOptions(muting: muting))
         assertEqual(
             firstPage.map(\.id), [stories[3].id],
             "The first page is filled from unmuted stories, not trimmed after LIMIT")
-        let remainder = try await db.fetchArticles(limit: nil, after: ArticleQueryCursor(firstPage[0]), muting: muting)
+        let remainder = try await db.fetchArticles(
+            limit: nil, options: ArticleFetchOptions(after: ArticleQueryCursor(firstPage[0]), muting: muting))
         assertEqual(
             (firstPage + remainder).map(\.id), [stories[3].id, stories[4].id, stories[6].id],
             "Cursor pages continue over unmuted stories only")
@@ -229,7 +230,8 @@ extension NewsTests {
         assertEqual(
             try await db.mutedArticleCount(muting: aiMuting), 1, "SQLite hides a set's stories by whole words only")
         assertEqual(
-            try await db.fetchArticles(limit: nil, muting: aiMuting).count, stories.count + 1,
+            try await db.fetchArticles(limit: nil, options: ArticleFetchOptions(muting: aiMuting)).count,
+            stories.count + 1,
             "The SQLite and Swift paths agree on what a set hides")
         assertEqual(try await db.mutedRuleCounts(aiMuting).topicSets, [aiSet: 1], "Settings count a set's stories")
 
@@ -242,7 +244,8 @@ extension NewsTests {
         let totals = try await db.listTotals(section: "Today", isRead: false, muting: muting)
         assertEqual(totals.stories, 5, "Totals count unread, unmuted stories across every page")
         assertEqual(totals.events, 2, "Totals count the events grouping listed stories")
-        let whole = try await db.fetchArticles(section: "Today", isRead: false, limit: nil, muting: muting)
+        let whole = try await db.fetchArticles(
+            section: "Today", isRead: false, limit: nil, options: ArticleFetchOptions(muting: muting))
         let grouped = EventFeedGrouping.entries(
             for: whole, events: try await db.eventFeedSummaries(forArticles: whole.map(\.id)), mode: .events)
         assertEqual(
@@ -533,7 +536,8 @@ extension NewsTests {
 
         // Mute rules strictly honoured: mute theverge.com
         var binderMuting = MuteRules(sources: ["theverge.com"])
-        let mutedArticles = try await db.fetchArticles(smartBinder: testBinder, muting: binderMuting)
+        let mutedArticles = try await db.fetchArticles(
+            smartBinder: testBinder, options: ArticleFetchOptions(muting: binderMuting))
         assertEqual(mutedArticles.map(\.id), ["db-1"], "Muted publisher theverge.com is excluded from smart binder")
         let mutedCount = try await db.mutedArticleCount(smartBinder: testBinder, muting: binderMuting)
         assertEqual(mutedCount, 1, "Muted count reports exactly 1 story hidden by muting")
@@ -546,7 +550,8 @@ extension NewsTests {
 
         // Mute by topic: mute "review"
         binderMuting.addTopic("review")
-        let topicMutedArticles = try await db.fetchArticles(smartBinder: testBinder, muting: binderMuting)
+        let topicMutedArticles = try await db.fetchArticles(
+            smartBinder: testBinder, options: ArticleFetchOptions(muting: binderMuting))
         assertTrue(topicMutedArticles.isEmpty, "Topic muting eliminates remaining story with 'review'")
         let doubleMutedCount = try await db.mutedArticleCount(smartBinder: testBinder, muting: binderMuting)
         assertEqual(doubleMutedCount, 2, "Both stories now counted as muted under smart binder")
@@ -592,7 +597,6 @@ extension NewsTests {
             assertEqual(settings.smartBinders.count, 0, "Initially zero smart binders")
 
             let persistentBinder = SmartBinder(
-                id: UUID(),
                 name: "Custom Defense & Tech",
                 icon: "cube",
                 categories: ["Tech", "World"],
@@ -775,7 +779,9 @@ extension NewsTests {
         try await db.setSaved(articleId: copy.id, isSaved: true)
         try await db.markRead(articleId: copy.id, isRead: true)
         let stored = Dictionary(
-            try await db.fetchArticles(limit: nil, includingOriginals: true).map { ($0.title, $0.id) },
+            try await db.fetchArticles(limit: nil, options: ArticleFetchOptions(includingOriginals: true)).map {
+                ($0.title, $0.id)
+            },
             uniquingKeysWith: { first, _ in first })
         let cafeID = stored[cafe.title]!
         let undatedID = stored[undated.title]!
@@ -1035,7 +1041,8 @@ extension NewsTests {
             "Found images are stored; misses are not images")
         assertTrue(
             FeedArticle.bestCardImage(
-                in: try await db.fetchArticles(limit: nil, eventID: try await db.eventID(forArticle: "e1"))) != nil,
+                in: try await db.fetchArticles(
+                    limit: nil, options: ArticleFetchOptions(eventID: try await db.eventID(forArticle: "e1")))) != nil,
             "Shared storage exposes fetched images to grouped cards and Briefing, without list-only decoration")
         let remaining = Set(
             try await db.imagelessStoryRows(activeSince: now.addingTimeInterval(-86_400), limit: 20).map(\.id))
@@ -1489,7 +1496,7 @@ extension NewsTests {
         try await db.markRead(articleId: "read", isRead: true)
         let fetched = try await db.fetchArticles(
             isRead: false, limit: 500,
-            publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now)
+            options: ArticleFetchOptions(publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now))
         let ids = Set(fetched.map(\.id))
         assertTrue(ids.contains("boundary"), "The lower time boundary is included")
         assertFalse(
@@ -2761,7 +2768,7 @@ extension NewsTests {
                         return (url, [story], nil, nil)
                     }
                 },
-                notifyBatch: { _, _ in }, imageFinder: .unavailable)
+                notifyBatch: { _, _ in }, dependencies: FeedManager.Dependencies(imageFinder: .unavailable))
         }
         let (newName, newDefaults) = suite("onboarding-permission")
         let (offName, offDefaults) = suite("onboarding-permission-off")

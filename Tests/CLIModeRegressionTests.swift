@@ -438,11 +438,13 @@ extension NewsTests {
         assertEqual(
             try await db.resolvedArticleID(for: unknown), unknown.id, "Ambiguous URL never selects a historical row")
         assertTrue(
-            try await db.fetchArticles(limit: 1, canonicalURL: duplicateA.normalizedLink).isEmpty,
+            try await db.fetchArticles(limit: 1, options: ArticleFetchOptions(canonicalURL: duplicateA.normalizedLink))
+                .isEmpty,
             "Ambiguous notification URL must not choose a document")
         execute(copyPath, "PRAGMA foreign_keys = ON; DELETE FROM articles WHERE id = 'historical-a';")
         assertTrue(
-            try await db.fetchArticles(limit: 1, canonicalURL: duplicateA.normalizedLink).isEmpty,
+            try await db.fetchArticles(limit: 1, options: ArticleFetchOptions(canonicalURL: duplicateA.normalizedLink))
+                .isEmpty,
             "Removing a conflicting row must not revive an ambiguous URL")
         assertEqual(
             try await db.resolvedArticleID(for: unknown), unknown.id, "Ambiguous URL remains unusable after deletion")
@@ -466,7 +468,8 @@ extension NewsTests {
         try await db.open()
         assertEqual(try await db.fetchArticles(limit: 1, id: second.id).first?.id, first.id, "ID alias survives reopen")
         assertEqual(
-            try await db.fetchArticles(limit: 1, canonicalURL: first.normalizedLink).first?.id, first.id,
+            try await db.fetchArticles(limit: 1, options: ArticleFetchOptions(canonicalURL: first.normalizedLink))
+                .first?.id, first.id,
             "Previous URL survives replacement and reopen")
         let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
@@ -679,7 +682,8 @@ extension NewsTests {
         assertEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         assertEqual(
-            try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8,
+            try await migrated.fetchArticles(limit: nil, options: ArticleFetchOptions(includingOriginals: true)).count,
+            8,
             "Every stored original remains reachable")
         assertEqual(
             try await migrated.fetchArticles(id: "historical-b").first?.id, "historical-a",
@@ -688,10 +692,12 @@ extension NewsTests {
             try await migrated.fetchArticles(id: "observed-variant-b").first?.id, "historical-a",
             "Observed old ID aliases follow the survivor")
         assertEqual(
-            try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.aiSummary, nil,
+            try await migrated.fetchArticles(id: "historical-b", options: ArticleFetchOptions(includingOriginals: true))
+                .first?.aiSummary, nil,
             "Unversioned original analysis is invalidated by the provenance migration")
         assertEqual(
-            try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.fullContent, body,
+            try await migrated.fetchArticles(id: "historical-b", options: ArticleFetchOptions(includingOriginals: true))
+                .first?.fullContent, body,
             "Original publisher text is retained")
         assertTrue(try await migrated.isRead(articleId: "historical-b"), "Read flags are unioned")
         assertTrue(try await migrated.isSaved(articleId: "historical-a"), "Saved flags are unioned")
@@ -721,13 +727,15 @@ extension NewsTests {
             try await migrated.upsertArticles([incoming]).isEmpty,
             "Proven family evidence prevents refreshed variants from reappearing")
         assertTrue(
-            try await migrated.fetchArticles(canonicalURL: url).isEmpty, "Uncertain URL tombstone is never revived")
+            try await migrated.fetchArticles(options: ArticleFetchOptions(canonicalURL: url)).isEmpty,
+            "Uncertain URL tombstone is never revived")
         assertEqual(
             value(copy, "SELECT count(*) FROM article_aliases WHERE kind='content' AND article_id IS NULL;"), "2",
             "Historical evidence never revives ambiguous content aliases")
         try await migrated.clearArticleCache()
         assertEqual(
-            try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.fullContent, body,
+            try await migrated.fetchArticles(id: "historical-b", options: ArticleFetchOptions(includingOriginals: true))
+                .first?.fullContent, body,
             "Saved family originals survive content cache purging")
         await migrated.close()
         try await migrated.open()
@@ -746,7 +754,8 @@ extension NewsTests {
             try await migrated.pruneOldArticles(keepReadDays: 30), 0,
             "A citation to any original protects the entire reconciled family")
         assertEqual(
-            try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8,
+            try await migrated.fetchArticles(limit: nil, options: ArticleFetchOptions(includingOriginals: true)).count,
+            8,
             "Citation retention preserves all family originals")
         try await migrated.deleteEventOverview(eventID: "history-event")
         assertEqual(
@@ -998,7 +1007,8 @@ extension NewsTests {
             "Undated stories remain visible beyond 500 dated stories")
         assertEqual(snapshot.first?.pubDate, DateParser.unknownDate, "Ordering never fabricates a publication date")
         let firstPage = try await db.fetchArticles(limit: 2)
-        let remainder = try await db.fetchArticles(limit: nil, after: ArticleQueryCursor(firstPage.last!))
+        let remainder = try await db.fetchArticles(
+            limit: nil, options: ArticleFetchOptions(after: ArticleQueryCursor(firstPage.last!)))
         assertEqual((firstPage + remainder).count, 504, "Date cursor includes every row")
         assertEqual(Set((firstPage + remainder).map(\.id)).count, 504, "Tied ingestion dates do not duplicate rows")
         let searchPage = try await db.searchArticles(query: "is:unread", limit: 2)
@@ -1152,7 +1162,8 @@ extension NewsTests {
             try await db.upsertArticles([variant], feedUrl: original.identityFeedURL).isEmpty,
             "Verified canonical variant reuses stored identity")
         assertEqual(
-            try await db.fetchArticles(canonicalURL: final.absoluteString).first?.id, original.id,
+            try await db.fetchArticles(options: ArticleFetchOptions(canonicalURL: final.absoluteString)).first?.id,
+            original.id,
             "Verified redirect resolves through aliases")
         assertTrue(try await db.isRead(articleId: original.id), "Canonical evidence preserves read state")
         assertTrue(try await db.isSaved(articleId: original.id), "Canonical evidence preserves saved state")
@@ -1186,7 +1197,8 @@ extension NewsTests {
             assertTrue(false, "Alias write failure must propagate")
         } catch {}
         assertEqual(
-            try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).first?.id, variant.id,
+            try await persistent.fetchArticles(options: ArticleFetchOptions(canonicalURL: canonical.absoluteString))
+                .first?.id, variant.id,
             "Failed evidence rolls back earlier alias conflict")
         assertEqual(
             sqlite3_exec(handle, "DROP TRIGGER fail_document;", nil, nil, nil), SQLITE_OK,
@@ -1197,15 +1209,18 @@ extension NewsTests {
             try await persistent.fetchArticles(limit: nil).count, 2,
             "Evidence does not merge conflicting historical rows")
         assertTrue(
-            try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).isEmpty,
+            try await persistent.fetchArticles(options: ArticleFetchOptions(canonicalURL: canonical.absoluteString))
+                .isEmpty,
             "Conflicting validated canonical becomes ambiguous")
         await persistent.close()
         try await persistent.open()
         assertEqual(
-            try await persistent.fetchArticles(canonicalURL: final.absoluteString).first?.id, original.id,
+            try await persistent.fetchArticles(options: ArticleFetchOptions(canonicalURL: final.absoluteString)).first?
+                .id, original.id,
             "Validated redirect alias survives reopening")
         assertTrue(
-            try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).isEmpty,
+            try await persistent.fetchArticles(options: ArticleFetchOptions(canonicalURL: canonical.absoluteString))
+                .isEmpty,
             "Validated canonical ambiguity survives reopening")
         await persistent.close()
 
