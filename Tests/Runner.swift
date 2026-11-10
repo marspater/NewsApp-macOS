@@ -62,6 +62,11 @@ struct NewsRegressionRunner {
             if selected("Tests/EditorialRankingTests.swift") { await EditorialRankingTests.run() }
             if selected("Tests/EditorialPersonalizationTests.swift") { await EditorialPersonalizationTests.run() }
             if selected("Tests/EditorialIntelligenceTests.swift") { await EditorialIntelligenceTests.run() }
+            if selected("Tests/TodayLaneAssignmentTests.swift"), !targetedMode {
+                do { try await TodayLaneAssignmentTests.run() } catch {
+                    recordFailure("TEST FAILED with unexpected error: \(error)")
+                }
+            }
             if selected("Tests/StorageTests.swift"), !targetedMode {
                 do { try await StorageTests.run() } catch {
                     recordFailure("TEST FAILED with unexpected error: \(error)")
