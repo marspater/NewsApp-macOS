@@ -63,7 +63,10 @@ final class NewsPerformanceTests: XCTestCase {
         app.launch()
         let field = app.searchFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 30), "No search field in the toolbar")
-        // The fixture must be stored before timing starts: the first search waits for the refresh.
+        // The fixture must be stored before timing starts: wait for the unfiltered list, or the first search's filter
+        // check passes on an empty list and the headline gets only the short wait.
+        XCTAssertTrue(
+            story(Self.otherHeadline).waitForExistence(timeout: 60), "The fixture did not load into the story list")
         search(field)
         clear(field)
         measure(metrics: metrics, options: manualStop) {
@@ -73,8 +76,9 @@ final class NewsPerformanceTests: XCTestCase {
         }
     }
 
-    /// The fixture's other story: the unfiltered list shows it, a finished search for the headline does not.
-    static let otherHeadline = "Regional Orchestra Announces Free Summer Concert Series"
+    /// The fixture's lead story (newest, with an image): the unfiltered list shows it on top, a finished search for
+    /// the headline does not. The list renders lazily, so a story further down may never exist in the hierarchy.
+    static let otherHeadline = "Coastal Survey Maps Tidal Flats From The Air"
 
     /// ⌘F expands and focuses the collapsed toolbar field, as in `NewsSmokeUITests.searchHeadline`.
     func focus(_ field: XCUIElement) {

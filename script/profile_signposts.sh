@@ -29,7 +29,10 @@ if [[ "$ACTUAL_ID" != "$BUNDLE_ID" ]]; then
     exit 1
 fi
 
-FEED=$(sed "s/{{PUBDATE}}/$(LC_ALL=C date -u '+%a, %d %b %Y %H:%M:%S +0000')/" Tests/Fixtures/ui-smoke/feed.xml | tr -d '\n')
+RFC822='+%a, %d %b %Y %H:%M:%S +0000'
+# Both placeholders, as NewsSmokeUITests.fixtureFeed fills them: the earlier story is an hour older.
+FEED=$(sed -e "s/{{PUBDATE}}/$(LC_ALL=C date -u "$RFC822")/" -e "s/{{EARLIER_PUBDATE}}/$(LC_ALL=C date -u -v-1H "$RFC822")/" \
+    Tests/Fixtures/ui-smoke/feed.xml | tr -d '\n')
 RECORD=(xcrun xctrace record --template 'Time Profiler' --instrument os_signpost --time-limit "$TIME_LIMIT"
     --no-prompt --output "$OUTPUT/News.trace"
     --env "NEWS_LIBRARY_NAME=profile-$RUN_ID" --env "NEWS_FIXTURE_FEED=$FEED"
