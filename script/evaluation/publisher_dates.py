@@ -436,7 +436,13 @@ if __name__ == '__main__':
         manifest = json.loads(args.manifest.read_text())
         records = {r['url']: r for r in json.loads((args.pages / 'pages.json').read_text())}
         results = [verify(d, records[d['url']], args.pages) for d in manifest['documents']]
-        report = dict(version=1, releaseEligible=False, manifestSHA256=hashlib.sha256(args.manifest.read_bytes()).hexdigest(), summary=dict(Counter(r['status'] for r in results)), documents=results)
+        report = {
+            'version': 1,
+            'releaseEligible': False,
+            'manifestSHA256': hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
+            'summary': dict(Counter(r['status'] for r in results)),
+            'documents': results,
+        }
         write_private(args.output, json.dumps(report, ensure_ascii=False, indent=2) + '\n')
         print(json.dumps(report['summary'], sort_keys=True))
     else:
