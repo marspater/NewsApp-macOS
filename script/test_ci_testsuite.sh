@@ -22,7 +22,7 @@ grep -q 'file="Tests/Passing.swift"' "$WORK/junit.xml" || fail "testcase must ca
 grep -q 'failures="0"' "$WORK/junit.xml" || fail "passing run must report no failures"
 
 script/ci_testsuite.sh "$WORK/junit.xml" Tests/Passing.swift Tests/Failing.swift > /dev/null && fail "failing atom must exit non-zero"
-[ "$(grep -c '<testcase ' "$WORK/junit.xml")" -eq 2 ] || fail "each atom must get its own testcase"
+[[ "$(grep -c '<testcase ' "$WORK/junit.xml")" -eq 2 ]] || fail "each atom must get its own testcase"
 grep -q 'tests="2" failures="1"' "$WORK/junit.xml" || fail "failure count must match failing atoms"
 grep -q 'ran Tests/Failing.swift' "$WORK/junit.xml" || fail "failure must include the atom output"
 
@@ -48,7 +48,7 @@ PATH="$WORK/bin:$PATH" NEWS_TEST_RUNNER="$WORK/profiling-runner" \
 [[ "$(tr '\n' ' ' < "$WORK/out.lcov")" == "DA:1,0 DA:2,999999999999999999 DA:3,1 DA:4,1 " ]] || fail "a count of 19 or more digits must become 1 and other counts stay"
 
 NEWS_TEST_RUNNER="$WORK/unbuilt" script/ci_testsuite.sh "$WORK/junit.xml" > /dev/null || fail "no selected atom must exit 0"
-[ ! -e "$WORK/unbuilt" ] || fail "no selected atom must not compile the runner"
+[[ ! -e "$WORK/unbuilt" ]] || fail "no selected atom must not compile the runner"
 grep -q 'tests="0" failures="0"' "$WORK/junit.xml" || fail "no selected atom must report an empty suite"
 
 echo "✅ ci_testsuite.sh checks passed"

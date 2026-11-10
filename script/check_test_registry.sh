@@ -9,14 +9,14 @@ cd "$(dirname "$0")/.."
 status=0
 atoms=$(script/test_atoms.sh)
 for atom in $atoms; do
-    [ -f "$atom" ] || { echo "❌ Runner.swift dispatches $atom, which does not exist"; status=1; }
+    [[ -f "$atom" ]] || { echo "❌ Runner.swift dispatches $atom, which does not exist"; status=1; }
     type=$(basename "$atom" .swift)
     grep -qE "\b$type\.(run|main|runAllTests)\(" Tests/Runner.swift || {
         echo "❌ $atom is registered but its suite is not called by Runner.swift"; status=1;
     }
 done
 for file in $(grep -lE 'static func (run|main|runAllTests)\(\)' Tests/*.swift); do
-    [ "$file" = Tests/Runner.swift ] && continue
+    [[ "$file" == "Tests/Runner.swift" ]] && continue
     grep -qxF "$file" <<< "$atoms" && continue
     type=$(basename "$file" .swift)
     # Called from another suite.
@@ -30,5 +30,5 @@ for file in $(grep -lE 'try await runSuite\(tests\)' Tests/*.swift); do
         echo "❌ $file must be dispatched with !targetedMode in Tests/Runner.swift"; status=1;
     }
 done
-[ "$status" -eq 0 ] && echo "Test registry: every suite runs once ($(echo "$atoms" | wc -l | tr -d ' ') atoms)"
+[[ "$status" -eq 0 ]] && echo "Test registry: every suite runs once ($(echo "$atoms" | wc -l | tr -d ' ') atoms)"
 exit $status

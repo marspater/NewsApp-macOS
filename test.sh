@@ -88,7 +88,7 @@ copy_coverage() {
 }
 
 PASS_STAMP=""
-if [ $# -eq 0 ] && [ -z "${NEWS_TEST_FORCE:-}" ] && KEY=$(runner_inputs_key 2>/dev/null); then
+if [[ $# -eq 0 ]] && [[ -z "${NEWS_TEST_FORCE:-}" ]] && KEY=$(runner_inputs_key 2>/dev/null); then
     PASS_STAMP="${TMPDIR:-/tmp}/news-test-passes/$KEY"
     # A coverage run skips only with the report these inputs produced (kept beside the stamp); a run whose export
     # failed, or whose report came from other inputs, runs again.
@@ -239,7 +239,7 @@ else
     fi
 fi
 
-if [ -n "$PASS_STAMP" ] && [ "$MODE" == "full" ]; then
+if [[ -n "$PASS_STAMP" ]] && [[ "$MODE" == "full" ]]; then
     mkdir -p "$(dirname "$PASS_STAMP")"
     touch "$PASS_STAMP"
 fi

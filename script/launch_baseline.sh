@@ -31,8 +31,9 @@ NEWS_BUNDLE_ID="$BUNDLE_ID" NEWS_APP_DIR="$APP" ./build.sh >/dev/null
 EXECUTABLE="$APP/Contents/MacOS/News"
 
 wait_for_exit() {
-    for _ in $(seq 1 200); do kill -0 "$1" 2>/dev/null || return 0; sleep 0.05; done
-    kill -KILL "$1" 2>/dev/null || true
+    local pid="$1"
+    for _ in $(seq 1 200); do kill -0 "$pid" 2>/dev/null || return 0; sleep 0.05; done
+    kill -KILL "$pid" 2>/dev/null || true
 }
 
 # One launch: returns after the first card is logged, memory is sampled and the app has quit.
