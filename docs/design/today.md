@@ -41,7 +41,7 @@ A conditional lane needs three stories that clear its bar. Below that it is abse
 
 ## Page
 
-Top to bottom, in one vertical `ScrollView`: the masthead (DESIGN.md section 8.1), The Lead, the conditional lanes in assignment order, then The Latest.
+Top to bottom, in one vertical `ScrollView`: the masthead (DESIGN.md section 8.1), The Lead, the conditional lanes in the page order of the table above, then The Latest.
 
 **Lane header.** The name in `AppTypography.sectionTitle` with the heading trait, the description beneath it in `caption` and the secondary color, and no count.
 
