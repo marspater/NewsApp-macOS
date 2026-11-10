@@ -1,6 +1,18 @@
 # Today edition Z2 shadow evaluation (#934, 10 November 2026)
 
-Shadow evaluation for [Z2 (#934)](https://github.com/marspater/NewsApp-macOS/issues/934) under [the signed-off Today edition specification](../plans/2026-11-09-today-edition-spec.md). Measured offline via `NEWS_TEST_ATOM=Tests/NewsTests.swift ./test.sh --today-shadow` on a migrated temporary copy of `~/news-eval/library-copy.sqlite3` (7,442 articles across 37 subscribed feeds, 99 read/saved interactions over 30 days, latest snapshot timestamp `1793382432`). Aggregate metrics only are stored here and under `~/news-eval/today-shadow-2026-11-10/shadow-report.json`; all candidate titles and review sheets stay private under `/private/tmp/today-shadow-eval/`. Labels are single-pass agent labels awaiting Mars's 20-story spot check.
+Shadow evaluation for [Z2 (#934)](https://github.com/marspater/NewsApp-macOS/issues/934) under [the signed-off Today edition specification](../plans/2026-11-09-today-edition-spec.md). Measured offline with `--today-shadow` (command below) on a migrated temporary copy of `~/news-eval/library-copy.sqlite3` (7,442 articles across 37 fetched feeds, 99 read/saved interactions over 30 days, latest snapshot timestamp `1793382432`). Aggregate metrics only are stored here and under `~/news-eval/today-shadow-2026-11-10/shadow-report.json`; all candidate titles and review sheets stay private under `/private/tmp/today-shadow-eval/`. Labels are single-pass agent labels awaiting Mars's 20-story spot check.
+
+```sh
+NEWS_TEST_ATOM=Tests/NewsTests.swift \
+NEWS_TODAY_NOW=<epoch seconds> \
+NEWS_TODAY_LABELS=/private/tmp/<run>/labels-private.json \
+NEWS_TODAY_FEEDS=/private/tmp/<run>/feeds.txt \
+./test.sh --today-shadow /private/tmp/<run>/library-copy.sqlite3 /private/tmp/<run>/<output>
+```
+
+The two arguments are the library copy and the output directory. Both must lie under `/private/tmp` or `/tmp`; the output directory is created `0700`, and an existing one must already be closed to other accounts. The variables are optional. `NEWS_TODAY_NOW` pins the clock (default: the newest story in the copy), `NEWS_TODAY_WINDOW_HOURS` sets the candidate window (default `72`), and `NEWS_TODAY_LABELS` names the private label file (without it the labelled sections are left out). `NEWS_TODAY_FEEDS` names a file with the subscribed feed URLs, one per line. A library copy does not hold the subscription list, so without that file every feed the copy has fetched stands in for it, and a feed removed since keeps its stories in the pool. These figures used `NEWS_TODAY_NOW=1793382432`, the label file and no `NEWS_TODAY_FEEDS`: the pool is the 37 fetched feeds, an upper bound on the subscriptions.
+
+The figures were re-read after the review fixes at commit `bddd996`, with the same copy, clock and labels: the Coverage gate rose from `21 / 29` to `23 / 29`, because grouping confidence is now the mean over the whole story, and every other quality figure is unchanged.
 
 ## Score, Confidence, and Gate Definitions (Z2)
 
@@ -8,7 +20,7 @@ Neither the `0–1` editorial `score`, the `0–1` placement `confidence`, nor t
 
 - **Editorial `score` (`0.0...1.0`)**: weighted sum without publisher affinity (`affinity` acts only as a Lead tie-breaker behind `score` and `originalReportCount`, so affinity never lifts a single-report story onto a Lead slide or ahead of a multi-report story):
   - Original reporting breadth (`0.42`): $\min(1.0, \log_2(\max(1, \text{originalCount})) / \log_2(6.0)) \times 0.42$, where wire copy counts once per agency (`BriefingPriorityData.originalReports`).
-  - Briefing importance (`0.28`, `+0.05` sector impact bonus when `event_overviews` carries `industryImpact` below `.major`): `BriefingPriorityData.assessImportance` mapped as `.major = 0.28`, `.notable = 0.16`, `.minor = 0.04`.
+  - Briefing importance (`0.28`, `+0.05` sector impact bonus below `.major` when the stored overview in `event_overviews` holds a non-empty Industry Impact section): `BriefingPriorityData.assessImportance` mapped as `.major = 0.28`, `.notable = 0.16`, `.minor = 0.04`.
   - NaturalLanguage importance (`0.20`): `NotificationService.shared.computeImportance` (`0.0...1.0`), decoupled from notification posting thresholds (`breakingScore = 0.60`, `priorityScore = 0.75`).
   - Momentum / developing cadence (`0.10`): rising + developing `0.10`, rising or developing `0.07`, steady `0.02`, fading `0.00`.
   - Promotional deals guard: headlines matching explicit deals/promo cues (`Deals:`, `Black Friday`, `Cyber Monday`, `Doorbusters`, etc.) are capped at `0.25`.
@@ -19,11 +31,11 @@ Neither the `0–1` editorial `score`, the `0–1` placement `confidence`, nor t
 
 | Measure | Value | Notes |
 | --- | --- | --- |
-| Candidate pool (`72 h` / `24 h`) | `738` / `522` | Subscribed feeds resolved via `article_feeds` and `articles.feed_url` |
+| Candidate pool (`72 h` / `24 h`) | `738` / `522` | Feeds resolved via `article_feeds` and `articles.feed_url`; the 37 fetched feeds stand in for the subscription list |
 | `Latest` completeness | `1.00` (`100 %`) | Every eligible story placed in exactly one lane |
 | Duplicate rate across lanes | `0.00` (`0 %`) | Story-layer (`#581`) deduplication |
-| Loader / Assign runtime (Debug) | `104.9 ms` / `4,055.7 ms` | SQLite load (`105 ms`); pure assignment in Debug (`4.06 s`, dominated by per-story `NLTagger` passes when `entity_mentions` is unpopulated on migrated v27 copy) |
-| Coverage gate (`>= 3` publishers) | `21 / 29` (`72.4 %`) | Rejects `8` confirmed clusters with `< 0.70` mean `pair_assessments` score or `< 2` originals |
+| Loader / Assign runtime (Debug) | `104.9 ms` / `4,055.7 ms` | SQLite load (`105 ms`); pure assignment in Debug (`4.06 s`, dominated by per-story `NLTagger` passes when `entity_mentions` is unpopulated on migrated v27 copy). The re-read took `479.6 ms` / `20,291.3 ms` while the Mac was busy with other work (load average about 9): that pair is not a clean measurement, and the loader's grouping query changed in between |
+| Coverage gate (`>= 3` publishers) | `23 / 29` (`79.3 %`) | Rejects `6` confirmed clusters with `< 0.70` mean `pair_assessments` score or `< 2` originals |
 
 | Lane | Shown | Raw Qualifying (72 h) | Qualifying Rule / Breakdown |
 | --- | --- | --- | --- |
