@@ -19,7 +19,7 @@ Exported on 9 November 2026 from the design canvas. They illustrate these rules;
 
 ## Lanes
 
-In assignment order. One story enters exactly one lane, the first whose quality bar it clears.
+In page order. One story enters exactly one lane, the first whose quality bar it clears. Assignment order differs from page order in one place: The Deep Read is assigned before Your Beat, so a long read on a subject the reader follows is a Feature card in The Deep Read (specification, section 4.1).
 
 | Lane | Description, shown under the name | Display | Card |
 | --- | --- | --- | --- |
@@ -33,15 +33,15 @@ In assignment order. One story enters exactly one lane, the first whose quality 
 1. Chronological within every lane. The Lead follows its rank.
 2. No topic lanes: sections belong to the sidebar.
 3. No Briefing duplication: no assessments, gauges, strategic impact or weak signals. The Lead ranks by the editorial score from Z2 (#934), not by publisher count.
-4. One story, one lane, by the order above. Lanes hold stories (#581), never single reports, so an event cannot appear twice.
-5. Subscriptions are the candidate pool; publisher affinity raises rank. There is no "From your sources" lane.
+4. One story, one lane, by the assignment order. Lanes hold stories (#581), never single reports, so an event cannot appear twice.
+5. Subscriptions are the candidate pool; publisher affinity raises rank, with full weight in Your Beat and as a tie-breaker only in The Lead. There is no "From your sources" lane.
 6. The Latest is the safety net: personalisation never hides an ordinary story.
 
 A conditional lane needs three stories that clear its bar. Below that it is absent: no empty rail, no filler, and The Lead is never padded to five. Lanes appear and hide only when the reader applies an update.
 
 ## Page
 
-Top to bottom, in one vertical `ScrollView`: the masthead (DESIGN.md section 8.1), The Lead, the conditional lanes in assignment order, then The Latest.
+Top to bottom, in one vertical `ScrollView`: the masthead (DESIGN.md section 8.1), The Lead, the conditional lanes in the page order of the table above, then The Latest.
 
 **Lane header.** The name in `AppTypography.sectionTitle` with the heading trait, the description beneath it in `caption` and the secondary color, and no count.
 
