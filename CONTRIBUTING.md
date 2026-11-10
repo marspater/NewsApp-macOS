@@ -147,6 +147,10 @@ The VoiceOver harness is parked (#268) and is not part of release verification; 
 
 `--live` checks rendered AX nodes while scrolling, invokes card actions and verifies SQLite state, opens/dismisses a real citation and observes the production feed-buffer notification after inserting three fixture stories. Missing numeric heading metadata is reported as unverified and requires the manual rotor pass. AX tree order and observed notifications do not establish VoiceOver cursor order, rotor traversal, pronunciation or speech. Use `--manual`, enable VoiceOver yourself, and record that separate pass in #268. The Fixtures menu switches between Feed, Source Reader and Event Overview. On Feed, Queue New Stories holds the list through its production navigation command and inserts three stories. Close the fixture window to clean up. The harness does not change system accessibility settings.
 
+## Research runs
+
+A model candidate, a matcher knob or a holdout replay is recorded in the local run ledger, one line per run. The tools, the commands, the field and measure names and the flow are in [docs/TOOLING.md](docs/TOOLING.md).
+
 ## Pair review protocol (#551)
 
 Pair decisions are reviewed on a copy of a library, never the live file. `--review-pairs` exports every stored decision with both headlines; the reviewer labels a sample and the numbers go into a dated file under `docs/audits/`. Mars delegates bulk review to Claude and spot-checks; the audit says who labelled.
