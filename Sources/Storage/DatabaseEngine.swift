@@ -4922,7 +4922,7 @@ actor DatabaseEngine {
 
     /// Compatibility for historical audit callers. Only ordinary user-configured retention deletes stories.
     @discardableResult
-    func expireWaitingStories(now: Date = Date(), keepingFeedURLs: [String] = []) throws -> Int {
+    func expireWaitingStories(now _: Date = Date(), keepingFeedURLs _: [String] = []) throws -> Int {
         0
     }
 

@@ -1018,10 +1018,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private static func repairXML(data: Data, overrideEncoding: String.Encoding?) -> Data {
-        if overrideEncoding == nil, let bom = detectBOMEncoding(in: data), bom != .utf8 {
-            if let repaired = repairNonUTF8(data: data, bom: bom) {
-                return repaired
-            }
+        if overrideEncoding == nil, let bom = detectBOMEncoding(in: data), bom != .utf8,
+            let repaired = repairNonUTF8(data: data, bom: bom)
+        {
+            return repaired
         }
         let cdataStart = Data("<![CDATA[".utf8)
         let commentStart = Data("<!--".utf8)
@@ -1127,11 +1127,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
             if let semi = semicolonIdx {
                 let entity = String(cleaned[nextIdx..<semi])
-                if ["amp", "lt", "gt", "quot", "apos"].contains(entity) {
-                    result.append("&")
-                    result.append(contentsOf: cleaned[nextIdx...semi])
-                    idx = cleaned.index(after: semi)
-                } else if isValidNumericEntity(cleaned[nextIdx..<semi]) {
+                if ["amp", "lt", "gt", "quot", "apos"].contains(entity)
+                    || isValidNumericEntity(cleaned[nextIdx..<semi])
+                {
                     result.append("&")
                     result.append(contentsOf: cleaned[nextIdx...semi])
                     idx = cleaned.index(after: semi)

@@ -67,7 +67,7 @@ def summarize(path):
 
 def main(argv):
     source, prefix = argv[1], argv[2]
-    meta = {key: value for key, value in (item.split("=", 1) for item in argv[4:])} if argv[3:4] == ["--meta"] else {}
+    meta = dict(item.split("=", 1) for item in argv[4:]) if argv[3:4] == ["--meta"] else {}
     intervals = summarize(source)
     # The output prefix is the operator's own command-line choice (profile_signposts.sh), not untrusted input.
     with open(prefix + ".json", "w") as handle:  # NOSONAR

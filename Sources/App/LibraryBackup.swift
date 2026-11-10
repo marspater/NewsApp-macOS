@@ -65,12 +65,16 @@ enum LibraryBackup {
             if let settings, (try? AppSettings.restoreSettings(settings, to: .standard)) == nil {
                 showAlert("The library was restored, but the backup's settings couldn't be read.")
             }
-            let configuration = NSWorkspace.OpenConfiguration()
-            configuration.createsNewApplicationInstance = true
-            NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
-                Task { @MainActor in
-                    handleRelaunchCompletion(app: app, error: error)
-                }
+            relaunch()
+        }
+    }
+
+    @MainActor private static func relaunch() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { app, error in
+            Task { @MainActor in
+                handleRelaunchCompletion(app: app, error: error)
             }
         }
     }

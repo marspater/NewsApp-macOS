@@ -46,7 +46,12 @@ def validate(manifest):
         require(all(d in documents for d in edge), 'Unknown pair document')
         left, right = (documents[d] for d in edge)
         require(all(events[d['event']]['split'] == pair['split'] for d in (left, right)), 'Pair crosses splits')
-        expected = 'same_document' if left['url'] == right['url'] else 'same_event' if left['event'] == right['event'] else 'different'
+        if left['url'] == right['url']:
+            expected = 'same_document'
+        elif left['event'] == right['event']:
+            expected = 'same_event'
+        else:
+            expected = 'different'
         require(pair['proposedLabel'] in LABELS and pair['proposedLabel'] == expected, 'Label contradicts proposed occurrences')
         require(pair['reviewStatus'] == 'pending', 'Proposed labels are not adjudications')
     return documents, events
@@ -98,9 +103,9 @@ def prepare(manifest, capture_path, output, labels_path=None):
         # The native clusterer scores all pairs, including links outside the review sample.
         require(review.get('allEventAssignmentsReviewed') is True, 'Review every event assignment, including singleton boundaries')
         require(all(type(d.get('published')) in (int, float) and math.isfinite(d['published']) for d in documents.values()), 'Undated captured inputs require a reviewed exclusion before replay; never invent timestamps')
-        articles = [dict(id=d['id'], url=d['url'], title=items[d['id']]['title'], description=items[d['id']]['description'], source=d['source'],
-                         published=datetime.fromtimestamp(d['published'], timezone.utc).isoformat().replace('+00:00', 'Z'),
-                         event=d['event'], split=events[d['event']]['split']) for d in documents.values()]
+        articles = [{'id': d['id'], 'url': d['url'], 'title': items[d['id']]['title'], 'description': items[d['id']]['description'], 'source': d['source'],
+                     'published': datetime.fromtimestamp(d['published'], timezone.utc).isoformat().replace('+00:00', 'Z'),
+                     'event': d['event'], 'split': events[d['event']]['split']} for d in documents.values()]
         write_private(directory / 'reviewed-event-corpus.json', json.dumps({'articles': articles, 'review': review}, ensure_ascii=False, indent=2) + '\n')
         print('Exported independently reviewed event inputs; no predictions were run.')
         return

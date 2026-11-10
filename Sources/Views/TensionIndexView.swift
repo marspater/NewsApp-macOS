@@ -598,14 +598,12 @@ struct TensionGlyph: View {
         let heat: Double
         if level == .warm {
             heat = 0.0
+            context.translateBy(x: width * 0.08, y: height * 0.2)
+            context.scaleBy(x: 0.84, y: 0.8)
         } else if level == .hot {
             heat = 0.5
         } else {
             heat = 1.0
-        }
-        if level == .warm {
-            context.translateBy(x: width * 0.08, y: height * 0.2)
-            context.scaleBy(x: 0.84, y: 0.8)
         }
         // Two incommensurate waves per parameter, so the flicker never visibly repeats or resets.
         let fire = time * (1 + heat)

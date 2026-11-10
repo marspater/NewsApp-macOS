@@ -189,7 +189,7 @@ struct OverviewThematicAngleExtractor: Sendable {
     /// - Returns: Validated `OverviewThematicAngle`, or `nil` if insufficient thematic facts exist.
     static func extractThematicAngle(
         facts: [PassageAnchoredFact],
-        passages: [EvidencePassage],
+        passages _: [EvidencePassage],
         existingCitations: [String: OverviewCitation]
     ) -> OverviewThematicAngle? {
         // Reverse-index passages to citation IDs

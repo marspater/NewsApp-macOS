@@ -438,8 +438,8 @@ final class NotificationService: Sendable {
     /// What Settings says after a test banner: why nothing showed, or how the reader's notification settings shaped
     /// it. Sentence case, no claim beyond what the outcome and settings show.
     static func sampleStatus(
-        _ outcome: PostOutcome, authorization: UNAuthorizationStatus, alert: UNNotificationSetting, style: UNAlertStyle,
-        previews: UNShowPreviewsSetting
+        _ outcome: PostOutcome, authorization: UNAuthorizationStatus, alert _: UNNotificationSetting,
+        style: UNAlertStyle, previews: UNShowPreviewsSetting
     ) -> String {
         let systemSettings = "System Settings › Notifications › News"
         switch outcome {

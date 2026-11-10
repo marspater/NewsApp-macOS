@@ -438,8 +438,12 @@ struct BriefingTileView: View {
     let isLead: Bool
     let isDeveloping: Bool
     let onOpen: () -> Void
-    var onToggleRead: () -> Void = {}
-    var onToggleSave: () -> Void = {}
+    var onToggleRead: () -> Void = {
+        // No-op unless the caller handles read state.
+    }
+    var onToggleSave: () -> Void = {
+        // No-op unless the caller handles saving.
+    }
 
     @Environment(\.effectiveContrast) private var contrast
     @Environment(\.effectiveReduceMotion) private var reduceMotion
@@ -451,8 +455,12 @@ struct BriefingTileView: View {
         citedFact: BriefingCitedFact?,
         state: BriefingTileState = BriefingTileState(),
         onOpen: @escaping () -> Void,
-        onToggleRead: @escaping () -> Void = {},
-        onToggleSave: @escaping () -> Void = {}
+        onToggleRead: @escaping () -> Void = {
+            // No-op unless the caller handles read state.
+        },
+        onToggleSave: @escaping () -> Void = {
+            // No-op unless the caller handles saving.
+        }
     ) {
         self.article = article
         self.eventSummary = eventSummary

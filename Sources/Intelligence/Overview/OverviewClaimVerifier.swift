@@ -89,7 +89,7 @@ public struct OverviewClaimVerifier: Sendable {
     static func verifyOverview(
         _ overview: EventOverviewDocument,
         passages: [EvidencePassage],
-        articles: [FeedArticle]
+        articles _: [FeedArticle]
     ) -> OverviewVerificationReport {
         let passagesByID = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0) })
         var claimResults: [ClaimVerificationResult] = []

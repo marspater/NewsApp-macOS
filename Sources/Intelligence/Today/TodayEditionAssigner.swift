@@ -229,7 +229,13 @@ enum TodayEditionAssigner {
             return nil
         }
         let reason =
-            byStar ? "your_beat_starred" : (byInterest ? "your_beat_interest" : "your_beat_publisher_affinity")
+            if byStar {
+                "your_beat_starred"
+            } else if byInterest {
+                "your_beat_interest"
+            } else {
+                "your_beat_publisher_affinity"
+            }
         return LanePlacement(story: story, confidence: conf, reason: reason)
     }
 

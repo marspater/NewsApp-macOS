@@ -267,9 +267,7 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         }
 
         let cleanExcludes = Self.cleanTerms(excludeKeywords)
-        if !cleanExcludes.isEmpty {
-            if cleanExcludes.contains(where: { text.contains($0.lowercased()) }) { return false }
-        }
+        if cleanExcludes.contains(where: { text.contains($0.lowercased()) }) { return false }
 
         return true
     }

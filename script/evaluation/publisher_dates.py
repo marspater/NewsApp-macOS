@@ -347,11 +347,12 @@ def self_check():
     with tempfile.TemporaryDirectory() as path:
         directory = Path(path)
         raw = html.encode()
-        (directory / 'page.html').write_bytes(raw)
-        record = {'file': 'page.html', 'finalURL': example_a, 'sha256': hashlib.sha256(raw).hexdigest(), 'fetchedAt': 0}
+        page = directory / 'page.html'
+        page.write_bytes(raw)
+        record = {'file': page.name, 'finalURL': example_a, 'sha256': hashlib.sha256(raw).hexdigest(), 'fetchedAt': 0}
         report = verify({'id': 'a', 'url': example_a, 'published': instant('2026-10-03T12:00:00Z')}, record, directory)
         check(report['status'] == 'feed-matches-modification' and report['publisherPublished'] == published_a)
-        (directory / 'page.html').write_text('changed')
+        page.write_text('changed')
         try:
             verify({'id': 'a', 'url': example_a}, record, directory)
         except ValueError:
@@ -373,7 +374,7 @@ if __name__ == '__main__':
         manifest = json.loads(args.manifest.read_text())
         records = {r['url']: r for r in json.loads((args.pages / 'pages.json').read_text())}
         results = [verify(d, records[d['url']], args.pages) for d in manifest['documents']]
-        report = dict(version=1, releaseEligible=False, manifestSHA256=hashlib.sha256(args.manifest.read_bytes()).hexdigest(), summary=dict(Counter(r['status'] for r in results)), documents=results)
+        report = {'version': 1, 'releaseEligible': False, 'manifestSHA256': hashlib.sha256(args.manifest.read_bytes()).hexdigest(), 'summary': dict(Counter(r['status'] for r in results)), 'documents': results}
         write_private(args.output, json.dumps(report, ensure_ascii=False, indent=2) + '\n')
         print(json.dumps(report['summary'], sort_keys=True))
     else:

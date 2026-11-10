@@ -1075,14 +1075,11 @@ class FeedManager: NSObject, ObservableObject {
         let database = articleStore.database
         let finder = imageFinder
         let muting = appSettings.muteRules
-        let retained = appSettings.tensionRetainedFeedURLs
         imageLookupTask = Task { [weak self] in
             self?.logger.info("Story image lookup started")
             defer { self?.logger.info("Story image lookup finished") }
             let work = Task.detached(priority: .utility) {
-                try await StoryCurator.run(
-                    in: database, imageFinder: finder, muting: muting,
-                    keepingFeedURLs: retained)
+                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting)
             }
             let result = await withTaskCancellationHandler {
                 await work.result

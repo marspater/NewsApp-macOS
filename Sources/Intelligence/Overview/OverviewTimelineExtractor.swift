@@ -76,11 +76,11 @@ struct OverviewTimelineValidator: Sendable {
         })
 
         var isChronologicallyFuture = false
-        if let eventDate = item.eventDate, let pubDate = item.publicationDate {
-            // Event date is more than 24 hours after publication date
-            if eventDate.timeIntervalSince(pubDate) > 86400 {
-                isChronologicallyFuture = true
-            }
+        // Event date is more than 24 hours after publication date
+        if let eventDate = item.eventDate, let pubDate = item.publicationDate,
+            eventDate.timeIntervalSince(pubDate) > 86400
+        {
+            isChronologicallyFuture = true
         }
 
         if (hasPlanKeywords || isChronologicallyFuture) && !item.isFuturePlan {

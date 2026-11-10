@@ -356,7 +356,13 @@ struct TensionFigures: Equatable, Sendable {
             return nil
         }
         guard let value = Double(digits.replacingOccurrences(of: ",", with: "")) else { return nil }
-        let scaled = value * (multiplier == "million" ? 1_000_000 : multiplier == "thousand" ? 1_000 : 1)
+        let factor: Double =
+            switch multiplier {
+            case "million"?: 1_000_000
+            case "thousand"?: 1_000
+            default: 1
+            }
+        let scaled = value * factor
         guard scaled.isFinite, scaled >= 1, scaled < 1e12 else { return nil }
         return Int(scaled)
     }

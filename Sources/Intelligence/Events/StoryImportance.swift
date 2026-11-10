@@ -41,7 +41,6 @@ enum StoryCurator {
         imageFinder: StoryImageFinder = .unavailable,
         imageBudget: Int = imageBudget,
         muting: MuteRules = MuteRules(),
-        keepingFeedURLs: [String] = [],
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
         now: Date = Date()
     ) async throws -> Report {
