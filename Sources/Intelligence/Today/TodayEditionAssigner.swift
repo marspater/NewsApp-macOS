@@ -74,7 +74,9 @@ enum TodayEditionAssigner {
             inMotionPlacement($0, thresholds: thresholds)
         }
         // 3. The Deep Read (min 3, cap 8, chronological newest first; assigned BEFORE Your Beat per spec §4.1)
-        let deepRead = placeConditionalLane(lane: .theDeepRead, candidates: inMotion.remaining) {
+        let deepRead = placeConditionalLane(
+            lane: .theDeepRead, candidates: inMotion.remaining, keeps: hasMoreDepth
+        ) {
             deepReadPlacement($0, thresholds: thresholds)
         }
         // 4. Your Beat (min 3, cap 12, chronological newest first)
@@ -246,9 +248,29 @@ enum TodayEditionAssigner {
 
     // MARK: - Conditional lane placement
 
+    /// Which of two stories keeps its place when a lane is over its cap: the higher `score`, then the newest
+    /// report, then the story id (spec §2.2).
+    private static func hasHigherScore(_ a: EvaluatedStory, than b: EvaluatedStory) -> Bool {
+        if abs(a.score - b.score) > 1e-9 { return a.score > b.score }
+        return isNewer(a, than: b)
+    }
+
+    /// The Deep Read's own rule (#1194): the longer stored text, then the surer content type, then the newest
+    /// report, then the story id. The importance score follows publisher count, which is not depth.
+    private static func hasMoreDepth(_ a: EvaluatedStory, than b: EvaluatedStory) -> Bool {
+        if abs(a.readingTimeMinutes - b.readingTimeMinutes) > 1e-9 {
+            return a.readingTimeMinutes > b.readingTimeMinutes
+        }
+        let typeA = a.contentType?.confidence ?? 0.0
+        let typeB = b.contentType?.confidence ?? 0.0
+        if abs(typeA - typeB) > 1e-9 { return typeA > typeB }
+        return isNewer(a, than: b)
+    }
+
     private static func placeConditionalLane(
         lane: TodayLane,
         candidates: [EvaluatedStory],
+        keeps: (EvaluatedStory, EvaluatedStory) -> Bool = hasHigherScore,
         evaluate: (EvaluatedStory) -> LanePlacement?
     ) -> (placed: [TodayStoryAssignment], remaining: [EvaluatedStory]) {
         var matching: [LanePlacement] = []
@@ -268,11 +290,8 @@ enum TodayEditionAssigner {
         }
 
         let cap = lane.cap ?? matching.count
-        // Spec §2.2: overflow keeps highest score, breaking ties by newest report then story id.
-        let ranked = matching.sorted { a, b in
-            if abs(a.story.score - b.story.score) > 1e-9 { return a.story.score > b.story.score }
-            return isNewer(a.story, than: b.story)
-        }
+        // Spec §2.2: a lane over its cap keeps the stories its rule ranks first; the rest fall through.
+        let ranked = matching.sorted { keeps($0.story, $1.story) }
 
         let overflow = ranked.dropFirst(cap).map(\.story)
 

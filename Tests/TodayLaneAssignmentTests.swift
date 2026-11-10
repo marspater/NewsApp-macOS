@@ -29,6 +29,7 @@ extension NewsTests {
             ("testWireCopyDoesNotInflateOriginalReportsInLead", { testTodayWireCopyDoesNotInflateLead() }),
             ("testInMotionClockHeadlineAndMaterialChange", { testTodayInMotionClockAndMaterialChange() }),
             ("testDeepReadAssignedBeforeYourBeatAndLabelContract", { testTodayDeepReadOrderAndLabelContract() }),
+            ("testDeepReadOverflowKeepsDepthAndSummaryPhraseAlone", { testTodayDeepReadOverflowKeepsDepth() }),
             ("testYourBeatFinerProfileAndOverflowCascade", { testTodayYourBeatProfileAndOverflowCascade() }),
             ("testOutsideYourUsualAndNewLibraryEmptyHistory", { testTodayOutsideYourUsualAndNewLibrary() }),
             ("testConditionalUnderflowHidesLaneAndCascades", { testTodayUnderflowHidesAndCascades() }),
@@ -492,6 +493,70 @@ extension NewsTests {
             "Content-type label MUST be nil when qualified by reading length alone")
         assertEqual(byID["dr-inv"]?.contentTypeLabel, .investigation)
         assertEqual(byID["dr-op"]?.contentTypeLabel, .opinion)
+    }
+
+    /// #1194: over its cap The Deep Read keeps the longest stored reads, not the highest importance score,
+    /// and a phrase in the feed summary alone does not classify a story without a stored long text.
+    static func testTodayDeepReadOverflowKeepsDepth() {
+        func body(words: Int) -> String { Array(repeating: "reporting", count: words).joined(separator: " ") }
+        // Eight stored long reads, 8.5 to 12 min; the longest is the oldest, so display order differs from rank.
+        var entries: [FeedEntry] = []
+        var signals: [String: TodayStorySignals] = [:]
+        for index in 0..<8 {
+            let id = "long-\(index)"
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: id,
+                        title: "Harbour dredging plan, part \(index)",
+                        description: index == 0 ? "What to know about the dredging plan." : "A long stored feature.",
+                        pubDate: referenceNow.addingTimeInterval(TimeInterval(-600 - index * 60)),
+                        fullContent: body(words: 1700 + index * 100)
+                    )))
+            signals[id] = TodayStorySignals(nlImportanceOverride: 0.05, resolvedImportanceOverride: .minor)
+        }
+        // Two stories classified by their headline with no stored body: they qualify, and score higher.
+        let classifiedByHeadline = [
+            ("head-op", "Opinion: The port deserves better"), ("head-ex", "Explainer: How dredging works"),
+        ]
+        for (id, title) in classifiedByHeadline {
+            entries.append(.article(makeArticle(id: id, title: title, pubDate: referenceNow.addingTimeInterval(-100))))
+            signals[id] = TodayStorySignals(nlImportanceOverride: 0.45, resolvedImportanceOverride: .minor)
+        }
+        // A short news report whose summary alone carries an explainer phrase: not a Deep Read candidate.
+        entries.append(
+            .article(
+                makeArticle(
+                    id: "summary-only",
+                    title: "Storm closes coastal roads",
+                    description: "What to know about the closures.",
+                    pubDate: referenceNow.addingTimeInterval(-50)
+                )))
+        signals["summary-only"] = TodayStorySignals(nlImportanceOverride: 0.45, resolvedImportanceOverride: .minor)
+
+        let plan = TodayEditionAssigner.assign(
+            entries: entries,
+            context: TodayAssignmentContext(now: referenceNow, signalsByEntryID: signals)
+        )
+        let lead = Set(plan.entries(for: .theLead).map(\.id))
+        let deepRead = plan.entries(for: .theDeepRead)
+        let longIDs = Set((0..<8).map { "long-\($0)" }).subtracting(lead)
+        let scores = Dictionary(uniqueKeysWithValues: plan.allAssignments.map { ($0.id, $0.score) })
+        assertTrue(
+            (scores["head-ex"] ?? 0) > (scores["long-7"] ?? 1),
+            "Premise: the headline-classified stories outscore the long reads")
+        assertEqual(deepRead.count, min(8, longIDs.count + 2), "The cap stays at eight")
+        assertTrue(longIDs.isSubset(of: Set(deepRead.map(\.id))), "Every stored long read keeps its place")
+        assertEqual(
+            deepRead.map(\.id), deepRead.sorted { $0.sortKey > $1.sortKey }.map(\.id),
+            "The lane still shows newest first")
+        assertFalse(deepRead.contains { $0.id == "summary-only" }, "A summary phrase alone does not qualify")
+        assertEqual(
+            deepRead.first { $0.id == "long-0" }?.contentTypeLabel, lead.contains("long-0") ? nil : .explainer,
+            "A stored long read is still classified from its summary")
+        assertEqual(
+            Set(plan.allAssignments.map(\.id)), Set(entries.map(\.id)),
+            "Stories the cap drops stay in the edition")
     }
 
     static func testTodayYourBeatProfileAndOverflowCascade() {
