@@ -89,11 +89,16 @@ final class NewsPerformanceTests: XCTestCase {
         focus(field)
         app.typeText("Lighthouse Restoration\n")
         let filtered = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "exists == false"), object: app.staticTexts[Self.otherHeadline].firstMatch)
+            predicate: NSPredicate(format: "exists == false"), object: story(Self.otherHeadline))
         XCTAssertEqual(XCTWaiter.wait(for: [filtered], timeout: 60), .completed, "The search did not filter the list")
         XCTAssertTrue(
-            app.staticTexts[NewsSmokeUITests.headline].firstMatch.waitForExistence(timeout: 10),
+            story(NewsSmokeUITests.headline).waitForExistence(timeout: 10),
             "The fixture headline was not found")
+    }
+
+    /// A story card is one button labelled headline first (#1127), so no static text equals a headline.
+    func story(_ headline: String) -> XCUIElement {
+        NewsSmokeUITests.story(headline, in: app)
     }
 
     func clear(_ field: XCUIElement) {
@@ -105,7 +110,7 @@ final class NewsPerformanceTests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
         // The next measurement starts from the unfiltered list, so its end can only come from its own search.
         XCTAssertTrue(
-            app.staticTexts[Self.otherHeadline].firstMatch.waitForExistence(timeout: 30),
+            story(Self.otherHeadline).waitForExistence(timeout: 30),
             "The list did not return to the unfiltered fixture")
     }
 }

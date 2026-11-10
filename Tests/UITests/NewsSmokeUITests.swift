@@ -116,6 +116,10 @@ final class NewsSmokeUITests: XCTestCase {
 
     /// A story card: one button whose label starts with the headline, followed by source, date and state.
     func story(_ headline: String = headline) -> XCUIElement {
+        Self.story(headline, in: app)
+    }
+
+    static func story(_ headline: String, in app: XCUIApplication) -> XCUIElement {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", headline)).firstMatch
     }
 
