@@ -842,8 +842,9 @@ extension NewsTests {
         let plan1 = TodayEditionAssigner.assign(entries: entries, context: ctx1)
         let plan2 = TodayEditionAssigner.assign(entries: entries, context: ctx2)
         assertEqual(plan1, plan2, "Repeated database loads and assignments are strictly deterministic")
+        assertTrue(ctx1.profile.hasHistory, "Database loader builds a profile from the read story")
         assertTrue(
-            ctx1.profile.hasHistory || ctx1.profile.entityWeights["organization:cern"] != nil,
+            (ctx1.profile.entityWeights["organization:cern"] ?? 0) > 0,
             "Database loader populates fine entity profile from stored entity_mentions")
         assertEqual(
             plan1.allAssignments.map(\.id), ["cand-1"],

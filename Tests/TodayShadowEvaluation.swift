@@ -18,6 +18,8 @@ import SQLite3
 /// Shadow evaluation runner (`--today-shadow COPY.sqlite3 OUTPUT_DIR`) for Z2 (`#934`).
 /// Runs on a temporary copy of a real library, writes aggregate metrics to `shadow-report.json`, and
 /// keeps any headline/title spot-check sheets strictly in private temporary files outside the repository.
+/// `NEWS_TODAY_NOW` pins the clock (epoch seconds), `NEWS_TODAY_WINDOW_HOURS` the candidate window,
+/// `NEWS_TODAY_LABELS` names the private label file and `NEWS_TODAY_FEEDS` the snapshot's subscription list.
 enum TodayShadowEvaluation {
 
     struct StoryLabels: Decodable {
@@ -146,13 +148,20 @@ enum TodayShadowEvaluation {
             )
         }
 
-        // Copy to a scratch database so migrations (e.g. from older v27/v29 snapshots) never alter source.
+        // The sheets hold titles and profile-derived scores: the output directory is the user's alone, created
+        // 0700 when absent and checked before the run, and each file is written 0600.
+        try FileManager.default.createDirectory(
+            at: outURL, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let outputDirectory = try StoryCorpus.privateDirectory(outURL.path)
+
+        // Snapshot to a scratch database so migrations (e.g. from older v27/v29 snapshots) never alter source.
         let scratchDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("today-shadow-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: scratchDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: scratchDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: scratchDir) }
         let scratchDB = scratchDir.appendingPathComponent("library.sqlite3")
-        try FileManager.default.copyItem(at: sourceURL, to: scratchDB)
+        try snapshot(of: sourceURL, to: scratchDB)
 
         let db = DatabaseEngine(path: scratchDB.path)
         try await db.open()
@@ -366,12 +375,13 @@ enum TodayShadowEvaluation {
             labelledEvaluation: labelledReport
         )
 
-        try FileManager.default.createDirectory(at: outURL, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
         // Write aggregate-only report.
-        try encoder.encode(report).write(to: outURL.appendingPathComponent("shadow-report.json"))
+        try StoryCorpus.writePrivate(
+            try encoder.encode(report), to: outputDirectory.appendingPathComponent("shadow-report.json"),
+            replacing: true)
 
         // Write private spot-check sheets strictly in the /private/tmp output directory.
         let posPub = Dictionary(
@@ -407,8 +417,9 @@ enum TodayShadowEvaluation {
                 rankingZ2Position: posZ2[item.id] ?? 0
             )
         }
-        try encoder.encode(privateCandidates)
-            .write(to: outURL.appendingPathComponent("shadow-candidates-private.json"))
+        try StoryCorpus.writePrivate(
+            try encoder.encode(privateCandidates),
+            to: outputDirectory.appendingPathComponent("shadow-candidates-private.json"), replacing: true)
 
         // Collect 30-50 confirmed events for In Motion evaluation (rising or split across 24h boundary first).
         let inMotionAssignedIDs = Set(plan.entries(for: .inMotion).map(\.id))
@@ -440,11 +451,37 @@ enum TodayShadowEvaluation {
             if aBoundary != bBoundary { return aBoundary > bBoundary }
             return a.publisherCount > b.publisherCount
         }
-        try encoder.encode(Array(eventItems.prefix(50)))
-            .write(to: outURL.appendingPathComponent("in-motion-candidates-private.json"))
+        try StoryCorpus.writePrivate(
+            try encoder.encode(Array(eventItems.prefix(50))),
+            to: outputDirectory.appendingPathComponent("in-motion-candidates-private.json"), replacing: true)
 
         print("TODAY_SHADOW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
+    }
+
+    /// A consistent snapshot of the copied library, its `-wal` included, taken through a read-only connection as
+    /// `measureLiveOverviews` takes its own, so the copy is never written.
+    private static func snapshot(of source: URL, to destination: URL) throws {
+        // Apple's sqlite3 cannot open a WAL-mode file read-only once its `-wal` and `-shm` are gone, as after a
+        // plain copy of the main file. With no `-wal` and no `-journal` beside it the file is complete on its
+        // own, so it is read as immutable.
+        let hasJournal = ["-wal", "-journal"].contains { FileManager.default.fileExists(atPath: source.path + $0) }
+        let sqlite = Process()
+        sqlite.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        sqlite.arguments = [
+            source.absoluteString + (hasJournal ? "?mode=ro" : "?immutable=1"),
+            "VACUUM INTO '\(destination.path.replacingOccurrences(of: "'", with: "''"))';",
+        ]
+        let errors = Pipe()
+        sqlite.standardError = errors
+        try sqlite.run()
+        sqlite.waitUntilExit()
+        guard sqlite.terminationStatus == 0, FileManager.default.fileExists(atPath: destination.path) else {
+            let message = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            throw NSError(
+                domain: "TodayShadowEvaluation", code: 2,
+                userInfo: [NSLocalizedDescriptionKey: "Could not snapshot the library copy: \(message)"])
+        }
     }
 
     /// The snapshot's subscriptions. A library holds no subscription list (it lives in the app's settings), so
@@ -546,15 +583,10 @@ enum TodayShadowEvaluation {
                 }
             }
         }
-        let perLanePurity = perLaneTotal.mapValues { total in
-            let hits = perLaneHits[perLaneTotal.first(where: { $0.value == total })?.key ?? ""] ?? 0
-            return Double(hits) / Double(max(1, total))
-        }
         var lanePurityMap: [String: Double] = [:]
         for (lane, total) in perLaneTotal {
             lanePurityMap[lane] = Double(perLaneHits[lane, default: 0]) / Double(max(1, total))
         }
-        _ = perLanePurity
 
         let eventLabels = labels.events ?? [:]
         var tpNew = 0
