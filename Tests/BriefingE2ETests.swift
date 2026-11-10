@@ -794,10 +794,11 @@ struct BriefingE2ETests {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let articles = (0..<5).map { BriefingTestFactory.makeArticle(id: "art-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles)
-        engine.tick(seconds: 30.0)
+        // Part of an interval: the index is still 0 and time has run, so both assertions depend on the selection.
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval * 0.6)
         engine.selectCarouselIndex(3)
         assertEqual(engine.activeCarouselIndex, 3, "Direct dot selection updates active index")
-        assertEqual(engine.elapsedCarouselSeconds, 0.0, "Dot selection resets the 45s countdown")
+        assertEqual(engine.elapsedCarouselSeconds, 0.0, "Dot selection resets the countdown")
     }
 
     private static func testF505ManualArrowNavigation() {
