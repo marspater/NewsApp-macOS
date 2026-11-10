@@ -2,3 +2,8 @@
 exclude_paths:
   - "Tests/**"
   - "**/Tests/**"
+engines:
+  markdownlint:
+    exclude_paths:
+      - "docs/audits/**"
+      - "docs/plans/**"
