@@ -391,6 +391,30 @@ def process_sample_day(day, last_smoothed):
     return day_result, next_smoothed, day_metrics
 
 
+def print_series_row(r):
+    raw_str = f"{r['raw']:.2f}" if r["raw"] is not None else "N/A"
+    idx_str = f"{r['calibrated']:.1f}" if r["calibrated"] is not None else "N/A"
+    sm_str = f"{r['smoothed']:.1f}" if r["smoothed"] is not None else "N/A"
+    print(f"{r['id']:<38} | {r['status']:<12} | {raw_str:>7} | {idx_str:>7} | {sm_str:>8}")
+
+
+def v3_reading(indices, i):
+    """One day's v3 reading from the daily indices up to day `i`, which must have an index."""
+    window = [indices[j] for j in range(max(0, i - 6), i + 1) if indices[j] is not None]
+    smoothed = window[0]
+    for later in window[1:]:
+        smoothed = SMOOTHING_ALPHA * later + (1.0 - SMOOTHING_ALPHA) * smoothed
+    rises, j = 0, i
+    while j > 0 and indices[j - 1] is not None and indices[j] > indices[j - 1]:
+        rises += 1
+        j -= 1
+    return min(100, max(0, math.floor(smoothed + 0.5) + min(9, 3 * rises)))
+
+
+def v3_readings(indices):
+    return [None if value is None else v3_reading(indices, i) for i, value in enumerate(indices)]
+
+
 def run_calibration():
     with open(FIXTURE_PATH, "r", encoding="utf-8") as f:
         corpus = json.load(f)
@@ -432,10 +456,7 @@ def run_calibration():
     print(f"{'Day ID':<38} | {'Status':<12} | {'Raw':>7} | {'Index':>7} | {'Smoothed':>8}")
     print("-" * 82)
     for r in day_results:
-        raw_str = f"{r['raw']:.2f}" if r["raw"] is not None else "N/A"
-        idx_str = f"{r['calibrated']:.1f}" if r["calibrated"] is not None else "N/A"
-        sm_str = f"{r['smoothed']:.1f}" if r["smoothed"] is not None else "N/A"
-        print(f"{r['id']:<38} | {r['status']:<12} | {raw_str:>7} | {idx_str:>7} | {sm_str:>8}")
+        print_series_row(r)
 
     d9 = next(d for d in day_results if "negations" in d["id"])
     assert math.isclose(d9["raw"], 0.0, abs_tol=1e-5) and math.isclose(d9["calibrated"], 0.0, abs_tol=1e-5)
@@ -452,21 +473,7 @@ def run_calibration():
     # the 7-day exponentially weighted average (alpha 0.25, restarted at the oldest day in the window, rounded half
     # away from zero like Swift's rounded()) plus 3 points per consecutive daily rise, capped at 9.
     print("\n--- Methodology v3 reading (7-day window, alpha 0.25, momentum 3 per rise, cap 9) ---")
-    indices = [d["calibrated"] for d in day_results]
-    v3 = []
-    for i, value in enumerate(indices):
-        if value is None:
-            v3.append(None)
-            continue
-        window = [indices[j] for j in range(max(0, i - 6), i + 1) if indices[j] is not None]
-        smoothed = window[0]
-        for later in window[1:]:
-            smoothed = SMOOTHING_ALPHA * later + (1.0 - SMOOTHING_ALPHA) * smoothed
-        rises, j = 0, i
-        while j > 0 and indices[j - 1] is not None and indices[j] > indices[j - 1]:
-            rises += 1
-            j -= 1
-        v3.append(min(100, max(0, math.floor(smoothed + 0.5) + min(9, 3 * rises))))
+    v3 = v3_readings([d["calibrated"] for d in day_results])
     for d, r in zip(day_results, v3):
         print(f"{d['id']:<38} | {('N/A' if r is None else str(r)):>7}")
     expected_v3 = [88, 78, 66, 55, 51, 36, 33, 29, 15, 27, 18, None, None, None]

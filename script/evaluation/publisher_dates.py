@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Extract publisher date evidence offline; never substitute modified dates or approve labels."""
+from types import SimpleNamespace
 import argparse
 import hashlib
 import json
@@ -113,26 +114,32 @@ class Page(HTMLParser):
                 if isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 4_102_444_800:
                     self.cms.append({'field': 'cms:' + field, 'epoch': value})
 
+    def _add_meta_dates(self, a):
+        key = (a.get('property') or a.get('name') or a.get('itemprop') or '').lower()
+        if key in ('article:published_time', 'og:article:published_time', 'datepublished'):
+            self.add('datePublished', a.get('content'), 'meta:' + key)
+        if key in ('article:modified_time', 'og:article:modified_time', 'datemodified'):
+            self.add('dateModified', a.get('content'), 'meta:' + key)
+
+    def _add_links(self, a):
+        for rel in (a.get('rel') or '').lower().split():
+            if rel in ('canonical', 'amphtml', 'shortlink', 'alternate'):
+                if len(a['href']) > 8192:
+                    continue
+                try:
+                    resolved = urljoin(self.url, a['href'])
+                except ValueError:
+                    continue
+                self.links.append({'rel': rel, 'url': resolved, 'type': a.get('type', ''), 'language': a.get('hreflang', '')})
+
     def handle_starttag(self, tag, attributes):
         a = dict(attributes)
         if tag == 'div' and a.get('id') == 'jsMainMediaArticle':
             self._parse_africanews_cms(a)
         if tag == 'meta':
-            key = (a.get('property') or a.get('name') or a.get('itemprop') or '').lower()
-            if key in ('article:published_time', 'og:article:published_time', 'datepublished'):
-                self.add('datePublished', a.get('content'), 'meta:' + key)
-            if key in ('article:modified_time', 'og:article:modified_time', 'datemodified'):
-                self.add('dateModified', a.get('content'), 'meta:' + key)
+            self._add_meta_dates(a)
         if tag == 'link' and a.get('href'):
-            for rel in (a.get('rel') or '').lower().split():
-                if rel in ('canonical', 'amphtml', 'shortlink', 'alternate'):
-                    if len(a['href']) > 8192:
-                        continue
-                    try:
-                        resolved = urljoin(self.url, a['href'])
-                    except ValueError:
-                        continue
-                    self.links.append({'rel': rel, 'url': resolved, 'type': a.get('type', ''), 'language': a.get('hreflang', '')})
+            self._add_links(a)
         if tag == 'script' and a.get('type', '').lower() == 'application/ld+json':
             self.script = []
 
@@ -177,143 +184,198 @@ def verify(document, record, directory):
     return result
 
 
+def require_no_text(value):
+    """Frozen evidence keeps publisher text private at any depth."""
+    if isinstance(value, dict):
+        require(not set(value) & {'body', 'content', 'description', 'title'}, 'Keep publisher text private')
+        for item in value.values():
+            require_no_text(item)
+    elif isinstance(value, list):
+        for item in value:
+            require_no_text(item)
+
+
+def check_review_correction(ctx, report):
+    """publisher-review-v3: the base review plus its one declared assignment correction."""
+    base_raw = ctx.base_raw
+    expected = json.loads(base_raw)
+    expected['supersedesSHA256'] = hashlib.sha256(base_raw).hexdigest()
+    expected['assignmentCorrections'] = [{
+        'document': 'doc-0305',
+        'previousEvent': 'occurrence-0305',
+        'event': 'occurrence-0091',
+        'basis': 'User-accepted pair review identifies the same terror-charge occurrence in two singleton reports; existing sampled pair labels are unchanged.',
+    }]
+    next(d for d in expected['documents'] if d['id'] == 'doc-0305')['event'] = 'occurrence-0091'
+    expected['events'] = [e for e in expected['events'] if e['id'] != 'occurrence-0305']
+    next(e for e in expected['events'] if e['id'] == 'occurrence-0091')['reason'] = 'Both selected reports cover the same October 2 charge for preparing terrorist acts against Nigel Farage; later reactions remain context for this occurrence.'
+    require(report == expected, 'Undeclared changes in base assignment correction')
+    validate_review(report)
+
+
+def check_timestamps(ctx, report):
+    """publisher-timestamps-v2: one date observation per base document, URLs and feed dates unchanged."""
+    base_raw, originals = ctx.base_raw, ctx.originals
+    require(report['manifestSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong date evidence base')
+    require({d['id'] for d in report['documents']} == set(originals) and len(report['documents']) == len(originals), 'Missing or duplicate timestamp observations')
+    require(report['summary'] == dict(Counter(d['status'] for d in report['documents'])), 'Date summary mismatch')
+    for d in report['documents']:
+        require(d['url'] == originals[d['id']]['url'] and d['feedPublished'] == originals[d['id']]['published'], 'Captured dates or URLs were rewritten')
+        if 'publisherPublished' in d:
+            epoch = instant(d['publisherPublished'])
+            require(epoch is not None and abs(epoch - d['feedPublished'] - d['deltaSeconds']) < 0.001, 'Date comparison mismatch')
+
+
+def check_supplement(ctx, report):
+    """publisher-review-supplement-v1/v2: pending proposals on top of the base review."""
+    base_raw, base, name = ctx.base_raw, ctx.base, ctx.name
+    require(report['baseSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong supplement base')
+    docs = {d['id']: d for d in report['documents']}
+    events = {e['id']: e for e in report['events']}
+    require(len(docs) == len(report['documents']) and len(events) == len(report['events']), 'Duplicate supplement IDs')
+    changes = {c['id']: c for c in report['proposedAssignmentCorrections']}
+    for e in events.values():
+        expected = 'holdout' if int(hashlib.sha256(('news-review-v2:' + e['family']).encode()).hexdigest()[:8], 16) % 10 >= 7 else 'tune'
+        require(e['split'] == expected and e['reviewStatus'] == 'pending', 'Unreviewed family split changed')
+    check_supplement_documents(ctx, docs, events, changes)
+    edges, identifiers = set(), set()
+    for pair in report['pairs']:
+        left, right = docs[pair['left']], docs[pair['right']]
+        edge = tuple(sorted((left['id'], right['id'])))
+        require(edge[0] != edge[1] and edge not in edges and pair['id'] not in identifiers, 'Duplicate or self pair')
+        edges.add(edge); identifiers.add(pair['id'])
+        require(all(events[d['event']]['split'] == pair['split'] for d in (left, right)) and pair['reviewStatus'] == 'pending', 'Pair crosses splits or claims approval')
+        require(pair['proposedLabel'] in ('same_document', 'same_event', 'different'), 'Invalid proposal label')
+        require((left['event'] == right['event']) == (pair['proposedLabel'] != 'different'), 'Label contradicts occurrence proposal')
+        require(pair['proposedLabel'] != 'same_event' or pair['scope'] == 'event', 'Roundups/editions cannot become event positives')
+    require(300 <= len(base['pairs']) + len(report['pairs']) <= 500, 'Review batch outside issue pair budget')
+    if name == 'publisher-review-supplement-v2':
+        check_supplement_correction(ctx, report)
+
+
+def check_supplement_documents(ctx, docs, events, changes):
+    """Base documents keep their metadata and split; a moved document needs a pending declared correction."""
+    base, originals = ctx.base, ctx.originals
+    old_events = {e['id']: e for e in base['events']}
+    for d in docs.values():
+        require(d['event'] in events and d['scope'] in ('event', 'document-only'), 'Invalid supplement assignment')
+        if d['id'] in originals:
+            original = originals[d['id']]
+            require(all(d.get(k) == original.get(k) for k in ('url', 'source', 'language', 'feed', 'published', 'captureIndex')), 'Base metadata changed')
+            require(events[d['event']]['split'] == old_events[original['event']]['split'], 'Base document moved across splits')
+            if d['event'] != original['event']:
+                require(d['id'] in changes and changes[d['id']]['previousEvent'] == original['event'] and changes[d['id']]['proposedEvent'] == d['event'] and changes[d['id']]['reviewStatus'] == 'pending', 'Undeclared assignment correction')
+
+
+def check_supplement_correction(ctx, report):
+    """publisher-review-supplement-v2: v1 plus its one declared correction."""
+    root = ctx.root
+    original_raw = (root / 'publisher-review-supplement-v1.json').read_bytes()
+    expected = json.loads(original_raw)
+    expected['supersedesSHA256'] = hashlib.sha256(original_raw).hexdigest()
+    expected['assignmentCorrections'] = [{'pair': 'extra-044', 'document': 'doc-1207', 'previousEvent': 'irkutsk-information-removal', 'event': 'irkutsk-lab-death', 'label': 'same_event', 'basis': 'User-accepted supplemental review groups the same suspected plague death and quarantine with subsequent information-removal reporting.'}]
+    next(d for d in expected['documents'] if d['id'] == 'doc-1207')['event'] = 'irkutsk-lab-death'
+    expected['events'] = [e for e in expected['events'] if e['id'] != 'irkutsk-information-removal']
+    next(e for e in expected['events'] if e['id'] == 'irkutsk-lab-death')['reason'] = 'Same suspected plague death of the laboratory worker and quarantine; the reviewed label treats subsequent information-removal reporting as occurrence context.'
+    pair = next(p for p in expected['pairs'] if p['id'] == 'extra-044')
+    pair['proposedLabel'] = 'same_event'
+    pair['reason'] = 'Reviewed reports describe the same suspected plague death and quarantine, with information removal treated as reaction context.'
+    require(report == expected, 'Undeclared changes in supplemental correction')
+
+
+def check_diversity(ctx, report):
+    """publisher-diversity-v1/v2: new pending proposals that never rewrite or duplicate prior evidence."""
+    root, base_raw, base, originals, name = ctx.root, ctx.base_raw, ctx.base, ctx.originals, ctx.name
+    require(report['baseSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong diversity base')
+    supplement_raw = (root / 'publisher-review-supplement-v1.json').read_bytes()
+    require(report['supplementSHA256'] == hashlib.sha256(supplement_raw).hexdigest(), 'Wrong diversity supplement')
+    supplement = json.loads(supplement_raw)
+    prior_docs = originals | {d['id']: d for d in supplement['documents']}
+    prior_events = {e['id']: e for e in base['events'] + supplement['events']}
+    docs, events = validate_review(report)
+    urls = {d['url']: prior_events[d['event']]['split'] for d in prior_docs.values()}
+    edges = {tuple(sorted((p['left'], p['right']))) for p in base['pairs'] + supplement['pairs']}
+    for d in docs.values():
+        split = events[d['event']]['split']
+        require(urls.setdefault(d['url'], split) == split, 'URL crosses prior splits')
+        if d['id'] in prior_docs:
+            old = prior_docs[d['id']]
+            require(all(d.get(k) == old.get(k) for k in ('url', 'feed', 'source', 'language', 'published', 'captureIndex', 'event')), 'Prior evidence changed')
+            require(events[d['event']]['family'] == prior_events[d['event']]['family'], 'Prior family changed')
+    for pair in report['pairs']:
+        require(tuple(sorted((pair['left'], pair['right']))) not in edges, 'Prior review pair duplicated')
+    require(300 <= len(base['pairs']) + len(supplement['pairs']) + len(report['pairs']) <= 500, 'Combined pair budget exceeded')
+    if name == 'publisher-diversity-v2':
+        check_diversity_correction(ctx, report)
+
+
+def check_diversity_correction(ctx, report):
+    """publisher-diversity-v2: v1 plus the reviewer's one declared correction."""
+    root = ctx.root
+    original_raw = (root / 'publisher-diversity-v1.json').read_bytes()
+    expected = json.loads(original_raw)
+    expected['supersedesSHA256'] = hashlib.sha256(original_raw).hexdigest()
+    expected['assignmentCorrections'] = [{
+        'pair': 'diversity-024',
+        'document': 'doc-0931',
+        'previousEvent': 'trump-diesel-ban-reversal',
+        'event': 'g7-reserve-release',
+        'label': 'same_event',
+        'basis': 'Independent reviewer clarification after submitted pair sheet; broader fuel-policy grouping is a scoped exception to the separate-action rule.',
+    }]
+    next(d for d in expected['documents'] if d['id'] == 'doc-0931')['event'] = 'g7-reserve-release'
+    expected['events'] = [e for e in expected['events'] if e['id'] != 'trump-diesel-ban-reversal']
+    next(e for e in expected['events'] if e['id'] == 'g7-reserve-release')['reason'] = 'Reviewer groups the G7 reserve release and Trump export-ban reversal as one fuel-policy event for clustering; possible timeline context. This scoped exception does not redefine other event boundaries.'
+    pair = next(p for p in expected['pairs'] if p['id'] == 'diversity-024')
+    pair['proposedLabel'] = 'same_event'
+    pair['reason'] = 'Independent reviewer groups both decisions as one event for clustering, with possible timeline context.'
+    require(report == expected, 'Undeclared changes in reviewer correction')
+
+
+def check_date_resolutions(ctx, report):
+    """publisher-date-resolutions-v1: pending date proposals backed by the captured evidence."""
+    root = ctx.root
+    dates_raw = (root / 'publisher-timestamps-v2.json').read_bytes()
+    require(report['timestampSHA256'] == hashlib.sha256(dates_raw).hexdigest(), 'Wrong timestamp evidence base')
+    require(report['reviewStatus'] == 'pending' and {d['id'] for d in report['documents']} == {'doc-0658', 'doc-0684'} and len(report['documents']) == 2, 'Date proposals are not approvals')
+    for d in report['documents']:
+        old = next(x for x in json.loads(dates_raw)['documents'] if x['id'] == d['id'])
+        require(d['pageSHA256'] == old['pageSHA256'] and d['url'] == old['url'] and d['feedPublished'] == old['feedPublished'], 'Date evidence rewritten')
+        cms = {x['field']: x['epoch'] for x in d['publisherCMS']}
+        require(cms['cms:publishedAt'] == cms['cms:firstPublishedAt'] == cms['cms:lastPublishedAt'] == instant(d['proposedPublicationTime']), 'Ambiguous CMS publication')
+        require(cms['cms:updatedAt'] == d['feedPublished'], 'Feed does not match CMS update')
+        require(any(x['kind'] == 'datePublished' and 'CEST' in x['raw'] and instant(x['raw'].replace('CEST', 'T', 1)) == cms['cms:firstPublishedAt'] for x in old['dateEvidence']), 'OpenGraph/CMS publication interpretation unsupported')
+        require(any(x['epoch'] == cms['cms:createdAt'] and x['field'].startswith('jsonld:') for x in old['dateEvidence']), 'JSON-LD creation interpretation unsupported')
+
+
+def check_url_investigation(_ctx, report):
+    """publisher-url-investigation-v1: an empty candidate pool that cannot pass."""
+    require(report['summary'] == dict(Counter(v['status'] for v in report['variants'])), 'URL inventory mismatch')
+    require(report['tuning']['precision'] is None and report['tuning']['releaseGatePassed'] is False, 'Empty candidate pool cannot pass')
+
+
 def check_frozen_evidence(root):
     base_raw = (root / 'publisher-review-v2.json').read_bytes()
     base = json.loads(base_raw)
     originals = {d['id']: d for d in base['documents']}
-    for name in ('publisher-review-v3', 'publisher-timestamps-v2', 'publisher-review-supplement-v1', 'publisher-review-supplement-v2', 'publisher-url-investigation-v1', 'publisher-diversity-v1', 'publisher-diversity-v2', 'publisher-date-resolutions-v1'):
+    checks = {
+        'publisher-review-v3': check_review_correction,
+        'publisher-timestamps-v2': check_timestamps,
+        'publisher-review-supplement-v1': check_supplement,
+        'publisher-review-supplement-v2': check_supplement,
+        'publisher-url-investigation-v1': check_url_investigation,
+        'publisher-diversity-v1': check_diversity,
+        'publisher-diversity-v2': check_diversity,
+        'publisher-date-resolutions-v1': check_date_resolutions,
+    }
+    for name, check_report in checks.items():
         file = root / (name + '.json')
         raw = file.read_bytes()
         require(hashlib.sha256(raw).hexdigest() == file.with_suffix('.sha256').read_text().split()[0], 'Frozen evidence changed; version corrections')
         report = json.loads(raw)
         require(report['releaseEligible'] is False, 'Evidence proposals cannot claim release gates')
-        def no_text(value):
-            if isinstance(value, dict):
-                require(not set(value) & {'body', 'content', 'description', 'title'}, 'Keep publisher text private')
-                for item in value.values():
-                    no_text(item)
-            elif isinstance(value, list):
-                for item in value:
-                    no_text(item)
-        no_text(report)
-        if name == 'publisher-review-v3':
-            expected = json.loads(base_raw)
-            expected['supersedesSHA256'] = hashlib.sha256(base_raw).hexdigest()
-            expected['assignmentCorrections'] = [{
-                'document': 'doc-0305',
-                'previousEvent': 'occurrence-0305',
-                'event': 'occurrence-0091',
-                'basis': 'User-accepted pair review identifies the same terror-charge occurrence in two singleton reports; existing sampled pair labels are unchanged.',
-            }]
-            next(d for d in expected['documents'] if d['id'] == 'doc-0305')['event'] = 'occurrence-0091'
-            expected['events'] = [e for e in expected['events'] if e['id'] != 'occurrence-0305']
-            next(e for e in expected['events'] if e['id'] == 'occurrence-0091')['reason'] = 'Both selected reports cover the same October 2 charge for preparing terrorist acts against Nigel Farage; later reactions remain context for this occurrence.'
-            require(report == expected, 'Undeclared changes in base assignment correction')
-            validate_review(report)
-        elif name == 'publisher-timestamps-v2':
-            require(report['manifestSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong date evidence base')
-            require({d['id'] for d in report['documents']} == set(originals) and len(report['documents']) == len(originals), 'Missing or duplicate timestamp observations')
-            require(report['summary'] == dict(Counter(d['status'] for d in report['documents'])), 'Date summary mismatch')
-            for d in report['documents']:
-                require(d['url'] == originals[d['id']]['url'] and d['feedPublished'] == originals[d['id']]['published'], 'Captured dates or URLs were rewritten')
-                if 'publisherPublished' in d:
-                    epoch = instant(d['publisherPublished'])
-                    require(epoch is not None and abs(epoch - d['feedPublished'] - d['deltaSeconds']) < 0.001, 'Date comparison mismatch')
-        elif name in ('publisher-review-supplement-v1', 'publisher-review-supplement-v2'):
-            require(report['baseSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong supplement base')
-            docs = {d['id']: d for d in report['documents']}
-            events = {e['id']: e for e in report['events']}
-            require(len(docs) == len(report['documents']) and len(events) == len(report['events']), 'Duplicate supplement IDs')
-            changes = {c['id']: c for c in report['proposedAssignmentCorrections']}
-            for e in events.values():
-                expected = 'holdout' if int(hashlib.sha256(('news-review-v2:' + e['family']).encode()).hexdigest()[:8], 16) % 10 >= 7 else 'tune'
-                require(e['split'] == expected and e['reviewStatus'] == 'pending', 'Unreviewed family split changed')
-            old_events = {e['id']: e for e in base['events']}
-            for d in docs.values():
-                require(d['event'] in events and d['scope'] in ('event', 'document-only'), 'Invalid supplement assignment')
-                if d['id'] in originals:
-                    original = originals[d['id']]
-                    require(all(d.get(k) == original.get(k) for k in ('url', 'source', 'language', 'feed', 'published', 'captureIndex')), 'Base metadata changed')
-                    require(events[d['event']]['split'] == old_events[original['event']]['split'], 'Base document moved across splits')
-                    if d['event'] != original['event']:
-                        require(d['id'] in changes and changes[d['id']]['previousEvent'] == original['event'] and changes[d['id']]['proposedEvent'] == d['event'] and changes[d['id']]['reviewStatus'] == 'pending', 'Undeclared assignment correction')
-            edges, identifiers = set(), set()
-            for pair in report['pairs']:
-                left, right = docs[pair['left']], docs[pair['right']]
-                edge = tuple(sorted((left['id'], right['id'])))
-                require(edge[0] != edge[1] and edge not in edges and pair['id'] not in identifiers, 'Duplicate or self pair')
-                edges.add(edge); identifiers.add(pair['id'])
-                require(all(events[d['event']]['split'] == pair['split'] for d in (left, right)) and pair['reviewStatus'] == 'pending', 'Pair crosses splits or claims approval')
-                require(pair['proposedLabel'] in ('same_document', 'same_event', 'different'), 'Invalid proposal label')
-                require((left['event'] == right['event']) == (pair['proposedLabel'] != 'different'), 'Label contradicts occurrence proposal')
-                require(pair['proposedLabel'] != 'same_event' or pair['scope'] == 'event', 'Roundups/editions cannot become event positives')
-            require(300 <= len(base['pairs']) + len(report['pairs']) <= 500, 'Review batch outside issue pair budget')
-            if name == 'publisher-review-supplement-v2':
-                original_raw = (root / 'publisher-review-supplement-v1.json').read_bytes()
-                expected = json.loads(original_raw)
-                expected['supersedesSHA256'] = hashlib.sha256(original_raw).hexdigest()
-                expected['assignmentCorrections'] = [{'pair': 'extra-044', 'document': 'doc-1207', 'previousEvent': 'irkutsk-information-removal', 'event': 'irkutsk-lab-death', 'label': 'same_event', 'basis': 'User-accepted supplemental review groups the same suspected plague death and quarantine with subsequent information-removal reporting.'}]
-                next(d for d in expected['documents'] if d['id'] == 'doc-1207')['event'] = 'irkutsk-lab-death'
-                expected['events'] = [e for e in expected['events'] if e['id'] != 'irkutsk-information-removal']
-                next(e for e in expected['events'] if e['id'] == 'irkutsk-lab-death')['reason'] = 'Same suspected plague death of the laboratory worker and quarantine; the reviewed label treats subsequent information-removal reporting as occurrence context.'
-                pair = next(p for p in expected['pairs'] if p['id'] == 'extra-044')
-                pair['proposedLabel'] = 'same_event'
-                pair['reason'] = 'Reviewed reports describe the same suspected plague death and quarantine, with information removal treated as reaction context.'
-                require(report == expected, 'Undeclared changes in supplemental correction')
-        elif name in ('publisher-diversity-v1', 'publisher-diversity-v2'):
-            require(report['baseSHA256'] == hashlib.sha256(base_raw).hexdigest(), 'Wrong diversity base')
-            supplement_raw = (root / 'publisher-review-supplement-v1.json').read_bytes()
-            require(report['supplementSHA256'] == hashlib.sha256(supplement_raw).hexdigest(), 'Wrong diversity supplement')
-            supplement = json.loads(supplement_raw)
-            prior_docs = originals | {d['id']: d for d in supplement['documents']}
-            prior_events = {e['id']: e for e in base['events'] + supplement['events']}
-            docs, events = validate_review(report)
-            urls = {d['url']: prior_events[d['event']]['split'] for d in prior_docs.values()}
-            edges = {tuple(sorted((p['left'], p['right']))) for p in base['pairs'] + supplement['pairs']}
-            for d in docs.values():
-                split = events[d['event']]['split']
-                require(urls.setdefault(d['url'], split) == split, 'URL crosses prior splits')
-                if d['id'] in prior_docs:
-                    old = prior_docs[d['id']]
-                    require(all(d.get(k) == old.get(k) for k in ('url', 'feed', 'source', 'language', 'published', 'captureIndex', 'event')), 'Prior evidence changed')
-                    require(events[d['event']]['family'] == prior_events[d['event']]['family'], 'Prior family changed')
-            for pair in report['pairs']:
-                require(tuple(sorted((pair['left'], pair['right']))) not in edges, 'Prior review pair duplicated')
-            require(300 <= len(base['pairs']) + len(supplement['pairs']) + len(report['pairs']) <= 500, 'Combined pair budget exceeded')
-            if name == 'publisher-diversity-v2':
-                original_raw = (root / 'publisher-diversity-v1.json').read_bytes()
-                expected = json.loads(original_raw)
-                expected['supersedesSHA256'] = hashlib.sha256(original_raw).hexdigest()
-                expected['assignmentCorrections'] = [{
-                    'pair': 'diversity-024',
-                    'document': 'doc-0931',
-                    'previousEvent': 'trump-diesel-ban-reversal',
-                    'event': 'g7-reserve-release',
-                    'label': 'same_event',
-                    'basis': 'Independent reviewer clarification after submitted pair sheet; broader fuel-policy grouping is a scoped exception to the separate-action rule.',
-                }]
-                next(d for d in expected['documents'] if d['id'] == 'doc-0931')['event'] = 'g7-reserve-release'
-                expected['events'] = [e for e in expected['events'] if e['id'] != 'trump-diesel-ban-reversal']
-                next(e for e in expected['events'] if e['id'] == 'g7-reserve-release')['reason'] = 'Reviewer groups the G7 reserve release and Trump export-ban reversal as one fuel-policy event for clustering; possible timeline context. This scoped exception does not redefine other event boundaries.'
-                pair = next(p for p in expected['pairs'] if p['id'] == 'diversity-024')
-                pair['proposedLabel'] = 'same_event'
-                pair['reason'] = 'Independent reviewer groups both decisions as one event for clustering, with possible timeline context.'
-                require(report == expected, 'Undeclared changes in reviewer correction')
-        elif name == 'publisher-date-resolutions-v1':
-            dates_raw = (root / 'publisher-timestamps-v2.json').read_bytes()
-            require(report['timestampSHA256'] == hashlib.sha256(dates_raw).hexdigest(), 'Wrong timestamp evidence base')
-            require(report['reviewStatus'] == 'pending' and {d['id'] for d in report['documents']} == {'doc-0658', 'doc-0684'} and len(report['documents']) == 2, 'Date proposals are not approvals')
-            for d in report['documents']:
-                old = next(x for x in json.loads(dates_raw)['documents'] if x['id'] == d['id'])
-                require(d['pageSHA256'] == old['pageSHA256'] and d['url'] == old['url'] and d['feedPublished'] == old['feedPublished'], 'Date evidence rewritten')
-                cms = {x['field']: x['epoch'] for x in d['publisherCMS']}
-                require(cms['cms:publishedAt'] == cms['cms:firstPublishedAt'] == cms['cms:lastPublishedAt'] == instant(d['proposedPublicationTime']), 'Ambiguous CMS publication')
-                require(cms['cms:updatedAt'] == d['feedPublished'], 'Feed does not match CMS update')
-                require(any(x['kind'] == 'datePublished' and 'CEST' in x['raw'] and instant(x['raw'].replace('CEST', 'T', 1)) == cms['cms:firstPublishedAt'] for x in old['dateEvidence']), 'OpenGraph/CMS publication interpretation unsupported')
-                require(any(x['epoch'] == cms['cms:createdAt'] and x['field'].startswith('jsonld:') for x in old['dateEvidence']), 'JSON-LD creation interpretation unsupported')
-        else:
-            require(report['summary'] == dict(Counter(v['status'] for v in report['variants'])), 'URL inventory mismatch')
-            require(report['tuning']['precision'] is None and report['tuning']['releaseGatePassed'] is False, 'Empty candidate pool cannot pass')
+        require_no_text(report)
+        check_report(SimpleNamespace(root=root, name=name, base_raw=base_raw, base=base, originals=originals), report)
 
 
 def check(condition, message="Assertion failed"):
