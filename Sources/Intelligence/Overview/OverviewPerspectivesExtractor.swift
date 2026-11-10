@@ -381,10 +381,10 @@ struct OverviewPerspectivesExtractor: Sendable {
             }
             if cand.isDirectQuote {
                 filtered.append(cand)
-            } else if !articlesWithDirectQuotes.contains(cand.articleID) {
-                if unquotedArticleSeen.insert(cand.articleID).inserted {
-                    filtered.append(cand)
-                }
+            } else if !articlesWithDirectQuotes.contains(cand.articleID),
+                unquotedArticleSeen.insert(cand.articleID).inserted
+            {
+                filtered.append(cand)
             }
         }
         return filtered

@@ -115,12 +115,13 @@ struct BriefingRegionsData: Equatable, Sendable {
         let window = context.now.addingTimeInterval(-72 * 3600)...context.now
         let unreadPool =
             (try? await store.database.fetchArticles(
-                isRead: false, limit: 250, publicationWindow: window, muting: store.muting)) ?? []
+                isRead: false, limit: 250, options: ArticleFetchOptions(publicationWindow: window, muting: store.muting)
+            )) ?? []
         let fallbackPool: [FeedArticle]
         if unreadPool.count < 60 {
             fallbackPool =
                 (try? await store.database.fetchArticles(
-                    limit: 250, publicationWindow: window, muting: store.muting)) ?? []
+                    limit: 250, options: ArticleFetchOptions(publicationWindow: window, muting: store.muting))) ?? []
         } else {
             fallbackPool = []
         }

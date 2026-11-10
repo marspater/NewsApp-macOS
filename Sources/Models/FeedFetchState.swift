@@ -131,7 +131,14 @@ struct FeedHealth: Equatable, Sendable {
         latestItem = state.latestItemAt
         if let latest = state.latestItemAt {
             let age = max(0, now.timeIntervalSince(latest))
-            freshness = age <= Self.recentWindow ? .recent : age <= Self.quietWindow ? .quiet : .stale
+            freshness =
+                if age <= Self.recentWindow {
+                    .recent
+                } else if age <= Self.quietWindow {
+                    .quiet
+                } else {
+                    .stale
+                }
         } else {
             freshness = .unknown
         }
@@ -139,7 +146,14 @@ struct FeedHealth: Equatable, Sendable {
             textQuality = .unknown
         } else {
             let ratio = Double(state.fullTextItems) / Double(state.itemCount)
-            textQuality = ratio >= 0.8 ? .full : ratio >= 0.3 ? .partial : .summaries
+            textQuality =
+                if ratio >= 0.8 {
+                    .full
+                } else if ratio >= 0.3 {
+                    .partial
+                } else {
+                    .summaries
+                }
         }
     }
 

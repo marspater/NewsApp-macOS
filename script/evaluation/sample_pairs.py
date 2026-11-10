@@ -147,6 +147,15 @@ def labelled_rows(export, kind, verdicts, held_out):
             yield index, row, LABELS[verdict]
 
 
+def row_pair_prefix(row, pair_prefix):
+    """The prefix an earlier model read (#626): the pair's gap and whether one publisher wrote both, unknown for an
+    undated article or an empty publisher, as `--export-pairs` writes them."""
+    times = float(row['published_a']), float(row['published_b'])
+    gap = None if min(times) <= UNKNOWN_DATE else abs(times[0] - times[1]) / 3600
+    same = row['source_a'] == row['source_b'] if row['source_a'] and row['source_b'] else None
+    return pair_prefix(gap, same)
+
+
 def export_labels(export, kind, labels, snapshot, out, holdout=None, prefixed=False):
     """Writes the labelled rows of one class as weighted training rows in the three-way contract of
     `train_pair_model.py` (#627, weight 5): `different` 0, `related` 1, `same` 2, all exact. Texts come from the
@@ -172,12 +181,7 @@ def export_labels(export, kind, labels, snapshot, out, holdout=None, prefixed=Fa
             if not a or not b:
                 continue
             if prefixed:
-                # The prefix an earlier model read (#626): the pair's gap and whether one publisher wrote both, unknown
-                # for an undated article or an empty publisher, as `--export-pairs` writes them.
-                times = float(row['published_a']), float(row['published_b'])
-                gap = None if min(times) <= UNKNOWN_DATE else abs(times[0] - times[1]) / 3600
-                same = row['source_a'] == row['source_b'] if row['source_a'] and row['source_b'] else None
-                prefix = pair_prefix(gap, same)
+                prefix = row_pair_prefix(row, pair_prefix)
                 a, b = prefix + a, prefix + b
             if (a, b) in existing:  # compared as written, prefix included, so a rerun appends nothing twice
                 continue

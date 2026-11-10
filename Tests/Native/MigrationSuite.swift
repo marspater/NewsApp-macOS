@@ -517,11 +517,13 @@ extension NativeSuites.MigrationSuite {
         expectEqual(
             try await db.resolvedArticleID(for: unknown), unknown.id, "Ambiguous URL never selects a historical row")
         expectTrue(
-            try await db.fetchArticles(limit: 1, canonicalURL: duplicateA.normalizedLink).isEmpty,
+            try await db.fetchArticles(limit: 1, options: ArticleFetchOptions(canonicalURL: duplicateA.normalizedLink))
+                .isEmpty,
             "Ambiguous notification URL must not choose a document")
         execute(copyPath, "PRAGMA foreign_keys = ON; DELETE FROM articles WHERE id = 'historical-a';")
         expectTrue(
-            try await db.fetchArticles(limit: 1, canonicalURL: duplicateA.normalizedLink).isEmpty,
+            try await db.fetchArticles(limit: 1, options: ArticleFetchOptions(canonicalURL: duplicateA.normalizedLink))
+                .isEmpty,
             "Removing a conflicting row must not revive an ambiguous URL")
         expectEqual(
             try await db.resolvedArticleID(for: unknown), unknown.id, "Ambiguous URL remains unusable after deletion")
@@ -545,7 +547,8 @@ extension NativeSuites.MigrationSuite {
         try await db.open()
         expectEqual(try await db.fetchArticles(limit: 1, id: second.id).first?.id, first.id, "ID alias survives reopen")
         expectEqual(
-            try await db.fetchArticles(limit: 1, canonicalURL: first.normalizedLink).first?.id, first.id,
+            try await db.fetchArticles(limit: 1, options: ArticleFetchOptions(canonicalURL: first.normalizedLink))
+                .first?.id, first.id,
             "Previous URL survives replacement and reopen")
         let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
         await store.initialize()
@@ -758,7 +761,8 @@ extension NativeSuites.MigrationSuite {
         expectEqual(
             try await migrated.fetchArticles(limit: nil).count, 6, "Only confident same-URL text copies are hidden")
         expectEqual(
-            try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8,
+            try await migrated.fetchArticles(limit: nil, options: ArticleFetchOptions(includingOriginals: true)).count,
+            8,
             "Every stored original remains reachable")
         expectEqual(
             try await migrated.fetchArticles(id: "historical-b").first?.id, "historical-a",
@@ -767,10 +771,12 @@ extension NativeSuites.MigrationSuite {
             try await migrated.fetchArticles(id: "observed-variant-b").first?.id, "historical-a",
             "Observed old ID aliases follow the survivor")
         expectEqual(
-            try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.aiSummary, nil,
+            try await migrated.fetchArticles(id: "historical-b", options: ArticleFetchOptions(includingOriginals: true))
+                .first?.aiSummary, nil,
             "Unversioned original analysis is invalidated by the provenance migration")
         expectEqual(
-            try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.fullContent, body,
+            try await migrated.fetchArticles(id: "historical-b", options: ArticleFetchOptions(includingOriginals: true))
+                .first?.fullContent, body,
             "Original publisher text is retained")
         expectTrue(try await migrated.isRead(articleId: "historical-b"), "Read flags are unioned")
         expectTrue(try await migrated.isSaved(articleId: "historical-a"), "Saved flags are unioned")
@@ -800,13 +806,15 @@ extension NativeSuites.MigrationSuite {
             try await migrated.upsertArticles([incoming]).isEmpty,
             "Proven family evidence prevents refreshed variants from reappearing")
         expectTrue(
-            try await migrated.fetchArticles(canonicalURL: url).isEmpty, "Uncertain URL tombstone is never revived")
+            try await migrated.fetchArticles(options: ArticleFetchOptions(canonicalURL: url)).isEmpty,
+            "Uncertain URL tombstone is never revived")
         expectEqual(
             value(copy, "SELECT count(*) FROM article_aliases WHERE kind='content' AND article_id IS NULL;"), "2",
             "Historical evidence never revives ambiguous content aliases")
         try await migrated.clearArticleCache()
         expectEqual(
-            try await migrated.fetchArticles(id: "historical-b", includingOriginals: true).first?.fullContent, body,
+            try await migrated.fetchArticles(id: "historical-b", options: ArticleFetchOptions(includingOriginals: true))
+                .first?.fullContent, body,
             "Saved family originals survive content cache purging")
         await migrated.close()
         try await migrated.open()
@@ -825,7 +833,8 @@ extension NativeSuites.MigrationSuite {
             try await migrated.pruneOldArticles(keepReadDays: 30), 0,
             "A citation to any original protects the entire reconciled family")
         expectEqual(
-            try await migrated.fetchArticles(limit: nil, includingOriginals: true).count, 8,
+            try await migrated.fetchArticles(limit: nil, options: ArticleFetchOptions(includingOriginals: true)).count,
+            8,
             "Citation retention preserves all family originals")
         try await migrated.deleteEventOverview(eventID: "history-event")
         expectEqual(

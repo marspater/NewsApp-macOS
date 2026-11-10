@@ -73,7 +73,8 @@ struct BriefingRanking: Equatable, Sendable {
         let priorities = (try? await database.briefingPriorities(articleIDs: events.map(\.representative.id))) ?? [:]
         for entry in events where !Task.isCancelled {
             guard case .event(let summary, let representative, _) = entry,
-                let members = try? await database.fetchArticles(limit: nil, eventID: summary.eventID)
+                let members = try? await database.fetchArticles(
+                    limit: nil, options: ArticleFetchOptions(eventID: summary.eventID))
             else { continue }
             ranking.signals[entry.id] = signal(
                 reports: members.map { ($0.publisherName, BriefingPriorityData.reportText($0)) },

@@ -174,8 +174,10 @@ extension NewsTests {
         assertTrue(
             try await db.getReadArticleIDs().contains(article.id), "Shared stories belong to every originating feed")
         let firstPage = try await db.fetchArticles(limit: 200)
-        let secondPage = try await db.fetchArticles(limit: 200, after: ArticleQueryCursor(firstPage.last!))
-        let thirdPage = try await db.fetchArticles(limit: 200, after: ArticleQueryCursor(secondPage.last!))
+        let secondPage = try await db.fetchArticles(
+            limit: 200, options: ArticleFetchOptions(after: ArticleQueryCursor(firstPage.last!)))
+        let thirdPage = try await db.fetchArticles(
+            limit: 200, options: ArticleFetchOptions(after: ArticleQueryCursor(secondPage.last!)))
         assertEqual(
             Set((firstPage + secondPage + thirdPage).map(\.id)).count, 511,
             "Keyset pages include all stories without duplicates at tied dates")
@@ -371,7 +373,7 @@ extension NewsTests {
             try await db.fetchArticles(id: alias.id).first?.id, original.id,
             "Alias save resolves the original document without a new primary key")
         assertEqual(
-            try await db.fetchArticles(canonicalURL: corrected.link).count, 1,
+            try await db.fetchArticles(options: ArticleFetchOptions(canonicalURL: corrected.link)).count, 1,
             "Rapid save changes preserve one URL-equivalent document")
         let emptyLink = FeedArticle(
             title: "No link", link: "", guid: "empty-one", description: "", pubDate: .distantPast, source: "Publisher")
@@ -453,7 +455,7 @@ extension NewsTests {
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, [archived, fresh, fresh], nil, nil) } },
             notifyBatch: { articles, _ in notified.append(contentsOf: articles.map { $0.id }) },
-            imageFinder: .unavailable)
+            dependencies: FeedManager.Dependencies(imageFinder: .unavailable))
         await manager.fetchFeedsAsync()
         await manager.notificationPass?.value
         let freshID = ArticleIdentity.scopedGUID(fresh.guid, feedURL: settings.feedURLs[0])!
@@ -551,8 +553,7 @@ extension NewsTests {
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, [article], nil, nil) } },
             notifyBatch: { _, _ in },
-            enrichmentQueue: queue,
-            allowsBackgroundWork: { !energySaving })
+            dependencies: FeedManager.Dependencies(enrichmentQueue: queue, allowsBackgroundWork: { !energySaving }))
         await background.fetchFeedsAsync()
         guard let storedID = background.articles.first?.id else {
             return assertTrue(false, "The refreshed article is stored")
@@ -1873,7 +1874,8 @@ extension NewsTests {
                 if await calls.next() == 1 { await gate.wait() }
                 return [(url, [article], nil, nil)]
             },
-            powerEvents: center, wakeRefreshDelay: .milliseconds(10), now: { clock })
+            dependencies: FeedManager.Dependencies(
+                powerEvents: center, wakeRefreshDelay: .milliseconds(10), now: { clock }))
         func sleepAndWake() async {
             center.post(name: NSWorkspace.willSleepNotification, object: nil)
             center.post(name: NSWorkspace.didWakeNotification, object: nil)
@@ -1934,7 +1936,8 @@ extension NewsTests {
         var clock = Date()
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, _ in urls.map { ($0, [], nil, nil) } }, imageFinder: .unavailable, now: { clock })
+            fetchBatch: { urls, _ in urls.map { ($0, [], nil, nil) } },
+            dependencies: FeedManager.Dependencies(imageFinder: .unavailable, now: { clock }))
         func storeOldStory(_ name: String, read: Bool, saved: Bool = false) async throws -> String {
             let article = FeedArticle(
                 title: name, link: "https://example.com/\(name)", guid: name, description: name,
@@ -2009,7 +2012,8 @@ extension NewsTests {
                     return (url, [article], nil, nil)
                 }
             },
-            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map(\.id)) }, imageFinder: .unavailable)
+            notifyBatch: { articles, _ in notified.append(contentsOf: articles.map(\.id)) },
+            dependencies: FeedManager.Dependencies(imageFinder: .unavailable))
 
         let first = Task { await manager.fetchFeedsAsync() }
         // Cancel once the first feed's story is committed and before the run can notify it.
@@ -2039,7 +2043,7 @@ extension NewsTests {
         try await db.upsertArticles([undated, old], feedUrl: "https://example.com/feed")
         let now = Date()
         let window = try await db.fetchArticles(
-            publicationWindow: now.addingTimeInterval(-3600)...now.addingTimeInterval(60))
+            options: ArticleFetchOptions(publicationWindow: now.addingTimeInterval(-3600)...now.addingTimeInterval(60)))
         assertEqual(
             window.map(\.title), ["Undated"],
             "An undated story stored now is within the last hour; a three-day-old story is not")
@@ -2883,7 +2887,7 @@ extension NewsTests {
                 fetchBatch: { urls, _ in urls.map { ($0, $0 == starredFeed ? starred : plain, nil, nil) } },
                 notifyBatch: { articles, delivery in
                     await service.triageAndNotify(newArticles: articles, delivery: delivery)
-                }, imageFinder: .unavailable, now: { clock ?? Date() })
+                }, dependencies: FeedManager.Dependencies(imageFinder: .unavailable, now: { clock ?? Date() }))
             await manager.fetchFeedsAsync()
             // The pass runs on after the refresh returns; this waits for its banners before reading them.
             _ = await manager.notificationPass?.value
@@ -2997,7 +3001,7 @@ extension NewsTests {
                 },
                 notifyBatch: { articles, delivery in
                     await service.triageAndNotify(newArticles: articles, delivery: delivery)
-                }, imageFinder: .unavailable)
+                }, dependencies: FeedManager.Dependencies(imageFinder: .unavailable))
             await manager.fetchFeedsAsync()
             _ = await manager.notificationPass?.value
             manager.stopBackgroundWork()

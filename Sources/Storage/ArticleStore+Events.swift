@@ -29,13 +29,13 @@ extension ArticleStore {
     }
 
     func eventMemberArticles(eventID: String) async throws -> [FeedArticle] {
-        try await database.fetchArticles(limit: nil, eventID: eventID)
+        try await database.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: eventID))
     }
 
     /// Every visible report of the story the event leads (#581), for the expanded story card, whose coverage counts
     /// the whole story.
     func storyMemberArticles(eventID: String) async throws -> [FeedArticle] {
-        try await database.fetchArticles(limit: nil, eventID: eventID, wholeStory: true)
+        try await database.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: eventID, wholeStory: true))
     }
 
     /// Earlier events of the same developing story, shown under "Earlier in This Story": every earlier event of the
@@ -43,7 +43,7 @@ extension ArticleStore {
     /// related acts the matcher kept apart (#522).
     func relatedStoryEvents(eventID: String) async throws -> [RelatedStoryEvent] {
         let lexical = try await EventStoryRelation.find(eventID: eventID, in: database)
-        let members = try await database.fetchArticles(limit: nil, eventID: eventID)
+        let members = try await database.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: eventID))
         guard let start = members.map(\.pubDate).min() else { return lexical }
         // Every related act and story event, earlier and later: the earlier-only filter comes first.
         let earlier = try await database.relatedActEvents(eventID: eventID, limit: .max)

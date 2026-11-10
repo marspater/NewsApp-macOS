@@ -438,7 +438,8 @@ actor OverviewGenerationCoordinator {
         do {
             articles = try await store.database.fetchArticles(
                 limit: 100,
-                publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting)
+                options: ArticleFetchOptions(
+                    publicationWindow: Date().addingTimeInterval(-72 * 3600)...Date(), muting: muting))
             events = try await store.eventFeedSummaries(for: articles.map(\.id))
         } catch {
             if !(error is CancellationError) {

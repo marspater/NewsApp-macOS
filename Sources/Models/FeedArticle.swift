@@ -759,7 +759,13 @@ public struct ReaderImageCandidate: Codable, Hashable, Sendable {
                 func score(_ image: Self) -> Int {
                     let text = (image.alt ?? "") + " " + (image.caption ?? "")
                     let overlap = words.intersection(MuteRules.words(text)).count
-                    return overlap * 10 + (image.origin == .body ? 3 : image.origin == .openGraph ? 2 : 1)
+                    let originScore =
+                        switch image.origin {
+                        case .body: 3
+                        case .openGraph: 2
+                        case .feed: 1
+                        }
+                    return overlap * 10 + originScore
                 }
                 let a = score(lhs.element)
                 let b = score(rhs.element)

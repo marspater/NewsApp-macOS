@@ -919,10 +919,12 @@ extension NewsTests {
                     + "l'Élysée mardi à Paris, tandis que les députés débattent du texte.",
                 pubDate: now.addingTimeInterval(-3600), source: "Gazette Deux"),
         ])
-        _ = try await EventClusterer.run(in: french, now: now) { _, _ in
-            assertTrue(false, "The pair model is never called for French reports")
-            return 1.0
-        }
+        _ = try await EventClusterer.run(
+            in: french, now: now,
+            scoring: EventClusterScoring(pairProbability: { _, _ in
+                assertTrue(false, "The pair model is never called for French reports")
+                return 1.0
+            }))
         await french.close()
 
         // A≈B and B≈C while A contradicts C: C cannot join an event that holds A and B.
@@ -1557,7 +1559,9 @@ extension NewsTests {
         try await db.setSaved(articleId: "saved", isSaved: true)
         try await db.markRead(articleId: "read", isRead: true)
         func listed() async throws -> Set<String> {
-            Set(try await db.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id))
+            Set(
+                try await db.fetchArticles(limit: nil, options: ArticleFetchOptions(hidingWaitingStories: true)).map(
+                    \.id))
         }
 
         assertEqual(try await listed(), Set(all.map(\.id)), "Importance never hides a publication")
@@ -1630,7 +1634,8 @@ extension NewsTests {
             try await panel.tensionCorpus(day: panelDay, feedURLs: [panelFeed]).map(\.article.id), ["panel-minor"],
             "The waiting panel story still counts in its tension day")
         assertEqual(
-            try await panel.fetchArticles(limit: nil, hidingWaitingStories: true).count, 2,
+            try await panel.fetchArticles(limit: nil, options: ArticleFetchOptions(hidingWaitingStories: true)).count,
+            2,
             "Panel and ordinary stories remain visible")
         let collectionOff = try await StoryCurator.run(
             in: panel, now: now.addingTimeInterval(26 * 3600))
@@ -1643,11 +1648,14 @@ extension NewsTests {
         try await curated.open()
         try await curated.upsertArticles([story("c1", "One"), story("c2", "Two"), story("c3", "Three")])
         assertEqual(
-            try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).count, 3, "Unrated stories show")
+            try await curated.fetchArticles(limit: nil, options: ArticleFetchOptions(hidingWaitingStories: true)).count,
+            3, "Unrated stories show")
         try await curated.recordImportance("c1", .major, at: now)
         for id in ["c2", "c3"] { try await curated.recordImportance(id, .minor, at: now) }
         assertEqual(
-            Set(try await curated.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id)), ["c1", "c2", "c3"],
+            Set(
+                try await curated.fetchArticles(limit: nil, options: ArticleFetchOptions(hidingWaitingStories: true))
+                    .map(\.id)), ["c1", "c2", "c3"],
             "Explicit audit ratings cannot hide stories")
         assertEqual(
             try await curated.notificationStoryIDs(["c1", "c2", "c3", "missing"]), ["c1", "c2", "c3"],
@@ -1689,11 +1697,11 @@ extension NewsTests {
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, _ in urls.map { ($0, reports, nil, nil) } },
             notifyBatch: { articles, _ in notified += articles.map(\.title) },
-            imageFinder: StoryImageFinder { _ in
-                await pages.wait()
-                return .none
-            },
-            allowsBackgroundWork: { true })
+            dependencies: FeedManager.Dependencies(
+                imageFinder: StoryImageFinder { _ in
+                    await pages.wait()
+                    return .none
+                }, allowsBackgroundWork: { true }))
         let refresh = Task { await manager.fetchFeedsAsync() }
         await eventually("Notifications are dispatched while image lookups wait") { notified == reports.map(\.title) }
         assertEqual(notified, reports.map(\.title), "Refresh never filters eligible stories by model importance")
@@ -2609,8 +2617,8 @@ extension NewsTests {
         batches.set(feeds[0], Array(control.prefix(2)))
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
-            fetchBatch: { urls, _ in batches.batch(urls) }, notifyBatch: { _, _ in }, imageFinder: .unavailable,
-            allowsBackgroundWork: { true })
+            fetchBatch: { urls, _ in batches.batch(urls) }, notifyBatch: { _, _ in },
+            dependencies: FeedManager.Dependencies(imageFinder: .unavailable, allowsBackgroundWork: { true }))
         defer { manager.stopBackgroundWork() }
         await manager.fetchFeedsAsync()
         await manager.waitForEventClustering()
@@ -3235,14 +3243,18 @@ extension NewsTests {
         var storyReports = 0
         if let lead = try await apart.storyID(forEvent: voteApart) {
             for id in try await apart.storyEventIDs(lead) {
-                storyReports += try await apart.fetchArticles(limit: nil, eventID: id).count
+                storyReports += try await apart.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: id))
+                    .count
             }
         }
         assertEqual(
-            try await apart.fetchArticles(limit: nil, eventID: voteApart, wholeStory: true).count, storyReports,
+            try await apart.fetchArticles(
+                limit: nil, options: ArticleFetchOptions(eventID: voteApart, wholeStory: true)
+            ).count, storyReports,
             "A story's reports are its events' reports")
         assertTrue(
-            try await apart.fetchArticles(limit: nil, eventID: voteApart).count < storyReports,
+            try await apart.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: voteApart)).count
+                < storyReports,
             "One event of the story holds fewer reports than the story")
         // A low-energy pass can finish every report while leaving only the story work pending.
         let lastStoryPass = await apart.lastStoryPass
@@ -3384,7 +3396,7 @@ extension NewsTests {
         prefilterPolicy.semanticVetoThreshold = 0.0
         _ = try await EventClusterer.run(
             in: singleDb, matchPolicy: prefilterPolicy, now: now.addingTimeInterval(360), allowsEnergy: true,
-            storyProbabilities: { @Sendable _, _ in (0.6, 0.35) })
+            scoring: EventClusterScoring(storyProbabilities: { @Sendable _, _ in (0.6, 0.35) }))
         if let boosterEvent = try await singleDb.eventID(forArticle: boosterID),
             let targetEvent = createdEventID
         {
@@ -3428,10 +3440,10 @@ extension NewsTests {
             policy.pairModelPrefix = prefix
             _ = try await EventClusterer.run(
                 in: db, matchPolicy: policy, now: start.addingTimeInterval(4 * 3600),
-                pairProbability: { a, b in
+                scoring: EventClusterScoring(pairProbability: { a, b in
                     await calls.add(a, b)
                     return answer
-                })
+                }))
             var events: [String?] = []
             for article in stories {
                 events.append(try await db.eventID(forArticle: try await db.resolvedArticleID(for: article)))
@@ -3465,10 +3477,10 @@ extension NewsTests {
         try await lowPower.upsertArticles(stories)
         let rulesOnly = try await EventClusterer.run(
             in: lowPower, now: start.addingTimeInterval(4 * 3600), allowsEnergy: false,
-            pairProbability: { _, _ in
+            scoring: EventClusterScoring(pairProbability: { _, _ in
                 assertTrue(false, "The pair model is not asked without energy")
                 return 0.99
-            })
+            }))
         var ids: [String] = []
         for article in stories { ids.append(try await lowPower.resolvedArticleID(for: article)) }
         assertEqual(try await lowPower.eventID(forArticle: ids[0]), nil, "The rules alone leave the flood pair apart")
@@ -3478,14 +3490,14 @@ extension NewsTests {
         assertEqual(rulesOnly.deferred, 2, "Both flood reports wait for a pass with energy")
         let againWithoutEnergy = try await EventClusterer.run(
             in: lowPower, now: start.addingTimeInterval(5 * 3600), allowsEnergy: false,
-            pairProbability: { _, _ in
+            scoring: EventClusterScoring(pairProbability: { _, _ in
                 assertTrue(false, "Deferred rows are not read again without energy")
                 return 0.99
-            })
+            }))
         assertEqual(againWithoutEnergy.processed, 0, "Deferred rows wait for energy instead of being re-read")
         let withEnergy = try await EventClusterer.run(
             in: lowPower, now: start.addingTimeInterval(6 * 3600), allowsEnergy: true,
-            pairProbability: { _, _ in 0.99 })
+            scoring: EventClusterScoring(pairProbability: { _, _ in 0.99 }))
         assertTrue(withEnergy.processed >= 2, "A pass with energy reads the deferred rows again")
         let joinedFlood = try await lowPower.eventID(forArticle: ids[0])
         let joinedFloodPartner = try await lowPower.eventID(forArticle: ids[1])

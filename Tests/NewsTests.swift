@@ -1147,7 +1147,8 @@ struct NewsTests {
             fflush(stdout)
             if ratings.count == before { break }
         }
-        let visible = Set(try await db.fetchArticles(limit: nil, hidingWaitingStories: true).map(\.id))
+        let visible = Set(
+            try await db.fetchArticles(limit: nil, options: ArticleFetchOptions(hidingWaitingStories: true)).map(\.id))
         let hiddenMajor = ratings.filter { $0["importance"] == "major" && !visible.contains($0["id"] ?? "") }.count
         assertEqual(hiddenMajor, 0, "No rated major story is hidden")
         // #309: every minor-rated story in the window, whether it waits, and one sampled re-rate that bypasses the cache.
@@ -1270,7 +1271,9 @@ struct NewsTests {
         var placeholders: [[String: String]] = []
         func coverage() async throws -> (cards: Int, pictured: Int) {
             let articles = try await db.fetchArticles(
-                limit: nil, publicationWindow: clock.addingTimeInterval(-72 * 3600)...clock, hidingWaitingStories: true)
+                limit: nil,
+                options: ArticleFetchOptions(
+                    publicationWindow: clock.addingTimeInterval(-72 * 3600)...clock, hidingWaitingStories: true))
             let summaries = try await db.eventFeedSummaries(forArticles: articles.map(\.id))
             let entries = EventFeedGrouping.entries(for: articles, events: summaries, mode: .events)
             var pictured = 0
@@ -1285,7 +1288,8 @@ struct NewsTests {
                 switch entry {
                 case .article(let article): members = [article]
                 case .event(let summary, _, _):
-                    members = try await db.fetchArticles(limit: nil, eventID: summary.eventID)
+                    members = try await db.fetchArticles(
+                        limit: nil, options: ArticleFetchOptions(eventID: summary.eventID))
                 }
                 if FeedArticle.bestCardImage(in: members) != nil {
                     pictured += 1
@@ -1675,7 +1679,9 @@ struct NewsTests {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let active = try await db.fetchArticles(
-            limit: nil, publicationWindow: selectionWindowStart...selectionWindowEnd, hidingWaitingStories: true)
+            limit: nil,
+            options: ArticleFetchOptions(
+                publicationWindow: selectionWindowStart...selectionWindowEnd, hidingWaitingStories: true))
         let events = try await db.eventFeedSummaries(forArticles: active.map(\.id)).filter { $0.sources.count > 1 }
             .sorted { $0.sources.count > $1.sources.count }
         var report = [
@@ -1780,7 +1786,7 @@ struct NewsTests {
         // text of the passages it cites, for the 30-event support review. Private, like the other outputs.
         var industryEntries: [[String: Any]] = []
         for event in events {
-            var members = try await db.fetchArticles(limit: nil, eventID: event.eventID)
+            var members = try await db.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: event.eventID))
             guard let first = members.first else { continue }
             let measured =
                 !excluded.contains(event.eventID) && report["liveGenerated", default: 0] < target
@@ -2671,8 +2677,10 @@ struct NewsTests {
         repeat {
             let report = try await EventClusterer.run(
                 in: db, matchPolicy: policy, now: newest, allowsEnergy: true,
-                pairProbability: StoryCorpus.pairProbabilityFromEnvironment(),
-                storyProbabilities: StoryCorpus.storyProbabilitiesFromEnvironment(), calibrationRows: calibrationRows)
+                scoring: EventClusterScoring(
+                    pairProbability: StoryCorpus.pairProbabilityFromEnvironment(),
+                    storyProbabilities: StoryCorpus.storyProbabilitiesFromEnvironment(),
+                    calibrationRows: calibrationRows))
             passes += 1
             total.processed += report.processed
             total.joined += report.joined
@@ -3075,8 +3083,9 @@ struct NewsTests {
             repeat {
                 let report = try await EventClusterer.run(
                     in: db, matchPolicy: policy, now: Date(timeIntervalSince1970: clock), allowsEnergy: true,
-                    pairProbability: StoryCorpus.pairProbabilityFromEnvironment(),
-                    storyProbabilities: StoryCorpus.storyProbabilitiesFromEnvironment())
+                    scoring: EventClusterScoring(
+                        pairProbability: StoryCorpus.pairProbabilityFromEnvironment(),
+                        storyProbabilities: StoryCorpus.storyProbabilitiesFromEnvironment()))
                 total.processed += report.processed
                 total.created += report.created
                 total.merged += report.merged

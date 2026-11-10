@@ -359,7 +359,7 @@ public final class CoverageSentimentEvaluator: Sendable {
     ///   - text: The input headline or article snippet to assess.
     ///   - languageCode: An optional language identifier.
     /// - Returns: A calibrated ``ToneAssessment`` containing the raw score, calibrated score, and explanatory rationale.
-    public static func assessTextToneSafely(_ text: String, languageCode: String? = nil) -> ToneAssessment {
+    public static func assessTextToneSafely(_ text: String, languageCode _: String? = nil) -> ToneAssessment {
         let tagger = NLTagger(tagSchemes: [.sentimentScore])
         tagger.string = text
         let (sentiment, _) = tagger.tag(at: text.startIndex, unit: .paragraph, scheme: .sentimentScore)

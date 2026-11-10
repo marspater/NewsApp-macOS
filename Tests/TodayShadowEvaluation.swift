@@ -176,7 +176,8 @@ enum TodayShadowEvaluation {
 
         // Clock: NEWS_TODAY_NOW or the latest visible article order date in the snapshot.
         let env = ProcessInfo.processInfo.environment
-        let allArticles = try await db.fetchArticles(limit: nil, hidingWaitingStories: false)
+        let allArticles = try await db.fetchArticles(
+            limit: nil, options: ArticleFetchOptions(hidingWaitingStories: false))
         let latestDate = allArticles.map(\.orderDate).filter { $0 != DateParser.unknownDate }.max() ?? Date()
         let now = env["NEWS_TODAY_NOW"].flatMap(TimeInterval.init).map { Date(timeIntervalSince1970: $0) } ?? latestDate
 

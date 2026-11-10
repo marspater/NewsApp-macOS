@@ -116,6 +116,16 @@ class FeedManager: NSObject, ObservableObject {
     var notificationsEnabled: Bool { appSettings.notificationsEnabled }
     var aiEnabled: Bool { appSettings.aiEnabled }
 
+    /// What background work runs on and when; tests replace the clock, the energy gate and the services.
+    struct Dependencies {
+        var enrichmentQueue: EnrichmentQueue?
+        var imageFinder: StoryImageFinder = .publisherPages
+        var allowsBackgroundWork: @MainActor () -> Bool = { IntelligencePolicy.allowsEnergy() }
+        var powerEvents: NotificationCenter?
+        var wakeRefreshDelay: Duration = .seconds(10)
+        var now: () -> Date = { Date() }
+    }
+
     init(
         settings: AppSettings? = nil, store: ArticleStore? = nil, schedulesRefresh: Bool = true,
         fetchBatch: (@Sendable ([String], Bool) async -> FeedBatch)? = nil,
@@ -123,12 +133,7 @@ class FeedManager: NSObject, ObservableObject {
             articles, delivery in
             await NotificationService.shared.triageAndNotify(newArticles: articles, delivery: delivery)
         },
-        enrichmentQueue: EnrichmentQueue? = nil,
-        imageFinder: StoryImageFinder = .publisherPages,
-        allowsBackgroundWork: @escaping @MainActor () -> Bool = { IntelligencePolicy.allowsEnergy() },
-        powerEvents: NotificationCenter? = nil,
-        wakeRefreshDelay: Duration = .seconds(10),
-        now: @escaping () -> Date = { Date() }
+        dependencies: Dependencies = Dependencies()
     ) {
         let store = store ?? ArticleStore.shared
         let state = store.database
@@ -139,18 +144,18 @@ class FeedManager: NSObject, ObservableObject {
                 await FeedFetcher.shared.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: state)
             }
         self.notifyBatch = notifyBatch
-        self.enrichmentQueue = enrichmentQueue ?? EnrichmentQueue(store: store)
-        self.imageFinder = imageFinder
-        self.allowsBackgroundWork = allowsBackgroundWork
-        self.wakeRefreshDelay = wakeRefreshDelay
-        self.now = now
+        self.enrichmentQueue = dependencies.enrichmentQueue ?? EnrichmentQueue(store: store)
+        self.imageFinder = dependencies.imageFinder
+        self.allowsBackgroundWork = dependencies.allowsBackgroundWork
+        self.wakeRefreshDelay = dependencies.wakeRefreshDelay
+        self.now = dependencies.now
         super.init()
         // Clear AI Analysis (#805): the store refuses the in-flight writes; the session state resets here, before
         // the clear returns.
         store.analysisClearedHandler = { [weak self] in await self?.analysisCleared() }
         observeArticles()
         observeSubscriptions()
-        observeLifecycle(powerEvents: powerEvents, schedulesRefresh: schedulesRefresh)
+        observeLifecycle(powerEvents: dependencies.powerEvents, schedulesRefresh: schedulesRefresh)
         loadCachedArticles()
         if schedulesRefresh { startBackgroundFetch() }
     }
@@ -1075,14 +1080,11 @@ class FeedManager: NSObject, ObservableObject {
         let database = articleStore.database
         let finder = imageFinder
         let muting = appSettings.muteRules
-        let retained = appSettings.tensionRetainedFeedURLs
         imageLookupTask = Task { [weak self] in
             self?.logger.info("Story image lookup started")
             defer { self?.logger.info("Story image lookup finished") }
             let work = Task.detached(priority: .utility) {
-                try await StoryCurator.run(
-                    in: database, imageFinder: finder, muting: muting,
-                    keepingFeedURLs: retained)
+                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting)
             }
             let result = await withTaskCancellationHandler {
                 await work.result

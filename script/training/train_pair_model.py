@@ -568,12 +568,10 @@ def self_check():
             and 'story >= 0.9: TP 1, FP 0, FN 0' in swept, 'Held-out sweep under both admission rules')
     import contextlib
     import io
-    try:
-        with contextlib.redirect_stderr(io.StringIO()):
-            main(['pairs.csv', 'out', '--pretrain', 'public.csv'])
+    refused = True
+    with contextlib.redirect_stderr(io.StringIO()), contextlib.suppress(SystemExit):
+        main(['pairs.csv', 'out', '--pretrain', 'public.csv'])
         refused = False
-    except SystemExit:
-        refused = True
     require(refused, 'Pretraining without headline exclusions is refused before any CSV is read')
     print('Pair model training self-check passed')
 

@@ -351,7 +351,8 @@ extension NativeSuites.FeedParsingSuite {
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
-            notifyBatch: { articles, _ in notified += articles.count }, imageFinder: .unavailable)
+            notifyBatch: { articles, _ in notified += articles.count },
+            dependencies: FeedManager.Dependencies(imageFinder: .unavailable))
         func rss(_ names: [String]) -> Data {
             let items = names.map {
                 "<item><title>Report \($0)</title><link>\(fixtureRoot.appendingPathComponent($0).absoluteString)</link><guid>\($0)</guid><description>Publisher report</description><pubDate>Wed, 21 Oct 2026 07:28:00 +0000</pubDate></item>"
@@ -878,7 +879,7 @@ extension NativeSuites.FeedParsingSuite {
         let manager = FeedManager(
             settings: settings, store: store, schedulesRefresh: false,
             fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
-            notifyBatch: { _, _ in }, now: { clock.now })
+            notifyBatch: { _, _ in }, dependencies: FeedManager.Dependencies(now: { clock.now }))
         defer { manager.stopBackgroundWork() }
         clock.advance(by: 60)
 
@@ -934,7 +935,7 @@ extension NativeSuites.FeedParsingSuite {
                     while released.count == 0 { try? await Task.sleep(for: .milliseconds(5)) }
                     return await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db)
                 },
-                notifyBatch: { _, _ in }, now: { clock.now })
+                notifyBatch: { _, _ in }, dependencies: FeedManager.Dependencies(now: { clock.now }))
             defer { racing.stopBackgroundWork() }
             requests = []
             let scheduledRun = Task { await racing.fetchFeedsAsync(scheduled: true) }
@@ -961,7 +962,7 @@ extension NativeSuites.FeedParsingSuite {
                 while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
                 return []
             },
-            notifyBatch: { _, _ in }, now: { clock.now })
+            notifyBatch: { _, _ in }, dependencies: FeedManager.Dependencies(now: { clock.now }))
         let cancelledRun = Task { await cancelling.fetchFeedsAsync(scheduled: true) }
         await eventually("The refresh to cancel is collecting") { cancelledEntered.count == 1 }
         let abandonedRun = Task { await cancelling.fetchFeedsAsync() }
@@ -1540,7 +1541,8 @@ extension NativeSuites.FeedParsingSuite {
             "Undated stories remain visible beyond 500 dated stories")
         expectEqual(snapshot.first?.pubDate, DateParser.unknownDate, "Ordering never fabricates a publication date")
         let firstPage = try await db.fetchArticles(limit: 2)
-        let remainder = try await db.fetchArticles(limit: nil, after: ArticleQueryCursor(firstPage.last!))
+        let remainder = try await db.fetchArticles(
+            limit: nil, options: ArticleFetchOptions(after: ArticleQueryCursor(firstPage.last!)))
         expectEqual((firstPage + remainder).count, 504, "Date cursor includes every row")
         expectEqual(Set((firstPage + remainder).map(\.id)).count, 504, "Tied ingestion dates do not duplicate rows")
         let searchPage = try await db.searchArticles(query: "is:unread", limit: 2)
@@ -2669,7 +2671,8 @@ extension NativeSuites.FeedParsingSuite {
             try await db.upsertArticles([variant], feedUrl: original.identityFeedURL).isEmpty,
             "Verified canonical variant reuses stored identity")
         expectEqual(
-            try await db.fetchArticles(canonicalURL: final.absoluteString).first?.id, original.id,
+            try await db.fetchArticles(options: ArticleFetchOptions(canonicalURL: final.absoluteString)).first?.id,
+            original.id,
             "Verified redirect resolves through aliases")
         expectTrue(try await db.isRead(articleId: original.id), "Canonical evidence preserves read state")
         expectTrue(try await db.isSaved(articleId: original.id), "Canonical evidence preserves saved state")
@@ -2703,7 +2706,8 @@ extension NativeSuites.FeedParsingSuite {
             expectTrue(false, "Alias write failure must propagate")
         } catch {}
         expectEqual(
-            try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).first?.id, variant.id,
+            try await persistent.fetchArticles(options: ArticleFetchOptions(canonicalURL: canonical.absoluteString))
+                .first?.id, variant.id,
             "Failed evidence rolls back earlier alias conflict")
         expectEqual(
             sqlite3_exec(handle, "DROP TRIGGER fail_document;", nil, nil, nil), SQLITE_OK,
@@ -2714,15 +2718,18 @@ extension NativeSuites.FeedParsingSuite {
             try await persistent.fetchArticles(limit: nil).count, 2,
             "Evidence does not merge conflicting historical rows")
         expectTrue(
-            try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).isEmpty,
+            try await persistent.fetchArticles(options: ArticleFetchOptions(canonicalURL: canonical.absoluteString))
+                .isEmpty,
             "Conflicting validated canonical becomes ambiguous")
         await persistent.close()
         try await persistent.open()
         expectEqual(
-            try await persistent.fetchArticles(canonicalURL: final.absoluteString).first?.id, original.id,
+            try await persistent.fetchArticles(options: ArticleFetchOptions(canonicalURL: final.absoluteString)).first?
+                .id, original.id,
             "Validated redirect alias survives reopening")
         expectTrue(
-            try await persistent.fetchArticles(canonicalURL: canonical.absoluteString).isEmpty,
+            try await persistent.fetchArticles(options: ArticleFetchOptions(canonicalURL: canonical.absoluteString))
+                .isEmpty,
             "Validated canonical ambiguity survives reopening")
         await persistent.close()
 

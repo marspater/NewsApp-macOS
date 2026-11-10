@@ -367,6 +367,14 @@ struct SettingsView: View {
                         }
                         Spacer()
                         let starred = appSettings.starredFeedURLs.contains(urlString)
+                        let starHelp =
+                            if starred {
+                                "Notifies about every story"
+                            } else if starLimitReached {
+                                "Up to \(AppSettings.starredFeedLimit) feeds can be starred"
+                            } else {
+                                "Notify about every story"
+                            }
                         Button {
                             appSettings.setFeedStarred(urlString, !starred)
                         } label: {
@@ -376,13 +384,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(!starred && starLimitReached)
-                        .help(
-                            starred
-                                ? "Notifies about every story"
-                                : starLimitReached
-                                    ? "Up to \(AppSettings.starredFeedLimit) feeds can be starred"
-                                    : "Notify about every story"
-                        )
+                        .help(starHelp)
                         .accessibilityLabel(
                             starred
                                 ? "Stop notifying about every story from this feed"

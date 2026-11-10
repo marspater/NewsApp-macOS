@@ -120,7 +120,7 @@ struct TodayEditionThresholds: Equatable, Sendable {
 
     var developingWindowSeconds: TimeInterval = 3600
 
-    static let `default` = TodayEditionThresholds()
+    static let standard = TodayEditionThresholds()
 }
 
 /// Output contract per story entry placed in a Today lane (`#934`).

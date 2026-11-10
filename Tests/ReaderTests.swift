@@ -1238,7 +1238,7 @@ extension NewsTests {
         let cachedOverview = await coordinator.requestOverview(
             eventID: event.id, eventTitle: "Harbor bridge",
             membershipVersion: event.membershipVersion,
-            articles: try await db.fetchArticles(limit: nil, eventID: event.id))
+            articles: try await db.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: event.id)))
         assertTrue(cachedOverview != nil, "An overview can be generated from current stored inputs")
         _ = try await db.updateEnrichment(
             articleId: article.id, update: .init(content: revisedBody + " The city announced an additional inspection.")
@@ -1250,7 +1250,7 @@ extension NewsTests {
             frozen, nil,
             "An overview built from frozen pre-update snapshots is rejected, not served from the old memory cache")
         assertEqual(try await db.fetchEventOverview(eventID: event.id), nil, "A rejected overview is not stored")
-        let current = try await db.fetchArticles(limit: nil, eventID: event.id)
+        let current = try await db.fetchArticles(limit: nil, options: ArticleFetchOptions(eventID: event.id))
         let regenerated = await coordinator.requestOverview(
             eventID: event.id, eventTitle: "Harbor bridge",
             membershipVersion: event.membershipVersion, articles: current)
@@ -2000,8 +2000,10 @@ extension NewsTests {
                 $0.imageUrl == nil
             }, "Feed cards omit repeated publisher furniture on hydration")
         assertTrue(
-            try await db.fetchArticles(includingOriginals: true).filter { $0.source == "Recurring publisher" }
-                .allSatisfy { $0.imageUrl != nil }, "Explicit original retrieval preserves stored image metadata")
+            try await db.fetchArticles(options: ArticleFetchOptions(includingOriginals: true)).filter {
+                $0.source == "Recurring publisher"
+            }
+            .allSatisfy { $0.imageUrl != nil }, "Explicit original retrieval preserves stored image metadata")
         assertTrue(
             try await db.searchArticles(query: "Document").allSatisfy { $0.imageUrl == nil },
             "Search uses the same media curation")

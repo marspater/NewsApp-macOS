@@ -232,7 +232,7 @@ actor EnrichmentQueue {
     /// Runs overview generation using the enrichment queue's bounded concurrency and cancellation tracking.
     func scheduleOverviewGeneration(
         eventID: String,
-        priority: EnrichmentPriority = .high,
+        priority _: EnrichmentPriority = .high,
         operation: @escaping @Sendable () async -> EventOverviewDocument?
     ) async -> EventOverviewDocument? {
         cancelOverview(eventID: eventID, reason: .superseded)

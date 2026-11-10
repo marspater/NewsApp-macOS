@@ -311,7 +311,7 @@ final class ArticleStore: ObservableObject {
         }
         let link = ArticleIdentity.canonicalizeURL(request.link)
         guard !link.isEmpty else { return nil }
-        return try await database.fetchArticles(limit: 1, canonicalURL: link).first
+        return try await database.fetchArticles(limit: 1, options: ArticleFetchOptions(canonicalURL: link)).first
     }
 
     func search(query: String, limit: Int = 100) async -> [FeedArticle] {

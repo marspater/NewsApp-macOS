@@ -118,8 +118,7 @@ struct ListInvalidationBaseline {
                     }
                     return (url, fresh, nil, nil)
                 }
-            },
-            allowsBackgroundWork: { false })
+            }, dependencies: FeedManager.Dependencies(allowsBackgroundWork: { false }))
         defer { manager.stopBackgroundWork() }
         let themes = ThemeManager(defaults: defaults)
         themes.autoHideRead = true

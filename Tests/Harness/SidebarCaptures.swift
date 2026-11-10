@@ -55,8 +55,7 @@ struct SidebarCaptures {
             fetchBatch: { _, _ in [] },
             notifyBatch: { _, _ in
                 // The harness posts no notifications.
-            },
-            allowsBackgroundWork: { false })
+            }, dependencies: FeedManager.Dependencies(allowsBackgroundWork: { false }))
         let stories = (0..<120).map { index in
             FeedArticle(
                 title: "Fictional story \(index)", link: "https://example.com/story-\(index)", guid: "story-\(index)",

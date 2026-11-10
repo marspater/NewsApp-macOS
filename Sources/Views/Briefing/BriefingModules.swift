@@ -109,7 +109,7 @@ enum BriefingModuleKind: String, CaseIterable, Codable, Sendable {
 struct BriefingLayout: Equatable, Codable, Sendable {
     private var visible: [BriefingPillar: [BriefingModuleKind]]
 
-    static let `default` = BriefingLayout(
+    static let standard = BriefingLayout(
         visible: Dictionary(
             uniqueKeysWithValues: BriefingPillar.allCases.map { ($0, $0.kinds.filter(\.defaultVisible)) }))
 
@@ -119,7 +119,7 @@ struct BriefingLayout: Equatable, Codable, Sendable {
 
     /// Reads the stored form; a pillar the store lacks takes its default, and unknown or misplaced kinds are dropped.
     init(stored: [String: [String]]) {
-        var visible = Self.default.visible
+        var visible = Self.standard.visible
         for pillar in BriefingPillar.allCases {
             guard let raw = stored[pillar.rawValue] else { continue }
             var kinds: [BriefingModuleKind] = []
@@ -193,11 +193,11 @@ struct BriefingLayout: Equatable, Codable, Sendable {
 extension AppSettings {
     /// The Briefing's module order and visibility; the default until the reader customizes it.
     var briefingLayout: BriefingLayout {
-        briefingModuleOrder.map { BriefingLayout(stored: $0) } ?? .default
+        briefingModuleOrder.map { BriefingLayout(stored: $0) } ?? .standard
     }
 
     func setBriefingLayout(_ layout: BriefingLayout) {
-        setBriefingModuleOrder(layout == .default ? nil : layout.stored)
+        setBriefingModuleOrder(layout == .standard ? nil : layout.stored)
     }
 }
 
@@ -429,8 +429,8 @@ struct BriefingCustomizeSheet: View {
             }
             Divider()
             HStack {
-                Button("Reset to Default") { settings.setBriefingLayout(.default) }
-                    .disabled(layout == .default)
+                Button("Reset to Default") { settings.setBriefingLayout(.standard) }
+                    .disabled(layout == .standard)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)

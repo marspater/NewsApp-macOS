@@ -132,7 +132,8 @@ struct PublisherHealthSort: SortComparator, Hashable, Sendable {
         guard let lhs else { return rhs == nil ? .orderedSame : .orderedDescending }
         guard let rhs else { return .orderedAscending }
         let (low, high) = order == .forward ? (lhs, rhs) : (rhs, lhs)
-        return low < high ? .orderedAscending : low > high ? .orderedDescending : .orderedSame
+        if low < high { return .orderedAscending }
+        return low > high ? .orderedDescending : .orderedSame
     }
 }
 

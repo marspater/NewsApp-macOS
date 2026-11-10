@@ -124,7 +124,7 @@ struct TodayAssignmentContext: Equatable, Sendable {
         starredFeedURLs: Set<String> = [],
         profile: TodayUserProfile = .empty,
         signalsByEntryID: [String: TodayStorySignals] = [:],
-        thresholds: TodayEditionThresholds = .default
+        thresholds: TodayEditionThresholds = .standard
     ) {
         self.now = now
         self.subscribedFeedURLs = subscribedFeedURLs

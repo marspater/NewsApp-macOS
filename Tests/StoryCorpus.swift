@@ -173,8 +173,9 @@ enum StoryCorpus {
                     let energy = ProcessInfo.processInfo.environment["NEWS_ENERGY"] != "0"
                     let report = try await EventClusterer.run(
                         in: db, matchPolicy: policy, now: clock,
-                        allowsEnergy: energy, pairProbability: pairProbability,
-                        storyProbabilities: storyProbabilities)
+                        allowsEnergy: energy,
+                        scoring: EventClusterScoring(
+                            pairProbability: pairProbability, storyProbabilities: storyProbabilities))
                     onPass?(report)
                 }
                 clock = clock.addingTimeInterval(6 * 3600)

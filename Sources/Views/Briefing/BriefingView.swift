@@ -105,7 +105,7 @@ struct BriefingView: View {
     let briefing: FiniteBriefing?
     /// Every module's data, read from the library by the list.
     var data = BriefingBoardData()
-    var layout = BriefingLayout.default
+    var layout = BriefingLayout.standard
     var readIDs: Set<String> = []
     var savedIDs: Set<String> = []
     /// The story the list's keyboard focus is on, ringed like a focused card.
@@ -140,7 +140,7 @@ struct BriefingView: View {
         entries: [FeedEntry],
         briefing: FiniteBriefing?,
         data: BriefingBoardData = BriefingBoardData(),
-        layout: BriefingLayout = .default,
+        layout: BriefingLayout = .standard,
         readIDs: Set<String> = [],
         savedIDs: Set<String> = [],
         focusedID: String? = nil,

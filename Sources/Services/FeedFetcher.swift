@@ -95,18 +95,16 @@ actor FeedFetcher {
     /// Extracts the charset parameter from the Content-Type header or falls back to textEncodingName (#1149).
     static func extractCharset(from response: HTTPURLResponse) -> String? {
         if let contentType = response.value(forHTTPHeaderField: "Content-Type")
-            ?? (response.allHeaderFields["Content-Type"] as? String)
-        {
-            if let match = contentType.range(
+            ?? (response.allHeaderFields["Content-Type"] as? String),
+            let match = contentType.range(
                 of: #"(?i)(?:^|[;\s])\s*charset\s*=\s*(?:"([^"]*)"|'([^']*)'|([^'";\s]+))"#,
                 options: .regularExpression)
-            {
-                let extracted = contentType[match]
-                if let eqIndex = extracted.firstIndex(of: "=") {
-                    let raw = extracted[extracted.index(after: eqIndex)...].trimmingCharacters(
-                        in: CharacterSet(charactersIn: "\"' \t"))
-                    if !raw.isEmpty { return raw }
-                }
+        {
+            let extracted = contentType[match]
+            if let eqIndex = extracted.firstIndex(of: "=") {
+                let raw = extracted[extracted.index(after: eqIndex)...].trimmingCharacters(
+                    in: CharacterSet(charactersIn: "\"' \t"))
+                if !raw.isEmpty { return raw }
             }
         }
         if let encodingName = response.textEncodingName?.trimmingCharacters(

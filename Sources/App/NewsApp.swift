@@ -560,7 +560,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         MainActor.assumeIsolated { StoryQuickLookCoordinator.shared.control(panel) }
     }
 
-    nonisolated override func endPreviewPanelControl(_: QLPreviewPanel!) {}
+    nonisolated override func endPreviewPanelControl(_: QLPreviewPanel!) {
+        // The coordinator stays the data source until the next begin call replaces it; nothing to undo.
+    }
 
     func applicationDidFinishLaunching(_ _: Notification) {
         #if NEWS_SENTRY

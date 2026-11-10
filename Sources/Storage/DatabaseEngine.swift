@@ -3362,15 +3362,8 @@ actor DatabaseEngine {
         isRead: Bool? = nil,
         isSaved: Bool? = nil,
         limit: Int? = 500,
-        after: ArticleQueryCursor? = nil,
         id: String? = nil,
-        canonicalURL: String? = nil,
-        eventID: String? = nil,
-        wholeStory: Bool = false,
-        includingOriginals: Bool = false,
-        publicationWindow: ClosedRange<Date>? = nil,
-        muting: MuteRules = MuteRules(),
-        hidingWaitingStories: Bool = false
+        options: ArticleFetchOptions = ArticleFetchOptions()
     ) throws -> [FeedArticle] {
         let criteria = FetchCriteria(
             section: section,
@@ -3378,20 +3371,20 @@ actor DatabaseEngine {
             isRead: isRead,
             isSaved: isSaved,
             limit: limit,
-            after: after,
+            after: options.after,
             id: id,
-            canonicalURL: canonicalURL,
-            eventID: eventID,
-            wholeStory: wholeStory,
-            includingOriginals: includingOriginals,
-            publicationWindow: publicationWindow,
-            muting: muting,
-            hidingWaitingStories: hidingWaitingStories
+            canonicalURL: options.canonicalURL,
+            eventID: options.eventID,
+            wholeStory: options.wholeStory,
+            includingOriginals: options.includingOriginals,
+            publicationWindow: options.publicationWindow,
+            muting: options.muting,
+            hidingWaitingStories: options.hidingWaitingStories
         )
         let (query, params) = try buildFetchArticlesQuery(criteria: criteria)
         let results = try executeQueryArticles(
             sql: query, params: params, prepareErrorMessage: "Failed to prepare fetch query")
-        return includingOriginals ? results : try curateImages(in: results)
+        return options.includingOriginals ? results : try curateImages(in: results)
     }
 
     // MARK: - Search Suggestion
@@ -4477,8 +4470,8 @@ actor DatabaseEngine {
     private func unreadStoryCount(muting: MuteRules) throws -> Int {
         try listAggregates(
             "count(DISTINCT CASE WHEN g.reports >= 2 THEN 'story:' || g.story ELSE 'article:' || a.id END)",
-            joins: Self.storyGroupJoins, section: "Unread", isRead: false, isSaved: nil, search: nil,
-            searchVector: nil, filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
+            joins: Self.storyGroupJoins, scope: ListScope(section: "Unread", isRead: false),
+            filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
             filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))[0]
     }
 
@@ -4540,8 +4533,11 @@ actor DatabaseEngine {
             scope: collectionOnlyFeedURLs)
         if let known = mutedCountCache.counts[key] { return known }
         let count = try listAggregates(
-            "count(*)", section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
-            searchVector: searchVector, filter: " AND " + Self.mutedArticle,
+            "count(*)",
+            scope: ListScope(
+                section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
+                searchVector: searchVector),
+            filter: " AND " + Self.mutedArticle,
             filterParameters: Self.mutingParameters(muting))[0]
         guard changes != nil else { return count }
         if mutedCountCache.counts.count >= 32 { mutedCountCache.counts = [:] }
@@ -4564,8 +4560,9 @@ actor DatabaseEngine {
         let totals = try listAggregates(
             "count(*), count(DISTINCT CASE WHEN g.reports >= 2 THEN g.story END)",
             joins: Self.storyGroupJoins,
-            section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
-            searchVector: searchVector,
+            scope: ListScope(
+                section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved, search: search,
+                searchVector: searchVector),
             filter: muting.isEmpty ? "" : " AND NOT " + Self.mutedArticle,
             filterParameters: muting.isEmpty ? [] : Self.mutingParameters(muting))
         return (totals[0], totals[1])
@@ -4580,12 +4577,20 @@ actor DatabaseEngine {
              WHERE \(visibleArticle) GROUP BY 1) g ON g.story = coalesce(e.story_id, e.id)
         """
 
+    /// The list or search an aggregate covers; a non-empty `search` replaces the list filters.
+    private struct ListScope {
+        var section: String?
+        var smartBinder: SmartBinder?
+        var isRead: Bool?
+        var isSaved: Bool?
+        var search: String?
+        var searchVector: [Float]?
+    }
+
     /// One row of integer aggregates over the stories of a list or search, under the list's own filters plus
     /// `filter`.
     private func listAggregates(
-        _ columns: String, joins: String = "", section: String?, smartBinder: SmartBinder? = nil, isRead: Bool?,
-        isSaved: Bool?, search: String?, searchVector: [Float]?,
-        filter: String, filterParameters: [QueryParameter]
+        _ columns: String, joins: String = "", scope: ListScope, filter: String, filterParameters: [QueryParameter]
     ) throws -> [Int] {
         guard let db = db else {
             throw NSError(
@@ -4595,14 +4600,14 @@ actor DatabaseEngine {
             "SELECT \(columns) FROM articles a JOIN article_state s ON s.article_id = a.id LEFT JOIN article_enrichment ae ON ae.article_id = a.id"
             + joins
         var params: [QueryParameter]
-        let searchText = search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let searchText = scope.search?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if searchText.isEmpty {
             let conditions = listConditions(
-                section: section, smartBinder: smartBinder, isRead: isRead, isSaved: isSaved)
+                section: scope.section, smartBinder: scope.smartBinder, isRead: scope.isRead, isSaved: scope.isSaved)
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         } else {
-            let conditions = searchConditions(ArticleFilterQuery.parse(searchText), vector: searchVector)
+            let conditions = searchConditions(ArticleFilterQuery.parse(searchText), vector: scope.searchVector)
             sql += " WHERE " + Self.visibleArticle + conditions.sql
             params = conditions.params
         }
@@ -4876,7 +4881,9 @@ actor DatabaseEngine {
                 WHERE af.feed_url = ? AND a.created_at > ? AND \(Self.visibleArticle) ORDER BY a.created_at, a.id;
                 """, [.text(feed), .real(time.timeIntervalSince1970)]
             ).compactMap { $0.first ?? nil }
-            stories[feed] = try ids.compactMap { try fetchArticles(limit: 1, id: $0, muting: muting).first }
+            stories[feed] = try ids.compactMap {
+                try fetchArticles(limit: 1, id: $0, options: ArticleFetchOptions(muting: muting)).first
+            }
         }
         return stories
     }
@@ -4922,7 +4929,7 @@ actor DatabaseEngine {
 
     /// Compatibility for historical audit callers. Only ordinary user-configured retention deletes stories.
     @discardableResult
-    func expireWaitingStories(now: Date = Date(), keepingFeedURLs: [String] = []) throws -> Int {
+    func expireWaitingStories(now _: Date = Date(), keepingFeedURLs _: [String] = []) throws -> Int {
         0
     }
 
@@ -5026,7 +5033,8 @@ actor DatabaseEngine {
             if let cached = picturedEvents[key] {
                 pictured = cached
             } else {
-                var members = try fetchArticles(limit: nil, id: row[2] == nil ? id : nil, eventID: row[2])
+                var members = try fetchArticles(
+                    limit: nil, id: row[2] == nil ? id : nil, options: ArticleFetchOptions(eventID: row[2]))
                 // A member only on a collection feed (World Tension panel) is hidden from lists: its image does not
                 // spare the listed stories a lookup (#595).
                 if let eventID = row[2], !scope.sql.isEmpty {
@@ -5453,4 +5461,16 @@ private func sectionFunction(
     func text(_ index: Int) -> String { sqlite3_value_text(values[index]).map { String(cString: $0) } ?? "" }
     sqlite3_result_int(
         context, ArticleSection.matches(text(3), title: text(0), description: text(1), category: text(2)) ? 1 : 0)
+}
+
+/// The less common `DatabaseEngine.fetchArticles` inputs: paging, lookups by link or event, and visibility filters.
+struct ArticleFetchOptions: Sendable {
+    var after: ArticleQueryCursor?
+    var canonicalURL: String?
+    var eventID: String?
+    var wholeStory = false
+    var includingOriginals = false
+    var publicationWindow: ClosedRange<Date>?
+    var muting = MuteRules()
+    var hidingWaitingStories = false
 }

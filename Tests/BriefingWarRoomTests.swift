@@ -54,17 +54,17 @@ enum BriefingWarRoomTests {
         filter.region = .oceania
         filter.regionsByEntry = Dictionary(
             uniqueKeysWithValues: weak.rows.map { ($0.entry.id, Set([TensionMacroRegion.europe])) })
-        let shown = BriefingView.visibleModules(layout: .default, data: data, filter: filter)
+        let shown = BriefingView.visibleModules(layout: .standard, data: data, filter: filter)
         check(!shown.contains(.weakSignals), "weak signals hide when the region filter empties them")
         check(shown.contains(.forwardWatch), "forward watch rows without a story stay")
         check(
-            BriefingView.visibleModules(layout: .default, data: data).contains(.weakSignals),
+            BriefingView.visibleModules(layout: .standard, data: data).contains(.weakSignals),
             "weak signals show without a filter")
         // No Regions control on the board: the selection cannot be cleared there, so the board clears it.
         check(
-            BriefingView.effectiveFilter(filter, layout: .default, data: data).region == nil,
+            BriefingView.effectiveFilter(filter, layout: .standard, data: data).region == nil,
             "a region without the Regions module is dropped")
-        var layout = BriefingLayout.default
+        var layout = BriefingLayout.standard
         layout.setVisible(.regions, false)
         check(
             BriefingView.effectiveFilter(filter, layout: layout, data: data).region == nil,
@@ -72,7 +72,7 @@ enum BriefingWarRoomTests {
     }
 
     static func layoutDefaults() {
-        let layout = BriefingLayout.default
+        let layout = BriefingLayout.standard
         check(
             layout.modules(in: .situationalAwareness)
                 == [.heroCarousel, .worldTension, .sinceLastBriefing, .executiveSitrep], "situational order")
@@ -84,12 +84,12 @@ enum BriefingWarRoomTests {
     }
 
     static func layoutEditing() {
-        var layout = BriefingLayout.default
+        var layout = BriefingLayout.standard
         layout.setVisible(.worldTension, false)
         check(!layout.isVisible(.worldTension), "setVisible hides")
         check(layout.allModules(in: .situationalAwareness)[1] == .worldTension, "hidden module keeps its place")
         layout.setVisible(.worldTension, true)
-        check(layout == .default, "showing again restores the canvas place")
+        check(layout == .standard, "showing again restores the canvas place")
         layout.move(.sinceLastBriefing, to: 0)
         check(
             layout.modules(in: .situationalAwareness) == [
@@ -102,7 +102,7 @@ enum BriefingWarRoomTests {
         layout.setVisible(.executiveSitrep, true)
         check(layout.modules(in: .situationalAwareness).last == .executiveSitrep, "the sitrep returns last")
         check(
-            layout.modules(in: .strategicImpact) == BriefingLayout.default.modules(in: .strategicImpact),
+            layout.modules(in: .strategicImpact) == BriefingLayout.standard.modules(in: .strategicImpact),
             "move leaves other pillars")
         layout.move(.tensionDrivers, to: 0)
         check(!layout.isVisible(.tensionDrivers), "moving a hidden module does nothing")
@@ -116,14 +116,14 @@ enum BriefingWarRoomTests {
         defer { removeTestDefaults(suite) }
         guard let defaults = UserDefaults(suiteName: suite) else { return check(false, "test defaults") }
         let settings = AppSettings(defaults: defaults)
-        check(settings.briefingLayout == .default, "default when absent")
-        var layout = BriefingLayout.default
+        check(settings.briefingLayout == .standard, "default when absent")
+        var layout = BriefingLayout.standard
         layout.setVisible(.regions, false)
         layout.move(.escalationTimeline, to: 0)
         settings.setBriefingLayout(layout)
         check(AppSettings(defaults: defaults).briefingLayout == layout, "round-trips through AppSettings")
         check(AppSettings.backedUpKeys.contains(AppSettings.briefingModuleOrderKey), "layout is backed up")
-        settings.setBriefingLayout(.default)
+        settings.setBriefingLayout(.standard)
         check(defaults.object(forKey: AppSettings.briefingModuleOrderKey) == nil, "reset clears the store")
         check(
             BriefingLayout(stored: ["forwardWatch": ["weakSignals", "bogus", "forwardWatch"]])
@@ -131,12 +131,12 @@ enum BriefingWarRoomTests {
     }
 
     static func hiddenModules() {
-        let modules = BriefingView.visibleModules(layout: .default, data: BriefingBoardData())
+        let modules = BriefingView.visibleModules(layout: .standard, data: BriefingBoardData())
         check(modules == [.heroCarousel, .worldTension], "modules without data are hidden")
         check(
-            BriefingView.visibleModules(layout: .default, data: BriefingBoardData(), hasStories: false)
+            BriefingView.visibleModules(layout: .standard, data: BriefingBoardData(), hasStories: false)
                 == [.worldTension], "no carousel without stories")
-        var layout = BriefingLayout.default
+        var layout = BriefingLayout.standard
         layout.setVisible(.worldTension, false)
         check(!BriefingView.visibleModules(layout: layout, data: BriefingBoardData()).contains(.worldTension), "hidden")
     }

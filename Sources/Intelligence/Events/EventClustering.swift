@@ -106,10 +106,10 @@ enum EventClusterer {
         now: Date = Date(),
         limit: Int = 2_000,
         allowsEnergy: Bool = IntelligencePolicy.allowsEnergy(),
-        pairProbability: (@Sendable (String, String) async -> Double?)? = nil,
-        storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)? = nil,
-        calibrationRows: [PairCalibration.Row]? = nil
+        scoring: EventClusterScoring = EventClusterScoring()
     ) async throws -> EventClusteringReport {
+        let storyProbabilities = scoring.storyProbabilities
+        let calibrationRows = scoring.calibrationRows
         let passStart = DispatchTime.now().uptimeNanoseconds
         var stages = EventClusteringStages()
         func seconds(since start: UInt64) -> Double {
@@ -122,8 +122,8 @@ enum EventClusterer {
             defer { stages[keyPath: stage] += seconds(since: start) }
             return try await body()
         }
-        let injectedProbability = pairProbability
-        let pairProbability = pairProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
+        let injectedProbability = scoring.pairProbability
+        let pairProbability = injectedProbability ?? { a, b in await PairScorer.shared.probability(a, b) }
         /// Same-event and related-act probabilities for the story signal (#627): a separate story model when given,
         /// else the pair model (an injected scorer answers p_same only).
         func pairProbabilities(_ a: String, _ b: String) async -> (same: Double, related: Double)? {
@@ -1131,4 +1131,11 @@ enum EventClusterer {
     private static func closestGap(_ lhs: [EventMatchRow], _ rhs: [EventMatchRow]) -> TimeInterval? {
         lhs.flatMap { a in rhs.map { abs(a.date.timeIntervalSince($0.date)) } }.min()
     }
+}
+
+/// Model inputs `EventClusterer.run` uses instead of the shipped scorers and stored calibration; tests inject them.
+struct EventClusterScoring: Sendable {
+    var pairProbability: (@Sendable (String, String) async -> Double?)?
+    var storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)?
+    var calibrationRows: [PairCalibration.Row]?
 }

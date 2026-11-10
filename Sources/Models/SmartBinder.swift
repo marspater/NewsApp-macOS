@@ -42,8 +42,8 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
     public var createdAt: Date
     public var matchAllKeywords: Bool
 
+    /// A new binder always gets a fresh identity; edits mutate an existing value instead.
     public init(
-        id: UUID = UUID(),
         name: String,
         icon: String = "folder",
         categories: [String] = [],
@@ -52,7 +52,7 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         publishers: [String] = [],
         matchAllKeywords: Bool = false
     ) {
-        self.id = id
+        self.id = UUID()
         self.name = name
         self.icon = icon
         self.categories = categories
@@ -267,9 +267,7 @@ public struct SmartBinder: Identifiable, Codable, Sendable, Hashable, Equatable 
         }
 
         let cleanExcludes = Self.cleanTerms(excludeKeywords)
-        if !cleanExcludes.isEmpty {
-            if cleanExcludes.contains(where: { text.contains($0.lowercased()) }) { return false }
-        }
+        if cleanExcludes.contains(where: { text.contains($0.lowercased()) }) { return false }
 
         return true
     }

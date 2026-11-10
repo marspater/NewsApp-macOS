@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 
 LCOV_PATH=""
 JUNIT_PATH=""
-if [ "${1:-}" = "--lcov" ]; then
+if [[ "${1:-}" = "--lcov" ]]; then
     LCOV_PATH="$2"
     shift 2
 else
@@ -23,14 +23,14 @@ WORK=$(mktemp -d "${TMPDIR:-/tmp}/news-testsuite.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
 COVERAGE_FLAGS=()
-if [ -n "$LCOV_PATH" ]; then COVERAGE_FLAGS=(-profile-generate -profile-coverage-mapping); fi
+if [[ -n "$LCOV_PATH" ]]; then COVERAGE_FLAGS=(-profile-generate -profile-coverage-mapping); fi
 RUNNER="${NEWS_TEST_RUNNER:-$WORK/test_runner}"
-if [ -z "${NEWS_TEST_RUNNER:-}" ] && [ -n "$LCOV_PATH" ] && [ -n "${CIRCLE_BUILD_NUM:-}" ]; then
+if [[ -z "${NEWS_TEST_RUNNER:-}" ]] && [[ -n "$LCOV_PATH" ]] && [[ -n "${CIRCLE_BUILD_NUM:-}" ]]; then
     # Analysis invokes this script once per atom; build the instrumented runner once per CI job.
     RUNNER="${TMPDIR:-/tmp}/news-coverage-runner-$CIRCLE_BUILD_NUM"
 fi
 # Impact analysis can select no atom; then nothing is compiled or run.
-if [ $# -gt 0 ] && [ ! -x "$RUNNER" ]; then
+if [[ $# -gt 0 ]] && [[ ! -x "$RUNNER" ]]; then
     script/build_test_runner.sh "$RUNNER" ${COVERAGE_FLAGS[@]+"${COVERAGE_FLAGS[@]}"} || exit 1
 fi
 
@@ -44,7 +44,7 @@ for atom in "$@"; do
     ATOM_STATUS=${PIPESTATUS[0]}
     DURATION=$(($(date +%s) - START_TIME))
     CASES+="    <testcase name=\"$atom\" classname=\"NewsTests\" file=\"$atom\" time=\"$DURATION\">"
-    if [ "$ATOM_STATUS" -ne 0 ]; then
+    if [[ "$ATOM_STATUS" -ne 0 ]]; then
         STATUS=1
         FAILURES=$((FAILURES + 1))
         # Keep the tail of the output so the failure is readable in the Tests tab; "]]>" would end the CDATA early.
@@ -54,7 +54,7 @@ for atom in "$@"; do
 "
 done
 
-if [ -n "$JUNIT_PATH" ]; then
+if [[ -n "$JUNIT_PATH" ]]; then
     mkdir -p "$(dirname "$JUNIT_PATH")"
     cat > "$JUNIT_PATH" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -65,9 +65,9 @@ $CASES  </testsuite>
 EOF
 fi
 
-if [ -n "$LCOV_PATH" ] && [ $# -gt 0 ]; then
+if [[ -n "$LCOV_PATH" ]] && [[ $# -gt 0 ]]; then
     # Report the atom failure itself rather than a coverage error caused by it.
-    if [ "$STATUS" -ne 0 ]; then
+    if [[ "$STATUS" -ne 0 ]]; then
         echo "Analysis skipped: $FAILURES test atom(s) failed." >&2
         exit $STATUS
     fi

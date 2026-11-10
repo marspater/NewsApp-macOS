@@ -187,7 +187,7 @@
 
         /// Never wakes, so the hero carousel holds its first story.
         struct StillClock: CarouselClock {
-            func sleep(seconds: Double) async throws {
+            func sleep(seconds _: Double) async throws {
                 try await Task.sleep(for: .seconds(86_400 * 365))
             }
         }
@@ -331,8 +331,7 @@
                 fetchBatch: { _, _ in [] },
                 notifyBatch: { _, _ in
                     // Previews post no notifications.
-                },
-                allowsBackgroundWork: { false })
+                }, dependencies: FeedManager.Dependencies(allowsBackgroundWork: { false }))
             readManager = ReadManager(articleStore: store)
             savedStories = SavedStoriesManager(articleStore: store)
             themeManager = ThemeManager(defaults: defaults)
