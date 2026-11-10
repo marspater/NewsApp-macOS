@@ -87,6 +87,7 @@ enum EditorialIntelligenceTests {
         check(dossier?.related.first?.sharedStories == 2, "A relationship counts its shared stories")
         try await database.clearArticleEnrichment()
         check(try await database.fetchEntity(id: "organization:harbour-authority") == nil, "Clear removes entities")
+        await database.close()
     }
 
     private static func testDualReaderAlignment() async {

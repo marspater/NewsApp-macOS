@@ -440,6 +440,7 @@ extension NativeSuites.FeedParsingSuite {
         try await db.clearAllDatabaseCache()
         expectEqual(try await stored(), nil, "Purging replaceable caches forces the next refresh to be unconditional")
         manager.stopBackgroundWork()
+        await db.close()
     }
 
     @MainActor
@@ -700,6 +701,7 @@ extension NativeSuites.FeedParsingSuite {
             manager.feedStatuses[shown], .failed(.retryScheduled(until: refreshStart.addingTimeInterval(1800))),
             "The paused feed reports when it resumes")
         manager.stopBackgroundWork()
+        await db.close()
     }
 
     /// A manual refresh retries a feed a network change backed off, and nothing else (#927).
@@ -971,6 +973,7 @@ extension NativeSuites.FeedParsingSuite {
         await abandonedRun.value
         await cancelledRun.value
         expectEqual(cancelledEntered.count, 1, "A cancelled refresh starts nothing after it")
+        await db.close()
     }
 
     @MainActor
@@ -1435,6 +1438,7 @@ extension NativeSuites.FeedParsingSuite {
         }
         expectEqual(manager.feedHealth[live]?.textQuality, .full, "Content stats survive a failure")
         manager.stopBackgroundWork()
+        await db.close()
     }
 
     /// #981: a feed date beyond clock skew is stored as unknown (ordered by ingestion time, pruned with its

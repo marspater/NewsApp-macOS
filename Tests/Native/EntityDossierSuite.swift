@@ -162,6 +162,7 @@ extension NativeSuites {
             #expect(try await Self.index(database, ["one": [Self.harbour]]))
             let maria = try await database.fetchEntity(id: "person:maria-ortega")
             #expect(maria?.storyCount == 1, "The rewritten story no longer names Maria Ortega")
+            await database.close()
         }
 
         @Test func countsStayExactWhenAStoryIsReadTwice() async throws {
@@ -178,6 +179,7 @@ extension NativeSuites {
             #expect(try await database.fetchEntity(id: "person:maria-ortega")?.storyCount == 1)
             let rows = try await database.eventRows("SELECT count(*) FROM entity_mentions;")
             #expect(rows.first?[0] == "4")
+            await database.close()
         }
 
         @Test func graphDossierAndChips() async throws {
@@ -230,6 +232,7 @@ extension NativeSuites {
             #expect(Set(chips) == ["person:maria-ortega", "organization:harbour-authority"])
             #expect(try await database.entities(forArticles: [], limit: 8).isEmpty)
             #expect(try await database.fetchEntityDossier(id: "person:nobody", now: Self.now) == nil)
+            await database.close()
         }
 
         @Test func onlyAMaintenancePassComputesGlobalCentrality() async throws {
@@ -276,6 +279,7 @@ extension NativeSuites {
             #expect(later.indexedStories == 1)
             #expect(later.graph?.edges == 2)
             #expect(try await centralities() == computed)
+            await database.close()
         }
 
         /// The walk counts the seed's edge once from each neighbour, though the neighbour's own strongest edges hold it
@@ -320,6 +324,7 @@ extension NativeSuites {
             #expect(
                 zip(dossier.related, expected).allSatisfy { abs($0.score - $1.score) < 1e-9 },
                 "A seed edge counted twice would move every score")
+            await database.close()
         }
 
         /// A chip row reads again when an indexing pass or a clear changes the index, though its stories did not change.
@@ -361,6 +366,7 @@ extension NativeSuites {
             let graph = try await database.refreshEntityGraph(
                 now: Self.now, expectedGeneration: before, withCentrality: true)
             #expect(graph == nil)
+            await database.close()
         }
 
         /// Opt-in (`NEWS_ENTITY_PERF=1`, an idle Mac): the dossier's non-graph path on 5,000 stories and 40,000 mentions
@@ -453,6 +459,7 @@ extension NativeSuites {
                 String(bytes: $0, encoding: .utf8)
             }
             print("ENTITY_DOSSIER_REPORT \(json ?? "{}")")
+            await database.close()
         }
 
         @Test func dossierQueriesAreAnsweredByIndexes() async throws {
@@ -471,6 +478,7 @@ extension NativeSuites {
                     !details.contains { $0.hasPrefix("SCAN entity_") || $0.hasPrefix("SCAN articles") }, "\(details)")
                 #expect(details.contains { $0.contains("SEARCH") }, "\(details)")
             }
+            await database.close()
         }
     }
 }
