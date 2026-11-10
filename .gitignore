@@ -20,6 +20,12 @@ xcuserdata/
 # Python evaluation tooling cache
 __pycache__/
 
+# Strays from research tools started in this folder (docs/TOOLING.md)
+/mlflow.db
+/mlruns/
+/mlartifacts/
+__marimo__/
+
 # Codacy local CLI state
 .codacy/
 

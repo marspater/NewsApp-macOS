@@ -1,0 +1,130 @@
+# Research tooling
+
+The tools used for research on News (model candidates, matcher changes, holdout replays), how they are set up on Mars's Mac, and the flow every agent follows. These tools are not part of the app, its build or CI. The app's own build, test and measurement tools are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+Changes to this setup are logged in the [change log](#change-log) at the end.
+
+## The flow, for every agent
+
+1. **Before a run:** read what was already tried. `news-ledger ui` shows every run; filter by `dataset` first. Do not repeat a run that is on record unless the code under it changed.
+2. **Run** the experiment as its issue and [AGENTS.md](../AGENTS.md) describe. Receipts stay under `~/news-eval/`.
+3. **After each run:** log one line with its real numbers (see [Logging a run](#logging-a-run)). A run counts as done once its line is in the ledger.
+4. **Conclusions** still go on the issue, and a claim in a PR or audit names the ledger run it rests on.
+
+A session without access to Mars's Mac skips step 3 and reports the same fields in its PR, or on the issue when there is no PR. The coordinating session logs them.
+
+## What is installed
+
+| Tool | Version | Job | Opened with |
+| --- | --- | --- | --- |
+| [MLflow](https://mlflow.org) | 3.18.0 | The run ledger: one line per run, with parameters and numbers | `news-ledger ui` |
+| [marimo](https://marimo.io) | 0.25.2 | The page Mars reads: runs per dataset against the baseline | `news-ledger notebook` |
+| [Datasette](https://datasette.io) | 0.65.5 | Browse a SQLite library copy in the browser, read-only | `news-ledger data COPY.sqlite3` |
+
+Each tool is installed in its own environment with `uv tool install --python 3.13 <tool>`, so none of them can disturb the training environment pinned in `script/training/requirements.txt`. Everything runs on this Mac and binds to `127.0.0.1`. No cloud service is involved.
+
+## Where things live
+
+Everything is in `~/news-eval/mlflow/`, beside the evaluation receipts and outside the repository, so every worktree and every agent shares one ledger.
+
+| Path | What it is |
+| --- | --- |
+| `ledger.db` | The MLflow store (SQLite). The only copy of the ledger |
+| `backups/` | One copy of the ledger per day, taken before that day's first write |
+| `ledger`, `ledger.py` | The `news-ledger` command (`~/.local/bin/news-ledger` links to it) |
+| `env.sh` | The MLflow settings: the store's address, usage reports off |
+| `clustering_737.py` | The marimo notebook for #737; it opens the ledger read-only |
+
+These files are not under version control. A change to them is recorded in the change log below.
+
+## Commands
+
+`news-ledger` works from any folder and writes only under `~/news-eval/mlflow/`.
+
+| Command | Does | Address |
+| --- | --- | --- |
+| `news-ledger log <experiment> "<what was tried>" key=value…` | Records one run | |
+| `news-ledger ui` | MLflow: every run, sortable and comparable | `http://127.0.0.1:5737` |
+| `news-ledger notebook` | The #737 page; `news-ledger notebook edit` to change it | `http://127.0.0.1:5738` |
+| `news-ledger data COPY.sqlite3` | Datasette on a library copy; refuses the live library | `http://127.0.0.1:5739` |
+| `news-ledger backup` | Copies the ledger to `backups/` now | |
+
+Use these commands, not the tools' own. A plain `mlflow ui` or `marimo edit` writes files into the folder it starts in (an empty `mlflow.db`, a `__marimo__` folder), and on macOS port 5000, MLflow's default, belongs to AirPlay Receiver. The repository ignores those stray files.
+
+## Logging a run
+
+```bash
+news-ledger log 737-clustering "g + newsletter strip" \
+    dataset=library-holdout-2026-11-03 commit=1a3a7ca verdict=failed \
+    source=docs/audits/2026-11-06-recall-edition-admission.md \
+    knobs="NEWS_VETO_SHARE=0.34 NEWS_PAIR_THRESHOLD=0.85" \
+    strict_same=13 strict_related=6 strict_wrong=3 story_good=21 story_wrong=3
+```
+
+A value that is a number becomes a measure; anything else becomes a parameter. `date=YYYY-MM-DD` back-dates a run measured earlier.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `<experiment>` | yes | One per research question, named after its issue: `737-clustering` |
+| `dataset` | yes | The exact set the numbers were measured on. Numbers from different sets are not comparable, and relabelled or split sets get their own name |
+| `verdict` | yes | `baseline`, `reference` (a setting kept for comparison), `passed`, `failed`, `shipped` or `superseded` |
+| `source` | yes | The audit file or receipt folder that holds the evidence |
+| `commit` | when known | The commit the run was measured on |
+| `knobs`, `matcher`, `note` | optional | The setting that distinguishes this run |
+
+The command refuses a run without `dataset`, `verdict` and `source`, and a verdict outside the list.
+
+### Measures
+
+One name means one thing. Before adding a name, check this table and the names already in the ledger; add a row here when a new one is needed.
+
+| Name | Meaning |
+| --- | --- |
+| `strict_same`, `strict_related`, `strict_wrong` | Holdout pairs linked into one event, by their label: same occurrence, related, different |
+| `story_good`, `story_wrong` | Pairs linked at story level: same plus related, and different |
+| `multi_publisher_story` | Recent stories in a multi-publisher **story** (the harness line "in a multi-publisher story") |
+| `multi_publisher_event` | Recent stories in a multi-publisher **event** (the harness line "in a multi-publisher event") |
+| `recent_stories` | The denominator of both counts above |
+| `groups` | Groups in the grouping evaluation |
+| `tune_matched`, `tune_false`, `tune_missed` | The tune corpus: pairs matched, false pairs, pairs missed |
+| `regression_matched`, `regression_false`, `regression_missed` | The authored regression sets, likewise |
+| `same`, `wrong`, `cutoff` | The 24 October library holdout: same pairs linked and wrong links at that cutoff |
+
+`multi_publisher` on its own is refused: until 10 November 2026 it held the story count in some runs and the event count in others (442 and 451 against 433 and 443 on the 3 November holdout).
+
+### What never goes in
+
+- Article text, headlines or anything else from a library. Measures and settings only.
+- Any reading from a sealed holdout.
+- A number that was not measured.
+
+## Reading the ledger
+
+- `news-ledger ui`, then the experiment. Add the columns you need and filter with `tags.dataset = '<set>'`.
+- `news-ledger notebook` for #737: pick a dataset, then a measure. Bars are runs, oldest first, and the dashed line is the newest baseline on that set.
+- From a script: MLflow's Python API with the tracking address in `env.sh`, or SQLite opened read-only on `ledger.db`.
+
+## Setting it up again
+
+On a new Mac, or after a clean install:
+
+```bash
+uv tool install --python 3.13 mlflow
+uv tool install --python 3.13 marimo
+uv tool install --python 3.13 datasette
+```
+
+Then restore `~/news-eval/mlflow/` from a backup and link the command:
+
+```bash
+ln -sf ~/news-eval/mlflow/ledger ~/.local/bin/news-ledger
+```
+
+Optional: source `~/news-eval/mlflow/env.sh` from the shell profile, so a plain `mlflow` command also uses the ledger with usage reports off.
+
+## Change log
+
+| Date | Change |
+| --- | --- |
+| 10 November 2026 | MLflow, marimo and Datasette installed. Ledger created with the 19 runs on record before that day; the #737 session added its own. Deepnote's cloud was considered and not adopted: the models and the data stay on this Mac |
+| 10 November 2026 | `news-ledger` command, fixed ports, daily backups, required fields and the verdict list. MLflow's usage reports turned off (they were on for the first hours). `multi_publisher` split into `multi_publisher_story` and `multi_publisher_event` and the affected runs renamed |
