@@ -109,3 +109,10 @@ The 553 replayed pairs of the three sets, by reviewed label, and how many the ba
    - The 3 November set and the sealed 6 November set were labelled before the `pegged` class existed. A pegged-inside ruling changes what their `same` and `related` counts measure.
 2. The five three-way splits (`splits-for-mars.txt` in the review folder).
 3. The six rubric gaps above.
+
+## Decided since (10 November 2026)
+
+- **Item 1 is ruled** ([Mars on #1183](https://github.com/marspater/NewsApp-macOS/pull/1183#issuecomment-6765685390)). A pegged report is not automatically a strict same-occurrence match. For strict event matching `same` is positive, and `pegged-part` only when individually verified as a contemporaneous part of the same occurrence. `pegged-reaction` and `pegged-analysis` are not positive: they may be shown as contextual reading beside the event or story without becoming members or voting in admission. `later` is a distinct act, linked at story level. The pegged labels stay as they are, and reports keep both the pegged-inside and pegged-outside rows.
+- The ruling sits between the two reviewed columns above, nearer "pegged outside". No verification of individual `pegged-part` pairs is on record, so no row applies it exactly.
+- The evidence head stays off: its 0.93 reading after the fact does not replace the pre-registered failure.
+- Items 2 and 3 are open. For item 2 Mars asked for a compact, privacy-safe case pack instead of the raw splits file: the five three-way splits, about ten corrected pairs across classes and about five unchanged controls, with nothing from the sealed 6 November set. It has not been produced.
