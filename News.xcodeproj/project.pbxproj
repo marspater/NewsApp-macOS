@@ -19,6 +19,16 @@
 		0A0000000000000000000080 /* NewsParsingDependencies in Frameworks */ = {isa = PBXBuildFile; productRef = 0A0000000000000000000081 /* NewsParsingDependencies */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		0A0000000000000000000094 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0A0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 0A0000000000000000000040;
+			remoteInfo = News;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		0A0000000000000000000020 /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; name = AppIcon.icon; path = Assets/AppIcon.icon; sourceTree = "<group>"; };
 		0A0000000000000000000021 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -38,8 +48,6 @@
 			membershipExceptions = (
 				App/Main.swift,
 				App/NewsApp.swift,
-				Resources,
-				ThirdPartyNotices.txt,
 				Views/List/ArticleListView.swift,
 				Views/List/EventCardView.swift,
 				Views/MainView.swift,
@@ -55,14 +63,6 @@
 			);
 			target = 0A0000000000000000000042 /* NewsHarness */;
 		};
-		0A0000000000000000000014 /* Exceptions for "Tests" folder in "NewsTestRunner" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Fixtures,
-				Plans,
-			);
-			target = 0A0000000000000000000041 /* NewsTestRunner */;
-		};
 		0A0000000000000000000015 /* Exceptions for "Tests" folder in "NewsHarness" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -76,8 +76,6 @@
 			membershipExceptions = (
 				App/Main.swift,
 				App/NewsApp.swift,
-				Resources,
-				ThirdPartyNotices.txt,
 				Views/List/ArticleListView.swift,
 				Views/List/EventCardView.swift,
 				Views/MainView.swift,
@@ -89,18 +87,9 @@
 		0A0000000000000000000084 /* Exceptions for "Tests" folder in "NewsTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Fixtures,
-				Plans,
 				Runner.swift,
 			);
 			target = 0A000000000000000000008A /* NewsTests */;
-		};
-		0A0000000000000000000091 /* Exceptions for "Tests" folder in "NewsUITests" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Fixtures,
-			);
-			target = 0A0000000000000000000096 /* NewsUITests */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -112,8 +101,6 @@
 				0A0000000000000000000013 /* Exceptions for "Sources" folder in "NewsHarness" target */,
 				0A0000000000000000000083 /* Exceptions for "Sources" folder in "NewsTests" target */,
 			);
-			explicitFileTypes = {
-			};
 			explicitFolders = (
 				Resources/CoreML,
 			);
@@ -123,13 +110,9 @@
 		0A0000000000000000000011 /* Tests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				0A0000000000000000000014 /* Exceptions for "Tests" folder in "NewsTestRunner" target */,
 				0A0000000000000000000015 /* Exceptions for "Tests" folder in "NewsHarness" target */,
 				0A0000000000000000000084 /* Exceptions for "Tests" folder in "NewsTests" target */,
-				0A0000000000000000000091 /* Exceptions for "Tests" folder in "NewsUITests" target */,
 			);
-			explicitFileTypes = {
-			};
 			explicitFolders = (
 				Fixtures,
 				Plans,
@@ -138,16 +121,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXContainerItemProxy section */
-		0A0000000000000000000094 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 0A0000000000000000000001 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 0A0000000000000000000040;
-			remoteInfo = News;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		0A0000000000000000000051 /* Frameworks */ = {
@@ -588,9 +561,18 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* Tests/UITests/* container-migration.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/*",
+					"Tests/Harness/*",
+					"Tests/Native/*",
+					"Tests/UITests/*",
+					"container-migration.plist",
+				);
 				GENERATE_INFOPLIST_FILE = NO;
-				INCLUDED_SOURCE_FILE_NAMES = "Tests/TestDefaults.swift $(NEWS_HARNESS)";
+				INCLUDED_SOURCE_FILE_NAMES = (
+					Tests/TestDefaults.swift,
+					"$(NEWS_HARNESS)",
+				);
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -610,9 +592,18 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/* Tests/UITests/* container-migration.plist";
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/*",
+					"Tests/Harness/*",
+					"Tests/Native/*",
+					"Tests/UITests/*",
+					"container-migration.plist",
+				);
 				GENERATE_INFOPLIST_FILE = NO;
-				INCLUDED_SOURCE_FILE_NAMES = "Tests/TestDefaults.swift $(NEWS_HARNESS)";
+				INCLUDED_SOURCE_FILE_NAMES = (
+					Tests/TestDefaults.swift,
+					"$(NEWS_HARNESS)",
+				);
 				INFOPLIST_FILE = Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -629,7 +620,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/* Tests/UITests/*";
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/Harness/*",
+					"Tests/UITests/*",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
@@ -642,7 +636,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/Harness/* Tests/UITests/*";
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/Harness/*",
+					"Tests/UITests/*",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
@@ -655,10 +652,17 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/*";
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/*",
+					"Tests/Harness/*",
+					"Tests/Native/*",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/UITests/*";
-				OTHER_LDFLAGS = "-framework AppIntents";
+				OTHER_LDFLAGS = (
+					"-framework",
+					AppIntents,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
 				PRODUCT_NAME = NewsUITests;
 				SWIFT_VERSION = 5.0;
@@ -669,10 +673,17 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ENABLE_HARDENED_RUNTIME = NO;
-				EXCLUDED_SOURCE_FILE_NAMES = "Tests/* Tests/Harness/* Tests/Native/*";
+				EXCLUDED_SOURCE_FILE_NAMES = (
+					"Tests/*",
+					"Tests/Harness/*",
+					"Tests/Native/*",
+				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INCLUDED_SOURCE_FILE_NAMES = "Tests/UITests/*";
-				OTHER_LDFLAGS = "-framework AppIntents";
+				OTHER_LDFLAGS = (
+					"-framework",
+					AppIntents,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.uitests;
 				PRODUCT_NAME = NewsUITests;
 				SWIFT_VERSION = 5.0;
