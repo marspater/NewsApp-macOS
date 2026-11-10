@@ -15,6 +15,7 @@
 // UpdateChecker.swift
 
 import Foundation
+import Observation
 import os
 
 #if canImport(AppKit)
@@ -22,7 +23,7 @@ import os
 #endif
 
 /// Strict semantic version representation (major.minor.patch).
-struct SemanticVersion: Equatable, Comparable, Sendable {
+struct SemanticVersion: Comparable, Sendable {
     let major: Int
     let minor: Int
     let patch: Int
@@ -30,7 +31,7 @@ struct SemanticVersion: Equatable, Comparable, Sendable {
     /// Parses strict SemVer strings formatted as `vX.Y.Z` or `X.Y.Z`.
     /// Rejects leading zeros (e.g. `001.002.003`) per SemVer 2.0.0 specification.
     /// Rejects non-conforming tags (e.g. `release-2.0.1`, `v2.0`, `foo`).
-    static func parse(_ raw: String) -> SemanticVersion? {
+    static func parse(_ raw: some StringProtocol) -> SemanticVersion? {
         var str = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if str.hasPrefix("v") || str.hasPrefix("V") {
             str.removeFirst()
@@ -44,7 +45,7 @@ struct SemanticVersion: Equatable, Comparable, Sendable {
             if part.count > 1 && part.first == "0" {
                 return nil
             }
-            guard part.allSatisfy({ $0.isNumber }) else {
+            guard part.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else {
                 return nil
             }
         }
@@ -67,7 +68,7 @@ struct SemanticVersion: Equatable, Comparable, Sendable {
 }
 
 /// Decodable payload from GitHub Releases API.
-struct GitHubReleasePayload: Codable, Sendable {
+struct GitHubReleasePayload: Decodable, Sendable {
     let tagName: String
     let name: String?
     let htmlUrl: String
@@ -91,16 +92,16 @@ struct GitHubReleasePayload: Codable, Sendable {
 /// - Enforces 72-hour automatic throttling after every attempt, failed or not, while allowing manual bypass.
 /// - Validates strict SemVer before flagging updates.
 @MainActor
-final class UpdateChecker: ObservableObject {
+@Observable final class UpdateChecker {
     static let shared = UpdateChecker(defaults: .standard)
 
-    @Published var isChecking: Bool = false
-    @Published var updateAvailable: Bool = false
-    @Published var latestVersionString: String? = nil
-    @Published var releaseNotes: String? = nil
-    @Published var verifiedReleaseURL: URL? = nil
-    @Published var lastCheckDate: Date? = nil
-    @Published var statusMessage: String? = nil
+    var isChecking: Bool = false
+    var updateAvailable: Bool = false
+    var latestVersionString: String? = nil
+    var releaseNotes: String? = nil
+    var verifiedReleaseURL: URL? = nil
+    var lastCheckDate: Date? = nil
+    var statusMessage: String? = nil
 
     private let httpClient: SecureHTTPClient
     private let now: @Sendable () -> Date
@@ -110,7 +111,7 @@ final class UpdateChecker: ObservableObject {
     private static let lastAttemptKey = "updateCheckLastAttempt"
     /// The last automatic or manual attempt, successful or not. Failures throttle too (#798).
     /// A date more than the window ahead of the clock (a backward correction) counts as expired.
-    private var lastAttemptDate: Date?
+    @ObservationIgnored private var lastAttemptDate: Date?
 
     init(
         httpClient: SecureHTTPClient = .shared,

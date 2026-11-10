@@ -1,0 +1,2 @@
+- A cancelled Mark All as Read operation no longer changes the library, and a cancelled delayed state refresh no longer runs after its wait is interrupted.
+- Update-check Settings state uses Swift Observation; feed destination preflight now declares its `FeedError` domain, and strict semantic-version parsing accepts string slices while rejecting non-ASCII digits.

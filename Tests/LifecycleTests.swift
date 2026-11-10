@@ -20,6 +20,7 @@ import Foundation
 import ImageIO
 import NaturalLanguage
 import Network
+import Observation
 import PDFKit
 import SQLite3
 import SwiftUI
@@ -54,6 +55,7 @@ extension NewsTests {
             ("testEnrichmentQueueCancelledJobsNotRetained", { await testEnrichmentQueueCancelledJobsNotRetained() }),
             ("testDistributionAndEntitlementsIntegrity", { await testDistributionAndEntitlementsIntegrity() }),
             ("testStrictSemVerAndReleaseSecurity", { await testStrictSemVerAndReleaseSecurity() }),
+            ("testUpdateCheckerObservation", { await testUpdateCheckerObservation() }),
             ("testUpdateCheckerThrottleWithClock", { await testUpdateCheckerThrottleWithClock() }),
             ("testUpdateCheckerFailureBackoff", { await testUpdateCheckerFailureBackoff() }),
             ("testUpdateCheckerVersionComparisonAndErrors", { await testUpdateCheckerVersionComparisonAndErrors() }),
@@ -873,6 +875,19 @@ extension NewsTests {
         assertTrue(fileManager.fileExists(atPath: privacyDoc), "PRIVACY.md must exist")
     }
 
+    @MainActor
+    static func testUpdateCheckerObservation() async {
+        let checker = UpdateChecker(currentAppVersion: "1.0.0")
+        let changed = DispatchSemaphore(value: 0)
+        withObservationTracking {
+            _ = checker.statusMessage
+        } onChange: {
+            changed.signal()
+        }
+        checker.statusMessage = "Checking for updates..."
+        assertTrue(changed.wait(timeout: .now()) == .success, "UpdateChecker changes invalidate Observation tracking")
+    }
+
     static func testStrictSemVerAndReleaseSecurity() async {
         print("  - Testing Strict SemVer Parsing & Release URL Security...")
 
@@ -880,6 +895,10 @@ extension NewsTests {
         assertEqual(
             SemanticVersion.parse("v2.0.1"), SemanticVersion(major: 2, minor: 0, patch: 1), "v2.0.1 should parse")
         assertEqual(SemanticVersion.parse("2.0.1"), SemanticVersion(major: 2, minor: 0, patch: 1), "2.0.1 should parse")
+        assertEqual(
+            SemanticVersion.parse("3.4.5"[...]), SemanticVersion(major: 3, minor: 4, patch: 5),
+            "A Substring parses without an intermediate String")
+        assertEqual(SemanticVersion.parse("١.2.3"), nil, "SemVer only accepts ASCII digits")
         assertEqual(
             SemanticVersion.parse("10.12.3"), SemanticVersion(major: 10, minor: 12, patch: 3), "10.12.3 should parse")
         assertEqual(SemanticVersion.parse("0.1.0"), SemanticVersion(major: 0, minor: 1, patch: 0), "0.1.0 should parse")

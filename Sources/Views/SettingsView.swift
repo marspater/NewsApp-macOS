@@ -102,7 +102,7 @@ struct SettingsView: View {
     @State private var confirmsUnmuteAll = false
     @State private var inferredInterests: [String: Int] = [:]
     @State private var confirmsResetInterests = false
-    @ObservedObject private var updateChecker = UpdateChecker.shared
+    @State private var updateChecker = UpdateChecker.shared
 
     var body: some View {
         TabView(selection: $selectedPane) {

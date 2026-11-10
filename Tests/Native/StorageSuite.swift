@@ -40,6 +40,9 @@ import dnssd
 extension NativeSuites {
     @Suite(.tags(.storage, .integration)) struct StorageSuite {
         @Test func databaseEnginePersistence() async { await Self.testDatabaseEnginePersistence() }
+        @Test @MainActor func cancelledBulkMarkDoesNotWrite() async throws {
+            try await Self.testCancelledBulkMarkDoesNotWrite()
+        }
         @Test func fts5SearchAndOperators() async { await Self.testFTS5SearchAndOperators() }
         @Test func unchangedFTSRefresh() async throws { try await Self.testUnchangedFTSRefresh() }
         @Test func searchSpellingSuggestion() async throws { try await Self.testSearchSpellingSuggestion() }
@@ -77,6 +80,31 @@ extension NativeSuites {
 }
 
 extension NativeSuites.StorageSuite {
+    @MainActor
+    static func testCancelledBulkMarkDoesNotWrite() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let db = DatabaseEngine(path: directory.appendingPathComponent("cancelled.sqlite3").path)
+        let store = ArticleStore(database: db)
+        await store.waitForStartup()
+        expectTrue(store.isReady, "The isolated library opens before the cancellation test")
+
+        let article = FeedArticle(
+            title: "Unmarked story", link: "https://example.com/cancelled", guid: "cancelled-mark",
+            description: "", pubDate: Date(), source: "Test Publisher")
+        try await db.upsertArticles([article])
+
+        let cancelled = Task { @MainActor in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await store.markAllAsRead()
+        }
+        expectFalse(await cancelled.value, "Cancelled Mark All as Read reports no write")
+        expectTrue(try await db.getReadArticleIDs().isEmpty, "Cancellation preserves the unread story")
+        await db.close()
+    }
+
     static func testUnchangedFTSRefresh() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
