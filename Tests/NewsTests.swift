@@ -70,6 +70,11 @@ struct NewsTests {
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--today-shadow"), CommandLine.arguments.count > index + 2 {
+            try await TodayShadowEvaluation.run(
+                path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--corpus-cache-audit") {
             guard CommandLine.arguments.indices.contains(index + 1) else {
                 throw StoryCorpus.Failure.invalid("Missing private cache path")
