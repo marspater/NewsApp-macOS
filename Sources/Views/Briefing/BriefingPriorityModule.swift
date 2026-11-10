@@ -393,6 +393,12 @@ struct BriefingPriorityModuleView: View {
                     card.isLead ? AppColor.accent : AppColor.border(for: contrast),
                     lineWidth: strokeLineWidth(for: card))
         )
+        // The whole card opens the story, like a region tile; the publisher link and the footer button are buttons
+        // of their own and keep their action. Keyboard and VoiceOver use the footer button.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let summary = card.summary { actions.onOpenEvent(summary) }
+        }
         .accessibilityElement(children: .contain)
     }
 

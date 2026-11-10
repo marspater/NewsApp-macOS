@@ -1322,8 +1322,11 @@ extension NewsTests {
             entries.map(\.publisherCount), [1, 3, 9, 1, 3, 5, 1],
             "Coverage counts distinct publishers, not reports: seven reports from three outlets are three")
         assertEqual(
-            BriefingView.heroEntries(entries).map(\.id), ["c", "f", "b", "e", "a"],
-            "The carousel shows five stories, most publishers first, edition order breaking ties")
+            BriefingView.heroEntries(entries).map(\.id), ["c", "f", "b", "e", "a", "d", "g"],
+            "The carousel shows the stories, most publishers first, edition order breaking ties")
+        assertEqual(
+            BriefingView.heroEntries((0..<14).map { .article(story("n\($0)", nil)) }).count, BriefingView.heroLimit,
+            "The carousel stops at ten stories")
         assertEqual(BriefingView.heroEntries(Array(entries.prefix(2))).count, 2, "Fewer stories show what there is")
         // Original reports first (wire copies count once), then stored importance, then publishers, then edition order.
         let wireCopies = (0..<6).map { (publisher: "Daily \($0)", text: "(AP) - Same dispatch") }
@@ -1359,7 +1362,7 @@ extension NewsTests {
             "e": BriefingRanking.signal(reports: independent, importance: .minor),
         ])
         assertEqual(
-            BriefingView.heroEntries(entries, ranking: ranking).map(\.id), ["b", "e", "f", "c", "a"],
+            Array(BriefingView.heroEntries(entries, ranking: ranking).map(\.id).prefix(5)), ["b", "e", "f", "c", "a"],
             "Nine publishers of wire copy lose to three of original reporting; importance breaks the tie, a rating beats none"
         )
         assertEqual(

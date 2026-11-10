@@ -817,7 +817,9 @@ struct EventOverviewReaderView: View {
     /// enclosing row's `sourcedSentenceActions` open them.
     private func sourcedSentence(_ text: String, citations: [OverviewCitation], fallback: String? = nil) -> some View {
         let sources = citations.map { (id: $0.id, label: inlineSourceLabel($0, fallback: fallback)) }
-        return Text(Self.sourcedAttributedString(text, sources: sources, scale: textScale, contrast: contrast))
+        let attributed = Self.sourcedAttributedString(text, sources: sources, scale: textScale, contrast: contrast)
+        return Text(attributed, chipIndex: Self.citationIndex)
+            .textRenderer(InlineChipRenderer(fill: InlineChip.fill(contrast: contrast)))
             .font(bodyFont)
             .lineSpacing(bodyLineSpacing)
             .foregroundStyle(AppColor.primaryText)
@@ -860,8 +862,14 @@ struct EventOverviewReaderView: View {
         }
     }
 
-    /// The sentence, then each source's name as a linked run in the citation pill's colours (`TagView`'s accent
-    /// text on its wash), separated by a space, so they wrap with the sentence.
+    /// The citation a run of `sourcedAttributedString` links to, by position; nil for the sentence itself.
+    nonisolated static func citationIndex(_ run: AttributedString.Runs.Run) -> Int? {
+        guard let link = run.link, link.scheme == citationScheme else { return nil }
+        return link.host.flatMap { Int($0) }
+    }
+
+    /// The sentence, then each source's name as a linked run in the neutral chip's text colour (`InlineChip`),
+    /// separated by a space, so they wrap with the sentence. The chip's rounded fill is drawn by the renderer.
     nonisolated static func sourcedAttributedString(
         _ text: String, sources: [(id: String, label: String)], scale: CGFloat, contrast: ColorSchemeContrast
     ) -> AttributedString {
@@ -869,9 +877,8 @@ struct EventOverviewReaderView: View {
         for (index, source) in sources.enumerated() {
             var run = AttributedString("\u{00A0}\(source.label)\u{00A0}")
             run.link = URL(string: "\(citationScheme)://\(index)")
-            run.font = AppTypography.overviewFont(.eyebrow, scale: scale).weight(.semibold)
-            run.foregroundColor = TagView.textColor(tint: AppColor.accent, contrast: contrast)
-            run.backgroundColor = TagView.fill(tint: AppColor.accent, contrast: contrast)
+            run.font = AppTypography.overviewFont(.eyebrow, scale: scale).weight(.medium)
+            run.foregroundColor = InlineChip.textColor(contrast: contrast)
             result.append(AttributedString(" "))
             result.append(run)
         }

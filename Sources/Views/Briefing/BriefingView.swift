@@ -162,10 +162,13 @@ struct BriefingView: View {
         self.actions = actions
     }
 
-    /// The carousel's three to five stories in `BriefingRanking` order: original reports, then stored importance, then
-    /// publishers, then edition order.
+    /// The most stories the carousel shows; an edition with fewer shows what it has.
+    static let heroLimit = 10
+
+    /// The carousel's stories, up to `heroLimit`, in `BriefingRanking` order: original reports, then stored
+    /// importance, then publishers, then edition order.
     static func heroEntries(_ entries: [FeedEntry], ranking: BriefingRanking = BriefingRanking()) -> [FeedEntry] {
-        Array(ranking.order(entries).prefix(5))
+        Array(ranking.order(entries).prefix(heroLimit))
     }
 
     /// The tiles grouped by topic: the story's category in the app's taxonomy, sections in the order their first story

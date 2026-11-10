@@ -167,9 +167,11 @@ struct ArticleListView: View {
 
     var filteredArticles: [FeedArticle] { buffer.displayed.articles }
 
-    /// Saved Stories and History list exactly what the reader kept or opened.
+    /// Saved Stories and History list exactly what the reader kept or opened. Briefing is always one card per event,
+    /// whatever the list preference says: its modules are built on events.
     private var groupingMode: FeedGroupingMode {
-        groupsEvents && selectedTopic != "Saved Stories" && selectedTopic != "History"
+        if isBriefing { return .events }
+        return groupsEvents && selectedTopic != "Saved Stories" && selectedTopic != "History"
             ? .events : .publications
     }
 
@@ -289,7 +291,7 @@ struct ArticleListView: View {
             }
         }()
         return ListCommandActions(
-            canGroupStories: true, newBriefing: isBriefing ? { startNewBriefing() } : nil,
+            canGroupStories: !isBriefing, newBriefing: isBriefing ? { startNewBriefing() } : nil,
             back: backAction, backDestination: backDest,
             customizeBriefing: isBriefing ? { showsCustomizeBriefing = true } : nil)
     }
@@ -536,7 +538,17 @@ struct ArticleListView: View {
                         briefingEditionArticleIDs = edition.articles.map(\.id).joined(separator: "\n")
                     }
                 }
-                let briefingArticles = briefing?.articles ?? []
+                // The edition's stories are frozen, but a photo the page lookup recorded after the selection belongs
+                // on its card: without this a story from a feed without images stays bare for the whole edition (#1201).
+                let frozen = briefing?.articles ?? []
+                let photos =
+                    (try? await articleStore.database.storyImages(
+                        for: frozen.filter { $0.imageUrl == nil }.map(\.id))) ?? [:]
+                let briefingArticles = frozen.map { story in
+                    var story = story
+                    if story.imageUrl == nil { story.imageUrl = photos[story.id] }
+                    return story
+                }
                 let events = (try? await articleStore.eventFeedSummaries(for: briefingArticles.map(\.id))) ?? []
                 try Task.checkCancellation()
                 let snapshot = FeedSnapshot(articles: briefingArticles, events: events)
@@ -884,17 +896,19 @@ struct ArticleListView: View {
             ToolbarSpacer(.flexible, placement: .primaryAction)
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
-                Label(
-                    "Group Stories by Event",
-                    systemImage: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
+            if !isBriefing {
+                Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
+                    Label(
+                        "Group Stories by Event",
+                        systemImage: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
+                }
+                .toggleStyle(.button)
+                .help(
+                    groupsEvents
+                        ? "Showing one card per event. Show every story on its own (G)"
+                        : "Showing every story on its own. Group stories of the same event (G)"
+                )
             }
-            .toggleStyle(.button)
-            .help(
-                groupsEvents
-                    ? "Showing one card per event. Show every story on its own (G)"
-                    : "Showing every story on its own. Group stories of the same event (G)"
-            )
 
             Picker("Story Layout", selection: $gridLayout) {
                 Label("List", systemImage: "list.bullet").tag(false)
@@ -1330,7 +1344,7 @@ struct ArticleListView: View {
             } else if press.characters == "e" {
                 toggleFocusedEventSources()
                 return .handled
-            } else if press.characters == "g" {
+            } else if press.characters == "g", !isBriefing {
                 groupsEvents.toggle()
                 return .handled
             } else if press.characters == "u" {

@@ -662,6 +662,60 @@ struct TagView: View {
     }
 }
 
+/// A source named inside a sentence (event overview highlights and perspectives): a quiet neutral chip that wraps
+/// with the text. `InlineChipText` builds the text and `InlineChipRenderer` draws the rounded fill, which an
+/// attributed string's own background cannot do (it is a square).
+enum InlineChip {
+    static let cornerRadius: CGFloat = 4.0
+
+    static func fill(contrast: ColorSchemeContrast) -> Color {
+        Color(contrast == .increased ? NSColor.tertiaryLabelColor : NSColor.quaternaryLabelColor)
+    }
+
+    /// Secondary text mixed toward primary, so the label keeps 4.5:1 on the chip's own fill.
+    static func textColor(contrast: ColorSchemeContrast) -> Color {
+        AppColor.secondaryText.mix(with: AppColor.primaryText, by: contrast == .increased ? 0.8 : 0.5)
+    }
+}
+
+/// Marks the runs of one inline chip; runs with the same index on a line share one fill.
+struct InlineChipAttribute: TextAttribute {
+    let index: Int
+}
+
+struct InlineChipRenderer: TextRenderer {
+    let fill: Color
+
+    func draw(layout: Text.Layout, in context: inout GraphicsContext) {
+        for line in layout {
+            var chips: [Int: CGRect] = [:]
+            for run in line {
+                guard let chip = run[InlineChipAttribute.self] else { continue }
+                let bounds = run.typographicBounds.rect
+                chips[chip.index] = chips[chip.index]?.union(bounds) ?? bounds
+            }
+            for bounds in chips.values {
+                context.fill(
+                    Path(roundedRect: bounds, cornerRadius: InlineChip.cornerRadius, style: .continuous),
+                    with: .color(fill))
+            }
+            for run in line { context.draw(run) }
+        }
+    }
+}
+
+extension Text {
+    /// One text from an attributed string whose chip runs are named by `chipIndex`: every run keeps its own
+    /// attributes (font, color, link), and a chip run also carries the attribute the renderer looks for.
+    init(_ attributed: AttributedString, chipIndex: (AttributedString.Runs.Run) -> Int?) {
+        self = attributed.runs.reduce(Text(verbatim: "")) { text, run in
+            let piece = Text(AttributedString(attributed[run.range]))
+            guard let index = chipIndex(run) else { return Text("\(text)\(piece)") }
+            return Text("\(text)\(piece.customAttribute(InlineChipAttribute(index: index)))")
+        }
+    }
+}
+
 extension TagView {
     /// Marks generated content; the only use of the intelligence color besides its glyphs.
     static func intelligence(_ title: String = "AI", foreground: Color? = nil) -> TagView {

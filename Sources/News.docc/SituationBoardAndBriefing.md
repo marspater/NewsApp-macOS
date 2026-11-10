@@ -26,7 +26,7 @@ An edition is frozen until the next edition hour (``FiniteBriefing/defaultEditio
 | Weak signals | Weak signals |
 | Forward watch | Forward watch, escalation timeline |
 
-``BriefingHeroCarouselView`` advances every 45 seconds with a slow cross-fade and pauses while the reader is engaged with it. ``BriefingActions`` carries every interaction back to the list.
+``BriefingHeroCarouselView`` advances every 10 seconds with a slow cross-fade and pauses while the reader is engaged with it. ``BriefingActions`` carries every interaction back to the list.
 
 ### Executive sitrep
 

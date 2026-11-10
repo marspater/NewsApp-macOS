@@ -16,7 +16,7 @@ import Foundation
 import SwiftUI
 
 /// The top stories of the edition, one at a time over their best image (DESIGN.md 8.4). The app's only auto-advancing
-/// motion: every 45 s a slow cross-fade, paused on hover, keyboard focus and while a story or sheet is open, and never
+/// motion: every 10 s a slow cross-fade, paused on hover, keyboard focus and while a story or sheet is open, and never
 /// under Reduce Motion, where the first story stays. Arrows and dots always work.
 struct BriefingHeroCarouselView: View {
     let entries: [FeedEntry]
@@ -34,7 +34,7 @@ struct BriefingHeroCarouselView: View {
     @FocusState private var isCarouselFocused: Bool
     @State private var timerResetToken: Int = 0
 
-    static let autoAdvanceInterval: Double = 45.0
+    static let autoAdvanceInterval: Double = 10.0
     private static let crossFade = Animation.easeInOut(duration: 0.6)
 
     private var shouldTimerRun: Bool {
@@ -117,7 +117,7 @@ struct BriefingHeroCarouselView: View {
         .accessibilityLabel("Top stories")
     }
 
-    /// A manual move: instant under Reduce Motion, and the 45 s countdown starts again.
+    /// A manual move: instant under Reduce Motion, and the countdown starts again.
     private func step(_ offset: Int) {
         guard entries.count > 1 else { return }
         withAnimation(reduceMotion ? nil : Self.crossFade) {
