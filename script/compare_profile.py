@@ -48,7 +48,8 @@ def compare(current, previous, tolerance, floor=0.0):
     rows, regressions = [], []
     for key in sorted(current):
         now, before = current[key], previous.get(key)
-        change = (now - before) / before if before else None
+        # Only a positive baseline has a meaningful ratio: XCTMemoryMetric's Memory Physical is a delta and can be <= 0.
+        change = (now - before) / before if before is not None and before > 0 else None
         rows.append((key, now, before, change))
         if change is not None and before >= floor and change > tolerance:
             regressions.append((key, change))

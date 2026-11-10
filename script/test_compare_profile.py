@@ -54,6 +54,11 @@ class CompareTests(unittest.TestCase):
         self.assertIn("XCTest metrics\n\nNo values in this run.", table)
         self.assertEqual(warnings, "")
 
+    def test_no_ratio_against_a_negative_baseline(self):
+        rows, regressions = compare_profile.compare({("t", "m", "kB"): 10.0}, {("t", "m", "kB"): -32.0}, 0.25)
+        self.assertEqual(rows, [(("t", "m", "kB"), 10.0, -32.0, None)])
+        self.assertEqual(regressions, [])
+
     def test_skips_a_previous_run_of_another_configuration(self):
         with tempfile.TemporaryDirectory() as now, tempfile.TemporaryDirectory() as before:
             write(now, "metrics.json", metrics([2.0]))
