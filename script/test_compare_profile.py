@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
-import compare_profile  # noqa: E402
+import compare_profile
 
 
 def metrics(clock):

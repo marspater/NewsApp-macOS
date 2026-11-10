@@ -55,7 +55,9 @@ jobs:
             -testPlan UITests -configuration Profile -destination 'platform=macOS' -derivedDataPath build/DerivedData \
             -only-testing:NewsUITests/NewsPerformanceTests \
             -resultBundlePath "$RUNNER_TEMP/NewsPerformanceTests.xcresult" -quiet
-          # Clock, memory and CPU measurements beside summary.json, so the next run can compare against them.
+          # Clock, memory and CPU measurements beside summary.json, so the next run can compare against them. The
+          # directory exists only if Record Signposts ran.
+          mkdir -p "$RUNNER_TEMP/profile"
           xcrun xcresulttool get test-results metrics --path "$RUNNER_TEMP/NewsPerformanceTests.xcresult" \
             > "$RUNNER_TEMP/profile/metrics.json"
           # Skipped tests exit 0: require that both measured tests actually passed.

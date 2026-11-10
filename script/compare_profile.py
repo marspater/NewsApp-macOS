@@ -15,13 +15,16 @@ import sys
 
 # Signpost intervals this short are scheduling noise; their relative change says nothing.
 SIGNPOST_FLOOR_MS = 1.0
+SUMMARY = "summary.json"
+METRICS = "metrics.json"
 
 
 def load(directory, name):
     path = os.path.join(directory, name) if directory else ""
     if not path or not os.path.isfile(path):
         return None
-    with open(path) as handle:
+    # The directories are the workflow's own command-line arguments (RUNNER_TEMP), not untrusted input.
+    with open(path) as handle:  # NOSONAR
         return json.load(handle)
 
 
@@ -73,10 +76,10 @@ def main(argv):
         tolerance = float(args[index + 1])
         del args[index:index + 2]
     current_dir, previous_dir = args[0], (args[1] if len(args) > 1 else None)
-    summary = load(current_dir, "summary.json")
+    summary = load(current_dir, SUMMARY)
     meta = (summary or {}).get("meta", {})
     lines = ["## Profile comparison", ""] + [f"- {key}: {value}" for key, value in meta.items()]
-    previous_meta = (load(previous_dir, "summary.json") or {}).get("meta", {})
+    previous_meta = (load(previous_dir, SUMMARY) or {}).get("meta", {})
     # Runs before the Profile configuration recorded no configuration: they measured the Debug build.
     configuration = meta.get("configuration", "Debug")
     previous_configuration = previous_meta.get("configuration", "Debug")
@@ -92,10 +95,10 @@ def main(argv):
     lines += [f"- tolerance: warn when a median grows more than {tolerance:.0%}", ""]
     warnings = []
     sections = [
-        ("XCTest metrics", "Test · metric", metric_medians(load(current_dir, "metrics.json")),
-         metric_medians(load(previous_dir, "metrics.json")), 0.0),
+        ("XCTest metrics", "Test · metric", metric_medians(load(current_dir, METRICS)),
+         metric_medians(load(previous_dir, METRICS)), 0.0),
         ("Signpost intervals", "Category · interval", signpost_medians(summary),
-         signpost_medians(load(previous_dir, "summary.json")), SIGNPOST_FLOOR_MS),
+         signpost_medians(load(previous_dir, SUMMARY)), SIGNPOST_FLOOR_MS),
     ]
     for title, header, current, previous, floor in sections:
         if not current:
