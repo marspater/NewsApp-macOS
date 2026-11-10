@@ -2930,6 +2930,14 @@ extension NewsTests {
             refused = true
         }
         assertTrue(refused, "The live library is refused")
+        let container = directory.appendingPathComponent("Library/Containers/app")
+        try FileManager.default.createDirectory(at: container, withIntermediateDirectories: true)
+        let live = container.appendingPathComponent("news.sqlite3")
+        try Data().write(to: live)
+        let link = directory.appendingPathComponent("link.sqlite3")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: live)
+        assertTrue(StoryCorpus.isLiveLibrary(link.path), "A symlink to the live library is the live library")
+        assertTrue(!StoryCorpus.isLiveLibrary(directory.appendingPathComponent("copy.sqlite3").path), "A copy is not")
     }
 
     /// Reader verdicts (#552): "Same Event" and "Not the Same Event" pairs leave the library as weight-5 training rows

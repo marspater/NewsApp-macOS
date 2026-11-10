@@ -217,7 +217,7 @@ struct NewsTests {
             }
             // Resolved first, so a link outside the container cannot point the replay at the live library.
             let snapshot = URL(fileURLWithPath: snapshotPath).resolvingSymlinksInPath().path
-            guard !snapshot.contains("/Library/Containers/") else {
+            guard !StoryCorpus.isLiveLibrary(snapshot) else {
                 throw StoryCorpus.Failure.invalid("Replay a copy of the library, never the live file")
             }
             let source = DatabaseEngine(path: snapshot)
@@ -2235,7 +2235,7 @@ struct NewsTests {
     /// corrections, as `pairs-review.csv` in the private directory (#551). The CSV carries headlines, so it is never
     /// written inside the checkout and never overwritten; a file inside an app container is refused.
     static func exportPairReview(snapshot: String, outputDirectory: String) async throws -> Int {
-        guard !snapshot.contains("/Library/Containers/") else {
+        guard !StoryCorpus.isLiveLibrary(snapshot) else {
             throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
         }
         let file = try StoryCorpus.privateDirectory(outputDirectory).appendingPathComponent("pairs-review.csv")
@@ -2315,7 +2315,7 @@ struct NewsTests {
     /// 36 h, and pairs of active events sharing two terms (one representative pair each). Each class is drawn in SHA-256
     /// order of the two ids, so a rerun draws the same pairs. Headlines travel with the rows; never written in the checkout.
     static func exportHoldoutCandidates(snapshot: String, outputDirectory: String) async throws -> Int {
-        guard !snapshot.contains("/Library/Containers/") else {
+        guard !StoryCorpus.isLiveLibrary(snapshot) else {
             throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
         }
         let file = try StoryCorpus.privateDirectory(outputDirectory).appendingPathComponent("holdout-candidates.csv")
@@ -2537,7 +2537,7 @@ struct NewsTests {
     /// in its candidate search. Nothing is clustered and the copy's events are not read
     /// (docs/audits/2026-11-09-evidence-head.md).
     static func exportPairSignals(snapshot: String, pairs: String, output: String) async throws {
-        guard !snapshot.contains("/Library/Containers/") else {
+        guard !StoryCorpus.isLiveLibrary(snapshot) else {
             throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
         }
         struct Pair: Decodable {
@@ -2615,7 +2615,7 @@ struct NewsTests {
     /// level (both stories' events in one `story_id`; `same` and `related` are true pairs, only `different` is a false
     /// merge). Also prints the share of recent stories shown in a multi-publisher event. The copy is deleted afterwards.
     static func evaluateLibraryHoldout(snapshot: String, holdout: String) async throws {
-        guard !snapshot.contains("/Library/Containers/") else {
+        guard !StoryCorpus.isLiveLibrary(snapshot) else {
             throw StoryCorpus.Failure.invalid("Evaluate on a copy of the library, never the live file")
         }
         struct Pair: Decodable {
@@ -2907,7 +2907,7 @@ struct NewsTests {
         guard let snapshot = ProcessInfo.processInfo.environment["NEWS_SNAPSHOT_DB"] else {
             throw StoryCorpus.Failure.invalid("--fragment-merge-timing needs NEWS_SNAPSHOT_DB")
         }
-        guard !snapshot.contains("/Library/Containers/") else {
+        guard !StoryCorpus.isLiveLibrary(snapshot) else {
             throw StoryCorpus.Failure.invalid("Measure on a copy of the library, never the live file")
         }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -3108,7 +3108,7 @@ struct NewsTests {
         guard let snapshot = environment["NEWS_SNAPSHOT_DB"], let output = environment["NEWS_EVENT_OUTPUT"] else {
             throw StoryCorpus.Failure.invalid("--export-categories needs NEWS_SNAPSHOT_DB and NEWS_EVENT_OUTPUT")
         }
-        guard !snapshot.contains("/Library/Containers/") else {
+        guard !StoryCorpus.isLiveLibrary(snapshot) else {
             throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
         }
         let size = Int(environment["NEWS_CATEGORY_SAMPLE"] ?? "") ?? 200
@@ -3228,7 +3228,7 @@ struct NewsTests {
         var holdoutTitles = Set<String>()
         var unresolvedHoldoutIDs = holdoutIDs
         // The live library is refused before anything reads or copies it.
-        guard !snapshots.split(separator: ":").contains(where: { $0.contains("/Library/Containers/") }) else {
+        guard !snapshots.split(separator: ":").contains(where: { StoryCorpus.isLiveLibrary(String($0)) }) else {
             throw StoryCorpus.Failure.invalid("Export from a copy of the library, never the live file")
         }
         for path in snapshots.split(separator: ":").map(String.init) where !holdoutIDs.isEmpty {
