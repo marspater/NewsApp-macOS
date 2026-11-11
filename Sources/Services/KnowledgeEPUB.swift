@@ -89,10 +89,20 @@ enum KnowledgeEPUB {
             result +=
                 "<blockquote><p>\(xml(quote.text))</p><p>\(xml(quote.publisher)) — \(xml(quote.url))</p></blockquote>"
         }
-        if !document.notes.isEmpty { result += "<h3>My highlights and notes</h3>" }
-        for note in document.notes {
-            result += "<blockquote><p>\(xml(note.selectedText))</p></blockquote>"
-            if !note.noteBody.isEmpty { result += "<p>\(xml(note.noteBody))</p>" }
+        if !document.notes.isEmpty {
+            let sortedNotes = document.notes.sortedInReadingOrder()
+            result += "<h3>My highlights and notes</h3>"
+            if sortedNotes.count > 1 {
+                result += "<div class=\"story-notes-group\">"
+                for (i, note) in sortedNotes.enumerated() {
+                    result += "<h4>Passage \(i + 1)</h4><blockquote><p>\(xml(note.selectedText))</p></blockquote>"
+                    if !note.noteBody.isEmpty { result += "<p>\(xml(note.noteBody))</p>" }
+                }
+                result += "</div>"
+            } else if let note = sortedNotes.first {
+                result += "<blockquote><p>\(xml(note.selectedText))</p></blockquote>"
+                if !note.noteBody.isEmpty { result += "<p>\(xml(note.noteBody))</p>" }
+            }
         }
         result += "</section>"
         return result

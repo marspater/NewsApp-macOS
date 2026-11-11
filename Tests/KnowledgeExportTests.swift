@@ -71,6 +71,21 @@ enum KnowledgeExportTests {
             check(
                 output.contains("My highlights and notes") && output.contains("Quoted publisher words"),
                 "notes and highlights")
+            check(!output.contains("Story passages in reading order"), "single note has no extraneous group header")
+            let note2 = UserNote(
+                articleID: "id", paragraphIndex: 1, charStart: 0, selectedText: "Second quote", prefix: "",
+                suffix: "", noteBody: "Second private note")
+            let multiDoc = KnowledgeExportDocument(
+                id: "id", title: text, publisher: "Original [publisher]", url: "https://example.com/story",
+                published: Date(timeIntervalSince1970: 0), body: "Body", tags: [], quotes: [], notes: [note2, note])
+            let multiOutput = String(decoding: KnowledgeExport.markdown([multiDoc], title: "Reading"), as: UTF8.self)
+            check(multiOutput.contains("Story passages in reading order (2)"), "multiple notes group header in export")
+            check(
+                multiOutput.contains("Passage 1") && multiOutput.contains("Passage 2"),
+                "passages numbered in reading order")
+            let noteIdx = multiOutput.range(of: "Quoted publisher words")?.lowerBound
+            let note2Idx = multiOutput.range(of: "Second quote")?.lowerBound
+            check(noteIdx != nil && note2Idx != nil && noteIdx! < note2Idx!, "notes exported in reading order")
             check(
                 output.contains("Cited qualified words") && output.contains("example.org/report"),
                 "independent source citation")

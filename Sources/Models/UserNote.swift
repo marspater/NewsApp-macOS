@@ -136,3 +136,75 @@ enum NoteAnchor {
             + zip(after, note.suffix).prefix { $0 == $1 }.count
     }
 }
+
+extension Collection where Element == UserNote {
+    /// Notes sorted in story reading order: by paragraph index, then character start, then creation date.
+    func sortedInReadingOrder() -> [UserNote] {
+        sorted {
+            if $0.paragraphIndex != $1.paragraphIndex {
+                return $0.paragraphIndex < $1.paragraphIndex
+            }
+            if $0.charStart != $1.charStart {
+                return $0.charStart < $1.charStart
+            }
+            return $0.createdAt < $1.createdAt
+        }
+    }
+}
+
+extension Collection where Element == UserNoteListing {
+    /// Listings sorted in story reading order.
+    func sortedInReadingOrder() -> [UserNoteListing] {
+        sorted {
+            if $0.note.paragraphIndex != $1.note.paragraphIndex {
+                return $0.note.paragraphIndex < $1.note.paragraphIndex
+            }
+            if $0.note.charStart != $1.note.charStart {
+                return $0.note.charStart < $1.note.charStart
+            }
+            return $0.note.createdAt < $1.note.createdAt
+        }
+    }
+}
+
+/// A group of notes belonging to one story (Issue #1208).
+struct StoryAnnotationGroup: Identifiable, Sendable {
+    let articleID: String
+    let articleTitle: String
+    let source: String
+    let listings: [UserNoteListing]
+    var id: String { articleID }
+
+    var isMultiple: Bool { listings.count > 1 }
+
+    init(articleID: String, articleTitle: String, source: String, listings: [UserNoteListing]) {
+        self.articleID = articleID
+        self.articleTitle = articleTitle
+        self.source = source
+        self.listings = listings
+    }
+}
+
+extension Collection where Element == UserNoteListing {
+    /// Groups listings by story (articleID), preserving order of appearance, with notes inside each story in reading order.
+    func groupedByStory() -> [StoryAnnotationGroup] {
+        var order: [String] = []
+        var dict: [String: [UserNoteListing]] = [:]
+        for listing in self {
+            let id = listing.note.articleID
+            if dict[id] == nil {
+                order.append(id)
+            }
+            dict[id, default: []].append(listing)
+        }
+        return order.compactMap { id in
+            guard let list = dict[id], let first = list.first else { return nil }
+            return StoryAnnotationGroup(
+                articleID: id,
+                articleTitle: first.articleTitle,
+                source: first.source,
+                listings: list.sortedInReadingOrder()
+            )
+        }
+    }
+}

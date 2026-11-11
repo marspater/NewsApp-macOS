@@ -29,6 +29,10 @@ struct AnnotationsInspectorView: View {
     @State private var selectedID: String?
     @State private var deleting: UserNote?
 
+    private var orderedNotes: [UserNote] {
+        notes.sortedInReadingOrder()
+    }
+
     var body: some View {
         Group {
             if notes.isEmpty {
@@ -37,20 +41,33 @@ struct AnnotationsInspectorView: View {
                 } description: {
                     Text("Select text in the story, then press ⌘Y to highlight it or ⇧⌘Y to add a note.")
                 }
-            } else {
-                // Arrow keys move through the rows, Return shows the selected passage in the story.
-                List(notes, selection: $selectedID) { note in
-                    row(note)
+            } else if notes.count > 1 {
+                // Multiple notes: automatically group together in reading order with designed presentation (#1208).
+                List(selection: $selectedID) {
+                    Section {
+                        ForEach(orderedNotes) { note in
+                            row(note)
+                                .listRowSeparator(.hidden)
+                        }
+                    } header: {
+                        groupHeader(count: orderedNotes.count)
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .onKeyPress(.return) {
+                    revealSelected()
+                }
+            } else if let singleNote = notes.first {
+                // Single note: displays cleanly without an extraneous group header (#1208).
+                List(selection: $selectedID) {
+                    row(singleNote)
                         .listRowSeparator(.hidden)
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .onKeyPress(.return) {
-                    guard let note = notes.first(where: { $0.id == selectedID }), !lostIDs.contains(note.id) else {
-                        return .ignored
-                    }
-                    onReveal(note)
-                    return .handled
+                    revealSelected()
                 }
             }
         }
@@ -65,6 +82,29 @@ struct AnnotationsInspectorView: View {
         }
     }
 
+    private func revealSelected() -> KeyPress.Result {
+        guard let note = notes.first(where: { $0.id == selectedID }), !lostIDs.contains(note.id) else {
+            return .ignored
+        }
+        onReveal(note)
+        return .handled
+    }
+
+    private func groupHeader(count: Int) -> some View {
+        HStack(spacing: AppSpacing.xs) {
+            Label("Story Highlights & Notes", systemImage: "highlighter")
+                .font(AppTypography.caption.weight(.semibold))
+                .foregroundStyle(AppColor.secondaryText)
+            Spacer()
+            Text("\(count) passages · Reading order")
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.tertiaryText)
+        }
+        .padding(.vertical, AppSpacing.xxs)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Story annotations, \(count) passages in reading order")
+    }
+
     /// One note: its quote, a notice when the passage is gone, and its text with the actions or the editor.
     private func row(_ note: UserNote) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.xs) {
@@ -76,7 +116,9 @@ struct AnnotationsInspectorView: View {
             }
             if editingID == note.id { editor(note) } else { footer(note) }
         }
-        .padding(.vertical, AppSpacing.xs)
+        .padding(AppSpacing.sm)
+        .background(AppColor.cardBackground, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .padding(.vertical, AppSpacing.xxs)
         .accessibilityElement(children: .contain)
     }
 

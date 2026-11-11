@@ -582,6 +582,7 @@ struct EventOverviewReaderView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h1)
                 .textSelection(.enabled)
+                .readerLookUp(text: overview.title)
 
             HStack(spacing: AppSpacing.eyebrowGap) {
                 Text("Updated \(formattedUpdateTime)")
@@ -653,6 +654,7 @@ struct EventOverviewReaderView: View {
                         .foregroundStyle(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
+                        .readerLookUp(text: fact.text)
                     ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
                         ForEach(fact.citationIDs, id: \.self) { id in
                             if let citation = overview.citations[id] { citationPill(citation) }
@@ -667,6 +669,7 @@ struct EventOverviewReaderView: View {
                         .foregroundStyle(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
+                        .readerLookUp(text: para)
                 }
             }
         }
@@ -825,6 +828,7 @@ struct EventOverviewReaderView: View {
             .foregroundStyle(AppColor.primaryText)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
+            .readerLookUp(text: text)
             .environment(\.openURL, citationOpenURLAction(citations))
     }
 
@@ -928,6 +932,7 @@ struct EventOverviewReaderView: View {
             .lineSpacing(bodyLineSpacing)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
+            .readerLookUp(text: text)
             .environment(\.openURL, citationOpenURLAction(sources))
             .accessibilityActions { citationAccessibilityActions(sources) }
     }
@@ -1430,6 +1435,7 @@ struct EventOverviewReaderView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+                .readerLookUp(text: item.implication)
 
             if !citations.isEmpty {
                 ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
@@ -1483,6 +1489,7 @@ struct EventOverviewReaderView: View {
                         .lineSpacing(bodyLineSpacing)
                         .foregroundStyle(AppColor.primaryText)
                         .textSelection(.enabled)
+                        .readerLookUp(text: angle.summary)
                 }
 
                 let validAngleFacts = Self.filterValidFacts(angle.facts)

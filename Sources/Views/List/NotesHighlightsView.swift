@@ -48,8 +48,21 @@ struct NotesHighlightsView: View {
                 }
             } else {
                 // Arrow keys move through the rows, Return opens the selected story.
-                List(listings, selection: $selectedID) { listing in
-                    row(listing)
+                let groups = listings.groupedByStory()
+                List(selection: $selectedID) {
+                    ForEach(groups) { group in
+                        if group.isMultiple {
+                            Section {
+                                ForEach(group.listings) { listing in
+                                    groupedRow(listing)
+                                }
+                            } header: {
+                                storyGroupHeader(group)
+                            }
+                        } else if let singleListing = group.listings.first {
+                            row(singleListing)
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .onKeyPress(.return) {
@@ -76,6 +89,83 @@ struct NotesHighlightsView: View {
         } message: { note in
             Text("“\(note.noteBody.prefix(80))” is deleted with its highlight.")
         }
+    }
+
+    /// Story group header for stories with multiple highlights and notes (#1208).
+    private func storyGroupHeader(_ group: StoryAnnotationGroup) -> some View {
+        let storyTitle = group.articleTitle
+        let noteCount = group.listings.count
+        return Button {
+            onOpen(group.articleID)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                    Text(storyTitle)
+                        .font(AppTypography.headline)
+                        .foregroundStyle(AppColor.primaryText)
+                        .multilineTextAlignment(.leading)
+                    Text("\(group.source) · \(noteCount) passages in reading order")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.tertiaryText)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, AppSpacing.xxs)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(storyTitle), \(noteCount) passages in reading order")
+        .accessibilityHint("Opens the story")
+    }
+
+    /// One note within a story group: its quote, note body, and timestamp in reading order (#1208).
+    private func groupedRow(_ listing: UserNoteListing) -> some View {
+        let note = listing.note
+        return HStack(alignment: .top, spacing: AppSpacing.sm) {
+            Button {
+                onOpen(note.articleID)
+            } label: {
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text("“\(note.selectedText)”")
+                        .font(AppTypography.callout)
+                        .foregroundStyle(AppColor.primaryText)
+                        .multilineTextAlignment(.leading)
+                        .padding(.leading, AppSpacing.xs)
+                        .background(alignment: .leading) {
+                            Rectangle().fill(AppColor.noteHighlight).frame(width: AppLayout.quoteBarWidth)
+                        }
+                    if note.hasBody {
+                        Text(note.noteBody)
+                            .font(AppTypography.body)
+                            .foregroundStyle(AppColor.primaryText)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the story")
+            Button(role: .destructive) {
+                if note.hasBody { deleting = note } else { Task { await articleStore.deleteNote(id: note.id) } }
+            } label: {
+                Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .help("Delete this highlight")
+            .accessibilityLabel("Delete highlight “\(note.selectedText.prefix(40))”")
+        }
+        .padding(AppSpacing.sm)
+        .background(AppColor.cardBackground, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        .padding(.vertical, AppSpacing.xxs)
     }
 
     /// One note with its story title, source and date; the row opens the story.

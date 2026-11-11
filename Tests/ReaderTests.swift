@@ -60,6 +60,9 @@ extension NewsTests {
             ("testReaderFurnitureRemoval", { await testReaderFurnitureRemoval() }),
             ("testContentQualityValidation", { await testContentQualityValidation() }),
             ("testExtractionOutcomeDiagnostics", { await testExtractionOutcomeDiagnostics() }),
+            ("testReaderNoteShortcutFocusGuard", { await testReaderNoteShortcutFocusGuard() }),
+            ("testReaderDictionaryLookup", { await testReaderDictionaryLookup() }),
+            ("testStoryAnnotationsGroupingAndReadingOrder", { testStoryAnnotationsGroupingAndReadingOrder() }),
         ]
         try await runSuite(tests)
     }
@@ -2397,6 +2400,130 @@ extension NewsTests {
 
         let outcomeNetwork = ExtractionOutcome.networkError(reason: "Connection timeout")
         assertEqual(outcomeNetwork.failureReason, "Connection timeout", "Network failure message")
+    }
+
+    @MainActor
+    static func testReaderNoteShortcutFocusGuard() {
+        print("  - Testing Reader note shortcut focus guard (#1206)...")
+        // 1. Text input focus detection
+        let editableTextView = NSTextView()
+        editableTextView.isEditable = true
+        assertTrue(
+            ArticleDetailView.isTextInputActive(firstResponder: editableTextView, isNoteDraftActive: false),
+            "Editable NSTextView must be detected as active text input"
+        )
+
+        let readOnlyTextView = NSTextView()
+        readOnlyTextView.isEditable = false
+        assertFalse(
+            ArticleDetailView.isTextInputActive(firstResponder: readOnlyTextView, isNoteDraftActive: false),
+            "Read-only NSTextView (selectable reader text) must not be treated as text input"
+        )
+
+        let editableTextField = NSTextField()
+        editableTextField.isEditable = true
+        assertTrue(
+            ArticleDetailView.isTextInputActive(firstResponder: editableTextField, isNoteDraftActive: false),
+            "Editable NSTextField must be detected as active text input"
+        )
+
+        let readOnlyTextField = NSTextField()
+        readOnlyTextField.isEditable = false
+        assertFalse(
+            ArticleDetailView.isTextInputActive(firstResponder: readOnlyTextField, isNoteDraftActive: false),
+            "Non-editable NSTextField must not be treated as text input"
+        )
+
+        assertTrue(
+            ArticleDetailView.isTextInputActive(firstResponder: nil, isNoteDraftActive: true),
+            "Active note draft popover must be detected as active text input"
+        )
+
+        assertFalse(
+            ArticleDetailView.isTextInputActive(firstResponder: nil, isNoteDraftActive: false),
+            "No responder and no note draft means no text input active"
+        )
+    }
+
+    @MainActor
+    static func testReaderDictionaryLookup() {
+        print("  - Testing Reader dictionary look up (#1207)...")
+        // 1. Word extraction from point using layout manager
+        let text = "Quantum computing advances rapidly in 2026."
+        let font = NSFont.systemFont(ofSize: 14)
+        let size = NSSize(width: 400, height: 200)
+
+        let word1 = ReaderDictionaryLookup.word(at: NSPoint(x: 10, y: 10), in: text, font: font, containerSize: size)
+        assertEqual(word1, "Quantum", "Extracts first word at coordinate origin")
+
+        // 2. Character index word extraction
+        let word2 = ReaderDictionaryLookup.word(at: 10, in: text)
+        assertEqual(word2, "computing", "Extracts word around character index")
+
+        let word3 = ReaderDictionaryLookup.word(at: 100, in: text)
+        assertEqual(word3, nil, "Out of bounds character index returns nil")
+
+        // 3. Lookup title generation for context menu
+        assertEqual(
+            ReaderDictionaryLookup.lookupTitle(for: "quantum"), "Look Up “quantum”", "Short word quoted in title")
+        assertEqual(ReaderDictionaryLookup.lookupTitle(for: ""), "Look Up", "Empty string gives bare Look Up")
+        assertEqual(ReaderDictionaryLookup.lookupTitle(for: nil), "Look Up", "Nil string gives bare Look Up")
+        let longSelection = "A very long sentence with many words that exceeds limit"
+        assertEqual(
+            ReaderDictionaryLookup.lookupTitle(for: longSelection),
+            "Look Up “\(longSelection.prefix(20))…”",
+            "Long selection is truncated with ellipsis"
+        )
+    }
+
+    static func testStoryAnnotationsGroupingAndReadingOrder() {
+        print("  - Testing Story annotations grouping and reading order (#1208)...")
+        // 1. Reading order sorting of UserNotes
+        let now = Date()
+        let noteA = UserNote(
+            id: "a", articleID: "story1", paragraphIndex: 2, charStart: 10, selectedText: "Third paragraph note",
+            prefix: "", suffix: "", noteBody: "Body A", createdAt: now
+        )
+        let noteB = UserNote(
+            id: "b", articleID: "story1", paragraphIndex: 0, charStart: 30, selectedText: "First paragraph second note",
+            prefix: "", suffix: "", noteBody: "Body B", createdAt: now.addingTimeInterval(10)
+        )
+        let noteC = UserNote(
+            id: "c", articleID: "story1", paragraphIndex: 0, charStart: 5, selectedText: "First paragraph first note",
+            prefix: "", suffix: "", noteBody: "Body C", createdAt: now.addingTimeInterval(20)
+        )
+        let noteD = UserNote(
+            id: "d", articleID: "story1", paragraphIndex: 1, charStart: 0, selectedText: "Second paragraph note",
+            prefix: "", suffix: "", noteBody: "Body D", createdAt: now
+        )
+
+        let unsorted = [noteA, noteB, noteC, noteD]
+        let sorted = unsorted.sortedInReadingOrder()
+        assertEqual(
+            sorted.map(\.id), ["c", "b", "d", "a"],
+            "Notes must be ordered strictly by reading order (paragraphIndex then charStart)")
+
+        // 2. Grouping listings by story
+        let listing1 = UserNoteListing(note: noteA, articleTitle: "Story One", source: "Publisher 1")
+        let listing2 = UserNoteListing(note: noteC, articleTitle: "Story One", source: "Publisher 1")
+        let noteOther = UserNote(
+            id: "e", articleID: "story2", paragraphIndex: 0, charStart: 0, selectedText: "Other story note",
+            prefix: "", suffix: "", noteBody: "Body E", createdAt: now
+        )
+        let listingOther = UserNoteListing(note: noteOther, articleTitle: "Story Two", source: "Publisher 2")
+
+        let allListings = [listing1, listing2, listingOther]
+        let groups = allListings.groupedByStory()
+        assertEqual(groups.count, 2, "Must group listings into 2 distinct stories")
+
+        let story1Group = groups.first(where: { $0.articleID == "story1" })
+        assertTrue(story1Group?.isMultiple == true, "Story with multiple notes has isMultiple == true")
+        assertEqual(
+            story1Group?.listings.map(\.id), ["c", "a"], "Listings in story group must be sorted in reading order")
+
+        let story2Group = groups.first(where: { $0.articleID == "story2" })
+        assertTrue(story2Group?.isMultiple == false, "Story with single note has isMultiple == false")
+        assertEqual(story2Group?.listings.count, 1, "Single note retained in story group")
     }
 
 }
