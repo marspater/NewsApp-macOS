@@ -2,7 +2,7 @@
 
 How the Today edition looks and behaves: lanes, the six card variants, The Lead, scrolling, keyboard focus, updates and states (epic Z, #932). [DESIGN.md](DESIGN.md) holds the design language this extends, and its section 8.8 points here. Quality bars, thresholds and the shadow evaluation are in the [specification](../plans/2026-11-09-today-edition-spec.md). Unread, Saved Stories, History, Smart Binders and search keep the list and grid of DESIGN.md section 8.2.
 
-**Status.** No view code exists yet: Z3 (#935), Z4 (#936) and Z6 (#938) build this, and Z7 (#1174) supplies the card metadata. A field with no data is hidden, never faked.
+**Status.** The card variants exist (Z6, #938: `StoryCardVariant` and `StoryCardMetadata` in `Sources/Views/List/StoryCardVariant.swift`). Z3 (#935) and Z4 (#936) build The Lead and the lanes, and Z7 (#1174) supplies the card metadata. A field with no data is hidden, never faked. The visual references below are the target the views are compared with.
 
 ## Visual references
 
@@ -69,7 +69,7 @@ Presentations of the one `ArticleCardView`, chosen by the lane, sharing the anat
 | Variant | Lane | Width | Image | Below the headline |
 | --- | --- | --- | --- | --- |
 | Lead | The Lead | Full column | Full bleed, fading | See The Lead above |
-| Developing | In Motion | 320 pt | Top, 140 pt | Dek; "N publishers · N new reports"; with three or more report days, a progress strip of one dot per report day, newest filled |
+| Developing | In Motion | 320 pt | Top, 140 pt | Dek; "N publishers · N new reports"; with three or more report days, a progress rail of one ring per report day (at most seven), newest filled |
 | Standard | Your Beat, Outside Your Usual | 320 pt | Top, 140 pt | Dek; date |
 | Feature | The Deep Read | 400 pt | Top, 3:2 | Dek; content-type tag from the classification, never from length alone; reading time; date |
 | Coverage | Any lane, when the grouping is confident | 320 pt | Top, 140 pt | Dek; publisher count, original reports in teal and up to three monograms; one attributed differing account |
@@ -77,9 +77,9 @@ Presentations of the one `ArticleCardView`, chosen by the lane, sharing the anat
 
 Headlines are serif: 15 pt on Developing, Standard, Coverage and Compact, 20 pt on Feature. A Coverage card appears only past the grouping gate in the specification; otherwise the lane's plain variant shows.
 
-**Developing status.** The accent pill on the image's top trailing corner carries the update as one status, for example "Updated 14 min ago", with the latest report's time in `monospacedDigit`. The time does not repeat at the bottom of the card.
+**Developing status.** The accent pill at the trailing end of the publisher line, as the visual reference places it, carries the update as one status, for example "Updated 14 min ago", with the latest report's time in `monospacedDigit`. The time does not repeat at the bottom of the card.
 
-**Compact photo.** The notification banner's treatment ([notifications.md](notifications.md)): the photo fills the trailing 52 % of the card, top to bottom, and dissolves toward the text through an alpha fade and a progressive blur, baked once per image and cached. Text may extend over the dissolving edge, to at most 66 % of the card's width. Minimum height 104 pt; a three-line headline grows the card. Z5 (#937) measures what baking a full grid costs.
+**Compact photo.** The notification banner's treatment ([notifications.md](notifications.md)): the photo fills the trailing 52 % of the card, top to bottom, and dissolves toward the text. Z6 draws the dissolve as a gradient of the card's own fill over the photo's leading edge, which costs no pass per image; the banner's baked alpha fade and progressive blur replace it if Z5 finds the grid can afford them. Text may extend over the dissolving edge, to at most 66 % of the card's width. Minimum height 104 pt; a three-line headline grows the card. Z5 (#937) measures what baking a full grid costs.
 
 **Imagery.** Real story imagery where available, richer abstract artwork where appropriate, and a plain placeholder only for missing media. A story with no image has no photo fade.
 

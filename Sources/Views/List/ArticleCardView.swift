@@ -29,6 +29,10 @@ struct ArticleCardView<Footer: View>: View {
     /// A grid card without coverage keeps the coverage row's height inside its button, so it ends level with the
     /// event cards of its row and the whole card still opens the story (#779).
     var reservesCoverageRow = false
+    /// A Today edition presentation (docs/design/today.md); nil keeps the list or grid card.
+    var variant: StoryCardVariant?
+    /// What the variant shows beyond the story itself. A field without data is hidden.
+    var metadata = StoryCardMetadata()
     let action: () -> Void
     /// Rows that share the card surface below the story, such as an event's coverage; `EmptyView()` for none.
     let footer: Footer
@@ -36,19 +40,19 @@ struct ArticleCardView<Footer: View>: View {
     @EnvironmentObject private var readManager: ReadManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var appSettings: AppSettings
-    @Environment(\.effectiveReduceMotion) private var reduceMotion
-    @Environment(\.effectiveContrast) private var contrast
+    @Environment(\.effectiveReduceMotion) var reduceMotion
+    @Environment(\.effectiveContrast) var contrast
     @State private var isHovered = false
 
-    private var cardImageURL: URL? {
+    var cardImageURL: URL? {
         FeedArticle.bestCardImage(in: [article] + imageFallbacks)
     }
 
-    private var isRead: Bool {
+    var isRead: Bool {
         readManager.isRead(article.id)
     }
 
-    private var isSaved: Bool {
+    var isSaved: Bool {
         savedStories.isSaved(article)
     }
 
@@ -63,9 +67,7 @@ struct ArticleCardView<Footer: View>: View {
         return false
     }
 
-    private var radius: CGFloat {
-        showsLeadImage ? AppRadius.container : AppRadius.card
-    }
+    private var radius: CGFloat { AppRadius.storyCard }
 
     private var cardLayout: AnyLayout {
         compact
@@ -73,26 +75,12 @@ struct ArticleCardView<Footer: View>: View {
             : AnyLayout(VStackLayout(alignment: .leading, spacing: 0))
     }
 
-    private var appearance: (border: Color, width: CGFloat, shadow: Color, radius: CGFloat, y: CGFloat) {
-        if isSelected {
-            return (
-                AppColor.accent, AppLayout.focusStroke, AppShadow.cardFocusRingColor, AppShadow.cardFocusRingRadius,
-                AppShadow.cardFocusRingY
-            )
-        }
-        if isHovered {
-            return (
-                AppColor.hoverBorder, AppLayout.hoverStroke, AppShadow.cardHoverColor, AppShadow.cardHoverRadius,
-                AppShadow.cardHoverY
-            )
-        }
-        return (
-            AppColor.border(for: contrast), AppLayout.hairline, AppShadow.cardRestingColor, AppShadow.cardRestingRadius,
-            AppShadow.cardRestingY
-        )
-    }
+    /// Hover and keyboard focus share one elevation (DESIGN.md 12).
+    private var isRaised: Bool { isHovered || isSelected }
 
-    /// One surface for the story and its footer: the card fill, radius, stroke, shadow and hover.
+    private var cardShape: RoundedRectangle { RoundedRectangle(cornerRadius: radius, style: .continuous) }
+
+    /// One surface for the story and its footer: the card fill, radius, hairline, elevation, hover and focus ring.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button(action: action) {
@@ -130,27 +118,64 @@ struct ArticleCardView<Footer: View>: View {
         // A card is as tall as its own content: in a grid row it never stretches to a taller neighbour, such as an
         // event card showing its sources (#779).
         .fixedSize(horizontal: false, vertical: true)
-        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        .containerShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
-        // The shadow is cast by the filled card shape rather than the composited card, whose shadow needed an
+        .clipShape(cardShape)
+        .containerShape(cardShape)
+        // The shadows are cast by the filled card shape rather than the composited card, whose shadow needed an
         // offscreen pass per card on every scrolled frame (#778). The card is opaque, so it looks the same.
         .background {
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
+            let contact = isRaised ? AppShadow.cardHoverContact : AppShadow.cardRestingContact
+            let ambient = isRaised ? AppShadow.cardHoverAmbient : AppShadow.cardRestingAmbient
+            cardShape
                 .fill(AppColor.surface)
-                .shadow(color: appearance.shadow, radius: appearance.radius, x: 0, y: appearance.y)
+                .shadow(color: contact.color, radius: contact.radius, x: 0, y: contact.y)
+                .shadow(color: ambient.color, radius: ambient.radius, x: 0, y: ambient.y)
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .strokeBorder(appearance.border, lineWidth: appearance.width)
-        )
+        .overlay {
+            // With Increase Contrast the hovered edge is the solid accent: a 40 % accent can be fainter than the
+            // resting contrast border.
+            let hoveredEdge = contrast == .increased ? AppColor.accent : AppColor.hoverBorder
+            cardShape.strokeBorder(
+                isHovered ? hoveredEdge : AppColor.border(for: contrast),
+                lineWidth: isHovered ? AppLayout.hoverStroke : AppLayout.hairline)
+        }
+        // The inner top highlight: light caught by the upper edge, gone a little way down the corners.
+        .overlay {
+            cardShape
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            AppColor.cardTopHighlight(hovered: isRaised),
+                            AppColor.cardTopHighlight(hovered: isRaised).opacity(0),
+                        ],
+                        startPoint: .top, endPoint: UnitPoint(x: 0.5, y: 0.12)),
+                    lineWidth: AppLayout.cardTopHighlightHeight
+                )
+                .allowsHitTesting(false)
+        }
+        // Keyboard focus: a solid ring outside the card, never over its edge.
+        .overlay {
+            if isSelected {
+                let outset = AppLayout.focusRingOffset + AppLayout.focusStroke
+                RoundedRectangle(cornerRadius: radius + outset, style: .continuous)
+                    .strokeBorder(AppColor.accent, lineWidth: AppLayout.focusStroke)
+                    .padding(-outset)
+                    .allowsHitTesting(false)
+            }
+        }
+        .offset(y: isRaised && !reduceMotion ? -AppLayout.cardHoverLift : 0)
         .animation(reduceMotion ? nil : AppMotion.hover, value: isHovered)
         .animation(reduceMotion ? nil : AppMotion.state, value: isSelected)
         .onHover { isHovered = $0 }
     }
 
+    /// The image grows a little inside its frame while the card is raised; Reduce Motion keeps it still.
+    var imageScale: CGFloat { isRaised && !reduceMotion ? AppLayout.cardHoverImageScale : 1 }
+
     @ViewBuilder
     private var cardFace: some View {
-        if #available(macOS 26.0, *), isLead, let url = cardImageURL {
+        if let variant {
+            editionFace(variant)
+        } else if #available(macOS 26.0, *), isLead, let url = cardImageURL {
             ArticleRemoteImage(url: url) { phase in
                 leadImage(for: phase, aspectRatio: DecodedImageCache.aspectRatio(for: url))
             }
@@ -197,7 +222,9 @@ struct ArticleCardView<Footer: View>: View {
                             Color.clear
                                 .frame(maxWidth: .infinity)
                                 .frame(height: cardHeaderHeight)
-                                .overlay { image.resizable().aspectRatio(contentMode: .fill) }
+                                .overlay {
+                                    image.resizable().aspectRatio(contentMode: .fill).scaleEffect(imageScale)
+                                }
                                 .clipped()
                                 // Clipping hides the overflow but does not stop it taking clicks meant for the card
                                 // above.
@@ -322,7 +349,7 @@ struct ArticleCardView<Footer: View>: View {
 
     /// A story without a usable image: a flat elevated surface and the newspaper glyph. It fills whatever frame
     /// its caller gives it, from a grid header to the whole lead.
-    private var editorialPlaceholder: some View {
+    var editorialPlaceholder: some View {
         AppColor.elevatedSurface
             .overlay(alignment: .topLeading) {
                 Image(systemName: "newspaper")
@@ -422,15 +449,16 @@ struct ArticleCardView<Footer: View>: View {
 
     // MARK: - Helpers
 
-    private var displaySource: String { article.publisherName }
+    var displaySource: String { article.publisherName }
 
     private var accessibilityDescription: String {
         let readState = isRead ? "Read" : "Unread"
         let savedState = isSaved ? ", saved in your library" : ""
         let dateFormatted = article.dateAccessibilityText
         let excerpt = article.searchExcerpt.map { " Matching text: \($0.plainText)" } ?? ""
+        let extras = variant.map { metadata.accessibilityText(for: $0) } ?? ""
         return
-            "\(article.title), from \(displaySource), \(dateFormatted). \(readState)\(savedState).\(excerpt)"
+            "\(article.title), from \(displaySource), \(dateFormatted). \(readState)\(savedState).\(extras)\(excerpt)"
     }
 }
 
@@ -534,7 +562,7 @@ struct CoverageRowSpace: View {
 /// Feed summaries cleaned for cards, by raw text: card bodies run on every update while scrolling, the cleaning
 /// regular expressions once per summary (#778).
 @MainActor
-private enum CardText {
+enum CardText {
     private static let cache: NSCache<NSString, NSString> = {
         let cache = NSCache<NSString, NSString>()
         cache.countLimit = 2000
@@ -558,8 +586,8 @@ struct StoryContextMenuItems<TrailingContent: View>: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var appSettings: AppSettings
 
-    private var isRead: Bool { readManager.isRead(article.id) }
-    private var isSaved: Bool { savedStories.isSaved(article) }
+    var isRead: Bool { readManager.isRead(article.id) }
+    var isSaved: Bool { savedStories.isSaved(article) }
 
     init(article: FeedArticle, @ViewBuilder trailingContent: () -> TrailingContent) {
         self.article = article
@@ -633,6 +661,7 @@ extension ArticleCardView: @MainActor Equatable where Footer == EmptyView {
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.article == rhs.article && lhs.isSelected == rhs.isSelected && lhs.compact == rhs.compact
             && lhs.imageFallbacks == rhs.imageFallbacks && lhs.isLead == rhs.isLead
-            && lhs.reservesCoverageRow == rhs.reservesCoverageRow
+            && lhs.reservesCoverageRow == rhs.reservesCoverageRow && lhs.variant == rhs.variant
+            && lhs.metadata == rhs.metadata
     }
 }
