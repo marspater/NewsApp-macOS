@@ -227,7 +227,6 @@ struct TodayLaneSection: View {
                         guard let focused, ids.contains(focused) else { return }
                         withAnimation(reduceMotion ? nil : AppMotion.hover) { proxy.scrollTo(focused) }
                     }
-                    .onChange(of: position) { _, leading in actions.leadingCardChanged(lane.lane, leading) }
                     // A lane that appears holding the focused card (an applied update moved it there) shows it.
                     .onAppear {
                         guard let focusedID, ids.contains(focusedID) else { return }
@@ -275,6 +274,9 @@ struct TodayLaneSection: View {
             $0.contentOffset.x
         } action: { _, offset in
             scrollX = offset
+            // The card at the leading edge, for an arrow key entering the lane.
+            let leading = Int((offset / cardStep).rounded())
+            actions.leadingCardChanged(lane.lane, ids.indices.contains(leading) ? ids[leading] : nil)
         }
         .onScrollGeometryChange(for: CGFloat.self) {
             max(0, $0.contentSize.width - $0.containerSize.width)
@@ -334,10 +336,14 @@ struct TodayLaneSection: View {
         return order.compactMap { longest[$0] }
     }
 
+    /// The distance between two cards' leading edges.
+    private var cardStep: CGFloat {
+        (lane.stories.first?.cardVariant.laneWidth ?? AppLayout.laneCardWidth) + AppLayout.cardGap
+    }
+
     /// Moves the row by two cards from where it is scrolled to now; the row itself scrolls freely with the trackpad.
     private func pageButton(_ symbol: String, label: String, offset: Int) -> some View {
-        let cardWidth = lane.stories.first?.cardVariant.laneWidth ?? AppLayout.laneCardWidth
-        let step = cardWidth + AppLayout.cardGap
+        let step = cardStep
         let index = (scrollX / step).rounded()
         let target = max(0, min(scrollMax, (index + CGFloat(offset * 2)) * step))
         return Button {
