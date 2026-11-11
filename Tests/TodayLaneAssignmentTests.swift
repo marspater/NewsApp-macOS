@@ -1082,11 +1082,9 @@ extension NewsTests {
                     id: "c\(index)", title: "\(titles[index % 3]) number \(index)", pubDate: referenceNow))
         }
         let context = TodayAssignmentContext(now: referenceNow)
+        // Every field of the evaluation, not a chosen few: a value that concurrency changed would show.
         func summary(_ stories: [TodayEditionAssigner.EvaluatedStory]) -> [String] {
-            stories.map {
-                "\($0.id) \($0.score) \($0.originalReportCount) \($0.publisherCount) \($0.interestMatch) "
-                    + "\($0.novelty) \($0.readingTimeMinutes) \($0.contentType?.type.rawValue ?? "-")"
-            }
+            stories.map { String(describing: $0) }
         }
         let serial = entries.map { TodayEditionAssigner.evaluateStory($0, context: context) }
         let concurrent = TodayEditionAssigner.evaluateStories(entries, context: context)
