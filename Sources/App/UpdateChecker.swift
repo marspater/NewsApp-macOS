@@ -28,8 +28,6 @@ struct SemanticVersion: Comparable, Sendable {
     let minor: Int
     let patch: Int
 
-    private static let asciiDigits = UInt8(ascii: "0")...UInt8(ascii: "9")
-
     /// Parses strict SemVer strings formatted as `vX.Y.Z` or `X.Y.Z`.
     /// Rejects leading zeros (e.g. `001.002.003`) per SemVer 2.0.0 specification.
     /// Rejects non-conforming tags (e.g. `release-2.0.1`, `v2.0`, `foo`).
@@ -47,7 +45,7 @@ struct SemanticVersion: Comparable, Sendable {
             if part.count > 1 && part.first == "0" {
                 return nil
             }
-            guard part.utf8.allSatisfy(Self.asciiDigits.contains) else {
+            guard part.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else {
                 return nil
             }
         }
