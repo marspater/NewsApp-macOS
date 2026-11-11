@@ -22,11 +22,11 @@ The run prints `TODAY_PAGE_TIMING`; `--today-shadow` now builds with `-O`.
 | Context load, median ms | 39.3 | 41.1 | 40.8 | 40.8 |
 | Assignment, median ms | 727.0 | 125.6 | 125.3 | 125.2 |
 
-**What changed.** Each story's evidence needs three NaturalLanguage passes (sentiment, names, and names again for the interest match when the library holds no entity mentions for it), about 4 ms a story. The stories are independent, so `evaluateStories` spreads them over the cores with `DispatchQueue.concurrentPerform` and writes each result to its own slot. The order of the result and every value in it are unchanged; `testDeterminismAndDatabaseLoaderIntegration` covers it.
+**What changed.** Each story's evidence needs three NaturalLanguage passes (sentiment, names, and names again for the interest match when the library holds no entity mentions for it), about 4 ms a story. The stories are independent, so `evaluateStories` spreads them over the cores with `DispatchQueue.concurrentPerform` and writes each result to its own slot. The order of the result and every value in it are unchanged; `testConcurrentEvaluationMatchesSerial` compares the concurrent evaluation of 40 stories with the serial one.
 
 The Mac was in use during the runs (load average about 4), so the figures are an upper bound for an idle Mac, not a clean median under `docs/audits/2026-11-07-build-measurement-protocol.md`. The "before" figure is one run.
 
-**Proposed budget for #543:** 250 ms for context load plus assignment of a 200-story page (measured 166 ms). The launch transition waits for the edition for at most one second (`ArticleListView.settleLaunch`), so a page within budget arrives with the first frame.
+**Proposed budget for #543:** 250 ms for context load plus assignment of a 200-story page. The two medians above sum to 166 ms, which is not the median of the combined durations: the runs above did not record it, and `TODAY_PAGE_TIMING` now prints `combinedMedianMs` for the next run. The launch transition waits for the edition for at most one second (`ArticleListView.settleLaunch`). These timings follow a full-window load and assignment and leave out other page work, so they do not show that the edition arrives with the first frame; that needs the first-frame measurement listed below.
 
 ## Not measured
 

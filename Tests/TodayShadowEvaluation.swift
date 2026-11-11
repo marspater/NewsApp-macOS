@@ -31,6 +31,7 @@ enum TodayShadowEvaluation {
         let entries = EventFeedGrouping.entries(for: page, events: summaries, mode: .events)
         var loader: [Double] = []
         var assign: [Double] = []
+        var combined: [Double] = []
         for _ in 0..<3 {
             let loadStart = CFAbsoluteTimeGetCurrent()
             let context = try await database.loadTodayAssignmentContext(
@@ -38,12 +39,15 @@ enum TodayShadowEvaluation {
             loader.append((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
             let assignStart = CFAbsoluteTimeGetCurrent()
             _ = TodayEditionAssigner.assign(entries: entries, context: context)
-            assign.append((CFAbsoluteTimeGetCurrent() - assignStart) * 1000)
+            let end = CFAbsoluteTimeGetCurrent()
+            assign.append((end - assignStart) * 1000)
+            combined.append((end - loadStart) * 1000)
         }
         print(
             String(
-                format: "TODAY_PAGE_TIMING stories=%d entries=%d loaderMedianMs=%.1f assignMedianMs=%.1f",
-                page.count, entries.count, loader.sorted()[1], assign.sorted()[1]))
+                format:
+                    "TODAY_PAGE_TIMING stories=%d entries=%d loaderMedianMs=%.1f assignMedianMs=%.1f combinedMedianMs=%.1f",
+                page.count, entries.count, loader.sorted()[1], assign.sorted()[1], combined.sorted()[1]))
     }
 
     struct StoryLabels: Decodable {
