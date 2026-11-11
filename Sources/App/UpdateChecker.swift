@@ -92,8 +92,7 @@ struct GitHubReleasePayload: Codable, Sendable {
 /// - Enforces 72-hour automatic throttling after every attempt, failed or not, while allowing manual bypass.
 /// - Validates strict SemVer before flagging updates.
 @MainActor
-@Observable
-final class UpdateChecker {
+@Observable final class UpdateChecker {
     static let shared = UpdateChecker(defaults: .standard)
 
     var isChecking: Bool = false
