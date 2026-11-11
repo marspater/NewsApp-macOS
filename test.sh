@@ -19,7 +19,7 @@ fi
 
 TEST_OPT_FLAGS=()
 for argument in "$@"; do
-    if [[ "$argument" == "--performance-baseline" || "$argument" == "--search-memory" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" || "$argument" == "--library-holdout" ]]; then TEST_OPT_FLAGS=(-O); fi
+    if [[ "$argument" == "--performance-baseline" || "$argument" == "--search-memory" || "$argument" == "--transport-cancellation" || "$argument" == "--publisher-cancellation" || "$argument" == "--library-holdout" || "$argument" == "--today-shadow" ]]; then TEST_OPT_FLAGS=(-O); fi
 done
 
 # The plain run is the gate: it starts with the self-checks that need no Swift build. A run with arguments is one

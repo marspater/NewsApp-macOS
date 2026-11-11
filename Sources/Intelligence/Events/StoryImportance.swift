@@ -32,6 +32,8 @@ enum StoryCurator {
         var expired = 0
         var imagesFound = 0
         var imagesChecked = 0
+        /// Stories of `first` the budget ran out before: a later pass looks them up.
+        var deferredIDs: Set<String> = []
         var changed: Bool { expired > 0 || imagesChecked > 0 }
     }
 
@@ -43,6 +45,7 @@ enum StoryCurator {
         imageFinder: StoryImageFinder = .unavailable,
         imageBudget: Int = imageBudget,
         muting: MuteRules = MuteRules(),
+        first: [String] = [],
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
         now: Date = Date(),
         onImageSaved: (@Sendable () -> Void)? = nil
@@ -52,10 +55,17 @@ enum StoryCurator {
             // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
             var lookedUp = Set<String>()
             do {
-                for row in try await database.imagelessStoryRows(
+                let rows = try await database.imagelessStoryRows(
                     activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting,
-                    isRequestable: { StoryImageFinder.pageURL($0) != nil })
-                where lookedUp.count < imageBudget {
+                    first: first, isRequestable: { StoryImageFinder.pageURL($0) != nil })
+                for (index, row) in rows.enumerated() {
+                    guard lookedUp.count < imageBudget else {
+                        // A story whose event was looked up is covered by it.
+                        report.deferredIDs = Set(
+                            rows[index...].filter { !lookedUp.contains($0.eventID ?? $0.id) }.map(\.id)
+                        ).intersection(Set(first))
+                        break
+                    }
                     try Task.checkCancellation()
                     if let event = row.eventID, lookedUp.contains(event) { continue }
                     // A link the client would refuse before any request is never a candidate and spends no budget. Nothing

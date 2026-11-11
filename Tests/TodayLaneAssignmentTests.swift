@@ -28,6 +28,9 @@ extension NewsTests {
             ("testLeadFallbackAndAffinityTieBreak", { testTodayLeadFallbackAndAffinityTieBreak() }),
             ("testWireCopyDoesNotInflateOriginalReportsInLead", { testTodayWireCopyDoesNotInflateLead() }),
             ("testInMotionClockHeadlineAndMaterialChange", { testTodayInMotionClockAndMaterialChange() }),
+            ("testInMotionUpdateWindowKeepsUnderwayApart", { testTodayInMotionUpdateWindow() }),
+            ("testInMotionWithoutRisingNeverFillsWithRepetition", { testTodayInMotionWithoutRising() }),
+            ("testYourBeatAffinityAsBoosterOnly", { testTodayYourBeatAffinityBooster() }),
             ("testDeepReadAssignedBeforeYourBeatAndLabelContract", { testTodayDeepReadOrderAndLabelContract() }),
             ("testDeepReadOverflowKeepsDepthAndSummaryPhraseAlone", { testTodayDeepReadOverflowKeepsDepth() }),
             ("testYourBeatFinerProfileAndOverflowCascade", { testTodayYourBeatProfileAndOverflowCascade() }),
@@ -35,6 +38,13 @@ extension NewsTests {
             ("testConditionalUnderflowHidesLaneAndCascades", { testTodayUnderflowHidesAndCascades() }),
             ("testSubscriptionPoolAndZeroDuplicatesAndLatestSafetyNet", { testTodaySubscriptionPoolAndSafetyNet() }),
             ("testCoverageGateAndDevelopingPill", { testTodayCoverageGateAndDevelopingPill() }),
+            ("testCardMetadataHasRealSourcesOrIsHidden", { testTodayCardMetadata() }),
+            ("testFocusMovesWithinAndBetweenLanes", { testTodayFocusMap() }),
+            ("testFocusIsRestoredWhenTheEditionChanges", { testTodayFocusRestore() }),
+            ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
+            ("testHeldEditionKeepsTagsEntriesAndNewEditionSortsLatest", { testTodayHeldEditionDetails() }),
+            ("testConcurrentEvaluationMatchesSerial", { testTodayConcurrentEvaluationMatchesSerial() }),
+            ("testLeadNeedsAPhotoAndLeftFeedsLeaveToday", { testTodayLeadPhotoAndLeftFeeds() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
@@ -414,6 +424,154 @@ extension NewsTests {
         assertFalse(inMotionIDs.contains("rep-new"))
     }
 
+    /// An event of two or more reports, newest first, each `hoursAgo` before the reference clock.
+    private static func inMotionEvent(
+        _ id: String, reports: [(hoursAgo: Double, title: String)]
+    ) -> FeedEntry {
+        makeEventEntry(
+            eventID: "im-\(id)",
+            members: reports.enumerated().map { index, report in
+                (
+                    "\(id)-\(index)", "Outlet \(id) \(index)", report.title, "Report.",
+                    referenceNow.addingTimeInterval(-report.hoursAgo * 3600), "https://\(id)\(index).example/rss"
+                )
+            })
+    }
+
+    private static let inquiryHeadline = "Regulators open preliminary inquiry into proposed rail merger"
+    private static let rulingHeadline = "Court blocks merger and orders divestiture of regional assets"
+
+    /// The evaluation variant of #934: "is the story underway" stays at 24 h whatever the update window is.
+    static func testTodayInMotionUpdateWindow() {
+        func summary(_ entry: FeedEntry) -> EventFeedSummary {
+            guard case .event(let summary, _, _) = entry else { fatalError("An event entry") }
+            return summary
+        }
+        func variant(_ entry: FeedEntry, updateHours: Double) -> Bool {
+            TodayEditionAssigner.hasSubstantiveInMotionUpdate(
+                summary(entry), now: referenceNow, underway: 24 * 3600, updateWindow: updateHours * 3600)
+        }
+        func shipped(_ entry: FeedEntry, windowHours: Double = 24) -> Bool {
+            TodayEditionAssigner.hasSubstantiveInMotionUpdate(
+                summary(entry), now: referenceNow, window: windowHours * 3600)
+        }
+
+        // An initial report 30 hours ago with an update 2 hours ago.
+        let freshUpdate = inMotionEvent("fresh", reports: [(2, rulingHeadline), (30, inquiryHeadline)])
+        assertTrue(shipped(freshUpdate), "The shipped rule takes an update 2 h old on a story 30 h old")
+        assertTrue(variant(freshUpdate, updateHours: 24), "So does the 24 h update window")
+        assertTrue(variant(freshUpdate, updateHours: 36), "So does the 36 h update window")
+        assertFalse(
+            shipped(freshUpdate, windowHours: 36),
+            "Moving the shipped cutoff to 36 h also moves the earlier reports inside it: the story reads as new")
+
+        // An older story whose latest meaningful update is 25 to 36 hours old.
+        for updateAge in [25.0, 30.0, 36.0] {
+            let olderUpdate = inMotionEvent("older", reports: [(updateAge, rulingHeadline), (60, inquiryHeadline)])
+            assertFalse(shipped(olderUpdate), "The shipped rule has no report inside 24 h (update \(updateAge) h old)")
+            assertFalse(variant(olderUpdate, updateHours: 24), "Nor has the 24 h update window (\(updateAge) h)")
+            assertTrue(variant(olderUpdate, updateHours: 36), "The 36 h update window takes it (\(updateAge) h)")
+        }
+        let staleUpdate = inMotionEvent("stale", reports: [(37, rulingHeadline), (60, inquiryHeadline)])
+        assertFalse(variant(staleUpdate, updateHours: 36), "An update 37 h old is outside the 36 h window")
+
+        // A story whose reports all fall in the last 24 hours is new, not ongoing, whatever the update window.
+        let newStory = inMotionEvent("new", reports: [(2, rulingHeadline), (20, inquiryHeadline)])
+        assertFalse(shipped(newStory), "The shipped rule calls a story inside 24 h new")
+        assertFalse(variant(newStory, updateHours: 24), "The 24 h update window calls a story inside 24 h new")
+        assertFalse(variant(newStory, updateHours: 36), "The 36 h update window calls a story inside 24 h new")
+
+        // The update is compared against the reports that came before it. A first report has none; a report that
+        // repeats an earlier one is no update, also when that earlier report is itself inside the window.
+        let firstReportOnly = inMotionEvent("first", reports: [(30, inquiryHeadline), (30, rulingHeadline)])
+        assertFalse(variant(firstReportOnly, updateHours: 36), "Reports of the same moment are not each other's past")
+        let repeated = inMotionEvent(
+            "repeat",
+            reports: [
+                (30, "Annual budget bill debated by Parliament on Tuesday"),
+                (60, "Parliament debates annual budget bill on Monday"),
+            ])
+        assertFalse(variant(repeated, updateHours: 36), "A paraphrase 30 h old is repetition in the 36 h window")
+        let repeatedInsideWindow = inMotionEvent(
+            "echo",
+            reports: [
+                (2, "Court blocks the merger and orders divestiture of regional assets"),
+                (30, rulingHeadline),
+                (60, inquiryHeadline),
+            ])
+        assertFalse(
+            variant(repeatedInsideWindow, updateHours: 24),
+            "The 2 h report repeats the 30 h one, and the 30 h update is outside the 24 h window")
+        assertTrue(
+            variant(repeatedInsideWindow, updateHours: 36),
+            "The 30 h report is the update of the 60 h story in the 36 h window")
+    }
+
+    /// Without the rising requirement steady and fading stories enter In Motion; the headline test still decides,
+    /// so a lane short of its minimum stays hidden.
+    static func testTodayInMotionWithoutRising() {
+        let lead = inMotionEvent(
+            "lead",
+            reports: [
+                (0.5, "National emergency declared after severe coastal storms kill dozens"),
+                (0.6, "Evacuations ordered across three provinces after deadly storms"),
+            ])
+        // Fading: one report 6 to 12 hours ago and none since. Steady: nothing in the last 12 hours.
+        let fading = (1...2).map {
+            inMotionEvent("fading\($0)", reports: [(8, rulingHeadline), (30, inquiryHeadline)])
+        }
+        let steady = inMotionEvent("steady", reports: [(14, rulingHeadline), (30, inquiryHeadline)])
+        let olderUpdate = inMotionEvent("older", reports: [(30, rulingHeadline), (60, inquiryHeadline)])
+        let newStory = inMotionEvent("new", reports: [(8, rulingHeadline), (20, inquiryHeadline)])
+        let repetition = inMotionEvent(
+            "repeat",
+            reports: [
+                (8, "Annual budget bill debated by Parliament on Tuesday"),
+                (30, "Parliament debates annual budget bill on Monday"),
+            ])
+        let entries = [lead] + fading + [steady, olderUpdate, newStory, repetition]
+
+        func inMotion(_ entries: [FeedEntry], _ change: (inout TodayEditionThresholds) -> Void) -> Set<String> {
+            var thresholds = TodayEditionThresholds.standard
+            change(&thresholds)
+            var signals = Dictionary(
+                uniqueKeysWithValues: entries.map {
+                    ($0.id, TodayStorySignals(nlImportanceOverride: 0.30, resolvedImportanceOverride: .minor))
+                })
+            signals["lead-0"] = TodayStorySignals(nlImportanceOverride: 0.95, resolvedImportanceOverride: .major)
+            let plan = TodayEditionAssigner.assign(
+                entries: entries,
+                context: TodayAssignmentContext(now: referenceNow, signalsByEntryID: signals, thresholds: thresholds))
+            assertEqual(plan.allAssignments.count, entries.count, "Every story keeps one lane")
+            return Set(plan.entries(for: .inMotion).map(\.id))
+        }
+
+        assertEqual(inMotion(entries) { _ in }, [], "The shipped rule needs rising momentum")
+        assertEqual(
+            inMotion(entries) { $0.inMotionUpdateWindowSeconds = 24 * 3600 }, [],
+            "The update window alone keeps the rising requirement")
+        assertEqual(
+            inMotion(entries) {
+                $0.inMotionUpdateWindowSeconds = 24 * 3600
+                $0.inMotionRequiresRisingMomentum = false
+            },
+            ["fading1-0", "fading2-0", "steady-0"],
+            "Steady and fading updates enter; the new story, the repetition and the 30 h update stay out")
+        assertEqual(
+            inMotion(entries) {
+                $0.inMotionUpdateWindowSeconds = 36 * 3600
+                $0.inMotionRequiresRisingMomentum = false
+            },
+            ["fading1-0", "fading2-0", "steady-0", "older-0"],
+            "The 36 h window adds the update 30 h old, and nothing that is new or repeated")
+        assertEqual(
+            inMotion([lead, fading[0], steady, newStory, repetition]) {
+                $0.inMotionUpdateWindowSeconds = 36 * 3600
+                $0.inMotionRequiresRisingMomentum = false
+            }, [],
+            "Two real updates are under the minimum of three: repetition never fills the lane")
+    }
+
     static func testTodayDeepReadOrderAndLabelContract() {
         let longBody = Array(repeating: "reporting", count: 1650).joined(separator: " ")  // >= 1,600 words (~8.25 min)
         // Stories also match the user's entity profile strongly, proving The Deep Read beats Your Beat!
@@ -628,6 +786,74 @@ extension NewsTests {
         assertTrue(latestIDs.contains("coarse-tech"))
     }
 
+    /// The evaluation option of #934: publisher affinity qualifies only together with an interest match above a
+    /// lower bar, while a starred feed and a strong interest match still qualify alone.
+    static func testTodayYourBeatAffinityBooster() {
+        let profile = TodayUserProfile(
+            entityWeights: ["organization:cern": 12.0],
+            keywordWeights: ["fusion": 10.0],
+            publisherWeights: ["favorite": 12.0, "occasional": 2.0, "rare": 2.0, "other": 2.0],
+            interactionCount: 25
+        )
+        func story(
+            _ id: String, _ title: String, source: String, feedURL: String = "https://plain.example/rss",
+            entities: [EntityResult]? = nil
+        ) -> FeedEntry {
+            .article(
+                makeArticle(
+                    id: id, title: title, source: source, feedURL: feedURL, category: nil,
+                    pubDate: referenceNow.addingTimeInterval(-600), entities: entities))
+        }
+        let lead = story("lead", "Crisis emergency talks begin", source: "Wire Desk")
+        let affinityOnly = (1...3).map {
+            story("affinity-\($0)", "Harbor authority reviews ferry timetable \($0)", source: "Favorite")
+        }
+        let affinityAndSomeInterest = story(
+            "boosted", "Fusion startup secures funding for reactor prototype", source: "Favorite")
+        let strongInterest = (1...2).map {
+            story(
+                "interest-\($0)", "Collider team publishes beam results \($0)", source: "Rare",
+                entities: [EntityResult(name: "CERN", type: .organization)])
+        }
+        let starred = story(
+            "starred", "Council approves cycling budget", source: "Other", feedURL: "https://starred.example/rss")
+        let entries = [lead] + affinityOnly + [affinityAndSomeInterest] + strongInterest + [starred]
+
+        func yourBeat(affinityInterestMinimum: Double) -> [TodayStoryAssignment] {
+            var thresholds = TodayEditionThresholds.standard
+            thresholds.yourBeatAffinityInterestMinimum = affinityInterestMinimum
+            var signals = Dictionary(
+                uniqueKeysWithValues: entries.map {
+                    ($0.id, TodayStorySignals(nlImportanceOverride: 0.30, resolvedImportanceOverride: .minor))
+                })
+            signals["lead"] = TodayStorySignals(nlImportanceOverride: 0.90, resolvedImportanceOverride: .major)
+            return TodayEditionAssigner.assign(
+                entries: entries,
+                context: TodayAssignmentContext(
+                    now: referenceNow, starredFeedURLs: ["https://starred.example/rss"], profile: profile,
+                    signalsByEntryID: signals, thresholds: thresholds)
+            ).entries(for: .yourBeat)
+        }
+
+        let shipped = yourBeat(affinityInterestMinimum: TodayEditionThresholds.standard.yourBeatAffinityInterestMinimum)
+        assertEqual(
+            Set(shipped.map(\.id)),
+            ["affinity-1", "affinity-2", "affinity-3", "boosted", "interest-1", "interest-2", "starred"],
+            "The shipped rule lets top-quartile affinity qualify a story on its own")
+        let boostedMatch = shipped.first { $0.id == "boosted" }?.interestMatch ?? 0
+        assertTrue(
+            boostedMatch >= 0.30 && boostedMatch < 0.50,
+            "The boosted story's interest match (\(boostedMatch)) is under the bar that qualifies alone")
+
+        let booster = yourBeat(affinityInterestMinimum: 0.30)
+        assertEqual(
+            Set(booster.map(\.id)), ["boosted", "interest-1", "interest-2", "starred"],
+            "As a booster, affinity needs an interest match of 0.30; stars and strong interest qualify alone")
+        assertEqual(
+            booster.first { $0.id == "boosted" }?.reason, "your_beat_publisher_affinity",
+            "The boosted story still enters through its publisher")
+    }
+
     static func testTodayOutsideYourUsualAndNewLibrary() {
         let lead = FeedEntry.article(
             makeArticle(id: "lead", title: "Breaking storm emergency closes port", pubDate: referenceNow))
@@ -823,6 +1049,334 @@ extension NewsTests {
         assertFalse(byID["w1"]?.isDeveloping == true, "Event older than 1 h is not Developing")
     }
 
+    /// Z7 (#1174): every card field comes from the assignment or the event, and a field without data stays nil.
+    static func testTodayCardMetadata() {
+        let day = 86_400.0
+        let event = makeEventEntry(
+            eventID: "ev-meta",
+            members: [
+                (
+                    "m1", "Outlet 1", "Port closes", "Detail", referenceNow.addingTimeInterval(-2 * day),
+                    "https://o1.example/rss"
+                ),
+                (
+                    "m2", "Outlet 2", "Port stays closed", "Detail", referenceNow.addingTimeInterval(-day),
+                    "https://o2.example/rss"
+                ),
+                (
+                    "m3", "Outlet 3", "Port reopens", "Detail", referenceNow.addingTimeInterval(-600),
+                    "https://o3.example/rss"
+                ),
+            ],
+            seenVersion: 1
+        )
+        let longRead = makeArticle(
+            id: "long", title: "Inside how the port was rebuilt", pubDate: referenceNow.addingTimeInterval(-3600),
+            fullContent: Array(repeating: "word", count: 2100).joined(separator: " "))
+        let teaser = makeArticle(id: "teaser", title: "A short note", pubDate: referenceNow.addingTimeInterval(-3600))
+        let plan = TodayEditionAssigner.assign(
+            entries: [event, .article(longRead), .article(teaser)],
+            context: TodayAssignmentContext(
+                now: referenceNow,
+                signalsByEntryID: ["m1": TodayStorySignals(originalReportCount: 2, groupingConfidence: 0.9)]))
+        let byID = Dictionary(uniqueKeysWithValues: plan.allAssignments.map { ($0.id, $0) })
+        guard let eventAssignment = byID["m1"], let long = byID["long"], let short = byID["teaser"] else {
+            assertTrue(false, "Every entry is assigned")
+            return
+        }
+        let utc = Calendar(identifier: .gregorian)
+        let meta = StoryCardMetadata(eventAssignment, differingAccount: "A: one. B: two.", calendar: utc)
+        assertEqual(meta.publisherCount, 3, "Publishers come from the event's distinct sources")
+        assertEqual(meta.originalReports, 2, "Original reports come from the assignment")
+        assertEqual(meta.newReportCount, 2, "Reports that joined after the seen version are new")
+        assertEqual(meta.reportDays, 3, "One progress mark per report day")
+        assertEqual(meta.updatedAt, referenceNow.addingTimeInterval(-600), "The pill carries the latest report's time")
+        assertEqual(meta.publishers, ["Outlet 1", "Outlet 2", "Outlet 3"], "Monograms follow coverage order")
+        assertEqual(meta.differingAccount, "A: one. B: two.", "The stored account is passed through")
+
+        assertEqual(StoryCardMetadata(long).readingMinutes, 11, "2,100 stored words read in 11 minutes")
+        let bare = StoryCardMetadata(short)
+        assertTrue(bare.readingMinutes == nil, "A feed summary's length is not a reading time")
+        assertTrue(
+            bare.publisherCount == nil && bare.updatedAt == nil && bare.publishers.isEmpty, "No event, no coverage")
+        assertTrue(bare.contentType == nil, "No classification, no content-type tag")
+
+        if case .event(let summary, _, _) = event {
+            assertTrue(summary.isDeveloping(now: referenceNow), "A report ten minutes ago makes the event developing")
+            assertFalse(summary.isDeveloping(now: referenceNow.addingTimeInterval(7200)), "Two hours later it is not")
+            assertFalse(
+                summary.isDeveloping(now: referenceNow.addingTimeInterval(-4000)), "A report dated ahead does not count"
+            )
+        }
+        let never = makeEventEntry(
+            eventID: "ev-new",
+            members: [
+                ("n1", "Outlet 1", "A", "Detail", referenceNow, "https://o1.example/rss"),
+                ("n2", "Outlet 2", "B", "Detail", referenceNow, "https://o2.example/rss"),
+            ])
+        if case .event(let summary, _, _) = never {
+            assertTrue(summary.newReportCount == nil, "An event never opened is new, not updated")
+        }
+
+        let verge = OverviewPerspective(
+            participant: "Consortium", position: "the standard is voluntary", sourcePublisher: "The Verge")
+        let vergeAgain = OverviewPerspective(
+            participant: "Vendors", position: "adoption will be slow.", sourcePublisher: "the verge")
+        let ars = OverviewPerspective(
+            participant: "Regulator", position: "the consortium can enforce it.", sourcePublisher: "Ars Technica")
+        let unattributed = OverviewPerspective(participant: "Analysts", position: "it changes little")
+        assertEqual(
+            StoryCardMetadata.differingAccount(in: [verge, vergeAgain, unattributed, ars]),
+            "The Verge: the standard is voluntary. Ars Technica: the consortium can enforce it.",
+            "Two publishers' positions, each attributed, in the overview's order")
+        assertTrue(
+            StoryCardMetadata.differingAccount(in: [verge, vergeAgain, unattributed]) == nil,
+            "One publisher's account is not a difference")
+    }
+
+    private static func focusMap(latest: [String] = ["l1", "l2", "l3", "l4", "l5"], columns: Int = 2) -> TodayFocusMap {
+        TodayFocusMap(lanes: [
+            .init(lane: .theLead, ids: ["a", "b", "c"]),
+            .init(lane: .inMotion, ids: ["m1", "m2", "m3"]),
+            .init(lane: .yourBeat, ids: []),
+            .init(lane: .theDeepRead, ids: ["d1", "d2", "d3"]),
+            .init(lane: .theLatest, ids: latest, columns: columns),
+        ])
+    }
+
+    /// Z4 (#936): arrows inside and between lanes, J and K in reading order.
+    static func testTodayFocusMap() {
+        let map = focusMap()
+        assertEqual(map.lanes.map(\.lane), [.theLead, .inMotion, .theDeepRead, .theLatest], "An empty lane is absent")
+        assertEqual(map.move(.down, from: nil), "a", "Without focus, the first card takes it")
+        assertEqual(map.move(.right, from: "c"), "a", "The Lead is a loop")
+        assertEqual(map.move(.left, from: "a"), "c", "The Lead loops backwards too")
+        assertEqual(map.move(.right, from: "m3"), "m3", "A row stops at its last card")
+        assertEqual(map.move(.left, from: "m1"), "m1", "A row stops at its first card")
+        assertEqual(map.move(.down, from: "b"), "m1", "Down from The Lead enters the first lane below")
+        assertEqual(
+            map.move(.down, from: "m2", memory: [.theDeepRead: "d3"]), "d3", "A lane gives focus to its remembered card"
+        )
+        assertEqual(
+            map.move(.down, from: "m2", memory: [.theDeepRead: "gone"]), "d1",
+            "A remembered card that left falls back to the first")
+        assertEqual(
+            map.move(.down, from: "m2", memory: [:], visible: [.theDeepRead: "d3"]), "d3",
+            "A lane without a remembered card gives focus to the card at its leading edge")
+        assertEqual(
+            map.move(.down, from: "m2", memory: [.theDeepRead: "d2"], visible: [.theDeepRead: "d3"]), "d2",
+            "A remembered card comes before the leading one")
+        assertEqual(map.move(.up, from: "a"), "a", "Nothing is above The Lead")
+        assertEqual(map.move(.down, from: "d2"), "l1", "Down from the last row lane enters the grid")
+        assertEqual(map.move(.right, from: "l2"), "l3", "Right in the grid wraps to the next row")
+        assertEqual(map.move(.down, from: "l1"), "l3", "Down in the grid moves one row")
+        assertEqual(map.move(.down, from: "l4"), "l5", "Down onto a shorter last row lands on its last card")
+        assertEqual(map.move(.down, from: "l5"), "l5", "The last row is the end")
+        assertEqual(map.move(.up, from: "l4"), "l2", "Up in the grid moves one row")
+        assertEqual(
+            map.move(.up, from: "l2", memory: [.theDeepRead: "d2"]), "d2", "Up from the first row enters the lane above"
+        )
+        assertEqual(map.step(1, from: "c"), "m1", "J leaves the slides for the next lane")
+        assertEqual(map.step(-1, from: "l1"), "d3", "K leaves the grid for the lane above")
+        assertEqual(map.step(1, from: "l5"), "l5", "J stops at the last story")
+        assertEqual(map.step(1, from: nil), "a", "J without focus starts at the first story")
+        assertEqual(focusMap(columns: 1).move(.down, from: "l1"), "l2", "The list layout is a grid of one column")
+    }
+
+    /// Z4 (#936): where focus lands when the reader applies an update.
+    static func testTodayFocusRestore() {
+        let old = focusMap()
+        func restored(_ id: String, _ lanes: [TodayFocusMap.Lane]) -> String? {
+            TodayFocusMap(lanes: lanes).restoredFocus(id, from: old)
+        }
+        let latest = TodayFocusMap.Lane(lane: .theLatest, ids: ["l1", "l2"], columns: 2)
+        let lead = TodayFocusMap.Lane(lane: .theLead, ids: ["a"])
+        assertEqual(
+            restored("m2", [lead, .init(lane: .theDeepRead, ids: ["m2", "d1"]), latest]), "m2",
+            "A card still in the edition keeps focus, also in another lane")
+        assertEqual(
+            restored("m2", [lead, .init(lane: .inMotion, ids: ["m1", "x", "m3"]), latest]), "x",
+            "A card gone from its lane passes focus to the card at its index")
+        assertEqual(
+            restored("m3", [lead, .init(lane: .inMotion, ids: ["m1"]), latest]), "m1",
+            "Past the end, the lane's last card takes focus")
+        assertEqual(
+            restored("m2", [lead, .init(lane: .theDeepRead, ids: ["d1"]), latest]), "d1",
+            "A lane gone passes focus to the first card of the next lane below")
+        assertEqual(
+            restored("l3", [lead, .init(lane: .inMotion, ids: ["m1", "m2"])]), "m2",
+            "With no lane below, the last card of the nearest lane above takes focus")
+        assertTrue(restored("m1", []) == nil, "With no card left, nothing holds focus")
+        assertTrue(
+            TodayFocusMap(lanes: [lead]).restoredFocus(nil, from: old) == nil, "A lane appearing never takes focus")
+    }
+
+    /// Z4 (#936): nothing changes lane until the reader applies an update; Today never hides a listed story.
+    static func testTodayEditionPinsLanes() {
+        func story(_ id: String, _ lane: TodayLane) -> TodayStoryAssignment {
+            TodayStoryAssignment.unplaced(.article(makeArticle(id: id, title: id, pubDate: referenceNow))).placed(
+                in: lane)
+        }
+        func plan(_ lanes: [(TodayLane, [String])]) -> TodayEditionPlan {
+            TodayEditionPlan(
+                lanes: lanes.map { lane, ids in
+                    TodayLaneResult(lane: lane, qualifies: true, entries: ids.map { story($0, lane) })
+                })
+        }
+        func entries(_ ids: [String]) -> [FeedEntry] {
+            ids.map { .article(makeArticle(id: $0, title: $0, pubDate: referenceNow)) }
+        }
+        func shape(_ edition: TodayEdition) -> [String] {
+            edition.lanes.map { "\($0.lane.rawValue): \($0.stories.map(\.id).joined(separator: ","))" }
+        }
+        let first = TodayEdition.make(
+            entries: entries(["a", "b", "c", "d", "e", "stray"]),
+            plan: plan([(.theLead, ["a"]), (.inMotion, ["b", "c", "d"]), (.yourBeat, []), (.theLatest, ["e"])]))
+        assertEqual(
+            shape(first), ["The Lead: a", "In Motion: b,c,d", "The Latest: e,stray"],
+            "Lanes follow the plan in page order; an empty lane is absent; a listed story the plan left out is in The Latest"
+        )
+        assertEqual(first.metadata["b"]?.laneName, "In Motion", "A card knows its lane for VoiceOver")
+
+        // A later page and a refreshed plan that would move every story: the edition on screen keeps its lanes.
+        let moved = plan([(.theLead, ["f"]), (.inMotion, []), (.theLatest, ["a", "b", "d", "e", "g"])])
+        let held = TodayEdition.make(
+            entries: entries(["a", "b", "d", "e", "stray", "f", "g"]), plan: moved, keeping: first)
+        assertEqual(
+            shape(held), ["The Lead: a", "In Motion: b,d", "The Latest: e,f,g,stray"],
+            "Stories stay in their lanes, a story that left the list leaves its lane, new stories join The Latest")
+        let tagged = TodayStoryAssignment.unplaced(.article(makeArticle(id: "t", title: "t", pubDate: referenceNow)))
+        assertTrue(
+            tagged.placed(in: .theDeepRead, contentType: .explainer).contentTypeLabel == .explainer
+                && tagged.placed(in: .yourBeat, contentType: .explainer).contentTypeLabel == nil,
+            "A story held in The Deep Read keeps its content-type tag, and no other lane shows one")
+        let applied = TodayEdition.make(entries: entries(["a", "b", "d", "e", "stray", "f", "g"]), plan: moved)
+        assertEqual(
+            shape(applied), ["The Lead: f", "The Latest: a,b,d,e,g,stray"],
+            "An applied update lays the edition out afresh")
+        assertEqual(
+            first.focusMap(latestColumns: 3).lanes.last?.columns, 3, "The Latest's grid columns reach the keyboard map")
+    }
+
+    /// A held edition keeps each card's tag, shows current entries, and a new edition's Latest stays newest first.
+    static func testTodayHeldEditionDetails() {
+        func entry(_ id: String, title: String? = nil, age: TimeInterval = 0) -> FeedEntry {
+            .article(makeArticle(id: id, title: title ?? id, pubDate: referenceNow.addingTimeInterval(-age)))
+        }
+        func deepRead(_ entries: [FeedEntry], _ label: TodayContentType?) -> TodayEditionPlan {
+            let stories = entries.map {
+                TodayStoryAssignment.unplaced($0).held(in: .theDeepRead, contentType: label)
+            }
+            return TodayEditionPlan(lanes: [TodayLaneResult(lane: .theDeepRead, qualifies: true, entries: stories)])
+        }
+        let first = TodayEdition.make(entries: [entry("x")], plan: deepRead([entry("x")], .explainer))
+        let retagged = TodayEdition.make(
+            entries: [entry("x")], plan: deepRead([entry("x")], .opinion), keeping: first)
+        assertTrue(
+            retagged.stories(in: .theDeepRead).first?.contentTypeLabel == .explainer,
+            "A held card keeps its tag when the fresh plan tags it differently")
+        let untagged = TodayEdition.make(entries: [entry("x")], plan: deepRead([entry("x")], nil))
+        let tagged = TodayEdition.make(
+            entries: [entry("x")], plan: deepRead([entry("x")], .opinion), keeping: untagged)
+        assertTrue(
+            tagged.stories(in: .theDeepRead).first?.contentTypeLabel == nil,
+            "A held card with no tag stays untagged when the fresh plan tags it")
+        let renamed = TodayEdition.make(
+            entries: [entry("x", title: "New title")], plan: TodayEditionPlan(lanes: []), keeping: first)
+        assertEqual(
+            renamed.stories(in: .theDeepRead).first?.entry.representative.title, "New title",
+            "A held story the plan no longer places shows its current entry")
+        let fresh = TodayEdition.make(
+            entries: [entry("old", age: 3600), entry("new", age: 60)], plan: TodayEditionPlan(lanes: []))
+        assertEqual(
+            fresh.latest.map(\.id), ["new", "old"], "A new edition's Latest is newest first, also with unplaced stories"
+        )
+    }
+
+    /// #937: spreading the stories over the cores keeps their order and every value of the serial evaluation.
+    static func testTodayConcurrentEvaluationMatchesSerial() {
+        let titles = ["Senate passes budget", "Storm closes harbor", "Chip maker reports record sales"]
+        let entries: [FeedEntry] = (0..<40).map { index in
+            .article(
+                makeArticle(
+                    id: "c\(index)", title: "\(titles[index % 3]) number \(index)", pubDate: referenceNow))
+        }
+        let context = TodayAssignmentContext(now: referenceNow)
+        // Every field of the evaluation, not a chosen few: a value that concurrency changed would show.
+        func summary(_ stories: [TodayEditionAssigner.EvaluatedStory]) -> [String] {
+            stories.map { String(describing: $0) }
+        }
+        let serial = entries.map { TodayEditionAssigner.evaluateStory($0, context: context) }
+        let concurrent = TodayEditionAssigner.evaluateStories(entries, context: context)
+        assertEqual(
+            summary(concurrent), summary(serial), "Concurrent evaluation keeps the serial order and values")
+    }
+
+    /// Live feedback of 11 November 2026: a story with no photo takes no slide while another story has one; a story
+    /// whose feeds the reader has all left is out of Today, and one whose feed is unknown stays; The Latest is
+    /// newest first by the date its cards show.
+    static func testTodayLeadPhotoAndLeftFeeds() {
+        func event(_ id: String, minutesAgo: Double) -> FeedEntry {
+            let date = referenceNow.addingTimeInterval(-minutesAgo * 60)
+            return makeEventEntry(
+                eventID: "ev-\(id)",
+                members: [
+                    ("\(id)1", "Outlet 1", "Bridge \(id) collapses in storm", "Detail", date, "https://o1.example/rss"),
+                    ("\(id)2", "Outlet 2", "Teams reach bridge \(id)", "Detail", date, "https://o2.example/rss"),
+                    (
+                        "\(id)3", "Outlet 3", "Traffic diverted at bridge \(id)", "Detail", date,
+                        "https://o3.example/rss"
+                    ),
+                ])
+        }
+        let entries = [event("a", minutesAgo: 30), event("b", minutesAgo: 40)]
+        var context = TodayAssignmentContext(now: referenceNow)
+        let open = TodayEditionAssigner.assign(entries: entries, context: context)
+        guard let top = open.entries(for: .theLead).first?.id else {
+            assertTrue(false, "The Lead has a first slide")
+            return
+        }
+        context.imagelessEntryIDs = [top]
+        let pictured = TodayEditionAssigner.assign(entries: entries, context: context)
+        assertFalse(pictured.entries(for: .theLead).contains { $0.id == top }, "A story with no photo takes no slide")
+        assertTrue(pictured.allAssignments.contains { $0.id == top }, "It is still in the edition, in another lane")
+        assertEqual(pictured.entries(for: .theLead).count, 1, "The pictured story leads")
+        context.imagelessEntryIDs = Set(entries.map(\.id))
+        assertEqual(
+            TodayEditionAssigner.assign(entries: entries, context: context).entries(for: .theLead).first?.id, top,
+            "With no photo anywhere, the top story still leads")
+
+        // Subscriptions: a story of a feed the reader left, one of a kept feed and one whose feed is not known.
+        let left = makeArticle(
+            id: "left", title: "From a feed the reader left", feedURL: "https://left.example/rss",
+            pubDate: referenceNow.addingTimeInterval(-600))
+        let kept = makeArticle(
+            id: "kept", title: "From a kept feed", feedURL: "https://kept.example/rss",
+            pubDate: referenceNow.addingTimeInterval(-1200))
+        var unknown = makeArticle(
+            id: "unknown", title: "Feed not known", pubDate: referenceNow.addingTimeInterval(-300))
+        unknown.identityFeedURL = nil
+        let listed: [FeedEntry] = [.article(unknown), .article(left), .article(kept)]
+        let subscribed = TodayAssignmentContext(now: referenceNow, subscribedFeedURLs: ["https://kept.example/rss"])
+        let gone = TodayEditionAssigner.unsubscribedEntryIDs(listed, context: subscribed)
+        assertEqual(gone, ["left"], "Only a story whose known feeds are all unsubscribed leaves Today")
+        let edition = TodayEdition.make(
+            entries: listed, plan: TodayEditionAssigner.assign(entries: listed, context: subscribed),
+            details: TodayCardDetails(unsubscribedIDs: gone))
+        assertEqual(
+            edition.lanes.flatMap { $0.stories.map(\.id) }.sorted(), ["kept", "unknown"],
+            "The left feed's story is not shown; the story with no known feed is kept")
+        let held = TodayEdition.make(
+            entries: listed, plan: TodayEditionPlan(lanes: []),
+            details: TodayCardDetails(unsubscribedIDs: ["kept"]), keeping: edition)
+        assertFalse(held.storyIDs.contains("kept"), "Unsubscribing removes the story from a held edition at once")
+
+        // The Latest follows the date on its cards, newest first, whatever order the stories arrive in.
+        let ordered = TodayEdition.make(
+            entries: [.article(kept), .article(unknown), .article(left)], plan: TodayEditionPlan(lanes: []))
+        assertEqual(ordered.latest.map(\.id), ["unknown", "left", "kept"], "The Latest is newest first")
+    }
+
     static func testTodayNotificationThresholdsIndependent() {
         // A story can score highly enough to be a Lead candidate without passing NotificationService.isPriority,
         // and changing NotificationService static thresholds is not referenced by TodayEditionThresholds.
@@ -918,6 +1472,10 @@ extension NewsTests {
         assertTrue(
             TodayEditionAssigner.assign(entries: entries, context: unsubscribed).allAssignments.isEmpty,
             "An empty subscription list admits no story")
+        let wholeHistory = try await db.todayUserProfile(now: now, interactionLimit: 1)
+        let noHistory = try await db.todayUserProfile(now: now, interactionLimit: 0)
+        assertEqual(wholeHistory, ctx1.profile, "A limit at or above the reader's history changes nothing")
+        assertFalse(noHistory.hasHistory, "A history cut to nothing is the profile of a new reader")
     }
 
     static func testTodayLoaderGroupingConfidenceCoversStory() async throws {

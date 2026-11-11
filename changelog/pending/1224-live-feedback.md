@@ -1,0 +1,6 @@
+- Today's Lead only shows stories with a photo, and lane cards and The Lead use the best photo of the whole event, not only of the reports on the page. Photos missing at the top of Today are looked up first.
+- Story photos no longer smear into stripes while a story opens or closes from The Latest.
+- In the grid, showing an event's sources grows its own column and leaves the cards beside it in place.
+- Each list keeps its own list or grid layout: changing it in Unread no longer changes Today.
+- The whole Factor Breakdown row opens it, not only its small triangle. The model status reads "The on-device model is active on this Mac."
+- A story whose feeds you have all unsubscribed from leaves Today at once; The Latest is always newest first.

@@ -200,10 +200,8 @@ struct BriefingView: View {
 
     /// An event that gained a report in the last hour.
     static func isDeveloping(_ entry: FeedEntry, now: Date) -> Bool {
-        guard case .event(let summary, _, _) = entry, summary.isConfirmed, let latest = summary.latestDate else {
-            return false
-        }
-        return now.timeIntervalSince(latest) <= 3600
+        guard case .event(let summary, _, _) = entry else { return false }
+        return summary.isDeveloping(now: now)
     }
 
     /// The board's actions, with region selection applied to the board's own filter first.

@@ -111,10 +111,18 @@ extension TodayEditionAssigner {
             // Momentum and 24-hour In Motion substantive update.
             momentum: summary.map { BriefingPriorityData.momentum(dates: $0.members.map(\.date), now: context.now) }
                 ?? .steady,
-            hasInMotionUpdate: summary.map {
-                hasSubstantiveInMotionUpdate($0, now: context.now, window: context.thresholds.inMotionWindowSeconds)
-            } ?? false
+            hasInMotionUpdate: summary.map { hasInMotionUpdate($0, context: context) } ?? false
         )
+    }
+
+    /// The shipped clock test, or the two-question variant when the evaluation option sets an update window.
+    private static func hasInMotionUpdate(_ summary: EventFeedSummary, context: TodayAssignmentContext) -> Bool {
+        let thresholds = context.thresholds
+        guard let updateWindow = thresholds.inMotionUpdateWindowSeconds else {
+            return hasSubstantiveInMotionUpdate(summary, now: context.now, window: thresholds.inMotionWindowSeconds)
+        }
+        return hasSubstantiveInMotionUpdate(
+            summary, now: context.now, underway: thresholds.inMotionWindowSeconds, updateWindow: updateWindow)
     }
 
     /// Each report's publisher and text: preloaded stored text when it covers the visible members, else the
@@ -143,11 +151,9 @@ extension TodayEditionAssigner {
         }
     }
 
-    /// Developing pill matches Briefing definition (`BriefingView.isDeveloping`).
+    /// The Developing pill shares the Briefing's definition (`EventFeedSummary.isDeveloping`).
     private static func isDevelopingEvent(_ summary: EventFeedSummary?, context: TodayAssignmentContext) -> Bool {
-        guard let summary, summary.isConfirmed, let latest = summary.latestDate else { return false }
-        let age = context.now.timeIntervalSince(latest)
-        return age <= context.thresholds.developingWindowSeconds && age >= -300
+        summary?.isDeveloping(now: context.now, window: context.thresholds.developingWindowSeconds) ?? false
     }
 
     private static func storyGroupingConfidence(

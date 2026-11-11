@@ -21,6 +21,34 @@ import SQLite3
 /// `NEWS_TODAY_NOW` pins the clock (epoch seconds), `NEWS_TODAY_WINDOW_HOURS` the candidate window,
 /// `NEWS_TODAY_LABELS` names the private label file and `NEWS_TODAY_FEEDS` the snapshot's subscription list.
 enum TodayShadowEvaluation {
+    /// Z5 (#937): what the Today page costs to lay out. The list shows 200 stories a page, so the newest 200 of the
+    /// window are loaded and assigned three times and the medians printed, with no story text.
+    static func timeFirstPage(
+        of articles: [FeedArticle], summaries: [EventFeedSummary], database: DatabaseEngine, now: Date,
+        feeds: Set<String>
+    ) async throws {
+        let page = Array(articles.sorted { $0.orderDate > $1.orderDate }.prefix(200))
+        let entries = EventFeedGrouping.entries(for: page, events: summaries, mode: .events)
+        var loader: [Double] = []
+        var assign: [Double] = []
+        var combined: [Double] = []
+        for _ in 0..<3 {
+            let loadStart = CFAbsoluteTimeGetCurrent()
+            let context = try await database.loadTodayAssignmentContext(
+                entries: entries, now: now, subscribedFeedURLs: feeds)
+            loader.append((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+            let assignStart = CFAbsoluteTimeGetCurrent()
+            _ = TodayEditionAssigner.assign(entries: entries, context: context)
+            let end = CFAbsoluteTimeGetCurrent()
+            assign.append((end - assignStart) * 1000)
+            combined.append((end - loadStart) * 1000)
+        }
+        print(
+            String(
+                format:
+                    "TODAY_PAGE_TIMING stories=%d entries=%d loaderMedianMs=%.1f assignMedianMs=%.1f combinedMedianMs=%.1f",
+                page.count, entries.count, loader.sorted()[1], assign.sorted()[1], combined.sorted()[1]))
+    }
 
     struct StoryLabels: Decodable {
         var stories: [String: StoryLabel]?
@@ -38,6 +66,9 @@ enum TodayShadowEvaluation {
         /// `NEWS_TODAY_FEEDS` when the run was given the subscription list, else `feeds-table`.
         let subscriptionSource: String
         let subscribedFeedCount: Int
+        /// Feeds the copy has fetched, and how many of them the subscription list names (by `AppSettings.feedKey`).
+        let snapshotFeedCount: Int
+        let snapshotFeedsSubscribed: Int
         let loaderDurationMs: Double
         let assignDurationMs: Double
         let candidatesTotal: Int
@@ -66,6 +97,8 @@ enum TodayShadowEvaluation {
         let coveragePassingGate: Int
         let threeRankingComparison: ThreeRankingReport
         let labelledEvaluation: LabelledEvaluationReport?
+        /// The In Motion and Your Beat variants of 11 November 2026, beside the shipped rule (#934).
+        let comparisons: ComparisonReport
     }
 
     struct ThreeRankingReport: Encodable {
@@ -85,6 +118,9 @@ enum TodayShadowEvaluation {
 
     struct LabelledEvaluationReport: Encodable {
         let labelledStoriesCount: Int
+        /// Labelled stories and events that are candidates under the run's subscription list.
+        let labelledStoriesAdmitted: Int
+        let labelledEventsAdmitted: Int
         let leadPrecisionAt5PublisherCount: Double?
         let leadPrecisionAt5BriefingSignals: Double?
         let leadPrecisionAt5Z2Combined: Double?
@@ -95,6 +131,8 @@ enum TodayShadowEvaluation {
         let inMotionFalsePositivesInitial: Int
         let inMotionFalsePositivesRepetition: Int
         let inMotionFalseNegativesNewInfo: Int
+        /// Events the maintainer called borderline: neither a real update nor repetition.
+        let inMotionBorderlineClearingBar: Int
     }
 
     struct PrivateStoryRow: Encodable {
@@ -190,6 +228,12 @@ enum TodayShadowEvaluation {
         let entries = EventFeedGrouping.entries(for: windowArticles, events: summaries, mode: .events)
 
         let subscriptions = try await subscribedFeeds(env, database: db)
+        let snapshotFeeds = try await db.fetchedFeedURLs()
+        let subscribedKeys = Set(subscriptions.urls.map(AppSettings.feedKey))
+        let snapshotFeedsSubscribed = snapshotFeeds.filter { subscribedKeys.contains(AppSettings.feedKey($0)) }.count
+        let labels = try env["NEWS_TODAY_LABELS"].map {
+            try JSONDecoder().decode(StoryLabels.self, from: Data(contentsOf: URL(fileURLWithPath: $0)))
+        }
         let loaderStart = CFAbsoluteTimeGetCurrent()
         let context = try await db.loadTodayAssignmentContext(
             entries: entries, now: now, subscribedFeedURLs: subscriptions.urls)
@@ -198,7 +242,8 @@ enum TodayShadowEvaluation {
         let assignStart = CFAbsoluteTimeGetCurrent()
         let plan = TodayEditionAssigner.assign(entries: entries, context: context)
         let assignDurationMs = (CFAbsoluteTimeGetCurrent() - assignStart) * 1000.0
-        let summaryByEventID = Dictionary(uniqueKeysWithValues: summaries.map { ($0.eventID, $0) })
+        try await timeFirstPage(
+            of: windowArticles, summaries: summaries, database: db, now: now, feeds: subscriptions.urls)
 
         let rawQualifyingCounts = computeRawQualifyingCounts(entries: entries, context: context)
 
@@ -296,14 +341,16 @@ enum TodayShadowEvaluation {
         let multiPubEvents = assignedList.filter { $0.publisherCount >= 3 }
         let passingCoverage = multiPubEvents.filter(\.isCoverageConfident)
 
-        // Three-ranking comparison on top 100-200 most recent stories (ordered by recency first, capped at 200).
-        let comparisonPool = Array(
-            assignedList.sorted {
-                $0.entry.representative.orderDate == $1.entry.representative.orderDate
-                    ? $0.id < $1.id
-                    : $0.entry.representative.orderDate > $1.entry.representative.orderDate
-            }.prefix(200)
-        )
+        // Three-ranking comparison: the labelled stories that are candidates, so every ranked story has a label
+        // whatever the subscription list admits; without labels, the 200 most recent stories.
+        let newestFirst = assignedList.sorted {
+            $0.entry.representative.orderDate == $1.entry.representative.orderDate
+                ? $0.id < $1.id
+                : $0.entry.representative.orderDate > $1.entry.representative.orderDate
+        }
+        let comparisonPool =
+            labels?.stories.map { stories in newestFirst.filter { stories[$0.id] != nil } }
+            ?? Array(newestFirst.prefix(200))
         let comparisonRawEntries = comparisonPool.map(\.entry)
 
         let briefingRanking = await BriefingRanking.load(entries: comparisonRawEntries, database: db)
@@ -348,30 +395,34 @@ enum TodayShadowEvaluation {
         )
 
         // Optional labelled evaluation if NEWS_TODAY_LABELS is provided.
-        var labelledReport: LabelledEvaluationReport?
-        if let labelsPath = env["NEWS_TODAY_LABELS"], FileManager.default.fileExists(atPath: labelsPath) {
-            let data = try Data(contentsOf: URL(fileURLWithPath: labelsPath))
-            let labels = try JSONDecoder().decode(StoryLabels.self, from: data)
-            labelledReport = evaluateLabels(
-                labels: labels,
+        let labelledReport = labels.map {
+            evaluateLabels(
+                labels: $0,
                 byPub: byPublisherCount,
                 byBriefing: byBriefingSignals,
                 byZ2: byZ2Combined,
                 plan: plan,
-                summariesByEventID: summaryByEventID,
-                now: now
+                context: context
             )
         }
+        let comparison = try await compareVariants(
+            ComparisonInputs(
+                database: db, now: now, entries: entries, entries24h: entries24h, context: context,
+                shippedPlan: plan, labels: labels, allArticles: allArticles),
+            privateOutput: outputDirectory)
 
         let report = ShadowReport(
             nowTimestamp: now.timeIntervalSince1970,
             candidateWindowHours: windowHours,
             subscriptionSource: subscriptions.source,
             subscribedFeedCount: subscriptions.urls.count,
+            snapshotFeedCount: snapshotFeeds.count,
+            snapshotFeedsSubscribed: snapshotFeedsSubscribed,
             loaderDurationMs: loaderDurationMs,
             assignDurationMs: assignDurationMs,
             candidatesTotal: eligibleBySub.count,
-            candidates24h: entries24h.count,
+            // The stories of the last 24 h that the subscription list admits, not every story of those 24 h.
+            candidates24h: plan24h.allAssignments.count,
             latestCompleteness: completeness,
             duplicateRate: duplicateRate,
             yourBeatPerDay24h: yourBeat24h,
@@ -395,7 +446,8 @@ enum TodayShadowEvaluation {
             coverageMultiPublisherEvents: multiPubEvents.count,
             coveragePassingGate: passingCoverage.count,
             threeRankingComparison: threeComparison,
-            labelledEvaluation: labelledReport
+            labelledEvaluation: labelledReport,
+            comparisons: comparison
         )
 
         let encoder = JSONEncoder()
@@ -526,52 +578,56 @@ enum TodayShadowEvaluation {
         return (Set(listed), "NEWS_TODAY_FEEDS")
     }
 
-    private static func computeRawQualifyingCounts(
+    /// The evidence of every story a plan placed, which is every story the subscription list admits.
+    static func evaluatedCandidates(
+        of plan: TodayEditionPlan, context: TodayAssignmentContext
+    ) -> [TodayEditionAssigner.EvaluatedStory] {
+        TodayEditionAssigner.evaluateStories(plan.allAssignments.map(\.entry), context: context)
+    }
+
+    /// How many stories clear each conditional lane's bar on their own, before lane order, minimum and cap. The
+    /// assigner's own bars decide, so a run with an evaluation option counts what that option places.
+    static func computeRawQualifyingCounts(
         entries: [FeedEntry],
         context: TodayAssignmentContext
     ) -> [String: Int] {
-        var counts: [String: Int] = [:]
-        // Check each story independently via 1-item/solo checks or checking each conditional lane without caps.
         let plan = TodayEditionAssigner.assign(entries: entries, context: context)
-        let deepReadQualCount = plan.allAssignments.filter { item in
-            let byType =
-                TodayEditionAssigner.deepReadContentType(
-                    of: item.entry.representative,
-                    readingTimeMinutes: item.readingTimeMinutes,
-                    thresholds: context.thresholds
-                ).map { $0.confidence >= context.thresholds.deepReadClassificationMinimumConfidence } ?? false
-            return item.readingTimeMinutes >= context.thresholds.deepReadMinimumMinutes || byType
-        }.count
-        let yourBeatQualCount = plan.allAssignments.filter { item in
-            let isStarred =
-                item.reason == "your_beat_starred"
-                || Set(item.entry.visibleArticles.compactMap(\.identityFeedURL))
-                    .union(context.signalsByEntryID[item.id]?.feedURLs ?? [])
-                    .contains { raw in
-                        let key = AppSettings.feedKey(raw)
-                        return context.starredFeedURLs.contains(raw)
-                            || context.starredFeedURLs.contains(where: { AppSettings.feedKey($0) == key })
-                    }
-            let isTopQuartile = context.profile.isTopQuartilePublisher(item.entry.representative.publisherName)
-            return item.interestMatch >= context.thresholds.yourBeatInterestMatchMinimum || isStarred || isTopQuartile
-        }.count
-        let inMotionQualCount = plan.allAssignments.filter { item in
-            guard case .event(let summary, _, _) = item.entry else { return false }
-            let mom = BriefingPriorityData.momentum(dates: summary.members.map(\.date), now: context.now)
-            return mom == .rising
-                && TodayEditionAssigner.hasSubstantiveInMotionUpdate(
-                    summary, now: context.now, window: context.thresholds.inMotionWindowSeconds)
-        }.count
-        let outsideQualCount = plan.allAssignments.filter { item in
-            context.profile.hasHistory
-                && item.novelty >= context.thresholds.outsideNoveltyMinimum
-                && item.score >= context.thresholds.outsideScoreMinimum
-        }.count
-        counts[TodayLane.inMotion.rawValue] = inMotionQualCount
-        counts[TodayLane.theDeepRead.rawValue] = deepReadQualCount
-        counts[TodayLane.yourBeat.rawValue] = yourBeatQualCount
-        counts[TodayLane.outsideYourUsual.rawValue] = outsideQualCount
-        return counts
+        let stories = evaluatedCandidates(of: plan, context: context)
+        let thresholds = context.thresholds
+        func count(_ clears: (TodayEditionAssigner.EvaluatedStory) -> Bool) -> Int { stories.filter(clears).count }
+        return [
+            TodayLane.inMotion.rawValue: count {
+                TodayEditionAssigner.inMotionPlacement($0, thresholds: thresholds) != nil
+            },
+            TodayLane.theDeepRead.rawValue: count {
+                TodayEditionAssigner.deepReadPlacement($0, thresholds: thresholds) != nil
+            },
+            TodayLane.yourBeat.rawValue: count {
+                TodayEditionAssigner.yourBeatPlacement($0, thresholds: thresholds) != nil
+            },
+            TodayLane.outsideYourUsual.rawValue: count {
+                TodayEditionAssigner.outsidePlacement($0, context: context) != nil
+            },
+        ]
+    }
+
+    /// The share of labelled stories a plan put in the lane their label expects, overall and by the plan's lane.
+    static func lanePurity(
+        of plan: TodayEditionPlan, labels: [String: StoryLabel]
+    ) -> (overall: Double?, byLane: [String: Double]) {
+        var hits: [String: Int] = [:]
+        var totals: [String: Int] = [:]
+        for item in plan.allAssignments {
+            guard let expected = labels[item.id]?.expectedLane else { continue }
+            totals[item.lane.rawValue, default: 0] += 1
+            if expected == item.lane.rawValue { hits[item.lane.rawValue, default: 0] += 1 }
+        }
+        let total = totals.values.reduce(0, +)
+        var byLane: [String: Double] = [:]
+        for (lane, laneTotal) in totals {
+            byLane[lane] = Double(hits[lane, default: 0]) / Double(laneTotal)
+        }
+        return (total > 0 ? Double(hits.values.reduce(0, +)) / Double(total) : nil, byLane)
     }
 
     private static func evaluateLabels(
@@ -580,70 +636,48 @@ enum TodayShadowEvaluation {
         byBriefing: [TodayStoryAssignment],
         byZ2: [TodayStoryAssignment],
         plan: TodayEditionPlan,
-        summariesByEventID: [String: EventFeedSummary],
-        now: Date
+        context: TodayAssignmentContext
     ) -> LabelledEvaluationReport {
         let storyLabels = labels.stories ?? [:]
         func precisionAt5(_ ranked: [TodayStoryAssignment]) -> Double? {
+            // All five stories need a Lead label: a shorter list would report a precision over fewer stories.
             let labelledTop = ranked.prefix(5).compactMap { storyLabels[$0.id]?.leadImportant }
-            guard !labelledTop.isEmpty else { return nil }
+            guard labelledTop.count == 5 else { return nil }
             let hits = labelledTop.filter { $0 }.count
             return Double(hits) / Double(labelledTop.count)
         }
+        let purity = lanePurity(of: plan, labels: storyLabels)
 
-        var purityHits = 0
-        var purityTotal = 0
-        var perLaneHits: [String: Int] = [:]
-        var perLaneTotal: [String: Int] = [:]
-        for item in plan.allAssignments {
-            if let expected = storyLabels[item.id]?.expectedLane {
-                purityTotal += 1
-                perLaneTotal[item.lane.rawValue, default: 0] += 1
-                if expected == item.lane.rawValue {
-                    purityHits += 1
-                    perLaneHits[item.lane.rawValue, default: 0] += 1
-                }
-            }
-        }
-        var lanePurityMap: [String: Double] = [:]
-        for (lane, total) in perLaneTotal {
-            lanePurityMap[lane] = Double(perLaneHits[lane, default: 0]) / Double(max(1, total))
-        }
-
+        // In Motion against the event labels: does the event's story clear the lane's bar, by the assigner's own
+        // test. An event outside the subscription list is not a candidate and is not counted.
         let eventLabels = labels.events ?? [:]
-        var tpNew = 0
-        var fpInitial = 0
-        var fpRep = 0
-        var fnNew = 0
+        var clearsBar: [String: Bool] = [:]
+        for story in evaluatedCandidates(of: plan, context: context) {
+            guard case .event(let summary, _, _) = story.entry else { continue }
+            clearsBar[summary.eventID] =
+                TodayEditionAssigner.inMotionPlacement(story, thresholds: context.thresholds) != nil
+        }
+        var counts: [String: Int] = [:]
         for (eventID, label) in eventLabels {
-            guard let summary = summariesByEventID[eventID] else { continue }
-            let predicted =
-                TodayEditionAssigner.hasSubstantiveInMotionUpdate(summary, now: now)
-                && BriefingPriorityData.momentum(dates: summary.members.map(\.date), now: now) == .rising
-            switch label {
-            case "new_information":
-                if predicted { tpNew += 1 } else { fnNew += 1 }
-            case "initial_report":
-                if predicted { fpInitial += 1 }
-            case "repetition":
-                if predicted { fpRep += 1 }
-            default:
-                break
-            }
+            guard let predicted = clearsBar[eventID] else { continue }
+            counts["\(label):\(predicted)", default: 0] += 1
         }
 
         return LabelledEvaluationReport(
             labelledStoriesCount: storyLabels.count,
+            labelledStoriesAdmitted: plan.allAssignments.filter { storyLabels[$0.id] != nil }.count,
+            labelledEventsAdmitted: eventLabels.keys.filter { clearsBar[$0] != nil }.count,
             leadPrecisionAt5PublisherCount: precisionAt5(byPub),
             leadPrecisionAt5BriefingSignals: precisionAt5(byBriefing),
             leadPrecisionAt5Z2Combined: precisionAt5(byZ2),
-            lanePurityOverall: purityTotal > 0 ? Double(purityHits) / Double(purityTotal) : nil,
-            lanePurityByLane: lanePurityMap,
+            lanePurityOverall: purity.overall,
+            lanePurityByLane: purity.byLane,
             inMotionReviewedCount: eventLabels.count,
-            inMotionTruePositivesNewInfo: tpNew,
-            inMotionFalsePositivesInitial: fpInitial,
-            inMotionFalsePositivesRepetition: fpRep,
-            inMotionFalseNegativesNewInfo: fnNew
+            inMotionTruePositivesNewInfo: counts["new_information:true", default: 0],
+            inMotionFalsePositivesInitial: counts["initial_report:true", default: 0],
+            inMotionFalsePositivesRepetition: counts["repetition:true", default: 0],
+            inMotionFalseNegativesNewInfo: counts["new_information:false", default: 0],
+            inMotionBorderlineClearingBar: counts["borderline:true", default: 0]
         )
     }
 }

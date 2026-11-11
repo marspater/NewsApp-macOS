@@ -155,6 +155,60 @@ enum AppColor {
     static var hoverBorder: Color { accent.opacity(hoverBorderOpacity) }
     static let badgeBackground = Color(NSColor.quaternaryLabelColor).opacity(0.12)
     static let unreadDot = Color.accentColor
+    /// The original-reports count on The Lead and Coverage cards, and nothing else (DESIGN.md 11).
+    static let originalReports = Color(
+        nsColor: NSColor(name: "originalReports") { appearance in
+            let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let contrast = appearance.name.rawValue.contains("HighContrast")
+            if contrast {
+                return dark
+                    ? NSColor(srgbRed: 0x8F / 255, green: 0xE8 / 255, blue: 0xDB / 255, alpha: 1)
+                    : NSColor(srgbRed: 0, green: 0x5A / 255, blue: 0x55 / 255, alpha: 1)
+            }
+            return dark
+                ? NSColor(srgbRed: 0x65 / 255, green: 0xD4 / 255, blue: 0xC5 / 255, alpha: 1)
+                : NSColor(srgbRed: 0, green: 0x6F / 255, blue: 0x69 / 255, alpha: 1)
+        })
+    /// The dark value of `originalReports`, for The Lead's foot, which sits on a dark image in both appearances.
+    static let originalReportsOnImage = Color(
+        nsColor: NSColor(srgbRed: 0x65 / 255, green: 0xD4 / 255, blue: 0xC5 / 255, alpha: 1))
+    /// The fill of a status pill on a photo ("Updated 14 min ago"): the person's accent, darkened until white text
+    /// on it reaches 4.5:1, in both appearances because the pill sits on an image.
+    static let statusPill = Color(
+        NSColor(name: "statusPill") { _ in readableAccent(NSColor.controlAccentColor, dark: false, on: .white) })
+    /// A story card's inner top highlight (DESIGN.md 12): white at 20 %, brighter on hover; quieter on the dark
+    /// card surface, where white reads much stronger.
+    static func cardTopHighlight(hovered: Bool) -> Color { hovered ? cardTopHighlightRaised : cardTopHighlightResting }
+    private static let cardTopHighlightResting = topHighlight(light: 0.20, dark: 0.08)
+    private static let cardTopHighlightRaised = topHighlight(light: 0.45, dark: 0.16)
+    private static func topHighlight(light: CGFloat, dark: CGFloat) -> Color {
+        Color(
+            nsColor: NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return NSColor.white.withAlphaComponent(isDark ? dark : light)
+            })
+    }
+    /// A stable identity color for a publisher's monogram, from the system palette by the name's letters.
+    static func publisherMonogram(_ name: String) -> Color {
+        let palette: [NSColor] = [
+            .systemBlue, .systemIndigo, .systemPurple, .systemPink, .systemRed, .systemOrange, .systemBrown,
+            .systemGreen, .systemTeal, .systemGray,
+        ]
+        let sum = name.lowercased().unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 9973 }
+        return Color(nsColor: palette[sum % palette.count])
+    }
+    /// A monogram's disc: a wash of the publisher's color on a card, the solid color on The Lead's image.
+    static func publisherMonogramFill(_ name: String, tinted: Bool) -> Color {
+        publisherMonogram(name).opacity(tinted ? 0.22 : 1)
+    }
+    /// The letter on a washed monogram: the publisher's color mixed halfway toward the primary text color.
+    static func publisherMonogramText(_ name: String) -> Color {
+        publisherMonogram(name).mix(with: primaryText, by: 0.5)
+    }
+    /// The surface a Compact card's photo dissolves into: the card fill, opaque at the text and clear at the photo.
+    static let compactPhotoFade = LinearGradient(
+        stops: [.init(color: surface, location: 0), .init(color: surface.opacity(0), location: 0.55)],
+        startPoint: .leading, endPoint: .trailing)
     /// The block a citation jumped to, until the reader dismisses the citation.
     static let passageHighlight = Color.accentColor.opacity(0.12)
     /// A passage the reader highlighted (V1 #711): a caution wash the primary text stays readable on.
@@ -201,6 +255,32 @@ enum AppColor {
     static let leadScrimFade = LinearGradient(
         colors: [leadScrim, Color.clear], startPoint: .bottom, endPoint: UnitPoint(x: 0.5, y: 0.35))
     /// The hero carousel's arrow backing and its inactive page dots, over the photo.
+    /// The Lead's image fades into the page along its lower edge (docs/design/today.md): no panel behind the text.
+    static let leadPageFade = LinearGradient(
+        stops: [.init(color: background.opacity(0), location: 0.93), .init(color: background, location: 1)],
+        startPoint: .top, endPoint: .bottom)
+    /// Darkens The Lead's image where its text sits: strongest at the leading edge, gone past the middle.
+    static let leadTextScrim = LinearGradient(
+        stops: [
+            .init(color: Color.black.opacity(0.72), location: 0),
+            .init(color: Color.black.opacity(0.5), location: 0.45),
+            .init(color: Color.black.opacity(0.12), location: 1),
+        ], startPoint: .leading, endPoint: .trailing)
+    /// Darkens the foot of The Lead's image, where the time, publishers and original reports sit, so they stay
+    /// legible on a bright photo.
+    static let leadFootScrim = LinearGradient(
+        stops: [
+            .init(color: Color.black.opacity(0), location: 0.55), .init(color: Color.black.opacity(0.6), location: 0.9),
+        ],
+        startPoint: .top, endPoint: .bottom)
+    /// A gray content pill on The Lead's image (reading time).
+    static let leadPill = Color.white.opacity(0.16)
+    static let leadPillBorder = Color.white.opacity(0.3)
+    /// The Lead's status pill ("Developing") on its dark image: the person's accent, lightened as accent text is
+    /// on a dark page, on a wash of itself.
+    static let leadStatus = Color(
+        NSColor(name: "leadStatus") { _ in readableAccent(NSColor.controlAccentColor, dark: true, on: .black) })
+    static var leadStatusFill: Color { leadStatus.opacity(0.22) }
     static let carouselControl = Color.black.opacity(0.45)
     static let carouselInactiveDot = Color.white.opacity(0.4)
 }
@@ -284,7 +364,35 @@ enum AppLayout {
     /// Grid card image or editorial placeholder header.
     static let editorialHeaderHeight: CGFloat = 140.0
     static let leadStoryHeight: CGFloat = 360.0
+    /// The Lead follows the window: 240 pt at the 600 pt minimum height, 0.6 pt more per window point, at most 440.
+    static func leadHeight(windowHeight: CGFloat) -> CGFloat {
+        min(440, max(240, 240 + (windowHeight - mainWindowMinimumHeight) * 0.6))
+    }
+    /// The Lead's text column never runs wider than a comfortable headline measure.
+    static let leadTextMaxWidth: CGFloat = 640
+    static let breathingDotSize: CGFloat = 8
     static let unreadDotSize: CGFloat = 6.0
+    // Today edition cards (docs/design/today.md)
+    static let laneCardWidth: CGFloat = 320
+    static let featureCardWidth: CGFloat = 400
+    /// The Feature card's image is 3:2 of the card's width.
+    static let featureImageHeight: CGFloat = featureCardWidth / 1.5
+    static let compactCardMinimumHeight: CGFloat = 104
+    /// The Latest's Compact grid: two columns still fit the 660 pt column of the minimum window.
+    static let compactColumnMinimum: CGFloat = 280
+    /// The Compact card's photo fills this share of the card from the trailing edge.
+    static let compactPhotoShare: CGFloat = 0.52
+    /// Compact text may reach this share of the card's width, over the photo's dissolving edge.
+    static let compactTextShare: CGFloat = 0.66
+    static let cardHoverLift: CGFloat = 3
+    static let cardHoverImageScale: CGFloat = 1.02
+    static let cardTopHighlightHeight: CGFloat = 1
+    static let focusRingOffset: CGFloat = 2
+    static let cardMonogramSize: CGFloat = 18
+    /// Each later monogram covers this much of the one before it.
+    static let cardMonogramOverlap: CGFloat = 6
+    static let cardMonogramStroke: CGFloat = 1.5
+    static let progressDotSize: CGFloat = 6
     /// Sidebar and reader popovers.
     static let popoverWidth: CGFloat = 280.0
     /// The entity dossier popover (W2 #716): its width, the tallest it grows before it scrolls, and the 30-day chart.
@@ -313,6 +421,10 @@ enum AppLayout {
     static let leadBackdropBlur: CGFloat = 40
     static let gridColumnMinimum: CGFloat = 300.0
     static let gridColumnMaximum: CGFloat = 420.0
+    /// How many grid columns of at least `minimum` fit `width`.
+    static func gridColumnCount(width: CGFloat, minimum: CGFloat = gridColumnMinimum) -> Int {
+        max(1, Int((width + cardGap) / (minimum + cardGap)))
+    }
     /// Briefing hero carousel: arrow circle, page dots and the pointer target around a small control.
     static let carouselControlSize: CGFloat = 32
     static let carouselDotSize: CGFloat = 8
@@ -371,6 +483,8 @@ enum AppSpacing {
 enum AppRadius {
     static let control: CGFloat = 6.0
     static let card: CGFloat = 12.0
+    /// Story cards (Mars, 9 November 2026; DESIGN.md 12).
+    static let storyCard: CGFloat = 16.0
     static let container: CGFloat = 16.0
     /// The story banner, matched to the system banner's corners.
     static let banner: CGFloat = 20.0
@@ -382,7 +496,7 @@ enum AppRadius {
 
 enum AppTypography {
     static let sectionHeaderTracking: Double = 0.6
-    static let eyebrowTracking: Double = 0.5
+    static let eyebrowTracking: Double = 0.6
 
     // Standard semantic typographic scale
     static let title = Font.title.bold()
@@ -413,6 +527,17 @@ enum AppTypography {
         case .list: return .system(size: 20, weight: .semibold, design: .serif)
         case .grid: return .system(size: 15, weight: .semibold)
         }
+    }
+
+    /// Today edition card headlines: serif, 20 pt on Feature and 15 pt elsewhere. Read state is carried by weight
+    /// and color, since these cards show no unread dot (DESIGN.md 8.2).
+    static func editionHeadline(feature: Bool, isRead: Bool) -> Font {
+        .system(size: feature ? 20 : 15, weight: isRead ? .medium : .semibold, design: .serif)
+    }
+    static let monogram = Font.system(size: 9, weight: .bold, design: .rounded)
+    /// The Lead's headline: serif, 2.4 % of the window's width, between 22 and 34 pt.
+    static func leadHeadline(windowWidth: CGFloat) -> Font {
+        .system(size: min(34, max(22, windowWidth * 0.024)), weight: .semibold, design: .serif)
     }
 
     // Reader Article Typography Themes
@@ -547,6 +672,30 @@ enum StoryCardLayout: Sendable {
 // MARK: - App Shadows
 
 enum AppShadow {
+    /// One shadow layer. SwiftUI's radius is half a design tool's blur.
+    struct Layer {
+        let color: Color
+        let radius: CGFloat
+        let y: CGFloat
+    }
+
+    /// Black at the light-appearance opacity of DESIGN.md 12; dark keeps the geometry and needs about four times
+    /// the opacity to separate a card from the darker page.
+    private static func shade(_ light: CGFloat) -> Color {
+        Color(
+            nsColor: NSColor(name: nil) { appearance in
+                let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return NSColor.black.withAlphaComponent(dark ? min(1, light * 4) : light)
+            })
+    }
+
+    // Story card elevation (DESIGN.md 12): a tight contact shadow and a soft ambient one.
+    static let cardRestingContact = Layer(color: shade(0.04), radius: 1, y: 1)
+    static let cardRestingAmbient = Layer(color: shade(0.03), radius: 6, y: 4)
+    static let cardHoverContact = Layer(color: shade(0.04), radius: 2, y: 2)
+    static let cardHoverAmbient = Layer(color: shade(0.06), radius: 12, y: 8)
+
+    // Single-layer tokens for the Briefing's cards and small marks.
     static let cardRestingColor = Color.black.opacity(0.06)
     static let cardRestingRadius: CGFloat = 6.0
     static let cardRestingY: CGFloat = 2.0
@@ -558,8 +707,6 @@ enum AppShadow {
     static let cardFocusRingColor = AppColor.accent.opacity(0.5)
     static let cardFocusRingRadius: CGFloat = 4.0
     static let cardFocusRingY: CGFloat = 0.0
-
-    // Backward compatibility alias (now a restrained accent glow, not radioactive pink)
 }
 
 // MARK: - App Motion
@@ -573,6 +720,9 @@ enum AppMotion {
     static let spring = Animation.spring(duration: 0.45, bounce: 0.3)
     /// The hotspot pins' pulse (DESIGN.md 13): one slow ring every two seconds, drawn at 20 frames a second, and
     /// stopped under Reduce Motion, in an inactive window and while the app is not active.
+    /// The Lead's unread dot breathes on a 2.6 s cycle (DESIGN.md 13); off under Reduce Motion.
+    static let breathe = Animation.easeInOut(duration: 1.3).repeatForever(autoreverses: true)
+    static let breatheDimmed: Double = 0.35
     static let pulsePeriod: TimeInterval = 2.0
     static let pulseFrameInterval: TimeInterval = 1.0 / 20.0
 
@@ -811,6 +961,72 @@ struct BannerSurface<S: Shape>: ViewModifier {
         } else {
             content.background(.regularMaterial, in: shape)
         }
+    }
+}
+
+/// The surface of a control that floats over a photo (The Lead's dots and arrows): glass tinted dark on macOS 26
+/// and later, so white marks on it stay legible when the photo is bright or the window is inactive and the glass
+/// turns pale; the same dark backing with the regular material on macOS 15.
+struct PhotoControlSurface<S: Shape>: ViewModifier {
+    let shape: S
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            // The dark backing sits between the glass and the marks: in an inactive window the glass turns pale
+            // whatever its tint, and white dots and arrows vanished on it (live pass, 11 November 2026).
+            content
+                .background(AppColor.carouselControl, in: shape)
+                .background { Color.clear.glassEffect(.regular, in: shape) }
+        } else {
+            content.background(AppColor.carouselControl, in: shape).background(.regularMaterial, in: shape)
+        }
+    }
+}
+
+/// Floating controls over content (The Lead's dots and arrows): their glass shapes share one container on macOS 26
+/// and later, so neighbouring shapes blend instead of stacking (DESIGN.md 3.3). Each control takes its surface from
+/// `BannerSurface`.
+struct FloatingGlassGroup<Content: View>: View {
+    var spacing: CGFloat = AppSpacing.xs
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            GlassEffectContainer(spacing: spacing) { HStack(spacing: spacing) { content } }
+        } else {
+            HStack(spacing: spacing) { content }
+        }
+    }
+}
+
+extension View {
+    /// A disclosure's label that toggles it from anywhere on its row: on macOS only the triangle does by default.
+    func disclosureRow(_ isExpanded: Binding<Bool>) -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { isExpanded.wrappedValue.toggle() }
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// The list or grid choice of each list (Today, Unread, a section…), kept apart so one list's layout does not
+/// change another's (Mars, 11 November 2026). A list never chosen for follows the earlier single preference.
+enum ListLayoutPreference {
+    static let key = "articleGridLayoutBySection"
+
+    static func choices(_ stored: String) -> [String: Bool] {
+        (try? JSONDecoder().decode([String: Bool].self, from: Data(stored.utf8))) ?? [:]
+    }
+
+    static func isGrid(_ section: String, stored: String, fallback: Bool) -> Bool {
+        choices(stored)[section] ?? fallback
+    }
+
+    static func setting(_ isGrid: Bool, for section: String, in stored: String) -> String {
+        var all = choices(stored)
+        all[section] = isGrid
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(all)).flatMap { String(data: $0, encoding: .utf8) } ?? stored
     }
 }
 

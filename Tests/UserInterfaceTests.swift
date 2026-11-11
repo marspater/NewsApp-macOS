@@ -1019,6 +1019,9 @@ extension NewsTests {
             "Minor-rated stories retain image eligibility; pictured events need no lookup"
         )
         assertTrue(rows.first.map { ["e1", "e2"].contains($0.id) } == true, "Clustered stories come first")
+        let asked = try await db.imagelessStoryRows(
+            activeSince: now.addingTimeInterval(-86_400), limit: 20, first: ["waiting", "down"])
+        assertEqual(asked.prefix(2).map(\.id), ["waiting", "down"], "Stories asked for come first, in the order asked")
         let pastRefused = try await db.imagelessStoryRows(
             activeSince: now.addingTimeInterval(-86_400), limit: 1,
             isRequestable: { !$0.hasSuffix("/e1") && !$0.hasSuffix("/e2") })
@@ -1990,7 +1993,41 @@ extension NewsTests {
         assertEqual(AppLayout.gridColumnMaximum, 420.0, "AppLayout.gridColumnMaximum should be 420.0")
         assertEqual(AppSpacing.textStack, 2.0, "AppSpacing.textStack should be 2.0")
         assertEqual(AppSpacing.eyebrowGap, 6.0, "AppSpacing.eyebrowGap should be 6.0")
-        assertEqual(AppTypography.eyebrowTracking, 0.5, "AppTypography.eyebrowTracking should be 0.5")
+        assertEqual(AppTypography.eyebrowTracking, 0.6, "AppTypography.eyebrowTracking should be 0.6")
+        assertEqual(AppRadius.storyCard, 16.0, "Story cards use the 16 pt radius")
+
+        // Each list keeps its own layout; a list never chosen for follows the earlier single preference.
+        var layouts = ""
+        assertTrue(ListLayoutPreference.isGrid("Unread", stored: layouts, fallback: true), "Unset follows the default")
+        layouts = ListLayoutPreference.setting(false, for: "Unread", in: layouts)
+        layouts = ListLayoutPreference.setting(true, for: "Today", in: layouts)
+        assertFalse(ListLayoutPreference.isGrid("Unread", stored: layouts, fallback: true), "Unread keeps its list")
+        assertTrue(ListLayoutPreference.isGrid("Today", stored: layouts, fallback: false), "Today keeps its grid")
+        assertTrue(ListLayoutPreference.isGrid("World", stored: "not json", fallback: true), "A bad value is ignored")
+        assertEqual(AppLayout.gridColumnCount(width: 300), 1, "One column at the minimum width")
+        assertEqual(AppLayout.gridColumnCount(width: 1163), 3, "Three columns in a wide window")
+
+        // Today card metadata (#938): a field without data adds nothing to the card or to VoiceOver.
+        let none = StoryCardMetadata()
+        assertTrue(none.coverageLine == nil && none.originalReportsText == nil && none.readingTimeText == nil)
+        let full = StoryCardMetadata(
+            publisherCount: 5, newReportCount: 1, contentType: "Explainer", readingMinutes: 11, originalReports: 3)
+        assertEqual(full.coverageLine, "5 publishers · 1 new report", "Counts are pluralized separately")
+        assertEqual(none.accessibilityText(for: .coverage), "", "No metadata, no extra description")
+        assertEqual(full.accessibilityText(for: .feature), " Explainer. 11 min read.", "Feature names type and time")
+        assertEqual(
+            full.accessibilityText(for: .coverage), " 5 publishers. 3 original reports.",
+            "Coverage names publishers and original reports")
+        var seen = StoryCardMetadata(publisherCount: 2, reportDays: 4, publishers: ["A", "B"])
+        seen.differingAccount = "A: one. B: two."
+        assertEqual(
+            seen.accessibilityText(for: .coverage),
+            " 2 publishers. Including \(["A", "B"].formatted(.list(type: .and))). Accounts differ. A: one. B: two..",
+            "Coverage names what its monograms and its differing account show")
+        assertEqual(
+            seen.accessibilityText(for: .developing), " 2 publishers. Reports on 4 days.",
+            "Developing names what its progress rail shows")
+        assertEqual(StoryCardMetadata(publisherCount: 0).coverageLine, nil, "A zero count is not shown")
 
         // 4. Ghost Typography Theme tokens
         assertEqual(AppTypography.bodyLineSpacing(for: .casper), 10.0, "Casper theme line spacing should be 10")

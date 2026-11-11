@@ -74,6 +74,11 @@ struct TodayUserProfile: Equatable, Sendable {
             || keywordWeights.values.reduce(0, +) >= 3.0
     }
 
+    /// The key of ``publisherWeights`` for a stored story: the catalog's publisher for its link, else its source.
+    static func publisherKey(source: String?, link: String?) -> String {
+        EventFeedSummary.displaySource(FeedCatalog.publisher(forLink: link ?? "") ?? source ?? "").lowercased()
+    }
+
     /// Publisher affinity on a `0.0...1.0` scale relative to the reader's highest-engaged publisher.
     func publisherAffinity(for publisher: String) -> Double {
         let key = EventFeedSummary.displaySource(publisher).lowercased()
@@ -120,6 +125,9 @@ struct TodayAssignmentContext: Equatable, Sendable {
     var profile: TodayUserProfile
     var signalsByEntryID: [String: TodayStorySignals]
     var thresholds: TodayEditionThresholds
+    /// Stories with no photo to show: none in any report of the event, or one that failed to load. The Lead is a
+    /// photo slide, so they are not candidates for it (Mars, 11 November 2026); every other lane takes them.
+    var imagelessEntryIDs: Set<String> = []
 
     init(
         now: Date = Date(),

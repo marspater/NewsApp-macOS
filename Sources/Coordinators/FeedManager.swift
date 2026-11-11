@@ -84,6 +84,10 @@ class FeedManager: NSObject, ObservableObject {
     private var entityIndexRunID: UUID?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
     private var imageLookupTask: Task<Void, Never>?
+    /// The stories the running lookup was handed, which a cancelled lookup gives back to the pending ones.
+    private var runningImageIDs: [String] = []
+    private var imagePriorityIDs: [String] = []
+    private var requestedImageIDs: Set<String> = []
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
     private var clusteringTask: Task<Void, Never>?
     private var clusteringRunID: UUID?
@@ -567,8 +571,7 @@ class FeedManager: NSObject, ObservableObject {
         enrichmentTask = nil
         overviewWarmupTask?.cancel()
         overviewWarmupTask = nil
-        imageLookupTask?.cancel()
-        imageLookupTask = nil
+        cancelImageLookup()
         clusteringTask?.cancel()
         clusteringTask = nil
         clusteringRunID = nil
@@ -1077,19 +1080,49 @@ class FeedManager: NSObject, ObservableObject {
 
     /// Looks up lead images for shown stories without any, after clustering and outside `waitForEventClustering`, so
     /// notification triage never waits for publisher pages. A later pass replaces a lookup still running.
-    private func lookUpStoryImages() {
-        imageLookupTask?.cancel()
+    /// Stories on screen without a photo (the Today edition's top): the next lookup starts with them, and one starts
+    /// now when none is running and a story is asked for the first time. A story is asked for once a session, so a
+    /// page that cannot be read does not start a lookup each time the list reloads.
+    func requestStoryImages(for ids: [String]) {
+        imagePriorityIDs = ids
+        startRequestedImageLookup()
+    }
+
+    /// Starts a lookup for the stories asked for and not yet handed to one. While a lookup runs, or background
+    /// work is not allowed, they stay pending: the running lookup calls this when it ends.
+    private func startRequestedImageLookup() {
+        guard imageLookupTask == nil, !Set(imagePriorityIDs).isSubset(of: requestedImageIDs) else { return }
+        lookUpStoryImages(pendingOnly: true)
+    }
+
+    /// `pendingOnly`: a follow-up for stories not handed to a lookup yet, so the ones already tried (and failed)
+    /// cannot take the budget again and keep the deferred ones out.
+    /// Cancels the running lookup. A lookup cut short before it asked for its stories leaves them pending, also when
+    /// no replacement can start (background work is not allowed).
+    private func cancelImageLookup() {
+        guard let task = imageLookupTask else { return }
+        task.cancel()
         imageLookupTask = nil
+        requestedImageIDs.subtract(runningImageIDs)
+        runningImageIDs = []
+    }
+
+    private func lookUpStoryImages(pendingOnly: Bool = false) {
+        cancelImageLookup()
         guard !isStopped, imageFinder.isAvailable, allowsBackgroundWork() else { return }
         let database = articleStore.database
         let finder = imageFinder
         let muting = appSettings.muteRules
         let store = articleStore
+        let first = pendingOnly ? imagePriorityIDs.filter { !requestedImageIDs.contains($0) } : imagePriorityIDs
+        // Handed to this lookup; a lookup that could not start (the guard above) leaves them pending.
+        requestedImageIDs.formUnion(first)
+        runningImageIDs = first
         imageLookupTask = Task { [weak self] in
             self?.logger.info("Story image lookup started")
             defer { self?.logger.info("Story image lookup finished") }
             let work = Task.detached(priority: .utility) {
-                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting) {
+                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting, first: first) {
                     Task { @MainActor in
                         store.noteStoryImageSaved()
                     }
@@ -1101,6 +1134,17 @@ class FeedManager: NSObject, ObservableObject {
                 work.cancel()
             }
             guard let self else { return }
+            // Stories the budget skipped stay pending for the next lookup. A lookup cancelled since may share its
+            // stories with its replacement, which owns them now.
+            if !Task.isCancelled, case .success(let report) = result {
+                self.requestedImageIDs.subtract(report.deferredIDs)
+            }
+            if !Task.isCancelled {
+                self.imageLookupTask = nil
+                self.runningImageIDs = []
+                // Stories asked for while this lookup ran get their own.
+                self.startRequestedImageLookup()
+            }
             switch result {
             case .success(let report):
                 self.lastImageLookup = report
@@ -1108,6 +1152,9 @@ class FeedManager: NSObject, ObservableObject {
             case .failure(let error):
                 if !(error is CancellationError) {
                     self.logger.error("Story image lookup failed: \(error.localizedDescription)")
+                    // A pass that failed attempted none for certain: asking again may retry these (a later
+                    // request, not an immediate one, so a persistent failure does not loop).
+                    if !Task.isCancelled { self.requestedImageIDs.subtract(first) }
                 }
             }
         }

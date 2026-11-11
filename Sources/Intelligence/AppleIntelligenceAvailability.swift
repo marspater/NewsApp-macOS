@@ -59,7 +59,7 @@ public enum AppleIntelligenceState: String, CaseIterable, Equatable, Sendable {
     public var explanation: String {
         switch self {
         case .ready:
-            return "The on-device model is ready on this Mac."
+            return "The on-device model is active on this Mac."
         case .appDisabled:
             return
                 "Turn on AI story analysis in Settings → Intelligence to assess World Tension and generate overviews."

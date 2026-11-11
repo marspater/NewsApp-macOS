@@ -87,6 +87,26 @@ struct EventFeedSummary: Hashable, Sendable {
 
     var latestDate: Date? { members.map(\.date).max() }
 
+    /// The one definition of "Developing" for Today and the Briefing: a confirmed event whose latest report is from
+    /// the last hour. A report dated more than five minutes ahead of the clock does not count.
+    func isDeveloping(now: Date, window: TimeInterval = 3600) -> Bool {
+        guard isConfirmed, let latestDate else { return false }
+        let age = now.timeIntervalSince(latestDate)
+        return age <= window && age >= -300
+    }
+
+    /// Reports that joined since the reader last opened the event; nil for an event never opened, which is new
+    /// rather than updated.
+    var newReportCount: Int? {
+        guard let seenVersion else { return nil }
+        return members.filter { $0.joinedVersion > seenVersion }.count
+    }
+
+    /// Days on which the event had a report.
+    func reportDayCount(calendar: Calendar = .current) -> Int {
+        Set(members.map { calendar.startOfDay(for: $0.date) }).count
+    }
+
     /// New reporting since the reader last opened the event: an unread member that joined after the
     /// seen version and does not repeat a headline the reader already had. Reprints of a known
     /// headline do not count, and an event never opened is new rather than updated.

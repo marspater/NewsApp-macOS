@@ -51,6 +51,34 @@ extension TodayEditionAssigner {
         }
     }
 
+    /// Evaluation variant (#934, 11 November 2026) that keeps two questions apart. Is the story already underway:
+    /// it has a report older than `underway`, so a story whose reports all fall inside that time is new, not
+    /// ongoing. How recent is the new report: it is dated within `updateWindow`, has reports dated before it and
+    /// is a material headline change against every one of them. A report in the window that only repeats an
+    /// earlier one never qualifies the story, however few stories the lane holds.
+    static func hasSubstantiveInMotionUpdate(
+        _ summary: EventFeedSummary,
+        now: Date,
+        underway: TimeInterval,
+        updateWindow: TimeInterval
+    ) -> Bool {
+        let upperBound = now.addingTimeInterval(300)
+        let members = summary.members.filter { $0.date <= upperBound }
+        guard members.contains(where: { $0.date < now.addingTimeInterval(-underway) }) else { return false }
+
+        let updateCutoff = now.addingTimeInterval(-updateWindow)
+        return members.contains { candidate in
+            guard candidate.date >= updateCutoff else { return false }
+            let earlierTitles = members.filter { $0.date < candidate.date }.map(\.title)
+            let key = EventFeedSummary.titleKey(candidate.title)
+            guard !earlierTitles.isEmpty, !key.isEmpty,
+                !earlierTitles.contains(where: { EventFeedSummary.titleKey($0) == key })
+            else { return false }
+            return isMaterialHeadlineChange(
+                candidate: candidate.title, againstKnownTokenSets: earlierTitles.map(headlineComparisonLemmas))
+        }
+    }
+
     /// Distinguishes genuine new reporting / numbers / developments from same-story headline rewordings.
     static func isMaterialHeadlineChange(
         candidate: String,
