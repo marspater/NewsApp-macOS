@@ -75,6 +75,7 @@ struct ArticleDetailView: View {
 
     @State private var experienceMode: ReaderExperienceMode = .sourcePublication
     @State private var currentOverview: EventOverviewDocument? = nil
+    @State private var overviewLoadedInputHash: String? = nil
     @State private var highlightedPassage: String? = nil
     @State private var eventMemberArticles: [FeedArticle] = []
     /// Earlier events of the overview's developing story, keyed by the event they were found for.
@@ -105,6 +106,7 @@ struct ArticleDetailView: View {
         self.allArticles = allArticles
         self._path = path
         self._currentOverview = State(initialValue: overview)
+        self._overviewLoadedInputHash = State(initialValue: overview != nil ? article.publisherInputHash : nil)
         self._textScaleOverride = State(
             initialValue: SystemSettingsOverrides.from().textScale.map(ReaderTextSize.normalized))
         if let mode = initialExperienceMode {
@@ -236,6 +238,8 @@ struct ArticleDetailView: View {
                 analysis = nil
                 analysisError = nil
                 isAnalyzing = false
+                currentOverview = nil
+                overviewLoadedInputHash = nil
             }
             .onAppear { isViewFocused = true }
             .onDisappear {
@@ -1997,6 +2001,7 @@ struct ArticleDetailView: View {
         guard let summary = summaries.first, summary.isConfirmed, summary.sources.count >= 2 else {
             setOverviewLoading(false)
             currentOverview = nil
+            overviewLoadedInputHash = nil
             eventMemberArticles = []
             relatedStories = nil
             experienceMode = .sourcePublication
@@ -2010,6 +2015,7 @@ struct ArticleDetailView: View {
 
         if let existing = currentOverview,
             existing.eventID == eventID,
+            overviewLoadedInputHash == inputHash,
             !existing.isStale(currentMembershipVersion: membershipVersion)
         {
             setOverviewLoading(false)
@@ -2036,6 +2042,7 @@ struct ArticleDetailView: View {
             articleID: articleID)
         if currentOverview?.eventID != eventID {
             currentOverview = nil
+            overviewLoadedInputHash = nil
             if !returnToOverview {
                 experienceMode = .sourcePublication
             }
@@ -2061,6 +2068,7 @@ struct ArticleDetailView: View {
         setOverviewLoading(false)
         if let doc = doc {
             currentOverview = doc
+            overviewLoadedInputHash = inputHash
             eventMemberArticles = resolvedMembers
             if returnToOverview && viewMode == .reader && experienceMode == modeAtLoad {
                 experienceMode = .eventOverview
@@ -2068,6 +2076,11 @@ struct ArticleDetailView: View {
             }
             await loadRelatedStories(eventID: eventID, articleID: articleID)
         } else {
+            currentOverview = nil
+            overviewLoadedInputHash = nil
+            if experienceMode == .eventOverview {
+                experienceMode = .sourcePublication
+            }
             overviewRequestedArticleID = nil
         }
     }

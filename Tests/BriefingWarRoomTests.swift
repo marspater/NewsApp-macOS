@@ -349,6 +349,24 @@ enum BriefingWarRoomTests {
             "aiEnabled=false resolves to appDisabled regardless of OS"
         )
 
+        // Real FoundationModels availability reasons (#1212):
+        check(
+            AppleIntelligenceAvailability.classifyAvailability("deviceNotEligible") == .unsupportedDevice,
+            "deviceNotEligible classifies to unsupportedDevice"
+        )
+        check(
+            AppleIntelligenceAvailability.classifyAvailability("appleIntelligenceNotEnabled") == .systemDisabled,
+            "appleIntelligenceNotEnabled classifies to systemDisabled"
+        )
+        check(
+            AppleIntelligenceAvailability.classifyAvailability("modelNotReady") == .modelDownloading,
+            "modelNotReady classifies to modelDownloading"
+        )
+        check(
+            AppleIntelligenceAvailability.classifyAvailability("available") == .ready,
+            "available classifies to ready"
+        )
+
         // Ineligible Mac:
         check(
             AppleIntelligenceAvailability.resolveState(
@@ -356,14 +374,25 @@ enum BriefingWarRoomTests {
             "deviceNotEligible resolves to unsupportedDevice"
         )
 
-        // System Settings off:
+        // System Settings off (with real reason string):
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, foundationModelsAvailability: "unavailable(appleIntelligenceNotEnabled)")
+                == .systemDisabled,
+            "appleIntelligenceNotEnabled resolves to systemDisabled"
+        )
         check(
             AppleIntelligenceAvailability.resolveState(
                 aiEnabled: true, foundationModelsAvailability: "unavailable(disabledInSettings)") == .systemDisabled,
             "disabledInSettings resolves to systemDisabled"
         )
 
-        // Model downloading:
+        // Model downloading (with real reason string):
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, foundationModelsAvailability: "unavailable(modelNotReady)") == .modelDownloading,
+            "modelNotReady resolves to modelDownloading"
+        )
         check(
             AppleIntelligenceAvailability.resolveState(
                 aiEnabled: true, foundationModelsAvailability: "unavailable(modelDownloading)") == .modelDownloading,
@@ -376,6 +405,11 @@ enum BriefingWarRoomTests {
         check(
             avail.state.explanation.contains("does not support Apple Intelligence"),
             "unsupportedDevice explanation matches")
+
+        avail.mockState = .macOSVersionTooOld
+        check(
+            avail.state.explanation.contains("macOS 26"),
+            "macOSVersionTooOld explanation references macOS 26")
 
         avail.mockState = .systemDisabled
         check(avail.state == .systemDisabled, "Mock state updated")
@@ -414,10 +448,20 @@ enum BriefingWarRoomTests {
         final class NonKeyAuxWindow: NSWindow {
             override var canBecomeKey: Bool { false }
         }
-        let auxWindow = NonKeyAuxWindow()
+        let auxWindow = NonKeyAuxWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        auxWindow.orderFront(nil)
         check(auxWindow.canBecomeKey == false, "Auxiliary helper window cannot become key")
+        check(auxWindow.isVisible, "Auxiliary window is visible before showMainWindow")
         StoryBannerPresenter.mainWindow = auxWindow
         StoryBannerPresenter.showMainWindow()
+        check(auxWindow.isVisible, "Auxiliary window remains visible after showMainWindow")
+        check(!auxWindow.isKeyWindow, "Auxiliary window did not become key window")
         StoryBannerPresenter.mainWindow = nil
+        auxWindow.orderOut(nil)
     }
 }

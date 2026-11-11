@@ -167,11 +167,12 @@ enum BannerGate: Equatable, Sendable {
 }
 
 /// The only way to honour Focus: macOS gives an app no notification callback, so the banner asks `INFocusStatusCenter`.
-/// When an app lacks the Communication Notifications entitlement (`com.apple.developer.usernotifications.communication`),
-/// querying user availability logs DNDErrorDomain 1004. Banners handle this gracefully without error spew (#1214).
+/// It functions with `NSFocusStatusUsageDescription` in Info.plist when signed or entitled (#1214). Banners handle
+/// environments without Focus configuration gracefully without error spew.
+@MainActor
 enum FocusStatus {
     /// Injected provider for unit tests.
-    static var provider: (() -> Bool?)?
+    static var provider: (@MainActor () -> Bool?)?
 
     /// Whether the app possesses the communication notifications entitlement required by DoNotDisturb framework.
     static let hasCommunicationEntitlement: Bool = {
@@ -182,18 +183,24 @@ enum FocusStatus {
         return false
     }()
 
+    /// Whether the host application is configured to access Focus status.
+    static var isConfigured: Bool {
+        guard Bundle.main.bundleIdentifier != nil else { return false }
+        return Bundle.main.object(forInfoDictionaryKey: "NSFocusStatusUsageDescription") != nil
+    }
+
     /// Asks once; macOS remembers the answer.
     static func requestAuthorization() {
-        guard hasCommunicationEntitlement else { return }
+        guard isConfigured || hasCommunicationEntitlement else { return }
         INFocusStatusCenter.default.requestAuthorization { _ in
             // The answer is read when a banner is drawn.
         }
     }
 
-    /// Whether a Focus is on; nil while the reader has not allowed it, lacks the entitlement, or shares no Focus status.
+    /// Whether a Focus is on; nil while the reader has not allowed it, lacks configuration, or shares no Focus status.
     static var isFocused: Bool? {
         if let provider { return provider() }
-        guard hasCommunicationEntitlement else { return nil }
+        guard isConfigured || hasCommunicationEntitlement else { return nil }
         let center = INFocusStatusCenter.default
         guard center.authorizationStatus == .authorized else { return nil }
         return center.focusStatus.isFocused

@@ -455,12 +455,6 @@ actor OverviewGenerationCoordinator {
         }.prefix(3)
         for event in top {
             guard !Task.isCancelled, await allowsEnergy() else { return }
-            // An overview already stored and fresh needs no warming pass (#1214).
-            if let stored = try? await store.fetchEventOverview(eventID: event.eventID),
-                !stored.isStale(currentMembershipVersion: event.eventVersion)
-            {
-                continue
-            }
             // The same reports the reader builds from, so the two never overwrite each other's overview (#792).
             let members: [FeedArticle]
             do {

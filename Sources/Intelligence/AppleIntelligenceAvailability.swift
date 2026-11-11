@@ -71,7 +71,7 @@ public enum AppleIntelligenceState: String, CaseIterable, Equatable, Sendable {
         case .unsupportedDevice:
             return "This Mac does not support Apple Intelligence. Keyword estimates and extractive summaries stand in."
         case .macOSVersionTooOld:
-            return "Apple Intelligence requires macOS 15 or later with on-device model support."
+            return "On-device Apple Intelligence requires macOS 26 or later. Keyword and extractive estimates stand in."
         }
     }
 
@@ -129,6 +129,28 @@ public final class AppleIntelligenceAvailability {
         return Self.resolveState(aiEnabled: AppSettings.shared.aiEnabled)
     }
 
+    /// Classifies an availability description or FoundationModels unavailable reason string into AppleIntelligenceState.
+    public nonisolated static func classifyAvailability(_ reason: String) -> AppleIntelligenceState {
+        let lower = reason.lowercased()
+        if lower.contains("available") && !lower.contains("unavailable") {
+            return .ready
+        }
+        if lower.contains("devicenoteligible") || lower.contains("ineligible") || lower.contains("unsupported") {
+            return .unsupportedDevice
+        }
+        if lower.contains("appleintelligencenotenabled") || lower.contains("notenabled") || lower.contains("disabled")
+            || lower.contains("settings")
+        {
+            return .systemDisabled
+        }
+        if lower.contains("modelnotready") || lower.contains("notready") || lower.contains("download")
+            || lower.contains("asset")
+        {
+            return .modelDownloading
+        }
+        return .temporarilyBusy
+    }
+
     /// Pure evaluation function allowing testing of environment combinations without global mutation.
     public nonisolated static func resolveState(
         aiEnabled: Bool,
@@ -137,18 +159,12 @@ public final class AppleIntelligenceAvailability {
     ) -> AppleIntelligenceState {
         guard aiEnabled else { return .appDisabled }
 
-        // Requires macOS 15+ generally, and FoundationModels SDK (macOS 26+)
         if osVersion.majorVersion < 15 {
             return .macOSVersionTooOld
         }
 
         if let explicit = foundationModelsAvailability {
-            let lower = explicit.lowercased()
-            if lower.contains("available") && !lower.contains("unavailable") { return .ready }
-            if lower.contains("devicenoteligible") || lower.contains("ineligible") { return .unsupportedDevice }
-            if lower.contains("disabled") || lower.contains("settings") { return .systemDisabled }
-            if lower.contains("download") || lower.contains("asset") { return .modelDownloading }
-            if lower.contains("busy") { return .temporarilyBusy }
+            return classifyAvailability(explicit)
         }
 
         #if canImport(FoundationModels)
@@ -158,17 +174,7 @@ public final class AppleIntelligenceAvailability {
                 case .available:
                     return .ready
                 case .unavailable(let reason):
-                    let reasonString = String(describing: reason).lowercased()
-                    if reasonString.contains("devicenoteligible") || reasonString.contains("ineligible") {
-                        return .unsupportedDevice
-                    }
-                    if reasonString.contains("disabled") || reasonString.contains("settings") {
-                        return .systemDisabled
-                    }
-                    if reasonString.contains("download") || reasonString.contains("asset") {
-                        return .modelDownloading
-                    }
-                    return .temporarilyBusy
+                    return classifyAvailability(String(describing: reason))
                 }
             }
         #endif

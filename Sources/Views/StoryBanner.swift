@@ -400,7 +400,7 @@ final class StoryBannerPresenter {
                 .priority: NSAccessibilityPriorityLevel.high.rawValue,
             ])
         // A banner that replaces another under a resting pointer gets no mouseEntered, so it starts from the pointer.
-        hold(frame.contains(NSEvent.mouseLocation))
+        hold(isHeadless ? false : frame.contains(NSEvent.mouseLocation))
         Self.log.notice(
             "shown \(banner.id, privacy: .private(mask: .hash)): frame=\(NSStringFromRect(frame), privacy: .public) visible=\(panel.isVisible, privacy: .public) screen=\(NSStringFromRect(screen.visibleFrame), privacy: .public)"
         )

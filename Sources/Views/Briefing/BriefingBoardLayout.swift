@@ -214,6 +214,18 @@ struct BriefingSituationalLayout: Layout {
         }
     }
 
+    public struct ModuleFrames: Equatable {
+        public var hero: CGRect?
+        public var trailing: CGRect?
+        public var sitrep: CGRect?
+
+        public init(hero: CGRect? = nil, trailing: CGRect? = nil, sitrep: CGRect? = nil) {
+            self.hero = hero
+            self.trailing = trailing
+            self.sitrep = sitrep
+        }
+    }
+
     static func computeFrames(
         width: CGFloat,
         heroHeight: CGFloat?,
@@ -222,7 +234,7 @@ struct BriefingSituationalLayout: Layout {
         leadingFraction: CGFloat = 2.0 / 3.0,
         minimumWidth: CGFloat = defaultMinimumWidth,
         spacing: CGFloat = AppLayout.cardGap
-    ) -> (hero: CGRect?, trailing: CGRect?, sitrep: CGRect?) {
+    ) -> ModuleFrames {
         if width >= minimumWidth, let trailingHeight {
             let leadingWidth = ((width - spacing) * leadingFraction).rounded()
             let trailingWidth = width - spacing - leadingWidth
@@ -240,7 +252,7 @@ struct BriefingSituationalLayout: Layout {
             }
 
             let trailingFrame = CGRect(x: leadingWidth + spacing, y: 0, width: trailingWidth, height: trailingHeight)
-            return (hero: heroFrame, trailing: trailingFrame, sitrep: sitrepFrame)
+            return ModuleFrames(hero: heroFrame, trailing: trailingFrame, sitrep: sitrepFrame)
         }
 
         var y: CGFloat = 0
@@ -262,7 +274,7 @@ struct BriefingSituationalLayout: Layout {
             y += sitrepHeight + spacing
         }
 
-        return (hero: heroFrame, trailing: trailingFrame, sitrep: sitrepFrame)
+        return ModuleFrames(hero: heroFrame, trailing: trailingFrame, sitrep: sitrepFrame)
     }
 
     func frames(width: CGFloat, subviews: Subviews) -> [CGRect] {

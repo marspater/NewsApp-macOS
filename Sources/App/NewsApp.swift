@@ -599,7 +599,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 // The banner reads the settings when it is drawn; the answer itself needs no handling here.
             }
             // The only way to honour Focus; the banner reads the answer when it is drawn.
-            FocusStatus.requestAuthorization()
+            Task { @MainActor in
+                FocusStatus.requestAuthorization()
+            }
         }
 
         #if !DEBUG
