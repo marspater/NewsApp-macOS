@@ -15,9 +15,79 @@
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
+import UserNotifications
 
-/// The dissolving photo crop of the app-drawn banner (#589, #906, #920).
+/// The dissolving photo crop of the app-drawn banner (#589, #906, #920) and notification attachment pipeline (#1010).
 extension NotificationService {
+    /// Attachment file size limit (10 MB).
+    static let attachmentLimit = Int(SecureHTTPClient.defaultImageLimit)
+
+    /// Short side a source needs for the tall crop; smaller images stay as they are.
+    static let notificationImageMinimumSide = 300
+    /// Rendered width of the tall crop; the height is 1.5 times it.
+    static let notificationImageWidth = 600
+
+    /// Converts an image to a standard 32-bit RGBA CGImage (e.g. from an 8-bit palette/indexed PNG, #1010).
+    static func convertToStandardRGBA(_ image: CGImage) -> CGImage {
+        let width = image.width
+        let height = image.height
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue
+        guard
+            let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            )
+        else { return image }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
+    }
+
+    /// A portrait crop (2:3) of the image, at most 600 × 900, sharp at its trailing edge, that blurs progressively and
+    /// fades to transparent toward its leading edge, the banner's text (#589). macOS has no custom banner layout, so the effect is baked into the PNG the system
+    /// places as the thumbnail. Rendered on the CPU, so the same input gives the same bytes. nil when the source's
+    /// short side is under 300 px, when the square the system shows is the better choice.
+    static func notificationImage(_ image: CGImage) -> CGImage? {
+        guard min(image.width, image.height) >= notificationImageMinimumSide else { return nil }
+        return dissolvingCrop(image, aspect: 2.0 / 3.0, maxWidth: notificationImageWidth)
+    }
+
+    /// Notification attachments do not support every format the protected reader can decode (notably WebP/AVIF or indexed palette PNGs).
+    /// Converts or decodes palette PNGs to standard 32-bit RGBA before creating `UNNotificationAttachment` (#1010).
+    /// Every failure is an `ImageLoadFailure` naming its stage with `contentType` and the byte count.
+    static func makeImageAttachment(data: Data, contentType: String? = nil) throws -> UNNotificationAttachment {
+        func failure(_ stage: ImageLoadFailure.Stage, _ error: Error? = nil) -> ImageLoadFailure {
+            ImageLoadFailure(
+                stage: stage, contentType: contentType, bytes: data.count, underlying: error.map { $0 as NSError })
+        }
+        let decoded: CGImage
+        do { decoded = try SecureHTTPClient.decodeReaderImage(data) } catch { throw failure(.decode, error) }
+        var image = notificationImage(decoded) ?? decoded
+        if image.colorSpace?.model == .indexed || image.bitsPerPixel != 32 {
+            image = convertToStandardRGBA(image)
+        }
+        let encoded = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(encoded, UTType.png.identifier as CFString, 1, nil)
+        else { throw failure(.encode) }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw failure(.encode) }
+        guard encoded.length <= attachmentLimit else { throw failure(.size) }
+        let fileURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).png")
+        do {
+            try (encoded as Data).write(to: fileURL)
+            return try UNNotificationAttachment(identifier: UUID().uuidString, url: fileURL, options: nil)
+        } catch {
+            try? FileManager.default.removeItem(at: fileURL)
+            throw failure(.attach, error)
+        }
+    }
     /// The centred crop of `image` at `aspect` (width over height), at most `maxWidth` px wide, sharp and opaque at its
     /// trailing edge and dissolving toward its leading edge, where the banner's text sits.
     static func dissolvingCrop(_ image: CGImage, aspect: Double, maxWidth: Int) -> CGImage? {

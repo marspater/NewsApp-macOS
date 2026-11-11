@@ -37,6 +37,12 @@ struct SidebarView: View {
         // Default no-op action
     }
 
+    /// Whether the tension indicator in the sidebar is visible (#1209).
+    /// Follows `appSettings.isWorldTensionEnabled` reactively so toggling immediately shows/hides it.
+    var isTensionReadingVisible: Bool {
+        appSettings.isWorldTensionEnabled
+    }
+
     @EnvironmentObject private var appSettings: AppSettings
     @EnvironmentObject private var feedManager: FeedManager
     @EnvironmentObject private var savedStories: SavedStoriesManager
@@ -111,7 +117,7 @@ struct SidebarView: View {
             isNewSmartBinderSheetPresented = true
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if showsTensionReading {
+            if isTensionReadingVisible {
                 VStack(spacing: 0) {
                     Divider()
                     TensionSidebarButton(open: openTension)

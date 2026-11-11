@@ -583,6 +583,21 @@ final class NotificationService: Sendable {
             return .failed(domain: error.domain, code: error.code)
         }
     }
+
+    /// Fetches an image and creates a notification attachment, logging the exact failing stage on error (#1010).
+    func downloadNotificationAttachment(from url: URL) async -> UNNotificationAttachment? {
+        do {
+            let (data, response) = try await SecureHTTPClient.shared.fetchImage(from: url, allowHTTP: false)
+            try Task.checkCancellation()
+            return try Self.makeImageAttachment(data: data, contentType: response.mimeType)
+        } catch {
+            if !ImageLoadFailure.isCancellation(error) {
+                logger.error(
+                    "Notification image attachment failed: \(ImageLoadFailure.describe(error), privacy: .public)")
+            }
+            return nil
+        }
+    }
 }
 
 typealias ScoredStory = (article: FeedArticle, score: Double)

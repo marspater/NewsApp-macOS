@@ -139,6 +139,10 @@ enum BriefingWarRoomTests {
         var layout = BriefingLayout.standard
         layout.setVisible(.worldTension, false)
         check(!BriefingView.visibleModules(layout: layout, data: BriefingBoardData()).contains(.worldTension), "hidden")
+        check(
+            !BriefingView.visibleModules(
+                layout: .standard, data: BriefingBoardData(), isWorldTensionEnabled: false
+            ).contains(.worldTension), "hidden when world tension disabled (#1209)")
     }
 
     static func reading(_ day: Int, _ score: Int, estimate: Bool = false, publishers: [String] = [])

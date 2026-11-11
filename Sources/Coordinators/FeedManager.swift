@@ -1081,22 +1081,27 @@ class FeedManager: NSObject, ObservableObject {
         let database = articleStore.database
         let finder = imageFinder
         let muting = appSettings.muteRules
+        let store = articleStore
         imageLookupTask = Task { [weak self] in
             self?.logger.info("Story image lookup started")
             defer { self?.logger.info("Story image lookup finished") }
             let work = Task.detached(priority: .utility) {
-                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting)
+                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting) {
+                    Task { @MainActor in
+                        store.noteStoryImageSaved()
+                    }
+                }
             }
             let result = await withTaskCancellationHandler {
                 await work.result
             } onCancel: {
                 work.cancel()
             }
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
             switch result {
             case .success(let report):
                 self.lastImageLookup = report
-                if report.changed { self.articleStore.noteEventsChanged() }
+                if report.changed { self.articleStore.noteStoryImageSaved() }
             case .failure(let error):
                 if !(error is CancellationError) {
                     self.logger.error("Story image lookup failed: \(error.localizedDescription)")

@@ -42,35 +42,44 @@ enum StoryCurator {
         imageBudget: Int = imageBudget,
         muting: MuteRules = MuteRules(),
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
-        now: Date = Date()
+        now: Date = Date(),
+        onImageSaved: (@Sendable () -> Void)? = nil
     ) async throws -> Report {
         var report = Report()
         if imageFinder.isAvailable, imageBudget > 0 {
             // ponytail: rows read once per pass; one lookup per event, the rest of an event waits for the next pass.
             var lookedUp = Set<String>()
-            for row in try await database.imagelessStoryRows(
-                activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting,
-                isRequestable: { StoryImageFinder.pageURL($0) != nil })
-            where lookedUp.count < imageBudget {
-                try Task.checkCancellation()
-                if let event = row.eventID, lookedUp.contains(event) { continue }
-                // A link the client would refuse before any request is never a candidate and spends no budget. Nothing
-                // is recorded, so a story whose link is later corrected under the same id is still looked up (#818).
-                lookedUp.insert(row.eventID ?? row.id)
-                switch await imageFinder.find(row.link) {
-                case .found(let url):
+            do {
+                for row in try await database.imagelessStoryRows(
+                    activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting,
+                    isRequestable: { StoryImageFinder.pageURL($0) != nil })
+                where lookedUp.count < imageBudget {
                     try Task.checkCancellation()
-                    if try await database.recordStoryImage(row.id, imageURL: url, at: now, expectedLink: row.link) {
-                        report.imagesFound += 1
+                    if let event = row.eventID, lookedUp.contains(event) { continue }
+                    // A link the client would refuse before any request is never a candidate and spends no budget. Nothing
+                    // is recorded, so a story whose link is later corrected under the same id is still looked up (#818).
+                    lookedUp.insert(row.eventID ?? row.id)
+                    switch await imageFinder.find(row.link) {
+                    case .found(let url):
+                        try Task.checkCancellation()
+                        if try await database.recordStoryImage(row.id, imageURL: url, at: now, expectedLink: row.link) {
+                            report.imagesFound += 1
+                            onImageSaved?()
+                        }
+                        report.imagesChecked += 1
+                    case .none:
+                        try Task.checkCancellation()
+                        try await database.recordStoryImage(row.id, imageURL: nil, at: now, expectedLink: row.link)
+                        report.imagesChecked += 1
+                    case .unreachable:
+                        continue
                     }
-                    report.imagesChecked += 1
-                case .none:
-                    try Task.checkCancellation()
-                    try await database.recordStoryImage(row.id, imageURL: nil, at: now, expectedLink: row.link)
-                    report.imagesChecked += 1
-                case .unreachable:
-                    continue
                 }
+            } catch is CancellationError {
+                if report.imagesFound > 0 {
+                    onImageSaved?()
+                }
+                throw CancellationError()
             }
         }
         return report

@@ -223,7 +223,7 @@ struct MainView: View {
         SidebarView(
             selectedTopic: Binding(get: { selectedTopic }, set: { showSection($0 ?? "Today") }),
             mastheadNotice: $mastheadNotice,
-            showsTensionReading: appSettings.tensionCollectionOptIn,
+            showsTensionReading: appSettings.isWorldTensionEnabled,
             openTension: { showsTension = true }
         )
         .environmentObject(appSettings)

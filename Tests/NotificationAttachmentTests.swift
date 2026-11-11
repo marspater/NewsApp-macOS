@@ -123,6 +123,40 @@ enum NotificationAttachmentTests {
             let decoded = try SecureHTTPClient.decodeReaderImage(palette)
             precondition(decoded.width == 962 && decoded.height == 548, "Palette PNG decodes at its size")
             precondition(StoryBannerPresenter.bannerPhoto(decoded, scale: 2) != nil, "Palette banner photo renders")
+            // Notification attachment conversion converts palette PNG to standard 32-bit RGBA PNG (#1010).
+            let attachment = try NotificationService.makeImageAttachment(data: palette, contentType: "image/png")
+            let attachmentData = try Data(contentsOf: attachment.url)
+            let attachmentSource = CGImageSourceCreateWithData(attachmentData as CFData, nil)!
+            let attachmentImage = CGImageSourceCreateImageAtIndex(attachmentSource, 0, nil)!
+            precondition(
+                attachmentImage.bitsPerPixel == 32,
+                "Attachment image must be 32-bit RGBA, got \(attachmentImage.bitsPerPixel)")
+            precondition(attachmentImage.colorSpace?.model != .indexed, "Attachment image must not be indexed palette")
+            try? FileManager.default.removeItem(at: attachment.url)
+
+            // Small palette image (bypassing dissolvingCrop) also converts to 32-bit RGBA.
+            let smallPalette = palettePNG(width: 200, height: 200)
+            let smallAttachment = try NotificationService.makeImageAttachment(
+                data: smallPalette, contentType: "image/png")
+            let smallData = try Data(contentsOf: smallAttachment.url)
+            let smallSource = CGImageSourceCreateWithData(smallData as CFData, nil)!
+            let smallImage = CGImageSourceCreateImageAtIndex(smallSource, 0, nil)!
+            precondition(smallImage.bitsPerPixel == 32, "Small attachment image must be 32-bit RGBA")
+            precondition(smallImage.colorSpace?.model != .indexed, "Small attachment image must not be indexed")
+            try? FileManager.default.removeItem(at: smallAttachment.url)
+
+            // Decode stage logging for invalid attachment bytes.
+            do {
+                _ = try NotificationService.makeImageAttachment(
+                    data: Data("not an image".utf8), contentType: "text/html")
+                fatalError("Malformed image must throw ImageLoadFailure")
+            } catch {
+                let description = ImageLoadFailure.describe(error)
+                precondition(
+                    description.hasPrefix("stage=decode type=text/html bytes=12"),
+                    "Decode failure must log stage=decode, got \(description)")
+            }
+
             // The host serves the named PNG, not a `Vary: Accept` WebP or AVIF variant, to an image request (#1010).
             precondition(
                 SecureHTTPClient.imageAccept.hasPrefix("image/png,")
