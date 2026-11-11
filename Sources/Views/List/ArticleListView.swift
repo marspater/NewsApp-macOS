@@ -1208,6 +1208,11 @@ struct ArticleListView: View {
                 + "\(todayGeneration):\(queryIdentity)"
         ) {
             let previous = todayEdition
+            // Bursts of store revisions (clustering, overviews) would lay the page out once each; they are debounced
+            // as in the list. The first edition loads at once.
+            if previous != nil {
+                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+            }
             // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
             // for or another day's stories lay the edition out afresh.
             let keeps = isHoldingList && previous?.generation == todayGeneration
@@ -1699,6 +1704,7 @@ struct KeyboardShortcutsView: View {
             [
                 ("J or ↓", "Next story"),
                 ("K or ↑", "Previous story"),
+                ("← → ↑ ↓", "In Today: move inside a lane and between lanes"),
                 ("Space or ⌘Y", "Quick Look preview (⌘Y in the list)"),
                 ("↵", "Open focused story"),
                 ("Esc, ← or B", "Back to list"),

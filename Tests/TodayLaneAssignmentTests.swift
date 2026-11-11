@@ -1017,6 +1017,11 @@ extension NewsTests {
         assertEqual(
             shape(held), ["The Lead: a", "In Motion: b,d", "The Latest: e,stray,f,g"],
             "Stories stay in their lanes, a story that left the list leaves its lane, new stories join The Latest")
+        let tagged = TodayStoryAssignment.unplaced(.article(makeArticle(id: "t", title: "t", pubDate: referenceNow)))
+        assertTrue(
+            tagged.placed(in: .theDeepRead, contentType: .explainer).contentTypeLabel == .explainer
+                && tagged.placed(in: .yourBeat, contentType: .explainer).contentTypeLabel == nil,
+            "A story held in The Deep Read keeps its content-type tag, and no other lane shows one")
         let applied = TodayEdition.make(entries: entries(["a", "b", "d", "e", "stray", "f", "g"]), plan: moved)
         assertEqual(
             shape(applied), ["The Lead: f", "The Latest: a,b,d,e,g,stray"],
