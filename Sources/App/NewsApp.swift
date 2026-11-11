@@ -502,7 +502,7 @@ struct FileCommands: Commands {
 struct KeyboardShortcutsCommands: Commands {
     static let windowID = "keyboard-shortcuts"
     @Environment(\.openWindow) private var openWindow
-    @ObservedObject private var updateChecker = UpdateChecker.shared
+    @State private var updateChecker = UpdateChecker.shared
 
     var body: some Commands {
         CommandGroup(after: .help) {

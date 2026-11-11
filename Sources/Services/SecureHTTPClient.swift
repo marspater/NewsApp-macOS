@@ -185,7 +185,7 @@ actor SecureHTTPClient {
     static let allowedPorts: Set<Int> = [80, 443, 8080, 8443]
 
     /// Shared navigation/ingestion preflight. The DNS lookup is asynchronous, cancellable and bounded (#945).
-    func validateDestination(_ url: URL, allowHTTP: Bool = false) async throws {
+    func validateDestination(_ url: URL, allowHTTP: Bool = false) async throws(FeedError) {
         // 1. Scheme & Port Validation
         guard let scheme = url.scheme?.lowercased() else {
             throw FeedError.malformedURL(url.absoluteString)

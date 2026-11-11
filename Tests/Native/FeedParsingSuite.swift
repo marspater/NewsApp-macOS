@@ -101,6 +101,14 @@ extension NativeSuites.FeedParsingSuite {
 
         let err4 = FeedError.dnsRebindingDetected(host: "rebind.example", ip: "127.0.0.1")
         expectTrue(err4.errorDescription?.contains("DNS rebinding") == true, "DNS rebinding message")
+
+        // The preflight API has a closed error domain; rejected schemes never touch the network.
+        do {
+            try await SecureHTTPClient.shared.validateDestination(URL(fileURLWithPath: "/tmp/news-feed"))
+            expectTrue(false, "Local file schemes must be refused")
+        } catch {
+            expectEqual(error, FeedError.insecureScheme("file"), "Preflight returns its typed FeedError")
+        }
     }
 
     @MainActor

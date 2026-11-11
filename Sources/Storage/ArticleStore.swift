@@ -256,8 +256,12 @@ final class ArticleStore: ObservableObject {
     private func scheduleFollowUpRefresh() {
         guard followUpRefresh == nil else { return }
         followUpRefresh = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            do { try await Task.sleep(for: .milliseconds(250)) } catch {
+                self?.followUpRefresh = nil
+                return
+            }
             self?.followUpRefresh = nil
+            guard !Task.isCancelled else { return }
             await self?.refreshState()
         }
     }
@@ -397,7 +401,11 @@ final class ArticleStore: ObservableObject {
     func markAllAsRead(feedUrl: String? = nil, muting: MuteRules = MuteRules()) async -> Bool {
         // A Shortcut can run during launch: wait for initialize to set the collection-only feeds, or panel reports
         // would be marked read and surface in History. ponytail: polls up to 10 s; await the init task if it grows.
-        for _ in 0..<100 where !isReady { try? await Task.sleep(for: .milliseconds(100)) }
+        for _ in 0..<100 where !isReady {
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return false }
+        }
+        // Cancellation must never turn an abandoned shortcut into a library-wide write.
+        guard !Task.isCancelled else { return false }
         guard isReady else {
             operationError = "Could not mark articles as read. Please try again."
             return false
@@ -407,6 +415,10 @@ final class ArticleStore: ObservableObject {
             stateChanges &+= 1
             await refreshState()
             return true
+        } catch is CancellationError {
+            // The database actor checks cancellation before executing the update.
+            // A cancelled Shortcut is not a failed storage operation.
+            return false
         } catch {
             operationError = "Could not mark articles as read. Please try again."
             logger.error("Failed to mark all as read: \(error.localizedDescription)")
