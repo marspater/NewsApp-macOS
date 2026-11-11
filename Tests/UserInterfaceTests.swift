@@ -27,6 +27,7 @@ import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
 import dnssd
+import os
 
 #if canImport(FoundationModels)
     import FoundationModels
@@ -1091,10 +1092,13 @@ extension NewsTests {
             try await cancelDb.upsertArticles([cancelStory, cancelStory2], feedUrl: "https://example.com/feed.xml")
 
             var cancelTask: Task<StoryCurator.Report, Error>?
-            var urlCounter = 0
+            let urlCounter = OSAllocatedUnfairLock(initialState: 0)
             let cancelFinder = StoryImageFinder { _ in
-                urlCounter += 1
-                return .found("https://cdn.example/cancelled-found-\(urlCounter).jpg")
+                let count = urlCounter.withLock { c -> Int in
+                    c += 1
+                    return c
+                }
+                return .found("https://cdn.example/cancelled-found-\(count).jpg")
             }
 
             let task = Task {

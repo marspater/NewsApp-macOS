@@ -89,17 +89,51 @@ enum ReaderDictionaryLookup {
         let attrString = NSAttributedString(string: trimmed)
         view.showDefinition(for: attrString, at: baselinePoint)
     }
+
+    /// Triggers dictionary lookup for selected text or word under point within a view.
+    static func performLookup(
+        for fallbackText: String,
+        font: NSFont = NSFont.systemFont(ofSize: 14),
+        at pointInView: NSPoint? = nil,
+        in view: NSView? = nil
+    ) {
+        if let selection = ReaderSelection.current(), !selection.isEmpty {
+            showDefinition(for: selection, at: pointInView, in: view)
+            return
+        }
+
+        let targetView = view ?? NSApp.keyWindow?.contentView
+        guard let targetView else { return }
+
+        let localPoint: NSPoint
+        if let pointInView {
+            localPoint = pointInView
+        } else if let window = targetView.window {
+            let screenPoint = NSEvent.mouseLocation
+            let windowPoint = window.convertPoint(fromScreen: screenPoint)
+            localPoint = targetView.convert(windowPoint, from: nil)
+        } else {
+            localPoint = .zero
+        }
+
+        if let word = word(at: localPoint, in: fallbackText, font: font, containerSize: targetView.bounds.size) {
+            showDefinition(for: word, at: localPoint, in: targetView)
+        } else {
+            showDefinition(for: fallbackText, at: localPoint, in: targetView)
+        }
+    }
+}
+
+@MainActor
+final class LookUpBridgeCoordinator {
+    weak var view: ForceClickMonitorView?
 }
 
 /// Attaches dictionary Look Up via force click, long press, context menu, and ⌃⌘D (Issue #1207).
 struct ReaderLookUpModifier: ViewModifier {
     let text: String
     var font: NSFont = NSFont.systemFont(ofSize: 14)
-
-    init(text: String, font: NSFont = NSFont.systemFont(ofSize: 14)) {
-        self.text = text
-        self.font = font
-    }
+    @State private var coordinator = LookUpBridgeCoordinator()
 
     func body(content: Content) -> some View {
         content
@@ -120,57 +154,44 @@ struct ReaderLookUpModifier: ViewModifier {
                 .keyboardShortcut("d", modifiers: [.control, .command])
             }
             .background {
-                ReaderForceClickBridge(text: text, font: font)
+                ReaderForceClickBridge(text: text, font: font, coordinator: coordinator)
                     .accessibilityHidden(true)
             }
     }
 
     private func triggerLookup() {
-        if let selection = ReaderSelection.current(), !selection.isEmpty {
-            ReaderDictionaryLookup.showDefinition(for: selection)
-        } else {
-            let screenPoint = NSEvent.mouseLocation
-            if let window = NSApp.keyWindow, let contentView = window.contentView {
-                let windowPoint = window.convertPoint(fromScreen: screenPoint)
-                let viewPoint = contentView.convert(windowPoint, from: nil)
-                if let w = ReaderDictionaryLookup.word(
-                    at: viewPoint, in: text, font: font, containerSize: contentView.bounds.size)
-                {
-                    ReaderDictionaryLookup.showDefinition(for: w, at: viewPoint, in: contentView)
-                } else {
-                    ReaderDictionaryLookup.showDefinition(for: text, at: viewPoint, in: contentView)
-                }
-            }
-        }
+        ReaderDictionaryLookup.performLookup(
+            for: text,
+            font: font,
+            in: coordinator.view
+        )
     }
 }
 
 struct ReaderForceClickBridge: NSViewRepresentable {
     let text: String
     let font: NSFont
+    let coordinator: LookUpBridgeCoordinator
 
-    init(text: String, font: NSFont) {
-        self.text = text
-        self.font = font
-    }
-
-    func makeNSView(context: Context) -> ForceClickMonitorView {
+    func makeNSView(context _: Context) -> ForceClickMonitorView {
         let view = ForceClickMonitorView()
         view.text = text
         view.font = font
+        coordinator.view = view
         return view
     }
 
-    func updateNSView(_ nsView: ForceClickMonitorView, context: Context) {
+    func updateNSView(_ nsView: ForceClickMonitorView, context _: Context) {
         nsView.text = text
         nsView.font = font
+        coordinator.view = nsView
     }
 }
 
 final class ForceClickMonitorView: NSView {
     var text: String = ""
     var font: NSFont = NSFont.systemFont(ofSize: 14)
-    private var monitor: Any?
+    nonisolated(unsafe) private var monitor: Any?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -198,18 +219,12 @@ final class ForceClickMonitorView: NSView {
     }
 
     private func triggerForceClick(at point: NSPoint) {
-        if let selection = ReaderSelection.current(), !selection.isEmpty {
-            ReaderDictionaryLookup.showDefinition(for: selection, at: point, in: self)
-        } else if let word = ReaderDictionaryLookup.word(at: point, in: text, font: font, containerSize: bounds.size) {
-            ReaderDictionaryLookup.showDefinition(for: word, at: point, in: self)
-        } else {
-            ReaderDictionaryLookup.showDefinition(for: text, at: point, in: self)
-        }
+        ReaderDictionaryLookup.performLookup(for: text, font: font, at: point, in: self)
     }
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
+    override func hitTest(_: NSPoint) -> NSView? {
         // Return nil so mouse clicks, selections, link activations pass straight through to SwiftUI Text
-        return nil
+        nil
     }
 }
 
