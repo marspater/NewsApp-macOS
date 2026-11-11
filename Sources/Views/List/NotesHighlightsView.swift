@@ -48,8 +48,21 @@ struct NotesHighlightsView: View {
                 }
             } else {
                 // Arrow keys move through the rows, Return opens the selected story.
-                List(listings, selection: $selectedID) { listing in
-                    row(listing)
+                let groups = listings.groupedByStory()
+                List(selection: $selectedID) {
+                    ForEach(groups) { group in
+                        if group.isMultiple {
+                            Section {
+                                ForEach(group.listings) { listing in
+                                    row(listing, inGroup: true)
+                                }
+                            } header: {
+                                storyGroupHeader(group)
+                            }
+                        } else if let singleListing = group.listings.first {
+                            row(singleListing).tag(singleListing.id)
+                        }
+                    }
                 }
                 .listStyle(.plain)
                 .onKeyPress(.return) {
@@ -78,40 +91,48 @@ struct NotesHighlightsView: View {
         }
     }
 
-    /// One note with its story title, source and date; the row opens the story.
-    private func row(_ listing: UserNoteListing) -> some View {
-        let note = listing.note
-        return HStack(alignment: .top, spacing: AppSpacing.sm) {
-            Button {
-                onOpen(note.articleID)
-            } label: {
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text(listing.articleTitle)
+    /// Story group header for stories with multiple highlights and notes (#1208).
+    private func storyGroupHeader(_ group: StoryAnnotationGroup) -> some View {
+        let storyTitle = group.articleTitle
+        let noteCount = group.listings.count
+        return Button {
+            onOpen(group.articleID)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.xs) {
+                VStack(alignment: .leading, spacing: AppSpacing.textStack) {
+                    Text(storyTitle)
                         .font(AppTypography.headline)
                         .foregroundStyle(AppColor.primaryText)
                         .multilineTextAlignment(.leading)
-                    Text("“\(note.selectedText)”")
-                        .font(AppTypography.callout)
-                        .foregroundStyle(AppColor.primaryText)
-                        .multilineTextAlignment(.leading)
-                        .padding(.leading, AppSpacing.xs)
-                        .background(alignment: .leading) {
-                            Rectangle().fill(AppColor.noteHighlight).frame(width: AppLayout.quoteBarWidth)
-                        }
-                    if note.hasBody {
-                        Text(note.noteBody)
-                            .font(AppTypography.body)
-                            .foregroundStyle(AppColor.primaryText)
-                            .multilineTextAlignment(.leading)
-                    }
-                    Text(
-                        "\(listing.source) · \(note.createdAt.formatted(date: .abbreviated, time: .shortened))"
-                    )
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
+                    Text("\(group.source) · \(noteCount) passages in reading order")
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.secondaryText)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.tertiaryText)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, AppSpacing.xxs)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(storyTitle), \(group.source), \(noteCount) passages in reading order")
+        .accessibilityHint("Opens the story")
+    }
+
+    /// One note row: optionally displayed inside a story group without repeating the story title (#1208).
+    private func row(_ listing: UserNoteListing, inGroup: Bool = false) -> some View {
+        let note = listing.note
+        let content = HStack(alignment: .top, spacing: AppSpacing.sm) {
+            Button {
+                onOpen(note.articleID)
+            } label: {
+                noteText(listing, inGroup: inGroup)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityHint("Opens the story")
@@ -124,6 +145,53 @@ struct NotesHighlightsView: View {
             .help("Delete this highlight")
             .accessibilityLabel("Delete highlight “\(note.selectedText.prefix(40))”")
         }
-        .padding(.vertical, AppSpacing.xs)
+        return Group {
+            if inGroup {
+                content
+                    .padding(AppSpacing.sm)
+                    .background(
+                        AppColor.cardBackground,
+                        in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    )
+                    .padding(.vertical, AppSpacing.xxs)
+            } else {
+                content
+                    .padding(.vertical, AppSpacing.xs)
+            }
+        }
+    }
+
+    /// The quoted words, the note and its date, without the story title inside a group.
+    private func noteText(_ listing: UserNoteListing, inGroup: Bool) -> some View {
+        let note = listing.note
+        return VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            if !inGroup {
+                Text(listing.articleTitle)
+                    .font(AppTypography.headline)
+                    .foregroundStyle(AppColor.primaryText)
+                    .multilineTextAlignment(.leading)
+            }
+            Text("“\(note.selectedText)”")
+                .font(AppTypography.callout)
+                .foregroundStyle(AppColor.primaryText)
+                .multilineTextAlignment(.leading)
+                .padding(.leading, AppSpacing.xs)
+                .background(alignment: .leading) {
+                    Rectangle().fill(AppColor.noteHighlight).frame(width: AppLayout.quoteBarWidth)
+                }
+            if note.hasBody {
+                Text(note.noteBody)
+                    .font(AppTypography.body)
+                    .foregroundStyle(AppColor.primaryText)
+                    .multilineTextAlignment(.leading)
+            }
+            Text(
+                inGroup
+                    ? note.createdAt.formatted(date: .abbreviated, time: .shortened)
+                    : "\(listing.source) · \(note.createdAt.formatted(date: .abbreviated, time: .shortened))"
+            )
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
+        }
     }
 }

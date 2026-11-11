@@ -136,9 +136,18 @@ private actor KnowledgeExportEncoder {
                 result.append(
                     NSAttributedString(string: quote.publisher + " — " + quote.url + "\n", attributes: attribution))
             }
-            if !document.notes.isEmpty { result.append(NSAttributedString(string: "\nMy highlights and notes\n")) }
-            for note in document.notes {
-                result.append(NSAttributedString(string: "“" + note.selectedText + "”\n" + note.noteBody + "\n"))
+            if !document.notes.isEmpty {
+                let sortedNotes = document.notes.sortedInReadingOrder()
+                result.append(NSAttributedString(string: "\nMy highlights and notes\n"))
+                if sortedNotes.count > 1 {
+                    result.append(
+                        NSAttributedString(string: "Story passages in reading order (\(sortedNotes.count)):\n"))
+                }
+                for (i, note) in sortedNotes.enumerated() {
+                    let prefix = sortedNotes.count > 1 ? "\nPassage \(i + 1):\n" : ""
+                    let body = note.noteBody.isEmpty ? "" : note.noteBody + "\n"
+                    result.append(NSAttributedString(string: "\(prefix)“\(note.selectedText)”\n\(body)"))
+                }
             }
         }
         return result

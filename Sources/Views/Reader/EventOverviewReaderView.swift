@@ -582,6 +582,7 @@ struct EventOverviewReaderView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(.h1)
                 .textSelection(.enabled)
+                .readerLookUp(text: overview.title, font: ReaderDictionaryLookup.overviewFont(.title, scale: textScale))
 
             HStack(spacing: AppSpacing.eyebrowGap) {
                 Text("Updated \(formattedUpdateTime)")
@@ -653,6 +654,8 @@ struct EventOverviewReaderView: View {
                         .foregroundStyle(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
+                        .readerLookUp(
+                            text: fact.text, font: ReaderDictionaryLookup.overviewFont(.introduction, scale: textScale))
                     ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
                         ForEach(fact.citationIDs, id: \.self) { id in
                             if let citation = overview.citations[id] { citationPill(citation) }
@@ -667,6 +670,8 @@ struct EventOverviewReaderView: View {
                         .foregroundStyle(AppColor.primaryText)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
+                        .readerLookUp(
+                            text: para, font: ReaderDictionaryLookup.overviewFont(.introduction, scale: textScale))
                 }
             }
         }
@@ -825,6 +830,9 @@ struct EventOverviewReaderView: View {
             .foregroundStyle(AppColor.primaryText)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
+            .readerLookUp(
+                text: String(attributed.characters), font: ReaderDictionaryLookup.bodyFont(for: theme, scale: textScale)
+            )
             .environment(\.openURL, citationOpenURLAction(citations))
     }
 
@@ -921,13 +929,18 @@ struct EventOverviewReaderView: View {
 
     /// One text with the source numbers as superscript links (`news-citation://<index>`), so the citations wrap
     /// with the sentence; VoiceOver offers "Open source N" actions instead of separate buttons.
-    private func citedText(_ text: String, citationIDs: [String], font: Font) -> some View {
+    private func citedText(
+        _ text: String, citationIDs: [String], font: Font, lookupFont: NSFont? = nil
+    ) -> some View {
         let sources = citedSources(citationIDs)
         return Text(Self.citedAttributedString(text, sources: sources.map(\.index), scale: textScale))
             .font(font)
             .lineSpacing(bodyLineSpacing)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
+            .readerLookUp(
+                text: text, font: lookupFont ?? ReaderDictionaryLookup.bodyFont(for: theme, scale: textScale)
+            )
             .environment(\.openURL, citationOpenURLAction(sources))
             .accessibilityActions { citationAccessibilityActions(sources) }
     }
@@ -1430,6 +1443,7 @@ struct EventOverviewReaderView: View {
                 .foregroundStyle(AppColor.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+                .readerLookUp(text: item.implication)
 
             if !citations.isEmpty {
                 ReaderTagLayout(spacing: AppSpacing.eyebrowGap) {
@@ -1483,6 +1497,7 @@ struct EventOverviewReaderView: View {
                         .lineSpacing(bodyLineSpacing)
                         .foregroundStyle(AppColor.primaryText)
                         .textSelection(.enabled)
+                        .readerLookUp(text: angle.summary)
                 }
 
                 let validAngleFacts = Self.filterValidFacts(angle.facts)
@@ -1491,7 +1506,8 @@ struct EventOverviewReaderView: View {
                 } else if !angle.citationIDs.isEmpty {
                     citedText(
                         "Sources", citationIDs: angle.citationIDs,
-                        font: AppTypography.overviewFont(.caption, scale: textScale)
+                        font: AppTypography.overviewFont(.caption, scale: textScale),
+                        lookupFont: ReaderDictionaryLookup.overviewFont(.caption, scale: textScale)
                     )
                     .foregroundStyle(currentSecondaryTextColor)
                 }

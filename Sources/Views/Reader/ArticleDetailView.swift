@@ -827,6 +827,12 @@ struct ArticleDetailView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(block.kind == .heading ? .h2 : .h3)
                 .textSelection(.enabled)
+                .readerLookUp(
+                    text: block.text,
+                    lineSpacing: AppSpacing.xxs * readerTextScale,
+                    font: ReaderDictionaryLookup.headingFont(
+                        level: block.kind == .heading ? 2 : 3, theme: themeManager.articleTheme, scale: readerTextScale)
+                )
         case .divider:
             Divider()
                 .opacity(Self.dividerOpacity(for: contrast))
@@ -845,6 +851,12 @@ struct ArticleDetailView: View {
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+                .readerLookUp(
+                    text: block.text,
+                    lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
+                    font: isLead
+                        ? ReaderDictionaryLookup.leadFont(for: themeManager.articleTheme, scale: readerTextScale)
+                        : ReaderDictionaryLookup.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
         default:
             readerWrappedBlock(block, index: index, overlay: overlay)
         }
@@ -864,6 +876,11 @@ struct ArticleDetailView: View {
                     .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
+                    .readerLookUp(
+                        text: block.text,
+                        lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
+                        font: ReaderDictionaryLookup.bodyFont(
+                            for: themeManager.articleTheme, scale: readerTextScale, italic: true))
             }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, AppSpacing.xxs * readerTextScale)
@@ -875,7 +892,12 @@ struct ArticleDetailView: View {
                     // A bullet is decoration; an ordinal is read before the item.
                     .accessibilityHidden(block.ordinal == nil)
                 // Not combined: the item is selectable text and may carry links (DESIGN.md 16).
-                Text(readerLinkedText(block, index: index, overlay: overlay)).textSelection(.enabled)
+                Text(readerLinkedText(block, index: index, overlay: overlay))
+                    .textSelection(.enabled)
+                    .readerLookUp(
+                        text: block.text,
+                        lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
+                        font: ReaderDictionaryLookup.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
@@ -885,6 +907,11 @@ struct ArticleDetailView: View {
                 Text(readerLinkedText(block, index: index, overlay: overlay))
                     .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
                     .textSelection(.enabled)
+                    .readerLookUp(
+                        text: block.text,
+                        lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
+                        font: ReaderDictionaryLookup.codeFont(for: themeManager.articleTheme, scale: readerTextScale)
+                    )
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(AppSpacing.md * readerTextScale)
             }
@@ -897,6 +924,10 @@ struct ArticleDetailView: View {
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
+                .readerLookUp(
+                    text: block.text,
+                    lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
+                    font: ReaderDictionaryLookup.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
         default:
             readerBoxedBlock(block, index: index, overlay: overlay)
         }
@@ -915,6 +946,11 @@ struct ArticleDetailView: View {
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
+                    .readerLookUp(
+                        text: block.text,
+                        lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
+                        font: ReaderDictionaryLookup.leadFont(
+                            for: themeManager.articleTheme, scale: readerTextScale, italic: true))
                 Divider().opacity(Self.dividerOpacity(for: contrast))
             }
         case .table:
@@ -1508,16 +1544,37 @@ struct ArticleDetailView: View {
         !modifiers.intersection([.command, .control, .option]).isEmpty
     }
 
+    /// Whether keyboard focus is currently in an active text input field or note editor (#1206).
+    static func isTextInputActive(
+        firstResponder: Any? = NSApp.keyWindow?.firstResponder,
+        isNoteDraftActive: Bool = false
+    ) -> Bool {
+        if isNoteDraftActive { return true }
+        guard let firstResponder else { return false }
+        if let text = firstResponder as? NSText, text.isEditable {
+            return true
+        }
+        if let textField = firstResponder as? NSTextField, textField.isEditable {
+            return true
+        }
+        return false
+    }
+
     private func handleKeyPress(press: KeyPress) -> KeyPress.Result {
         guard !Self.shouldPassThroughToSystem(modifiers: press.modifiers) else { return .ignored }
+        let textInputFocused = Self.isTextInputActive(isNoteDraftActive: noteDraft != nil)
         if press.key == .escape {
             if showsReadingOptions {
                 showsReadingOptions = false
                 return .handled
             }
+            if textInputFocused { return .ignored }
             Self.stepBack(&path)
             return .handled
         }
+        // When typing inside a note or text input, single-letter shortcuts must not hijack key events (#1206).
+        if textInputFocused { return .ignored }
+
         if press.key == .leftArrow || press.characters == "b" || press.characters == "h" {
             Self.stepBack(&path)
             return .handled

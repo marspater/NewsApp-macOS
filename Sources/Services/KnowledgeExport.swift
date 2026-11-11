@@ -77,10 +77,19 @@ enum KnowledgeExport {
                 lines += quote.text.components(separatedBy: .newlines).map { "> " + escapeMarkdown($0) }
                 lines += ["", source(quote.publisher, quote.url), ""]
             }
-            if !document.notes.isEmpty { lines += ["### My highlights and notes", ""] }
-            for note in document.notes {
-                lines += note.selectedText.components(separatedBy: .newlines).map { "> " + escapeMarkdown($0) }
-                lines += ["", escapeMarkdown(note.noteBody), ""]
+            if !document.notes.isEmpty {
+                let sortedNotes = document.notes.sortedInReadingOrder()
+                lines += ["### My highlights and notes", ""]
+                if sortedNotes.count > 1 {
+                    lines += ["_Story passages in reading order (\(sortedNotes.count)):_", ""]
+                }
+                for (i, note) in sortedNotes.enumerated() {
+                    if sortedNotes.count > 1 {
+                        lines += ["#### Passage \(i + 1)", ""]
+                    }
+                    lines += note.selectedText.components(separatedBy: .newlines).map { "> " + escapeMarkdown($0) }
+                    lines += ["", escapeMarkdown(note.noteBody), ""]
+                }
             }
         }
         return Data(lines.joined(separator: "\n").utf8)
