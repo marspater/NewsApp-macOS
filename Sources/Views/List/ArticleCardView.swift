@@ -117,7 +117,8 @@ struct ArticleCardView<Footer: View>: View {
         }
         // A card is as tall as its own content: in a grid row it never stretches to a taller neighbour, such as an
         // event card showing its sources (#779).
-        .fixedSize(horizontal: false, vertical: true)
+        // A lane card instead takes the height its row gives it, so the cards of a row end level.
+        .fixedSize(horizontal: false, vertical: variant?.laneWidth == nil)
         .clipShape(cardShape)
         .containerShape(cardShape)
         // The shadows are cast by the filled card shape rather than the composited card, whose shadow needed an

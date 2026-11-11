@@ -334,6 +334,9 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 | Tokens | `DesignSystem.swift` | Color, typography, spacing, radius, layout, shadow, motion |
 | Story card | `ArticleCardView.swift` | All story cards and their context menus |
 | Today card variants | `StoryCardVariant.swift` | The Developing, Standard, Feature, Coverage and Compact faces of the story card, their metadata (`StoryCardMetadata`), the status pill, progress rail and publisher monograms |
+| Today edition | `Sources/Views/Today/` | `TodayEditionView` (The Lead, lane rows, The Latest), `TodayEdition` (what each lane shows, pinned between applied updates) and `TodayFocusMap` (keyboard focus between and inside lanes) |
+| Hero carousel | `BriefingHeroCarouselView.swift` | The Briefing hero and, through `LeadPresentation`, Today's Lead: one rotation policy (section 13.1) |
+| Floating glass controls | `FloatingGlassGroup`, `BannerSurface` in `DesignSystem.swift` | Controls that float over content, such as The Lead's dots and arrows |
 | Event coverage | `EventCardView.swift` | Coverage disclosure and member rows |
 | Tag | `TagView` in `DesignSystem.swift` | Category, entity, Updated, Plan, the card's intelligence state tag and citation pills; inside Highlights and Perspectives the citation is an inline neutral chip (`InlineChip`, `sourcedAttributedString`), not a separate view |
 | Eyebrow | `EyebrowText` in `DesignSystem.swift` | Publisher and kicker lines in cards, reader and overview |

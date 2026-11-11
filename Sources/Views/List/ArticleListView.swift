@@ -107,12 +107,17 @@ struct ArticleListView: View {
     @MainActor static var hasSettledLaunch = false
     @State private var isSettled = ArticleListView.hasSettledLaunch
 
-    private var initialPrefetchURLs: [URL] { CardImagePrefetch.initialURLs(entries) }
+    private var initialPrefetchURLs: [URL] {
+        if isTodayEdition, let todayEdition { return todayEdition.initialImageURLs }
+        return CardImagePrefetch.initialURLs(entries)
+    }
 
     /// Whether the first card with an image is the full-size lead story (macOS 26). Only Today shows it at full
     /// size: the Briefing picks its hero by publisher count, and the hero decodes its own image on demand.
     private var showsLeadImage: Bool {
         guard #available(macOS 26, *), !isBriefing else { return false }
+        // The Lead's first slide is the first image the edition asks for.
+        if isTodayEdition { return todayEdition?.lead.first?.entry.cardImageURL != nil }
         return LeadStoryPresentation.firstEligibleID(
             in: entries, selectedTopic: selectedTopic, isSearching: isSearching) != nil
     }
@@ -152,6 +157,9 @@ struct ArticleListView: View {
 
     private var isBriefing: Bool { selectedTopic == "Briefing" && !isSearching }
 
+    /// Today outside a search is the edition: The Lead, lanes and The Latest (docs/design/today.md).
+    private var isTodayEdition: Bool { !isSearching && (selectedTopic ?? "Today") == "Today" }
+
     /// Muting applies to the feed lists and search; Saved Stories and History list everything the reader kept or opened.
     private var listMuting: MuteRules {
         isSearching || (selectedTopic != "Saved Stories" && selectedTopic != "History")
@@ -170,13 +178,31 @@ struct ArticleListView: View {
     /// Saved Stories and History list exactly what the reader kept or opened. Briefing is always one card per event,
     /// whatever the list preference says: its modules are built on events.
     private var groupingMode: FeedGroupingMode {
-        if isBriefing { return .events }
+        // Lanes hold stories, never single reports, so an event cannot appear twice (today.md, rule 4).
+        if isBriefing || isTodayEdition { return .events }
         return groupsEvents && selectedTopic != "Saved Stories" && selectedTopic != "History"
             ? .events : .publications
     }
 
     /// The shown page grouped once per change of page or grouping; the body reads it several times (#778).
     @State private var groupedEntries = GroupedEntries()
+
+    /// The Today page as laid out for the listed stories; nil until its first assignment has run.
+    @State private var todayEdition: TodayEdition?
+    /// Counts the updates the reader applied. An edition built for an older count is laid out afresh; within one
+    /// count its stories stay in their lanes.
+    @State private var todayGeneration = 0
+    /// Each lane's last focused card, for the session.
+    @State private var todayLaneMemory: [TodayLane: String] = [:]
+    @State private var todayLatestColumns = 1
+    /// The detail column's size, which sizes The Lead.
+    @State private var columnSize = CGSize(
+        width: AppLayout.mainWindowMinimumWidth, height: AppLayout.mainWindowMinimumHeight)
+    @State private var todayPrefetch = TodayLanePrefetch()
+
+    private var todayFocusMap: TodayFocusMap? {
+        isTodayEdition ? todayEdition?.focusMap(latestColumns: gridLayout ? todayLatestColumns : 1) : nil
+    }
 
     private var entries: [FeedEntry] { groupedEntries.entries(of: buffer.displayed, mode: groupingMode) }
 
@@ -291,7 +317,7 @@ struct ArticleListView: View {
             }
         }()
         return ListCommandActions(
-            canGroupStories: !isBriefing, newBriefing: isBriefing ? { startNewBriefing() } : nil,
+            canGroupStories: !isBriefing && !isTodayEdition, newBriefing: isBriefing ? { startNewBriefing() } : nil,
             back: backAction, backDestination: backDest,
             customizeBriefing: isBriefing ? { showsCustomizeBriefing = true } : nil)
     }
@@ -326,6 +352,13 @@ struct ArticleListView: View {
     /// in one transition, and only then starts the launch refresh and the catch-up clustering with its image lookup.
     private func settleLaunch() async {
         guard !Self.hasSettledLaunch, articleStore.isReady, !isLoadingPage else { return }
+        // The Today edition is assigned off the main actor; the one launch transition waits for it, at most a
+        // second, so its cards arrive with the page instead of after it.
+        if isTodayEdition, !entries.isEmpty {
+            for _ in 0..<50 where todayEdition == nil {
+                do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
+            }
+        }
         let urls = entries.prefix(12).compactMap(\.cardImageURL)
         let leadAtFullSize = showsLeadImage
         let loader = imageLoader
@@ -347,8 +380,13 @@ struct ArticleListView: View {
     private func scrollView(proxy: ScrollViewProxy) -> some View {
         attachNavigationCommands(
             to: ScrollView {
-                masthead
+                masthead.id(Self.mastheadScrollID)
                 listContent(proxy: proxy)
+            }
+            .onGeometryChange(for: CGSize.self) {
+                $0.size
+            } action: {
+                columnSize = $0
             }
             // An empty list keeps its masthead at the top and centers its state in the visible area.
             .overlay { emptyListOverlay }
@@ -577,6 +615,8 @@ struct ArticleListView: View {
         if isNewQuery {
             buffer = FeedUpdateBuffer()
             groupedEntries.resetPrefetch()
+            todayPrefetch.reset()
+            todayEdition = nil
             cursor = nil
             hasMoreResults = false
             expandedEvents = []
@@ -760,7 +800,13 @@ struct ArticleListView: View {
     private func applyPendingUpdates(proxy: ScrollViewProxy) {
         guard buffer.pending != nil else { return }
         showPendingUpdates()
-        if let first = entries.first {
+        if isTodayEdition {
+            // The page returns to the masthead and each row to its leading edge; a card that keeps keyboard focus
+            // is scrolled back into view once the new edition is laid out.
+            withAnimation(reduceMotion ? nil : AppMotion.hover) {
+                proxy.scrollTo(Self.mastheadScrollID, anchor: .top)
+            }
+        } else if let first = entries.first {
             withAnimation(reduceMotion ? nil : AppMotion.hover) {
                 proxy.scrollTo(first.id, anchor: .top)
             }
@@ -794,7 +840,8 @@ struct ArticleListView: View {
     }
 
     private var headerMaxWidth: CGFloat? {
-        Self.headerMaxWidth(isBriefing: isBriefing, gridLayout: gridLayout)
+        // The Today edition is full-bleed in both layouts, so its masthead starts at the page inset.
+        isTodayEdition ? .infinity : Self.headerMaxWidth(isBriefing: isBriefing, gridLayout: gridLayout)
     }
 
     /// The location title and one status line, scrolling with the list under the toolbar (DESIGN.md 8.1).
@@ -896,7 +943,7 @@ struct ArticleListView: View {
             ToolbarSpacer(.flexible, placement: .primaryAction)
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            if !isBriefing {
+            if !isBriefing && !isTodayEdition {
                 Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
                     Label(
                         "Group Stories by Event",
@@ -1042,7 +1089,9 @@ struct ArticleListView: View {
     @ViewBuilder
     private func articleGrid(proxy _: ScrollViewProxy) -> some View {
         let listed = entries
-        if isBriefing {
+        if isTodayEdition {
+            todayPage(listed)
+        } else if isBriefing {
             BriefingView(
                 entries: listed,
                 briefing: briefing,
@@ -1117,6 +1166,66 @@ struct ArticleListView: View {
             .padding(.bottom, AppSpacing.xl)
             // The click that brings an inactive window forward also opens the card under it (#594).
             .allowsWindowActivationEvents(true)
+        }
+    }
+
+    static var mastheadScrollID: String { "list-masthead" }
+
+    /// The Today edition of the listed stories. Its lanes are assigned off the main actor; until the first
+    /// assignment is back the page below the masthead is empty, so no card ever changes lane in view.
+    @ViewBuilder
+    private func todayPage(_ listed: [FeedEntry]) -> some View {
+        // A stack rather than a group: the task below must run while the page is still empty.
+        VStack(spacing: 0) {
+            if let todayEdition {
+                TodayEditionView(
+                    edition: todayEdition,
+                    focusedID: listHasFocus ? focusedArticleID : nil,
+                    readIDs: readManager.readArticles,
+                    columnSize: columnSize,
+                    gridLayout: gridLayout,
+                    isMotionPaused: !articlePath.isEmpty || isSheetPresented,
+                    actions: TodayEditionActions(
+                        open: { entry in open(entry) },
+                        cardAppeared: { id in
+                            NewsSignposts.firstCardAppeared()
+                            todayPrefetch.cardAppeared(id, in: todayEdition, using: imageLoader)
+                        },
+                        latestColumnsChanged: { todayLatestColumns = $0 }),
+                    latestListCard: { entry in entryCard(entry) }
+                )
+            }
+        }
+        // Reloads when the listed stories, their event membership, a stored overview or the applied updates change.
+        .task(
+            id: "\(groupedEntries.revision):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
+                + "\(todayGeneration):\(queryIdentity)"
+        ) {
+            let previous = todayEdition
+            // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
+            // for or another day's stories lay the edition out afresh.
+            let keeps = isHoldingList && previous?.generation == todayGeneration
+            let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
+            let edition = await articleStore.todayEdition(
+                entries: listed, subscribedFeedURLs: Set(appSettings.feedURLs),
+                starredFeedURLs: appSettings.starredFeedURLs, resetAt: resetAt,
+                keeping: keeps ? previous : nil, generation: todayGeneration)
+            guard !Task.isCancelled else { return }
+            // Focus follows its card, or the rules of today.md when the card or its lane is gone.
+            if let previous, let focused = focusedArticleID {
+                focusedArticleID = edition.focusMap(latestColumns: todayLatestColumns)
+                    .restoredFocus(focused, from: previous.focusMap(latestColumns: todayLatestColumns))
+            }
+            todayEdition = edition
+        }
+        .allowsWindowActivationEvents(true)
+    }
+
+    private func open(_ entry: FeedEntry) {
+        switch entry {
+        case .article(let article): openArticle(article)
+        case .event(let summary, let representative, _):
+            openEvent(summary.eventID, article: representative, initialExperienceMode: .eventOverview)
         }
     }
 
@@ -1293,6 +1402,12 @@ struct ArticleListView: View {
             StoryQuickLookCoordinator.shared.close()
             return .handled
         }
+        if let map = todayFocusMap, searchState.returnStory == nil,
+            let direction = Self.todayDirection(press.key)
+        {
+            focusToday(map.move(direction, from: focusedArticleID, memory: todayLaneMemory), in: map, proxy: proxy)
+            return .handled
+        }
         if press.key == .escape || press.key == .leftArrow || press.characters == "b" || press.characters == "h" {
             if searchState.returnStory != nil {
                 searchState.returnToStory(path: &articlePath)
@@ -1344,7 +1459,7 @@ struct ArticleListView: View {
             } else if press.characters == "e" {
                 toggleFocusedEventSources()
                 return .handled
-            } else if press.characters == "g", !isBriefing {
+            } else if press.characters == "g", !isBriefing, !isTodayEdition {
                 groupsEvents.toggle()
                 return .handled
             } else if press.characters == "u" {
@@ -1362,7 +1477,38 @@ struct ArticleListView: View {
         }
     }
 
+    static func todayDirection(_ key: KeyEquivalent) -> TodayFocusMap.Direction? {
+        switch key {
+        case .leftArrow: return .left
+        case .rightArrow: return .right
+        case .upArrow: return .up
+        case .downArrow: return .down
+        default: return nil
+        }
+    }
+
+    /// Moves keyboard focus to a Today card, remembers it for its lane and scrolls the page only as far as showing
+    /// it needs; the card's row scrolls itself.
+    private func focusToday(_ id: String?, in map: TodayFocusMap, proxy: ScrollViewProxy) {
+        guard let id else { return }
+        focusedArticleID = id
+        let lane = map.lane(of: id)
+        if let lane { todayLaneMemory[lane] = id }
+        withAnimation(reduceMotion ? nil : AppMotion.hover) {
+            proxy.scrollTo(lane == .theLead ? TodayEditionView<EmptyView>.leadScrollID : id)
+        }
+        if StoryQuickLookCoordinator.shared.isOpen,
+            let entry = entries.first(where: { $0.id == id })
+        {
+            StoryQuickLookCoordinator.shared.present(article: entry.representative, isDark: colorScheme == .dark)
+        }
+    }
+
     private func navigateList(offset: Int, proxy: ScrollViewProxy) {
+        if let map = todayFocusMap {
+            focusToday(map.step(offset, from: focusedArticleID), in: map, proxy: proxy)
+            return
+        }
         let listed = entries
         guard !listed.isEmpty else { return }
         let currentIndex: Int
@@ -1471,6 +1617,8 @@ struct ArticleListView: View {
         withAnimation(reduceMotion ? nil : AppMotion.state) {
             buffer.applyPending()
         }
+        // The reader asked for the update: the Today edition is laid out afresh.
+        todayGeneration += 1
         cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
         hasMoreResults = pendingHasMore
     }
@@ -1504,9 +1652,12 @@ private final class GroupedEntries {
     /// Position of each entry in `cached`, by entry ID (the card's representative story).
     private var indexByID: [String: Int] = [:]
     private let imagePrefetch = CardImagePrefetch()
+    /// Counts the times the grouped entries changed, for work keyed on them.
+    private(set) var revision = 0
 
     func entries(of snapshot: FeedSnapshot, mode: FeedGroupingMode) -> [FeedEntry] {
         if snapshot != self.snapshot || mode != self.mode {
+            revision += 1
             cached = snapshot.entries(mode)
             var map: [String: Int] = [:]
             map.reserveCapacity(cached.count)
@@ -1603,5 +1754,40 @@ struct KeyboardShortcutsView: View {
         .formStyle(.grouped)
         .frame(width: AppLayout.keyboardShortcutsPopoverWidth)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// Decodes the next cards of a lane before they scroll into view (#591, #936): a card appearing asks for the
+/// images of the cards after it in its own lane, each as its card shows it.
+@MainActor final class TodayLanePrefetch {
+    private var furthest: [TodayLane: Int] = [:]
+    private var tasks: [TodayLane: Task<Void, Never>] = [:]
+
+    func cardAppeared(
+        _ id: String, in edition: TodayEdition, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
+    ) {
+        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+        for lane in edition.lanes where lane.lane != .theLead {
+            guard let index = lane.stories.firstIndex(where: { $0.id == id }) else { continue }
+            let ahead = lane.lane == .theLatest ? 18 : 6
+            let end = min(lane.stories.count, index + 1 + ahead)
+            // Only once the card is past what an earlier card already asked for.
+            guard end > (furthest[lane.lane] ?? 0) else { return }
+            let start = max(index + 1, furthest[lane.lane] ?? 0)
+            furthest[lane.lane] = end
+            let urls = lane.stories[start..<end].compactMap(\.entry.cardImageURL)
+            let previous = tasks[lane.lane]
+            tasks[lane.lane] = Task {
+                await previous?.value
+                await DecodedImageCache.prefetch(urls, size: .card, using: loader)
+            }
+            return
+        }
+    }
+
+    func reset() {
+        furthest = [:]
+        for task in tasks.values { task.cancel() }
+        tasks = [:]
     }
 }

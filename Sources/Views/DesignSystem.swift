@@ -252,6 +252,25 @@ enum AppColor {
     static let leadScrimFade = LinearGradient(
         colors: [leadScrim, Color.clear], startPoint: .bottom, endPoint: UnitPoint(x: 0.5, y: 0.35))
     /// The hero carousel's arrow backing and its inactive page dots, over the photo.
+    /// The Lead's image fades into the page along its lower edge (docs/design/today.md): no panel behind the text.
+    static let leadPageFade = LinearGradient(
+        stops: [.init(color: background.opacity(0), location: 0.93), .init(color: background, location: 1)],
+        startPoint: .top, endPoint: .bottom)
+    /// Darkens The Lead's image where its text sits: strongest at the leading edge, gone past the middle.
+    static let leadTextScrim = LinearGradient(
+        stops: [
+            .init(color: Color.black.opacity(0.72), location: 0),
+            .init(color: Color.black.opacity(0.5), location: 0.45),
+            .init(color: Color.black.opacity(0.12), location: 1),
+        ], startPoint: .leading, endPoint: .trailing)
+    /// A gray content pill on The Lead's image (reading time).
+    static let leadPill = Color.white.opacity(0.16)
+    static let leadPillBorder = Color.white.opacity(0.3)
+    /// The Lead's status pill ("Developing") on its dark image: the person's accent, lightened as accent text is
+    /// on a dark page, on a wash of itself.
+    static let leadStatus = Color(
+        NSColor(name: "leadStatus") { _ in readableAccent(NSColor.controlAccentColor, dark: true, on: .black) })
+    static var leadStatusFill: Color { leadStatus.opacity(0.22) }
     static let carouselControl = Color.black.opacity(0.45)
     static let carouselInactiveDot = Color.white.opacity(0.4)
 }
@@ -335,13 +354,22 @@ enum AppLayout {
     /// Grid card image or editorial placeholder header.
     static let editorialHeaderHeight: CGFloat = 140.0
     static let leadStoryHeight: CGFloat = 360.0
+    /// The Lead follows the window: 240 pt at the 600 pt minimum height, 0.6 pt more per window point, at most 440.
+    static func leadHeight(windowHeight: CGFloat) -> CGFloat {
+        min(440, max(240, 240 + (windowHeight - mainWindowMinimumHeight) * 0.6))
+    }
+    /// The Lead's text column never runs wider than a comfortable headline measure.
+    static let leadTextMaxWidth: CGFloat = 640
+    static let breathingDotSize: CGFloat = 8
     static let unreadDotSize: CGFloat = 6.0
     // Today edition cards (docs/design/today.md)
     static let laneCardWidth: CGFloat = 320
     static let featureCardWidth: CGFloat = 400
-    /// The Feature card's image is 3:2.
-    static let featureImageAspect: CGFloat = 1.5
+    /// The Feature card's image is 3:2 of the card's width.
+    static let featureImageHeight: CGFloat = featureCardWidth / 1.5
     static let compactCardMinimumHeight: CGFloat = 104
+    /// The Latest's Compact grid: two columns still fit the 660 pt column of the minimum window.
+    static let compactColumnMinimum: CGFloat = 280
     /// The Compact card's photo fills this share of the card from the trailing edge.
     static let compactPhotoShare: CGFloat = 0.52
     /// The share of the photo, from its leading edge, that dissolves into the card.
@@ -495,6 +523,10 @@ enum AppTypography {
         .system(size: feature ? 20 : 15, weight: isRead ? .medium : .semibold, design: .serif)
     }
     static let monogram = Font.system(size: 9, weight: .bold, design: .rounded)
+    /// The Lead's headline: serif, 2.4 % of the window's width, between 22 and 34 pt.
+    static func leadHeadline(windowWidth: CGFloat) -> Font {
+        .system(size: min(34, max(22, windowWidth * 0.024)), weight: .semibold, design: .serif)
+    }
 
     // Reader Article Typography Themes
     static func titleFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
@@ -676,6 +708,9 @@ enum AppMotion {
     static let spring = Animation.spring(duration: 0.45, bounce: 0.3)
     /// The hotspot pins' pulse (DESIGN.md 13): one slow ring every two seconds, drawn at 20 frames a second, and
     /// stopped under Reduce Motion, in an inactive window and while the app is not active.
+    /// The Lead's unread dot breathes on a 2.6 s cycle (DESIGN.md 13); off under Reduce Motion.
+    static let breathe = Animation.easeInOut(duration: 1.3).repeatForever(autoreverses: true)
+    static let breatheDimmed: Double = 0.35
     static let pulsePeriod: TimeInterval = 2.0
     static let pulseFrameInterval: TimeInterval = 1.0 / 20.0
 
@@ -913,6 +948,22 @@ struct BannerSurface<S: Shape>: ViewModifier {
             content.background { Color.clear.glassEffect(.regular, in: shape) }
         } else {
             content.background(.regularMaterial, in: shape)
+        }
+    }
+}
+
+/// Floating controls over content (The Lead's dots and arrows): their glass shapes share one container on macOS 26
+/// and later, so neighbouring shapes blend instead of stacking (DESIGN.md 3.3). Each control takes its surface from
+/// `BannerSurface`.
+struct FloatingGlassGroup<Content: View>: View {
+    var spacing: CGFloat = AppSpacing.xs
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            GlassEffectContainer(spacing: spacing) { HStack(spacing: spacing) { content } }
+        } else {
+            HStack(spacing: spacing) { content }
         }
     }
 }

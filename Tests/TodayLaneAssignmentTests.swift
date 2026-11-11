@@ -36,6 +36,9 @@ extension NewsTests {
             ("testSubscriptionPoolAndZeroDuplicatesAndLatestSafetyNet", { testTodaySubscriptionPoolAndSafetyNet() }),
             ("testCoverageGateAndDevelopingPill", { testTodayCoverageGateAndDevelopingPill() }),
             ("testCardMetadataHasRealSourcesOrIsHidden", { testTodayCardMetadata() }),
+            ("testFocusMovesWithinAndBetweenLanes", { testTodayFocusMap() }),
+            ("testFocusIsRestoredWhenTheEditionChanges", { testTodayFocusRestore() }),
+            ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
@@ -907,6 +910,119 @@ extension NewsTests {
         assertTrue(
             StoryCardMetadata.differingAccount(in: [verge, vergeAgain, unattributed]) == nil,
             "One publisher's account is not a difference")
+    }
+
+    private static func focusMap(latest: [String] = ["l1", "l2", "l3", "l4", "l5"], columns: Int = 2) -> TodayFocusMap {
+        TodayFocusMap(lanes: [
+            .init(lane: .theLead, ids: ["a", "b", "c"]),
+            .init(lane: .inMotion, ids: ["m1", "m2", "m3"]),
+            .init(lane: .yourBeat, ids: []),
+            .init(lane: .theDeepRead, ids: ["d1", "d2", "d3"]),
+            .init(lane: .theLatest, ids: latest, columns: columns),
+        ])
+    }
+
+    /// Z4 (#936): arrows inside and between lanes, J and K in reading order.
+    static func testTodayFocusMap() {
+        let map = focusMap()
+        assertEqual(map.lanes.map(\.lane), [.theLead, .inMotion, .theDeepRead, .theLatest], "An empty lane is absent")
+        assertEqual(map.move(.down, from: nil), "a", "Without focus, the first card takes it")
+        assertEqual(map.move(.right, from: "c"), "a", "The Lead is a loop")
+        assertEqual(map.move(.left, from: "a"), "c", "The Lead loops backwards too")
+        assertEqual(map.move(.right, from: "m3"), "m3", "A row stops at its last card")
+        assertEqual(map.move(.left, from: "m1"), "m1", "A row stops at its first card")
+        assertEqual(map.move(.down, from: "b"), "m1", "Down from The Lead enters the first lane below")
+        assertEqual(
+            map.move(.down, from: "m2", memory: [.theDeepRead: "d3"]), "d3", "A lane gives focus to its remembered card"
+        )
+        assertEqual(
+            map.move(.down, from: "m2", memory: [.theDeepRead: "gone"]), "d1",
+            "A remembered card that left falls back to the first")
+        assertEqual(map.move(.up, from: "a"), "a", "Nothing is above The Lead")
+        assertEqual(map.move(.down, from: "d2"), "l1", "Down from the last row lane enters the grid")
+        assertEqual(map.move(.right, from: "l2"), "l3", "Right in the grid wraps to the next row")
+        assertEqual(map.move(.down, from: "l1"), "l3", "Down in the grid moves one row")
+        assertEqual(map.move(.down, from: "l4"), "l5", "Down onto a shorter last row lands on its last card")
+        assertEqual(map.move(.down, from: "l5"), "l5", "The last row is the end")
+        assertEqual(map.move(.up, from: "l4"), "l2", "Up in the grid moves one row")
+        assertEqual(
+            map.move(.up, from: "l2", memory: [.theDeepRead: "d2"]), "d2", "Up from the first row enters the lane above"
+        )
+        assertEqual(map.step(1, from: "c"), "m1", "J leaves the slides for the next lane")
+        assertEqual(map.step(-1, from: "l1"), "d3", "K leaves the grid for the lane above")
+        assertEqual(map.step(1, from: "l5"), "l5", "J stops at the last story")
+        assertEqual(map.step(1, from: nil), "a", "J without focus starts at the first story")
+        assertEqual(focusMap(columns: 1).move(.down, from: "l1"), "l2", "The list layout is a grid of one column")
+    }
+
+    /// Z4 (#936): where focus lands when the reader applies an update.
+    static func testTodayFocusRestore() {
+        let old = focusMap()
+        func restored(_ id: String, _ lanes: [TodayFocusMap.Lane]) -> String? {
+            TodayFocusMap(lanes: lanes).restoredFocus(id, from: old)
+        }
+        let latest = TodayFocusMap.Lane(lane: .theLatest, ids: ["l1", "l2"], columns: 2)
+        let lead = TodayFocusMap.Lane(lane: .theLead, ids: ["a"])
+        assertEqual(
+            restored("m2", [lead, .init(lane: .theDeepRead, ids: ["m2", "d1"]), latest]), "m2",
+            "A card still in the edition keeps focus, also in another lane")
+        assertEqual(
+            restored("m2", [lead, .init(lane: .inMotion, ids: ["m1", "x", "m3"]), latest]), "x",
+            "A card gone from its lane passes focus to the card at its index")
+        assertEqual(
+            restored("m3", [lead, .init(lane: .inMotion, ids: ["m1"]), latest]), "m1",
+            "Past the end, the lane's last card takes focus")
+        assertEqual(
+            restored("m2", [lead, .init(lane: .theDeepRead, ids: ["d1"]), latest]), "d1",
+            "A lane gone passes focus to the first card of the next lane below")
+        assertEqual(
+            restored("l3", [lead, .init(lane: .inMotion, ids: ["m1", "m2"])]), "m2",
+            "With no lane below, the last card of the nearest lane above takes focus")
+        assertTrue(restored("m1", []) == nil, "With no card left, nothing holds focus")
+        assertTrue(
+            TodayFocusMap(lanes: [lead]).restoredFocus(nil, from: old) == nil, "A lane appearing never takes focus")
+    }
+
+    /// Z4 (#936): nothing changes lane until the reader applies an update; Today never hides a listed story.
+    static func testTodayEditionPinsLanes() {
+        func story(_ id: String, _ lane: TodayLane) -> TodayStoryAssignment {
+            TodayStoryAssignment.unplaced(.article(makeArticle(id: id, title: id, pubDate: referenceNow))).placed(
+                in: lane)
+        }
+        func plan(_ lanes: [(TodayLane, [String])]) -> TodayEditionPlan {
+            TodayEditionPlan(
+                lanes: lanes.map { lane, ids in
+                    TodayLaneResult(lane: lane, qualifies: true, entries: ids.map { story($0, lane) })
+                })
+        }
+        func entries(_ ids: [String]) -> [FeedEntry] {
+            ids.map { .article(makeArticle(id: $0, title: $0, pubDate: referenceNow)) }
+        }
+        func shape(_ edition: TodayEdition) -> [String] {
+            edition.lanes.map { "\($0.lane.rawValue): \($0.stories.map(\.id).joined(separator: ","))" }
+        }
+        let first = TodayEdition.make(
+            entries: entries(["a", "b", "c", "d", "e", "stray"]),
+            plan: plan([(.theLead, ["a"]), (.inMotion, ["b", "c", "d"]), (.yourBeat, []), (.theLatest, ["e"])]))
+        assertEqual(
+            shape(first), ["The Lead: a", "In Motion: b,c,d", "The Latest: e,stray"],
+            "Lanes follow the plan in page order; an empty lane is absent; a listed story the plan left out is in The Latest"
+        )
+        assertEqual(first.metadata["b"]?.laneName, "In Motion", "A card knows its lane for VoiceOver")
+
+        // A later page and a refreshed plan that would move every story: the edition on screen keeps its lanes.
+        let moved = plan([(.theLead, ["f"]), (.inMotion, []), (.theLatest, ["a", "b", "d", "e", "g"])])
+        let held = TodayEdition.make(
+            entries: entries(["a", "b", "d", "e", "stray", "f", "g"]), plan: moved, keeping: first)
+        assertEqual(
+            shape(held), ["The Lead: a", "In Motion: b,d", "The Latest: e,stray,f,g"],
+            "Stories stay in their lanes, a story that left the list leaves its lane, new stories join The Latest")
+        let applied = TodayEdition.make(entries: entries(["a", "b", "d", "e", "stray", "f", "g"]), plan: moved)
+        assertEqual(
+            shape(applied), ["The Lead: f", "The Latest: a,b,d,e,g,stray"],
+            "An applied update lays the edition out afresh")
+        assertEqual(
+            first.focusMap(latestColumns: 3).lanes.last?.columns, 3, "The Latest's grid columns reach the keyboard map")
     }
 
     static func testTodayNotificationThresholdsIndependent() {
