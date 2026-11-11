@@ -83,6 +83,10 @@ extension TodayShadowEvaluation {
         let shows: Bool
         let shownTopPublisherShare: Double
         let shownTopThreeShare: Double
+        /// Labelled stories the lane shows, and those among them whose label expects Your Beat.
+        let shownLabelled: Int
+        let shownLabelledAsExpected: Int
+        let lanePurityOverall: Double?
         let outsideClearingBar: Int
         let outsideShown: Int
         let outsideShows: Bool
@@ -317,6 +321,8 @@ extension TodayShadowEvaluation {
         let qualifyingShares = concentration(qualifying.map { $0.story.entry.representative.publisherName })
         let shown = plan.entries(for: .yourBeat)
         let shownShares = concentration(shown.map { $0.entry.representative.publisherName })
+        let storyLabels = inputs.labels?.stories ?? [:]
+        let shownExpectedLanes = shown.compactMap { storyLabels[$0.id]?.expectedLane }
         let outsideClearing = evaluatedCandidates(of: plan, context: context).filter {
             TodayEditionAssigner.outsidePlacement($0, context: context) != nil
         }.count
@@ -344,6 +350,9 @@ extension TodayShadowEvaluation {
             shows: !shown.isEmpty,
             shownTopPublisherShare: shownShares.top,
             shownTopThreeShare: shownShares.topThree,
+            shownLabelled: shownExpectedLanes.count,
+            shownLabelledAsExpected: shownExpectedLanes.filter { $0 == TodayLane.yourBeat.rawValue }.count,
+            lanePurityOverall: lanePurity(of: plan, labels: storyLabels).overall,
             outsideClearingBar: outsideClearing,
             outsideShown: plan.entries(for: .outsideYourUsual).count,
             outsideShows: plan.result(for: .outsideYourUsual)?.qualifies == true,
