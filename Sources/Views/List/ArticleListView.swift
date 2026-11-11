@@ -1094,81 +1094,91 @@ struct ArticleListView: View {
         if isTodayEdition {
             todayPage(listed, proxy: proxy)
         } else if isBriefing {
-            BriefingView(
-                entries: listed,
-                briefing: briefing,
-                data: briefingData,
-                layout: appSettings.briefingLayout,
-                readIDs: readManager.readArticles,
-                savedIDs: briefingSavedIDs(listed),
-                focusedID: listHasFocus ? focusedArticleID : nil,
-                isMotionPaused: !articlePath.isEmpty || isSheetPresented || showsCustomizeBriefing,
-                nextEdition: FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour),
-                actions: BriefingActions(
-                    onOpenArticle: { article in openArticle(article) },
-                    onOpenEvent: { event in
-                        if let entry = listed.first(where: {
-                            if case .event(let s, _, _) = $0 { return s.eventID == event.eventID }
-                            return false
-                        }) {
-                            openEvent(
-                                event.eventID,
-                                article: entry.representative,
-                                initialExperienceMode: .eventOverview
-                            )
-                        }
-                    },
-                    onStartNewBriefing: { startNewBriefing() },
-                    onBackToToday: { selectedTopic = "Today" },
-                    onToggleRead: { readManager.toggleRead($0.id) },
-                    onToggleSave: { toggleSaved($0) }
-                ),
-                isWorldTensionEnabled: appSettings.isWorldTensionEnabled
-            )
-            // Every module's data from the library; nothing is generated at render time. Reloads when the stories,
-            // their event membership or a stored overview change.
-            .task(
-                id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision)"
-            ) {
-                let ranking = await BriefingRanking.load(entries: listed, database: articleStore.database)
-                let context = BriefingLoadContext(
-                    entries: listed, heroIDs: Set(BriefingView.heroEntries(listed, ranking: ranking).map(\.id)),
-                    briefing: briefing, now: Date(), tension: tensionModel?.state ?? WorldTensionState(),
-                    readIDs: readManager.readArticles, previousEditionStartedAt: nil, ranking: ranking)
-                let loaded = await BriefingBoardData.load(context, store: articleStore)
-                if !Task.isCancelled { briefingData = loaded }
-            }
-            .allowsWindowActivationEvents(true)
+            briefingPage(listed)
         } else {
-            let leadID: String? = {
-                if #available(macOS 26, *) {
-                    return LeadStoryPresentation.firstEligibleID(
-                        in: listed, selectedTopic: selectedTopic, isSearching: isSearching
-                    )
-                }
-                return nil
-            }()
-
-            VStack(spacing: AppLayout.cardGap) {
-                if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
-                    if leadIndex > 0 {
-                        cardCollection(Array(listed[..<leadIndex]))
-                    }
-                    entryCard(listed[leadIndex], isLead: true)
-                        .frame(maxWidth: AppLayout.listMaxWidth)
-                        .frame(maxWidth: .infinity)
-                    if leadIndex + 1 < listed.count {
-                        cardCollection(Array(listed[(leadIndex + 1)...]))
-                    }
-                } else {
-                    cardCollection(listed)
-                }
-            }
-            .padding(.horizontal, AppLayout.pageInset)
-            .padding(.bottom, AppSpacing.xl)
-            // The click that brings an inactive window forward also opens the card under it (#594).
-            .allowsWindowActivationEvents(true)
+            cardPage(listed)
         }
+    }
+
+    @ViewBuilder
+    private func briefingPage(_ listed: [FeedEntry]) -> some View {
+        BriefingView(
+            entries: listed,
+            briefing: briefing,
+            data: briefingData,
+            layout: appSettings.briefingLayout,
+            readIDs: readManager.readArticles,
+            savedIDs: briefingSavedIDs(listed),
+            focusedID: listHasFocus ? focusedArticleID : nil,
+            isMotionPaused: !articlePath.isEmpty || isSheetPresented || showsCustomizeBriefing,
+            nextEdition: FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour),
+            actions: BriefingActions(
+                onOpenArticle: { article in openArticle(article) },
+                onOpenEvent: { event in
+                    if let entry = listed.first(where: {
+                        if case .event(let s, _, _) = $0 { return s.eventID == event.eventID }
+                        return false
+                    }) {
+                        openEvent(
+                            event.eventID,
+                            article: entry.representative,
+                            initialExperienceMode: .eventOverview
+                        )
+                    }
+                },
+                onStartNewBriefing: { startNewBriefing() },
+                onBackToToday: { selectedTopic = "Today" },
+                onToggleRead: { readManager.toggleRead($0.id) },
+                onToggleSave: { toggleSaved($0) }
+            ),
+            isWorldTensionEnabled: appSettings.isWorldTensionEnabled
+        )
+        // Every module's data from the library; nothing is generated at render time. Reloads when the stories,
+        // their event membership or a stored overview change.
+        .task(
+            id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision)"
+        ) {
+            let ranking = await BriefingRanking.load(entries: listed, database: articleStore.database)
+            let context = BriefingLoadContext(
+                entries: listed, heroIDs: Set(BriefingView.heroEntries(listed, ranking: ranking).map(\.id)),
+                briefing: briefing, now: Date(), tension: tensionModel?.state ?? WorldTensionState(),
+                readIDs: readManager.readArticles, previousEditionStartedAt: nil, ranking: ranking)
+            let loaded = await BriefingBoardData.load(context, store: articleStore)
+            if !Task.isCancelled { briefingData = loaded }
+        }
+        .allowsWindowActivationEvents(true)
+    }
+
+    @ViewBuilder
+    private func cardPage(_ listed: [FeedEntry]) -> some View {
+        let leadID: String? = {
+            if #available(macOS 26, *) {
+                return LeadStoryPresentation.firstEligibleID(
+                    in: listed, selectedTopic: selectedTopic, isSearching: isSearching
+                )
+            }
+            return nil
+        }()
+
+        VStack(spacing: AppLayout.cardGap) {
+            if let leadID, let leadIndex = listed.firstIndex(where: { $0.id == leadID }) {
+                if leadIndex > 0 {
+                    cardCollection(Array(listed[..<leadIndex]))
+                }
+                entryCard(listed[leadIndex], isLead: true)
+                    .frame(maxWidth: AppLayout.listMaxWidth)
+                    .frame(maxWidth: .infinity)
+                if leadIndex + 1 < listed.count {
+                    cardCollection(Array(listed[(leadIndex + 1)...]))
+                }
+            } else {
+                cardCollection(listed)
+            }
+        }
+        .padding(.horizontal, AppLayout.pageInset)
+        .padding(.bottom, AppSpacing.xl)
+        // The click that brings an inactive window forward also opens the card under it (#594).
+        .allowsWindowActivationEvents(true)
     }
 
     static var mastheadScrollID: String { "list-masthead" }
