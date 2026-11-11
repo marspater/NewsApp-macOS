@@ -43,7 +43,7 @@ public enum AppleIntelligenceState: String, CaseIterable, Equatable, Sendable {
         case .systemDisabled:
             return "Turned off in System Settings"
         case .modelDownloading:
-            return "Model downloading"
+            return "Model not ready"
         case .temporarilyBusy:
             return "Model busy"
         case .unsupportedDevice:
@@ -65,7 +65,8 @@ public enum AppleIntelligenceState: String, CaseIterable, Equatable, Sendable {
             return
                 "Apple Intelligence is turned off in System Settings. Turn it on in System Settings → Apple Intelligence."
         case .modelDownloading:
-            return "The on-device language model is downloading. Keyword and extractive estimates stand in."
+            return
+                "The on-device language model is not ready yet, for example while it downloads. Keyword and extractive estimates stand in."
         case .temporarilyBusy:
             return "The on-device model is temporarily busy. Analysis will retry automatically after the next refresh."
         case .unsupportedDevice:
