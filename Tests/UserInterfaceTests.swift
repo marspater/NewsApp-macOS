@@ -2008,7 +2008,7 @@ extension NewsTests {
         seen.differingAccount = "A: one. B: two."
         assertEqual(
             seen.accessibilityText(for: .coverage),
-            " 2 publishers. Including A and B. Accounts differ. A: one. B: two..",
+            " 2 publishers. Including \(["A", "B"].formatted(.list(type: .and))). Accounts differ. A: one. B: two..",
             "Coverage names what its monograms and its differing account show")
         assertEqual(
             seen.accessibilityText(for: .developing), " 2 publishers. Reports on 4 days.",

@@ -28,7 +28,9 @@ struct BriefingHeroCarouselView: View {
     /// The Lead's presentation of the carousel (docs/design/today.md); nil draws the Briefing hero.
     var lead: LeadPresentation?
     /// The reader moved to another slide with the dots, the arrows or the arrow keys.
-    var onShow: (FeedEntry) -> Void = { _ in }
+    var onShow: (FeedEntry) -> Void = { _ in
+        // The Briefing hero has no observer.
+    }
     let onOpen: (FeedEntry) -> Void
 
     @Environment(\.effectiveReduceMotion) var reduceMotion
@@ -54,6 +56,12 @@ struct BriefingHeroCarouselView: View {
     }
 
     var currentIndex: Int { max(0, min(activeIndex, entries.count - 1)) }
+
+    /// The slide the Today list's keyboard focus names, when the entries hold it.
+    private var focusedIndex: Int? {
+        guard let focused = lead?.focusedID else { return nil }
+        return entries.firstIndex { $0.id == focused }
+    }
 
     var body: some View {
         ZStack {
@@ -115,7 +123,8 @@ struct BriefingHeroCarouselView: View {
         .onChange(of: reduceMotion) { _, newValue in
             if newValue { activeIndex = 0 }
         }
-        .onChange(of: entries.map(\.id)) { _, _ in activeIndex = 0 }
+        // A changed set of slides keeps the focused one in view, or starts over when none has focus.
+        .onChange(of: entries.map(\.id)) { _, _ in activeIndex = focusedIndex ?? 0 }
         // The Today list moved keyboard focus to a slide: show it. Rotation stays paused while a slide has focus.
         .onChange(of: lead?.focusedID, initial: true) { _, focused in
             guard let focused, let index = entries.firstIndex(where: { $0.id == focused }) else { return }

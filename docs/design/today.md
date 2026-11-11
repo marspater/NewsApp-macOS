@@ -75,7 +75,7 @@ Presentations of the one `ArticleCardView`, chosen by the lane, sharing the anat
 | Standard | Your Beat, Outside Your Usual | 320 pt | Top, 140 pt | Dek; date |
 | Feature | The Deep Read | 400 pt | Top, 3:2 | Dek; content-type tag from the classification, never from length alone; reading time; date |
 | Coverage | Any lane, when the grouping is confident | 320 pt | Top, 140 pt | Dek; publisher count, original reports in teal and up to three monograms; one attributed differing account |
-| Compact | The Latest | Adaptive 300–420 pt | Banner photo | One footer line: date and saved glyph |
+| Compact | The Latest | Adaptive 280–420 pt | Banner photo | One footer line: date and saved glyph |
 
 Headlines are serif: 15 pt on Developing, Standard, Coverage and Compact, 20 pt on Feature. A Coverage card appears only past the grouping gate in the specification; otherwise the lane's plain variant shows.
 
