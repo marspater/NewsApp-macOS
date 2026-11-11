@@ -79,31 +79,34 @@ struct StoryCardMetadata: Equatable, Sendable {
         return "\(readingMinutes) min read"
     }
 
-    /// What VoiceOver adds for the variant, as sentences after the card's read state.
-    @MainActor
-    func accessibilityText(for variant: StoryCardVariant, now: Date = Date()) -> String {
-        var parts: [String] = []
+    /// What VoiceOver adds for the variant, as sentences after the card's read state. The update is given as a
+    /// clock time, which stays true while the card is on screen; the pill's relative time ages on its own.
+    func accessibilityText(for variant: StoryCardVariant) -> String {
+        let parts: [String?]
         switch variant {
-        case .developing:
-            if let updatedAt {
-                parts.append(
-                    "Updated \(FeedArticle.relativeUpdateText(for: updatedAt, now: now, abbreviated: false))")
-            }
-            if let coverageLine { parts.append(coverageLine.replacingOccurrences(of: " · ", with: ", ")) }
-        case .feature:
-            if let contentType { parts.append(contentType) }
-            if let readingTimeText { parts.append(readingTimeText) }
-        case .coverage:
-            if let publisherCount, publisherCount > 0 {
-                parts.append("\(publisherCount) \(publisherCount == 1 ? "publisher" : "publishers")")
-            }
-            if let originalReportsText { parts.append(originalReportsText) }
-            if let differingAccount { parts.append(differingAccount) }
-        case .standard, .compact:
-            break
+        case .developing: parts = developingAccessibilityParts
+        case .feature: parts = [contentType, readingTimeText]
+        case .coverage: parts = coverageAccessibilityParts
+        case .standard, .compact: parts = []
         }
-        if let laneName { parts.append("In \(laneName)") }
-        return parts.map { " \($0)." }.joined()
+        return (parts + [laneName.map { "In \($0)" }]).compactMap { $0 }.map { " \($0)." }.joined()
+    }
+
+    private var developingAccessibilityParts: [String?] {
+        [
+            updatedAt.map { "Updated \($0.formatted(date: .abbreviated, time: .shortened))" },
+            coverageLine?.replacingOccurrences(of: " · ", with: ", "),
+            reportDays.flatMap { $0 >= 3 ? "Reports on \($0) days" : nil },
+        ]
+    }
+
+    private var coverageAccessibilityParts: [String?] {
+        [
+            StoryCardMetadata(publisherCount: publisherCount).coverageLine,
+            publishers.isEmpty ? nil : "Including \(publishers.prefix(3).formatted(.list(type: .and)))",
+            originalReportsText,
+            differingAccount.map { "Accounts differ. \($0)" },
+        ]
     }
 }
 
@@ -297,42 +300,38 @@ extension ArticleCardView {
     @ViewBuilder
     private func editionFooter(_ variant: StoryCardVariant) -> some View {
         switch variant {
-        case .developing:
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                if let line = metadata.coverageLine { caption(line) } else { editionDate }
-                if let days = metadata.reportDays, days >= 3 { ProgressStrip(days: days) }
-            }
-        case .feature:
-            HStack(spacing: AppSpacing.xs) {
-                if let type = metadata.contentType { TagView(title: type) }
-                if let time = metadata.readingTimeText { caption(time) }
-                Spacer(minLength: AppSpacing.xs)
-                editionDate
-            }
-        case .coverage:
-            if metadata.publisherCount == nil, metadata.originalReportsText == nil { editionDate }
+        case .developing: developingFooter
+        case .feature: featureFooter
+        case .coverage: coverageFooter
+        case .standard, .compact: editionDate
+        }
+    }
+
+    private var developingFooter: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            if let line = metadata.coverageLine { caption(line) } else { editionDate }
+            if let days = metadata.reportDays, days >= 3 { ProgressStrip(days: days) }
+        }
+    }
+
+    private var featureFooter: some View {
+        HStack(spacing: AppSpacing.xs) {
+            if let type = metadata.contentType { TagView(title: type) }
+            if let time = metadata.readingTimeText { caption(time) }
+            Spacer(minLength: AppSpacing.xs)
+            editionDate
+        }
+    }
+
+    @ViewBuilder
+    private var coverageFooter: some View {
+        let publishers = StoryCardMetadata(publisherCount: metadata.publisherCount).coverageLine
+        let original = metadata.originalReportsText
+        if publishers == nil, original == nil {
+            editionDate
+        } else {
             VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
-                HStack(spacing: AppSpacing.eyebrowGap) {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                        .accessibilityHidden(true)
-                    if let line = StoryCardMetadata(publisherCount: metadata.publisherCount).coverageLine {
-                        caption(line)
-                    }
-                    if let original = metadata.originalReportsText {
-                        Text(original)
-                            .font(AppTypography.caption)
-                            .foregroundStyle(AppColor.originalReports)
-                            .monospacedDigit()
-                            .lineLimit(1)
-                    }
-                    if !metadata.publishers.isEmpty {
-                        PublisherMonograms(publishers: metadata.publishers, ring: AppColor.surface)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .opacity(metadata.publisherCount == nil && metadata.originalReportsText == nil ? 0 : 1)
+                coverageCounts(publishers: publishers, original: original)
                 if let account = metadata.differingAccount {
                     Divider()
                     (Text("Accounts differ. ").font(AppTypography.caption.weight(.semibold))
@@ -342,8 +341,27 @@ extension ArticleCardView {
                         .multilineTextAlignment(.leading)
                 }
             }
-        case .standard, .compact:
-            editionDate
+        }
+    }
+
+    private func coverageCounts(publishers: String?, original: String?) -> some View {
+        HStack(spacing: AppSpacing.eyebrowGap) {
+            Image(systemName: "square.stack.3d.up")
+                .font(AppTypography.caption)
+                .foregroundStyle(AppColor.secondaryText)
+                .accessibilityHidden(true)
+            if let publishers { caption(publishers) }
+            if let original {
+                Text(original)
+                    .font(AppTypography.caption)
+                    .foregroundStyle(AppColor.originalReports)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            if !metadata.publishers.isEmpty {
+                PublisherMonograms(publishers: metadata.publishers, ring: AppColor.surface)
+            }
+            Spacer(minLength: 0)
         }
     }
 

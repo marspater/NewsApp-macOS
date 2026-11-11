@@ -133,7 +133,11 @@ struct ArticleCardView<Footer: View>: View {
         }
         .overlay {
             cardShape.strokeBorder(
-                isHovered ? AppColor.hoverBorder : AppColor.border(for: contrast),
+                // With Increase Contrast the hovered edge is the solid accent: a 40 % accent can be fainter than the
+                // resting contrast border.
+                isHovered
+                    ? (contrast == .increased ? AppColor.accent : AppColor.hoverBorder)
+                    : AppColor.border(for: contrast),
                 lineWidth: isHovered ? AppLayout.hoverStroke : AppLayout.hairline)
         }
         // The inner top highlight: light caught by the upper edge, gone a little way down the corners.

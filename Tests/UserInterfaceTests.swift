@@ -1999,14 +1999,20 @@ extension NewsTests {
         let full = StoryCardMetadata(
             publisherCount: 5, newReportCount: 1, contentType: "Explainer", readingMinutes: 11, originalReports: 3)
         assertEqual(full.coverageLine, "5 publishers · 1 new report", "Counts are pluralized separately")
-        await MainActor.run {
-            assertEqual(none.accessibilityText(for: .coverage), "", "No metadata, no extra description")
-            assertEqual(
-                full.accessibilityText(for: .feature), " Explainer. 11 min read.", "Feature names type and time")
-            assertEqual(
-                full.accessibilityText(for: .coverage), " 5 publishers. 3 original reports.",
-                "Coverage names publishers and original reports")
-        }
+        assertEqual(none.accessibilityText(for: .coverage), "", "No metadata, no extra description")
+        assertEqual(full.accessibilityText(for: .feature), " Explainer. 11 min read.", "Feature names type and time")
+        assertEqual(
+            full.accessibilityText(for: .coverage), " 5 publishers. 3 original reports.",
+            "Coverage names publishers and original reports")
+        var seen = StoryCardMetadata(publisherCount: 2, reportDays: 4, publishers: ["A", "B"])
+        seen.differingAccount = "A: one. B: two."
+        assertEqual(
+            seen.accessibilityText(for: .coverage),
+            " 2 publishers. Including A and B. Accounts differ. A: one. B: two..",
+            "Coverage names what its monograms and its differing account show")
+        assertEqual(
+            seen.accessibilityText(for: .developing), " 2 publishers. Reports on 4 days.",
+            "Developing names what its progress rail shows")
         assertEqual(StoryCardMetadata(publisherCount: 0).coverageLine, nil, "A zero count is not shown")
 
         // 4. Ghost Typography Theme tokens
