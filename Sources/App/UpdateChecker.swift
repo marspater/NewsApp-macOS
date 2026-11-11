@@ -97,11 +97,11 @@ struct GitHubReleasePayload: Codable, Sendable {
 
     var isChecking: Bool = false
     var updateAvailable: Bool = false
-    var latestVersionString: String? = nil
-    var releaseNotes: String? = nil
-    var verifiedReleaseURL: URL? = nil
-    var lastCheckDate: Date? = nil
-    var statusMessage: String? = nil
+    var latestVersionString: String?
+    var releaseNotes: String?
+    var verifiedReleaseURL: URL?
+    var lastCheckDate: Date?
+    var statusMessage: String?
 
     private let httpClient: SecureHTTPClient
     private let now: @Sendable () -> Date
