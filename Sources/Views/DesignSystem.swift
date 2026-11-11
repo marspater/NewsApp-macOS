@@ -497,7 +497,7 @@ enum AppTypography {
             design: role == .title ? .serif : .default)
     }
 
-    private static func overviewSize(_ role: OverviewTextRole) -> CGFloat {
+    static func overviewSize(_ role: OverviewTextRole) -> CGFloat {
         switch role {
         case .title: return 30
         case .section: return 18

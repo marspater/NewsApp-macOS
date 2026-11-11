@@ -55,6 +55,7 @@ struct AnnotationsInspectorView: View {
                         }
                     } else if let singleNote = orderedNotes.first {
                         row(singleNote)
+                            .tag(singleNote.id)
                             .listRowSeparator(.hidden)
                     }
                 }
