@@ -1207,31 +1207,37 @@ struct ArticleListView: View {
             id: "\(groupedEntries.revision):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
                 + "\(todayGeneration):\(queryIdentity)"
         ) {
-            let previous = todayEdition
-            // Bursts of store revisions (clustering, overviews) would lay the page out once each; they are debounced
-            // as in the list. The first edition loads at once.
-            if previous != nil {
-                do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
-            }
-            // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
-            // for or another day's stories lay the edition out afresh.
-            let keeps = isHoldingList && previous?.generation == todayGeneration
-            let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
-            let edition = await articleStore.todayEdition(
-                entries: listed,
-                reader: TodayReader(
-                    subscribedFeedURLs: Set(appSettings.feedURLs), starredFeedURLs: appSettings.starredFeedURLs,
-                    interestsResetAt: resetAt),
-                keeping: keeps ? previous : nil, generation: todayGeneration)
-            guard !Task.isCancelled else { return }
-            // Focus follows its card, or the rules of today.md when the card or its lane is gone.
-            if let previous, let focused = focusedArticleID {
-                focusedArticleID = edition.focusMap(latestColumns: todayLatestColumns)
-                    .restoredFocus(focused, from: previous.focusMap(latestColumns: todayLatestColumns))
-            }
-            todayEdition = edition
+            await reloadTodayEdition(listed)
         }
         .allowsWindowActivationEvents(true)
+    }
+
+    /// Lays the listed stories out as the Today edition and moves keyboard focus with it.
+    private func reloadTodayEdition(_ listed: [FeedEntry]) async {
+        let previous = todayEdition
+        // Bursts of store revisions (clustering, overviews) would lay the page out once each; they are debounced
+        // as in the list. The first edition loads at once.
+        if previous != nil {
+            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+        }
+        // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
+        // for or another day's stories lay the edition out afresh.
+        let keeps = isHoldingList && previous?.generation == todayGeneration
+        let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
+        let edition = await articleStore.todayEdition(
+            entries: listed,
+            reader: TodayReader(
+                subscribedFeedURLs: Set(appSettings.feedURLs), starredFeedURLs: appSettings.starredFeedURLs,
+                interestsResetAt: resetAt),
+            keeping: keeps ? previous : nil, generation: todayGeneration)
+        guard !Task.isCancelled else { return }
+        // Focus follows its card, or the rules of today.md when the card or its lane is gone.
+        if let previous, let focused = focusedArticleID {
+            focusedArticleID = edition.focusMap(latestColumns: todayLatestColumns)
+                .restoredFocus(focused, from: previous.focusMap(latestColumns: todayLatestColumns))
+        }
+        todayEdition = edition
+
     }
 
     private func open(_ entry: FeedEntry) {
