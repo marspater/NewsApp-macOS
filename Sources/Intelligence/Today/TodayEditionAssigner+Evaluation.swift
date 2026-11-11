@@ -140,11 +140,9 @@ extension TodayEditionAssigner {
         }
     }
 
-    /// Developing pill matches Briefing definition (`BriefingView.isDeveloping`).
+    /// The Developing pill shares the Briefing's definition (`EventFeedSummary.isDeveloping`).
     private static func isDevelopingEvent(_ summary: EventFeedSummary?, context: TodayAssignmentContext) -> Bool {
-        guard let summary, summary.isConfirmed, let latest = summary.latestDate else { return false }
-        let age = context.now.timeIntervalSince(latest)
-        return age <= context.thresholds.developingWindowSeconds && age >= -300
+        summary?.isDeveloping(now: context.now, window: context.thresholds.developingWindowSeconds) ?? false
     }
 
     private static func storyGroupingConfidence(

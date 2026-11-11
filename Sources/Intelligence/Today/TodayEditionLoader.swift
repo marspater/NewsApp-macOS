@@ -261,6 +261,21 @@ extension DatabaseEngine {
         }
     }
 
+    /// The differing account each Coverage card shows, by story id, read from the stored overviews of the events
+    /// past the grouping gate. A card without a stored overview, or with one publisher's account only, has none.
+    func todayDifferingAccounts(for plan: TodayEditionPlan) throws -> [String: String] {
+        var accounts: [String: String] = [:]
+        for assignment in plan.allAssignments where assignment.isCoverageConfident {
+            try Task.checkCancellation()
+            guard case .event(let summary, _, _) = assignment.entry,
+                let overview = try fetchEventOverview(eventID: summary.eventID),
+                let account = StoryCardMetadata.differingAccount(in: overview.perspectives)
+            else { continue }
+            accounts[assignment.id] = account
+        }
+        return accounts
+    }
+
     /// Loads the complete `TodayAssignmentContext` for an already-grouped list of `FeedEntry` values.
     ///
     /// `subscribedFeedURLs` is the reader's subscription list (`AppSettings.feedURLs`). The caller supplies it
