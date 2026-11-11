@@ -1088,10 +1088,12 @@ class FeedManager: NSObject, ObservableObject {
     /// work is not allowed, they stay pending: the running lookup calls this when it ends.
     private func startRequestedImageLookup() {
         guard imageLookupTask == nil, !imagePriorityIDs.isSubset(of: requestedImageIDs) else { return }
-        lookUpStoryImages()
+        lookUpStoryImages(pendingOnly: true)
     }
 
-    private func lookUpStoryImages() {
+    /// `pendingOnly`: a follow-up for stories not handed to a lookup yet, so the ones already tried (and failed)
+    /// cannot take the budget again and keep the deferred ones out.
+    private func lookUpStoryImages(pendingOnly: Bool = false) {
         imageLookupTask?.cancel()
         imageLookupTask = nil
         guard !isStopped, imageFinder.isAvailable, allowsBackgroundWork() else { return }
@@ -1099,7 +1101,7 @@ class FeedManager: NSObject, ObservableObject {
         let finder = imageFinder
         let muting = appSettings.muteRules
         let store = articleStore
-        let first = imagePriorityIDs
+        let first = pendingOnly ? imagePriorityIDs.subtracting(requestedImageIDs) : imagePriorityIDs
         // Handed to this lookup; a lookup that could not start (the guard above) leaves them pending.
         requestedImageIDs.formUnion(first)
         imageLookupTask = Task { [weak self] in
