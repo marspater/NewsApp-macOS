@@ -130,37 +130,9 @@ struct NotesHighlightsView: View {
             Button {
                 onOpen(note.articleID)
             } label: {
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    if !inGroup {
-                        Text(listing.articleTitle)
-                            .font(AppTypography.headline)
-                            .foregroundStyle(AppColor.primaryText)
-                            .multilineTextAlignment(.leading)
-                    }
-                    Text("“\(note.selectedText)”")
-                        .font(AppTypography.callout)
-                        .foregroundStyle(AppColor.primaryText)
-                        .multilineTextAlignment(.leading)
-                        .padding(.leading, AppSpacing.xs)
-                        .background(alignment: .leading) {
-                            Rectangle().fill(AppColor.noteHighlight).frame(width: AppLayout.quoteBarWidth)
-                        }
-                    if note.hasBody {
-                        Text(note.noteBody)
-                            .font(AppTypography.body)
-                            .foregroundStyle(AppColor.primaryText)
-                            .multilineTextAlignment(.leading)
-                    }
-                    Text(
-                        inGroup
-                            ? note.createdAt.formatted(date: .abbreviated, time: .shortened)
-                            : "\(listing.source) · \(note.createdAt.formatted(date: .abbreviated, time: .shortened))"
-                    )
-                    .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.secondaryText)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                noteText(listing, inGroup: inGroup)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityHint("Opens the story")
@@ -186,6 +158,40 @@ struct NotesHighlightsView: View {
                 content
                     .padding(.vertical, AppSpacing.xs)
             }
+        }
+    }
+
+    /// The quoted words, the note and its date, without the story title inside a group.
+    private func noteText(_ listing: UserNoteListing, inGroup: Bool) -> some View {
+        let note = listing.note
+        return VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            if !inGroup {
+                Text(listing.articleTitle)
+                    .font(AppTypography.headline)
+                    .foregroundStyle(AppColor.primaryText)
+                    .multilineTextAlignment(.leading)
+            }
+            Text("“\(note.selectedText)”")
+                .font(AppTypography.callout)
+                .foregroundStyle(AppColor.primaryText)
+                .multilineTextAlignment(.leading)
+                .padding(.leading, AppSpacing.xs)
+                .background(alignment: .leading) {
+                    Rectangle().fill(AppColor.noteHighlight).frame(width: AppLayout.quoteBarWidth)
+                }
+            if note.hasBody {
+                Text(note.noteBody)
+                    .font(AppTypography.body)
+                    .foregroundStyle(AppColor.primaryText)
+                    .multilineTextAlignment(.leading)
+            }
+            Text(
+                inGroup
+                    ? note.createdAt.formatted(date: .abbreviated, time: .shortened)
+                    : "\(listing.source) · \(note.createdAt.formatted(date: .abbreviated, time: .shortened))"
+            )
+            .font(AppTypography.caption)
+            .foregroundStyle(AppColor.secondaryText)
         }
     }
 }
