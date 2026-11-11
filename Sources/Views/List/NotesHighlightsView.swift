@@ -60,7 +60,7 @@ struct NotesHighlightsView: View {
                                 storyGroupHeader(group)
                             }
                         } else if let singleListing = group.listings.first {
-                            row(singleListing)
+                            row(singleListing).tag(singleListing.id)
                         }
                     }
                 }
