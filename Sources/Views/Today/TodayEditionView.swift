@@ -284,16 +284,25 @@ struct TodayLaneSection: View {
         }
     }
 
-    /// One story per distinct footer the row's cards can have.
+    /// One story per distinct footer the row's cards can have; of those with the same footer, the one with the
+    /// longest differing account, which sets the height of the row's tallest such card.
     private var probes: [TodayStoryAssignment] {
-        var seen = Set<String>()
-        return lane.stories.filter { story in
+        var order: [String] = []
+        var longest: [String: TodayStoryAssignment] = [:]
+        for story in lane.stories {
             let data = metadata[story.id] ?? StoryCardMetadata()
             let key =
                 "\(story.cardVariant):\((data.reportDays ?? 0) >= 3):\(data.differingAccount != nil):"
                 + "\(data.coverageLine != nil)"
-            return seen.insert(key).inserted
+            let length = data.differingAccount?.count ?? 0
+            if let kept = longest[key] {
+                if length > (metadata[kept.id]?.differingAccount?.count ?? 0) { longest[key] = story }
+            } else {
+                order.append(key)
+                longest[key] = story
+            }
         }
+        return order.compactMap { longest[$0] }
     }
 
     /// Moves the row by two cards; the row itself scrolls freely with the trackpad.

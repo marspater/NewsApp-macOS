@@ -56,6 +56,9 @@ struct StoryCardMetadata: Equatable, Sendable {
     var differingAccount: String?
     /// The lane showing the card, which VoiceOver names after the card's own description.
     var laneName: String?
+    /// The event the card opens, if any. The card's action captures its entry, and regrouping can change the event
+    /// behind the same representative, so the card's update decision must see it.
+    var eventID: String?
 
     /// "3 publishers · 2 new reports", leaving out what is unknown or zero.
     var coverageLine: String? {
