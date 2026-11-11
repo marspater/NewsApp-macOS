@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Iris (acquisition) owns this file. Experimental, no production consumer. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// One stored article as the identity mapping reads it. `fetchedAt` is when News first stored it.

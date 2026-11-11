@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 # Every Swift file starts with the Apache-2.0 header (copy it from any Swift file; in Package.swift it follows the
 # swift-tools-version line). Checked before swift-format is needed: --check runs in CI on the working tree, --staged
 # in the pre-commit hook on the staged content. Paths stay NUL-delimited, so no name is quoted or split.
+# Every Swift file under Sources/Intelligence also names its Angelia owner in a `// Angelia · <owner>` comment after
+# the header (docs/ANGELIA.md, rule 6). Owned files elsewhere (Services, Storage, Models) carry the same comment but
+# are not checked here: the register lists them.
 LICENSE_HEADER='// Copyright 2026 Mars Pater
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,6 +30,7 @@ case "${1:-}" in
 esac
 if [[ -n "$HEADER_SOURCE" ]]; then
     MISSING=""
+    UNOWNED=""
     while IFS= read -r -d '' file; do
         if [[ "$HEADER_SOURCE" == index ]]; then
             content=$(git show ":$file")
@@ -37,6 +41,7 @@ if [[ -n "$HEADER_SOURCE" ]]; then
         fi
         [[ "$file" == Package.swift && "$content" == "// swift-tools-version"* ]] && content=${content#*$'\n'}
         [[ "$content" == "$LICENSE_HEADER"$'\n'* ]] || MISSING+="$file"$'\n'
+        [[ "$file" != Sources/Intelligence/* || "$content" == *$'\n// Angelia · '* ]] || UNOWNED+="$file"$'\n'
     done < <(if [[ "$HEADER_SOURCE" == index ]]; then
         git diff --cached --name-only -z --diff-filter=d -- '*.swift'
     else
@@ -45,6 +50,11 @@ if [[ -n "$HEADER_SOURCE" ]]; then
     if [[ -n "$MISSING" ]]; then
         echo "❌ These Swift files do not start with the Apache-2.0 license header (copy it from any Swift file):" >&2
         printf '%s' "$MISSING" >&2
+        exit 1
+    fi
+    if [[ -n "$UNOWNED" ]]; then
+        echo "❌ These Swift files do not name their Angelia owner (add '// Angelia · <owner> ...' after the header; see docs/ANGELIA.md):" >&2
+        printf '%s' "$UNOWNED" >&2
         exit 1
     fi
 fi

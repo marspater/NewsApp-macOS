@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Athena (editorial selection) owns this file. Experimental: the Today edition has no view code yet.
+// Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// Bounded SQLite loaders on `DatabaseEngine` (off the main actor) for Z2 Today lane assignment (`#934`).

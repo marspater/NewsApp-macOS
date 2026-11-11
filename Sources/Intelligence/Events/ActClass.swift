@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Metis (linguistic signals) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// The act a headline leads with, read from the lemmas of its primary clause (#522). Two reports of one event word

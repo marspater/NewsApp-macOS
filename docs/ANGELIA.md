@@ -11,6 +11,7 @@ Angelia (Greek Ἀγγελία, "message"; say *ang-geh-LEE-ah*, hard g, stress 
 3. A name never raises maturity. The Status column is the only statement of what is live.
 4. Each type or function has one owner. A file that holds two owners' code is listed under [Shared files](#shared-files).
 5. Angelia spans three source layers (`Sources/Services`, `Sources/Intelligence`, `Sources/Storage`). It is wider than the "Intelligence" layer of the ARCHITECTURE.md system map.
+6. Every Swift file a name owns says so in a comment after the license header: `// Angelia · Themis (pair rules) owns this file. Register: docs/ANGELIA.md.` A shared file names each owner and its types. `script/format.sh --check` and the pre-commit hook refuse a file under `Sources/Intelligence/` without the comment; owned files elsewhere carry it by this register. A new or moved file gets its comment and its register row in the same change.
 
 ## Register
 
@@ -18,37 +19,44 @@ Paths are relative to `Sources/`.
 
 | Name | Job | Owns | Status |
 |---|---|---|---|
-| **Iris** | Bring reports in | `Services/FeedFetcher`, `FeedXMLParser`, `JSONFeedParser`, `DateParser` · `Intelligence/Extraction/ContentExtractionPipeline` | Live |
-| **Metis** | Turn text into structured clues | `Intelligence/ArticleIntelligence` (`ArticleClassifier`, `NaturalLanguageTopicClassifier`) · `EventFeatures`, `EventPlaces` · `Intelligence/Events/ActClass` | Live |
+| **Iris** | Bring reports in | `Services/FeedFetcher`, `FeedXMLParser`, `JSONFeedParser`, `DateParser`, driven by `FeedManager` | Live |
+| | | `Intelligence/Editorial/EditorialWireIdentity` (wire-agency origin of a report) | Experimental, no production consumer |
+| **Metis** | Turn text into structured clues | `Intelligence/ArticleIntelligence` (`ArticleClassifier`, `NaturalLanguageTopicClassifier`) · `EventFeatures`, `EventPlaces` · `Intelligence/Events/ActClass` · `Intelligence/Extraction/EnrichmentQueue`, `ContentExtractionPipeline` (reader text on open) · `Intelligence/Editorial/EntityIndexer` | Live |
 | **Proteus** | Encode semantic evidence | `Intelligence/Events/SentenceEmbedder` (`SentenceEmbedder`, `PairScorer`, `BertWordPieceTokenizer`) · `Resources/CoreML` | Live |
 | **Themis** | Rule on a pair of reports | `EventMatcher`, `EventMatchPolicy`, `EventConflict`, `EventPairAssessment`, `PairCalibration` | Live |
 | **Harmonia** | Assemble one occurrence | `EventClusterer` admission and `mergeFragments` · `event_inclusions`, `event_exclusions` | Live |
 | **Ariadne** | Link the events of a developing story | `EventClusterer.linkStories` · `EventStoryRelation` | Live |
-| **Mnemosyne** | Retain evidence and find it again | `Storage/DatabaseEngine*`, `ArticleStore*` · `EventCandidateFinder`, `EventMatchKey` · hybrid search (`DatabaseEngine+Search`) | Live |
-| **Clio** | Compose sourced overviews | `Intelligence/Overview/OverviewComposer`, `OverviewGenerationCoordinator`, `OverviewPassageSelector`, `OverviewPerspectivesExtractor`, `OverviewTimeline*`, `OverviewIndustryImpactExtractor`, `OverviewThematicAngleExtractor`, `PassageFactExtractor` | Live |
-| **Aletheia** | Check fidelity to the cited text | `OverviewClaimVerifier`, `GeneratedTextFidelity`, `OverviewQualityAuditor`, `CoverageSentimentEvaluator` | Live. Checks agreement with the source, never external truth. |
+| **Mnemosyne** | Retain evidence and find it again | `Storage/DatabaseEngine*`, `ArticleStore*` · `EventCandidateFinder`, `EventMatchKey` · hybrid search (`DatabaseEngine+Search`) · `Intelligence/Editorial/EntityGraph` | Live |
+| **Clio** | Compose sourced overviews | `Intelligence/Overview/OverviewComposer`, `OverviewGenerationCoordinator`, `OverviewPassageSelector`, `OverviewPerspectivesExtractor`, `OverviewTimeline*`, `OverviewIndustryImpactExtractor`, `OverviewThematicAngleExtractor`, `PassageFactExtractor` · `Intelligence/Editorial/DualReaderAlignmentService`, `PerspectiveReports` (Compare Perspectives) | Live |
+| **Aletheia** | Check fidelity to the cited text | `OverviewClaimVerifier`, `GeneratedTextFidelity`, `OverviewQualityAuditor`, `CoverageSentimentEvaluator`, `GenerationPromptDefense` | Live. Checks agreement with the source, never external truth. |
+| **Athena** | Decide what deserves attention | `FiniteBriefing`, `BriefingPriority` · `Intelligence/Briefing/*` · `Intelligence/Events/StoryImportance` (`StoryImportance`, `StoryCurator`, `StoryImage*`) · `Coordinators/NotificationService` triage | Live |
+| | | `Intelligence/Events/EventJudge` (`EventJudgeReport`, the importance audit's input) | Evaluation only, no production caller |
+| | | `Intelligence/Today/*` (six lanes, shadow evaluation; no view code yet) · `Intelligence/Editorial/EditorialRanking`, `EditorialPersonalization` | Experimental, no production consumer |
+| **Eris** | Assess World Tension | `Intelligence/Tension/*` (`WorldTensionService`, `TensionMethodology`, `Hotspot*`, `WorldTensionNearYou`) | Live |
 | **Kairos** | Detect what is new and accelerating | `Intelligence/Editorial/EditorialNovelty`, `EditorialMomentum` | Experimental, no production consumer |
-| **Athena** | Decide what deserves attention | `Intelligence/Today/*` · `FiniteBriefing`, `BriefingPriority` · `Intelligence/Briefing/*` | Live |
-| | | `Intelligence/Editorial/EditorialRanking`, `EditorialPersonalization` | Experimental, no production consumer |
+| **Angelia Core** | Shared model access and gates | `NewsTextModel`, `AppleIntelligenceAvailability`, `IntelligencePolicy` | Live |
 
 ## What each name hands on
 
 | From | To | Artifact |
 |---|---|---|
 | Iris | Mnemosyne | Article text and metadata, one transaction per feed |
-| Mnemosyne | Metis | Stored articles |
-| Metis | Mnemosyne | Category (`article_enrichment`), versioned `EventFeatures` (`article_features`) |
-| Mnemosyne | Themis | Up to 40 candidates from the past 48 hours (FTS5 shortlist, no verdict) |
+| Mnemosyne | Metis, Proteus, Clio | Stored text and metadata |
+| Metis | Themis | Versioned `EventFeatures` (cached in `article_features`); the category goes to `article_enrichment` |
 | Proteus | Themis | Cosine of two 384-dimension vectors; `p(same)` for a borderline English pair |
 | Proteus | Mnemosyne | Versioned vectors (`article_embeddings`) for matching and search |
+| Mnemosyne | Themis | Up to 40 candidates from the past 48 hours (FTS5 shortlist, no verdict) |
 | Themis | Harmonia | One `EventPairAssessment` per pair: match, compatible, borderline or conflict |
 | Harmonia | Mnemosyne | Event membership (`events`, `event_members`), stored pair verdicts (`pair_assessments`) |
-| Harmonia | Ariadne | Formed events |
-| Ariadne | Mnemosyne | Story membership and "Earlier in This Story" links |
-| Mnemosyne | Clio | An event's reports and passages |
+| Harmonia | Ariadne, Clio | Formed events |
+| Ariadne | Athena | Stories and "Earlier in This Story" links, read from storage |
 | Clio | Aletheia | Draft passages, perspectives, timeline and generated text |
 | Aletheia | Mnemosyne | Accepted overviews with citations (`event_overviews`, `event_overview_citations`) |
-| Mnemosyne | Athena | Formed stories with source, importance and reading signals |
+| Mnemosyne | Athena | Up to 500 candidate stories with importance, coverage and reading history; cited highlights for Briefing |
+| Mnemosyne | Eris | The day's panel headlines (`tensionCorpus`) |
+| Eris | Athena | The reading and its drivers, shown in Briefing's World Tension module. No input to Today or to Briefing selection. |
+| Angelia Core | Metis, Eris, Athena | `NewsTextModel` prose on three surfaces: reader summary, World Tension assessment, Briefing sitrep. Event overviews carry no model prose. |
+| Angelia Core | Metis, Proteus, Harmonia, Clio, Eris | The energy check (`IntelligencePolicy.allowsEnergy`) that defers model work |
 
 Two boundaries carry most of the system's errors. Proteus supplies evidence and Themis the verdict, so a high cosine is never a match on its own. Themis rules on a pair and Harmonia on the whole event, so a correct pair can still be refused admission.
 
@@ -61,20 +69,12 @@ These files hold more than one owner's code. Name the owner of the type or funct
 | `Intelligence/Events/EventMatcher.swift` | Metis (`EventFeatures`, `EventPlaces`) and Themis (`EventMatcher`, `EventMatchPolicy`) |
 | `Intelligence/Events/EventClustering.swift` | Harmonia (admission, `mergeFragments`) and Ariadne (`linkStories`), both inside `EventClusterer` |
 | `Intelligence/Events/EventCandidates.swift` | Mnemosyne (`EventCandidateFinder`, `EventMatchKey`) and Ariadne (`EventStoryRelation`) |
+| `Intelligence/ArticleIntelligence.swift` | Metis (classification, entities) and Angelia Core (`NewsTextModel`) |
 
-## Not yet assigned
+## No single owner
 
-Semantic code with no name. Each needs an owner or a new name before the register is complete.
+`Coordinators/FeedManager` drives Angelia without belonging to one domain: it starts the refresh (Iris), background classification (Metis) and the clustering pass (Harmonia and Ariadne), and it also owns sleep, wake and lifecycle. Its comment names the domains it drives.
 
-| Code | What it does |
-|---|---|
-| `Intelligence/Tension/*` (`WorldTensionService`, `TensionMethodology`, `Hotspot*`, `WorldTensionNearYou`) | World Tension assessment, smoothing, hotspots and the Near-you lens |
-| `Intelligence/Editorial/EntityIndexer`, `EntityGraph` | Entity index and co-reporting graph |
-| `Intelligence/Editorial/DualReaderAlignmentService`, `PerspectiveReports` | Compare Perspectives: the passages two reports share |
-| `Intelligence/Editorial/EditorialWireIdentity` | Wire-agency origin of a report (experimental) |
-| `Intelligence/Events/StoryImportance` (`StoryImportance`, `StoryCurator`, `StoryImage*`) | Importance rating and lead-image lookup |
-| `Intelligence/Extraction/EnrichmentQueue` | Bounded background classification |
-| `NewsTextModel`, `IntelligencePolicy`, `AppleIntelligenceAvailability`, `GenerationPromptDefense` | The Foundation Models path and its gates |
-| `Coordinators/NotificationService` triage | Which stories earn a banner |
+## Outside Angelia
 
 The protected network gateway (`NetworkBoundaryProxy`, `SecureHTTPClient`, `IPAddressValidator`) is outside Angelia: it is a security boundary, described in [SECURITY.md](../SECURITY.md).

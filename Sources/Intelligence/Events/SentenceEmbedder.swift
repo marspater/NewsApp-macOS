@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Proteus (semantic evidence: MiniLM vectors and PairScorer) owns this file. Register: docs/ANGELIA.md.
+
 import Accelerate
 import CoreML
 import Foundation

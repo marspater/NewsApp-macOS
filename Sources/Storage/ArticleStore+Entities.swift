@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Mnemosyne (storage and search) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// Where entity chips and dossiers read from (W2 #716). Previews and harnesses pass their own, or none, so a view

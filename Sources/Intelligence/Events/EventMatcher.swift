@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Metis (EventFeatures, EventPlaces) and
+// Themis (EventMatcher, EventMatchPolicy, PairCalibration) share this file. Register: docs/ANGELIA.md.
+
 import Foundation
 import NaturalLanguage
 

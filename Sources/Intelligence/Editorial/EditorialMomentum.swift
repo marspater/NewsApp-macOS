@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Kairos (novelty and momentum) owns this file. Experimental, no production consumer.
+// Register: docs/ANGELIA.md.
+
 import Foundation
 
 struct MomentumReport: Sendable {

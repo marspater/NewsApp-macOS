@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · no single owner. FeedManager drives Iris (refresh), Metis (enrichment) and the
+// Harmonia and Ariadne pass. Register: docs/ANGELIA.md.
+
 import AppKit
 import Combine
 import Foundation

@@ -3,7 +3,7 @@
 [![CI](https://github.com/marspater/NewsApp-macOS/actions/workflows/ci.yml/badge.svg)](https://github.com/marspater/NewsApp-macOS/actions/workflows/ci.yml)
 [![Security](https://github.com/marspater/NewsApp-macOS/actions/workflows/security.yml/badge.svg)](https://github.com/marspater/NewsApp-macOS/actions/workflows/security.yml)
 
-A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry.
+A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry. The semantic system that groups, explains and selects stories is named Angelia; [docs/ANGELIA.md](docs/ANGELIA.md) maps its twelve domains to the code.
 
 ## Story experience — 24 October 2026
 

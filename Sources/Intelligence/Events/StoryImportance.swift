@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Athena (editorial selection) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// How much a story matters to a general reader following the news, decided on device from its headline and summary.

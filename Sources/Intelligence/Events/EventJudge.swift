@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Athena (editorial selection) owns this file. Evaluation only: used by the importance audit.
+// Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// One report as the importance rater sees it: its headline and the start of its feed summary. The on-device event judge

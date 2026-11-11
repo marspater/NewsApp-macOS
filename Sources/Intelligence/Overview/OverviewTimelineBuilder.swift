@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Clio (sourced overviews) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// Builds an event overview's timeline (#143) from verified, passage-anchored facts, without a model.

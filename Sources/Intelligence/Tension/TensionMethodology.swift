@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Eris (World Tension) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 // News tension (experiment, #99). The normative text is docs/methodology/tension-index-v1.md; change it and this file
