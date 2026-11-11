@@ -241,6 +241,9 @@ final class ArticleStore: ObservableObject {
                 scheduleFollowUpRefresh()
             }
             return published
+        } catch is CancellationError {
+            // A newer refresh replaced this one: not a failure, and nothing to report.
+            return false
         } catch {
             logger.error("Failed to refresh ArticleStore state: \(error.localizedDescription)")
             return false

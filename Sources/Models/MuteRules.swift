@@ -198,7 +198,7 @@ struct MuteTopicSet: Identifiable, Equatable, Sendable {
     let phrases: [String]
 
     static let artificialIntelligence = MuteTopicSet(
-        id: "artificial-intelligence", title: "Artificial Intelligence",
+        id: "artificial-intelligence", title: "No AI, Please",
         phrases: [
             "AI", "A.I.", "artificial intelligence", "AGI", "generative AI", "AI agent", "AI agents", "LLM", "LLMs",
             "large language model", "large language models", "machine learning", "deep learning", "neural network",

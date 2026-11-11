@@ -114,13 +114,13 @@ final class BriefingSituationBoardEngine: @unchecked Sendable {
         self.readIDs = readIDs
         self.isReduceMotion = isReduceMotion
 
-        // Top 3 to 5 stories by publisher count for carousel (or available count if < 3)
+        // The top stories by publisher count, up to the production limit.
         let sorted = briefingArticles.sorted { a, b in
             let aCount = priorities[a.id]?.sourceCount ?? 1
             let bCount = priorities[b.id]?.sourceCount ?? 1
             return aCount == bCount ? a.id < b.id : aCount > bCount
         }
-        let cap = min(5, max(briefingArticles.count < 3 ? briefingArticles.count : 3, min(5, briefingArticles.count)))
+        let cap = min(BriefingView.heroLimit, briefingArticles.count)
         self.carouselStories = Array(sorted.prefix(cap))
     }
 
@@ -160,8 +160,8 @@ final class BriefingSituationBoardEngine: @unchecked Sendable {
         guard !isHovered && !isFocused && !isStoryOpen else { return }
 
         elapsedCarouselSeconds += seconds
-        while elapsedCarouselSeconds >= 45.0 {
-            elapsedCarouselSeconds -= 45.0
+        while elapsedCarouselSeconds >= BriefingHeroCarouselView.autoAdvanceInterval {
+            elapsedCarouselSeconds -= BriefingHeroCarouselView.autoAdvanceInterval
             activeCarouselIndex = (activeCarouselIndex + 1) % carouselStories.count
             rotationAdvancements += 1
         }
@@ -763,9 +763,9 @@ struct BriefingE2ETests {
         ]
         let engine = BriefingSituationBoardEngine(briefingArticles: articles, priorities: priorities)
         assertEqual(
-            engine.carouselStories.count, 5, "Carousel takes top 5 stories by publisher count from 10 briefing stories")
+            engine.carouselStories.count, 10, "Carousel takes up to ten stories by publisher count")
         assertEqual(
-            engine.carouselStories.map(\.id), ["art-0", "art-1", "art-2", "art-3", "art-4"],
+            Array(engine.carouselStories.map(\.id).prefix(5)), ["art-0", "art-1", "art-2", "art-3", "art-4"],
             "Carousel stories are ordered by publisher count")
     }
 
@@ -774,7 +774,7 @@ struct BriefingE2ETests {
         let articles = (0..<5).map { BriefingTestFactory.makeArticle(id: "art-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles)
         assertEqual(engine.activeCarouselIndex, 0, "Starts at index 0")
-        engine.tick(seconds: 44.9)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval - 0.1)
         assertEqual(engine.activeCarouselIndex, 0, "Does not advance before 45s threshold")
         engine.tick(seconds: 0.2)
         assertEqual(engine.activeCarouselIndex, 1, "Advances to index 1 after 45s")
@@ -784,9 +784,9 @@ struct BriefingE2ETests {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let articles = (0..<3).map { BriefingTestFactory.makeArticle(id: "art-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles)
-        engine.tick(seconds: 45.0)  // -> 1
-        engine.tick(seconds: 45.0)  // -> 2
-        engine.tick(seconds: 45.0)  // -> 0 (wrap)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)  // -> 1
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)  // -> 2
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)  // -> 0 (wrap)
         assertEqual(engine.activeCarouselIndex, 0, "Carousel cycles back to index 0 after last story")
     }
 
@@ -794,10 +794,11 @@ struct BriefingE2ETests {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let articles = (0..<5).map { BriefingTestFactory.makeArticle(id: "art-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles)
-        engine.tick(seconds: 30.0)
+        // Part of an interval: the index is still 0 and time has run, so both assertions depend on the selection.
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval * 0.6)
         engine.selectCarouselIndex(3)
         assertEqual(engine.activeCarouselIndex, 3, "Direct dot selection updates active index")
-        assertEqual(engine.elapsedCarouselSeconds, 0.0, "Dot selection resets the 45s countdown")
+        assertEqual(engine.elapsedCarouselSeconds, 0.0, "Dot selection resets the countdown")
     }
 
     private static func testF505ManualArrowNavigation() {
@@ -828,7 +829,7 @@ struct BriefingE2ETests {
         engine.isHovered = true
         engine.tick(seconds: 50.0)
         engine.isHovered = false
-        engine.tick(seconds: 45.0)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)
         assertEqual(engine.activeCarouselIndex, 1, "Carousel resumes advancing after hover clears")
     }
 
@@ -851,7 +852,7 @@ struct BriefingE2ETests {
         assertEqual(engine.activeCarouselIndex, 0, "Carousel NEVER advances while a story is open per DESIGN §8.4")
         engine.handleEscape()
         assertFalse(engine.isStoryOpen, "Story closed")
-        engine.tick(seconds: 45.0)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)
         assertEqual(engine.activeCarouselIndex, 1, "Carousel resumes advancing after story closes")
     }
 
@@ -885,7 +886,7 @@ struct BriefingE2ETests {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let articles = (0..<3).map { BriefingTestFactory.makeArticle(id: "art-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles, isReduceMotion: true)
-        engine.tick(seconds: 45.0)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)
         assertEqual(engine.rotationAdvancements, 0, "Zero rotation advancements recorded under Reduce Motion")
     }
 
@@ -901,16 +902,17 @@ struct BriefingE2ETests {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let articles = (0..<3).map { BriefingTestFactory.makeArticle(id: "art-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles, isReduceMotion: false)
-        engine.tick(seconds: 45.0)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)
         assertEqual(engine.activeCarouselIndex, 1, "Advanced to 1 normally")
         engine.isReduceMotion = true
-        engine.tick(seconds: 45.0)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)
         assertEqual(engine.activeCarouselIndex, 0, "Activating Reduce Motion immediately locks carousel to story 0")
     }
 
     private static func testF705MotionExceptionRuleDocumented() {
-        let interval = 45.0
-        assertEqual(interval, 45.0, "Carousel rotation duration matches 45s DESIGN §8.4 specification")
+        assertEqual(
+            BriefingHeroCarouselView.autoAdvanceInterval, 10.0,
+            "Carousel rotation matches the 10 s of DESIGN.md section 13.1")
     }
 
     // MARK: F8 Tests
@@ -1285,9 +1287,9 @@ struct BriefingE2ETests {
 
     private static func testB402CarouselCappedAtFive() {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
-        let articles = (0..<10).map { BriefingTestFactory.makeArticle(id: "cap-\($0)", source: "Pub-\($0)", now: now) }
+        let articles = (0..<14).map { BriefingTestFactory.makeArticle(id: "cap-\($0)", source: "Pub-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles)
-        assertEqual(engine.carouselStories.count, 5, "Carousel caps at exactly 5 stories")
+        assertEqual(engine.carouselStories.count, BriefingView.heroLimit, "Carousel caps at the hero limit")
     }
 
     private static func testB403TileGridContainsRemainingFive() {
@@ -1339,7 +1341,7 @@ struct BriefingE2ETests {
         let articles = (0..<5).map { BriefingTestFactory.makeArticle(id: "rm-\($0)", source: "Pub-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles, isReduceMotion: true)
         engine.isReduceMotion = false
-        engine.tick(seconds: 45.0)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)
         assertEqual(engine.activeCarouselIndex, 1, "Disabling Reduce Motion restores 45s timer")
     }
 
@@ -1440,9 +1442,9 @@ struct BriefingE2ETests {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let articles = (0..<4).map { BriefingTestFactory.makeArticle(id: "c1-\($0)", source: "Pub-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles)
-        engine.tick(seconds: 40.0)
-        engine.handleReturn()  // opens story at 40s
-        engine.tick(seconds: 10.0)  // ticks past 45s mark
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval - 5)
+        engine.handleReturn()  // opens the story before the interval ends
+        engine.tick(seconds: 10.0)  // past the interval
         assertEqual(engine.activeCarouselIndex, 0, "Carousel does not advance past 45s while story is open")
     }
 
@@ -1462,7 +1464,7 @@ struct BriefingE2ETests {
         engine.handleReturn()
         engine.tick(seconds: 100.0)
         engine.handleEscape()  // close story
-        engine.tick(seconds: 45.0)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval)
         assertEqual(engine.activeCarouselIndex, 1, "Carousel resumes advancing after story closed")
     }
 
@@ -1568,7 +1570,7 @@ struct BriefingE2ETests {
         engine.isHovered = true
         engine.nextCarouselStory()  // index 1, elapsed = 0
         engine.isHovered = false
-        engine.tick(seconds: 44.0)
+        engine.tick(seconds: BriefingHeroCarouselView.autoAdvanceInterval - 1)
         assertEqual(engine.activeCarouselIndex, 1, "Full 45s required after hover exit")
         engine.tick(seconds: 2.0)
         assertEqual(engine.activeCarouselIndex, 2, "Advances to 2 after completing 45s")
@@ -1602,11 +1604,11 @@ struct BriefingE2ETests {
         let now = Date(timeIntervalSince1970: 1_780_000_000)
         let articles = (0..<4).map { BriefingTestFactory.makeArticle(id: "c4-\($0)", source: "Pub-\($0)", now: now) }
         let engine = BriefingSituationBoardEngine(briefingArticles: articles)
-        engine.tick(seconds: 20.0)
+        engine.tick(seconds: 4.0)
         let updatedReading = BriefingTestFactory.makeTensionReading(score: 60)
         assertEqual(updatedReading.assessment.score, 60, "Tension score updated")
         assertEqual(engine.activeCarouselIndex, 0, "Carousel index remains stable across tension update")
-        assertEqual(engine.elapsedCarouselSeconds, 20.0, "Carousel timer retains elapsed progress")
+        assertEqual(engine.elapsedCarouselSeconds, 4.0, "Carousel timer retains elapsed progress")
     }
 
     private static func testC404SparklineExtendsOnNewDailyReading() {
@@ -1672,7 +1674,7 @@ struct BriefingE2ETests {
         let articles = (0..<10).map { BriefingTestFactory.makeArticle(id: "m-\($0)", source: "Pub-\($0)", now: now) }
         let priorities = ["m-0": BriefingPriority(sourceCount: 5), "m-1": BriefingPriority(sourceCount: 4)]
         let engine = BriefingSituationBoardEngine(briefingArticles: articles, priorities: priorities)
-        assertEqual(engine.carouselStories.count, 5, "Carousel populates with 5 lead stories")
+        assertEqual(engine.carouselStories.count, 10, "Carousel populates with the edition's ten stories")
         assertEqual(engine.carouselStories.first?.id, "m-0", "Lead carousel story is m-0")
     }
 

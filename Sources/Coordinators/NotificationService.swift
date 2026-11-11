@@ -48,6 +48,14 @@ struct NotificationDelivery: Sendable {
     /// it starts and its banners are minutes apart, so a reader who switches to Privacy or turns notifications off
     /// meanwhile must not get the rest.
     var continues: @Sendable () async -> Bool = { true }
+    /// The story with the images its card shows now, asked when its banner is posted: the library's curation drops a
+    /// publisher's repeated logo and adds the photo the page lookup recorded. The pass keeps each story as it was at
+    /// triage and posts minutes later, so a feed without images (Al Jazeera, CNBC) had no photo on its banner
+    /// although one was recorded meanwhile (#1201).
+    var curated: @Sendable (FeedArticle) async -> FeedArticle = { story in
+        // Without a library the story is shown as it came.
+        story
+    }
     /// Called after each banner posts, so the pass records it before the next.
     var record: @Sendable (PlannedBanner) async -> Void = { _ in
         // Without a library (tests, summary modes) there is nothing to record.
@@ -403,6 +411,8 @@ final class NotificationService: Sendable {
                     guard await delivery.continues() else { break }
                 }
                 guard !Task.isCancelled else { break }
+                var banner = banner
+                if let story = banner.article { banner.article = await delivery.curated(story) }
                 let outcome = await triggerFullNotification(banner, at: delivery.now, continues: delivery.continues)
                 // A halt is final: the pass must not wait out another gap and post its old banners once Full is back.
                 if outcome == .halted { break }

@@ -48,10 +48,6 @@ struct BriefingActions {
     var onOpenURL: (URL) -> Void = { url in
         if let safe = WebLink.url(url.absoluteString) { NSWorkspace.shared.open(safe) }
     }
-    /// Presents the Customize Briefing sheet.
-    var onCustomize: () -> Void = {
-        // Captures have no sheet to present.
-    }
 
     init(
         onOpenArticle: @escaping (FeedArticle) -> Void,
@@ -63,9 +59,6 @@ struct BriefingActions {
         },
         onToggleSave: @escaping (FeedArticle) -> Void = { _ in
             // Default no-op for previews and standalone usage
-        },
-        onCustomize: @escaping () -> Void = {
-            // Default no-op for previews and standalone usage
         }
     ) {
         self.onOpenArticle = onOpenArticle
@@ -74,7 +67,6 @@ struct BriefingActions {
         self.onBackToToday = onBackToToday
         self.onToggleRead = onToggleRead
         self.onToggleSave = onToggleSave
-        self.onCustomize = onCustomize
     }
 
     /// An event opens its overview and a single story its reader, as their cards do (DESIGN.md 8.3).
@@ -162,10 +154,13 @@ struct BriefingView: View {
         self.actions = actions
     }
 
-    /// The carousel's three to five stories in `BriefingRanking` order: original reports, then stored importance, then
-    /// publishers, then edition order.
+    /// The most stories the carousel shows; an edition with fewer shows what it has.
+    static let heroLimit = 10
+
+    /// The carousel's stories, up to `heroLimit`, in `BriefingRanking` order: original reports, then stored
+    /// importance, then publishers, then edition order.
     static func heroEntries(_ entries: [FeedEntry], ranking: BriefingRanking = BriefingRanking()) -> [FeedEntry] {
-        Array(ranking.order(entries).prefix(5))
+        Array(ranking.order(entries).prefix(heroLimit))
     }
 
     /// The tiles grouped by topic: the story's category in the app's taxonomy, sections in the order their first story
@@ -348,7 +343,7 @@ struct BriefingView: View {
                 readIDs: readIDs, clock: clock, isReaderOpen: isMotionPaused, onOpen: actions.open)
         case .worldTension:
             // Reads the window's World Tension model, as the sidebar does (#781).
-            BriefingTensionStripView(onOpenURL: actions.onOpenURL, onCustomize: actions.onCustomize)
+            BriefingTensionStripView(onOpenURL: actions.onOpenURL)
         case .sinceLastBriefing:
             if let value = data.sinceLast {
                 BriefingSinceLastModuleView(data: value, filter: boardFilter, actions: actions)
