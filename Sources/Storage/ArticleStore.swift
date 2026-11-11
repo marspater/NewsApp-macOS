@@ -122,7 +122,18 @@ final class ArticleStore: ObservableObject {
             try await database.open()
             self.databaseHealthNotice = await database.databaseHealthNotice()
             if self.databaseHealthNotice == nil {
-                _ = try await migrationCoordinator?.migrateIfNeeded()
+                if let stats = try await migrationCoordinator?.migrateIfNeeded(), stats.failures > 0 {
+                    logger.warning(
+                        "Legacy data migration found \(stats.failures) unreadable part(s); unreadable data preserved and retried on the next launch."
+                    )
+                }
+                for move in AppSettings.movedFeeds {
+                    do {
+                        try await database.moveFeed(from: move.from, to: move.to)
+                    } catch {
+                        logger.error("Moving stories from \(move.from) failed: \(error.localizedDescription)")
+                    }
+                }
                 // Overviews and summaries from an earlier macOS model regenerate with the current one when next requested.
                 // Only the app's own library tracks this; stores over other databases (tests, audits) are left as they are.
                 if database === DatabaseEngine.shared {
@@ -377,11 +388,12 @@ final class ArticleStore: ObservableObject {
 
     func toggleRead(id: String) async {
         do {
-            let id = try await database.resolvedArticleID(id)
-            await markAsRead(id: id, isRead: !isRead(id))
+            _ = try await database.toggleRead(articleId: id)
+            stateChanges &+= 1
+            await refreshState()
         } catch {
             operationError = "Could not save reading history. Please try again."
-            logger.error("Failed to resolve article read state: \(error.localizedDescription)")
+            logger.error("Failed to toggle article read state: \(error.localizedDescription)")
         }
     }
 
@@ -429,12 +441,13 @@ final class ArticleStore: ObservableObject {
     @discardableResult
     func toggleSave(article: FeedArticle) async -> Bool {
         do {
-            let id = try await database.resolvedArticleID(for: article)
-            let nextState = try await !database.isSaved(articleId: id)
-            return await setSaved(article: article, isSaved: nextState)
+            let next = try await database.toggleSaved(article: article)
+            stateChanges &+= 1
+            await refreshState()
+            return next
         } catch {
             operationError = "Could not update Saved Stories. Please try again."
-            logger.error("Failed to resolve article saved state: \(error.localizedDescription)")
+            logger.error("Failed to toggle article saved state: \(error.localizedDescription)")
             return false
         }
     }

@@ -1755,11 +1755,12 @@ extension DatabaseEngine {
                 else { return }
                 let id = String(cString: idText)
                 let byteCount = Int(sqlite3_column_bytes(statement, 1))
-                let floatCount = byteCount / MemoryLayout<Float>.stride
-                guard floatCount == 384 else { return }
+                let exactBytes = 384 * MemoryLayout<Float>.stride
+                guard byteCount == exactBytes else { return }
+                let floatCount = 384
                 // SQLite does not promise Float alignment for blob memory, so copy the bytes instead of rebinding them.
                 let floats = [Float](unsafeUninitializedCapacity: floatCount) { buffer, initialized in
-                    memcpy(buffer.baseAddress!, blobBytes, floatCount * MemoryLayout<Float>.stride)
+                    memcpy(buffer.baseAddress!, blobBytes, exactBytes)
                     initialized = floatCount
                 }
                 result[id] = floats

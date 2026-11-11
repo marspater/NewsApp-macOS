@@ -126,6 +126,11 @@ final class AppSettings: ObservableObject {
     ]
     static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 
+    /// Catalog feeds that moved to a new address (#1213). Subscriptions and stars automatically migrate on load.
+    nonisolated static let movedFeeds: [(from: String, to: String)] = [
+        ("https://phys.org/rss-feed", "https://phys.org/rss-feed/")
+    ]
+
     // MARK: - Published Properties
 
     private let defaults: UserDefaults
@@ -185,8 +190,15 @@ final class AppSettings: ObservableObject {
         if let savedUrls = defaults.stringArray(forKey: Self.feedURLsKey) {
             // Catalog feeds in languages that are not supported yet are parked; earlier subscriptions to them end.
             let parked = Set(FeedCatalog.parkedFeeds.map(\.url))
-            let kept = savedUrls.filter { !parked.contains($0) && !retired.contains(Self.feedKey($0)) }
-            if kept.count != savedUrls.count { defaults.set(kept, forKey: Self.feedURLsKey) }
+            var migratedUrls: [String] = []
+            for url in savedUrls {
+                let target = Self.movedFeeds.first(where: { $0.from == url })?.to ?? url
+                if !migratedUrls.contains(target) {
+                    migratedUrls.append(target)
+                }
+            }
+            let kept = migratedUrls.filter { !parked.contains($0) && !retired.contains(Self.feedKey($0)) }
+            if kept != savedUrls { defaults.set(kept, forKey: Self.feedURLsKey) }
             self.feedURLs = kept
         } else {
             self.feedURLs = Self.defaultFeeds
@@ -261,13 +273,26 @@ final class AppSettings: ObservableObject {
             topicSets: defaults.stringArray(forKey: Self.mutedTopicSetsKey) ?? [])
         // A retired feed gives its star slot back with its subscription (#800).
         let storedStars = defaults.stringArray(forKey: Self.starredFeedURLsKey) ?? []
-        let starred = Set(storedStars.filter { !retired.contains(Self.feedKey($0)) })
-        if starred.count != storedStars.count { defaults.set(starred.sorted(), forKey: Self.starredFeedURLsKey) }
+        var migratedStars: [String] = []
+        for url in storedStars {
+            let target = Self.movedFeeds.first(where: { $0.from == url })?.to ?? url
+            if !migratedStars.contains(target) {
+                migratedStars.append(target)
+            }
+        }
+        let starred = Set(migratedStars.filter { !retired.contains(Self.feedKey($0)) })
+        if starred != Set(storedStars) { defaults.set(starred.sorted(), forKey: Self.starredFeedURLsKey) }
         self.starredFeedURLs = starred
         // A star from before star times were kept counts from now.
-        var times = (defaults.dictionary(forKey: Self.starredFeedTimesKey) as? [String: Double] ?? [:]).filter {
-            starred.contains($0.key)
+        var times = (defaults.dictionary(forKey: Self.starredFeedTimesKey) as? [String: Double] ?? [:])
+        for move in Self.movedFeeds {
+            if let time = times.removeValue(forKey: move.from) {
+                if times[move.to] == nil {
+                    times[move.to] = time
+                }
+            }
         }
+        times = times.filter { starred.contains($0.key) }
         for url in starred where times[url] == nil { times[url] = Date().timeIntervalSince1970 }
         defaults.set(times, forKey: Self.starredFeedTimesKey)
         self.starredFeedTimes = times.mapValues { Date(timeIntervalSince1970: $0) }

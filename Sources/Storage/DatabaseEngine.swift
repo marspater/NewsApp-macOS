@@ -700,7 +700,9 @@ actor DatabaseEngine {
         let partial = scratch.appendingPathComponent(destination.lastPathComponent)
         try copyLibrary(to: partial)
         var extras = ["settings": settings]
-        extras["world-tension"] = try? Data(contentsOf: worldTensionURL)
+        if fileManager.fileExists(atPath: worldTensionURL.path) {
+            extras["world-tension"] = try Data(contentsOf: worldTensionURL)
+        }
         try withConnection(to: partial) { copy in
             try exec(copy, "CREATE TABLE \(Self.backupExtrasTable) (name TEXT PRIMARY KEY, value BLOB);")
             var statement: OpaquePointer?
@@ -795,6 +797,11 @@ actor DatabaseEngine {
                             "This backup was saved by a newer version of News (schema \(version); this version knows \(Self.schemaVersion)), so nothing was restored. Install the newer version to restore it."
                     ])
             }
+            let orphans = Self.foreignKeyCheck(on: copy)
+            guard orphans.isEmpty else {
+                logger.error("Restored copy has foreign-key orphans: \(orphans.joined(separator: "; "))")
+                throw damaged
+            }
             var extras: [String: Data] = [:]
             var statement: OpaquePointer?
             defer { sqlite3_finalize(statement) }
@@ -828,6 +835,24 @@ actor DatabaseEngine {
         await trial.close()
         guard trialNotice == nil else { throw damaged }
 
+        // The side file goes before the library: it is small, and the old one is put back from memory if the swap fails.
+        // A backup without tension history never touches the side file, so an unreadable file must not fail that restore.
+        let backupHasTension = extras.keys.contains("world-tension")
+        let previousTension: Data?
+        if backupHasTension, fileManager.fileExists(atPath: worldTensionURL.path) {
+            do {
+                previousTension = try Data(contentsOf: worldTensionURL)
+            } catch {
+                throw NSError(
+                    domain: "DatabaseEngine", code: -1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "The World Tension history file exists but could not be read for rollback safety, so nothing was restored: \(error.localizedDescription)"
+                    ])
+            }
+        } else {
+            previousTension = nil
+        }
         // Nothing is swapped in until the current library is kept; a library too damaged to copy online is copied as a file.
         if fileManager.fileExists(atPath: dbPath) {
             let kept = try keepCopyBeside(
@@ -835,8 +860,6 @@ actor DatabaseEngine {
             try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path)
             try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path + "-wal")
         }
-        // The side file goes before the library: it is small, and the old one is put back from memory if the swap fails.
-        let previousTension = try? Data(contentsOf: worldTensionURL)
         func putTension(_ data: Data?) throws {
             if let data {
                 try data.write(to: worldTensionURL, options: .atomic)
@@ -844,8 +867,8 @@ actor DatabaseEngine {
                 try fileManager.removeItem(at: worldTensionURL)
             }
         }
-        // A plain library file carries no extras and leaves the side file as it is.
-        if !extras.isEmpty { try putTension(extras["world-tension"]) }
+        // A backup carrying tension history replaces the side file; a backup without the entry keeps the existing file (#1203).
+        if backupHasTension { try putTension(extras["world-tension"]) }
 
         // The log is folded in first and must be fully folded: it is deleted below, and the reopened library would lose
         // the commits only it holds if the swap failed. A blocked checkpoint reports through its counts, not its status,
@@ -865,7 +888,7 @@ actor DatabaseEngine {
             guard status == SQLITE_OK, logFrames >= 0, logFrames == checkpointed else {
                 // Back to shared locking; the next read releases the exclusive lock.
                 sqlite3_exec(db, "PRAGMA locking_mode = NORMAL; SELECT count(*) FROM sqlite_master;", nil, nil, nil)
-                if !extras.isEmpty { try? putTension(previousTension) }
+                if backupHasTension { try? putTension(previousTension) }
                 throw NSError(
                     domain: "DatabaseEngine", code: Int(status),
                     userInfo: [
@@ -885,7 +908,7 @@ actor DatabaseEngine {
             }
         } catch {
             // A failed atomic replace leaves the library in place; its side file goes back too.
-            if !extras.isEmpty { try? putTension(previousTension) }
+            if backupHasTension { try? putTension(previousTension) }
             try? open()
             throw error
         }
@@ -2298,6 +2321,39 @@ actor DatabaseEngine {
     /// The open library's schema version (`PRAGMA user_version`), for Help › Export Diagnostics (#564).
     func storedSchemaVersion() throws -> Int { try getUserVersion() }
 
+    /// Runs `PRAGMA foreign_key_check;` on the given connection and returns any orphan descriptions (#1205).
+    static func foreignKeyCheck(on db: OpaquePointer) -> [String] {
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_prepare_v2(db, "PRAGMA foreign_key_check;", -1, &statement, nil) == SQLITE_OK else {
+            return ["error: could not prepare foreign_key_check"]
+        }
+        var orphans: [String] = []
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
+            let table = sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "unknown"
+            let rowid = sqlite3_column_int64(statement, 1)
+            let parent = sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? "unknown"
+            let fkid = sqlite3_column_int(statement, 3)
+            orphans.append("\(table) rowid \(rowid) -> \(parent) (fkid \(fkid))")
+            status = sqlite3_step(statement)
+        }
+        // A scan that stops before SQLITE_DONE is a failed check, never a clean result.
+        if status != SQLITE_DONE {
+            orphans.append("error: foreign_key_check stopped before finishing (sqlite status \(status))")
+        }
+        return orphans
+    }
+
+    /// Runs `PRAGMA foreign_key_check;` and returns any orphan descriptions without modifying rows (#1205).
+    func foreignKeyCheck() throws -> [String] {
+        guard let db = db else {
+            throw NSError(
+                domain: "DatabaseEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: "Database not open"])
+        }
+        return Self.foreignKeyCheck(on: db)
+    }
+
     private func sqliteError(_ db: OpaquePointer, _ context: String) -> NSError {
         NSError(
             domain: "DatabaseEngine", code: Int(sqlite3_errcode(db)),
@@ -2787,7 +2843,7 @@ actor DatabaseEngine {
         var expiredStmt: OpaquePointer?
         guard
             sqlite3_prepare_v2(
-                db, "SELECT 1 FROM expired_stories WHERE key IN ('pruned:' || ?, 'pruned:' || ?);", -1, &expiredStmt,
+                db, "SELECT 1 FROM expired_stories WHERE key = 'pruned:' || ?;", -1, &expiredStmt,
                 nil)
                 == SQLITE_OK
         else {
@@ -2830,12 +2886,25 @@ actor DatabaseEngine {
                 // its feed-scoped GUID. An explicit save (preserving stored content) may bring it back.
                 if !preservingStoredContent {
                     let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: identityFeedURL) ?? id
-                    sqlite3_reset(expiredStmt)
-                    sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
-                    sqlite3_bind_text(expiredStmt, 2, scoped, -1, Self.sqliteTransient)
-                    let expiredStatus = sqlite3_step(expiredStmt)
-                    if expiredStatus == SQLITE_ROW { continue }
-                    guard expiredStatus == SQLITE_DONE else { throw sqliteError(db, "Could not check pruned story") }
+                    // A feed that moved address (#1213) is still the same feed: a story pruned under the old address
+                    // keeps its tombstone under the old scope, so that scope is checked too.
+                    let previousScopes = AppSettings.movedFeeds.filter { $0.to == identityFeedURL }.compactMap {
+                        ArticleIdentity.scopedGUID(article.guid, feedURL: $0.from)
+                    }
+                    var wasPruned = false
+                    for key in [id, scoped] + previousScopes {
+                        sqlite3_reset(expiredStmt)
+                        sqlite3_bind_text(expiredStmt, 1, key, -1, Self.sqliteTransient)
+                        let expiredStatus = sqlite3_step(expiredStmt)
+                        if expiredStatus == SQLITE_ROW {
+                            wasPruned = true
+                            break
+                        }
+                        guard expiredStatus == SQLITE_DONE else {
+                            throw sqliteError(db, "Could not check pruned story")
+                        }
+                    }
+                    if wasPruned { continue }
                 }
                 insertedIDs.insert(id)
             }
@@ -3004,6 +3073,27 @@ actor DatabaseEngine {
         return retryAt
     }
 
+    /// Migrates stored feed references when a feed URL changes (#1213).
+    func moveFeed(from oldURL: String, to newURL: String) throws {
+        guard db != nil, oldURL != newURL else { return }
+        try beginTransaction()
+        do {
+            try eventRows("UPDATE articles SET feed_url = ? WHERE feed_url = ?;", [.text(newURL), .text(oldURL)])
+            try eventRows(
+                "INSERT OR IGNORE INTO article_feeds (article_id, feed_url) SELECT article_id, ? FROM article_feeds WHERE feed_url = ?;",
+                [.text(newURL), .text(oldURL)])
+            try eventRows("DELETE FROM article_feeds WHERE feed_url = ?;", [.text(oldURL)])
+            try eventRows("UPDATE OR IGNORE feeds SET url = ? WHERE url = ?;", [.text(newURL), .text(oldURL)])
+            try eventRows("DELETE FROM feeds WHERE url = ?;", [.text(oldURL)])
+            try eventRows(
+                "UPDATE notification_deliveries SET feed_url = ? WHERE feed_url = ?;", [.text(newURL), .text(oldURL)])
+            try commitTransaction()
+        } catch {
+            try? rollbackTransaction()
+            throw error
+        }
+    }
+
     private func writeFeedSchedule(
         _ feedURL: String, failures: Int, retryAt: Date?, kind: FeedFailureKind?, fetchedAt: Double?
     ) throws {
@@ -3109,20 +3199,37 @@ actor DatabaseEngine {
 
     typealias QueryParameter = (type: String, val: Any)
 
-    func bind(_ params: [QueryParameter], to statement: OpaquePointer?) {
+    func bind(_ params: [QueryParameter], to statement: OpaquePointer?) throws {
         for (idx, p) in params.enumerated() {
             let col = Int32(idx + 1)
+            let rc: Int32
             if p.type == "int", let v = p.val as? Int {
-                sqlite3_bind_int(statement, col, Int32(v))
+                rc = sqlite3_bind_int(statement, col, Int32(v))
             } else if p.type == "double", let v = p.val as? Double {
-                sqlite3_bind_double(statement, col, v)
+                rc = sqlite3_bind_double(statement, col, v)
             } else if p.type == "text", let v = p.val as? String {
-                sqlite3_bind_text(statement, col, v, -1, Self.sqliteTransient)
+                rc = sqlite3_bind_text(statement, col, v, -1, Self.sqliteTransient)
             } else if p.type == "blobFloats", let floats = p.val as? [Float] {
                 let byteCount = floats.count * MemoryLayout<Float>.stride
-                _ = floats.withUnsafeBytes { raw in
+                rc = floats.withUnsafeBytes { raw in
                     sqlite3_bind_blob(statement, col, raw.baseAddress, Int32(byteCount), Self.sqliteTransient)
                 }
+            } else {
+                throw NSError(
+                    domain: "DatabaseEngine", code: -1,
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Unsupported parameter type '\(p.type)' for value at index \(idx)"
+                    ])
+            }
+            guard rc == SQLITE_OK else {
+                let msg =
+                    statement.flatMap { s in sqlite3_db_handle(s).flatMap { db in String(cString: sqlite3_errmsg(db)) }
+                    } ?? "unknown error"
+                throw NSError(
+                    domain: "DatabaseEngine", code: Int(rc),
+                    userInfo: [
+                        NSLocalizedDescriptionKey: "Failed to bind parameter at index \(idx) (\(p.type)): \(msg)"
+                    ])
             }
         }
     }
@@ -3324,7 +3431,7 @@ actor DatabaseEngine {
         }
         defer { sqlite3_finalize(stmt) }
 
-        bind(params, to: stmt)
+        try bind(params, to: stmt)
 
         var results: [FeedArticle] = []
         let columnCount = sqlite3_column_count(stmt)
@@ -3625,7 +3732,7 @@ actor DatabaseEngine {
                 userInfo: [NSLocalizedDescriptionKey: String(cString: sqlite3_errmsg(db))])
         }
         defer { sqlite3_finalize(stmt) }
-        bind(params, to: stmt)
+        try bind(params, to: stmt)
         // Do not begin the library-wide update if cancellation arrived during preparation.
         try Task.checkCancellation()
         guard sqlite3_step(stmt) == SQLITE_DONE else {
@@ -3639,6 +3746,22 @@ actor DatabaseEngine {
         let next = try !isSaved(articleId: articleId)
         try setSaved(articleId: articleId, isSaved: next)
         return next
+    }
+
+    /// Atomically toggles the read state of an article in a single actor turn (#1205).
+    @discardableResult
+    func toggleRead(articleId: String) throws -> Bool {
+        let next = try !isRead(articleId: articleId)
+        try markRead(articleId: articleId, isRead: next)
+        return next
+    }
+
+    /// Atomically upserts and toggles the saved state of an article in a single actor turn (#1205).
+    @discardableResult
+    func toggleSaved(article: FeedArticle) throws -> Bool {
+        _ = try upsertArticles([article], preservingStoredContent: true)
+        let id = try resolvedArticleID(for: article)
+        return try toggleSaved(articleId: id)
     }
 
     /// Unsaves every saved story in one statement, so a failure leaves all of them saved (#946).
@@ -4415,12 +4538,27 @@ actor DatabaseEngine {
         }
 
         // Return freed pages to the filesystem without a full-table rebuild (#536). Not part of the transaction.
-        try executeSimple("PRAGMA incremental_vacuum;")
+        do {
+            if let postPruneVacuumAction {
+                try postPruneVacuumAction()
+            } else {
+                try executeSimple("PRAGMA incremental_vacuum;")
+            }
+        } catch {
+            logger.warning("Incremental vacuum after prune failed: \(error.localizedDescription)")
+        }
 
         if changes > 0 {
             logger.info("Pruned \(changes) read articles older than \(keepReadDays) days")
         }
         return changes
+    }
+
+    /// Test seam for simulating vacuum failure after committed prune (#1204).
+    var postPruneVacuumAction: (@Sendable () throws -> Void)?
+
+    func setPostPruneVacuumAction(_ action: (@Sendable () throws -> Void)?) {
+        postPruneVacuumAction = action
     }
 
     // MARK: - Counts & Diagnostics
@@ -4458,7 +4596,7 @@ actor DatabaseEngine {
             throw sqliteError(db, "Cannot count stories")
         }
         defer { sqlite3_finalize(stmt) }
-        bind(scope.params, to: stmt)
+        try bind(scope.params, to: stmt)
         guard sqlite3_step(stmt) == SQLITE_ROW else { throw sqliteError(db, "Cannot count stories") }
         total = Int(sqlite3_column_int(stmt, 0))
         saved = Int(sqlite3_column_int(stmt, 1))
@@ -4494,7 +4632,11 @@ actor DatabaseEngine {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return true }
         defer { sqlite3_finalize(stmt) }
-        bind([("text", articleId)], to: stmt)
+        do {
+            try bind([("text", articleId)], to: stmt)
+        } catch {
+            return true
+        }
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 
@@ -4511,7 +4653,12 @@ actor DatabaseEngine {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
         defer { sqlite3_finalize(stmt) }
-        bind((muting.isEmpty ? [] : Self.mutingParameters(muting)) + [("text", articleId)] + scope.params, to: stmt)
+        do {
+            try bind(
+                (muting.isEmpty ? [] : Self.mutingParameters(muting)) + [("text", articleId)] + scope.params, to: stmt)
+        } catch {
+            return nil
+        }
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
         return (isRead: sqlite3_column_int(stmt, 0) != 0, counted: sqlite3_column_int(stmt, 1) == 0)
     }
@@ -4627,7 +4774,7 @@ actor DatabaseEngine {
                 ])
         }
         defer { sqlite3_finalize(stmt) }
-        bind(params, to: stmt)
+        try bind(params, to: stmt)
         guard sqlite3_step(stmt) == SQLITE_ROW else {
             throw NSError(
                 domain: "DatabaseEngine", code: -1,
@@ -5183,7 +5330,7 @@ actor DatabaseEngine {
         defer { sqlite3_finalize(stmt) }
         var params: [QueryParameter] = feedURLs.map { ("text", $0) }
         params += [("double", day.start.timeIntervalSince1970), ("double", day.end.timeIntervalSince1970)]
-        bind(params, to: stmt)
+        try bind(params, to: stmt)
         var rows: [TensionCorpusRow] = []
         var status = sqlite3_step(stmt)
         while status == SQLITE_ROW {
