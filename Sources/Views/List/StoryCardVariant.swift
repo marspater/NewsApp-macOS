@@ -321,40 +321,41 @@ extension ArticleCardView {
         }
     }
 
-    @ViewBuilder
     private var coverageFooter: some View {
         let publishers = StoryCardMetadata(publisherCount: metadata.publisherCount).coverageLine
         let original = metadata.originalReportsText
-        if publishers == nil, original == nil {
-            editionDate
-        } else {
-            VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
-                coverageCounts(publishers: publishers, original: original)
-                if let account = metadata.differingAccount {
-                    Divider()
-                    (Text("Accounts differ. ").font(AppTypography.caption.weight(.semibold))
-                        + Text(account).font(AppTypography.caption))
-                        .foregroundStyle(AppColor.primaryText)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                }
+        return VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
+            coverageCounts(publishers: publishers, original: original)
+            if let account = metadata.differingAccount {
+                Divider()
+                (Text("Accounts differ. ").font(AppTypography.caption.weight(.semibold))
+                    + Text(account).font(AppTypography.caption))
+                    .foregroundStyle(AppColor.primaryText)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
             }
         }
     }
 
+    /// The counts row. Without either count the date stands in for the counts alone: the monograms and the
+    /// differing account render whenever their data exists.
     private func coverageCounts(publishers: String?, original: String?) -> some View {
         HStack(spacing: AppSpacing.eyebrowGap) {
-            Image(systemName: "square.stack.3d.up")
-                .font(AppTypography.caption)
-                .foregroundStyle(AppColor.secondaryText)
-                .accessibilityHidden(true)
-            if let publishers { caption(publishers) }
-            if let original {
-                Text(original)
+            if publishers == nil, original == nil {
+                editionDate
+            } else {
+                Image(systemName: "square.stack.3d.up")
                     .font(AppTypography.caption)
-                    .foregroundStyle(AppColor.originalReports)
-                    .monospacedDigit()
-                    .lineLimit(1)
+                    .foregroundStyle(AppColor.secondaryText)
+                    .accessibilityHidden(true)
+                if let publishers { caption(publishers) }
+                if let original {
+                    Text(original)
+                        .font(AppTypography.caption)
+                        .foregroundStyle(AppColor.originalReports)
+                        .monospacedDigit()
+                        .lineLimit(1)
+                }
             }
             if !metadata.publishers.isEmpty {
                 PublisherMonograms(publishers: metadata.publishers, ring: AppColor.surface)

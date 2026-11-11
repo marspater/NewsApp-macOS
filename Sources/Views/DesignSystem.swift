@@ -182,7 +182,9 @@ enum AppColor {
         Color(
             nsColor: NSColor(name: nil) { appearance in
                 let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                let alpha: CGFloat = dark ? (hovered ? 0.16 : 0.08) : (hovered ? 0.45 : 0.20)
+                let darkAlpha: CGFloat = hovered ? 0.16 : 0.08
+                let lightAlpha: CGFloat = hovered ? 0.45 : 0.20
+                let alpha = dark ? darkAlpha : lightAlpha
                 return NSColor.white.withAlphaComponent(alpha)
             })
     }
