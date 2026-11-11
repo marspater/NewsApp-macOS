@@ -74,7 +74,10 @@ struct ArticleDetailView: View {
     @State private var contentState: ArticleContentState = .loading
 
     @State private var experienceMode: ReaderExperienceMode = .sourcePublication
-    @State private var currentOverview: EventOverviewDocument? = nil
+    /// Identifies the latest overview load so an older one cannot overwrite its result.
+    @State private var overviewLoadSerial = 0
+    @State private var currentOverview: EventOverviewDocument?
+    @State private var overviewLoadedInputHash: String?
     @State private var highlightedPassage: String? = nil
     @State private var eventMemberArticles: [FeedArticle] = []
     /// Earlier events of the overview's developing story, keyed by the event they were found for.
@@ -105,6 +108,7 @@ struct ArticleDetailView: View {
         self.allArticles = allArticles
         self._path = path
         self._currentOverview = State(initialValue: overview)
+        self._overviewLoadedInputHash = State(initialValue: overview != nil ? article.publisherInputHash : nil)
         self._textScaleOverride = State(
             initialValue: SystemSettingsOverrides.from().textScale.map(ReaderTextSize.normalized))
         if let mode = initialExperienceMode {
@@ -236,8 +240,8 @@ struct ArticleDetailView: View {
                 analysis = nil
                 analysisError = nil
                 isAnalyzing = false
-                // Keep the overview mode so the regenerated overview returns by itself.
                 currentOverview = nil
+                overviewLoadedInputHash = nil
             }
             .onAppear { isViewFocused = true }
             .onDisappear {
@@ -1435,7 +1439,7 @@ struct ArticleDetailView: View {
                 .buttonStyle(.bordered)
                 .labelStyle(.iconOnly)
             }
-            Picker("Reading Style", selection: $themeManager.articleTheme) {
+            Picker("Reading Style", selection: themeManager.binding(\.articleTheme)) {
                 ForEach(ArticleThemeType.allCases) { Text($0.displayName).tag($0) }
             }
             .pickerStyle(.radioGroup)
@@ -1972,13 +1976,8 @@ struct ArticleDetailView: View {
     }
 
     private func setOverviewLoading(_ loading: Bool) {
-        if reduceMotion {
-            isOverviewLoading = loading
-        } else {
-            withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
-                isOverviewLoading = loading
-            }
-        }
+        guard isOverviewLoading != loading else { return }
+        isOverviewLoading = loading
     }
 
     private var canCheckForUpdates: Bool {
@@ -2024,14 +2023,18 @@ struct ArticleDetailView: View {
     private func loadEventOverviewForActiveArticle() async {
         let articleID = activeArticle.id
         let inputHash = currentArticle.publisherInputHash
+        // A newer load (membership changed during Check for Updates) supersedes this one; only the latest may write state.
+        overviewLoadSerial += 1
+        let serial = overviewLoadSerial
         guard !Task.isCancelled else { return }
         let summaries = (try? await articleStore.eventFeedSummaries(for: [articleID])) ?? []
-        guard !Task.isCancelled, activeArticle.id == articleID,
+        guard !Task.isCancelled, activeArticle.id == articleID, overviewLoadSerial == serial,
             currentArticle.publisherInputHash == inputHash
         else { return }
         guard let summary = summaries.first, summary.isConfirmed, summary.sources.count >= 2 else {
             setOverviewLoading(false)
             currentOverview = nil
+            overviewLoadedInputHash = nil
             eventMemberArticles = []
             relatedStories = nil
             experienceMode = .sourcePublication
@@ -2045,6 +2048,7 @@ struct ArticleDetailView: View {
 
         if let existing = currentOverview,
             existing.eventID == eventID,
+            overviewLoadedInputHash == inputHash,
             !existing.isStale(currentMembershipVersion: membershipVersion)
         {
             setOverviewLoading(false)
@@ -2058,7 +2062,7 @@ struct ArticleDetailView: View {
         }
 
         let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
-        guard !Task.isCancelled, activeArticle.id == articleID,
+        guard !Task.isCancelled, activeArticle.id == articleID, overviewLoadSerial == serial,
             currentArticle.publisherInputHash == inputHash
         else { return }
         let resolvedMembers = members.isEmpty ? [activeArticle] : members
@@ -2071,7 +2075,10 @@ struct ArticleDetailView: View {
             articleID: articleID)
         if currentOverview?.eventID != eventID {
             currentOverview = nil
-            experienceMode = .sourcePublication
+            overviewLoadedInputHash = nil
+            if !returnToOverview {
+                experienceMode = .sourcePublication
+            }
         }
         // A mode the person picks while the overview generates (Story during a Check for Updates) is kept.
         let modeAtLoad = experienceMode
@@ -2087,13 +2094,14 @@ struct ArticleDetailView: View {
             readerArticleID: articleID
         )
 
-        guard !Task.isCancelled, activeArticle.id == articleID,
+        guard !Task.isCancelled, activeArticle.id == articleID, overviewLoadSerial == serial,
             currentArticle.publisherInputHash == inputHash
         else { return }
 
         setOverviewLoading(false)
         if let doc = doc {
             currentOverview = doc
+            overviewLoadedInputHash = inputHash
             eventMemberArticles = resolvedMembers
             if returnToOverview && viewMode == .reader && experienceMode == modeAtLoad {
                 experienceMode = .eventOverview
@@ -2101,6 +2109,11 @@ struct ArticleDetailView: View {
             }
             await loadRelatedStories(eventID: eventID, articleID: articleID)
         } else {
+            currentOverview = nil
+            overviewLoadedInputHash = nil
+            if experienceMode == .eventOverview {
+                experienceMode = .sourcePublication
+            }
             overviewRequestedArticleID = nil
         }
     }

@@ -276,26 +276,27 @@ struct BriefingView: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// As the canvas lays it out: the carousel (two thirds) beside a column with World Tension and Since your last
-    /// briefing in layout order, wrapping below the carousel on a narrow board; the Executive sitrep full width below.
+    /// As the canvas lays it out (#1211): in wide windows the hero carousel sits beside a column with World Tension
+    /// and Since your last briefing in layout order, and the Executive sitrep sits directly under the hero at hero width;
+    /// on narrow windows or when modules are hidden, modules size responsively to free space with no empty bands or holes.
     @ViewBuilder
     private func situationalAwareness(_ modules: [BriefingModuleKind]) -> some View {
         let column = modules.filter { $0 == .worldTension || $0 == .sinceLastBriefing }
-        VStack(alignment: .leading, spacing: AppLayout.cardGap) {
-            if modules.contains(.heroCarousel), !column.isEmpty {
-                BriefingSplitLayout(leadingFraction: 2.0 / 3.0, minimumWidth: AppLayout.briefingSplitMinimum) {
-                    module(.heroCarousel)
-                    VStack(spacing: AppLayout.cardGap) {
-                        ForEach(column, id: \.self) { module($0) }
-                    }
-                    .frame(maxHeight: .infinity, alignment: .top)
-                }
-            } else if modules.contains(.heroCarousel) {
+        BriefingSituationalLayout {
+            if modules.contains(.heroCarousel) {
                 module(.heroCarousel)
-            } else {
-                ForEach(column, id: \.self) { module($0) }
+                    .briefingSituationalRole(.hero)
             }
-            if modules.contains(.executiveSitrep) { module(.executiveSitrep) }
+            if !column.isEmpty {
+                VStack(spacing: AppLayout.cardGap) {
+                    ForEach(column, id: \.self) { module($0) }
+                }
+                .briefingSituationalRole(.trailing)
+            }
+            if modules.contains(.executiveSitrep) {
+                module(.executiveSitrep)
+                    .briefingSituationalRole(.sitrep)
+            }
         }
     }
 

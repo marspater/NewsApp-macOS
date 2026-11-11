@@ -529,12 +529,15 @@ actor OverviewGenerationCoordinator {
     /// Cancels generation when the reader closes or event changes. The queue job is cancelled before this
     /// returns, so a request for the same event made afterwards is never cancelled by it.
     func cancel(eventID: String, reason: EnrichmentCancellationReason = .user) async {
-        if let running = inFlightTasks.removeValue(forKey: eventID) {
+        let hadRunning = inFlightTasks.removeValue(forKey: eventID)
+        if let running = hadRunning {
             running.task.cancel()
             latestRequestedInputs.removeValue(forKey: eventID)
         }
         await queue.cancelOverview(eventID: eventID, reason: reason)
-        logger.debug("Cancelled overview generation for \(eventID): \(reason.rawValue)")
+        if hadRunning != nil {
+            logger.debug("Cancelled overview generation for \(eventID): \(reason.rawValue)")
+        }
     }
 
     /// Only a request for the visible event itself, or a request for another event, may cancel a running generation

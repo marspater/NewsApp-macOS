@@ -170,6 +170,7 @@ struct MainView: View {
             }
             .background(MainWindowMarker())
             .task(id: pendingNavigationToken) {
+                guard pendingNavigationToken != nil else { return }
                 await handlePendingNavigation()
             }
             .onOpenURL { url in

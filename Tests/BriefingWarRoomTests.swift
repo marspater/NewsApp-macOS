@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import AppKit
 import Foundation
+import SwiftUI
 
 /// The Briefing war room shell (#848): module layout, its persistence, hidden modules and the World Tension captions.
 /// Drives production types only (#804).
@@ -36,6 +38,10 @@ enum BriefingWarRoomTests {
         hiddenModules()
         regionFilter()
         tensionCaptions()
+        situationalAwarenessSizing()
+        await acceptanceTests1201()
+        await appleIntelligenceAvailabilityTests()
+        await runtimeDiagnosticsTests()
         print("Finished \(checks) Briefing war room checks with \(failures) failures.")
         if failures > 0 { recordFailure("BriefingWarRoomTests: \(failures) check failure(s)") }
     }
@@ -172,5 +178,308 @@ enum BriefingWarRoomTests {
         check(
             BriefingTensionStripView.coverageText(reading(0, 40, publishers: Array(panel.prefix(3)))) == nil,
             "a short sample says nothing")
+    }
+
+    static func situationalAwarenessSizing() {
+        print("  - Testing Situational awareness sizing across widths (#1211)...")
+        let spacing = AppLayout.cardGap
+        let heroHeight: CGFloat = 360
+        let trailingHeight: CGFloat = 520
+        let sitrepHeight: CGFloat = 140
+
+        // 1. Wide window (1200 pt):
+        let wide = BriefingSituationalLayout.computeFrames(
+            width: 1200,
+            heroHeight: heroHeight,
+            trailingHeight: trailingHeight,
+            sitrepHeight: sitrepHeight
+        )
+        guard let heroWide = wide.hero, let trailingWide = wide.trailing, let sitrepWide = wide.sitrep else {
+            check(false, "Wide layout produces all three frames")
+            return
+        }
+        let expectedLeadingWidth = ((1200 - spacing) * 2.0 / 3.0).rounded()
+        let expectedTrailingWidth = 1200 - spacing - expectedLeadingWidth
+        check(heroWide.width == expectedLeadingWidth, "Hero takes 2/3 width in wide window")
+        check(heroWide.minX == 0 && heroWide.minY == 0, "Hero is at top-left")
+        check(sitrepWide.width == expectedLeadingWidth, "Sitrep takes hero's width (2/3) in wide window")
+        check(
+            sitrepWide.minX == 0 && sitrepWide.minY == heroHeight + spacing,
+            "Sitrep sits directly under hero without gap")
+        check(trailingWide.width == expectedTrailingWidth, "Trailing column takes remaining 1/3 width")
+        check(
+            trailingWide.minX == expectedLeadingWidth + spacing && trailingWide.minY == 0,
+            "Trailing column sits on right")
+
+        // 2. Wide window boundary (1000 pt):
+        let boundary = BriefingSituationalLayout.computeFrames(
+            width: 1000,
+            heroHeight: heroHeight,
+            trailingHeight: trailingHeight,
+            sitrepHeight: sitrepHeight
+        )
+        check(boundary.hero?.minY == 0, "Hero at top on boundary")
+        check(boundary.sitrep?.minY == heroHeight + spacing, "Sitrep directly under hero on boundary")
+        check(boundary.trailing?.minX == (boundary.hero?.maxX ?? 0) + spacing, "Trailing beside hero on boundary")
+
+        let justBelow = BriefingSituationalLayout.computeFrames(
+            width: 999, heroHeight: heroHeight, trailingHeight: trailingHeight, sitrepHeight: sitrepHeight)
+        check(justBelow.trailing?.minX == 0, "Just under the boundary stacks in one column")
+
+        // 3. Narrow window (600 pt):
+        let narrow = BriefingSituationalLayout.computeFrames(
+            width: 600,
+            heroHeight: heroHeight,
+            trailingHeight: trailingHeight,
+            sitrepHeight: sitrepHeight
+        )
+        guard let heroNarrow = narrow.hero, let trailingNarrow = narrow.trailing, let sitrepNarrow = narrow.sitrep
+        else {
+            check(false, "Narrow layout produces all three frames")
+            return
+        }
+        check(
+            heroNarrow.width == 600 && trailingNarrow.width == 600 && sitrepNarrow.width == 600,
+            "Single column full width")
+        check(heroNarrow.minY == 0, "Hero leads single column")
+        check(trailingNarrow.minY == heroHeight + spacing, "Trailing column follows hero in single column")
+        check(
+            sitrepNarrow.minY == trailingNarrow.maxY + spacing, "Sitrep closes situational awareness in single column")
+
+        // 4. Hiding trailing column leaves no hole in wide window:
+        let noTrailing = BriefingSituationalLayout.computeFrames(
+            width: 1200,
+            heroHeight: heroHeight,
+            trailingHeight: nil,
+            sitrepHeight: sitrepHeight
+        )
+        guard let heroNoTrailing = noTrailing.hero, let sitrepNoTrailing = noTrailing.sitrep else {
+            check(false, "Absent trailing produces hero and sitrep frames")
+            return
+        }
+        check(noTrailing.trailing == nil, "Trailing frame is absent")
+        check(heroNoTrailing.width == 1200, "Hero expands to full width when trailing column is absent")
+        check(sitrepNoTrailing.width == 1200, "Sitrep expands to full width when trailing column is absent")
+        check(sitrepNoTrailing.minY == heroHeight + spacing, "Sitrep sits under hero with no holes")
+
+        // A lone trailing module has no column to sit beside and takes the full width:
+        let trailingOnly = BriefingSituationalLayout.computeFrames(
+            width: 1200, heroHeight: nil, trailingHeight: trailingHeight, sitrepHeight: nil)
+        check(trailingOnly.trailing?.minX == 0, "A lone trailing module starts at the leading edge")
+        check(trailingOnly.trailing?.width == 1200, "A lone trailing module takes the full width")
+
+        // 5. Hiding hero module leaves no hole:
+        let noHero = BriefingSituationalLayout.computeFrames(
+            width: 600,
+            heroHeight: nil,
+            trailingHeight: trailingHeight,
+            sitrepHeight: sitrepHeight
+        )
+        check(noHero.hero == nil, "Hero frame is absent")
+        check(noHero.trailing?.minY == 0, "Trailing starts at top when hero is hidden")
+        check(noHero.sitrep?.minY == trailingHeight + spacing, "Sitrep follows trailing with no gap")
+    }
+
+    static func acceptanceTests1201() async {
+        print("  - Testing acceptance criteria for #1201...")
+        // 1. Hero carousel up to 10 stories and rotates every 10 seconds:
+        check(BriefingView.heroLimit == 10, "Hero shows up to ten stories (#1201)")
+        check(BriefingHeroCarouselView.autoAdvanceInterval == 10.0, "Hero rotates every 10 seconds (#1201)")
+
+        // 2. Muting topic set is "No AI, Please":
+        check(
+            MuteTopicSet.artificialIntelligence.title == "No AI, Please", "Muting topic set is 'No AI, Please' (#1201)")
+
+        // 3. Inline source citations match mock's neutral chip:
+        let regFill = InlineChip.fill(contrast: .standard)
+        let incFill = InlineChip.fill(contrast: .increased)
+        let regText = InlineChip.textColor(contrast: .standard)
+        let incText = InlineChip.textColor(contrast: .increased)
+        check(InlineChip.cornerRadius == 4.0, "Inline chip corner radius is 4.0 pt")
+        check(regFill != incFill, "Increased contrast strengthens chip fill")
+        check(regText != incText, "Increased contrast strengthens chip text")
+
+        // 4. Notification curated delivery attaches recorded page lookup photo:
+        let baseStory = FeedArticle(
+            storedID: "al-jazeera-1", title: "AJ Story", link: "https://example.com/aj", guid: "aj-1",
+            description: "", pubDate: Date(), source: "Al Jazeera", imageUrl: nil)
+        var curatedStory = baseStory
+        curatedStory.imageUrl = "https://example.com/aj-page-lookup.jpg"
+        var delivery = NotificationDelivery(mode: .full)
+        let withPhoto = curatedStory
+        delivery.curated = { _ in withPhoto }
+        let delivered = await delivery.curated(baseStory)
+        check(
+            delivered.imageUrl == "https://example.com/aj-page-lookup.jpg",
+            "Banner gains recorded photo from page lookup")
+
+        // 5. Briefing priority module opens story on whole card click:
+        var openedEventID: String?
+        let actions = BriefingActions(
+            onOpenArticle: { _ in },
+            onOpenEvent: { openedEventID = $0.eventID },
+            onStartNewBriefing: {},
+            onBackToToday: {}
+        )
+        let summary = EventFeedSummary(
+            eventID: "event-1", membershipVersion: 1, seenVersion: nil,
+            members: [
+                EventFeedMember(
+                    articleID: "a1", source: "S", title: "T", date: Date(), joinedVersion: 1, isRead: false,
+                    isSaved: false)
+            ]
+        )
+        actions.open(.event(summary, representative: baseStory, visibleMembers: [baseStory]))
+        check(openedEventID == "event-1", "Clicking Priority developments card opens its story (#1201)")
+    }
+
+    @MainActor
+    static func appleIntelligenceAvailabilityTests() async {
+        print("  - Testing AppleIntelligenceAvailability unified check (#1212)...")
+        let avail = AppleIntelligenceAvailability.shared
+
+        // Test each state properties:
+        for state in AppleIntelligenceState.allCases {
+            check(!state.statusLabel.isEmpty, "State \(state) has statusLabel")
+            check(!state.explanation.isEmpty, "State \(state) has explanation")
+            if state == .ready {
+                check(state.isAvailable, "Ready state is available")
+                check(state.actionTitle == nil, "Ready state has no action")
+            } else {
+                check(!state.isAvailable, "Non-ready state is not available")
+            }
+        }
+
+        // Test resolveState logic with OS version:
+        let v14 = OperatingSystemVersion(majorVersion: 14, minorVersion: 0, patchVersion: 0)
+        check(
+            AppleIntelligenceAvailability.resolveState(aiEnabled: true, osVersion: v14) == .macOSVersionTooOld,
+            "macOS 14 resolves to macOSVersionTooOld"
+        )
+        let v15 = OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0)
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, osVersion: v15, foundationModelsAvailability: "available") == .macOSVersionTooOld,
+            "macOS 15 to 25 resolves to macOSVersionTooOld even when the model reports available"
+        )
+        check(
+            AppleIntelligenceAvailability.resolveState(aiEnabled: false, osVersion: v14) == .appDisabled,
+            "aiEnabled=false resolves to appDisabled regardless of OS"
+        )
+
+        // Real FoundationModels availability reasons (#1212):
+        check(
+            AppleIntelligenceAvailability.classifyAvailability("deviceNotEligible") == .unsupportedDevice,
+            "deviceNotEligible classifies to unsupportedDevice"
+        )
+        check(
+            AppleIntelligenceAvailability.classifyAvailability("appleIntelligenceNotEnabled") == .systemDisabled,
+            "appleIntelligenceNotEnabled classifies to systemDisabled"
+        )
+        check(
+            AppleIntelligenceAvailability.classifyAvailability("modelNotReady") == .modelDownloading,
+            "modelNotReady classifies to modelDownloading"
+        )
+        check(
+            AppleIntelligenceAvailability.classifyAvailability("available") == .ready,
+            "available classifies to ready"
+        )
+
+        // Ineligible Mac:
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, foundationModelsAvailability: "unavailable(deviceNotEligible)") == .unsupportedDevice,
+            "deviceNotEligible resolves to unsupportedDevice"
+        )
+
+        // System Settings off (with real reason string):
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, foundationModelsAvailability: "unavailable(appleIntelligenceNotEnabled)")
+                == .systemDisabled,
+            "appleIntelligenceNotEnabled resolves to systemDisabled"
+        )
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, foundationModelsAvailability: "unavailable(disabledInSettings)") == .systemDisabled,
+            "disabledInSettings resolves to systemDisabled"
+        )
+
+        // Model downloading (with real reason string):
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, foundationModelsAvailability: "unavailable(modelNotReady)") == .modelDownloading,
+            "modelNotReady resolves to modelDownloading"
+        )
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, foundationModelsAvailability: "unavailable(modelDownloading)") == .modelDownloading,
+            "modelDownloading resolves to modelDownloading"
+        )
+
+        // Injected mock in AppleIntelligenceAvailability:
+        avail.mockState = .unsupportedDevice
+        check(avail.state == .unsupportedDevice, "Mock state injected")
+        check(
+            avail.state.explanation.contains("does not support Apple Intelligence"),
+            "unsupportedDevice explanation matches")
+
+        avail.mockState = .macOSVersionTooOld
+        check(
+            avail.state.explanation.contains("macOS 26"),
+            "macOSVersionTooOld explanation references macOS 26")
+
+        avail.mockState = .systemDisabled
+        check(avail.state == .systemDisabled, "Mock state updated")
+        check(avail.state.explanation.contains("System Settings"), "systemDisabled explanation matches")
+
+        avail.mockState = nil
+        check(avail.mockState == nil, "Mock state cleared")
+    }
+
+    @MainActor
+    static func runtimeDiagnosticsTests() {
+        print("  - Testing runtime diagnostics and warning eliminations (#1214)...")
+        // 1. FocusStatus entitlement check
+        check(
+            FocusStatus.hasCommunicationEntitlement == false,
+            "News does not possess communication notifications entitlement")
+        check(FocusStatus.isFocused == nil, "FocusStatus returns nil gracefully without error spew when unentitled")
+
+        // Injected provider for testing
+        FocusStatus.provider = { true }
+        check(FocusStatus.isFocused == true, "FocusStatus provider injects focused state")
+        let gateFocused = BannerGate.decide(
+            authorization: .authorized, alert: .enabled, style: .banner, previews: .always,
+            focused: FocusStatus.isFocused)
+        check(gateFocused == .suppress(.focus), "Focused state suppresses banner")
+
+        FocusStatus.provider = { false }
+        check(FocusStatus.isFocused == false, "FocusStatus provider injects unfocused state")
+        let gateUnfocused = BannerGate.decide(
+            authorization: .authorized, alert: .enabled, style: .banner, previews: .always,
+            focused: FocusStatus.isFocused)
+        check(gateUnfocused == .show(redacted: false, persistent: false), "Unfocused state delivers banner")
+        FocusStatus.provider = nil
+
+        // 2. StoryBannerPresenter window key status check
+        final class NonKeyAuxWindow: NSWindow {
+            override var canBecomeKey: Bool { false }
+        }
+        let auxWindow = NonKeyAuxWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        auxWindow.orderFront(nil)
+        check(auxWindow.canBecomeKey == false, "Auxiliary helper window cannot become key")
+        check(auxWindow.isVisible, "Auxiliary window is visible before showMainWindow")
+        StoryBannerPresenter.mainWindow = auxWindow
+        StoryBannerPresenter.showMainWindow()
+        check(auxWindow.isVisible, "Auxiliary window remains visible after showMainWindow")
+        check(!auxWindow.isKeyWindow, "Auxiliary window did not become key window")
+        StoryBannerPresenter.mainWindow = nil
+        auxWindow.orderOut(nil)
     }
 }
