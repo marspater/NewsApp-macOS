@@ -258,10 +258,12 @@ extension TodayShadowEvaluation {
 
         // Stories each publisher published inside the profile window, by the profile's own publisher key.
         var published: [String: Int] = [:]
+        var publishedIDs = Set<String>()
         var oldest = now
         for article in inputs.allArticles
         where article.orderDate >= profileStart && article.orderDate <= now.addingTimeInterval(300) {
             published[publisherKey(article), default: 0] += 1
+            publishedIDs.insert(article.id)
             oldest = min(oldest, article.orderDate)
         }
 
@@ -275,6 +277,14 @@ extension TodayShadowEvaluation {
             // Stories read or saved per publisher: a count, where the profile's weight gives a saved story three.
             let storiesRead = tally(rows.map { TodayUserProfile.publisherKey(source: $0[1], link: $0[2]) })
             let engaged = profile.publisherWeights.filter { $0.value >= 2.0 }
+            // The per-story numerator counts only stories of the publication window, so a read of an older story
+            // cannot lift a publisher that published nothing in it.
+            var windowWeights: [String: Double] = [:]
+            for row in rows {
+                guard let id = row[0], publishedIDs.contains(id) else { continue }
+                windowWeights[TodayUserProfile.publisherKey(source: row[1], link: row[2]), default: 0] +=
+                    row[5] == "1" ? 3 : 1
+            }
             let shippedAffinity = profile.topQuartilePublishers
             func withMinimum(_ stories: Int) -> Set<String> {
                 shippedAffinity.filter { storiesRead[$0, default: 0] >= stories }
@@ -286,7 +296,9 @@ extension TodayShadowEvaluation {
                 ("booster-0.40", shippedAffinity, 0.40),
                 (
                     "per-story-published",
-                    topQuartile(engaged) { key, weight in weight / Double(max(1, published[key, default: 0])) }, 0
+                    topQuartile(engaged) { key, _ in
+                        windowWeights[key, default: 0] / Double(max(1, published[key, default: 0]))
+                    }, 0
                 ),
                 ("minimum-3-stories", withMinimum(3), 0),
                 ("minimum-5-stories", withMinimum(5), 0),

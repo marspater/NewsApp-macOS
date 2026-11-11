@@ -640,8 +640,9 @@ enum TodayShadowEvaluation {
     ) -> LabelledEvaluationReport {
         let storyLabels = labels.stories ?? [:]
         func precisionAt5(_ ranked: [TodayStoryAssignment]) -> Double? {
+            // All five stories need a Lead label: a shorter list would report a precision over fewer stories.
             let labelledTop = ranked.prefix(5).compactMap { storyLabels[$0.id]?.leadImportant }
-            guard !labelledTop.isEmpty else { return nil }
+            guard labelledTop.count == 5 else { return nil }
             let hits = labelledTop.filter { $0 }.count
             return Double(hits) / Double(labelledTop.count)
         }
