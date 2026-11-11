@@ -49,6 +49,8 @@ Top to bottom, in one vertical `ScrollView`: the masthead (DESIGN.md section 8.1
 
 **The Latest.** A header and a vertical grid of Compact cards, adaptive columns 280–420 pt (`AppLayout.compactColumnMinimum`, so two columns fit the 660 pt column of the minimum window), or the existing list card when the reader chooses the list layout, both paging as Today pages now.
 
+**Grouping off.** The edition is built from stories, so it shows while Group Stories by Event is on, which is the default. With grouping off (G), Today lists every report on its own in the list or grid of DESIGN.md section 8.2, without The Lead or lanes, and G brings the edition back.
+
 **Trackpad.** A lane is a horizontal scroll view nested in the page's vertical one, and macOS arbitrates by the gesture's dominant axis at its start. No custom gesture. Shift plus wheel scrolls a row, the system behaviour. Z4 verifies this on hardware.
 
 ## The Lead

@@ -21,6 +21,8 @@ struct TodayEditionActions {
     var cardAppeared: (String) -> Void = { _ in }
     /// The Latest's grid changed how many cards a row holds, which the keyboard map needs.
     var latestColumnsChanged: (Int) -> Void = { _ in }
+    /// The reader moved The Lead to another slide with its dots or arrows.
+    var leadSlideShown: (FeedEntry) -> Void = { _ in }
 }
 
 /// The Today edition (docs/design/today.md; #935, #936): The Lead, the conditional lanes as horizontal rows, and
@@ -79,6 +81,7 @@ struct TodayEditionView<LatestListCard: View>: View {
                 metadata: edition.metadata,
                 developingIDs: Set(stories.filter(\.isDeveloping).map(\.id)),
                 focusedID: stories.contains { $0.id == focusedID } ? focusedID : nil),
+            onShow: actions.leadSlideShown,
             onOpen: actions.open
         )
         .id(TodayEditionView.leadScrollID)
@@ -251,10 +254,13 @@ struct TodayLaneSection: View {
     /// its metadata fills, never on the length of its text, so one probe per kind of card measures the row.
     private var heightProbe: some View {
         ZStack(alignment: .topLeading) {
+            // Bare cards with no scroll id: a second view with a story's id would be a target for `scrollTo`.
             ForEach(probes, id: \.id) { story in
-                TodayStoryCard(
-                    story: story, metadata: metadata[story.id] ?? StoryCardMetadata(), variant: story.cardVariant,
-                    isFocused: false, actions: TodayEditionActions(open: { _ in }))
+                ArticleCardView(
+                    article: story.entry.representative, variant: story.cardVariant,
+                    metadata: metadata[story.id] ?? StoryCardMetadata(), action: {}, footer: EmptyView()
+                )
+                .frame(width: story.cardVariant.laneWidth)
             }
         }
         .fixedSize(horizontal: false, vertical: true)

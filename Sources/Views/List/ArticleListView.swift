@@ -158,7 +158,8 @@ struct ArticleListView: View {
     private var isBriefing: Bool { selectedTopic == "Briefing" && !isSearching }
 
     /// Today outside a search is the edition: The Lead, lanes and The Latest (docs/design/today.md).
-    private var isTodayEdition: Bool { !isSearching && (selectedTopic ?? "Today") == "Today" }
+    /// It needs stories grouped by event: with grouping off (G), Today lists every report on its own as before.
+    private var isTodayEdition: Bool { groupsEvents && !isSearching && (selectedTopic ?? "Today") == "Today" }
 
     /// Muting applies to the feed lists and search; Saved Stories and History list everything the reader kept or opened.
     private var listMuting: MuteRules {
@@ -178,8 +179,7 @@ struct ArticleListView: View {
     /// Saved Stories and History list exactly what the reader kept or opened. Briefing is always one card per event,
     /// whatever the list preference says: its modules are built on events.
     private var groupingMode: FeedGroupingMode {
-        // Lanes hold stories, never single reports, so an event cannot appear twice (today.md, rule 4).
-        if isBriefing || isTodayEdition { return .events }
+        if isBriefing { return .events }
         return groupsEvents && selectedTopic != "Saved Stories" && selectedTopic != "History"
             ? .events : .publications
     }
@@ -317,7 +317,7 @@ struct ArticleListView: View {
             }
         }()
         return ListCommandActions(
-            canGroupStories: !isBriefing && !isTodayEdition, newBriefing: isBriefing ? { startNewBriefing() } : nil,
+            canGroupStories: !isBriefing, newBriefing: isBriefing ? { startNewBriefing() } : nil,
             back: backAction, backDestination: backDest,
             customizeBriefing: isBriefing ? { showsCustomizeBriefing = true } : nil)
     }
@@ -943,7 +943,7 @@ struct ArticleListView: View {
             ToolbarSpacer(.flexible, placement: .primaryAction)
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            if !isBriefing && !isTodayEdition {
+            if !isBriefing {
                 Toggle(isOn: $groupsEvents.animation(reduceMotion ? nil : AppMotion.state)) {
                     Label(
                         "Group Stories by Event",
@@ -1191,7 +1191,13 @@ struct ArticleListView: View {
                             NewsSignposts.firstCardAppeared()
                             todayPrefetch.cardAppeared(id, in: todayEdition, using: imageLoader)
                         },
-                        latestColumnsChanged: { todayLatestColumns = $0 }),
+                        latestColumnsChanged: { todayLatestColumns = $0 },
+                        // A slide held keyboard focus and the reader clicked to another: focus follows what shows.
+                        leadSlideShown: { entry in
+                            if todayEdition.lead.contains(where: { $0.id == focusedArticleID }) {
+                                focusedArticleID = entry.id
+                            }
+                        }),
                     latestListCard: { entry in entryCard(entry) }
                 )
             }
@@ -1459,7 +1465,7 @@ struct ArticleListView: View {
             } else if press.characters == "e" {
                 toggleFocusedEventSources()
                 return .handled
-            } else if press.characters == "g", !isBriefing, !isTodayEdition {
+            } else if press.characters == "g", !isBriefing {
                 groupsEvents.toggle()
                 return .handled
             } else if press.characters == "u" {
@@ -1550,6 +1556,8 @@ struct ArticleListView: View {
     }
 
     private func toggleFocusedEventSources() {
+        // Only the list's own cards have coverage to expand: not a lane card, and not The Latest's Compact grid.
+        if let map = todayFocusMap, gridLayout || map.lane(of: focusedArticleID) != .theLatest { return }
         guard let entry = entries.first(where: { $0.id == focusedArticleID }),
             case .event(let summary, _, _) = entry
         else { return }

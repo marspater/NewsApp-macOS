@@ -27,6 +27,8 @@ struct BriefingHeroCarouselView: View {
     var isReaderOpen: Bool = false
     /// The Lead's presentation of the carousel (docs/design/today.md); nil draws the Briefing hero.
     var lead: LeadPresentation?
+    /// The reader moved to another slide with the dots, the arrows or the arrow keys.
+    var onShow: (FeedEntry) -> Void = { _ in }
     let onOpen: (FeedEntry) -> Void
 
     @Environment(\.effectiveReduceMotion) var reduceMotion
@@ -66,7 +68,8 @@ struct BriefingHeroCarouselView: View {
         }
         .frame(height: lead?.height ?? AppLayout.leadStoryHeight)
         .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        // The Lead is not clipped: its image extends under the sidebar, and the image clips itself to its frame.
+        .modifier(HeroClip(radius: radius, isClipped: lead == nil))
         .background {
             if lead == nil {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -143,6 +146,7 @@ struct BriefingHeroCarouselView: View {
             activeIndex = (currentIndex + offset + entries.count) % entries.count
         }
         timerResetToken += 1
+        onShow(entries[currentIndex])
     }
 
     private func open() {
@@ -265,6 +269,7 @@ struct BriefingHeroCarouselView: View {
             guard index != currentIndex else { return }
             withAnimation(reduceMotion ? nil : Self.crossFade) { activeIndex = index }
             timerResetToken += 1
+            onShow(entry)
         } label: {
             Capsule()
                 .fill(active ? AppColor.leadText : AppColor.carouselInactiveDot)
@@ -278,5 +283,19 @@ struct BriefingHeroCarouselView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Story \(index + 1) of \(entries.count): \(entry.representative.title)")
         .accessibilityAddTraits(active ? .isSelected : [])
+    }
+}
+
+/// Clips the Briefing hero to its card shape and leaves The Lead unclipped.
+private struct HeroClip: ViewModifier {
+    let radius: CGFloat
+    let isClipped: Bool
+
+    func body(content: Content) -> some View {
+        if isClipped {
+            content.clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        } else {
+            content
+        }
     }
 }

@@ -178,12 +178,14 @@ enum AppColor {
         NSColor(name: "statusPill") { _ in readableAccent(NSColor.controlAccentColor, dark: false, on: .white) })
     /// A story card's inner top highlight (DESIGN.md 12): white at 20 %, brighter on hover; quieter on the dark
     /// card surface, where white reads much stronger.
-    static func cardTopHighlight(hovered: Bool) -> Color {
+    static func cardTopHighlight(hovered: Bool) -> Color { hovered ? cardTopHighlightRaised : cardTopHighlightResting }
+    private static let cardTopHighlightResting = topHighlight(light: 0.20, dark: 0.08)
+    private static let cardTopHighlightRaised = topHighlight(light: 0.45, dark: 0.16)
+    private static func topHighlight(light: CGFloat, dark: CGFloat) -> Color {
         Color(
             nsColor: NSColor(name: nil) { appearance in
-                let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-                let alpha: CGFloat = dark ? (hovered ? 0.16 : 0.08) : (hovered ? 0.45 : 0.20)
-                return NSColor.white.withAlphaComponent(alpha)
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                return NSColor.white.withAlphaComponent(isDark ? dark : light)
             })
     }
     /// A stable identity color for a publisher's monogram, from the system palette by the name's letters.
