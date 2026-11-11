@@ -121,7 +121,7 @@ struct BriefingHeroCarouselView: View {
             return .handled
         }
         .onChange(of: reduceMotion) { _, newValue in
-            if newValue { activeIndex = 0 }
+            if newValue { activeIndex = focusedIndex ?? 0 }
         }
         // A changed set of slides keeps the focused one in view, or starts over when none has focus.
         .onChange(of: entries.map(\.id)) { _, _ in activeIndex = focusedIndex ?? 0 }

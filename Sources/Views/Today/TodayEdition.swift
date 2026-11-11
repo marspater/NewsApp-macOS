@@ -119,6 +119,7 @@ struct TodayEdition: Equatable, Sendable {
             for story in lane.stories {
                 var metadata = StoryCardMetadata(story, differingAccount: differingAccounts[story.id])
                 metadata.laneName = lane.lane.rawValue
+                if case .event(let summary, _, _) = story.entry { metadata.eventID = summary.eventID }
                 edition.metadata[story.id] = metadata
             }
         }
