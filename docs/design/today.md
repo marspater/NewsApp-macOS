@@ -2,7 +2,7 @@
 
 How the Today edition looks and behaves: lanes, the six card variants, The Lead, scrolling, keyboard focus, updates and states (epic Z, #932). [DESIGN.md](DESIGN.md) holds the design language this extends, and its section 8.8 points here. Quality bars, thresholds and the shadow evaluation are in the [specification](../plans/2026-11-09-today-edition-spec.md). Unread, Saved Stories, History, Smart Binders and search keep the list and grid of DESIGN.md section 8.2.
 
-**Status.** The card variants exist (Z6, #938: `StoryCardVariant` and `StoryCardMetadata` in `Sources/Views/List/StoryCardVariant.swift`). Z3 (#935) and Z4 (#936) build The Lead and the lanes, and Z7 (#1174) supplies the card metadata. A field with no data is hidden, never faked. The visual references below are the target the views are compared with.
+**Status.** The card variants exist (Z6, #938: `StoryCardVariant` and `StoryCardMetadata` in `Sources/Views/List/StoryCardVariant.swift`). Z7 (#1174) fills the metadata from the lane assignment and the event (`StoryCardMetadata.init(_:differingAccount:)`), and Z3 (#935) and Z4 (#936) build The Lead and the lanes. A field with no data is hidden, never faked. The visual references below are the target the views are compared with.
 
 ## Visual references
 

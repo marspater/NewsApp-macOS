@@ -108,6 +108,64 @@ struct StoryCardMetadata: Equatable, Sendable {
     }
 }
 
+// MARK: - From a lane assignment (#1174)
+
+extension TodayStoryAssignment {
+    /// The card a lane shows for this story. Coverage replaces the Standard card only past the grouping gate; In
+    /// Motion and The Deep Read keep their own cards.
+    var cardVariant: StoryCardVariant {
+        switch lane {
+        case .inMotion: return .developing
+        case .theDeepRead: return .feature
+        case .theLatest: return .compact
+        case .theLead, .yourBeat, .outsideYourUsual: return isCoverageConfident ? .coverage : .standard
+        }
+    }
+
+    /// The stored reading time in whole minutes, or nil when all the app holds is the feed's summary: the length of
+    /// a summary is not a reading time.
+    var storedReadingMinutes: Int? {
+        let summaryWords = entry.visibleArticles.map { $0.description.split(whereSeparator: \.isWhitespace).count }
+        let summaryMinutes = Double(summaryWords.max() ?? 0) / 200
+        guard readingTimeMinutes >= 1, readingTimeMinutes > summaryMinutes + 0.01 else { return nil }
+        return Int(readingTimeMinutes.rounded(.up))
+    }
+}
+
+extension StoryCardMetadata {
+    /// Everything a Today card shows, from values the assignment pass and the event load already hold: no query
+    /// and no text work happens here. `differingAccount` comes from a stored overview, read with the edition.
+    init(_ assignment: TodayStoryAssignment, differingAccount: String? = nil, calendar: Calendar = .current) {
+        self.init()
+        contentType = assignment.contentTypeLabel?.rawValue
+        readingMinutes = assignment.storedReadingMinutes
+        guard case .event(let summary, _, _) = assignment.entry, summary.isConfirmed else { return }
+        updatedAt = summary.latestDate
+        publisherCount = assignment.publisherCount
+        newReportCount = summary.newReportCount
+        reportDays = summary.reportDayCount(calendar: calendar)
+        originalReports = assignment.originalReportCount
+        publishers = summary.sources
+        self.differingAccount = differingAccount
+    }
+}
+
+extension StoryCardMetadata {
+    /// One attributed differing account for the Coverage card: the positions two different publishers reported, in
+    /// the overview's order. Nil unless two publishers are named, so the card never implies a difference from one.
+    static func differingAccount(in perspectives: [OverviewPerspective]) -> String? {
+        var seen = Set<String>()
+        let attributed = perspectives.compactMap { perspective -> String? in
+            let position = perspective.position.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let publisher = perspective.sourcePublisher, !publisher.isEmpty, !position.isEmpty,
+                seen.insert(publisher.lowercased()).inserted
+            else { return nil }
+            return "\(publisher): \(position)" + (position.hasSuffix(".") ? "" : ".")
+        }
+        return attributed.count >= 2 ? attributed.prefix(2).joined(separator: " ") : nil
+    }
+}
+
 // MARK: - Edition faces
 
 extension ArticleCardView {

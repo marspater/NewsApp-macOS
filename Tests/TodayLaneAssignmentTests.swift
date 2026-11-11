@@ -35,6 +35,7 @@ extension NewsTests {
             ("testConditionalUnderflowHidesLaneAndCascades", { testTodayUnderflowHidesAndCascades() }),
             ("testSubscriptionPoolAndZeroDuplicatesAndLatestSafetyNet", { testTodaySubscriptionPoolAndSafetyNet() }),
             ("testCoverageGateAndDevelopingPill", { testTodayCoverageGateAndDevelopingPill() }),
+            ("testCardMetadataHasRealSourcesOrIsHidden", { testTodayCardMetadata() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
@@ -821,6 +822,91 @@ extension NewsTests {
         assertTrue(byID["c1"]?.isDeveloping == true, "Confirmed event updated within 1 h carries Developing flag")
         assertFalse(byID["w1"]?.isCoverageConfident == true, "Grouping confidence < 0.70 fails Coverage card gate")
         assertFalse(byID["w1"]?.isDeveloping == true, "Event older than 1 h is not Developing")
+    }
+
+    /// Z7 (#1174): every card field comes from the assignment or the event, and a field without data stays nil.
+    static func testTodayCardMetadata() {
+        let day = 86_400.0
+        let event = makeEventEntry(
+            eventID: "ev-meta",
+            members: [
+                (
+                    "m1", "Outlet 1", "Port closes", "Detail", referenceNow.addingTimeInterval(-2 * day),
+                    "https://o1.example/rss"
+                ),
+                (
+                    "m2", "Outlet 2", "Port stays closed", "Detail", referenceNow.addingTimeInterval(-day),
+                    "https://o2.example/rss"
+                ),
+                (
+                    "m3", "Outlet 3", "Port reopens", "Detail", referenceNow.addingTimeInterval(-600),
+                    "https://o3.example/rss"
+                ),
+            ],
+            seenVersion: 1
+        )
+        let longRead = makeArticle(
+            id: "long", title: "Inside how the port was rebuilt", pubDate: referenceNow.addingTimeInterval(-3600),
+            fullContent: Array(repeating: "word", count: 2100).joined(separator: " "))
+        let teaser = makeArticle(id: "teaser", title: "A short note", pubDate: referenceNow.addingTimeInterval(-3600))
+        let plan = TodayEditionAssigner.assign(
+            entries: [event, .article(longRead), .article(teaser)],
+            context: TodayAssignmentContext(
+                now: referenceNow,
+                signalsByEntryID: ["m1": TodayStorySignals(originalReportCount: 2, groupingConfidence: 0.9)]))
+        let byID = Dictionary(uniqueKeysWithValues: plan.allAssignments.map { ($0.id, $0) })
+        guard let eventAssignment = byID["m1"], let long = byID["long"], let short = byID["teaser"] else {
+            assertTrue(false, "Every entry is assigned")
+            return
+        }
+        let utc = Calendar(identifier: .gregorian)
+        let meta = StoryCardMetadata(eventAssignment, differingAccount: "A: one. B: two.", calendar: utc)
+        assertEqual(meta.publisherCount, 3, "Publishers come from the event's distinct sources")
+        assertEqual(meta.originalReports, 2, "Original reports come from the assignment")
+        assertEqual(meta.newReportCount, 2, "Reports that joined after the seen version are new")
+        assertEqual(meta.reportDays, 3, "One progress mark per report day")
+        assertEqual(meta.updatedAt, referenceNow.addingTimeInterval(-600), "The pill carries the latest report's time")
+        assertEqual(meta.publishers, ["Outlet 1", "Outlet 2", "Outlet 3"], "Monograms follow coverage order")
+        assertEqual(meta.differingAccount, "A: one. B: two.", "The stored account is passed through")
+
+        assertEqual(StoryCardMetadata(long).readingMinutes, 11, "2,100 stored words read in 11 minutes")
+        let bare = StoryCardMetadata(short)
+        assertTrue(bare.readingMinutes == nil, "A feed summary's length is not a reading time")
+        assertTrue(
+            bare.publisherCount == nil && bare.updatedAt == nil && bare.publishers.isEmpty, "No event, no coverage")
+        assertTrue(bare.contentType == nil, "No classification, no content-type tag")
+
+        if case .event(let summary, _, _) = event {
+            assertTrue(summary.isDeveloping(now: referenceNow), "A report ten minutes ago makes the event developing")
+            assertFalse(summary.isDeveloping(now: referenceNow.addingTimeInterval(7200)), "Two hours later it is not")
+            assertFalse(
+                summary.isDeveloping(now: referenceNow.addingTimeInterval(-4000)), "A report dated ahead does not count"
+            )
+        }
+        let never = makeEventEntry(
+            eventID: "ev-new",
+            members: [
+                ("n1", "Outlet 1", "A", "Detail", referenceNow, "https://o1.example/rss"),
+                ("n2", "Outlet 2", "B", "Detail", referenceNow, "https://o2.example/rss"),
+            ])
+        if case .event(let summary, _, _) = never {
+            assertTrue(summary.newReportCount == nil, "An event never opened is new, not updated")
+        }
+
+        let verge = OverviewPerspective(
+            participant: "Consortium", position: "the standard is voluntary", sourcePublisher: "The Verge")
+        let vergeAgain = OverviewPerspective(
+            participant: "Vendors", position: "adoption will be slow.", sourcePublisher: "the verge")
+        let ars = OverviewPerspective(
+            participant: "Regulator", position: "the consortium can enforce it.", sourcePublisher: "Ars Technica")
+        let unattributed = OverviewPerspective(participant: "Analysts", position: "it changes little")
+        assertEqual(
+            StoryCardMetadata.differingAccount(in: [verge, vergeAgain, unattributed, ars]),
+            "The Verge: the standard is voluntary. Ars Technica: the consortium can enforce it.",
+            "Two publishers' positions, each attributed, in the overview's order")
+        assertTrue(
+            StoryCardMetadata.differingAccount(in: [verge, vergeAgain, unattributed]) == nil,
+            "One publisher's account is not a difference")
     }
 
     static func testTodayNotificationThresholdsIndependent() {
