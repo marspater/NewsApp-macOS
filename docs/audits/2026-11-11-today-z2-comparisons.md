@@ -213,6 +213,7 @@ Cells are stories qualifying per day, of 406, before the cap. With no history Yo
 - One library copy at one clock, one reader. The subscription list is twelve days newer than the snapshot.
 - Reviewer labels are single-pass; Mars checked 20 stories and 12 events. Lead-worthiness is his one reading, as he says himself.
 - 161 labelled stories and 48 labelled events are candidates under the real list; the conditional lanes hold few labelled stories, so their purity moves in steps of one story.
+- The Lead's photo rule (a story without a photo takes no slide while another has one, 11 November 2026) is not applied: the harness knows no story's photo state, as in the first run.
 - Starred feeds are not in the copy and are not measured. Publisher volume is counted over the 29.8 days of stories the copy holds.
 - No timing is claimed. The harness computes each story's language score once and reuses it across the variant passes of a run; the first attempt, which recomputed it in every pass, was stopped when its memory grew without bound. The main report's own passes are unchanged.
 - This run does not pass the Z2 gate in #934.
