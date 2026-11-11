@@ -835,13 +835,6 @@ actor DatabaseEngine {
         await trial.close()
         guard trialNotice == nil else { throw damaged }
 
-        // Nothing is swapped in until the current library is kept; a library too damaged to copy online is copied as a file.
-        if fileManager.fileExists(atPath: dbPath) {
-            let kept = try keepCopyBeside(
-                label: "before-restore", group: "before-restore", withTime: true, fallingBackToFile: true)
-            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path)
-            try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path + "-wal")
-        }
         // The side file goes before the library: it is small, and the old one is put back from memory if the swap fails.
         // A backup without tension history never touches the side file, so an unreadable file must not fail that restore.
         let backupHasTension = extras.keys.contains("world-tension")
@@ -859,6 +852,13 @@ actor DatabaseEngine {
             }
         } else {
             previousTension = nil
+        }
+        // Nothing is swapped in until the current library is kept; a library too damaged to copy online is copied as a file.
+        if fileManager.fileExists(atPath: dbPath) {
+            let kept = try keepCopyBeside(
+                label: "before-restore", group: "before-restore", withTime: true, fallingBackToFile: true)
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path)
+            try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path + "-wal")
         }
         func putTension(_ data: Data?) throws {
             if let data {
