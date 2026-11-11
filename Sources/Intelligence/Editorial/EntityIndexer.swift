@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Metis (linguistic signals) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// Reads the entities of stored stories into the entity index and keeps the co-reporting graph current (W2 #716).

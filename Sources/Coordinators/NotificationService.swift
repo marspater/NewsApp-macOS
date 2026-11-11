@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Athena (editorial selection) owns the notification triage in this file. Register: docs/ANGELIA.md.
+
 import AppKit
 import Foundation
 import Intents

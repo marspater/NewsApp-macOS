@@ -3,11 +3,11 @@
 [![CI](https://github.com/marspater/NewsApp-macOS/actions/workflows/ci.yml/badge.svg)](https://github.com/marspater/NewsApp-macOS/actions/workflows/ci.yml)
 [![Security](https://github.com/marspater/NewsApp-macOS/actions/workflows/security.yml/badge.svg)](https://github.com/marspater/NewsApp-macOS/actions/workflows/security.yml)
 
-A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry.
+A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry. The semantic system that groups, explains and selects stories is named Angelia; [docs/ANGELIA.md](docs/ANGELIA.md) maps its twelve domains to the code.
 
 ## Story experience — 24 October 2026
 
-- Group reports of one event into a card with its coverage and an overview using hybrid EventMatcher v15 (deterministic entity/lexical features and on-device CoreML `all-MiniLM-L6-v2` embeddings with a pair model for borderline pairs; zero false pairs on the English holdout). Read and saved state stay with each publication.
+- Group reports of one event into a card with its coverage and an overview using hybrid EventMatcher v15 (deterministic entity/lexical features and on-device CoreML `all-MiniLM-L6-v2` embeddings with a pair model for borderline pairs). Read and saved state stay with each publication.
 - Parsing powered by SwiftSoup (CSS metadata selection and bounded DOM repair) and FeedKit (typed RSS/Atom/JSON feed parsing with streaming XML security boundaries).
 - Keep stories visible regardless of importance. Today and archive stay chronological; Briefing balances publishers/categories, then prefers broader coverage and existing importance ratings. Refresh never runs importance scoring or deletes stories for being minor.
 - Story banners the app draws itself, with the story photo, Save, Mark as Read and Open, honouring your notification settings and Focus, and background delivery triage.

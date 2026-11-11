@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Metis (classification, entities, sentiment, reader summary) and
+// Angelia Core (NewsTextModel) share this file. Register: docs/ANGELIA.md.
+
 import Foundation
 import NaturalLanguage
 import os

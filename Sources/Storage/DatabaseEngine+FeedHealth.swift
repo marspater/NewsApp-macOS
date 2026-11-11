@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Mnemosyne (storage and search) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// Stored numbers behind the Publisher Health inspector (#715).

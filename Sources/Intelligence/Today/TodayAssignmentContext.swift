@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Athena (editorial selection) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// 30-day finer reading-interest and publisher-affinity profile built from local read (`+1`) and saved (`+3`) history.

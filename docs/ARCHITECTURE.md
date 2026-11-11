@@ -1,6 +1,6 @@
 # Architecture
 
-Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](design/DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md), and App Store preparation in [XCODE_AND_APP_REVIEW.md](XCODE_AND_APP_REVIEW.md).
+Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](design/DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md), and App Store preparation in [XCODE_AND_APP_REVIEW.md](XCODE_AND_APP_REVIEW.md). The semantic system's name register (which name owns which code, and what each hands on) lives in [ANGELIA.md](ANGELIA.md).
 
 > [!IMPORTANT]
 > Nothing leaves the Mac except feed, article and image requests and the update check (one GitHub releases request, see PRIVACY §2), all through the protected gateway. No cloud backend, remote AI, telemetry or analytics SDKs, and no custom AI models except CoreML models this project builds, measures and ships itself (#520).
@@ -17,7 +17,7 @@ Native macOS, local-first RSS reader. This page is the contract for technology a
 
 ## System map
 
-Five layers, colour-coded. Arrows are calls; the thick arrow to publishers is the only way out of the Mac, through the protected gateway.
+Five layers, colour-coded. Names in italics are the Angelia owners of [ANGELIA.md](ANGELIA.md). Arrows are calls; the thick arrow to publishers is the only way out of the Mac, through the protected gateway.
 
 ```mermaid
 %%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 22, "rankSpacing": 44, "padding": 10}}}%%
@@ -35,24 +35,24 @@ flowchart LR
         Tension["<b>World Tension</b><br/>TensionIndexView"]
     end
 
-    subgraph Intel["Intelligence · on device"]
-        EQ["<b>EnrichmentQueue</b><br/>bounded classification"]
-        EC["<b>EventClusterer</b>"]
-        EM["<b>EventMatcher v15</b><br/>MiniLM embeddings · pair model"]
-        CEP["<b>ContentExtraction<br/>Pipeline</b><br/>reader v11 · SwiftSoup"]
-        OV["<b>Overview builders</b><br/>cited sentences"]
-        WT["<b>WorldTension</b>"]
+    subgraph Intel["Intelligence · on device · Angelia"]
+        EQ["<b>EnrichmentQueue</b><br/>bounded classification<br/><i>Metis</i>"]
+        EC["<b>EventClusterer</b><br/><i>Harmonia · Ariadne</i>"]
+        EM["<b>EventMatcher v15</b><br/>MiniLM embeddings · pair model<br/><i>Themis · Proteus</i>"]
+        CEP["<b>ContentExtraction<br/>Pipeline</b><br/>reader v11 · SwiftSoup<br/><i>Metis</i>"]
+        OV["<b>Overview builders</b><br/>cited sentences<br/><i>Clio · Aletheia</i>"]
+        WT["<b>WorldTension</b><br/><i>Eris</i>"]
     end
 
     subgraph Svc["Services · network"]
-        FF["<b>FeedFetcher</b><br/>≤6 requests<br/>≤2 per host"]
-        Parse["<b>FeedXMLParser</b><br/>FeedKit · JSONFeedParser"]
+        FF["<b>FeedFetcher</b><br/>≤6 requests<br/>≤2 per host<br/><i>Iris</i>"]
+        Parse["<b>FeedXMLParser</b><br/>FeedKit · JSONFeedParser<br/><i>Iris</i>"]
         HTTP["<b>SecureHTTPClient</b>"]
         GW["<b>NetworkBoundaryProxy</b><br/>IPAddressValidator"]
     end
 
     subgraph Store["Storage · SQLite"]
-        AS["<b>ArticleStore</b>"]
+        AS["<b>ArticleStore</b><br/><i>Mnemosyne</i>"]
         DB[("<b>DatabaseEngine</b><br/>+Events<br/>WAL · FTS5")]
     end
 

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Eris (World Tension) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// Typealias for tension calculations under the near-you methodology (#1172).

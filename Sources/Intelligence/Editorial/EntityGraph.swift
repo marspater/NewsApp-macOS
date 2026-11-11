@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Mnemosyne (storage and search) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// The arithmetic of the entity co-reporting graph (W2 #716): pure functions over adjacency lists, so background

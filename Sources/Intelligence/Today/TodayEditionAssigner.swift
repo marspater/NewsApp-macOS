@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Athena (editorial selection) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// Pure, deterministic Today edition importance scoring and 6-lane assignment module (Z2, #934).

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Athena (editorial selection) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// One forward-looking line a publisher stated, in the publisher's words. The app schedules nothing.

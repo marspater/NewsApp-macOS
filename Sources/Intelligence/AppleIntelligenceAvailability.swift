@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Angelia Core (shared model access and gates) owns this file. Register: docs/ANGELIA.md.
+
 import AppKit
 import Foundation
 import Observation

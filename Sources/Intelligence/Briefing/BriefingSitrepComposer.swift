@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Athena (editorial selection) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// One sitrep sentence per thread (#849). The on-device model may restate the thread's top highlights in one sentence;

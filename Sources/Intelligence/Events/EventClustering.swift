@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Harmonia (event admission, mergeFragments) and
+// Ariadne (linkStories) share this file, both inside EventClusterer. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// What one pair decision rested on, stored as JSON in `pair_assessments.features` (#551): the cosine, the pair model's
