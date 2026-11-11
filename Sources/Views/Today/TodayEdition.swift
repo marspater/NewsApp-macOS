@@ -115,15 +115,24 @@ struct TodayEdition: Equatable, Sendable {
             guard let stories = laneStories[lane], !stories.isEmpty else { return nil }
             return Lane(lane: lane, stories: stories)
         }
-        for lane in edition.lanes {
+        edition.metadata = cardMetadata(of: edition.lanes, differingAccounts: differingAccounts)
+        return edition
+    }
+
+    /// Every card's metadata, with the lane and the event it belongs to.
+    private static func cardMetadata(of lanes: [Lane], differingAccounts: [String: String]) -> [String:
+        StoryCardMetadata]
+    {
+        var result: [String: StoryCardMetadata] = [:]
+        for lane in lanes {
             for story in lane.stories {
                 var metadata = StoryCardMetadata(story, differingAccount: differingAccounts[story.id])
                 metadata.laneName = lane.lane.rawValue
                 if case .event(let summary, _, _) = story.entry { metadata.eventID = summary.eventID }
-                edition.metadata[story.id] = metadata
+                result[story.id] = metadata
             }
         }
-        return edition
+        return result
     }
 }
 
