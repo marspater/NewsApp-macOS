@@ -59,8 +59,11 @@ struct TodayFocusMap: Equatable, Sendable {
     }
 
     /// An arrow key. `memory` is each lane's last focused card; a lane entered from above or below gives focus to
-    /// it, or to its first card when it has none or the card left the lane.
-    func move(_ direction: Direction, from id: String?, memory: [TodayLane: String] = [:]) -> String? {
+    /// it, else to the card at its leading edge on screen, else to its first card.
+    /// `visible` is each lane's leading card on screen, taken when the lane has no remembered card.
+    func move(
+        _ direction: Direction, from id: String?, memory: [TodayLane: String] = [:], visible: [TodayLane: String] = [:]
+    ) -> String? {
         guard let (laneIndex, index) = position(of: id) else { return lanes.first?.ids.first }
         let lane = lanes[laneIndex]
         let rows = lane.columns > 0
@@ -74,7 +77,7 @@ struct TodayFocusMap: Equatable, Sendable {
             return lane.ids[min(lane.ids.count - 1, index + 1)]
         case .up:
             if rows, index - lane.columns >= 0 { return lane.ids[index - lane.columns] }
-            return entry(toLane: laneIndex - 1, memory: memory) ?? id
+            return entry(toLane: laneIndex - 1, memory: memory, visible: visible) ?? id
         case .down:
             if rows {
                 if index + lane.columns < lane.ids.count { return lane.ids[index + lane.columns] }
@@ -82,14 +85,15 @@ struct TodayFocusMap: Equatable, Sendable {
                 let lastRowStart = (lane.ids.count - 1) / lane.columns * lane.columns
                 return index < lastRowStart ? lane.ids[lane.ids.count - 1] : id
             }
-            return entry(toLane: laneIndex + 1, memory: memory) ?? id
+            return entry(toLane: laneIndex + 1, memory: memory, visible: visible) ?? id
         }
     }
 
-    private func entry(toLane index: Int, memory: [TodayLane: String]) -> String? {
+    private func entry(toLane index: Int, memory: [TodayLane: String], visible: [TodayLane: String]) -> String? {
         guard lanes.indices.contains(index) else { return nil }
         let lane = lanes[index]
         if let remembered = memory[lane.lane], lane.ids.contains(remembered) { return remembered }
+        if let leading = visible[lane.lane], lane.ids.contains(leading) { return leading }
         return lane.ids.first
     }
 
