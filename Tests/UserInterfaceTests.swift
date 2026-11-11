@@ -1091,7 +1091,7 @@ extension NewsTests {
                 guid: "cancel-story-2", description: "", pubDate: now, source: "News Source")
             try await cancelDb.upsertArticles([cancelStory, cancelStory2], feedUrl: "https://example.com/feed.xml")
 
-            var cancelTask: Task<StoryCurator.Report, Error>?
+            let cancelTask = OSAllocatedUnfairLock<Task<StoryCurator.Report, Error>?>(initialState: nil)
             let urlCounter = OSAllocatedUnfairLock(initialState: 0)
             let cancelFinder = StoryImageFinder { _ in
                 let count = urlCounter.withLock { c -> Int in
@@ -1106,10 +1106,10 @@ extension NewsTests {
                     Task { @MainActor in
                         store.noteStoryImageSaved()
                     }
-                    cancelTask?.cancel()
+                    cancelTask.withLock { $0 }?.cancel()
                 }
             }
-            cancelTask = task
+            cancelTask.withLock { $0 = task }
             let taskResult = await task.result
             var wasCancelled = false
             if case .failure(let error) = taskResult, error is CancellationError {
@@ -1121,8 +1121,8 @@ extension NewsTests {
             assertEqual(
                 images[cancelStory.id], "https://cdn.example/cancelled-found-1.jpg", "Photo must be saved in database")
 
-            // Allow any main-actor dispatch to settle
-            try await Task.sleep(nanoseconds: 20_000_000)
+            // The saved-image callback hops to the main actor; wait for it instead of sleeping.
+            await eventually("The saved photo advances the store revision") { await store.revision > initialRev }
 
             let currentRev = await store.revision
             let currentEventRev = await store.eventRevision
