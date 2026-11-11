@@ -99,6 +99,8 @@ One name means one thing. Before adding a name, check this table and the names a
 | `first_second_agree_pegged_same`, `first_second_agree_pegged_later` | A label review: pairs on which first and second pass agree, with `pegged` counted as `same` or as `later` |
 | `kappa_pegged_same`, `kappa_pegged_later` | A label review: Cohen's kappa of first against second pass, likewise |
 | `labels_changed`, `three_way_splits` | A label review: first-pass labels the review changed, and pairs no two reads agree on |
+| `page_stories`, `page_entries` | A Today page timing: stories loaded and the story entries they group into |
+| `page_loader_ms`, `page_assign_ms` | A Today page timing: median milliseconds of the context load and of the lane assignment, from the `TODAY_PAGE_TIMING` line of `--today-shadow` |
 
 A rescored run keeps its replay and changes only the labels; its `dataset` names the label set, for example `validation-2026-10-29+reviewed-labels-pegged-as-same`.
 

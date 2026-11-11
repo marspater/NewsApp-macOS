@@ -23,6 +23,21 @@ import Foundation
 /// any app write path and untouched for Briefing / legacy `--curation-live` compatibility.
 enum TodayEditionAssigner {
 
+    /// Every story's evidence, in the order given. Each story is evaluated on its own (its language tagging is the
+    /// cost of a pass, about 4 ms a story), so the stories are spread over the cores; the result does not depend on
+    /// how they were spread (#937).
+    static func evaluateStories(_ entries: [FeedEntry], context: TodayAssignmentContext) -> [EvaluatedStory] {
+        guard entries.count > 1 else { return entries.map { evaluateStory($0, context: context) } }
+        return [EvaluatedStory](unsafeUninitializedCapacity: entries.count) { buffer, count in
+            // Each iteration writes its own slot and nothing else.
+            nonisolated(unsafe) let slots = buffer
+            DispatchQueue.concurrentPerform(iterations: entries.count) { index in
+                (slots.baseAddress! + index).initialize(to: evaluateStory(entries[index], context: context))
+            }
+            count = entries.count
+        }
+    }
+
     struct EvaluatedStory {
         let entry: FeedEntry
         let score: Double
@@ -68,7 +83,7 @@ enum TodayEditionAssigner {
         let thresholds = context.thresholds
 
         // 1. The Lead (1–5 slides, rank-ordered).
-        let lead = selectLead(from: eligible.map { evaluateStory($0, context: context) }, thresholds: thresholds)
+        let lead = selectLead(from: evaluateStories(eligible, context: context), thresholds: thresholds)
         // 2. In Motion (min 3, cap 12, chronological newest first)
         let inMotion = placeConditionalLane(lane: .inMotion, candidates: lead.pool) {
             inMotionPlacement($0, thresholds: thresholds)

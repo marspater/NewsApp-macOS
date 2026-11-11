@@ -40,6 +40,7 @@ extension NewsTests {
             ("testFocusIsRestoredWhenTheEditionChanges", { testTodayFocusRestore() }),
             ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
             ("testHeldEditionKeepsTagsEntriesAndNewEditionSortsLatest", { testTodayHeldEditionDetails() }),
+            ("testConcurrentEvaluationMatchesSerial", { testTodayConcurrentEvaluationMatchesSerial() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
@@ -1070,6 +1071,25 @@ extension NewsTests {
         assertEqual(
             fresh.latest.map(\.id), ["new", "old"], "A new edition's Latest is newest first, also with unplaced stories"
         )
+    }
+
+    /// #937: spreading the stories over the cores keeps their order and every value of the serial evaluation.
+    static func testTodayConcurrentEvaluationMatchesSerial() {
+        let titles = ["Senate passes budget", "Storm closes harbor", "Chip maker reports record sales"]
+        let entries: [FeedEntry] = (0..<40).map { index in
+            .article(
+                makeArticle(
+                    id: "c\(index)", title: "\(titles[index % 3]) number \(index)", pubDate: referenceNow))
+        }
+        let context = TodayAssignmentContext(now: referenceNow)
+        // Every field of the evaluation, not a chosen few: a value that concurrency changed would show.
+        func summary(_ stories: [TodayEditionAssigner.EvaluatedStory]) -> [String] {
+            stories.map { String(describing: $0) }
+        }
+        let serial = entries.map { TodayEditionAssigner.evaluateStory($0, context: context) }
+        let concurrent = TodayEditionAssigner.evaluateStories(entries, context: context)
+        assertEqual(
+            summary(concurrent), summary(serial), "Concurrent evaluation keeps the serial order and values")
     }
 
     static func testTodayNotificationThresholdsIndependent() {
