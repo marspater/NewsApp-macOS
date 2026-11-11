@@ -73,7 +73,7 @@ struct TodayEdition: Equatable, Sendable {
     /// feed the reader no longer subscribes to, also goes to The Latest: Today never hides a listed story.
     static func make(
         entries: [FeedEntry], plan: TodayEditionPlan, differingAccounts: [String: String] = [:],
-        keeping previous: TodayEdition? = nil, generation: Int = 0, calendar: Calendar = .current
+        keeping previous: TodayEdition? = nil, generation: Int = 0
     ) -> TodayEdition {
         var fresh: [String: TodayStoryAssignment] = [:]
         for assignment in plan.allAssignments { fresh[assignment.id] = assignment }
@@ -108,8 +108,7 @@ struct TodayEdition: Equatable, Sendable {
         }
         for lane in edition.lanes {
             for story in lane.stories {
-                var metadata = StoryCardMetadata(
-                    story, differingAccount: differingAccounts[story.id], calendar: calendar)
+                var metadata = StoryCardMetadata(story, differingAccount: differingAccounts[story.id])
                 metadata.laneName = lane.lane.rawValue
                 edition.metadata[story.id] = metadata
             }
@@ -141,19 +140,26 @@ extension TodayStoryAssignment {
     }
 }
 
+/// What the lane assignment needs to know about the reader, from their settings.
+struct TodayReader: Sendable {
+    var subscribedFeedURLs: Set<String>
+    var starredFeedURLs: Set<String>
+    /// Reading interests count from here when the reader reset them.
+    var interestsResetAt: Date?
+}
+
 extension ArticleStore {
     /// Assigns the listed stories to lanes and reads what their cards show, off the main actor. A failed read
     /// leaves every story in The Latest rather than an empty page.
     func todayEdition(
-        entries: [FeedEntry], subscribedFeedURLs: Set<String>, starredFeedURLs: Set<String>, resetAt: Date?,
-        keeping previous: TodayEdition?, generation: Int
+        entries: [FeedEntry], reader: TodayReader, keeping previous: TodayEdition?, generation: Int
     ) async -> TodayEdition {
         let database = self.database
         let now = Date()
         do {
             let context = try await database.loadTodayAssignmentContext(
-                entries: entries, now: now, starredFeedURLs: starredFeedURLs,
-                subscribedFeedURLs: subscribedFeedURLs, resetAt: resetAt)
+                entries: entries, now: now, starredFeedURLs: reader.starredFeedURLs,
+                subscribedFeedURLs: reader.subscribedFeedURLs, resetAt: reader.interestsResetAt)
             try Task.checkCancellation()
             let plan = await Task.detached(priority: .userInitiated) {
                 TodayEditionAssigner.assign(entries: entries, context: context)
