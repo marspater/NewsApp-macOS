@@ -127,7 +127,7 @@ final class AppSettings: ObservableObject {
     static var retiredFeedsVersion: Int { retiredFeeds.map(\.version).max() ?? 0 }
 
     /// Catalog feeds that moved to a new address (#1213). Subscriptions and stars automatically migrate on load.
-    static let movedFeeds: [(from: String, to: String)] = [
+    nonisolated static let movedFeeds: [(from: String, to: String)] = [
         ("https://phys.org/rss-feed", "https://phys.org/rss-feed/")
     ]
 
