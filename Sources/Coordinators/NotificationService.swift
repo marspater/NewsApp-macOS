@@ -16,6 +16,7 @@ import AppKit
 import Foundation
 import Intents
 import NaturalLanguage
+import Security
 import UserNotifications
 import os
 
@@ -166,17 +167,33 @@ enum BannerGate: Equatable, Sendable {
 }
 
 /// The only way to honour Focus: macOS gives an app no notification callback, so the banner asks `INFocusStatusCenter`.
-/// It works in the sandbox with `NSFocusStatusUsageDescription` and no entitlement.
+/// When an app lacks the Communication Notifications entitlement (`com.apple.developer.usernotifications.communication`),
+/// querying user availability logs DNDErrorDomain 1004. Banners handle this gracefully without error spew (#1214).
 enum FocusStatus {
+    /// Injected provider for unit tests.
+    static var provider: (() -> Bool?)?
+
+    /// Whether the app possesses the communication notifications entitlement required by DoNotDisturb framework.
+    static let hasCommunicationEntitlement: Bool = {
+        guard let task = SecTaskCreateFromSelf(nil) else { return false }
+        let entitlement = "com.apple.developer.usernotifications.communication" as CFString
+        guard let value = SecTaskCopyValueForEntitlement(task, entitlement, nil) else { return false }
+        if let boolVal = value as? Bool { return boolVal }
+        return false
+    }()
+
     /// Asks once; macOS remembers the answer.
     static func requestAuthorization() {
+        guard hasCommunicationEntitlement else { return }
         INFocusStatusCenter.default.requestAuthorization { _ in
             // The answer is read when a banner is drawn.
         }
     }
 
-    /// Whether a Focus is on; nil while the reader has not allowed it or shares no Focus status.
+    /// Whether a Focus is on; nil while the reader has not allowed it, lacks the entitlement, or shares no Focus status.
     static var isFocused: Bool? {
+        if let provider { return provider() }
+        guard hasCommunicationEntitlement else { return nil }
         let center = INFocusStatusCenter.default
         guard center.authorizationStatus == .authorized else { return nil }
         return center.focusStatus.isFocused

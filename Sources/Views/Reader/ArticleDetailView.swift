@@ -236,8 +236,6 @@ struct ArticleDetailView: View {
                 analysis = nil
                 analysisError = nil
                 isAnalyzing = false
-                // Keep the overview mode so the regenerated overview returns by itself.
-                currentOverview = nil
             }
             .onAppear { isViewFocused = true }
             .onDisappear {
@@ -1407,7 +1405,7 @@ struct ArticleDetailView: View {
                 .buttonStyle(.bordered)
                 .labelStyle(.iconOnly)
             }
-            Picker("Reading Style", selection: $themeManager.articleTheme) {
+            Picker("Reading Style", selection: themeManager.binding(\.articleTheme)) {
                 ForEach(ArticleThemeType.allCases) { Text($0.displayName).tag($0) }
             }
             .pickerStyle(.radioGroup)
@@ -1944,13 +1942,8 @@ struct ArticleDetailView: View {
     }
 
     private func setOverviewLoading(_ loading: Bool) {
-        if reduceMotion {
-            isOverviewLoading = loading
-        } else {
-            withAnimation(Self.readerAnimation(reduceMotion: reduceMotion)) {
-                isOverviewLoading = loading
-            }
-        }
+        guard isOverviewLoading != loading else { return }
+        isOverviewLoading = loading
     }
 
     private var canCheckForUpdates: Bool {
@@ -2043,7 +2036,9 @@ struct ArticleDetailView: View {
             articleID: articleID)
         if currentOverview?.eventID != eventID {
             currentOverview = nil
-            experienceMode = .sourcePublication
+            if !returnToOverview {
+                experienceMode = .sourcePublication
+            }
         }
         // A mode the person picks while the overview generates (Story during a Check for Updates) is kept.
         let modeAtLoad = experienceMode

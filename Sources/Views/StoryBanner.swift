@@ -233,7 +233,11 @@ final class StoryBannerPresenter {
             window.deminiaturize(nil)
         } else if let window = mainWindow, window.isVisible {
             // Open but behind other windows, or on another Space: in front of them, so the story is seen.
-            window.makeKeyAndOrderFront(nil)
+            if window.canBecomeKey {
+                window.makeKeyAndOrderFront(nil)
+            } else {
+                window.orderFront(nil)
+            }
         } else {
             NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: .init())
         }
@@ -502,7 +506,9 @@ struct MainWindowMarker: NSViewRepresentable {
     private final class Marker: NSView {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let window { StoryBannerPresenter.mainWindow = window }
+            if let window, window.canBecomeKey || window.canBecomeMain {
+                StoryBannerPresenter.mainWindow = window
+            }
         }
     }
 }

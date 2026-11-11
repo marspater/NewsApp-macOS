@@ -815,6 +815,40 @@ struct SettingsView: View {
                 Text("Summaries, key points, entities and tone for each story, generated on this Mac.")
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
+
+                let availability = AppleIntelligenceAvailability.shared.state
+                HStack(alignment: .top, spacing: AppSpacing.sm) {
+                    Image(
+                        systemName: availability == .ready
+                            ? "checkmark.circle.fill"
+                            : (availability == .appDisabled ? "minus.circle" : "exclamationmark.triangle.fill")
+                    )
+                    .foregroundStyle(
+                        availability == .ready
+                            ? AppColor.success
+                            : (availability == .appDisabled ? AppColor.secondaryText : AppColor.warning)
+                    )
+                    .imageScale(.medium)
+                    .padding(.top, AppSpacing.textStack)
+                    VStack(alignment: .leading, spacing: AppSpacing.xxs) {
+                        Text(availability.statusLabel)
+                            .font(AppTypography.label)
+                            .foregroundStyle(AppColor.primaryText)
+                        Text(availability.explanation)
+                            .font(AppTypography.caption)
+                            .foregroundStyle(AppColor.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let actionTitle = availability.actionTitle {
+                            Button(actionTitle) {
+                                availability.performAction()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .padding(.top, AppSpacing.xxs)
+                        }
+                    }
+                }
+                .padding(.vertical, AppSpacing.xxs)
             }
 
             Section(header: sectionHeader("How It Works")) {

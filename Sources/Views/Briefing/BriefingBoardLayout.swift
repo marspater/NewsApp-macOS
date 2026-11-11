@@ -163,3 +163,150 @@ struct BriefingSplitLayout: Layout {
         ]
     }
 }
+
+// MARK: - Situational Awareness Layout
+
+enum BriefingSituationalRole: Int, LayoutValueKey {
+    case hero = 0
+    case trailing = 1
+    case sitrep = 2
+
+    static let defaultValue: BriefingSituationalRole = .hero
+}
+
+extension View {
+    func briefingSituationalRole(_ role: BriefingSituationalRole) -> some View {
+        layoutValue(key: BriefingSituationalRole.self, value: role)
+    }
+}
+
+/// Situational awareness module layout (#1211):
+/// In wide windows (>= minimumWidth):
+/// - The hero carousel takes 2/3 width on the left.
+/// - The Executive sitrep sits directly under the hero carousel at 2/3 width, filling the space beside the right column without leaving an empty band.
+/// - World Tension and Since your last briefing take 1/3 width in the trailing column on the right.
+/// - If the trailing column is empty or absent, hero and sitrep take full width without leaving a hole.
+/// In narrow windows (< minimumWidth):
+/// - A single responsive column stacking Hero -> Trailing column (World Tension, Since your last briefing) -> Executive sitrep.
+/// - Hiding any module leaves no gaps or holes.
+struct BriefingSituationalLayout: Layout {
+    static let defaultMinimumWidth: CGFloat = 900
+
+    var leadingFraction: CGFloat = 2.0 / 3.0
+    var minimumWidth: CGFloat = defaultMinimumWidth
+    var spacing: CGFloat = AppLayout.cardGap
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let width = proposal.width ?? minimumWidth
+        let f = frames(width: width, subviews: subviews)
+        let height = f.map(\.maxY).max() ?? 0
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        let f = frames(width: bounds.width, subviews: subviews)
+        for (subview, frame) in zip(subviews, f) {
+            subview.place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(frame.size)
+            )
+        }
+    }
+
+    static func computeFrames(
+        width: CGFloat,
+        heroHeight: CGFloat?,
+        trailingHeight: CGFloat?,
+        sitrepHeight: CGFloat?,
+        leadingFraction: CGFloat = 2.0 / 3.0,
+        minimumWidth: CGFloat = defaultMinimumWidth,
+        spacing: CGFloat = AppLayout.cardGap
+    ) -> (hero: CGRect?, trailing: CGRect?, sitrep: CGRect?) {
+        if width >= minimumWidth, let trailingHeight {
+            let leadingWidth = ((width - spacing) * leadingFraction).rounded()
+            let trailingWidth = width - spacing - leadingWidth
+
+            var leftY: CGFloat = 0
+            var heroFrame: CGRect?
+            if let heroHeight {
+                heroFrame = CGRect(x: 0, y: leftY, width: leadingWidth, height: heroHeight)
+                leftY += heroHeight + spacing
+            }
+
+            var sitrepFrame: CGRect?
+            if let sitrepHeight {
+                sitrepFrame = CGRect(x: 0, y: leftY, width: leadingWidth, height: sitrepHeight)
+            }
+
+            let trailingFrame = CGRect(x: leadingWidth + spacing, y: 0, width: trailingWidth, height: trailingHeight)
+            return (hero: heroFrame, trailing: trailingFrame, sitrep: sitrepFrame)
+        }
+
+        var y: CGFloat = 0
+        var heroFrame: CGRect?
+        if let heroHeight {
+            heroFrame = CGRect(x: 0, y: y, width: width, height: heroHeight)
+            y += heroHeight + spacing
+        }
+
+        var trailingFrame: CGRect?
+        if let trailingHeight {
+            trailingFrame = CGRect(x: 0, y: y, width: width, height: trailingHeight)
+            y += trailingHeight + spacing
+        }
+
+        var sitrepFrame: CGRect?
+        if let sitrepHeight {
+            sitrepFrame = CGRect(x: 0, y: y, width: width, height: sitrepHeight)
+            y += sitrepHeight + spacing
+        }
+
+        return (hero: heroFrame, trailing: trailingFrame, sitrep: sitrepFrame)
+    }
+
+    func frames(width: CGFloat, subviews: Subviews) -> [CGRect] {
+        var heroIndex: Int?
+        var trailingIndex: Int?
+        var sitrepIndex: Int?
+
+        for (index, subview) in subviews.enumerated() {
+            switch subview[BriefingSituationalRole.self] {
+            case .hero: heroIndex = index
+            case .trailing: trailingIndex = index
+            case .sitrep: sitrepIndex = index
+            }
+        }
+
+        let leadingWidth = ((width - spacing) * leadingFraction).rounded()
+        let isWide = width >= minimumWidth && trailingIndex != nil
+        let targetLeftWidth = isWide ? leadingWidth : width
+        let targetTrailingWidth = isWide ? (width - spacing - leadingWidth) : width
+
+        let heroHeight = heroIndex.map {
+            subviews[$0].sizeThatFits(ProposedViewSize(width: targetLeftWidth, height: nil)).height
+        }
+        let trailingHeight = trailingIndex.map {
+            subviews[$0].sizeThatFits(ProposedViewSize(width: targetTrailingWidth, height: nil)).height
+        }
+        let sitrepHeight = sitrepIndex.map {
+            subviews[$0].sizeThatFits(ProposedViewSize(width: targetLeftWidth, height: nil)).height
+        }
+
+        let computed = Self.computeFrames(
+            width: width,
+            heroHeight: heroHeight,
+            trailingHeight: trailingHeight,
+            sitrepHeight: sitrepHeight,
+            leadingFraction: leadingFraction,
+            minimumWidth: minimumWidth,
+            spacing: spacing
+        )
+
+        var result = Array(repeating: CGRect.zero, count: subviews.count)
+        if let heroIndex, let f = computed.hero { result[heroIndex] = f }
+        if let trailingIndex, let f = computed.trailing { result[trailingIndex] = f }
+        if let sitrepIndex, let f = computed.sitrep { result[sitrepIndex] = f }
+        return result
+    }
+}
