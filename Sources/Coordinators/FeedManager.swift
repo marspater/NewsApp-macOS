@@ -81,7 +81,7 @@ class FeedManager: NSObject, ObservableObject {
     private var entityIndexRunID: UUID?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
     private var imageLookupTask: Task<Void, Never>?
-    private var imagePriorityIDs: Set<String> = []
+    private var imagePriorityIDs: [String] = []
     private var requestedImageIDs: Set<String> = []
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
     private var clusteringTask: Task<Void, Never>?
@@ -1080,14 +1080,14 @@ class FeedManager: NSObject, ObservableObject {
     /// now when none is running and a story is asked for the first time. A story is asked for once a session, so a
     /// page that cannot be read does not start a lookup each time the list reloads.
     func requestStoryImages(for ids: [String]) {
-        imagePriorityIDs = Set(ids)
+        imagePriorityIDs = ids
         startRequestedImageLookup()
     }
 
     /// Starts a lookup for the stories asked for and not yet handed to one. While a lookup runs, or background
     /// work is not allowed, they stay pending: the running lookup calls this when it ends.
     private func startRequestedImageLookup() {
-        guard imageLookupTask == nil, !imagePriorityIDs.isSubset(of: requestedImageIDs) else { return }
+        guard imageLookupTask == nil, !Set(imagePriorityIDs).isSubset(of: requestedImageIDs) else { return }
         lookUpStoryImages(pendingOnly: true)
     }
 
@@ -1101,7 +1101,7 @@ class FeedManager: NSObject, ObservableObject {
         let finder = imageFinder
         let muting = appSettings.muteRules
         let store = articleStore
-        let first = pendingOnly ? imagePriorityIDs.subtracting(requestedImageIDs) : imagePriorityIDs
+        let first = pendingOnly ? imagePriorityIDs.filter { !requestedImageIDs.contains($0) } : imagePriorityIDs
         // Handed to this lookup; a lookup that could not start (the guard above) leaves them pending.
         requestedImageIDs.formUnion(first)
         imageLookupTask = Task { [weak self] in
@@ -1134,6 +1134,9 @@ class FeedManager: NSObject, ObservableObject {
             case .failure(let error):
                 if !(error is CancellationError) {
                     self.logger.error("Story image lookup failed: \(error.localizedDescription)")
+                    // A pass that failed attempted none for certain: asking again may retry these (a later
+                    // request, not an immediate one, so a persistent failure does not loop).
+                    self.requestedImageIDs.subtract(first)
                 }
             }
         }

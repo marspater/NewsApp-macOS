@@ -43,7 +43,7 @@ enum StoryCurator {
         imageFinder: StoryImageFinder = .unavailable,
         imageBudget: Int = imageBudget,
         muting: MuteRules = MuteRules(),
-        first: Set<String> = [],
+        first: [String] = [],
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
         now: Date = Date(),
         onImageSaved: (@Sendable () -> Void)? = nil
@@ -61,7 +61,7 @@ enum StoryCurator {
                         // A story whose event was looked up is covered by it.
                         report.deferredIDs = Set(
                             rows[index...].filter { !lookedUp.contains($0.eventID ?? $0.id) }.map(\.id)
-                        ).intersection(first)
+                        ).intersection(Set(first))
                         break
                     }
                     try Task.checkCancellation()

@@ -1019,6 +1019,9 @@ extension NewsTests {
             "Minor-rated stories retain image eligibility; pictured events need no lookup"
         )
         assertTrue(rows.first.map { ["e1", "e2"].contains($0.id) } == true, "Clustered stories come first")
+        let asked = try await db.imagelessStoryRows(
+            activeSince: now.addingTimeInterval(-86_400), limit: 20, first: ["waiting", "down"])
+        assertEqual(asked.prefix(2).map(\.id), ["waiting", "down"], "Stories asked for come first, in the order asked")
         let pastRefused = try await db.imagelessStoryRows(
             activeSince: now.addingTimeInterval(-86_400), limit: 1,
             isRequestable: { !$0.hasSuffix("/e1") && !$0.hasSuffix("/e2") })

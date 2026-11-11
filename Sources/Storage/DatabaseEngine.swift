@@ -5154,7 +5154,7 @@ actor DatabaseEngine {
     /// `isRequestable` drops links the image client would refuse before they count toward `limit`, so they cannot
     /// crowd out stories behind them on every pass (#818).
     func imagelessStoryRows(
-        activeSince: Date, limit: Int, muting: MuteRules = MuteRules(), first: Set<String> = [],
+        activeSince: Date, limit: Int, muting: MuteRules = MuteRules(), first: [String] = [],
         isRequestable: @Sendable (String) -> Bool = { _ in true }
     ) throws -> [(
         id: String, link: String, eventID: String?
@@ -5162,10 +5162,14 @@ actor DatabaseEngine {
         // ponytail: at most 2,000 recent candidates per pass, matching the clustering bound. The stories in `first`
         // sort ahead of the cap, so one outside the newest 2,000 is still looked up.
         let scope = collectionScope()
-        let priority = first.sorted()
-        // An expression, not a bare integer, which ORDER BY would read as a result column number.
+        // The stories of `first` in the order given, everything else after them. An expression, not a bare integer,
+        // which ORDER BY would read as a result column number.
+        var seen = Set<String>()
+        let priority = first.filter { seen.insert($0).inserted }
         let priorityRank =
-            priority.isEmpty ? "(1 + 0)" : "a.id IN (\(priority.map { _ in "?" }.joined(separator: ",")))"
+            priority.isEmpty
+            ? "(1 + 0)"
+            : "CASE a.id \(priority.indices.map { "WHEN ? THEN \($0)" }.joined(separator: " ")) ELSE \(priority.count) END"
         let rows = try eventRows(
             """
             SELECT a.id, a.canonical_url, m.event_id FROM articles a
@@ -5173,7 +5177,7 @@ actor DatabaseEngine {
             WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle) \(scope.sql)
                 AND NOT \(Self.mutedArticle)
                 AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = a.id)
-            ORDER BY \(priorityRank) DESC,
+            ORDER BY \(priorityRank),
                 (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
             LIMIT 2000;
             """,
@@ -5181,12 +5185,7 @@ actor DatabaseEngine {
                 + [.text(muting.sourceParameter), .text(muting.topicParameter)] + priority.map { .text($0) })
         var results: [(id: String, link: String, eventID: String?)] = []
         var picturedEvents: [String: Bool] = [:]
-        // Stories the reader is looking at (`first`) come before the rest, each group in the order above.
-        let ordered =
-            first.isEmpty
-            ? rows
-            : rows.filter { $0[0].map(first.contains) ?? false } + rows.filter { !($0[0].map(first.contains) ?? false) }
-        for row in ordered {
+        for row in rows {
             try Task.checkCancellation()
             guard results.count < limit else { break }
             guard let id = row[0], let link = row[1], isRequestable(link) else { continue }
