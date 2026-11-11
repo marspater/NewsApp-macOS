@@ -1160,6 +1160,12 @@ extension NewsTests {
         assertEqual(
             map.move(.down, from: "m2", memory: [.theDeepRead: "gone"]), "d1",
             "A remembered card that left falls back to the first")
+        assertEqual(
+            map.move(.down, from: "m2", memory: [:], visible: [.theDeepRead: "d3"]), "d3",
+            "A lane without a remembered card gives focus to the card at its leading edge")
+        assertEqual(
+            map.move(.down, from: "m2", memory: [.theDeepRead: "d2"], visible: [.theDeepRead: "d3"]), "d2",
+            "A remembered card comes before the leading one")
         assertEqual(map.move(.up, from: "a"), "a", "Nothing is above The Lead")
         assertEqual(map.move(.down, from: "d2"), "l1", "Down from the last row lane enters the grid")
         assertEqual(map.move(.right, from: "l2"), "l3", "Right in the grid wraps to the next row")

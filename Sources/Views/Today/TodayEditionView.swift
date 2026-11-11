@@ -25,6 +25,10 @@ struct TodayEditionActions {
     var latestColumnsChanged: (Int) -> Void = { _ in
         // No keyboard map by default.
     }
+    /// A lane's row scrolled: the card at its leading edge, which an arrow key entering the lane lands on.
+    var leadingCardChanged: (TodayLane, String?) -> Void = { _, _ in
+        // No keyboard map by default.
+    }
     /// The reader moved The Lead to another slide with its dots or arrows.
     var leadSlideShown: (FeedEntry) -> Void = { _ in
         // No lane memory by default.
@@ -223,6 +227,12 @@ struct TodayLaneSection: View {
                         guard let focused, ids.contains(focused) else { return }
                         withAnimation(reduceMotion ? nil : AppMotion.hover) { proxy.scrollTo(focused) }
                     }
+                    .onChange(of: position) { _, leading in actions.leadingCardChanged(lane.lane, leading) }
+                    // A lane that appears holding the focused card (an applied update moved it there) shows it.
+                    .onAppear {
+                        guard let focusedID, ids.contains(focusedID) else { return }
+                        proxy.scrollTo(focusedID)
+                    }
                     // The reader applied an update: the row shows the focused card when it still holds it, and
                     // otherwise returns to its leading edge.
                     .onChange(of: generation) { _, _ in
@@ -312,7 +322,7 @@ struct TodayLaneSection: View {
             let data = metadata[story.id] ?? StoryCardMetadata()
             let key =
                 "\(story.cardVariant):\((data.reportDays ?? 0) >= 3):\(data.differingAccount != nil):"
-                + "\(data.coverageLine != nil)"
+                + "\(data.coverageLine != nil):\(data.contentType != nil)"
             let length = data.differingAccount?.count ?? 0
             if let kept = longest[key] {
                 if length > (metadata[kept.id]?.differingAccount?.count ?? 0) { longest[key] = story }

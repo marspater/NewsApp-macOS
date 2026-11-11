@@ -214,6 +214,8 @@ struct ArticleListView: View {
     @State private var todayGeneration = 0
     /// Each lane's last focused card, for the session.
     @State private var todayLaneMemory: [TodayLane: String] = [:]
+    /// The card at each lane row's leading edge, where an arrow key enters a lane the reader has not focused.
+    @State private var todayLaneLeading: [TodayLane: String] = [:]
     @State private var todayLatestColumns = 1
     /// The detail column's size, which sizes The Lead.
     @State private var columnSize = CGSize(
@@ -1250,6 +1252,7 @@ struct ArticleListView: View {
                             todayPrefetch.cardAppeared(id, in: todayEdition, using: imageLoader)
                         },
                         latestColumnsChanged: { todayLatestColumns = $0 },
+                        leadingCardChanged: { lane, id in todayLaneLeading[lane] = id },
                         // A slide held keyboard focus and the reader clicked to another: focus follows what shows.
                         leadSlideShown: { entry in
                             if todayEdition.lead.contains(where: { $0.id == focusedArticleID }) {
@@ -1506,7 +1509,9 @@ struct ArticleListView: View {
         if let map = todayFocusMap, searchState.returnStory == nil,
             let direction = Self.todayDirection(press.key)
         {
-            focusToday(map.move(direction, from: focusedArticleID, memory: todayLaneMemory), in: map, proxy: proxy)
+            focusToday(
+                map.move(direction, from: focusedArticleID, memory: todayLaneMemory, visible: todayLaneLeading),
+                in: map, proxy: proxy)
             return .handled
         }
         if press.key == .escape || press.key == .leftArrow || press.characters == "b" || press.characters == "h" {
@@ -1629,20 +1634,27 @@ struct ArticleListView: View {
         }
     }
 
+    /// The story Return and Space act on: the focused one, else the first the reader sees, which on the Today page
+    /// is the ranked Lead and not the first listed story.
+    private func keyboardEntry() -> FeedEntry? {
+        let listed = entries
+        if let focused = listed.first(where: { $0.id == focusedArticleID }) { return focused }
+        if let first = todayFocusMap?.readingOrder.first { return listed.first { $0.id == first } }
+        return listed.first
+    }
+
     private func toggleQuickLook() {
         if StoryQuickLookCoordinator.shared.isOpen {
             StoryQuickLookCoordinator.shared.close()
         } else {
-            let listed = entries
-            guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
+            guard let entry = keyboardEntry() else { return }
             focusedArticleID = entry.id
             StoryQuickLookCoordinator.shared.present(article: entry.representative, isDark: colorScheme == .dark)
         }
     }
 
     private func openFocusedArticle() {
-        let listed = entries
-        guard let entry = listed.first(where: { $0.id == focusedArticleID }) ?? listed.first else { return }
+        guard let entry = keyboardEntry() else { return }
         switch entry {
         case .article(let article): openArticle(article)
         case .event(let summary, let representative, _):
@@ -1865,7 +1877,10 @@ struct KeyboardShortcutsView: View {
 /// images of the cards after it in its own lane, each as its card shows it.
 @MainActor final class TodayLanePrefetch {
     private var furthest: [TodayLane: Int] = [:]
+    /// The newest task of each lane, which the next one waits for, and every task started, so a reset cancels the
+    /// whole chain and not only its last link.
     private var tasks: [TodayLane: Task<Void, Never>] = [:]
+    private var started: [Task<Void, Never>] = []
 
     func cardAppeared(
         _ id: String, in edition: TodayEdition, using loader: @escaping @Sendable (URL, Int) async throws -> CGImage
@@ -1881,17 +1896,20 @@ struct KeyboardShortcutsView: View {
             furthest[lane.lane] = end
             let urls = lane.stories[start..<end].compactMap { edition.imageURL(of: $0) }
             let previous = tasks[lane.lane]
-            tasks[lane.lane] = Task {
+            let task = Task {
                 await previous?.value
                 await DecodedImageCache.prefetch(urls, size: .card, using: loader)
             }
+            tasks[lane.lane] = task
+            started.append(task)
             return
         }
     }
 
     func reset() {
         furthest = [:]
-        for task in tasks.values { task.cancel() }
+        for task in started { task.cancel() }
+        started = []
         tasks = [:]
     }
 }
