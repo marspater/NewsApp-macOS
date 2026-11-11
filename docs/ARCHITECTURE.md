@@ -1,6 +1,6 @@
 # Architecture
 
-Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](design/DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md), and App Store preparation in [XCODE_AND_APP_REVIEW.md](XCODE_AND_APP_REVIEW.md).
+Native macOS, local-first RSS reader. This page is the contract for technology and implementation invariants. Workflow lives in [CONTRIBUTING.md](../CONTRIBUTING.md), design in [DESIGN.md](design/DESIGN.md), security in [SECURITY.md](../SECURITY.md), privacy in [PRIVACY.md](../PRIVACY.md), and App Store preparation in [XCODE_AND_APP_REVIEW.md](XCODE_AND_APP_REVIEW.md). The semantic system's name register (which name owns which code, and what each hands on) lives in [ANGELIA.md](ANGELIA.md).
 
 > [!IMPORTANT]
 > Nothing leaves the Mac except feed, article and image requests and the update check (one GitHub releases request, see PRIVACY §2), all through the protected gateway. No cloud backend, remote AI, telemetry or analytics SDKs, and no custom AI models except CoreML models this project builds, measures and ships itself (#520).
