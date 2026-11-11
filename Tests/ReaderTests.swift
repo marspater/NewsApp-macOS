@@ -2463,6 +2463,15 @@ extension NewsTests {
         let word3 = ReaderDictionaryLookup.word(at: 100, in: text)
         assertEqual(word3, nil, "Out of bounds character index returns nil")
 
+        // Layout manager offsets are UTF-16: a word after emoji is found although its offset passes the character count.
+        let emojiText = "🙂🙂🙂 hello"
+        assertEqual(
+            ReaderDictionaryLookup.word(at: 11, in: emojiText), "hello",
+            "A UTF-16 offset past the grapheme count still finds its word")
+        assertEqual(
+            ReaderDictionaryLookup.word(at: emojiText.utf16.count, in: emojiText), nil,
+            "The UTF-16 length is out of bounds")
+
         // 3. Lookup title generation for context menu
         assertEqual(
             ReaderDictionaryLookup.lookupTitle(for: "quantum"), "Look Up “quantum”", "Short word quoted in title")
