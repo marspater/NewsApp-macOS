@@ -111,6 +111,8 @@ extension EnvironmentValues {
     }
 
     private static func store(_ image: CGImage, for url: URL, size: Size) {
+        // Any decode that is kept, a prefetch too, shows the photo works after an earlier failure.
+        noteSuccess(url)
         (size == .card ? cardImages : images).setObject(
             image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
     }

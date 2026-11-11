@@ -1261,10 +1261,11 @@ struct ArticleListView: View {
                 )
             }
         }
-        // Reloads when the listed stories, their event membership, a stored overview or the applied updates change.
+        // Reloads when the listed stories, their event membership, a stored overview, the subscriptions or the applied
+        // updates change.
         .task(
             id: "\(groupedEntries.revision):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
-                + "\(todayGeneration):\(queryIdentity)"
+                + "\(todayGeneration):\(queryIdentity):\(appSettings.feedURLs.hashValue)"
         ) {
             await reloadTodayEdition(listed, proxy: proxy)
         }
