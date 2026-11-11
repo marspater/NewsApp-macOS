@@ -2383,7 +2383,7 @@ extension NativeSuites.StorageSuite {
                 -1, &insertStmt, nil), SQLITE_OK)
         let oversizedData = Data(repeating: 0x3F, count: 1537)
         _ = oversizedData.withUnsafeBytes { raw in
-            sqlite3_bind_blob(insertStmt, 1, raw.baseAddress, 1537, nil)
+            sqlite3_bind_blob(insertStmt, 1, raw.baseAddress, 1537, DatabaseEngine.sqliteTransient)
         }
         expectEqual(sqlite3_step(insertStmt), SQLITE_DONE)
         sqlite3_finalize(insertStmt)
@@ -2465,6 +2465,20 @@ extension NativeSuites.StorageSuite {
         let oldArticles = try await db.eventRows(
             "SELECT id FROM articles WHERE feed_url = ?;", [.text("https://phys.org/rss-feed")])
         expectEqual(oldArticles.count, 0, "No articles under old URL")
+
+        // 4. A story read and pruned under the old address is not stored again as unread by the moved feed (#1213).
+        let movedNow = Date(timeIntervalSince1970: 1_800_000_000)
+        let prunedStory = FeedArticle(
+            title: "Pruned physics report", link: "https://phys.org/news/pruned", guid: "phys-pruned",
+            description: "Served long after reading", pubDate: movedNow.addingTimeInterval(-45 * 86_400),
+            source: "Phys.org")
+        let prunedIDs = try await db.upsertArticles([prunedStory], feedUrl: "https://phys.org/rss-feed")
+        try await db.markReadBatch(articleIds: Array(prunedIDs), isRead: true)
+        _ = try await db.pruneOldArticles(keepReadDays: 30, now: movedNow)
+        try await db.moveFeed(from: "https://phys.org/rss-feed", to: "https://phys.org/rss-feed/")
+        expectTrue(
+            try await db.upsertArticles([prunedStory], feedUrl: "https://phys.org/rss-feed/").isEmpty,
+            "A story pruned under the old address stays pruned when the moved feed serves it")
     }
 
 }
