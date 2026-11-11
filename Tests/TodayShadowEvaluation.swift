@@ -21,6 +21,30 @@ import SQLite3
 /// `NEWS_TODAY_NOW` pins the clock (epoch seconds), `NEWS_TODAY_WINDOW_HOURS` the candidate window,
 /// `NEWS_TODAY_LABELS` names the private label file and `NEWS_TODAY_FEEDS` the snapshot's subscription list.
 enum TodayShadowEvaluation {
+    /// Z5 (#937): what the Today page costs to lay out. The list shows 200 stories a page, so the newest 200 of the
+    /// window are loaded and assigned three times and the medians printed, with no story text.
+    static func timeFirstPage(
+        of articles: [FeedArticle], summaries: [EventFeedSummary], database: DatabaseEngine, now: Date,
+        feeds: Set<String>
+    ) async throws {
+        let page = Array(articles.sorted { $0.orderDate > $1.orderDate }.prefix(200))
+        let entries = EventFeedGrouping.entries(for: page, events: summaries, mode: .events)
+        var loader: [Double] = []
+        var assign: [Double] = []
+        for _ in 0..<3 {
+            let loadStart = CFAbsoluteTimeGetCurrent()
+            let context = try await database.loadTodayAssignmentContext(
+                entries: entries, now: now, subscribedFeedURLs: feeds)
+            loader.append((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+            let assignStart = CFAbsoluteTimeGetCurrent()
+            _ = TodayEditionAssigner.assign(entries: entries, context: context)
+            assign.append((CFAbsoluteTimeGetCurrent() - assignStart) * 1000)
+        }
+        print(
+            String(
+                format: "TODAY_PAGE_TIMING stories=%d entries=%d loaderMedianMs=%.1f assignMedianMs=%.1f",
+                page.count, entries.count, loader.sorted()[1], assign.sorted()[1]))
+    }
 
     struct StoryLabels: Decodable {
         var stories: [String: StoryLabel]?
@@ -198,6 +222,8 @@ enum TodayShadowEvaluation {
         let assignStart = CFAbsoluteTimeGetCurrent()
         let plan = TodayEditionAssigner.assign(entries: entries, context: context)
         let assignDurationMs = (CFAbsoluteTimeGetCurrent() - assignStart) * 1000.0
+        try await timeFirstPage(
+            of: windowArticles, summaries: summaries, database: db, now: now, feeds: subscriptions.urls)
         let summaryByEventID = Dictionary(uniqueKeysWithValues: summaries.map { ($0.eventID, $0) })
 
         let rawQualifyingCounts = computeRawQualifyingCounts(entries: entries, context: context)
