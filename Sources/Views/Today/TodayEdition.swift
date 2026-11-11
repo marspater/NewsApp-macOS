@@ -220,7 +220,13 @@ extension ArticleStore {
             try Task.checkCancellation()
             // A story's photo may sit on a report of its event that this page does not list.
             var details = TodayCardDetails()
-            for entry in entries where entry.cardImageURL == nil {
+            // ponytail: one read per event, for at most the 60 newest events without a listed photo, so a page of
+            // them cannot hold up the edition; read them in one query if a library needs more.
+            let unpictured = entries.filter { entry in
+                if case .event = entry { return entry.cardImageURL == nil }
+                return false
+            }
+            for entry in unpictured.prefix(60) {
                 try Task.checkCancellation()
                 guard case .event(let summary, _, _) = entry,
                     let members = try? await storyMemberArticles(eventID: summary.eventID),

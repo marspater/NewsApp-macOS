@@ -1081,9 +1081,14 @@ class FeedManager: NSObject, ObservableObject {
     /// page that cannot be read does not start a lookup each time the list reloads.
     func requestStoryImages(for ids: [String]) {
         imagePriorityIDs = Set(ids)
-        let new = imagePriorityIDs.subtracting(requestedImageIDs)
-        requestedImageIDs.formUnion(new)
-        if !new.isEmpty, imageLookupTask == nil { lookUpStoryImages() }
+        startRequestedImageLookup()
+    }
+
+    /// Starts a lookup for the stories asked for and not yet handed to one. While a lookup runs, or background
+    /// work is not allowed, they stay pending: the running lookup calls this when it ends.
+    private func startRequestedImageLookup() {
+        guard imageLookupTask == nil, !imagePriorityIDs.isSubset(of: requestedImageIDs) else { return }
+        lookUpStoryImages()
     }
 
     private func lookUpStoryImages() {
@@ -1095,6 +1100,8 @@ class FeedManager: NSObject, ObservableObject {
         let muting = appSettings.muteRules
         let store = articleStore
         let first = imagePriorityIDs
+        // Handed to this lookup; a lookup that could not start (the guard above) leaves them pending.
+        requestedImageIDs.formUnion(first)
         imageLookupTask = Task { [weak self] in
             self?.logger.info("Story image lookup started")
             defer { self?.logger.info("Story image lookup finished") }
@@ -1111,7 +1118,11 @@ class FeedManager: NSObject, ObservableObject {
                 work.cancel()
             }
             guard let self else { return }
-            if !Task.isCancelled { self.imageLookupTask = nil }
+            if !Task.isCancelled {
+                self.imageLookupTask = nil
+                // Stories asked for while this lookup ran get their own.
+                self.startRequestedImageLookup()
+            }
             switch result {
             case .success(let report):
                 self.lastImageLookup = report
