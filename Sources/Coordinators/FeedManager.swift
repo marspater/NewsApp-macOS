@@ -1131,8 +1131,11 @@ class FeedManager: NSObject, ObservableObject {
                 work.cancel()
             }
             guard let self else { return }
-            // Stories the budget skipped stay pending for the next lookup.
-            if case .success(let report) = result { self.requestedImageIDs.subtract(report.deferredIDs) }
+            // Stories the budget skipped stay pending for the next lookup. A lookup cancelled since may share its
+            // stories with its replacement, which owns them now.
+            if !Task.isCancelled, case .success(let report) = result {
+                self.requestedImageIDs.subtract(report.deferredIDs)
+            }
             if !Task.isCancelled {
                 self.imageLookupTask = nil
                 self.runningImageIDs = []
@@ -1148,7 +1151,7 @@ class FeedManager: NSObject, ObservableObject {
                     self.logger.error("Story image lookup failed: \(error.localizedDescription)")
                     // A pass that failed attempted none for certain: asking again may retry these (a later
                     // request, not an immediate one, so a persistent failure does not loop).
-                    self.requestedImageIDs.subtract(first)
+                    if !Task.isCancelled { self.requestedImageIDs.subtract(first) }
                 }
             }
         }
