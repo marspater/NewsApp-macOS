@@ -330,9 +330,9 @@ extension TodayShadowEvaluation {
         let qualifying = evaluatedCandidates(of: plan24h, context: context).compactMap {
             TodayEditionAssigner.yourBeatPlacement($0, thresholds: context.thresholds)
         }
-        let qualifyingShares = concentration(qualifying.map { $0.story.entry.representative.publisherName })
+        let qualifyingShares = concentration(qualifying.map { publisherKey($0.story.entry.representative) })
         let shown = plan.entries(for: .yourBeat)
-        let shownShares = concentration(shown.map { $0.entry.representative.publisherName })
+        let shownShares = concentration(shown.map { publisherKey($0.entry.representative) })
         let storyLabels = inputs.labels?.stories ?? [:]
         let shownExpectedLanes = shown.compactMap { storyLabels[$0.id]?.expectedLane }
         let outsideClearing = evaluatedCandidates(of: plan, context: context).filter {
