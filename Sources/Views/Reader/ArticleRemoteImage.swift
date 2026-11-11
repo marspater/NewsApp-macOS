@@ -46,6 +46,11 @@ extension EnvironmentValues {
     /// not show (Today's Lead). Bounded; a later success clears the entry.
     private(set) static var failedURLs: Set<URL> = []
 
+    /// A photo that failed earlier loaded after all.
+    static func noteSuccess(_ url: URL) {
+        if !failedURLs.isEmpty { failedURLs.remove(url) }
+    }
+
     static func noteFailure(_ url: URL) {
         if failedURLs.count >= 500 { failedURLs.removeAll() }
         failedURLs.insert(url)
@@ -348,6 +353,7 @@ struct ArticleRemoteImage<Content: View>: View {
                         let image = try await DecodedImageCache.load(url, size: size, using: loadImage)
                         try Task.checkCancellation()
                         phase = .success(Self.image(image))
+                        DecodedImageCache.noteSuccess(url)
                         NotificationCenter.default.post(
                             name: .readerImageFinished, object: url, userInfo: ["success": true])
                         return

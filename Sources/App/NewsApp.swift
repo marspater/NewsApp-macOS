@@ -430,6 +430,8 @@ struct ListViewCommands: Commands {
             }
             .pickerStyle(.inline)
             .labelsHidden()
+            // No list in front (a story is open): there is no list whose layout the command could change.
+            .disabled(listActions == nil)
 
             Toggle("Group Stories by Event", isOn: $groupsEvents)
                 .disabled(listActions?.canGroupStories != true)

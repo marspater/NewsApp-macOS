@@ -409,6 +409,9 @@ struct ArticleListView: View {
             } action: {
                 columnSize = $0
             }
+            // The Today edition's rows pass under the floating sidebar, so the page must not cut them at the
+            // column's edge.
+            .scrollClipDisabled(isTodayEdition && Self.rowsPassUnderSidebar)
             // An empty list keeps its masthead at the top and centers its state in the visible area.
             .overlay { emptyListOverlay }
             .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
@@ -1216,6 +1219,12 @@ struct ArticleListView: View {
         case (true, false): return "Showing one card per event. Show every story on its own (G)"
         case (false, false): return "Showing every story on its own. Group stories of the same event (G)"
         }
+    }
+
+    /// macOS 26 and later float the sidebar over the content.
+    static var rowsPassUnderSidebar: Bool {
+        if #available(macOS 26, *) { return true }
+        return false
     }
 
     static var mastheadScrollID: String { "list-masthead" }

@@ -5159,8 +5159,13 @@ actor DatabaseEngine {
     ) throws -> [(
         id: String, link: String, eventID: String?
     )] {
-        // ponytail: at most 2,000 recent candidates per pass, matching the clustering bound.
+        // ponytail: at most 2,000 recent candidates per pass, matching the clustering bound. The stories in `first`
+        // sort ahead of the cap, so one outside the newest 2,000 is still looked up.
         let scope = collectionScope()
+        let priority = first.sorted()
+        // An expression, not a bare integer, which ORDER BY would read as a result column number.
+        let priorityRank =
+            priority.isEmpty ? "(1 + 0)" : "a.id IN (\(priority.map { _ in "?" }.joined(separator: ",")))"
         let rows = try eventRows(
             """
             SELECT a.id, a.canonical_url, m.event_id FROM articles a
@@ -5168,11 +5173,12 @@ actor DatabaseEngine {
             WHERE \(Self.articleDateOrder) >= ? AND \(Self.visibleArticle) \(scope.sql)
                 AND NOT \(Self.mutedArticle)
                 AND NOT EXISTS (SELECT 1 FROM story_images si WHERE si.article_id = a.id)
-            ORDER BY (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
+            ORDER BY \(priorityRank) DESC,
+                (SELECT count(*) FROM event_members peer WHERE peer.event_id = m.event_id) DESC, \(Self.articleDateOrder) DESC, a.id
             LIMIT 2000;
             """,
             [.real(activeSince.timeIntervalSince1970)] + scope.params.map { .text($0.val as? String ?? "") }
-                + [.text(muting.sourceParameter), .text(muting.topicParameter)])
+                + [.text(muting.sourceParameter), .text(muting.topicParameter)] + priority.map { .text($0) })
         var results: [(id: String, link: String, eventID: String?)] = []
         var picturedEvents: [String: Bool] = [:]
         // Stories the reader is looking at (`first`) come before the rest, each group in the order above.
