@@ -34,11 +34,14 @@ enum ReaderDictionaryLookup {
     static func word(
         at point: NSPoint,
         in text: String,
+        lineSpacing: CGFloat = 0,
         font: NSFont = NSFont.systemFont(ofSize: 14),
         containerSize: NSSize
     ) -> String? {
         guard !text.isEmpty, containerSize.width > 0, containerSize.height > 0 else { return nil }
-        let textStorage = NSTextStorage(string: text, attributes: [.font: font])
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = lineSpacing
+        let textStorage = NSTextStorage(string: text, attributes: [.font: font, .paragraphStyle: paragraph])
         let layoutManager = NSLayoutManager()
         let textContainer = NSTextContainer(size: containerSize)
         textContainer.lineFragmentPadding = 0
@@ -93,6 +96,7 @@ enum ReaderDictionaryLookup {
     /// Triggers dictionary lookup for selected text or word under point within a view.
     static func performLookup(
         for fallbackText: String,
+        lineSpacing: CGFloat = 0,
         font: NSFont = NSFont.systemFont(ofSize: 14),
         at pointInView: NSPoint? = nil,
         in view: NSView? = nil
@@ -116,7 +120,10 @@ enum ReaderDictionaryLookup {
             localPoint = .zero
         }
 
-        if let word = word(at: localPoint, in: fallbackText, font: font, containerSize: targetView.bounds.size) {
+        if let word = word(
+            at: localPoint, in: fallbackText, lineSpacing: lineSpacing, font: font,
+            containerSize: targetView.bounds.size)
+        {
             showDefinition(for: word, at: localPoint, in: targetView)
         } else {
             showDefinition(for: fallbackText, at: localPoint, in: targetView)
@@ -186,6 +193,7 @@ final class LookUpBridgeCoordinator {
 /// Attaches dictionary Look Up via force click, long press, context menu, and ⌃⌘D (Issue #1207).
 struct ReaderLookUpModifier: ViewModifier {
     let text: String
+    var lineSpacing: CGFloat = 0
     var font: NSFont = NSFont.systemFont(ofSize: 14)
     @State private var coordinator = LookUpBridgeCoordinator()
 
@@ -208,7 +216,7 @@ struct ReaderLookUpModifier: ViewModifier {
                 .keyboardShortcut("d", modifiers: [.control, .command])
             }
             .background {
-                ReaderForceClickBridge(text: text, font: font, coordinator: coordinator)
+                ReaderForceClickBridge(text: text, lineSpacing: lineSpacing, font: font, coordinator: coordinator)
                     .accessibilityHidden(true)
             }
     }
@@ -216,6 +224,7 @@ struct ReaderLookUpModifier: ViewModifier {
     private func triggerLookup() {
         ReaderDictionaryLookup.performLookup(
             for: text,
+            lineSpacing: lineSpacing,
             font: font,
             in: coordinator.view
         )
@@ -224,6 +233,7 @@ struct ReaderLookUpModifier: ViewModifier {
 
 struct ReaderForceClickBridge: NSViewRepresentable {
     let text: String
+    let lineSpacing: CGFloat
     let font: NSFont
     let coordinator: LookUpBridgeCoordinator
 
@@ -231,6 +241,7 @@ struct ReaderForceClickBridge: NSViewRepresentable {
         let view = ForceClickMonitorView()
         view.text = text
         view.font = font
+        view.lineSpacing = lineSpacing
         coordinator.view = view
         return view
     }
@@ -238,23 +249,29 @@ struct ReaderForceClickBridge: NSViewRepresentable {
     func updateNSView(_ nsView: ForceClickMonitorView, context _: Context) {
         nsView.text = text
         nsView.font = font
+        nsView.lineSpacing = lineSpacing
         coordinator.view = nsView
     }
 }
 
 final class ForceClickMonitorView: NSView {
     var text: String = ""
+    var lineSpacing: CGFloat = 0
     var font: NSFont = NSFont.systemFont(ofSize: 14)
     nonisolated(unsafe) private var monitor: Any?
+    /// One force click is one lookup: pressure keeps reporting stage 2 while the button stays down.
+    private var forceClickLatched = false
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil && monitor == nil {
             monitor = NSEvent.addLocalMonitorForEvents(matching: [.pressure]) { [weak self] event in
                 guard let self = self, let window = self.window, event.window == window else { return event }
-                if event.stage == 2 {
+                if event.stage < 2 { self.forceClickLatched = false }
+                if event.stage == 2, !self.forceClickLatched {
                     let pointInView = self.convert(event.locationInWindow, from: nil)
                     if self.bounds.contains(pointInView) {
+                        self.forceClickLatched = true
                         self.triggerForceClick(at: pointInView)
                     }
                 }
@@ -273,7 +290,7 @@ final class ForceClickMonitorView: NSView {
     }
 
     private func triggerForceClick(at point: NSPoint) {
-        ReaderDictionaryLookup.performLookup(for: text, font: font, at: point, in: self)
+        ReaderDictionaryLookup.performLookup(for: text, lineSpacing: lineSpacing, font: font, at: point, in: self)
     }
 
     /// The text system measures from the top-left, so points in this view must too.
@@ -287,7 +304,9 @@ final class ForceClickMonitorView: NSView {
 
 extension View {
     /// Enables system dictionary Look Up on word via force click, long press, context menu, and ⌃⌘D.
-    func readerLookUp(text: String, font: NSFont = NSFont.systemFont(ofSize: 14)) -> some View {
-        modifier(ReaderLookUpModifier(text: text, font: font))
+    func readerLookUp(text: String, lineSpacing: CGFloat = 0, font: NSFont = NSFont.systemFont(ofSize: 14))
+        -> some View
+    {
+        modifier(ReaderLookUpModifier(text: text, lineSpacing: lineSpacing, font: font))
     }
 }

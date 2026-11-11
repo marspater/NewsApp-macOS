@@ -119,7 +119,7 @@ struct NotesHighlightsView: View {
         .buttonStyle(.plain)
         .padding(.vertical, AppSpacing.xxs)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(storyTitle), \(noteCount) passages in reading order")
+        .accessibilityLabel("\(storyTitle), \(group.source), \(noteCount) passages in reading order")
         .accessibilityHint("Opens the story")
     }
 

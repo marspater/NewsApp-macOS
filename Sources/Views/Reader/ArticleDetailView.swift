@@ -829,6 +829,7 @@ struct ArticleDetailView: View {
                 .textSelection(.enabled)
                 .readerLookUp(
                     text: block.text,
+                    lineSpacing: AppSpacing.xxs * readerTextScale,
                     font: ReaderDictionaryLookup.headingFont(
                         level: block.kind == .heading ? 2 : 3, theme: themeManager.articleTheme, scale: readerTextScale)
                 )
@@ -852,6 +853,7 @@ struct ArticleDetailView: View {
                 .textSelection(.enabled)
                 .readerLookUp(
                     text: block.text,
+                    lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
                     font: isLead
                         ? ReaderDictionaryLookup.leadFont(for: themeManager.articleTheme, scale: readerTextScale)
                         : ReaderDictionaryLookup.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
@@ -876,6 +878,7 @@ struct ArticleDetailView: View {
                     .textSelection(.enabled)
                     .readerLookUp(
                         text: block.text,
+                        lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
                         font: ReaderDictionaryLookup.bodyFont(
                             for: themeManager.articleTheme, scale: readerTextScale, italic: true))
             }
@@ -893,6 +896,7 @@ struct ArticleDetailView: View {
                     .textSelection(.enabled)
                     .readerLookUp(
                         text: block.text,
+                        lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
                         font: ReaderDictionaryLookup.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
@@ -905,6 +909,7 @@ struct ArticleDetailView: View {
                     .textSelection(.enabled)
                     .readerLookUp(
                         text: block.text,
+                        lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
                         font: ReaderDictionaryLookup.codeFont(for: themeManager.articleTheme, scale: readerTextScale)
                     )
                     .fixedSize(horizontal: true, vertical: false)
@@ -921,6 +926,7 @@ struct ArticleDetailView: View {
                 .textSelection(.enabled)
                 .readerLookUp(
                     text: block.text,
+                    lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
                     font: ReaderDictionaryLookup.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
         default:
             readerBoxedBlock(block, index: index, overlay: overlay)
@@ -942,6 +948,7 @@ struct ArticleDetailView: View {
                     .textSelection(.enabled)
                     .readerLookUp(
                         text: block.text,
+                        lineSpacing: AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale,
                         font: ReaderDictionaryLookup.leadFont(
                             for: themeManager.articleTheme, scale: readerTextScale, italic: true))
                 Divider().opacity(Self.dividerOpacity(for: contrast))
