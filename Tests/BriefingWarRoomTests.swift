@@ -39,7 +39,7 @@ enum BriefingWarRoomTests {
         regionFilter()
         tensionCaptions()
         situationalAwarenessSizing()
-        acceptanceTests1201()
+        await acceptanceTests1201()
         await appleIntelligenceAvailabilityTests()
         await runtimeDiagnosticsTests()
         print("Finished \(checks) Briefing war room checks with \(failures) failures.")
@@ -258,6 +258,12 @@ enum BriefingWarRoomTests {
         check(sitrepNoTrailing.width == 1200, "Sitrep expands to full width when trailing column is absent")
         check(sitrepNoTrailing.minY == heroHeight + spacing, "Sitrep sits under hero with no holes")
 
+        // A lone trailing module has no column to sit beside and takes the full width:
+        let trailingOnly = BriefingSituationalLayout.computeFrames(
+            width: 1200, heroHeight: nil, trailingHeight: trailingHeight, sitrepHeight: nil)
+        check(trailingOnly.trailing?.minX == 0, "A lone trailing module starts at the leading edge")
+        check(trailingOnly.trailing?.width == 1200, "A lone trailing module takes the full width")
+
         // 5. Hiding hero module leaves no hole:
         let noHero = BriefingSituationalLayout.computeFrames(
             width: 600,
@@ -270,7 +276,7 @@ enum BriefingWarRoomTests {
         check(noHero.sitrep?.minY == trailingHeight + spacing, "Sitrep follows trailing with no gap")
     }
 
-    static func acceptanceTests1201() {
+    static func acceptanceTests1201() async {
         print("  - Testing acceptance criteria for #1201...")
         // 1. Hero carousel up to 10 stories and rotates every 10 seconds:
         check(BriefingView.heroLimit == 10, "Hero shows up to ten stories (#1201)")
@@ -296,9 +302,11 @@ enum BriefingWarRoomTests {
         var curatedStory = baseStory
         curatedStory.imageUrl = "https://example.com/aj-page-lookup.jpg"
         var delivery = NotificationDelivery(mode: .full)
-        delivery.curated = { _ in curatedStory }
+        let withPhoto = curatedStory
+        delivery.curated = { _ in withPhoto }
+        let delivered = await delivery.curated(baseStory)
         check(
-            curatedStory.imageUrl == "https://example.com/aj-page-lookup.jpg",
+            delivered.imageUrl == "https://example.com/aj-page-lookup.jpg",
             "Banner gains recorded photo from page lookup")
 
         // 5. Briefing priority module opens story on whole card click:
@@ -317,7 +325,7 @@ enum BriefingWarRoomTests {
                     isSaved: false)
             ]
         )
-        actions.onOpenEvent(summary)
+        actions.open(.event(summary, representative: baseStory, visibleMembers: [baseStory]))
         check(openedEventID == "event-1", "Clicking Priority developments card opens its story (#1201)")
     }
 
@@ -343,6 +351,12 @@ enum BriefingWarRoomTests {
         check(
             AppleIntelligenceAvailability.resolveState(aiEnabled: true, osVersion: v14) == .macOSVersionTooOld,
             "macOS 14 resolves to macOSVersionTooOld"
+        )
+        let v15 = OperatingSystemVersion(majorVersion: 15, minorVersion: 0, patchVersion: 0)
+        check(
+            AppleIntelligenceAvailability.resolveState(
+                aiEnabled: true, osVersion: v15, foundationModelsAvailability: "available") == .macOSVersionTooOld,
+            "macOS 15 to 25 resolves to macOSVersionTooOld even when the model reports available"
         )
         check(
             AppleIntelligenceAvailability.resolveState(aiEnabled: false, osVersion: v14) == .appDisabled,

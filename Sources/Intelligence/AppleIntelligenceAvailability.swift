@@ -159,7 +159,7 @@ public final class AppleIntelligenceAvailability {
     ) -> AppleIntelligenceState {
         guard aiEnabled else { return .appDisabled }
 
-        if osVersion.majorVersion < 15 {
+        if osVersion.majorVersion < 26 {
             return .macOSVersionTooOld
         }
 

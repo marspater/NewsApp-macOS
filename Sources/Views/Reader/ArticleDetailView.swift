@@ -74,6 +74,8 @@ struct ArticleDetailView: View {
     @State private var contentState: ArticleContentState = .loading
 
     @State private var experienceMode: ReaderExperienceMode = .sourcePublication
+    /// Identifies the latest overview load so an older one cannot overwrite its result.
+    @State private var overviewLoadSerial = 0
     @State private var currentOverview: EventOverviewDocument?
     @State private var overviewLoadedInputHash: String?
     @State private var highlightedPassage: String? = nil
@@ -2014,9 +2016,12 @@ struct ArticleDetailView: View {
     private func loadEventOverviewForActiveArticle() async {
         let articleID = activeArticle.id
         let inputHash = currentArticle.publisherInputHash
+        // A newer load (membership changed during Check for Updates) supersedes this one; only the latest may write state.
+        overviewLoadSerial += 1
+        let serial = overviewLoadSerial
         guard !Task.isCancelled else { return }
         let summaries = (try? await articleStore.eventFeedSummaries(for: [articleID])) ?? []
-        guard !Task.isCancelled, activeArticle.id == articleID,
+        guard !Task.isCancelled, activeArticle.id == articleID, overviewLoadSerial == serial,
             currentArticle.publisherInputHash == inputHash
         else { return }
         guard let summary = summaries.first, summary.isConfirmed, summary.sources.count >= 2 else {
@@ -2050,7 +2055,7 @@ struct ArticleDetailView: View {
         }
 
         let members = (try? await articleStore.eventMemberArticles(eventID: eventID)) ?? []
-        guard !Task.isCancelled, activeArticle.id == articleID,
+        guard !Task.isCancelled, activeArticle.id == articleID, overviewLoadSerial == serial,
             currentArticle.publisherInputHash == inputHash
         else { return }
         let resolvedMembers = members.isEmpty ? [activeArticle] : members
@@ -2082,7 +2087,7 @@ struct ArticleDetailView: View {
             readerArticleID: articleID
         )
 
-        guard !Task.isCancelled, activeArticle.id == articleID,
+        guard !Task.isCancelled, activeArticle.id == articleID, overviewLoadSerial == serial,
             currentArticle.publisherInputHash == inputHash
         else { return }
 

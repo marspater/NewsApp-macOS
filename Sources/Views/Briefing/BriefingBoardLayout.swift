@@ -235,7 +235,7 @@ struct BriefingSituationalLayout: Layout {
         minimumWidth: CGFloat = defaultMinimumWidth,
         spacing: CGFloat = AppLayout.cardGap
     ) -> ModuleFrames {
-        if width >= minimumWidth, let trailingHeight {
+        if width >= minimumWidth, let trailingHeight, heroHeight != nil || sitrepHeight != nil {
             let leadingWidth = ((width - spacing) * leadingFraction).rounded()
             let trailingWidth = width - spacing - leadingWidth
 
@@ -291,7 +291,8 @@ struct BriefingSituationalLayout: Layout {
         }
 
         let leadingWidth = ((width - spacing) * leadingFraction).rounded()
-        let isWide = width >= minimumWidth && trailingIndex != nil
+        // A lone trailing module has no leading column to sit beside, so it takes the full width.
+        let isWide = width >= minimumWidth && trailingIndex != nil && (heroIndex != nil || sitrepIndex != nil)
         let targetLeftWidth = isWide ? leadingWidth : width
         let targetTrailingWidth = isWide ? (width - spacing - leadingWidth) : width
 
