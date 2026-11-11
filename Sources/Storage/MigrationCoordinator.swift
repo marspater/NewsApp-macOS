@@ -157,13 +157,15 @@ actor MigrationCoordinator {
             // Mark migration complete ONLY AFTER every step succeeded!
             if unreadable {
                 stats.failures += 1
-                logger.error("Some legacy data could not be read and was not imported. Legacy data preserved.")
+                logger.warning(
+                    "Legacy migration completed with unreadable parts: some legacy data could not be read and was preserved without importing."
+                )
+            } else {
+                logger.info(
+                    "Legacy migration completed successfully: \(stats.articlesImported) articles imported, \(stats.savedStories) saved stories, \(stats.readStates) read states, \(stats.duplicatesMerged) duplicates merged."
+                )
             }
             userDefaults.set(Self.currentMigrationVersion, forKey: Self.migrationVersionKey)
-
-            logger.info(
-                "Legacy migration completed successfully: \(stats.articlesImported) articles imported, \(stats.savedStories) saved stories, \(stats.readStates) read states, \(stats.duplicatesMerged) duplicates merged."
-            )
             return stats
         } catch {
             // Legacy data is never removed, so the next launch repeats the import.

@@ -65,6 +65,10 @@ extension NewsTests {
             ("testUserNotesStorageAndFTS", { try await testUserNotesStorageAndFTS() }),
             ("testPublisherRevisionTextStorage", { try await testPublisherRevisionTextStorage() }),
             ("testGranularCacheClearingAndRetention", { try await testGranularCacheClearingAndRetention() }),
+            ("testWorldTensionBackupAndRestoreSafety", { try await testWorldTensionBackupAndRestoreSafety() }),
+            ("testPruneResilienceWhenVacuumFails", { try await testPruneResilienceWhenVacuumFails() }),
+            ("testStorageHardeningItems", { try await testStorageHardeningItems() }),
+            ("testMovedFeedSubscriptionMigration", { try await testMovedFeedSubscriptionMigration() }),
         ]
         try await runSuite(tests)
     }
@@ -2100,6 +2104,232 @@ extension NewsTests {
 
         // 5. Test CacheManager methods
         // Do not clear the user's WebKit cache from a unit test.
+    }
+
+    static func testWorldTensionBackupAndRestoreSafety() async throws {
+        print("  - Testing World Tension backup and restore safety (#1203)...")
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-tension-safe-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let library = directory.appendingPathComponent("news.sqlite3")
+        let sideFile = URL(fileURLWithPath: library.path + ".world-tension-v2.json")
+        let db = DatabaseEngine(path: library.path)
+        try await db.open()
+
+        // 1. Unreadable side file at backup time fails the backup cleanly (#1203).
+        try fileManager.createDirectory(at: sideFile, withIntermediateDirectories: false)
+        let archive = directory.appendingPathComponent("backup.sqlite3")
+        var backupFailed = false
+        do {
+            try await db.writeBackup(to: archive, settings: Data())
+        } catch {
+            backupFailed = true
+        }
+        assertTrue(backupFailed, "Backup fails cleanly when the side file exists but cannot be read as data")
+        try fileManager.removeItem(at: sideFile)
+
+        // 2. Restoring a backup without tension entry keeps current local tension (#1203).
+        try Data("[\"local-history\"]".utf8).write(to: sideFile)
+        let cleanArchive = directory.appendingPathComponent("clean-backup.sqlite3")
+        let emptyDb = DatabaseEngine(path: directory.appendingPathComponent("empty.sqlite3").path)
+        try await emptyDb.open()
+        try await emptyDb.writeBackup(to: cleanArchive, settings: Data())
+        await emptyDb.close()
+
+        _ = try await db.restoreBackup(from: cleanArchive)
+        assertEqual(
+            try Data(contentsOf: sideFile), Data("[\"local-history\"]".utf8),
+            "Restoring a backup without tension entry preserves existing local history")
+    }
+
+    @MainActor
+    static func testPruneResilienceWhenVacuumFails() async throws {
+        print("  - Testing prune resilience when incremental vacuum fails (#1204)...")
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-prune-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let dbPath = directory.appendingPathComponent("prune.sqlite3").path
+        let db = DatabaseEngine(path: dbPath)
+        try await db.open()
+        let store = ArticleStore(database: db)
+        await store.initialize()
+
+        let now = Date()
+        let oldDate = now.addingTimeInterval(-40 * 86400)
+        let oldArticle = FeedArticle(
+            storedID: "old-1", title: "Old report", link: "https://test.com/old",
+            guid: "old-1", description: "desc", pubDate: oldDate, source: "Source")
+        try await db.upsertArticles([oldArticle])
+        try await db.markRead(articleId: "old-1", isRead: true)
+
+        await store.refreshState()
+        assertEqual(store.articles.count, 1, "Store has 1 article before prune")
+
+        // Set vacuum failure hook
+        await db.setPostPruneVacuumAction {
+            throw NSError(domain: "test", code: -1, userInfo: [NSLocalizedDescriptionKey: "Simulated vacuum busy"])
+        }
+
+        let pruned = await store.pruneOldArticles(keepReadDays: 30)
+        assertEqual(pruned, 1, "Committed prune count is returned even when vacuum fails")
+        assertEqual(store.articles.count, 0, "Store state is refreshed after prune with vacuum failure")
+        assertEqual(try await db.fetchArticles(limit: nil).count, 0, "Old article was deleted from database")
+    }
+
+    @MainActor
+    static func testStorageHardeningItems() async throws {
+        print("  - Testing storage hardening items (#1205)...")
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-hardening-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let dbPath = directory.appendingPathComponent("test.sqlite3").path
+        let db = DatabaseEngine(path: dbPath)
+        try await db.open()
+
+        // 1. Foreign-key check on restored copy (#1205)
+        let orphanArchive = directory.appendingPathComponent("orphan-backup.sqlite3")
+        try await db.writeBackup(to: orphanArchive, settings: Data())
+        var handle: OpaquePointer?
+        assertEqual(sqlite3_open_v2(orphanArchive.path, &handle, SQLITE_OPEN_READWRITE, nil), SQLITE_OK, "Open archive")
+        assertEqual(
+            sqlite3_exec(handle, "PRAGMA foreign_keys = OFF;", nil, nil, nil), SQLITE_OK, "Turn foreign keys off")
+        assertEqual(
+            sqlite3_exec(
+                handle,
+                "INSERT INTO article_feeds (article_id, feed_url) VALUES ('orphan-story', 'https://orphan.test');",
+                nil, nil, nil), SQLITE_OK, "Insert orphan row")
+        let detectedOrphans = DatabaseEngine.foreignKeyCheck(on: handle!)
+        assertEqual(detectedOrphans.count, 1, "Foreign key check detects orphan row")
+        sqlite3_close(handle)
+
+        var restoreFailed = false
+        do {
+            _ = try await db.restoreBackup(from: orphanArchive)
+        } catch {
+            restoreFailed = true
+        }
+        assertTrue(restoreFailed, "Restoring a backup with foreign-key orphans is refused")
+
+        // 2. Bind parameter error handling (#1205)
+        var bindFailed = false
+        var testStmt: OpaquePointer?
+        assertEqual(sqlite3_open(":memory:", &handle), SQLITE_OK, "Open memory db")
+        assertEqual(sqlite3_prepare_v2(handle, "SELECT ?;", -1, &testStmt, nil), SQLITE_OK, "Prepare dummy statement")
+        do {
+            try await db.bind([("unknownType", 123)], to: testStmt)
+        } catch {
+            bindFailed = true
+        }
+        sqlite3_finalize(testStmt)
+        sqlite3_close(handle)
+        assertTrue(bindFailed, "bind throws on unsupported parameter type")
+
+        // 3. Exact embedding blob size: 1537 bytes rejected (#1205)
+        let rawDb = directory.appendingPathComponent("embeddings.sqlite3").path
+        let embedDb = DatabaseEngine(path: rawDb)
+        try await embedDb.open()
+        let sampleArticle = FeedArticle(
+            storedID: "oversized", title: "Oversized report", link: "https://test.com/oversized",
+            guid: "oversized", description: "desc", pubDate: Date(), source: "Source")
+        try await embedDb.upsertArticles([sampleArticle])
+        var memDb: OpaquePointer?
+        assertEqual(sqlite3_open_v2(rawDb, &memDb, SQLITE_OPEN_READWRITE, nil), SQLITE_OK, "Open embed db")
+        var insertStmt: OpaquePointer?
+        assertEqual(
+            sqlite3_prepare_v2(
+                memDb,
+                "INSERT INTO article_embeddings (article_id, model_version, vector) VALUES ('oversized', 1, ?);",
+                -1, &insertStmt, nil), SQLITE_OK, "Prepare embedding insert")
+        let oversizedData = Data(repeating: 0x3F, count: 1537)
+        _ = oversizedData.withUnsafeBytes { raw in
+            sqlite3_bind_blob(insertStmt, 1, raw.baseAddress, 1537, nil)
+        }
+        assertEqual(sqlite3_step(insertStmt), SQLITE_DONE, "Step embedding insert")
+        sqlite3_finalize(insertStmt)
+        sqlite3_close(memDb)
+
+        let fetchedOversized = try await embedDb.fetchArticleEmbeddings(articleIDs: ["oversized"], modelVersion: 1)
+        assertTrue(
+            fetchedOversized["oversized"] == nil, "A 1537-byte embedding blob is ignored by exact byte count check")
+        await embedDb.close()
+
+        // 4. Atomic toggles (#1205)
+        let store = ArticleStore(database: db)
+        await store.initialize()
+        let testArticle = FeedArticle(
+            storedID: "toggle-test", title: "Toggle report", link: "https://test.com/toggle",
+            guid: "toggle-guid", description: "desc", pubDate: Date(), source: "Source")
+        try await db.upsertArticles([testArticle])
+
+        assertFalse(store.isRead("toggle-test"), "Article starts unread")
+        await store.toggleRead(id: "toggle-test")
+        assertTrue(store.isRead("toggle-test"), "Atomic toggleRead marks article read")
+        await store.toggleRead(id: "toggle-test")
+        assertFalse(store.isRead("toggle-test"), "Atomic toggleRead marks article unread")
+
+        let saved1 = await store.toggleSave(article: testArticle)
+        assertTrue(saved1, "Atomic toggleSave saves article")
+        let saved2 = await store.toggleSave(article: testArticle)
+        assertFalse(saved2, "Atomic toggleSave unsaves article")
+    }
+
+    @MainActor
+    static func testMovedFeedSubscriptionMigration() async throws {
+        print("  - Testing Phys.org catalog feed address and moved feed migration (#1213)...")
+        // 1. Catalog entry is https://phys.org/rss-feed/
+        let catalog = FeedCatalog.allFeeds
+        let physOrg = catalog.first { $0.id == "phys-org" }
+        assertEqual(
+            physOrg?.url, "https://phys.org/rss-feed/", "Catalog entry uses direct HTTPS URL with trailing slash")
+
+        // 2. Settings automatically migrates old URL
+        let suite = "test.moved.feed.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(["https://phys.org/rss-feed"], forKey: AppSettings.feedURLsKey)
+        defaults.set(["https://phys.org/rss-feed"], forKey: AppSettings.starredFeedURLsKey)
+        defaults.set(["https://phys.org/rss-feed": 1_700_000_000.0], forKey: AppSettings.starredFeedTimesKey)
+
+        let settings = AppSettings(defaults: defaults)
+        assertTrue(settings.feedURLs.contains("https://phys.org/rss-feed/"), "feedURLs migrated to new URL")
+        assertFalse(settings.feedURLs.contains("https://phys.org/rss-feed"), "Old URL removed from feedURLs")
+        assertTrue(
+            settings.starredFeedURLs.contains("https://phys.org/rss-feed/"), "starredFeedURLs migrated to new URL")
+        assertEqual(
+            settings.starredFeedTimes["https://phys.org/rss-feed/"], Date(timeIntervalSince1970: 1_700_000_000.0),
+            "Star time preserved")
+
+        // 3. Database moveFeed moves articles and article_feeds
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory.appendingPathComponent("news-move-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: directory) }
+
+        let dbPath = directory.appendingPathComponent("move.sqlite3").path
+        let db = DatabaseEngine(path: dbPath)
+        try await db.open()
+
+        let article = FeedArticle(
+            storedID: "phys-1", identityFeedURL: "https://phys.org/rss-feed", title: "Quantum physics update",
+            link: "https://phys.org/news/1", guid: "phys-1", description: "desc", pubDate: Date(), source: "Phys.org")
+        try await db.upsertArticles([article])
+        let beforeArticles = try await db.eventRows(
+            "SELECT id FROM articles WHERE feed_url = ?;", [.text("https://phys.org/rss-feed")])
+        assertEqual(beforeArticles.count, 1, "Article saved under old URL")
+
+        try await db.moveFeed(from: "https://phys.org/rss-feed", to: "https://phys.org/rss-feed/")
+        let afterArticles = try await db.eventRows(
+            "SELECT id FROM articles WHERE feed_url = ?;", [.text("https://phys.org/rss-feed/")])
+        assertEqual(afterArticles.count, 1, "Articles moved to new feed URL")
+        let oldArticles = try await db.eventRows(
+            "SELECT id FROM articles WHERE feed_url = ?;", [.text("https://phys.org/rss-feed")])
+        assertEqual(oldArticles.count, 0, "No articles under old URL")
     }
 
 }

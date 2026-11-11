@@ -314,6 +314,8 @@ enum DiagnosticsExport {
         }
         let integrity = try await database.eventRows("PRAGMA integrity_check(20);").compactMap { $0.first ?? nil }
         lines.append("Integrity check: \(integrity.joined(separator: "; "))")
+        let foreignKeys = try await database.foreignKeyCheck()
+        lines.append("Foreign key check: \(foreignKeys.isEmpty ? "ok" : foreignKeys.joined(separator: "; "))")
         let oldest = try await database.eventRows("SELECT min(published_at), max(published_at) FROM articles;")
         let dates = (oldest.first ?? []).map {
             $0.flatMap(Double.init).map { Date(timeIntervalSince1970: $0).formatted(.iso8601) } ?? "none"

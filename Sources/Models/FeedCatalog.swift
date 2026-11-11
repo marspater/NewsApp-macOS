@@ -378,7 +378,7 @@ enum FeedCatalog {
             fullText: .full, hasImages: true, availability: .available),
         CatalogFeed(
             id: "phys-org", title: "Phys.org · Spotlight", publisher: "Phys.org",
-            url: "https://phys.org/rss-feed",
+            url: "https://phys.org/rss-feed/",
             language: "en", region: "GB", topic: .science, set: .scienceHealth,
             fullText: .summary, hasImages: true, availability: .available),
         CatalogFeed(
