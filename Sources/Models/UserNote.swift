@@ -137,33 +137,30 @@ enum NoteAnchor {
     }
 }
 
+extension UserNote {
+    /// Returns true if this note appears earlier in reading order than `other`.
+    func isOrderedBeforeInReadingOrder(_ other: UserNote) -> Bool {
+        if paragraphIndex != other.paragraphIndex {
+            return paragraphIndex < other.paragraphIndex
+        }
+        if charStart != other.charStart {
+            return charStart < other.charStart
+        }
+        return createdAt < other.createdAt
+    }
+}
+
 extension Collection where Element == UserNote {
     /// Notes sorted in story reading order: by paragraph index, then character start, then creation date.
     func sortedInReadingOrder() -> [UserNote] {
-        sorted {
-            if $0.paragraphIndex != $1.paragraphIndex {
-                return $0.paragraphIndex < $1.paragraphIndex
-            }
-            if $0.charStart != $1.charStart {
-                return $0.charStart < $1.charStart
-            }
-            return $0.createdAt < $1.createdAt
-        }
+        sorted { $0.isOrderedBeforeInReadingOrder($1) }
     }
 }
 
 extension Collection where Element == UserNoteListing {
     /// Listings sorted in story reading order.
     func sortedInReadingOrder() -> [UserNoteListing] {
-        sorted {
-            if $0.note.paragraphIndex != $1.note.paragraphIndex {
-                return $0.note.paragraphIndex < $1.note.paragraphIndex
-            }
-            if $0.note.charStart != $1.note.charStart {
-                return $0.note.charStart < $1.note.charStart
-            }
-            return $0.note.createdAt < $1.note.createdAt
-        }
+        sorted { $0.note.isOrderedBeforeInReadingOrder($1.note) }
     }
 }
 

@@ -82,12 +82,11 @@ enum KnowledgeExport {
                 lines += ["### My highlights and notes", ""]
                 if sortedNotes.count > 1 {
                     lines += ["_Story passages in reading order (\(sortedNotes.count)):_", ""]
-                    for (i, note) in sortedNotes.enumerated() {
+                }
+                for (i, note) in sortedNotes.enumerated() {
+                    if sortedNotes.count > 1 {
                         lines += ["#### Passage \(i + 1)", ""]
-                        lines += note.selectedText.components(separatedBy: .newlines).map { "> " + escapeMarkdown($0) }
-                        lines += ["", escapeMarkdown(note.noteBody), ""]
                     }
-                } else if let note = sortedNotes.first {
                     lines += note.selectedText.components(separatedBy: .newlines).map { "> " + escapeMarkdown($0) }
                     lines += ["", escapeMarkdown(note.noteBody), ""]
                 }
