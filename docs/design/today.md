@@ -2,7 +2,7 @@
 
 How the Today edition looks and behaves: lanes, the six card variants, The Lead, scrolling, keyboard focus, updates and states (epic Z, #932). [DESIGN.md](DESIGN.md) holds the design language this extends, and its section 8.8 points here. Quality bars, thresholds and the shadow evaluation are in the [specification](../plans/2026-11-09-today-edition-spec.md). Unread, Saved Stories, History, Smart Binders and search keep the list and grid of DESIGN.md section 8.2.
 
-**Status.** The card variants exist (Z6, #938: `StoryCardVariant` and `StoryCardMetadata` in `Sources/Views/List/StoryCardVariant.swift`). Z7 (#1174) fills the metadata from the lane assignment and the event (`StoryCardMetadata.init(_:differingAccount:)`), and Z3 (#935) and Z4 (#936) build The Lead and the lanes. A field with no data is hidden, never faked. The visual references below are the target the views are compared with.
+**Status.** The card variants exist (Z6, #938: `StoryCardVariant` and `StoryCardMetadata` in `Sources/Views/List/StoryCardVariant.swift`). Z7 (#1174) fills the metadata from the lane assignment and the event (`StoryCardMetadata.init(_:differingAccount:)`). The Lead is the hero carousel's `LeadPresentation` (Z3, #935), and the page is `TodayEditionView` over a `TodayEdition`, with `TodayFocusMap` holding the keyboard rules (Z4, #936), all under `Sources/Views/Today/`. A field with no data is hidden, never faked. The visual references below are the target the views are compared with.
 
 ## Visual references
 
@@ -43,11 +43,13 @@ A conditional lane needs three stories that clear its bar. Below that it is abse
 
 Top to bottom, in one vertical `ScrollView`: the masthead (DESIGN.md section 8.1), The Lead, the conditional lanes in the page order of the table above, then The Latest.
 
-**Lane header.** The name in `AppTypography.sectionTitle` with the heading trait, the description beneath it in `caption` and the secondary color, and no count.
+**Lane header.** The name in `AppTypography.sectionTitle` with the heading trait, the description beneath it in `caption` and the secondary color, and no count. A lane row's header ends in previous and next buttons that move the row by two cards, as the visual reference shows; the row also scrolls freely.
 
-**Lane row.** A horizontal `ScrollView` with `LazyHStack`, `AppLayout.cardGap` between cards and view-aligned scrolling. No paging dots and no auto-scroll. The leading inset equals `AppLayout.pageInset`. The scrollable area extends into the leading safe area, so cards pass under the glass sidebar instead of clipping at the column edge; if macOS 15 does not allow that, cards clip there and the layout is otherwise identical. Cards in one row align their tops and end level.
+**Lane row.** A horizontal `ScrollView` with `LazyHStack`, `AppLayout.cardGap` between cards and view-aligned scrolling. No paging dots and no auto-scroll. The leading inset equals `AppLayout.pageInset`. Every card of a row is as tall as the row's tallest card. The scrollable area extends into the leading safe area, so cards pass under the glass sidebar instead of clipping at the column edge; if macOS 15 does not allow that, cards clip there and the layout is otherwise identical. Cards in one row align their tops and end level.
 
-**The Latest.** A header and the existing vertical grid of Compact cards, adaptive columns 300–420 pt, or the existing list card when the reader chooses the list layout, both paging as Today pages now.
+**The Latest.** A header and a vertical grid of Compact cards, adaptive columns 280–420 pt (`AppLayout.compactColumnMinimum`, so two columns fit the 660 pt column of the minimum window), or the existing list card when the reader chooses the list layout, both paging as Today pages now.
+
+**Grouping off.** The edition is built from stories, so it shows while Group Stories by Event is on, which is the default. With grouping off (G), Today lists every report on its own in the list or grid of DESIGN.md section 8.2, without The Lead or lanes, and G brings the edition back.
 
 **Trackpad.** A lane is a horizontal scroll view nested in the page's vertical one, and macOS arbitrates by the gesture's dominant axis at its start. No custom gesture. Shift plus wheel scrolls a row, the system behaviour. Z4 verifies this on hardware.
 
@@ -56,7 +58,7 @@ Top to bottom, in one vertical `ScrollView`: the masthead (DESIGN.md section 8.1
 A full-bleed magazine-cover hero, using the shared carousel component and the motion of DESIGN.md section 13.1.
 
 - **Image.** Touches both column edges and fades into the page, with no panel behind the text. `backgroundExtensionEffect()` on the image only carries it under the sidebar on macOS 26 and later; macOS 15 shows the same full-width image without the extension.
-- **Height.** Follows the window: 240 pt at the 600 pt minimum, growing by 0.6 pt per window point, capped at 440 pt. `AppLayout.leadStoryHeight` (360 pt) stands until Z3.
+- **Height.** Follows the window: 240 pt at the 600 pt minimum, growing by 0.6 pt per window point, capped at 440 pt (`AppLayout.leadHeight`). Z3 measures the detail column, which is the window less the toolbar and the sidebar.
 - **Headline.** System serif, white, scaling with window width from 22 to 34 pt (2.4 % of the window width), up to three lines, then the publisher's summary.
 - **Top line.** The breathing dot on the current slide while unread, "PUBLISHER · 1 OF N" as an eyebrow (position hidden with one slide), a status pill in the accent when the story has a status, and a read-time pill in gray once the time is known. Pills are content tags, not glass.
 - **Foot.** Clock glyph and time, up to three overlapping publisher marks, the publisher count, and the original-reports count in teal (DESIGN.md section 11), always the dark value because the foot sits on a dark image. Publisher marks are monograms first; favicons follow Z7.
@@ -73,7 +75,7 @@ Presentations of the one `ArticleCardView`, chosen by the lane, sharing the anat
 | Standard | Your Beat, Outside Your Usual | 320 pt | Top, 140 pt | Dek; date |
 | Feature | The Deep Read | 400 pt | Top, 3:2 | Dek; content-type tag from the classification, never from length alone; reading time; date |
 | Coverage | Any lane, when the grouping is confident | 320 pt | Top, 140 pt | Dek; publisher count, original reports in teal and up to three monograms; one attributed differing account |
-| Compact | The Latest | Adaptive 300–420 pt | Banner photo | One footer line: date and saved glyph |
+| Compact | The Latest | Adaptive 280–420 pt | Banner photo | One footer line: date and saved glyph |
 
 Headlines are serif: 15 pt on Developing, Standard, Coverage and Compact, 20 pt on Feature. A Coverage card appears only past the grouping gate in the specification; otherwise the lane's plain variant shows.
 
@@ -89,7 +91,7 @@ Headlines are serif: 15 pt on Developing, Standard, Coverage and Compact, 20 pt 
 
 One buffer and one "Show N New Stories" button in the leading toolbar (U; "Show Updates" when only placements changed) serve every lane. N counts stories new to Today across every lane.
 
-- Until the click, nothing moves: no lane appears, hides or reorders, and The Lead keeps its slides. A card whose content refreshed in place (read state, a new image, more coverage) updates in place.
+- Until the click, nothing moves: no lane appears, hides or reorders, and The Lead keeps its slides. A further page of stories joins The Latest and never a lane above it. A card whose content refreshed in place (read state, a new image, more coverage) updates in place.
 - On the click, every lane updates at once, and the page returns to the masthead and each row to its leading edge, with `AppMotion.hover` (`nil` under Reduce Motion). When a card keeps keyboard focus through the click, keeping it visible takes priority: the page and that card's row scroll only as far as needed to show it, and every other row returns to its leading edge.
 - When every listed story is from an earlier day, the refresh replaces the edition at once.
 - Closing a story applies an update that a subscription's first refresh produced while the reader was open (#782).

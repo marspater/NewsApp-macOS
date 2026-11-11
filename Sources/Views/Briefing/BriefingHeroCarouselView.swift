@@ -25,27 +25,43 @@ struct BriefingHeroCarouselView: View {
     var readIDs: Set<String> = []
     let clock: any CarouselClock
     var isReaderOpen: Bool = false
+    /// The Lead's presentation of the carousel (docs/design/today.md); nil draws the Briefing hero.
+    var lead: LeadPresentation?
+    /// The reader moved to another slide with the dots, the arrows or the arrow keys.
+    var onShow: (FeedEntry) -> Void = { _ in
+        // The Briefing hero has no observer.
+    }
     let onOpen: (FeedEntry) -> Void
 
-    @Environment(\.effectiveReduceMotion) private var reduceMotion
+    @Environment(\.effectiveReduceMotion) var reduceMotion
     @Environment(\.effectiveContrast) private var contrast
-    @State private var activeIndex: Int = 0
+    @State var activeIndex: Int = 0
     @State private var isHovered: Bool = false
     @FocusState private var isCarouselFocused: Bool
     @State private var timerResetToken: Int = 0
 
     static let autoAdvanceInterval: Double = 10.0
-    private static let crossFade = Animation.easeInOut(duration: 0.6)
+    static let crossFade = Animation.easeInOut(duration: 0.6)
 
     private var shouldTimerRun: Bool {
         !reduceMotion && !isHovered && !isCarouselFocused && !isReaderOpen && entries.count > 1
+            && lead?.focusedID == nil
     }
+
+    /// The Lead is full-bleed: no radius, border or shadow of its own.
+    private var radius: CGFloat { lead == nil ? AppRadius.card : 0 }
 
     private var timerReloadKey: String {
         "\(shouldTimerRun)-\(timerResetToken)-\(entries.map(\.id))"
     }
 
-    private var currentIndex: Int { max(0, min(activeIndex, entries.count - 1)) }
+    var currentIndex: Int { max(0, min(activeIndex, entries.count - 1)) }
+
+    /// The slide the Today list's keyboard focus names, when the entries hold it.
+    private var focusedIndex: Int? {
+        guard let focused = lead?.focusedID else { return nil }
+        return entries.firstIndex { $0.id == focused }
+    }
 
     var body: some View {
         ZStack {
@@ -54,29 +70,38 @@ struct BriefingHeroCarouselView: View {
                     .id(entries[currentIndex].id)
                     .transition(.opacity)
             }
-            if entries.count > 1 { controls }
+            if entries.count > 1 {
+                if lead != nil { leadControls } else { controls }
+            }
         }
-        .frame(height: AppLayout.leadStoryHeight)
+        .frame(height: lead?.height ?? AppLayout.leadStoryHeight)
         .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
+        // The Lead is not clipped: its image extends under the sidebar, and the image clips itself to its frame.
+        .modifier(HeroClip(radius: radius, isClipped: lead == nil))
         .background {
-            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .fill(AppColor.leadPlaceholder)
-                .shadow(
-                    color: isCarouselFocused ? AppShadow.cardFocusRingColor : AppShadow.cardRestingColor,
-                    radius: isCarouselFocused ? AppShadow.cardFocusRingRadius : AppShadow.cardRestingRadius, x: 0,
-                    y: isCarouselFocused ? AppShadow.cardFocusRingY : AppShadow.cardRestingY
-                )
+            if lead == nil {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .fill(AppColor.leadPlaceholder)
+                    .shadow(
+                        color: isCarouselFocused ? AppShadow.cardFocusRingColor : AppShadow.cardRestingColor,
+                        radius: isCarouselFocused ? AppShadow.cardFocusRingRadius : AppShadow.cardRestingRadius,
+                        x: 0,
+                        y: isCarouselFocused ? AppShadow.cardFocusRingY : AppShadow.cardRestingY
+                    )
+            }
         }
-        .overlay(
-            RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
-                .strokeBorder(
-                    isCarouselFocused ? AppColor.accent : AppColor.border(for: contrast),
-                    lineWidth: isCarouselFocused ? AppLayout.focusStroke : AppLayout.hairline)
-        )
+        .overlay {
+            if lead == nil {
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(
+                        isCarouselFocused ? AppColor.accent : AppColor.border(for: contrast),
+                        lineWidth: isCarouselFocused ? AppLayout.focusStroke : AppLayout.hairline)
+            }
+        }
         .onHover { isHovered = $0 }
-        // Focusable, so keyboard focus pauses the rotation and the arrow keys move between stories.
-        .focusable()
+        // The Briefing hero is focusable, so keyboard focus pauses the rotation and the arrow keys move between
+        // stories. The Lead takes its focus from the Today list, which owns the keys of the whole edition.
+        .focusable(lead == nil)
         .focused($isCarouselFocused)
         .focusEffectDisabled()
         .onKeyPress(.leftArrow) {
@@ -96,9 +121,15 @@ struct BriefingHeroCarouselView: View {
             return .handled
         }
         .onChange(of: reduceMotion) { _, newValue in
-            if newValue { activeIndex = 0 }
+            if newValue { activeIndex = focusedIndex ?? 0 }
         }
-        .onChange(of: entries.map(\.id)) { _, _ in activeIndex = 0 }
+        // A changed set of slides keeps the focused one in view, or starts over when none has focus.
+        .onChange(of: entries.map(\.id)) { _, _ in activeIndex = focusedIndex ?? 0 }
+        // The Today list moved keyboard focus to a slide: show it. Rotation stays paused while a slide has focus.
+        .onChange(of: lead?.focusedID, initial: true) { _, focused in
+            guard let focused, let index = entries.firstIndex(where: { $0.id == focused }) else { return }
+            withAnimation(reduceMotion ? nil : Self.crossFade) { activeIndex = index }
+        }
         .task(id: timerReloadKey) {
             guard shouldTimerRun else { return }
             while !Task.isCancelled {
@@ -118,12 +149,13 @@ struct BriefingHeroCarouselView: View {
     }
 
     /// A manual move: instant under Reduce Motion, and the countdown starts again.
-    private func step(_ offset: Int) {
+    func step(_ offset: Int) {
         guard entries.count > 1 else { return }
         withAnimation(reduceMotion ? nil : Self.crossFade) {
             activeIndex = (currentIndex + offset + entries.count) % entries.count
         }
         timerResetToken += 1
+        onShow(entries[currentIndex])
     }
 
     private func open() {
@@ -138,18 +170,23 @@ struct BriefingHeroCarouselView: View {
         return Button {
             onOpen(entry)
         } label: {
-            ZStack(alignment: .bottomLeading) {
-                image(for: entry)
-                AppColor.leadScrimFade
-                caption(story, publishers: entry.publisherCount, isRead: isRead)
+            if let lead {
+                leadSlide(entry, lead: lead, isRead: isRead)
+            } else {
+                ZStack(alignment: .bottomLeading) {
+                    image(for: entry)
+                    AppColor.leadScrimFade
+                    caption(story, publishers: entry.publisherCount, isRead: isRead)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "\(story.title), from \(story.publisherName), \(story.cardDateText())"
+            lead.map { leadAccessibilityLabel(entry, lead: $0, isRead: isRead) }
+                ?? "\(story.title), from \(story.publisherName), \(story.cardDateText())"
                 + (entry.publisherCount > 1 ? ", \(entry.publisherCount) publishers" : "")
                 + (isRead ? ". Read" : ". Unread")
         )
@@ -157,7 +194,7 @@ struct BriefingHeroCarouselView: View {
     }
 
     @ViewBuilder
-    private func image(for entry: FeedEntry) -> some View {
+    func image(for entry: FeedEntry) -> some View {
         if let url = images[entry.id] ?? FeedArticle.bestCardImage(in: entry.visibleArticles) {
             ArticleRemoteImage(url: url) { phase in
                 if let image = phase.image {
@@ -235,12 +272,13 @@ struct BriefingHeroCarouselView: View {
         .accessibilityLabel(label)
     }
 
-    private func dot(_ index: Int, _ entry: FeedEntry) -> some View {
+    func dot(_ index: Int, _ entry: FeedEntry) -> some View {
         let active = index == currentIndex
         return Button {
             guard index != currentIndex else { return }
             withAnimation(reduceMotion ? nil : Self.crossFade) { activeIndex = index }
             timerResetToken += 1
+            onShow(entry)
         } label: {
             Capsule()
                 .fill(active ? AppColor.leadText : AppColor.carouselInactiveDot)
@@ -254,5 +292,19 @@ struct BriefingHeroCarouselView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("Story \(index + 1) of \(entries.count): \(entry.representative.title)")
         .accessibilityAddTraits(active ? .isSelected : [])
+    }
+}
+
+/// Clips the Briefing hero to its card shape and leaves The Lead unclipped.
+private struct HeroClip: ViewModifier {
+    let radius: CGFloat
+    let isClipped: Bool
+
+    func body(content: Content) -> some View {
+        if isClipped {
+            content.clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+        } else {
+            content
+        }
     }
 }

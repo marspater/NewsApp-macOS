@@ -54,6 +54,11 @@ struct StoryCardMetadata: Equatable, Sendable {
     var publishers: [String] = []
     /// One attributed differing account from a stored overview.
     var differingAccount: String?
+    /// The lane showing the card, which VoiceOver names after the card's own description.
+    var laneName: String?
+    /// The event the card opens, if any. The card's action captures its entry, and regrouping can change the event
+    /// behind the same representative, so the card's update decision must see it.
+    var eventID: String?
 
     /// "3 publishers · 2 new reports", leaving out what is unknown or zero.
     var coverageLine: String? {
@@ -87,7 +92,7 @@ struct StoryCardMetadata: Equatable, Sendable {
         case .coverage: parts = coverageAccessibilityParts
         case .standard, .compact: parts = []
         }
-        return parts.compactMap { $0 }.map { " \($0)." }.joined()
+        return (parts + [laneName.map { "In \($0)" }]).compactMap { $0 }.map { " \($0)." }.joined()
     }
 
     private var developingAccessibilityParts: [String?] {
@@ -178,6 +183,7 @@ extension ArticleCardView {
                 editionImage(variant)
                 editionText(variant)
             }
+            .frame(maxHeight: .infinity, alignment: .top)
         }
     }
 
@@ -187,8 +193,7 @@ extension ArticleCardView {
     private func editionImage(_ variant: StoryCardVariant) -> some View {
         Color.clear
             .frame(maxWidth: .infinity)
-            .frame(height: variant == .feature ? nil : AppLayout.editorialHeaderHeight)
-            .aspectRatio(variant == .feature ? AppLayout.featureImageAspect : nil, contentMode: .fit)
+            .frame(height: variant == .feature ? AppLayout.featureImageHeight : AppLayout.editorialHeaderHeight)
             .overlay { editionPhoto(size: .card) }
             .clipped()
             .contentShape(Rectangle())
