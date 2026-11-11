@@ -1213,8 +1213,10 @@ struct ArticleListView: View {
             let keeps = isHoldingList && previous?.generation == todayGeneration
             let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
             let edition = await articleStore.todayEdition(
-                entries: listed, subscribedFeedURLs: Set(appSettings.feedURLs),
-                starredFeedURLs: appSettings.starredFeedURLs, resetAt: resetAt,
+                entries: listed,
+                reader: TodayReader(
+                    subscribedFeedURLs: Set(appSettings.feedURLs), starredFeedURLs: appSettings.starredFeedURLs,
+                    interestsResetAt: resetAt),
                 keeping: keeps ? previous : nil, generation: todayGeneration)
             guard !Task.isCancelled else { return }
             // Focus follows its card, or the rules of today.md when the card or its lane is gone.
