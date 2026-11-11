@@ -142,17 +142,11 @@ private actor KnowledgeExportEncoder {
                 if sortedNotes.count > 1 {
                     result.append(
                         NSAttributedString(string: "Story passages in reading order (\(sortedNotes.count)):\n"))
-                    for (i, note) in sortedNotes.enumerated() {
-                        result.append(
-                            NSAttributedString(
-                                string: "\nPassage \(i + 1):\n“" + note.selectedText + "”\n"
-                                    + (note.noteBody.isEmpty ? "" : note.noteBody + "\n")))
-                    }
-                } else if let note = sortedNotes.first {
-                    result.append(
-                        NSAttributedString(
-                            string: "“" + note.selectedText + "”\n"
-                                + (note.noteBody.isEmpty ? "" : note.noteBody + "\n")))
+                }
+                for (i, note) in sortedNotes.enumerated() {
+                    let prefix = sortedNotes.count > 1 ? "\nPassage \(i + 1):\n" : ""
+                    let body = note.noteBody.isEmpty ? "" : note.noteBody + "\n"
+                    result.append(NSAttributedString(string: "\(prefix)“\(note.selectedText)”\n\(body)"))
                 }
             }
         }

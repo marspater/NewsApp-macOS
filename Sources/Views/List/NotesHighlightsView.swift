@@ -54,7 +54,7 @@ struct NotesHighlightsView: View {
                         if group.isMultiple {
                             Section {
                                 ForEach(group.listings) { listing in
-                                    groupedRow(listing)
+                                    row(listing, inGroup: true)
                                 }
                             } header: {
                                 storyGroupHeader(group)
@@ -123,63 +123,20 @@ struct NotesHighlightsView: View {
         .accessibilityHint("Opens the story")
     }
 
-    /// One note within a story group: its quote, note body, and timestamp in reading order (#1208).
-    private func groupedRow(_ listing: UserNoteListing) -> some View {
+    /// One note row: optionally displayed inside a story group without repeating the story title (#1208).
+    private func row(_ listing: UserNoteListing, inGroup: Bool = false) -> some View {
         let note = listing.note
-        return HStack(alignment: .top, spacing: AppSpacing.sm) {
+        let content = HStack(alignment: .top, spacing: AppSpacing.sm) {
             Button {
                 onOpen(note.articleID)
             } label: {
                 VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text("“\(note.selectedText)”")
-                        .font(AppTypography.callout)
-                        .foregroundStyle(AppColor.primaryText)
-                        .multilineTextAlignment(.leading)
-                        .padding(.leading, AppSpacing.xs)
-                        .background(alignment: .leading) {
-                            Rectangle().fill(AppColor.noteHighlight).frame(width: AppLayout.quoteBarWidth)
-                        }
-                    if note.hasBody {
-                        Text(note.noteBody)
-                            .font(AppTypography.body)
+                    if !inGroup {
+                        Text(listing.articleTitle)
+                            .font(AppTypography.headline)
                             .foregroundStyle(AppColor.primaryText)
                             .multilineTextAlignment(.leading)
                     }
-                    Text(note.createdAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(AppTypography.caption)
-                        .foregroundStyle(AppColor.secondaryText)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Opens the story")
-            Button(role: .destructive) {
-                if note.hasBody { deleting = note } else { Task { await articleStore.deleteNote(id: note.id) } }
-            } label: {
-                Label("Delete", systemImage: "trash").labelStyle(.iconOnly)
-            }
-            .buttonStyle(.borderless)
-            .help("Delete this highlight")
-            .accessibilityLabel("Delete highlight “\(note.selectedText.prefix(40))”")
-        }
-        .padding(AppSpacing.sm)
-        .background(AppColor.cardBackground, in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous))
-        .padding(.vertical, AppSpacing.xxs)
-    }
-
-    /// One note with its story title, source and date; the row opens the story.
-    private func row(_ listing: UserNoteListing) -> some View {
-        let note = listing.note
-        return HStack(alignment: .top, spacing: AppSpacing.sm) {
-            Button {
-                onOpen(note.articleID)
-            } label: {
-                VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    Text(listing.articleTitle)
-                        .font(AppTypography.headline)
-                        .foregroundStyle(AppColor.primaryText)
-                        .multilineTextAlignment(.leading)
                     Text("“\(note.selectedText)”")
                         .font(AppTypography.callout)
                         .foregroundStyle(AppColor.primaryText)
@@ -195,7 +152,9 @@ struct NotesHighlightsView: View {
                             .multilineTextAlignment(.leading)
                     }
                     Text(
-                        "\(listing.source) · \(note.createdAt.formatted(date: .abbreviated, time: .shortened))"
+                        inGroup
+                            ? note.createdAt.formatted(date: .abbreviated, time: .shortened)
+                            : "\(listing.source) · \(note.createdAt.formatted(date: .abbreviated, time: .shortened))"
                     )
                     .font(AppTypography.caption)
                     .foregroundStyle(AppColor.secondaryText)
@@ -214,6 +173,19 @@ struct NotesHighlightsView: View {
             .help("Delete this highlight")
             .accessibilityLabel("Delete highlight “\(note.selectedText.prefix(40))”")
         }
-        .padding(.vertical, AppSpacing.xs)
+        return Group {
+            if inGroup {
+                content
+                    .padding(AppSpacing.sm)
+                    .background(
+                        AppColor.cardBackground,
+                        in: RoundedRectangle(cornerRadius: AppRadius.card, style: .continuous)
+                    )
+                    .padding(.vertical, AppSpacing.xxs)
+            } else {
+                content
+                    .padding(.vertical, AppSpacing.xs)
+            }
+        }
     }
 }

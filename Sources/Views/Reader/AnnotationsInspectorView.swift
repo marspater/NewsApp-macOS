@@ -41,28 +41,22 @@ struct AnnotationsInspectorView: View {
                 } description: {
                     Text("Select text in the story, then press ⌘Y to highlight it or ⇧⌘Y to add a note.")
                 }
-            } else if notes.count > 1 {
-                // Multiple notes: automatically group together in reading order with designed presentation (#1208).
+            } else {
+                // Notes in reading order; multiple notes group under a header while single notes display cleanly (#1208).
                 List(selection: $selectedID) {
-                    Section {
-                        ForEach(orderedNotes) { note in
-                            row(note)
-                                .listRowSeparator(.hidden)
+                    if notes.count > 1 {
+                        Section {
+                            ForEach(orderedNotes) { note in
+                                row(note)
+                                    .listRowSeparator(.hidden)
+                            }
+                        } header: {
+                            groupHeader(count: orderedNotes.count)
                         }
-                    } header: {
-                        groupHeader(count: orderedNotes.count)
+                    } else if let singleNote = orderedNotes.first {
+                        row(singleNote)
+                            .listRowSeparator(.hidden)
                     }
-                }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .onKeyPress(.return) {
-                    revealSelected()
-                }
-            } else if let singleNote = notes.first {
-                // Single note: displays cleanly without an extraneous group header (#1208).
-                List(selection: $selectedID) {
-                    row(singleNote)
-                        .listRowSeparator(.hidden)
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)

@@ -83,8 +83,11 @@ enum KnowledgeExportTests {
             check(
                 multiOutput.contains("Passage 1") && multiOutput.contains("Passage 2"),
                 "passages numbered in reading order")
-            let noteIdx = multiOutput.range(of: "Quoted publisher words")?.lowerBound
-            let note2Idx = multiOutput.range(of: "Second quote")?.lowerBound
+            let passage1Start = multiOutput.range(of: "Passage 1")?.upperBound ?? multiOutput.startIndex
+            let noteIdx = multiOutput.range(of: "Quoted publisher words", range: passage1Start..<multiOutput.endIndex)?
+                .lowerBound
+            let note2Idx = multiOutput.range(of: "Second quote", range: passage1Start..<multiOutput.endIndex)?
+                .lowerBound
             check(noteIdx != nil && note2Idx != nil && noteIdx! < note2Idx!, "notes exported in reading order")
             check(
                 output.contains("Cited qualified words") && output.contains("example.org/report"),

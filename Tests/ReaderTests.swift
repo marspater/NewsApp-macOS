@@ -2468,6 +2468,18 @@ extension NewsTests {
             ReaderDictionaryLookup.lookupTitle(for: "quantum"), "Look Up “quantum”", "Short word quoted in title")
         assertEqual(ReaderDictionaryLookup.lookupTitle(for: ""), "Look Up", "Empty string gives bare Look Up")
         assertEqual(ReaderDictionaryLookup.lookupTitle(for: nil), "Look Up", "Nil string gives bare Look Up")
+        let exactly25 = String(repeating: "a", count: 25)
+        assertEqual(
+            ReaderDictionaryLookup.lookupTitle(for: exactly25),
+            "Look Up “\(exactly25)”",
+            "25 character selection shown in full without ellipsis"
+        )
+        let exactly26 = String(repeating: "a", count: 26)
+        assertEqual(
+            ReaderDictionaryLookup.lookupTitle(for: exactly26),
+            "Look Up “\(exactly26.prefix(20))…”",
+            "26 character selection is truncated to 20 characters with ellipsis"
+        )
         let longSelection = "A very long sentence with many words that exceeds limit"
         assertEqual(
             ReaderDictionaryLookup.lookupTitle(for: longSelection),
@@ -2502,6 +2514,17 @@ extension NewsTests {
         assertEqual(
             sorted.map(\.id), ["c", "b", "d", "a"],
             "Notes must be ordered strictly by reading order (paragraphIndex then charStart)")
+
+        let noteTieEarly = UserNote(
+            id: "tieEarly", articleID: "story1", paragraphIndex: 3, charStart: 0, selectedText: "Earlier note",
+            prefix: "", suffix: "", noteBody: "", createdAt: now
+        )
+        let noteTieLate = UserNote(
+            id: "tieLate", articleID: "story1", paragraphIndex: 3, charStart: 0, selectedText: "Later note",
+            prefix: "", suffix: "", noteBody: "", createdAt: now.addingTimeInterval(5)
+        )
+        let ties = [noteTieLate, noteTieEarly].sortedInReadingOrder()
+        assertEqual(ties.map(\.id), ["tieEarly", "tieLate"], "Equal positions broken by createdAt ascending")
 
         // 2. Grouping listings by story
         let listing1 = UserNoteListing(note: noteA, articleTitle: "Story One", source: "Publisher 1")

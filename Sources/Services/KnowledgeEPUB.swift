@@ -92,17 +92,13 @@ enum KnowledgeEPUB {
         if !document.notes.isEmpty {
             let sortedNotes = document.notes.sortedInReadingOrder()
             result += "<h3>My highlights and notes</h3>"
-            if sortedNotes.count > 1 {
-                result += "<div class=\"story-notes-group\">"
-                for (i, note) in sortedNotes.enumerated() {
-                    result += "<h4>Passage \(i + 1)</h4><blockquote><p>\(xml(note.selectedText))</p></blockquote>"
-                    if !note.noteBody.isEmpty { result += "<p>\(xml(note.noteBody))</p>" }
-                }
-                result += "</div>"
-            } else if let note = sortedNotes.first {
+            if sortedNotes.count > 1 { result += "<div class=\"story-notes-group\">" }
+            for (i, note) in sortedNotes.enumerated() {
+                if sortedNotes.count > 1 { result += "<h4>Passage \(i + 1)</h4>" }
                 result += "<blockquote><p>\(xml(note.selectedText))</p></blockquote>"
                 if !note.noteBody.isEmpty { result += "<p>\(xml(note.noteBody))</p>" }
             }
+            if sortedNotes.count > 1 { result += "</div>" }
         }
         result += "</section>"
         return result
