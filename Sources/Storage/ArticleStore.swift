@@ -52,6 +52,17 @@ final class ArticleStore: ObservableObject {
     @Published private(set) var revision: UInt64 = 0
     /// Bumped when clustering or the reader changes events; the feed regroups on it.
     @Published var eventRevision: UInt64 = 0
+
+    /// Advances the store revision, triggering objectWillChange and invalidating feed card queries (#1210).
+    func advanceRevision() {
+        revision &+= 1
+    }
+
+    /// Notifies the store that a story photo was recorded/saved, advancing revision and event revision (#1210).
+    func noteStoryImageSaved() {
+        revision &+= 1
+        noteEventsChanged()
+    }
     /// Bumped when an event overview is stored; the Briefing reloads its cited facts on it.
     @Published var overviewRevision: UInt64 = 0
     @Published var operationError: String?

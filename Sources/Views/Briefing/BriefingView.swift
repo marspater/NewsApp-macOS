@@ -107,6 +107,8 @@ struct BriefingView: View {
     var nextEdition = Date()
     let clock: any CarouselClock
     let actions: BriefingActions
+    /// Whether the World Tension tile is enabled (#1209).
+    var isWorldTensionEnabled = true
 
     @State private var filter = BriefingBoardFilter()
 
@@ -139,7 +141,8 @@ struct BriefingView: View {
         isMotionPaused: Bool = false,
         nextEdition: Date = Date(),
         clock: any CarouselClock = ContinuousCarouselClock(),
-        actions: BriefingActions
+        actions: BriefingActions,
+        isWorldTensionEnabled: Bool = true
     ) {
         self.entries = entries
         self.briefing = briefing
@@ -152,6 +155,7 @@ struct BriefingView: View {
         self.nextEdition = nextEdition
         self.clock = clock
         self.actions = actions
+        self.isWorldTensionEnabled = isWorldTensionEnabled
     }
 
     /// The most stories the carousel shows; an edition with fewer shows what it has.
@@ -183,10 +187,14 @@ struct BriefingView: View {
     /// The modules the board shows, in pillar and layout order: visible in the layout and with data.
     static func visibleModules(
         layout: BriefingLayout, data: BriefingBoardData, hasStories: Bool = true,
-        filter: BriefingBoardFilter = BriefingBoardFilter()
+        filter: BriefingBoardFilter = BriefingBoardFilter(),
+        isWorldTensionEnabled: Bool = true
     ) -> [BriefingModuleKind] {
         BriefingPillar.allCases.flatMap { pillar in
-            layout.modules(in: pillar).filter { data.hasData(for: $0, hasStories: hasStories, filter: filter) }
+            layout.modules(in: pillar).filter {
+                if $0 == .worldTension && !isWorldTensionEnabled { return false }
+                return data.hasData(for: $0, hasStories: hasStories, filter: filter)
+            }
         }
     }
 
@@ -210,7 +218,8 @@ struct BriefingView: View {
 
     var body: some View {
         let modules = Self.visibleModules(
-            layout: layout, data: data, hasStories: entries.contains(where: boardFilter.includes), filter: boardFilter)
+            layout: layout, data: data, hasStories: entries.contains(where: boardFilter.includes), filter: boardFilter,
+            isWorldTensionEnabled: isWorldTensionEnabled)
         let pillars = BriefingPillar.allCases.filter { pillar in modules.contains { $0.pillar == pillar } }
         VStack(alignment: .leading, spacing: AppSpacing.xl) {
             ForEach(pillars.filter { $0 != .weakSignals && $0 != .forwardWatch }, id: \.self) { pillar in

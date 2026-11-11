@@ -27,6 +27,7 @@ import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
 import dnssd
+import os
 
 #if canImport(FoundationModels)
     import FoundationModels
@@ -1071,6 +1072,82 @@ extension NewsTests {
         let scoped = try await db.imagelessStoryRows(activeSince: now.addingTimeInterval(-86_400), limit: 20)
         assertTrue(scoped.contains { $0.id == "g1" }, "A hidden member's image does not skip the listed story")
         assertFalse(scoped.contains { $0.id == "g2" }, "The hidden member itself is never looked up")
+
+        // #1210: A photo saved by a cancelled lookup pass reaches cards immediately by advancing revision
+        do {
+            let cancelDb = DatabaseEngine(path: ":memory:")
+            try await cancelDb.open()
+            let store = await MainActor.run {
+                ArticleStore(database: cancelDb, spotlightIndexer: MockSpotlightIndexer())
+            }
+            let initialRev = await store.revision
+            let initialEventRev = await store.eventRevision
+
+            let cancelStory = FeedArticle(
+                storedID: "cancel-story", title: "Imageless story", link: "https://example.com/cancel-story",
+                guid: "cancel-story", description: "", pubDate: now, source: "News Source")
+            let cancelStory2 = FeedArticle(
+                storedID: "cancel-story-2", title: "Second imageless story", link: "https://example.com/cancel-story-2",
+                guid: "cancel-story-2", description: "", pubDate: now, source: "News Source")
+            try await cancelDb.upsertArticles([cancelStory, cancelStory2], feedUrl: "https://example.com/feed.xml")
+
+            let cancelTask = OSAllocatedUnfairLock<Task<StoryCurator.Report, Error>?>(initialState: nil)
+            let urlCounter = OSAllocatedUnfairLock(initialState: 0)
+            let cancelFinder = StoryImageFinder { _ in
+                let count = urlCounter.withLock { c -> Int in
+                    c += 1
+                    return c
+                }
+                return .found("https://cdn.example/cancelled-found-\(count).jpg")
+            }
+
+            let task = Task {
+                try await StoryCurator.run(in: cancelDb, imageFinder: cancelFinder, now: now) {
+                    Task { @MainActor in
+                        store.noteStoryImageSaved()
+                    }
+                    cancelTask.withLock { $0 }?.cancel()
+                }
+            }
+            cancelTask.withLock { $0 = task }
+            let taskResult = await task.result
+            var wasCancelled = false
+            if case .failure(let error) = taskResult, error is CancellationError {
+                wasCancelled = true
+            }
+            assertTrue(wasCancelled, "Pass must be cancelled mid-flight after saving an image")
+
+            let images = try await cancelDb.storyImages(for: [cancelStory.id])
+            assertEqual(
+                images[cancelStory.id], "https://cdn.example/cancelled-found-1.jpg", "Photo must be saved in database")
+
+            // The saved-image callback hops to the main actor; wait for it instead of sleeping.
+            await eventually("The saved photo advances the store revision") { await store.revision > initialRev }
+
+            let currentRev = await store.revision
+            let currentEventRev = await store.eventRevision
+            assertTrue(currentRev > initialRev, "Store revision must advance so feed cards update immediately (#1210)")
+            assertTrue(currentEventRev > initialEventRev, "Event revision must advance on saved photo (#1210)")
+
+            let fetched = try await cancelDb.fetchArticles(id: cancelStory.id)
+            let photos = try await cancelDb.storyImages(for: fetched.map(\.id))
+            var article = fetched.first!
+            if article.imageUrl == nil {
+                article.imageUrl = photos[article.id]
+            }
+            assertEqual(
+                article.imageUrl, "https://cdn.example/cancelled-found-1.jpg",
+                "Article with looked-up photo receives the image")
+
+            let completedReport = try await StoryCurator.run(in: cancelDb, imageFinder: cancelFinder, now: now) {
+                Task { @MainActor in
+                    store.noteStoryImageSaved()
+                }
+            }
+            assertEqual(completedReport.imagesFound, 1, "Completed pass continues to behave properly")
+            await cancelDb.close()
+        }
+
         await db.close()
         try await testStoryImageIndexMigration(fixtureRoot: fixtureRoot)
         try await testMarkAllReadScope(fixtureRoot: fixtureRoot)

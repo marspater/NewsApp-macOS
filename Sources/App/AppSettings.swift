@@ -581,6 +581,16 @@ final class AppSettings: ObservableObject {
         defaults.set(enabled, forKey: Self.tensionCollectionOptInKey)
     }
 
+    /// Whether the World Tension indicator is enabled (#1209).
+    var isWorldTensionEnabled: Bool {
+        get { tensionCollectionOptIn }
+        set { setTensionCollectionOptIn(newValue) }
+    }
+
+    func setIsWorldTensionEnabled(_ enabled: Bool) {
+        setTensionCollectionOptIn(enabled)
+    }
+
     // MARK: - Muting
 
     /// Mutes a publisher host given as a hostname or URL. Returns the stored host, or nil if nothing was added.
