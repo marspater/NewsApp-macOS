@@ -1,6 +1,6 @@
 # Research tooling
 
-The tools used for research on News (model candidates, matcher changes, holdout replays), how they are set up on Mars's Mac, and the flow every agent follows. These tools are not part of the app, its build or CI. The app's own build, test and measurement tools are in [CONTRIBUTING.md](../CONTRIBUTING.md).
+The tools used for research on News (model candidates, matcher changes, holdout replays), how they are set up on Mars's Mac, and the flow every agent follows. These tools are not part of the app, its build or CI. The domains a run changes (Themis, Harmonia, Proteus and the others) are defined in the [Angelia register](ANGELIA.md). The app's own build, test and measurement tools are in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 Changes to this setup are logged in the [change log](#change-log) at the end.
 

@@ -5,11 +5,11 @@
 
 A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry. The semantic system that groups, explains and selects stories is named Angelia; [docs/ANGELIA.md](docs/ANGELIA.md) maps its twelve domains to the code.
 
-## Story experience — 24 October 2026
+## Story experience
 
 - Group reports of one event into a card with its coverage and an overview using hybrid EventMatcher v15 (deterministic entity/lexical features and on-device CoreML `all-MiniLM-L6-v2` embeddings with a pair model for borderline pairs). Read and saved state stay with each publication.
 - Parsing powered by SwiftSoup (CSS metadata selection and bounded DOM repair) and FeedKit (typed RSS/Atom/JSON feed parsing with streaming XML security boundaries).
-- Keep stories visible regardless of importance. Today and archive stay chronological; Briefing balances publishers/categories, then prefers broader coverage and existing importance ratings. Refresh never runs importance scoring or deletes stories for being minor.
+- Keep stories visible regardless of importance. Today opens as an edition: The Lead, then In Motion, Your Beat, The Deep Read and Outside Your Usual when enough stories qualify, and The Latest with everything else. Unread, Saved Stories, History and search keep the list and grid. Briefing balances publishers/categories, then prefers broader coverage and existing importance ratings. Refresh never runs importance scoring or deletes stories for being minor.
 - Story banners the app draws itself, with the story photo, Save, Mark as Read and Open, honouring your notification settings and Focus, and background delivery triage.
 - Read multi-source overviews as publisher excerpts with source badges and passage citations, plus validated deterministic timelines and attributed perspectives. No model-written introduction or factual prose is generated for event overviews.
 - World Tension (methodology v3): on-device reasoned international headline assessment with four-factor cited explanations (`Novelty`, `Proximity to worst case`, `Reversibility`, `Scope of impact`), backed by a balanced 12-feed global panel.
@@ -20,7 +20,7 @@ See the [acceptance audit](docs/audits/2026-10-18-post-wave2-release-acceptance.
 ## Reading
 
 - An editorial list with an optional grid, system light/dark appearance, keyboard navigation and native glass controls.
-- Publisher content appears in a selectable, paragraph-based reader. AI-generated summaries are labelled and collapsible.
+- Publisher content appears in a selectable, paragraph-based reader. Generated summaries are labelled and stay collapsed until opened.
 - Full feed content is used immediately. For summary-only feeds, the app fetches the article when opened, and an event overview may first fetch up to four of its articles when energy policy allows, each limited to four seconds; failed extraction leaves the feed preview and an explicit reason, with an in-app Web view and external browser option. Use **More Actions → Reload Reader Content** to refresh older cached extractions without clearing the library.
 - Atom namespaces, XHTML paragraphs, alternate links, relative URLs and distinct publication/update dates are supported. JSON `content_text` remains plain text.
 - Local SQLite persistence preserves saved stories, read history and extracted content. OPML imports and exports subscriptions. An opt-in starter catalog of 52 English-language feeds, verified on 31 October 2026, groups feeds into sets you can subscribe to; custom RSS keeps working. Feeds in other languages are parked until event matching supports them (#264).
@@ -91,10 +91,11 @@ Standard project, contribution, privacy and security documents stay at the root.
 ## Source layout
 
 - `Sources/App`: entry point, settings, theme, update checks, URL schemes and App Intents.
-- `Sources/Views`: sidebar, list/grid, reader, WebKit and semantic design tokens.
-- `Sources/Services`: feed parsers, OPML, dates and secure HTTP ingestion.
-- `Sources/Storage`: SQLite, migrations and observable stores.
-- `Sources/Intelligence`: extraction, deterministic taxonomy, on-device analysis and bounded enrichment queue.
+- `Sources/Views`: sidebar, list/grid, the Today edition, Briefing, reader, WebKit and semantic design tokens.
+- `Sources/Services`: feed fetching and parsers (Iris), OPML, dates, local exports and the protected gateway.
+- `Sources/Storage`: SQLite, migrations, search and observable stores (Mnemosyne).
+- `Sources/Models`: the value types the layers share.
+- `Sources/Intelligence`: Angelia's on-device analysis. Extraction and taxonomy (Metis), embeddings and the pair model (Proteus), event and story grouping (Themis, Harmonia, Ariadne), overviews and their checks (Clio, Aletheia), Today and Briefing selection (Athena), World Tension (Eris) and research modules (Kairos).
 - `Sources/Coordinators`: feed refresh and notifications.
 - `Tests/`: `Runner.swift` dispatches one atom per `<Domain>Tests.swift` for the custom runner; `Native/` holds the Swift Testing suites of ported domains (migrations, feed parsing, storage, publisher excerpts and more), run through the plans in `Plans/`; `UITests/` holds the smoke flows and performance metrics against the Debug app; `Harness/` holds the opt-in QA entry points.
 

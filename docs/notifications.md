@@ -5,6 +5,8 @@ and are the contract the tests check. How a banner looks and when it may interru
 [docs/design/notifications.md](design/notifications.md). Minimal and Privacy modes are unchanged: one summary banner per delivery pass,
 not counted by any lane.
 
+In the [Angelia register](ANGELIA.md), this triage belongs to Athena.
+
 ## Delivery path
 
 The app draws every banner itself, in a floating panel (DESIGN.md 8.7), in every window state while News is running:

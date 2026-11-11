@@ -8,6 +8,13 @@ All analysis runs on the Mac and no story text reaches a remote AI service. Most
 
 The system as a whole is named Angelia. Its twelve domains (Iris, Metis, Proteus, Themis, Harmonia, Ariadne, Mnemosyne, Clio, Aletheia, Athena, Eris and Kairos) are ownership names for the types on this page; the register in `docs/ANGELIA.md` maps each name to its code, and each owned source file names its owner in a comment after the license header.
 
+| Section below | Owner |
+|---|---|
+| Topic classification, sentiment | Metis; Aletheia for coverage sentiment |
+| Bundled Core ML models | Proteus |
+| Event grouping | Mnemosyne finds candidates, Themis decides pairs, Harmonia forms events, Ariadne links stories |
+| Foundation Models, energy | Angelia Core; Aletheia checks generated text |
+
 ### Topic classification
 
 ``ArticleClassifier`` assigns one of the twelve ``NewsCategory`` values in three stages: a publisher's own category when it names one, then keyword scoring by ``NaturalLanguageTopicClassifier`` over ``NaturalLanguageTopicClassifier/taxonomy``, with headline matches weighted above description and body, then ``NewsCategory/world`` as the default. ``EnrichmentQueue`` runs it in the background under the bounded enrichment rules.

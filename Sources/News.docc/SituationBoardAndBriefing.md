@@ -4,7 +4,7 @@ Understand how a daily edition is selected, then how the board presents it.
 
 ## Overview
 
-The Briefing is a finite daily edition, and the Situation Board is the view that presents it. Selection and presentation are separate: ``FiniteBriefing`` picks the stories, and ``BriefingView`` lays out the board around them.
+The Briefing is a finite daily edition, and the Situation Board is the view that presents it. Selection and presentation are separate: ``FiniteBriefing`` picks the stories, and ``BriefingView`` lays out the board around them. In the Angelia register (`docs/ANGELIA.md`), selection belongs to Athena and World Tension to Eris.
 
 ### Selecting an edition
 
