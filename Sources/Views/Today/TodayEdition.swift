@@ -84,7 +84,9 @@ struct TodayEdition: Equatable, Sendable {
         if let previous, !previous.lanes.isEmpty {
             for lane in previous.lanes {
                 for story in lane.stories where listedIDs.contains(story.id) {
-                    let current = fresh[story.id]?.placed(in: lane.lane) ?? story
+                    // The card keeps its content-type tag too, also when the fresh plan would move the story.
+                    let current =
+                        fresh[story.id]?.placed(in: lane.lane, contentType: story.contentTypeLabel) ?? story
                     laneStories[lane.lane, default: []].append(current)
                     placed.insert(story.id)
                 }
@@ -119,11 +121,11 @@ struct TodayEdition: Equatable, Sendable {
 
 extension TodayStoryAssignment {
     /// The same story shown in another lane; its scores and evidence are unchanged.
-    func placed(in lane: TodayLane) -> TodayStoryAssignment {
+    func placed(in lane: TodayLane, contentType kept: TodayContentType? = nil) -> TodayStoryAssignment {
         guard lane != self.lane else { return self }
         return TodayStoryAssignment(
             id: id, entry: entry, lane: lane, score: score, confidence: confidence, reason: reason,
-            sortKey: sortKey, contentTypeLabel: lane == .theDeepRead ? contentTypeLabel : nil,
+            sortKey: sortKey, contentTypeLabel: lane == .theDeepRead ? (contentTypeLabel ?? kept) : nil,
             isCoverageConfident: isCoverageConfident, isDeveloping: isDeveloping,
             originalReportCount: originalReportCount, publisherCount: publisherCount,
             groupingConfidence: groupingConfidence, readingTimeMinutes: readingTimeMinutes,
