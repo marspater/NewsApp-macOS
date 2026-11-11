@@ -71,6 +71,11 @@ struct TodayUserProfile: Equatable, Sendable {
             || keywordWeights.values.reduce(0, +) >= 3.0
     }
 
+    /// The key of ``publisherWeights`` for a stored story: the catalog's publisher for its link, else its source.
+    static func publisherKey(source: String?, link: String?) -> String {
+        EventFeedSummary.displaySource(FeedCatalog.publisher(forLink: link ?? "") ?? source ?? "").lowercased()
+    }
+
     /// Publisher affinity on a `0.0...1.0` scale relative to the reader's highest-engaged publisher.
     func publisherAffinity(for publisher: String) -> Double {
         let key = EventFeedSummary.displaySource(publisher).lowercased()

@@ -101,6 +101,14 @@ struct TodayEditionThresholds: Equatable, Sendable {
 
     var inMotionWindowSeconds: TimeInterval = 24 * 3600
     var inMotionMinimumConfidence = 0.70
+    /// Evaluation option, off by default (#934, 11 November 2026). When set, In Motion asks two separate questions:
+    /// is the story already underway (a report older than ``inMotionWindowSeconds``), and how recent is the new
+    /// report (dated within this many seconds). A candidate report is then compared against every report dated
+    /// before it, not only against those older than the window.
+    var inMotionUpdateWindowSeconds: TimeInterval?
+    /// Evaluation option (#934, 11 November 2026). When false, steady and fading momentum also enter In Motion;
+    /// the headline test for a substantive update still applies.
+    var inMotionRequiresRisingMomentum = true
 
     var deepReadMinimumMinutes = 8.0
     var deepReadWordsPerMinute = 200.0
@@ -109,6 +117,10 @@ struct TodayEditionThresholds: Equatable, Sendable {
 
     var yourBeatInterestMatchMinimum = 0.50
     var yourBeatMinimumConfidence = 0.60
+    /// Evaluation option (#934, 11 November 2026). Above zero, publisher affinity is a booster: it qualifies a
+    /// story for Your Beat only together with an interest match of at least this value. Starred feeds and an
+    /// interest match of ``yourBeatInterestMatchMinimum`` still qualify on their own.
+    var yourBeatAffinityInterestMinimum = 0.0
 
     var outsideNoveltyMinimum = 0.60
     var outsideScoreMinimum = 0.35

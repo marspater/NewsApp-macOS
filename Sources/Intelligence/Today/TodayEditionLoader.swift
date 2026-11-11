@@ -27,11 +27,16 @@ extension DatabaseEngine {
     }
 
     /// Builds the 30-day finer reading-interest and publisher-affinity profile (`read +1`, `saved +3`).
-    func todayUserProfile(now: Date = Date(), resetAt: Date? = nil) throws -> TodayUserProfile {
+    ///
+    /// `interactionLimit` keeps only the newest read or saved stories; the shadow evaluation lowers it to see the
+    /// lanes of a reader with little history (#934).
+    func todayUserProfile(
+        now: Date = Date(), resetAt: Date? = nil, interactionLimit: Int = 200
+    ) throws -> TodayUserProfile {
         let thirtyDaysAgo = now.addingTimeInterval(-30 * 86400)
         let cutoff = max(thirtyDaysAgo, resetAt ?? .distantPast)
         var history = TodayReadingHistory()
-        for row in try todayReadingHistoryRows(since: cutoff) {
+        for row in try todayReadingHistoryRows(since: cutoff, limit: interactionLimit) {
             try Task.checkCancellation()
             history.add(row)
         }
@@ -46,7 +51,7 @@ extension DatabaseEngine {
 
     /// The stories read or saved since `cutoff`, newest interaction first: `id, source, canonical_url, title,
     /// category, is_saved`.
-    private func todayReadingHistoryRows(since cutoff: Date) throws -> [[String?]] {
+    func todayReadingHistoryRows(since cutoff: Date, limit: Int = 200) throws -> [[String?]] {
         let hasEnrichment = try tableExists("article_enrichment")
         let categoryExpr = hasEnrichment ? "coalesce(ae.category, a.category)" : "a.category"
         let enrichmentJoin = hasEnrichment ? "LEFT JOIN article_enrichment ae ON ae.article_id = a.id" : ""
@@ -60,7 +65,7 @@ extension DatabaseEngine {
                 AND max(coalesce(s.saved_at, 0), coalesce(s.read_at, 0)) >= ?
                 AND \(Self.visibleArticle)
             ORDER BY max(coalesce(s.saved_at, 0), coalesce(s.read_at, 0)) DESC
-            LIMIT 200;
+            LIMIT \(max(0, min(200, limit)));
             """,
             [.real(cutoff.timeIntervalSince1970)]
         )
@@ -316,8 +321,7 @@ private struct TodayReadingHistory {
         totalInteractions += Int(weight)
         articleWeights[id] = max(articleWeights[id] ?? 0.0, weight)
 
-        let publisher = FeedCatalog.publisher(forLink: row[2] ?? "") ?? row[1] ?? ""
-        let pubKey = EventFeedSummary.displaySource(publisher).lowercased()
+        let pubKey = TodayUserProfile.publisherKey(source: row[1], link: row[2])
         if !pubKey.isEmpty {
             publisherWeights[pubKey, default: 0.0] += weight
         }
