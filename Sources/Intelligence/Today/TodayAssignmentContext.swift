@@ -117,6 +117,9 @@ struct TodayAssignmentContext: Equatable, Sendable {
     var profile: TodayUserProfile
     var signalsByEntryID: [String: TodayStorySignals]
     var thresholds: TodayEditionThresholds
+    /// Stories with no photo to show: none in any report of the event, or one that failed to load. The Lead is a
+    /// photo slide, so they are not candidates for it (Mars, 11 November 2026); every other lane takes them.
+    var imagelessEntryIDs: Set<String> = []
 
     init(
         now: Date = Date(),

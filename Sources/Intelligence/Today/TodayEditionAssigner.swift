@@ -83,7 +83,9 @@ enum TodayEditionAssigner {
         let thresholds = context.thresholds
 
         // 1. The Lead (1–5 slides, rank-ordered).
-        let lead = selectLead(from: evaluateStories(eligible, context: context), thresholds: thresholds)
+        let lead = selectLead(
+            from: evaluateStories(eligible, context: context), imageless: context.imagelessEntryIDs,
+            thresholds: thresholds)
         // 2. In Motion (min 3, cap 12, chronological newest first)
         let inMotion = placeConditionalLane(lane: .inMotion, candidates: lead.pool) {
             inMotionPlacement($0, thresholds: thresholds)
@@ -144,15 +146,30 @@ enum TodayEditionAssigner {
         return eligible
     }
 
+    /// Stories every known feed of which the reader has left: they are out of Today, also out of The Latest
+    /// (subscriptions are the candidate pool). A story whose feed is not known is not among them, so a gap in
+    /// the stored feed identity never hides an eligible story.
+    static func unsubscribedEntryIDs(_ entries: [FeedEntry], context: TodayAssignmentContext) -> Set<String> {
+        guard let subscribed = context.subscribedFeedURLs else { return [] }
+        return Set(
+            entries.filter { entry in
+                let signals = context.signalsByEntryID[entry.id]
+                return !feedURLs(of: entry, signals: signals).isEmpty
+                    && !isSubscribed(entry, signals: signals, in: subscribed)
+            }.map(\.id))
+    }
+
+    private static func feedURLs(of entry: FeedEntry, signals: TodayStorySignals?) -> Set<String> {
+        Set(entry.visibleArticles.compactMap(\.identityFeedURL)).union(signals?.feedURLs ?? [])
+    }
+
     private static func isSubscribed(
         _ entry: FeedEntry,
         signals: TodayStorySignals?,
         in subscribed: Set<String>
     ) -> Bool {
         let subscribedKeys = Set(subscribed.map(AppSettings.feedKey))
-        let candidateURLs =
-            Set(entry.visibleArticles.compactMap(\.identityFeedURL))
-            .union(signals?.feedURLs ?? [])
+        let candidateURLs = feedURLs(of: entry, signals: signals)
         return candidateURLs.contains { url in
             subscribed.contains(url) || subscribedKeys.contains(AppSettings.feedKey(url))
         }
@@ -168,8 +185,16 @@ enum TodayEditionAssigner {
     /// The Lead's slides in rank order, and every other story as the pool the conditional lanes draw from.
     private static func selectLead(
         from evaluated: [EvaluatedStory],
+        imageless: Set<String> = [],
         thresholds: TodayEditionThresholds
     ) -> (winners: [LanePlacement], pool: [EvaluatedStory]) {
+        // A story without a photo never takes a slide while any story has one; it goes on to the other lanes.
+        // Only a library with no photo at all keeps its top story as The Lead, so the page still has one.
+        let pictured = evaluated.filter { !imageless.contains($0.id) }
+        if !pictured.isEmpty, pictured.count < evaluated.count {
+            let selected = selectLead(from: pictured, thresholds: thresholds)
+            return (selected.winners, selected.pool + evaluated.filter { imageless.contains($0.id) })
+        }
         let ordered = evaluated.sorted(by: leadPrecedes)
         guard let first = ordered.first else { return ([], []) }
         var winners = [

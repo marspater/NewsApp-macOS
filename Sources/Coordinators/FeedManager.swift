@@ -81,6 +81,8 @@ class FeedManager: NSObject, ObservableObject {
     private var entityIndexRunID: UUID?
     /// Publisher-page lead images, looked up after clustering so notifications never wait for page downloads.
     private var imageLookupTask: Task<Void, Never>?
+    private var imagePriorityIDs: Set<String> = []
+    private var requestedImageIDs: Set<String> = []
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
     private var clusteringTask: Task<Void, Never>?
     private var clusteringRunID: UUID?
@@ -1074,6 +1076,16 @@ class FeedManager: NSObject, ObservableObject {
 
     /// Looks up lead images for shown stories without any, after clustering and outside `waitForEventClustering`, so
     /// notification triage never waits for publisher pages. A later pass replaces a lookup still running.
+    /// Stories on screen without a photo (the Today edition's top): the next lookup starts with them, and one starts
+    /// now when none is running and a story is asked for the first time. A story is asked for once a session, so a
+    /// page that cannot be read does not start a lookup each time the list reloads.
+    func requestStoryImages(for ids: [String]) {
+        imagePriorityIDs = Set(ids)
+        let new = imagePriorityIDs.subtracting(requestedImageIDs)
+        requestedImageIDs.formUnion(new)
+        if !new.isEmpty, imageLookupTask == nil { lookUpStoryImages() }
+    }
+
     private func lookUpStoryImages() {
         imageLookupTask?.cancel()
         imageLookupTask = nil
@@ -1082,11 +1094,12 @@ class FeedManager: NSObject, ObservableObject {
         let finder = imageFinder
         let muting = appSettings.muteRules
         let store = articleStore
+        let first = imagePriorityIDs
         imageLookupTask = Task { [weak self] in
             self?.logger.info("Story image lookup started")
             defer { self?.logger.info("Story image lookup finished") }
             let work = Task.detached(priority: .utility) {
-                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting) {
+                try await StoryCurator.run(in: database, imageFinder: finder, muting: muting, first: first) {
                     Task { @MainActor in
                         store.noteStoryImageSaved()
                     }
@@ -1098,6 +1111,7 @@ class FeedManager: NSObject, ObservableObject {
                 work.cancel()
             }
             guard let self else { return }
+            if !Task.isCancelled { self.imageLookupTask = nil }
             switch result {
             case .success(let report):
                 self.lastImageLookup = report

@@ -50,6 +50,8 @@ struct TensionIndexView: View {
     }
     @Environment(\.dismiss) private var dismiss
     @State private var selectedDay: Date?
+    @State private var showsFactors = false
+    @State private var showsMethod = false
     @State private var selectedRegion: HotspotRegion?
     @State private var selectedPin: HotspotClusterPin?
     @Environment(\.effectiveContrast) private var contrast
@@ -71,10 +73,11 @@ struct TensionIndexView: View {
                         hotspotMap(reading)
                         drivers(reading)
                         group {
-                            DisclosureGroup {
+                            DisclosureGroup(isExpanded: $showsFactors) {
                                 reasons(reading).padding(.top, AppSpacing.sm)
                             } label: {
-                                groupTitle("Factor Breakdown")
+                                // The whole row opens it, not only the small triangle.
+                                groupTitle("Factor Breakdown").disclosureRow($showsFactors)
                             }
                         }
                         if trend.count > 1 {
@@ -400,12 +403,14 @@ struct TensionIndexView: View {
                 "An AI interpretation of selected international headlines, not a measured probability of catastrophe. Publisher claims and model reasoning can be wrong."
             )
             .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
-            DisclosureGroup("How World Tension Is Assessed") {
+            DisclosureGroup(isExpanded: $showsMethod) {
                 Text(
                     "The on-device model reasons about novelty, proximity to worst case, reversibility and scope of impact. Nuclear and WMD situations carry outsized weight when supported by headlines. Current international headlines are compared with earlier coverage; no fixed formula sets the score. Before an assessment is saved, every place, person and figure it names is checked against the supplied headlines. Royal, celebrity, sport and lifestyle stories are left out. The reading shown is the weighted average of the past seven days' assessments, plus up to 9° when the assessment rose on consecutive days. When no assessment exists for the day, a labelled keyword estimate of the current headlines is shown as it is and never enters the average. It is not saved while the model is unavailable; when the model declines the headlines, it is kept as the day's reading until new headlines or Reassess bring an assessment. Near you: where your Mac's region has a war next door, the reading adds up to 15° for the past week's stories in your library that name that war with fighting or attacks, or your own country with a crisis, a protest, an attack or a security cue, counted by keyword and shown beside the world reading."
                 )
                 .font(AppTypography.caption).foregroundStyle(AppColor.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
+            } label: {
+                Text("How World Tension Is Assessed").disclosureRow($showsMethod)
             }
             HStack {
                 Text("Last 24 hours · \(TensionMethodology.v1.panel.count) international panel feeds")

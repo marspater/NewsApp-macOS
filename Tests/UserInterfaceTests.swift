@@ -1993,6 +1993,17 @@ extension NewsTests {
         assertEqual(AppTypography.eyebrowTracking, 0.6, "AppTypography.eyebrowTracking should be 0.6")
         assertEqual(AppRadius.storyCard, 16.0, "Story cards use the 16 pt radius")
 
+        // Each list keeps its own layout; a list never chosen for follows the earlier single preference.
+        var layouts = ""
+        assertTrue(ListLayoutPreference.isGrid("Unread", stored: layouts, fallback: true), "Unset follows the default")
+        layouts = ListLayoutPreference.setting(false, for: "Unread", in: layouts)
+        layouts = ListLayoutPreference.setting(true, for: "Today", in: layouts)
+        assertFalse(ListLayoutPreference.isGrid("Unread", stored: layouts, fallback: true), "Unread keeps its list")
+        assertTrue(ListLayoutPreference.isGrid("Today", stored: layouts, fallback: false), "Today keeps its grid")
+        assertTrue(ListLayoutPreference.isGrid("World", stored: "not json", fallback: true), "A bad value is ignored")
+        assertEqual(AppLayout.gridColumnCount(width: 300), 1, "One column at the minimum width")
+        assertEqual(AppLayout.gridColumnCount(width: 1163), 3, "Three columns in a wide window")
+
         // Today card metadata (#938): a field without data adds nothing to the card or to VoiceOver.
         let none = StoryCardMetadata()
         assertTrue(none.coverageLine == nil && none.originalReportsText == nil && none.readingTimeText == nil)

@@ -45,7 +45,7 @@ struct ArticleCardView<Footer: View>: View {
     @State private var isHovered = false
 
     var cardImageURL: URL? {
-        FeedArticle.bestCardImage(in: [article] + imageFallbacks)
+        FeedArticle.bestCardImage(in: [article] + imageFallbacks) ?? metadata.imageURL
     }
 
     var isRead: Bool {
@@ -121,6 +121,9 @@ struct ArticleCardView<Footer: View>: View {
         .fixedSize(horizontal: false, vertical: variant?.laneWidth == nil)
         .clipShape(cardShape)
         .containerShape(cardShape)
+        // One geometry for the card and everything in it: when a list changes size or leaves during navigation,
+        // the photo moves with its card instead of animating toward its new frame on its own.
+        .geometryGroup()
         // The shadows are cast by the filled card shape rather than the composited card, whose shadow needed an
         // offscreen pass per card on every scrolled frame (#778). The card is opaque, so it looks the same.
         .background {

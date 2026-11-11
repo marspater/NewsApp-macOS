@@ -76,6 +76,7 @@ struct TodayEditionView<LatestListCard: View>: View {
         let stories = edition.lead
         return BriefingHeroCarouselView(
             entries: stories.map(\.entry),
+            images: edition.metadata.compactMapValues(\.imageURL),
             readIDs: readIDs,
             clock: clock,
             isReaderOpen: isMotionPaused,
@@ -141,7 +142,7 @@ struct TodayEditionView<LatestListCard: View>: View {
 
     /// How many adaptive columns of at least the Compact minimum fit `width`.
     static func gridColumns(width: CGFloat) -> Int {
-        max(1, Int((width + AppLayout.cardGap) / (AppLayout.compactColumnMinimum + AppLayout.cardGap)))
+        AppLayout.gridColumnCount(width: width, minimum: AppLayout.compactColumnMinimum)
     }
 }
 

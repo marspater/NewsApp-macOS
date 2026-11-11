@@ -41,6 +41,7 @@ enum StoryCurator {
         imageFinder: StoryImageFinder = .unavailable,
         imageBudget: Int = imageBudget,
         muting: MuteRules = MuteRules(),
+        first: Set<String> = [],
         activeLifetime: TimeInterval = EventCandidatePolicy.standard.activeEventLifetime,
         now: Date = Date(),
         onImageSaved: (@Sendable () -> Void)? = nil
@@ -52,7 +53,7 @@ enum StoryCurator {
             do {
                 for row in try await database.imagelessStoryRows(
                     activeSince: now.addingTimeInterval(-activeLifetime), limit: imageBudget * 3, muting: muting,
-                    isRequestable: { StoryImageFinder.pageURL($0) != nil })
+                    first: first, isRequestable: { StoryImageFinder.pageURL($0) != nil })
                 where lookedUp.count < imageBudget {
                     try Task.checkCancellation()
                     if let event = row.eventID, lookedUp.contains(event) { continue }

@@ -207,7 +207,8 @@ enum AppColor {
     }
     /// The surface a Compact card's photo dissolves into: the card fill, opaque at the text and clear at the photo.
     static let compactPhotoFade = LinearGradient(
-        colors: [surface, surface.opacity(0)], startPoint: .leading, endPoint: .trailing)
+        stops: [.init(color: surface, location: 0), .init(color: surface.opacity(0), location: 0.55)],
+        startPoint: .leading, endPoint: .trailing)
     /// The block a citation jumped to, until the reader dismisses the citation.
     static let passageHighlight = Color.accentColor.opacity(0.12)
     /// A passage the reader highlighted (V1 #711): a caution wash the primary text stays readable on.
@@ -374,8 +375,6 @@ enum AppLayout {
     static let compactColumnMinimum: CGFloat = 280
     /// The Compact card's photo fills this share of the card from the trailing edge.
     static let compactPhotoShare: CGFloat = 0.52
-    /// The share of the photo, from its leading edge, that dissolves into the card.
-    static let compactPhotoFadeShare: CGFloat = 0.55
     /// Compact text may reach this share of the card's width, over the photo's dissolving edge.
     static let compactTextShare: CGFloat = 0.66
     static let cardHoverLift: CGFloat = 3
@@ -415,6 +414,10 @@ enum AppLayout {
     static let leadBackdropBlur: CGFloat = 40
     static let gridColumnMinimum: CGFloat = 300.0
     static let gridColumnMaximum: CGFloat = 420.0
+    /// How many grid columns of at least `minimum` fit `width`.
+    static func gridColumnCount(width: CGFloat, minimum: CGFloat = gridColumnMinimum) -> Int {
+        max(1, Int((width + cardGap) / (minimum + cardGap)))
+    }
     /// Briefing hero carousel: arrow circle, page dots and the pointer target around a small control.
     static let carouselControlSize: CGFloat = 32
     static let carouselDotSize: CGFloat = 8
@@ -967,6 +970,38 @@ struct FloatingGlassGroup<Content: View>: View {
         } else {
             HStack(spacing: spacing) { content }
         }
+    }
+}
+
+extension View {
+    /// A disclosure's label that toggles it from anywhere on its row: on macOS only the triangle does by default.
+    func disclosureRow(_ isExpanded: Binding<Bool>) -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture { isExpanded.wrappedValue.toggle() }
+            .accessibilityAddTraits(.isButton)
+    }
+}
+
+/// The list or grid choice of each list (Today, Unread, a section…), kept apart so one list's layout does not
+/// change another's (Mars, 11 November 2026). A list never chosen for follows the earlier single preference.
+enum ListLayoutPreference {
+    static let key = "articleGridLayoutBySection"
+
+    static func choices(_ stored: String) -> [String: Bool] {
+        (try? JSONDecoder().decode([String: Bool].self, from: Data(stored.utf8))) ?? [:]
+    }
+
+    static func isGrid(_ section: String, stored: String, fallback: Bool) -> Bool {
+        choices(stored)[section] ?? fallback
+    }
+
+    static func setting(_ isGrid: Bool, for section: String, in stored: String) -> String {
+        var all = choices(stored)
+        all[section] = isGrid
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return (try? encoder.encode(all)).flatMap { String(data: $0, encoding: .utf8) } ?? stored
     }
 }
 

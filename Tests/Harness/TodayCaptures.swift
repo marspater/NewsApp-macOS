@@ -279,9 +279,9 @@ struct TodayCaptures {
             ])
         return TodayEdition.make(
             entries: all.map(\.entry), plan: plan,
-            differingAccounts: [
+            details: TodayCardDetails(differingAccounts: [
                 "beat-1": "The Verge: the standard is voluntary. Ars Technica: the consortium can enforce it."
-            ])
+            ]))
     }
 
     /// The page at the detail width of a 1,440 pt window and of the 900 pt minimum window, full and partly filled

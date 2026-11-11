@@ -5154,7 +5154,7 @@ actor DatabaseEngine {
     /// `isRequestable` drops links the image client would refuse before they count toward `limit`, so they cannot
     /// crowd out stories behind them on every pass (#818).
     func imagelessStoryRows(
-        activeSince: Date, limit: Int, muting: MuteRules = MuteRules(),
+        activeSince: Date, limit: Int, muting: MuteRules = MuteRules(), first: Set<String> = [],
         isRequestable: @Sendable (String) -> Bool = { _ in true }
     ) throws -> [(
         id: String, link: String, eventID: String?
@@ -5175,7 +5175,12 @@ actor DatabaseEngine {
                 + [.text(muting.sourceParameter), .text(muting.topicParameter)])
         var results: [(id: String, link: String, eventID: String?)] = []
         var picturedEvents: [String: Bool] = [:]
-        for row in rows {
+        // Stories the reader is looking at (`first`) come before the rest, each group in the order above.
+        let ordered =
+            first.isEmpty
+            ? rows
+            : rows.filter { $0[0].map(first.contains) ?? false } + rows.filter { !($0[0].map(first.contains) ?? false) }
+        for row in ordered {
             try Task.checkCancellation()
             guard results.count < limit else { break }
             guard let id = row[0], let link = row[1], isRequestable(link) else { continue }

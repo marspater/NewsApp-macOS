@@ -41,6 +41,7 @@ extension NewsTests {
             ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
             ("testHeldEditionKeepsTagsEntriesAndNewEditionSortsLatest", { testTodayHeldEditionDetails() }),
             ("testConcurrentEvaluationMatchesSerial", { testTodayConcurrentEvaluationMatchesSerial() }),
+            ("testLeadNeedsAPhotoAndLeftFeedsLeaveToday", { testTodayLeadPhotoAndLeftFeeds() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
@@ -1017,7 +1018,7 @@ extension NewsTests {
         let held = TodayEdition.make(
             entries: entries(["a", "b", "d", "e", "stray", "f", "g"]), plan: moved, keeping: first)
         assertEqual(
-            shape(held), ["The Lead: a", "In Motion: b,d", "The Latest: e,stray,f,g"],
+            shape(held), ["The Lead: a", "In Motion: b,d", "The Latest: e,f,g,stray"],
             "Stories stay in their lanes, a story that left the list leaves its lane, new stories join The Latest")
         let tagged = TodayStoryAssignment.unplaced(.article(makeArticle(id: "t", title: "t", pubDate: referenceNow)))
         assertTrue(
@@ -1086,6 +1087,71 @@ extension NewsTests {
         let concurrent = TodayEditionAssigner.evaluateStories(entries, context: context)
         assertEqual(
             summary(concurrent), summary(serial), "Concurrent evaluation keeps the serial order and values")
+    }
+
+    /// Live feedback of 11 November 2026: a story with no photo takes no slide while another story has one; a story
+    /// whose feeds the reader has all left is out of Today, and one whose feed is unknown stays; The Latest is
+    /// newest first by the date its cards show.
+    static func testTodayLeadPhotoAndLeftFeeds() {
+        func event(_ id: String, minutesAgo: Double) -> FeedEntry {
+            let date = referenceNow.addingTimeInterval(-minutesAgo * 60)
+            return makeEventEntry(
+                eventID: "ev-\(id)",
+                members: [
+                    ("\(id)1", "Outlet 1", "Bridge \(id) collapses in storm", "Detail", date, "https://o1.example/rss"),
+                    ("\(id)2", "Outlet 2", "Teams reach bridge \(id)", "Detail", date, "https://o2.example/rss"),
+                    (
+                        "\(id)3", "Outlet 3", "Traffic diverted at bridge \(id)", "Detail", date,
+                        "https://o3.example/rss"
+                    ),
+                ])
+        }
+        let entries = [event("a", minutesAgo: 30), event("b", minutesAgo: 40)]
+        var context = TodayAssignmentContext(now: referenceNow)
+        let open = TodayEditionAssigner.assign(entries: entries, context: context)
+        guard let top = open.entries(for: .theLead).first?.id else {
+            assertTrue(false, "The Lead has a first slide")
+            return
+        }
+        context.imagelessEntryIDs = [top]
+        let pictured = TodayEditionAssigner.assign(entries: entries, context: context)
+        assertFalse(pictured.entries(for: .theLead).contains { $0.id == top }, "A story with no photo takes no slide")
+        assertTrue(pictured.allAssignments.contains { $0.id == top }, "It is still in the edition, in another lane")
+        assertEqual(pictured.entries(for: .theLead).count, 1, "The pictured story leads")
+        context.imagelessEntryIDs = Set(entries.map(\.id))
+        assertEqual(
+            TodayEditionAssigner.assign(entries: entries, context: context).entries(for: .theLead).first?.id, top,
+            "With no photo anywhere, the top story still leads")
+
+        // Subscriptions: a story of a feed the reader left, one of a kept feed and one whose feed is not known.
+        let left = makeArticle(
+            id: "left", title: "From a feed the reader left", feedURL: "https://left.example/rss",
+            pubDate: referenceNow.addingTimeInterval(-600))
+        let kept = makeArticle(
+            id: "kept", title: "From a kept feed", feedURL: "https://kept.example/rss",
+            pubDate: referenceNow.addingTimeInterval(-1200))
+        var unknown = makeArticle(
+            id: "unknown", title: "Feed not known", pubDate: referenceNow.addingTimeInterval(-300))
+        unknown.identityFeedURL = nil
+        let listed: [FeedEntry] = [.article(unknown), .article(left), .article(kept)]
+        let subscribed = TodayAssignmentContext(now: referenceNow, subscribedFeedURLs: ["https://kept.example/rss"])
+        let gone = TodayEditionAssigner.unsubscribedEntryIDs(listed, context: subscribed)
+        assertEqual(gone, ["left"], "Only a story whose known feeds are all unsubscribed leaves Today")
+        let edition = TodayEdition.make(
+            entries: listed, plan: TodayEditionAssigner.assign(entries: listed, context: subscribed),
+            details: TodayCardDetails(unsubscribedIDs: gone))
+        assertEqual(
+            edition.lanes.flatMap { $0.stories.map(\.id) }.sorted(), ["kept", "unknown"],
+            "The left feed's story is not shown; the story with no known feed is kept")
+        let held = TodayEdition.make(
+            entries: listed, plan: TodayEditionPlan(lanes: []),
+            details: TodayCardDetails(unsubscribedIDs: ["kept"]), keeping: edition)
+        assertFalse(held.storyIDs.contains("kept"), "Unsubscribing removes the story from a held edition at once")
+
+        // The Latest follows the date on its cards, newest first, whatever order the stories arrive in.
+        let ordered = TodayEdition.make(
+            entries: [.article(kept), .article(unknown), .article(left)], plan: TodayEditionPlan(lanes: []))
+        assertEqual(ordered.latest.map(\.id), ["unknown", "left", "kept"], "The Latest is newest first")
     }
 
     static func testTodayNotificationThresholdsIndependent() {
