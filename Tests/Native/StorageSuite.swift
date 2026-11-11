@@ -101,6 +101,7 @@ extension NativeSuites.StorageSuite {
             return await store.markAllAsRead()
         }
         expectFalse(await cancelled.value, "Cancelled Mark All as Read reports no write")
+        expectEqual(store.operationError, nil, "Cancellation is not reported as a storage error")
         expectTrue(try await db.getReadArticleIDs().isEmpty, "Cancellation preserves the unread story")
 
         let cancelledDatabaseCall = Task {

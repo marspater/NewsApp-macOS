@@ -415,6 +415,10 @@ final class ArticleStore: ObservableObject {
             stateChanges &+= 1
             await refreshState()
             return true
+        } catch is CancellationError {
+            // The database actor checks cancellation before executing the update.
+            // A cancelled Shortcut is not a failed storage operation.
+            return false
         } catch {
             operationError = "Could not mark articles as read. Please try again."
             logger.error("Failed to mark all as read: \(error.localizedDescription)")

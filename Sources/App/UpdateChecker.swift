@@ -67,8 +67,8 @@ struct SemanticVersion: Comparable, Sendable {
     }
 }
 
-/// Decodable payload from GitHub Releases API.
-struct GitHubReleasePayload: Decodable, Sendable {
+/// Codable release payload: production decodes it and test fixtures encode deterministic responses.
+struct GitHubReleasePayload: Codable, Sendable {
     let tagName: String
     let name: String?
     let htmlUrl: String
