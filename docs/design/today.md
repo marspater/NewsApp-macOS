@@ -45,7 +45,7 @@ Top to bottom, in one vertical `ScrollView`: the masthead (DESIGN.md section 8.1
 
 **Lane header.** The name in `AppTypography.sectionTitle` with the heading trait, the description beneath it in `caption` and the secondary color, and no count. A lane row's header ends in previous and next buttons that move the row by two cards, as the visual reference shows; the row also scrolls freely.
 
-**Lane row.** A horizontal `ScrollView` with `LazyHStack`, `AppLayout.cardGap` between cards and view-aligned scrolling. No paging dots and no auto-scroll. The leading inset equals `AppLayout.pageInset`. Every card of a row is as tall as the row's tallest card. The scrollable area extends into the leading safe area, so cards pass under the glass sidebar instead of clipping at the column edge; if macOS 15 does not allow that, cards clip there and the layout is otherwise identical. Cards in one row align their tops and end level.
+**Lane row.** A horizontal `ScrollView` with `LazyHStack` and `AppLayout.cardGap` between cards. It scrolls freely: view-aligned snapping with an id-bound scroll position kept the header's buttons from moving the row in a window (live pass, 11 November 2026), so the buttons set the row's own offset, two cards at a time. No paging dots and no auto-scroll. The leading inset equals `AppLayout.pageInset`. Every card of a row is as tall as the row's tallest card. On macOS 26 and later neither the row nor the page clips its content (`scrollClipDisabled`), so cards pass under the glass sidebar instead of clipping at the column edge (seen on macOS 27.2); on macOS 15 cards clip there and the layout is otherwise identical. Cards in one row align their tops and end level.
 
 **The Latest.** A header and a vertical grid of Compact cards, adaptive columns 280–420 pt (`AppLayout.compactColumnMinimum`, so two columns fit the 660 pt column of the minimum window), or the existing list card when the reader chooses the list layout, both paging as Today pages now. It is always newest first by the date its cards show.
 
@@ -63,7 +63,7 @@ A full-bleed magazine-cover hero, using the shared carousel component and the mo
 - **Headline.** System serif, white, scaling with window width from 22 to 34 pt (2.4 % of the window width), up to three lines, then the publisher's summary.
 - **Top line.** The breathing dot on the current slide while unread, "PUBLISHER · 1 OF N" as an eyebrow (position hidden with one slide), a status pill in the accent when the story has a status, and a read-time pill in gray once the time is known. Pills are content tags, not glass.
 - **Foot.** Clock glyph and time, up to three overlapping publisher marks, the publisher count, and the original-reports count in teal (DESIGN.md section 11), always the dark value because the foot sits on a dark image. Publisher marks are monograms first; favicons follow Z7.
-- **Controls.** Page dots and previous and next arrows float at the trailing foot on glass, through the shared helper in one `GlassEffectContainer`. They are always visible, and absent with one slide.
+- **Controls.** Page dots and previous and next arrows float at the trailing foot on glass with a dark backing under the marks (`PhotoControlSurface`), in one `GlassEffectContainer`, so they stay legible on a bright photo and in an inactive window. The foot of the image is darkened for the same reason (`AppColor.leadFootScrim`). They are always visible, and absent with one slide.
 
 ## Card variants
 

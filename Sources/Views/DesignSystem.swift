@@ -266,6 +266,13 @@ enum AppColor {
             .init(color: Color.black.opacity(0.5), location: 0.45),
             .init(color: Color.black.opacity(0.12), location: 1),
         ], startPoint: .leading, endPoint: .trailing)
+    /// Darkens the foot of The Lead's image, where the time, publishers and original reports sit, so they stay
+    /// legible on a bright photo.
+    static let leadFootScrim = LinearGradient(
+        stops: [
+            .init(color: Color.black.opacity(0), location: 0.55), .init(color: Color.black.opacity(0.6), location: 0.9),
+        ],
+        startPoint: .top, endPoint: .bottom)
     /// A gray content pill on The Lead's image (reading time).
     static let leadPill = Color.white.opacity(0.16)
     static let leadPillBorder = Color.white.opacity(0.3)
@@ -953,6 +960,24 @@ struct BannerSurface<S: Shape>: ViewModifier {
             content.background { Color.clear.glassEffect(.regular, in: shape) }
         } else {
             content.background(.regularMaterial, in: shape)
+        }
+    }
+}
+
+/// The surface of a control that floats over a photo (The Lead's dots and arrows): glass tinted dark on macOS 26
+/// and later, so white marks on it stay legible when the photo is bright or the window is inactive and the glass
+/// turns pale; the same dark backing with the regular material on macOS 15.
+struct PhotoControlSurface<S: Shape>: ViewModifier {
+    let shape: S
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            // The dark backing sits between the glass and the marks: in an inactive window the glass turns pale
+            // whatever its tint, and white dots and arrows vanished on it (live pass, 11 November 2026).
+            content
+                .background(AppColor.carouselControl, in: shape)
+                .background { Color.clear.glassEffect(.regular, in: shape) }
+        } else {
+            content.background(AppColor.carouselControl, in: shape).background(.regularMaterial, in: shape)
         }
     }
 }

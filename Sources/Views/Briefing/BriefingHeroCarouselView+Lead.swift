@@ -38,6 +38,7 @@ extension BriefingHeroCarouselView {
         return ZStack(alignment: .topLeading) {
             leadImage(for: entry)
             AppColor.leadTextScrim
+            AppColor.leadFootScrim
             AppColor.leadPageFade
             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                 leadTopLine(entry, lead: lead, metadata: metadata, isRead: isRead)
@@ -161,7 +162,7 @@ extension BriefingHeroCarouselView {
             }
             .padding(.horizontal, AppSpacing.xs)
             .frame(height: AppLayout.carouselControlSize)
-            .modifier(BannerSurface(shape: Capsule()))
+            .modifier(PhotoControlSurface(shape: Capsule()))
             leadArrow("chevron.left", label: "Previous story") { step(-1) }
             leadArrow("chevron.right", label: "Next story") { step(1) }
         }
@@ -176,7 +177,7 @@ extension BriefingHeroCarouselView {
                 .font(AppTypography.headline)
                 .foregroundStyle(AppColor.leadText)
                 .frame(width: AppLayout.carouselControlSize, height: AppLayout.carouselControlSize)
-                .modifier(BannerSurface(shape: Circle()))
+                .modifier(PhotoControlSurface(shape: Circle()))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
