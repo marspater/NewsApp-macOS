@@ -93,3 +93,5 @@ Lane counts are unchanged (`5 / 5 / 8 / 12 / 6 / 702`).
 What the change costs: all `8` places now go to stored long reads, so the `26` stories that qualify by headline, section or URL alone are all dropped by the cap on this copy. Two of them are in the labelled stories, the reviewer calls both The Deep Read, and they are now in The Latest. The lane shows a headline-classified story only when fewer than eight stored long reads qualify. The short story the summary rule excluded moved to Your Beat, where the reviewer expected The Latest (Your Beat purity `1.00` to `0.875`): that is the publisher-affinity question above, not a Deep Read one.
 
 The limits above still hold: one library copy at one clock, single-pass reviewer labels, the feeds found in the copy and not the reader's subscriptions. This re-run does not pass the Z2 gate in #934.
+
+The re-run with the reader's real subscriptions and Mars's label corrections, and the comparisons for In Motion and Your Beat, are in [the audit of 11 November 2026](2026-11-11-today-z2-comparisons.md).

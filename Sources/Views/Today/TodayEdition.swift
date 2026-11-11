@@ -58,7 +58,20 @@ struct TodayEdition: Equatable, Sendable {
             case .theLatest: count = 9
             default: count = 5
             }
-            return lane.stories.prefix(count).compactMap(\.entry.cardImageURL)
+            return lane.stories.prefix(count).compactMap { imageURL(of: $0) }
+        }
+    }
+
+    /// The photo a story's card shows: from the reports listed on the page, else the best of its whole event.
+    func imageURL(of story: TodayStoryAssignment) -> URL? {
+        story.entry.cardImageURL ?? metadata[story.id]?.imageURL
+    }
+
+    /// Stories near the top of the page that have no photo yet, The Lead's lanes first: the next photo lookup
+    /// starts with them.
+    var imagelessShownIDs: [String] {
+        lanes.flatMap { lane in
+            lane.stories.prefix(lane.lane == .theLatest ? 30 : 12).filter { imageURL(of: $0) == nil }.map(\.id)
         }
     }
 
@@ -69,14 +82,17 @@ struct TodayEdition: Equatable, Sendable {
     /// A new edition (`previous` nil) follows the assignment `plan`. An edition that is already on screen keeps
     /// every story in its lane, because nothing moves until the reader applies an update (docs/design/today.md,
     /// "Updates"): its cards take the fresh values, a story that left the list leaves its lane, and stories the
-    /// list gained (a further page) join The Latest. A listed story the plan did not place, such as one from a
-    /// feed the reader no longer subscribes to, also goes to The Latest: Today never hides a listed story.
+    /// list gained (a further page) join The Latest. A listed story the plan did not place because its feed is not
+    /// known also goes to The Latest, so a gap in the stored feed identity never hides a story; a story whose
+    /// feeds the reader has all left (`details.unsubscribedIDs`) is not shown at all.
     static func make(
-        entries: [FeedEntry], plan: TodayEditionPlan, differingAccounts: [String: String] = [:],
+        entries: [FeedEntry], plan: TodayEditionPlan, details: TodayCardDetails = TodayCardDetails(),
         keeping previous: TodayEdition? = nil, generation: Int = 0
     ) -> TodayEdition {
         var fresh: [String: TodayStoryAssignment] = [:]
         for assignment in plan.allAssignments { fresh[assignment.id] = assignment }
+        // A story of a feed the reader has left is not part of Today, wherever it was before.
+        let entries = entries.filter { !details.unsubscribedIDs.contains($0.id) }
         let listed = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let listedIDs = Set(listed.keys)
         var laneStories: [TodayLane: [TodayStoryAssignment]] = [:]
@@ -105,9 +121,12 @@ struct TodayEdition: Equatable, Sendable {
             laneStories[.theLatest, default: []].append(
                 fresh[entry.id]?.placed(in: .theLatest) ?? .unplaced(entry))
         }
-        if !retaining {
-            // A new edition's Latest is newest first, as the assignment orders it, also with the stories it left out.
-            laneStories[.theLatest]?.sort { $0.sortKey == $1.sortKey ? $0.id < $1.id : $0.sortKey > $1.sortKey }
+        // The Latest is always newest first by the date its cards show, also with the stories the assignment left
+        // out and in an edition that is being held: a held Latest is in that order already, and a further page is
+        // older, so sorting moves nothing the reader was looking at.
+        laneStories[.theLatest]?.sort {
+            let (a, b) = ($0.entry.representative.orderDate, $1.entry.representative.orderDate)
+            return a == b ? $0.id < $1.id : a > b
         }
 
         var edition = TodayEdition(generation: generation)
@@ -115,18 +134,17 @@ struct TodayEdition: Equatable, Sendable {
             guard let stories = laneStories[lane], !stories.isEmpty else { return nil }
             return Lane(lane: lane, stories: stories)
         }
-        edition.metadata = cardMetadata(of: edition.lanes, differingAccounts: differingAccounts)
+        edition.metadata = cardMetadata(of: edition.lanes, details: details)
         return edition
     }
 
     /// Every card's metadata, with the lane and the event it belongs to.
-    private static func cardMetadata(of lanes: [Lane], differingAccounts: [String: String]) -> [String:
-        StoryCardMetadata]
-    {
+    private static func cardMetadata(of lanes: [Lane], details: TodayCardDetails) -> [String: StoryCardMetadata] {
         var result: [String: StoryCardMetadata] = [:]
         for lane in lanes {
             for story in lane.stories {
-                var metadata = StoryCardMetadata(story, differingAccount: differingAccounts[story.id])
+                var metadata = StoryCardMetadata(story, differingAccount: details.differingAccounts[story.id])
+                metadata.imageURL = details.eventImages[story.id]
                 metadata.laneName = lane.lane.rawValue
                 if case .event(let summary, _, _) = story.entry { metadata.eventID = summary.eventID }
                 result[story.id] = metadata
@@ -167,8 +185,20 @@ extension TodayStoryAssignment {
     }
 }
 
+/// What the cards of an edition show that is read from the library with it.
+struct TodayCardDetails: Equatable, Sendable {
+    /// One attributed differing account per Coverage card, by story id.
+    var differingAccounts: [String: String] = [:]
+    /// The best photo of the whole event, for stories whose listed reports carry none, by story id.
+    var eventImages: [String: URL] = [:]
+    /// Listed stories whose feeds the reader has all left (`TodayEditionAssigner.unsubscribedEntryIDs`).
+    var unsubscribedIDs: Set<String> = []
+}
+
 /// What the lane assignment needs to know about the reader, from their settings.
 struct TodayReader: Sendable {
+    /// Photos that failed to load this session (`DecodedImageCache.failedURLs`).
+    var failedImageURLs: Set<URL> = []
     var subscribedFeedURLs: Set<String>
     var starredFeedURLs: Set<String>
     /// Reading interests count from here when the reader reset them.
@@ -184,17 +214,39 @@ extension ArticleStore {
         let database = self.database
         let now = Date()
         do {
-            let context = try await database.loadTodayAssignmentContext(
+            var context = try await database.loadTodayAssignmentContext(
                 entries: entries, now: now, starredFeedURLs: reader.starredFeedURLs,
                 subscribedFeedURLs: reader.subscribedFeedURLs, resetAt: reader.interestsResetAt)
             try Task.checkCancellation()
+            // A story's photo may sit on a report of its event that this page does not list.
+            var details = TodayCardDetails()
+            // ponytail: one read per event, for at most the 60 newest events without a listed photo, so a page of
+            // them cannot hold up the edition; read them in one query if a library needs more.
+            let unpictured = entries.filter { entry in
+                if case .event = entry { return entry.cardImageURL == nil }
+                return false
+            }
+            for entry in unpictured.prefix(60) {
+                try Task.checkCancellation()
+                guard case .event(let summary, _, _) = entry,
+                    let members = try? await storyMemberArticles(eventID: summary.eventID),
+                    let image = FeedArticle.bestCardImage(in: members)
+                else { continue }
+                details.eventImages[entry.id] = image
+            }
+            details.unsubscribedIDs = TodayEditionAssigner.unsubscribedEntryIDs(entries, context: context)
+            context.imagelessEntryIDs = Set(
+                entries.filter { entry in
+                    guard let image = entry.cardImageURL ?? details.eventImages[entry.id] else { return true }
+                    return reader.failedImageURLs.contains(image)
+                }.map(\.id))
             let plan = await Task.detached(priority: .userInitiated) {
                 TodayEditionAssigner.assign(entries: entries, context: context)
             }.value
             try Task.checkCancellation()
-            let accounts = (try? await database.todayDifferingAccounts(for: plan)) ?? [:]
+            details.differingAccounts = (try? await database.todayDifferingAccounts(for: plan)) ?? [:]
             return TodayEdition.make(
-                entries: entries, plan: plan, differingAccounts: accounts, keeping: previous, generation: generation)
+                entries: entries, plan: plan, details: details, keeping: previous, generation: generation)
         } catch {
             return TodayEdition.make(
                 entries: entries, plan: TodayEditionPlan(lanes: []), keeping: previous, generation: generation)

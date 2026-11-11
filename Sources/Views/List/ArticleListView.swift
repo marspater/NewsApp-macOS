@@ -24,6 +24,8 @@ import SwiftUI
 /// what the commands read: which actions exist, never the closures themselves.
 struct ListCommandActions: Equatable {
     let canGroupStories: Bool
+    /// The list in front, whose own layout View › as List and as Grid change.
+    var layoutSection = "Today"
     let newBriefing: (() -> Void)?
     /// Leaves the Briefing for the destination shown before it (Navigate › Back).
     var back: (() -> Void)? = nil
@@ -33,7 +35,8 @@ struct ListCommandActions: Equatable {
     var customizeBriefing: (() -> Void)? = nil
 
     static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.canGroupStories == rhs.canGroupStories && (lhs.newBriefing == nil) == (rhs.newBriefing == nil)
+        lhs.canGroupStories == rhs.canGroupStories && lhs.layoutSection == rhs.layoutSection
+            && (lhs.newBriefing == nil) == (rhs.newBriefing == nil)
             && (lhs.back == nil) == (rhs.back == nil) && lhs.backDestination == rhs.backDestination
             && (lhs.customizeBriefing == nil) == (rhs.customizeBriefing == nil)
     }
@@ -83,7 +86,22 @@ struct ArticleListView: View {
     @EnvironmentObject private var savedStories: SavedStoriesManager
     @EnvironmentObject private var searchState: ArticleSearchState
 
-    @AppStorage("articleGridLayout") private var gridLayout = false
+    /// The single layout preference of earlier versions: the layout of a list the reader has not chosen one for.
+    @AppStorage("articleGridLayout") private var defaultGridLayout = false
+    @AppStorage(ListLayoutPreference.key) private var sectionLayouts = ""
+
+    /// The list being shown, which keeps its own list or grid choice.
+    private var layoutSection: String { selectedTopic ?? "Today" }
+
+    private var gridLayout: Bool {
+        ListLayoutPreference.isGrid(layoutSection, stored: sectionLayouts, fallback: defaultGridLayout)
+    }
+
+    private var gridLayoutChoice: Binding<Bool> {
+        Binding(
+            get: { gridLayout },
+            set: { sectionLayouts = ListLayoutPreference.setting($0, for: layoutSection, in: sectionLayouts) })
+    }
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.appearsActive) private var appearsActive
@@ -117,7 +135,9 @@ struct ArticleListView: View {
     private var showsLeadImage: Bool {
         guard #available(macOS 26, *), !isBriefing else { return false }
         // The Lead's first slide is the first image the edition asks for.
-        if isTodayEdition { return todayEdition?.lead.first?.entry.cardImageURL != nil }
+        if isTodayEdition {
+            return todayEdition.flatMap { edition in edition.lead.first.flatMap(edition.imageURL) } != nil
+        }
         return LeadStoryPresentation.firstEligibleID(
             in: entries, selectedTopic: selectedTopic, isSearching: isSearching) != nil
     }
@@ -319,7 +339,8 @@ struct ArticleListView: View {
             }
         }()
         return ListCommandActions(
-            canGroupStories: !isBriefing, newBriefing: isBriefing ? { startNewBriefing() } : nil,
+            canGroupStories: !isBriefing, layoutSection: layoutSection,
+            newBriefing: isBriefing ? { startNewBriefing() } : nil,
             back: backAction, backDestination: backDest,
             customizeBriefing: isBriefing ? { showsCustomizeBriefing = true } : nil)
     }
@@ -390,6 +411,9 @@ struct ArticleListView: View {
             } action: {
                 columnSize = $0
             }
+            // The Today edition's rows pass under the floating sidebar, so the page must not cut them at the
+            // column's edge.
+            .scrollClipDisabled(isTodayEdition && Self.rowsPassUnderSidebar)
             // An empty list keeps its masthead at the top and centers its state in the visible area.
             .overlay { emptyListOverlay }
             .onChange(of: queuedUpdateCount, handleQueuedUpdatesChange)
@@ -954,14 +978,10 @@ struct ArticleListView: View {
                         systemImage: groupsEvents ? "square.stack.3d.up.fill" : "square.stack.3d.up")
                 }
                 .toggleStyle(.button)
-                .help(
-                    groupsEvents
-                        ? "Showing one card per event. Show every story on its own (G)"
-                        : "Showing every story on its own. Group stories of the same event (G)"
-                )
+                .help(groupingHelp)
             }
 
-            Picker("Story Layout", selection: $gridLayout) {
+            Picker("Story Layout", selection: gridLayoutChoice) {
                 Label("List", systemImage: "list.bullet").tag(false)
                 Label("Grid", systemImage: "square.grid.2x2").tag(true)
             }
@@ -1183,6 +1203,32 @@ struct ArticleListView: View {
         .allowsWindowActivationEvents(true)
     }
 
+    /// The stories of one grid column: every `count`th story, starting at `column`.
+    static func column(_ column: Int, of count: Int, in entries: [FeedEntry]) -> [FeedEntry] {
+        guard count > 1 else { return entries }
+        return stride(from: column, to: entries.count, by: count).map { entries[$0] }
+    }
+
+    /// What the grouping toggle does here. In Today it also switches between the edition and the plain list.
+    private var groupingHelp: String {
+        let isToday = !isSearching && (selectedTopic ?? "Today") == "Today"
+        switch (groupsEvents, isToday) {
+        case (true, true):
+            return "Showing the Today edition: The Lead, lanes and one card per event. "
+                + "Show every story on its own, without lanes (G)"
+        case (false, true):
+            return "Showing every story on its own. Group stories by event and show the Today edition (G)"
+        case (true, false): return "Showing one card per event. Show every story on its own (G)"
+        case (false, false): return "Showing every story on its own. Group stories of the same event (G)"
+        }
+    }
+
+    /// macOS 26 and later float the sidebar over the content.
+    static var rowsPassUnderSidebar: Bool {
+        if #available(macOS 26, *) { return true }
+        return false
+    }
+
     static var mastheadScrollID: String { "list-masthead" }
 
     /// The Today edition of the listed stories. Its lanes are assigned off the main actor; until the first
@@ -1218,10 +1264,11 @@ struct ArticleListView: View {
                 )
             }
         }
-        // Reloads when the listed stories, their event membership, a stored overview or the applied updates change.
+        // Reloads when the listed stories, their event membership, a stored overview, the subscriptions or the applied
+        // updates change.
         .task(
             id: "\(groupedEntries.revision):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
-                + "\(todayGeneration):\(queryIdentity)"
+                + "\(todayGeneration):\(queryIdentity):\(appSettings.feedURLs.hashValue)"
         ) {
             await reloadTodayEdition(listed, proxy: proxy)
         }
@@ -1243,8 +1290,8 @@ struct ArticleListView: View {
         let edition = await articleStore.todayEdition(
             entries: listed,
             reader: TodayReader(
-                subscribedFeedURLs: Set(appSettings.feedURLs), starredFeedURLs: appSettings.starredFeedURLs,
-                interestsResetAt: resetAt),
+                failedImageURLs: DecodedImageCache.failedURLs, subscribedFeedURLs: Set(appSettings.feedURLs),
+                starredFeedURLs: appSettings.starredFeedURLs, interestsResetAt: resetAt),
             keeping: keeps ? previous : nil, generation: todayGeneration)
         guard !Task.isCancelled else { return }
         // A rebuilt edition has other cards at the same positions, so the lanes' image prefetch starts over.
@@ -1252,6 +1299,8 @@ struct ArticleListView: View {
         let isApplied = previous.map { $0.generation != edition.generation } ?? false
         let restored = restoreTodayFocus(in: edition, from: previous)
         todayEdition = edition
+        // Photos the top of the page still lacks are looked up first.
+        feedManager.requestStoryImages(for: edition.imagelessShownIDs)
         // An applied update returns the page to the masthead; a card that kept focus is brought back into view.
         if isApplied, let restored {
             await Task.yield()
@@ -1285,17 +1334,19 @@ struct ArticleListView: View {
     @ViewBuilder
     private func cardCollection(_ listed: [FeedEntry]) -> some View {
         if gridLayout {
-            LazyVGrid(
-                columns: [
-                    GridItem(
-                        .adaptive(
-                            minimum: AppLayout.gridColumnMinimum,
-                            maximum: AppLayout.gridColumnMaximum), spacing: AppLayout.cardGap, alignment: .top)
-                ],
-                spacing: AppLayout.cardGap
-            ) {
-                ForEach(listed) { entry in entryCard(entry) }
+            // Independent columns, not grid rows: showing an event's sources grows its own column and leaves the
+            // cards beside it where they are (Mars, 11 November 2026). Stories still read across: story n sits in
+            // column n mod the column count.
+            let count = AppLayout.gridColumnCount(width: columnSize.width - AppLayout.pageInset * 2)
+            HStack(alignment: .top, spacing: AppLayout.cardGap) {
+                ForEach(0..<count, id: \.self) { column in
+                    LazyVStack(spacing: AppLayout.cardGap) {
+                        ForEach(Self.column(column, of: count, in: listed)) { entry in entryCard(entry) }
+                    }
+                    .frame(maxWidth: AppLayout.gridColumnMaximum, alignment: .top)
+                }
             }
+            .frame(maxWidth: .infinity)
         } else {
             LazyVStack(spacing: AppLayout.cardGap) {
                 ForEach(listed) { entry in entryCard(entry) }
@@ -1843,7 +1894,7 @@ struct KeyboardShortcutsView: View {
             guard end > (furthest[lane.lane] ?? 0) else { return }
             let start = max(index + 1, furthest[lane.lane] ?? 0)
             furthest[lane.lane] = end
-            let urls = lane.stories[start..<end].compactMap(\.entry.cardImageURL)
+            let urls = lane.stories[start..<end].compactMap { edition.imageURL(of: $0) }
             let previous = tasks[lane.lane]
             let task = Task {
                 await previous?.value

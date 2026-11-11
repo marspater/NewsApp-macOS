@@ -101,6 +101,20 @@ One name means one thing. Before adding a name, check this table and the names a
 | `labels_changed`, `three_way_splits` | A label review: first-pass labels the review changed, and pairs no two reads agree on |
 | `page_stories`, `page_entries` | A Today page timing: stories loaded and the story entries they group into |
 | `page_loader_ms`, `page_assign_ms` | A Today page timing: median milliseconds of the context load and of the lane assignment, from the `TODAY_PAGE_TIMING` line of `--today-shadow` |
+| `candidates_72h`, `candidates_24h` | A Today shadow run (`--today-shadow`): stories the subscription list admits in the 72 h window, and those of the last 24 h |
+| `labelled_stories`, `labelled_events` | A Today shadow run: labelled stories and labelled In Motion events that are candidates under the subscription list |
+| `lead_precision_at_5`, `lead_precision_at_5_publisher_count`, `lead_precision_at_5_briefing` | A Today shadow run: share of the top five labelled candidates that the labels call Lead-worthy, ranked by the Z2 score, by publisher count and by the Briefing signals |
+| `lane_purity` | A Today shadow run: share of labelled stories placed in the lane their label expects |
+| `lane_lead`, `lane_in_motion`, `lane_deep_read`, `lane_your_beat`, `lane_outside`, `lane_latest` | A Today shadow run: stories each lane shows in the 72 h edition |
+| `latest_completeness`, `duplicate_rate` | A Today shadow run: share of candidates placed in a lane, and share of placements that repeat a story |
+| `in_motion_clearing` | A Today shadow run: stories that clear In Motion's bar, before its cap |
+| `in_motion_updates_shown`, `in_motion_updates_missed` | A Today shadow run: labelled real updates among the candidates that In Motion shows, and those it does not show |
+| `in_motion_borderline_shown`, `in_motion_repetitions_shown`, `in_motion_initial_shown`, `in_motion_unlabelled_shown` | A Today shadow run: what else In Motion shows, by event label (borderline, repetition, initial report) or without one |
+| `your_beat_qualifying_24h` | A Today shadow run: stories of the last 24 h that clear Your Beat's bar, before its cap |
+| `your_beat_top_share`, `your_beat_top3_share` | A Today shadow run: among those stories, the share of the busiest publisher and of the busiest three |
+| `your_beat_shown_top_share`, `your_beat_shown_top3_share` | A Today shadow run: the same two shares inside Your Beat as the 72 h edition shows it |
+| `your_beat_qualifying_24h_newest15`, `your_beat_qualifying_24h_newest5` | A Today shadow run: `your_beat_qualifying_24h` with the reading history cut to its newest 15 and its newest 5 stories |
+| `outside_clearing` | A Today shadow run: stories that clear Outside Your Usual's bar, before its cap |
 
 A rescored run keeps its replay and changes only the labels; its `dataset` names the label set, for example `validation-2026-10-29+reviewed-labels-pegged-as-same`.
 

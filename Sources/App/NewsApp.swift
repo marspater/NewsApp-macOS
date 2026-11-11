@@ -410,17 +410,28 @@ struct ListViewCommands: Commands {
     @FocusedValue(\.listActions) private var listActions
     @FocusedValue(\.readerActions) private var readerActions
     @ObservedObject var themeManager: ThemeManager
-    @AppStorage("articleGridLayout") private var gridLayout = false
+    @AppStorage("articleGridLayout") private var defaultGridLayout = false
+    @AppStorage(ListLayoutPreference.key) private var sectionLayouts = ""
     @AppStorage("groupsEventCoverage") private var groupsEvents = true
+
+    /// The layout of the list in front; each list keeps its own.
+    private var gridLayout: Binding<Bool> {
+        let section = listActions?.layoutSection ?? "Today"
+        return Binding(
+            get: { ListLayoutPreference.isGrid(section, stored: sectionLayouts, fallback: defaultGridLayout) },
+            set: { sectionLayouts = ListLayoutPreference.setting($0, for: section, in: sectionLayouts) })
+    }
 
     var body: some Commands {
         CommandGroup(before: .sidebar) {
-            Picker("Story Layout", selection: $gridLayout) {
+            Picker("Story Layout", selection: gridLayout) {
                 Text("As List").tag(false)
                 Text("As Grid").tag(true)
             }
             .pickerStyle(.inline)
             .labelsHidden()
+            // No list in front (a story is open): there is no list whose layout the command could change.
+            .disabled(listActions == nil)
 
             Toggle("Group Stories by Event", isOn: $groupsEvents)
                 .disabled(listActions?.canGroupStories != true)

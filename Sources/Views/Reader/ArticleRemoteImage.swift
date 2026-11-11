@@ -42,6 +42,20 @@ extension EnvironmentValues {
 /// Decoded images by source URL, so a card scrolled back into view shows its image at once instead of fetching and
 /// decoding it again. NSCache evicts under memory pressure.
 @MainActor enum DecodedImageCache {
+    /// Images that could not be loaded this session, so a photo slide is not given to a story whose photo will
+    /// not show (Today's Lead). Bounded; a later success clears the entry.
+    private(set) static var failedURLs: Set<URL> = []
+
+    /// A photo that failed earlier loaded after all.
+    static func noteSuccess(_ url: URL) {
+        if !failedURLs.isEmpty { failedURLs.remove(url) }
+    }
+
+    static func noteFailure(_ url: URL) {
+        if failedURLs.count >= 500 { failedURLs.removeAll() }
+        failedURLs.insert(url)
+    }
+
     /// Cards decode at card size; the reader, the lead card, the Briefing hero and banners at full size (#591).
     enum Size: Hashable, Sendable {
         case card, full
@@ -97,6 +111,8 @@ extension EnvironmentValues {
     }
 
     private static func store(_ image: CGImage, for url: URL, size: Size) {
+        // Any decode that is kept, a prefetch too, shows the photo works after an earlier failure.
+        noteSuccess(url)
         (size == .card ? cardImages : images).setObject(
             image, forKey: url as NSURL, cost: image.bytesPerRow * image.height)
     }
@@ -339,6 +355,7 @@ struct ArticleRemoteImage<Content: View>: View {
                         let image = try await DecodedImageCache.load(url, size: size, using: loadImage)
                         try Task.checkCancellation()
                         phase = .success(Self.image(image))
+                        DecodedImageCache.noteSuccess(url)
                         NotificationCenter.default.post(
                             name: .readerImageFinished, object: url, userInfo: ["success": true])
                         return
@@ -349,6 +366,7 @@ struct ArticleRemoteImage<Content: View>: View {
                         let cancelled = error is CancellationError || (error as? URLError)?.code == .cancelled
                         if cancelled, attempt < 2 { continue }
                         phase = .failure(error)
+                        DecodedImageCache.noteFailure(url)
                         NotificationCenter.default.post(
                             name: .readerImageFinished, object: url, userInfo: ["success": false])
                         return

@@ -54,6 +54,8 @@ struct StoryCardMetadata: Equatable, Sendable {
     var publishers: [String] = []
     /// One attributed differing account from a stored overview.
     var differingAccount: String?
+    /// The best photo of the story's whole event, when the reports listed on the page carry none.
+    var imageURL: URL?
     /// The lane showing the card, which VoiceOver names after the card's own description.
     var laneName: String?
     /// The event the card opens, if any. The card's action captures its entry, and regrouping can change the event
@@ -374,67 +376,62 @@ extension ArticleCardView {
     /// The Latest's card: the photo fills the trailing side and dissolves toward the text, which may run over the
     /// dissolving edge. A story with no image has no photo and no fade.
     private var compactFace: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
-            EyebrowText(displaySource)
-            editionHeadline(.compact)
-            Spacer(minLength: AppSpacing.xxs)
-            HStack(spacing: AppSpacing.xs) {
-                editionDate
-                if isSaved {
-                    Image(systemName: "bookmark.fill")
-                        .font(AppTypography.eyebrow)
-                        .foregroundStyle(AppColor.accentText)
-                        .accessibilityLabel("Saved")
-                }
-            }
-        }
-        .padding(AppSpacing.sm)
-        .frame(maxWidth: .infinity, minHeight: AppLayout.compactCardMinimumHeight, alignment: .leading)
-        .modifier(LeadingShare(share: cardImageURL == nil ? 1 : AppLayout.compactTextShare))
-        .background {
+        CompactCardLayout(hasPhoto: cardImageURL != nil) {
             if cardImageURL != nil {
-                GeometryReader { card in
-                    let width = card.size.width * AppLayout.compactPhotoShare
-                    Color.clear
-                        .overlay { editionPhoto(size: .card) }
-                        .clipped()
-                        // ponytail: a gradient of the card's own fill instead of a baked alpha fade and progressive
-                        // blur per image; bake it if Z5 (#937) finds the grid can afford one more pass per photo.
-                        .overlay(alignment: .leading) {
-                            AppColor.compactPhotoFade.frame(width: width * AppLayout.compactPhotoFadeShare)
-                        }
-                        .frame(width: width)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .accessibilityHidden(true)
+                Color.clear
+                    .overlay { editionPhoto(size: .card) }
+                    .clipped()
+                    // ponytail: a gradient of the card's own fill instead of a baked alpha fade and progressive
+                    // blur per image; bake it if Z5 (#937) finds the grid can afford one more pass per photo.
+                    .overlay { AppColor.compactPhotoFade }
+                    .accessibilityHidden(true)
             }
+            VStack(alignment: .leading, spacing: AppSpacing.eyebrowGap) {
+                EyebrowText(displaySource)
+                editionHeadline(.compact)
+                Spacer(minLength: AppSpacing.xxs)
+                HStack(spacing: AppSpacing.xs) {
+                    editionDate
+                    if isSaved {
+                        Image(systemName: "bookmark.fill")
+                            .font(AppTypography.eyebrow)
+                            .foregroundStyle(AppColor.accentText)
+                            .accessibilityLabel("Saved")
+                    }
+                }
+            }
+            .padding(AppSpacing.sm)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
 
-/// Gives its content the leading share of the offered width and keeps the full width itself.
-private struct LeadingShare: ViewModifier {
-    let share: CGFloat
+/// Lays out a Compact card: the text takes the leading share of the width and sets the height, and the photo, when
+/// there is one, fills the trailing share from top to bottom. The sizes come from the card's own bounds in one pass,
+/// so the photo never animates apart from its card (the photos smeared during navigation while a geometry reader
+/// sized them).
+private struct CompactCardLayout: Layout {
+    let hasPhoto: Bool
 
-    func body(content: Content) -> some View {
-        ShareLayout(share: share) { content }
+    private func textWidth(_ width: CGFloat) -> CGFloat { hasPhoto ? width * AppLayout.compactTextShare : width }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        guard let text = subviews.last else { return .zero }
+        guard let width = proposal.width else { return text.sizeThatFits(.unspecified) }
+        let size = text.sizeThatFits(ProposedViewSize(width: textWidth(width), height: nil))
+        return CGSize(width: width, height: max(size.height, AppLayout.compactCardMinimumHeight))
     }
 
-    private struct ShareLayout: Layout {
-        let share: CGFloat
-
-        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
-            guard let width = proposal.width, let child = subviews.first else {
-                return subviews.first?.sizeThatFits(proposal) ?? .zero
-            }
-            let size = child.sizeThatFits(ProposedViewSize(width: width * share, height: proposal.height))
-            return CGSize(width: width, height: size.height)
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        guard let text = subviews.last else { return }
+        if hasPhoto, subviews.count > 1 {
+            let width = bounds.width * AppLayout.compactPhotoShare
+            subviews[0].place(
+                at: CGPoint(x: bounds.maxX - width, y: bounds.minY),
+                proposal: ProposedViewSize(width: width, height: bounds.height))
         }
-
-        func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
-            subviews.first?.place(
-                at: bounds.origin, proposal: ProposedViewSize(width: bounds.width * share, height: bounds.height))
-        }
+        text.place(
+            at: bounds.origin, proposal: ProposedViewSize(width: textWidth(bounds.width), height: bounds.height))
     }
 }
 

@@ -56,6 +56,7 @@ Rules the bars share:
 
 - **Publisher count is not confirmation.** Original reports weigh; wire copies count once.
 - **Editorial and notification importance are separate decisions.** They may share evidence, never a threshold.
+- **The Lead needs a photo.** A story with no photo in any report of its event, or whose photo failed to load, is not a candidate for a slide while another story has one, and falls through to the next lanes (Mars, 11 November 2026). The next photo lookup starts with the stories Today shows.
 - **The Lead is never padded.** A library with one qualifying story shows one slide and no dots. The first slide is the top-ranked story even when its score or confidence is low, so The Lead always exists when Today has any story.
 - **Coverage card gate.** The Coverage variant appears only when the event grouping is confident: ≥ 3 publishers, ≥ 2 original reports and a grouping confidence that Z2 or #737 defines, since event membership stores no score today. Below that the story shows its plain variant for the lane.
 - **Developing pill.** Uses the Briefing definition (`BriefingView.isDeveloping`: a report joined in the last hour) so one word means one thing across the app.
@@ -81,6 +82,10 @@ Recorded on #933 on 9 November 2026.
 | Story card radius | 16 pt, delivered by Z6 (DESIGN.md section 12) |
 | Headline typeface | The system serif. Newsreader in the mocks maps to it and the app bundles no typeface (DESIGN.md section 10) |
 | Design documents in `docs/design/` | Signed off |
+| Grouping toggle (11 November 2026) | Kept. Grouping on shows the edition; grouping off shows every report on its own in the list or grid |
+| The Lead's size (11 November 2026) | Follows the detail column |
+| Stories of unsubscribed feeds (11 November 2026) | Leave Today at once; a story whose feed is not known stays, in The Latest |
+| Z2 gate (11 November 2026) | The shadow evaluation stays preliminary until it is re-run with the reader's subscriptions; In Motion's window and momentum rule and Your Beat's affinity follow the comparison in `docs/audits/2026-11-11-today-z2-comparisons.md` |
 | Order of Your Beat and The Deep Read | The Deep Read is assigned first, from stored evidence only (section 4.1). The page order stays as the mocks show it |
 
 **Thresholds.** Mars delegated this decision on 9 November 2026 to a review of section 2.2 against the code. Its outcome: the numbers stand as Z2's starting point, with four corrections made in this revision. In Motion's test is taken against the clock, because `hasSubstantiveUpdate` is relative to the reader's last visit and is false for an event never opened. Your Beat's match needs a scale and a finer profile from Z2. The Deep Read's 8 minutes is 1,600 words at the reader's rate. The Coverage gate's grouping confidence is not stored today. Z2 reports what each lane would have shown on a copy of a real library and proposes the final numbers for Mars to review; nothing ships from the starting values.

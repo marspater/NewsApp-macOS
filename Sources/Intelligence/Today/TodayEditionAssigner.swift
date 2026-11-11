@@ -83,7 +83,9 @@ enum TodayEditionAssigner {
         let thresholds = context.thresholds
 
         // 1. The Lead (1–5 slides, rank-ordered).
-        let lead = selectLead(from: evaluateStories(eligible, context: context), thresholds: thresholds)
+        let lead = selectLead(
+            from: evaluateStories(eligible, context: context), imageless: context.imagelessEntryIDs,
+            thresholds: thresholds)
         // 2. In Motion (min 3, cap 12, chronological newest first)
         let inMotion = placeConditionalLane(lane: .inMotion, candidates: lead.pool) {
             inMotionPlacement($0, thresholds: thresholds)
@@ -144,15 +146,30 @@ enum TodayEditionAssigner {
         return eligible
     }
 
+    /// Stories every known feed of which the reader has left: they are out of Today, also out of The Latest
+    /// (subscriptions are the candidate pool). A story whose feed is not known is not among them, so a gap in
+    /// the stored feed identity never hides an eligible story.
+    static func unsubscribedEntryIDs(_ entries: [FeedEntry], context: TodayAssignmentContext) -> Set<String> {
+        guard let subscribed = context.subscribedFeedURLs else { return [] }
+        return Set(
+            entries.filter { entry in
+                let signals = context.signalsByEntryID[entry.id]
+                return !feedURLs(of: entry, signals: signals).isEmpty
+                    && !isSubscribed(entry, signals: signals, in: subscribed)
+            }.map(\.id))
+    }
+
+    private static func feedURLs(of entry: FeedEntry, signals: TodayStorySignals?) -> Set<String> {
+        Set(entry.visibleArticles.compactMap(\.identityFeedURL)).union(signals?.feedURLs ?? [])
+    }
+
     private static func isSubscribed(
         _ entry: FeedEntry,
         signals: TodayStorySignals?,
         in subscribed: Set<String>
     ) -> Bool {
         let subscribedKeys = Set(subscribed.map(AppSettings.feedKey))
-        let candidateURLs =
-            Set(entry.visibleArticles.compactMap(\.identityFeedURL))
-            .union(signals?.feedURLs ?? [])
+        let candidateURLs = feedURLs(of: entry, signals: signals)
         return candidateURLs.contains { url in
             subscribed.contains(url) || subscribedKeys.contains(AppSettings.feedKey(url))
         }
@@ -168,8 +185,16 @@ enum TodayEditionAssigner {
     /// The Lead's slides in rank order, and every other story as the pool the conditional lanes draw from.
     private static func selectLead(
         from evaluated: [EvaluatedStory],
+        imageless: Set<String> = [],
         thresholds: TodayEditionThresholds
     ) -> (winners: [LanePlacement], pool: [EvaluatedStory]) {
+        // A story without a photo never takes a slide while any story has one; it goes on to the other lanes.
+        // Only a library with no photo at all keeps its top story as The Lead, so the page still has one.
+        let pictured = evaluated.filter { !imageless.contains($0.id) }
+        if !pictured.isEmpty, pictured.count < evaluated.count {
+            let selected = selectLead(from: pictured, thresholds: thresholds)
+            return (selected.winners, selected.pool + evaluated.filter { imageless.contains($0.id) })
+        }
         let ordered = evaluated.sorted(by: leadPrecedes)
         guard let first = ordered.first else { return ([], []) }
         var winners = [
@@ -210,18 +235,22 @@ enum TodayEditionAssigner {
 
     // MARK: - Conditional lane bars
 
-    private static func inMotionPlacement(
+    // The bars are not private: the shadow evaluation counts the stories that clear each one on its own.
+
+    static func inMotionPlacement(
         _ story: EvaluatedStory,
         thresholds: TodayEditionThresholds
     ) -> LanePlacement? {
-        let conf = inMotionConfidence(story)
-        guard story.hasInMotionUpdate, story.momentum == .rising,
-            conf >= thresholds.inMotionMinimumConfidence
-        else { return nil }
-        return LanePlacement(story: story, confidence: conf, reason: "in_motion_substantive_24h_update")
+        let conf = inMotionConfidence(story, thresholds: thresholds)
+        let moving = story.momentum == .rising || !thresholds.inMotionRequiresRisingMomentum
+        guard story.hasInMotionUpdate, moving, conf >= thresholds.inMotionMinimumConfidence else { return nil }
+        let reason =
+            thresholds.inMotionUpdateWindowSeconds == nil
+            ? "in_motion_substantive_24h_update" : "in_motion_substantive_update"
+        return LanePlacement(story: story, confidence: conf, reason: reason)
     }
 
-    private static func deepReadPlacement(
+    static func deepReadPlacement(
         _ story: EvaluatedStory,
         thresholds: TodayEditionThresholds
     ) -> LanePlacement? {
@@ -234,14 +263,16 @@ enum TodayEditionAssigner {
         return LanePlacement(story: story, confidence: conf, reason: reason)
     }
 
-    private static func yourBeatPlacement(
+    static func yourBeatPlacement(
         _ story: EvaluatedStory,
         thresholds: TodayEditionThresholds
     ) -> LanePlacement? {
         let byInterest = story.interestMatch >= thresholds.yourBeatInterestMatchMinimum
         let byStar = story.isStarredFeed
-        let byAffinity = story.isTopQuartilePublisher
-        let conf = yourBeatConfidence(story)
+        // The shipped minimum is zero, so affinity qualifies on its own; above zero it is a booster only.
+        let byAffinity =
+            story.isTopQuartilePublisher && story.interestMatch >= thresholds.yourBeatAffinityInterestMinimum
+        let conf = yourBeatConfidence(story, byAffinity: byAffinity)
         guard byInterest || byStar || byAffinity, conf >= thresholds.yourBeatMinimumConfidence else {
             return nil
         }
@@ -256,7 +287,7 @@ enum TodayEditionAssigner {
         return LanePlacement(story: story, confidence: conf, reason: reason)
     }
 
-    private static func outsidePlacement(_ story: EvaluatedStory, context: TodayAssignmentContext) -> LanePlacement? {
+    static func outsidePlacement(_ story: EvaluatedStory, context: TodayAssignmentContext) -> LanePlacement? {
         guard context.profile.hasHistory else { return nil }
         let thresholds = context.thresholds
         let conf = outsideConfidence(story)
@@ -366,8 +397,9 @@ enum TodayEditionAssigner {
         return min(1.0, 0.30 + reportStrength * 0.45 + scoreStrength * 0.25)
     }
 
-    private static func inMotionConfidence(_ story: EvaluatedStory) -> Double {
-        guard story.hasInMotionUpdate, story.momentum == .rising else { return 0.30 }
+    private static func inMotionConfidence(_ story: EvaluatedStory, thresholds: TodayEditionThresholds) -> Double {
+        let moving = story.momentum == .rising || !thresholds.inMotionRequiresRisingMomentum
+        guard story.hasInMotionUpdate, moving else { return 0.30 }
         return story.groupingConfidence >= 0.70 || story.publisherCount >= 3 ? 0.88 : 0.75
     }
 
@@ -384,10 +416,10 @@ enum TodayEditionAssigner {
         return max(typeConf, lengthConf)
     }
 
-    private static func yourBeatConfidence(_ story: EvaluatedStory) -> Double {
+    private static func yourBeatConfidence(_ story: EvaluatedStory, byAffinity: Bool) -> Double {
         var conf = 0.0
         if story.isStarredFeed { conf = max(conf, 0.90) }
-        if story.isTopQuartilePublisher { conf = max(conf, 0.78) }
+        if byAffinity { conf = max(conf, 0.78) }
         if story.interestMatch >= 0.50 { conf = max(conf, min(0.95, 0.55 + story.interestMatch * 0.40)) }
         return conf
     }
