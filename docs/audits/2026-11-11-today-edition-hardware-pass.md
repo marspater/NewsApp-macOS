@@ -1,0 +1,72 @@
+# Today edition: first pass in a window (epic Z, #932)
+
+**Date:** 11 November 2026
+**Asked for by:** Mars, after his own first run of the development build.
+**What this is:** the checks of the Today edition that need a real window, as far as they could be done on the one Mac at hand. An untested combination is listed as not run, with what it needs.
+
+## Environment
+
+| | |
+| --- | --- |
+| Mac | Mac17,3, Apple M5, 24 GB |
+| OS | macOS 27.2.1 (26B131). No macOS 26 or macOS 15 system or virtual machine is available on this Mac |
+| Build | Release, ad-hoc signed, bundle id `com.marspater.news.isolatedqa` (`script/run_isolated.sh`), from `fix/today-live-feedback`; each row below names the commit it was seen on where that matters |
+| Library | A read-only backup of the development library (about 3,040 stories, 320 grouped events) in the isolated container. The real app's container was not touched; the development container was only read |
+| Settings | The development build's 43 subscriptions, first-launch and notification flags, passed as launch arguments, which override nothing stored |
+| Driving | Background accessibility input and window captures. No trackpad, no VoiceOver speech, no system setting was changed |
+| Appearance | Dark (the system's), light (`-appAppearance Light`), dark with Increase Contrast and Reduce Motion simulated (`--increase-contrast --reduce-motion`) |
+
+## Results on macOS 27.2.1
+
+| Check | Result |
+| --- | --- |
+| Page against the mocks, wide window, sidebar open, dark and light | Seen. Structure, The Lead, lane rows, cards and The Latest follow `docs/mocks/today/`. Differences that remain are the documented ones (#1224) |
+| The Lead's image extends under the sidebar | Passed, dark and light |
+| Lane cards pass under the sidebar | **Failed, fixed, passed.** Rows were cut at the column's edge: the page's own scroll view clipped them. Fixed in `e841044` (`scrollClipDisabled` on the page as well as the row) and seen passing |
+| A lane's previous and next buttons | **Failed, fixed, passed.** They did not move the row. Two fixes did not work in a window (an id-bound scroll position with view-aligned snapping; a scroll reader, which moved the page instead). Setting the row's own offset works (`e841044`) |
+| The Lead's dots and arrows | **Failed, fixed, partly seen.** Legible in an active window; in an inactive window the glass turned pale and the white marks vanished. A dark backing between glass and marks was added in `e841044`; the inactive state was not re-captured after it |
+| The Lead's foot (time, publishers, original reports) on a bright photo | **Weak, fixed.** Teal on a bright image was hard to read; a foot scrim was added and seen in light and dark |
+| Carousel: next arrow, automatic rotation | Passed: the arrow changes the slide; the slide advanced on its own between captures about ten seconds apart |
+| Vertical page scrolling | Passed with wheel events. The Lead scrolls under the toolbar |
+| Arrow keys | Passed: down moves from The Lead to the lanes, right moves along a row and the row scrolls only as far as needed, the focused card shows the ring and the lift |
+| Opening a story and returning | Passed from The Latest: the scroll position is kept, the card keeps focus and shows as read |
+| Applying queued updates | Passed: the button leaves, the page returns to the masthead, then scrolls back to the card that kept focus, as today.md specifies |
+| The Latest after an applied update | In order: 8, 8, 9, 9, 9, 13, 17, 18, 18, 19 minutes and on |
+| Compact cards | Photos fill the trailing side; cards of a row are equally tall; photos arrive a moment after a long jump down the page |
+| Grid columns in Unread | Passed: showing an event's sources grew its own column; the cards in the other columns stayed |
+| A layout per list | Passed: Unread switched to the list layout while Today kept its grid |
+| Increase Contrast | Seen in dark: hairlines and secondary text strengthen |
+| Reduce Motion | Launched with it: The Lead shows its first slide. That it never rotates was not timed |
+
+## Not run
+
+| Check | Why | What it needs |
+| --- | --- | --- |
+| macOS 26, and the macOS 15 fallback | Only macOS 27 here | A Mac or virtual machine on each; CI compiles and tests on macOS 26 (Xcode 26.6) but shows no window |
+| Narrow window (900 pt), sidebar closed | The screen locked before these steps; background input stops then | The same pass again, or a look by Mars. Offscreen captures at the 900 pt column width exist |
+| Trackpad: page against row, diagonal gestures | No trackpad input can be synthesised | Mars on hardware. One wheel scroll with the pointer over a row moved that row by a card once; not reproduced, worth a look |
+| Hover lift and image scale | Needs a real pointer | Mars on hardware |
+| The transition smear from the recording (0:16–0:19) | A capture cannot catch a frame mid-transition; the last frame after returning is clean | A new screen recording on the fixed build |
+| J and K, focus restoration when a lane disappears | Not reached before the lock; the rules are unit-tested (`TodayFocusMap`) | The pass again |
+| VoiceOver, lane names and descriptions, the Lanes rotor, card actions, slide position | Turning VoiceOver on is a system setting and speaks aloud | Mars, or a session he starts for it |
+| Reduce Transparency, Show Borders, clear and tinted glass | System settings | Mars, or his go-ahead to change them for a pass |
+| Launch and refresh watched as motion | Captures are stills | A screen recording |
+| Scroll frame time | Needs Instruments on the Profile build with real scrolling | An Instruments run by Mars, or his go-ahead to record one |
+
+## Measurements
+
+First card after process start, from the app's own `First card visible` log line, same library, warm launches. Memory from `footprint` 25 seconds after the last launch.
+
+| Build | Conditions | First card, ms | Physical footprint | Peak |
+| --- | --- | --- | --- | --- |
+| Edition (`d5a6bdf` plus the pager fix) | Load average 2 to 5 | 882, 862, 890 | 253 MB | 429 MB |
+| Main (`ba1853e`) | Load 7 to 19, a test run active | 713, 614, 625, 617 | 306 MB | 314 MB |
+| Edition (`33411bc`) | Same, alternating with main | 2,530, 2,615, 2,387 (and 1,773, 1,894, 1,806 a round earlier) | 251 MB | 439 MB |
+
+- **The edition is slower to its first card than main.** Main shows the first page as soon as it is read. The edition waits for the lane assignment, which uses every core, so it also suffers most when the Mac is busy. The quiet-Mac figure, about 880 ms, is above the 850 ms budget of the 2 October launch baseline, which was set on a small seeded library; main on this library was not measured on a quiet Mac. A clean paired run is still owed.
+- **Peak memory is about 130 MB higher with the edition** in the first seconds, and the same at rest. After scrolling the whole of The Latest the footprint reached 780 MB (peak 983 MB), of which CoreAnimation held about 350 MB; main was not scrolled the same way, so this has no comparison yet.
+- Scroll frame time was not measured.
+
+None of the three budgets Z5 (#937) names is recorded as met.
+
+**Options for the first card, for Mars:** keep the wait and set Today's budget from a clean measurement; or remember the last edition's lanes and lay the page out from them at launch, refreshing the assignment in place afterwards, which removes the wait at the price of a new stored value.
