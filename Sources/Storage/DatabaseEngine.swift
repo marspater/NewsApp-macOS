@@ -843,8 +843,10 @@ actor DatabaseEngine {
             try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: kept.path + "-wal")
         }
         // The side file goes before the library: it is small, and the old one is put back from memory if the swap fails.
+        // A backup without tension history never touches the side file, so an unreadable file must not fail that restore.
+        let backupHasTension = extras.keys.contains("world-tension")
         let previousTension: Data?
-        if fileManager.fileExists(atPath: worldTensionURL.path) {
+        if backupHasTension, fileManager.fileExists(atPath: worldTensionURL.path) {
             do {
                 previousTension = try Data(contentsOf: worldTensionURL)
             } catch {
@@ -866,7 +868,6 @@ actor DatabaseEngine {
             }
         }
         // A backup carrying tension history replaces the side file; a backup without the entry keeps the existing file (#1203).
-        let backupHasTension = extras.keys.contains("world-tension")
         if backupHasTension { try putTension(extras["world-tension"]) }
 
         // The log is folded in first and must be fully folded: it is deleted below, and the reopened library would lose
@@ -2328,12 +2329,18 @@ actor DatabaseEngine {
             return ["error: could not prepare foreign_key_check"]
         }
         var orphans: [String] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
+        var status = sqlite3_step(statement)
+        while status == SQLITE_ROW {
             let table = sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "unknown"
             let rowid = sqlite3_column_int64(statement, 1)
             let parent = sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? "unknown"
             let fkid = sqlite3_column_int(statement, 3)
             orphans.append("\(table) rowid \(rowid) -> \(parent) (fkid \(fkid))")
+            status = sqlite3_step(statement)
+        }
+        // A scan that stops before SQLITE_DONE is a failed check, never a clean result.
+        if status != SQLITE_DONE {
+            orphans.append("error: foreign_key_check stopped before finishing (sqlite status \(status))")
         }
         return orphans
     }
@@ -2836,7 +2843,7 @@ actor DatabaseEngine {
         var expiredStmt: OpaquePointer?
         guard
             sqlite3_prepare_v2(
-                db, "SELECT 1 FROM expired_stories WHERE key IN ('pruned:' || ?, 'pruned:' || ?);", -1, &expiredStmt,
+                db, "SELECT 1 FROM expired_stories WHERE key = 'pruned:' || ?;", -1, &expiredStmt,
                 nil)
                 == SQLITE_OK
         else {
@@ -2879,12 +2886,25 @@ actor DatabaseEngine {
                 // its feed-scoped GUID. An explicit save (preserving stored content) may bring it back.
                 if !preservingStoredContent {
                     let scoped = ArticleIdentity.scopedGUID(article.guid, feedURL: identityFeedURL) ?? id
-                    sqlite3_reset(expiredStmt)
-                    sqlite3_bind_text(expiredStmt, 1, id, -1, Self.sqliteTransient)
-                    sqlite3_bind_text(expiredStmt, 2, scoped, -1, Self.sqliteTransient)
-                    let expiredStatus = sqlite3_step(expiredStmt)
-                    if expiredStatus == SQLITE_ROW { continue }
-                    guard expiredStatus == SQLITE_DONE else { throw sqliteError(db, "Could not check pruned story") }
+                    // A feed that moved address (#1213) is still the same feed: a story pruned under the old address
+                    // keeps its tombstone under the old scope, so that scope is checked too.
+                    let previousScopes = AppSettings.movedFeeds.filter { $0.to == identityFeedURL }.compactMap {
+                        ArticleIdentity.scopedGUID(article.guid, feedURL: $0.from)
+                    }
+                    var wasPruned = false
+                    for key in [id, scoped] + previousScopes {
+                        sqlite3_reset(expiredStmt)
+                        sqlite3_bind_text(expiredStmt, 1, key, -1, Self.sqliteTransient)
+                        let expiredStatus = sqlite3_step(expiredStmt)
+                        if expiredStatus == SQLITE_ROW {
+                            wasPruned = true
+                            break
+                        }
+                        guard expiredStatus == SQLITE_DONE else {
+                            throw sqliteError(db, "Could not check pruned story")
+                        }
+                    }
+                    if wasPruned { continue }
                 }
                 insertedIDs.insert(id)
             }
