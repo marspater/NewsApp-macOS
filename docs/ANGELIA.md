@@ -11,7 +11,7 @@ Angelia (Greek Ἀγγελία, "message"; say *ang-geh-LEE-ah*, hard g, stress 
 3. A name never raises maturity. The Status column is the only statement of what is live.
 4. Each type or function has one owner. A file that holds two owners' code is listed under [Shared files](#shared-files).
 5. Angelia spans three source layers (`Sources/Services`, `Sources/Intelligence`, `Sources/Storage`). It is wider than the "Intelligence" layer of the ARCHITECTURE.md system map.
-6. Every Swift file a name owns says so in a comment after the license header: `// Angelia · Themis (pair rules) owns this file. Register: docs/ANGELIA.md.` A shared file names each owner and its types. The comment sits one blank line after the header. `script/format.sh --check` and the pre-commit hook refuse a file under `Sources/Intelligence/` without it; owned files elsewhere carry it by this register. A new or moved file gets its comment and its register row in the same change. Scope: files in Services, Intelligence, Storage, Models and Coordinators that one domain owns or two share. Views, tests, app lifecycle and the models several domains read (`FeedArticle`, `ArticleIdentity`) carry none.
+6. Every Swift file a name owns says so in a comment after the license header: `// Angelia · Themis (pair rules) owns this file. Register: docs/ANGELIA.md.` A shared file names each owner and its types. The comment sits one blank line after the header. `script/format.sh --check` and the pre-commit hook refuse a file under `Sources/Intelligence/` without it; owned files elsewhere carry it by this register. A new or moved file gets its comment and its register row in the same change. Scope: files in Services, Intelligence, Storage, Models and Coordinators that one domain owns or two share. Views, tests, app lifecycle and models that no single domain produces (`FeedArticle`, `ArticleIdentity`) carry none.
 
 ## Register
 
@@ -53,6 +53,8 @@ Paths are relative to `Sources/`.
 | Clio | Aletheia | Draft passages, perspectives, timeline and generated text |
 | Aletheia | Mnemosyne | Accepted overviews with citations (`event_overviews`, `event_overview_citations`) |
 | Mnemosyne | Athena | Up to 500 candidate stories with importance, coverage and reading history; cited highlights for Briefing |
+| Mnemosyne | Athena | For Today: the assignment context of the listed stories, read by the bounded `TodayEditionLoader` queries |
+| Athena | Today page | The lane plan (`TodayEditionAssigner.assign`), which `TodayEdition` turns into the page off the main actor |
 | Mnemosyne | Eris | The day's panel headlines (`tensionCorpus`) |
 | Eris | Athena | The reading and its drivers, shown in Briefing's World Tension module. No input to Today or to Briefing selection. |
 | Angelia Core | Metis, Eris, Athena | `NewsTextModel` prose on three surfaces: reader summary, World Tension assessment, Briefing sitrep. Event overviews carry no model prose. |

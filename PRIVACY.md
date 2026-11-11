@@ -1,6 +1,6 @@
 # Privacy Architecture & Data Policy
 
-NewsApp is engineered with a **local-first, zero-telemetry architecture**. Reading state, saved stories and generated analysis are stored on your Mac and are not sent to telemetry or cloud AI providers. Feed, article and image requests go directly to publishers, which receive your IP address and the requested URLs. Pages opened in Web view can load publisher-controlled third-party resources.
+News is engineered with a **local-first, zero-telemetry architecture**. Reading state, saved stories and generated analysis are stored on your Mac and are not sent to telemetry or cloud AI providers. Feed, article and image requests go directly to publishers, which receive your IP address and the requested URLs. Pages opened in Web view can load publisher-controlled third-party resources.
 
 ---
 
@@ -14,7 +14,7 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
 * **Separation of Concerns**: Ephemeral HTTP response caches (`URLCache`) are strictly segregated from durable user data. Clearing the HTTP cache does not alter bookmarks, read markers, or custom feed hierarchies.
 * **Spotlight Indexing**: Only stories you explicitly save are indexed in macOS Spotlight (`CoreSpotlight`) on your Mac, with their title, publisher, the publisher's own description, and publication date (`com.marspater.news.saved-stories`); text generated on your Mac is never indexed in new entries, and entries made by earlier versions are replaced at the next launch's rebuild once it succeeds. Unread and read feed items are never indexed. Removing a story from Saved Stories removes its Spotlight entry immediately, clearing caches leaves saved-story entries intact, and each launch rebuilds the Spotlight entries from the library, so after a restore only the restored library's saved stories remain. Deleting the library files by hand leaves entries in Spotlight until News next launches.
 * **Muting**: Muted publisher hosts and topic words are stored in the app's local preferences and applied on your Mac; they are never sent anywhere.
-* **Backups**: Back Up Library… writes a backup only where you save it; it contains your library, settings and World Tension history and is readable by your user account only. NewsApp never uploads it; a synced folder you save it to, such as iCloud Drive, may. Restoring keeps the replaced library beside it on your Mac (newest two copies).
+* **Backups**: Back Up Library… writes a backup only where you save it; it contains your library, settings and World Tension history and is readable by your user account only. News never uploads it; a synced folder you save it to, such as iCloud Drive, may. Restoring keeps the replaced library beside it on your Mac (newest two copies).
 * **Knowledge Exports**: Export Story or Briefing in the File menu, and the Export menu in the toolbar, write cached publisher text, cited passages and your private highlights and notes only to the file you choose. Exporting does not fetch pages. Add to Apple Notes… sends the export, including private notes, to the native Notes sharing service. It may add the note directly using your Notes account and sync settings. Files from Export as Markdown… and Compile to EPUB… can sync through the destination folder you select.
 * **No Account Required**: The application does not require user registration, account creation, or cloud authentication.
 
@@ -22,7 +22,7 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
 
 ## 2. Zero Telemetry & Network Egress Boundary
 
-* **No Analytics or Tracking**: NewsApp contains zero telemetry SDKs, zero user tracking scripts, and zero third-party diagnostic reporters (e.g., no Google Analytics, no Firebase, no Sentry, no Mixpanel).
+* **No Analytics or Tracking**: News contains zero telemetry SDKs, zero user tracking scripts, and zero third-party diagnostic reporters (e.g., no Google Analytics, no Firebase, no Sentry, no Mixpanel).
 * **Direct Network Access**: Outgoing HTTP/HTTPS network requests are made directly from your Mac to the specific RSS, Atom, or JSON feed hosts that you choose to subscribe to, and to the original web pages you view. In the background, the app also reads a few article pages from those publishers: for card images, and for publisher-excerpt event overviews when energy policy allows. An on-device loopback gateway validates destinations and pins upstream connections to public IP addresses. No remote proxy, relay server or cloud scraper is utilized. TLS remains end-to-end between the native client and publisher.
 * **Update Check**: News asks GitHub whether a newer release exists: one `GET https://api.github.com/repos/marspater/NewsApp-macOS/releases/latest` at launch and when the app is activated, at most once every 72 hours, and whenever you choose Check for Updates. It carries the app's versioned User-Agent plus the client's standard request headers (Accept, Accept-Language, Sec-Fetch-*), and no identifier of your Mac or you, and no library data or settings, though GitHub sees your IP address as any web server does. It only reports a newer version and opens the release page when you ask; it never downloads or installs anything.
 * **Server-Side Request Forgery (SSRF) Protection**:
@@ -37,7 +37,7 @@ NewsApp is engineered with a **local-first, zero-telemetry architecture**. Readi
 
 ## 3. Notification Privacy Tiers & Network Egress
 
-NewsApp provides three distinct notification privacy modes with clear network and metadata boundaries:
+News provides three distinct notification privacy modes with clear network and metadata boundaries:
 
 * **Full Mode**: Displays the article headline, publisher source, and teaser snippet; a grouped banner shows a count and up to two headlines. News draws every banner itself while it is running, in a floating panel, and never hands a notification to macOS; macOS is asked only for permission and your notification settings, which News reads to honour them (alerts, alert style, previews). If an article provides a lead image, the banner fetches it on-demand directly from the publisher through the reader's image cache and `SecureHTTPClient` with full SSRF validation, size limits (10 MB max), and timeout bounds. To keep banners quiet during a Focus, News asks macOS whether a Focus is on (Focus status, with your permission); it learns only whether one is on, never which, and the answer stays on your Mac. Which stories notify is decided on your Mac from each story's wording, how many publishers report its event, the feeds you star (at most three) and your top three interest categories, which come from the same local read and saved history as the Briefing. To hold its limits and avoid repeats across refreshes and relaunches, `news.sqlite3` keeps a local delivery log: when each banner posted, its lane and starred feed, and the events it announced with a headline key (7 days), plus priority stories waiting for the next grouped banner with their headlines (24 hours). The log never leaves your Mac.
 * **Private Mode**: Emits strictly generic notification alerts (`Title: News Update`, `Body: You have new articles available. Open to read.`). Zero article headlines, body snippets, or publisher names are included, and **zero remote image requests** are executed. The same banner replaces a story's when System Settings hides previews.
@@ -58,7 +58,7 @@ NewsApp provides three distinct notification privacy modes with clear network an
 
 ## 5. Minimal Hardened Runtime Entitlements
 
-NewsApp is signed with macOS **Hardened Runtime** and declares only the absolute minimum required entitlements (`News.entitlements`):
+News is signed with macOS **Hardened Runtime** and declares only the absolute minimum required entitlements (`News.entitlements`):
 
 | Entitlement | Purpose |
 |:---|:---|

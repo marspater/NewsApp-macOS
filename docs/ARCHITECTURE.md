@@ -79,7 +79,7 @@ flowchart LR
     Tension --> WT
     List -->|Today| Today
     Today --> TE
-    TE -->|bounded loaders| DB
+    Today -->|bounded loaders| DB
 
     classDef ui fill:#E8F0FE,stroke:#3B6FD8,stroke-width:1.5px,color:#14264A
     classDef coord fill:#FFF3E0,stroke:#D9861C,stroke-width:1.5px,color:#4A2C05
@@ -188,6 +188,8 @@ timeline
         v33 : articles.author (#998)
         v34 : feed request counters, articles.reader_barrier (#715)
         v35 : feeds.last_failure_at and last_failure_detail (#929)
+    section Entities
+        v36 : entities, entity_mentions, entity_edges, entity_index (#716)
 ```
 
 ## Invariants

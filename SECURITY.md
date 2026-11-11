@@ -12,7 +12,7 @@ We aim to acknowledge reports within 48 hours; this is a target, not a guarantee
 
 ## System and trust boundaries
 
-NewsApp is a local-first macOS RSS, Atom and JSON Feed reader. The app stores subscriptions, reading history, saved articles and analysis locally. It has no cloud backend, remote AI service or telemetry. See [architecture](docs/ARCHITECTURE.md) and [privacy](PRIVACY.md).
+News is a local-first macOS RSS, Atom and JSON Feed reader. The app stores subscriptions, reading history, saved articles and analysis locally. It has no cloud backend, remote AI service or telemetry. See [architecture](docs/ARCHITECTURE.md) and [privacy](PRIVACY.md).
 
 Untrusted inputs include feed/article URLs and bodies, publisher HTML and resources, redirects, DNS answers, OPML imports and release metadata. Protected assets include local files, credentials, network services, persisted user state and integrity of reader content. A publisher's response is not trusted simply because its endpoint is public or uses HTTPS.
 

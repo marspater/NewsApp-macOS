@@ -1,4 +1,4 @@
-# Contributing to NewsApp
+# Contributing to News
 
 Start with [README.md](README.md), [architecture and technology constraints](docs/ARCHITECTURE.md), [the Angelia name register](docs/ANGELIA.md), [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md); for UI work, also the [design language](docs/design/DESIGN.md). These documents apply to every contributor. `AGENTS.md` contains instructions for coding agents only.
 
