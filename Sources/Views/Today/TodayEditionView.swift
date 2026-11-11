@@ -18,11 +18,17 @@ import SwiftUI
 struct TodayEditionActions {
     var open: (FeedEntry) -> Void
     /// A card scrolled into view, for the lane's image prefetch.
-    var cardAppeared: (String) -> Void = { _ in }
+    var cardAppeared: (String) -> Void = { _ in
+        // No prefetch by default.
+    }
     /// The Latest's grid changed how many cards a row holds, which the keyboard map needs.
-    var latestColumnsChanged: (Int) -> Void = { _ in }
+    var latestColumnsChanged: (Int) -> Void = { _ in
+        // No keyboard map by default.
+    }
     /// The reader moved The Lead to another slide with its dots or arrows.
-    var leadSlideShown: (FeedEntry) -> Void = { _ in }
+    var leadSlideShown: (FeedEntry) -> Void = { _ in
+        // No lane memory by default.
+    }
 }
 
 /// The Today edition (docs/design/today.md; #935, #936): The Lead, the conditional lanes as horizontal rows, and
@@ -210,12 +216,13 @@ struct TodayLaneSection: View {
                         guard let focused, ids.contains(focused) else { return }
                         withAnimation(reduceMotion ? nil : AppMotion.hover) { proxy.scrollTo(focused) }
                     }
-                    // The reader applied an update: the row returns to its leading edge, unless it holds the
-                    // focused card, which stays in view.
+                    // The reader applied an update: the row shows the focused card when it still holds it, and
+                    // otherwise returns to its leading edge.
                     .onChange(of: generation) { _, _ in
-                        guard let first = ids.first, !(focusedID.map(ids.contains) ?? false) else { return }
+                        let kept = focusedID.flatMap { ids.contains($0) ? $0 : nil }
+                        guard let target = kept ?? ids.first else { return }
                         withAnimation(reduceMotion ? nil : AppMotion.hover) {
-                            proxy.scrollTo(first, anchor: .leading)
+                            proxy.scrollTo(target, anchor: kept == nil ? .leading : nil)
                         }
                     }
             }
@@ -258,7 +265,10 @@ struct TodayLaneSection: View {
             ForEach(probes, id: \.id) { story in
                 ArticleCardView(
                     article: story.entry.representative, variant: story.cardVariant,
-                    metadata: metadata[story.id] ?? StoryCardMetadata(), action: {}, footer: EmptyView()
+                    metadata: metadata[story.id] ?? StoryCardMetadata(),
+                    action: {
+                        // Probe only: it is measured, never clicked.
+                    }, footer: EmptyView()
                 )
                 .frame(width: story.cardVariant.laneWidth)
             }

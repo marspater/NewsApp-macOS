@@ -39,6 +39,7 @@ extension NewsTests {
             ("testFocusMovesWithinAndBetweenLanes", { testTodayFocusMap() }),
             ("testFocusIsRestoredWhenTheEditionChanges", { testTodayFocusRestore() }),
             ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
+            ("testHeldEditionKeepsTagsEntriesAndNewEditionSortsLatest", { testTodayHeldEditionDetails() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
@@ -1028,6 +1029,41 @@ extension NewsTests {
             "An applied update lays the edition out afresh")
         assertEqual(
             first.focusMap(latestColumns: 3).lanes.last?.columns, 3, "The Latest's grid columns reach the keyboard map")
+    }
+
+    /// A held edition keeps each card's tag, shows current entries, and a new edition's Latest stays newest first.
+    static func testTodayHeldEditionDetails() {
+        func entry(_ id: String, title: String? = nil, age: TimeInterval = 0) -> FeedEntry {
+            .article(makeArticle(id: id, title: title ?? id, pubDate: referenceNow.addingTimeInterval(-age)))
+        }
+        func deepRead(_ entries: [FeedEntry], _ label: TodayContentType?) -> TodayEditionPlan {
+            let stories = entries.map {
+                TodayStoryAssignment.unplaced($0).held(in: .theDeepRead, contentType: label)
+            }
+            return TodayEditionPlan(lanes: [TodayLaneResult(lane: .theDeepRead, qualifies: true, entries: stories)])
+        }
+        let first = TodayEdition.make(entries: [entry("x")], plan: deepRead([entry("x")], .explainer))
+        let retagged = TodayEdition.make(
+            entries: [entry("x")], plan: deepRead([entry("x")], .opinion), keeping: first)
+        assertTrue(
+            retagged.stories(in: .theDeepRead).first?.contentTypeLabel == .explainer,
+            "A held card keeps its tag when the fresh plan tags it differently")
+        let untagged = TodayEdition.make(entries: [entry("x")], plan: deepRead([entry("x")], nil))
+        let tagged = TodayEdition.make(
+            entries: [entry("x")], plan: deepRead([entry("x")], .opinion), keeping: untagged)
+        assertTrue(
+            tagged.stories(in: .theDeepRead).first?.contentTypeLabel == nil,
+            "A held card with no tag stays untagged when the fresh plan tags it")
+        let renamed = TodayEdition.make(
+            entries: [entry("x", title: "New title")], plan: TodayEditionPlan(lanes: []), keeping: first)
+        assertEqual(
+            renamed.stories(in: .theDeepRead).first?.entry.representative.title, "New title",
+            "A held story the plan no longer places shows its current entry")
+        let fresh = TodayEdition.make(
+            entries: [entry("old", age: 3600), entry("new", age: 60)], plan: TodayEditionPlan(lanes: []))
+        assertEqual(
+            fresh.latest.map(\.id), ["new", "old"], "A new edition's Latest is newest first, also with unplaced stories"
+        )
     }
 
     static func testTodayNotificationThresholdsIndependent() {

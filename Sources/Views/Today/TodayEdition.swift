@@ -77,16 +77,19 @@ struct TodayEdition: Equatable, Sendable {
     ) -> TodayEdition {
         var fresh: [String: TodayStoryAssignment] = [:]
         for assignment in plan.allAssignments { fresh[assignment.id] = assignment }
-        let listedIDs = Set(entries.map(\.id))
+        let listed = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let listedIDs = Set(listed.keys)
         var laneStories: [TodayLane: [TodayStoryAssignment]] = [:]
         var placed = Set<String>()
 
-        if let previous, !previous.lanes.isEmpty {
+        let retaining = previous.map { !$0.lanes.isEmpty } ?? false
+        if let previous, retaining {
             for lane in previous.lanes {
                 for story in lane.stories where listedIDs.contains(story.id) {
-                    // The card keeps its content-type tag too, also when the fresh plan would move the story.
-                    let current =
-                        fresh[story.id]?.placed(in: lane.lane, contentType: story.contentTypeLabel) ?? story
+                    // The card keeps its content-type tag too, also when the fresh plan would retag or move the story.
+                    // A story the plan no longer places still shows the current entry, not the one it was built from.
+                    let current = (fresh[story.id] ?? story).held(
+                        in: lane.lane, contentType: story.contentTypeLabel, entry: listed[story.id])
                     laneStories[lane.lane, default: []].append(current)
                     placed.insert(story.id)
                 }
@@ -101,6 +104,10 @@ struct TodayEdition: Equatable, Sendable {
         for entry in entries where !placed.contains(entry.id) {
             laneStories[.theLatest, default: []].append(
                 fresh[entry.id]?.placed(in: .theLatest) ?? .unplaced(entry))
+        }
+        if !retaining {
+            // A new edition's Latest is newest first, as the assignment orders it, also with the stories it left out.
+            laneStories[.theLatest]?.sort { $0.sortKey == $1.sortKey ? $0.id < $1.id : $0.sortKey > $1.sortKey }
         }
 
         var edition = TodayEdition(generation: generation)
@@ -123,9 +130,17 @@ extension TodayStoryAssignment {
     /// The same story shown in another lane; its scores and evidence are unchanged.
     func placed(in lane: TodayLane, contentType kept: TodayContentType? = nil) -> TodayStoryAssignment {
         guard lane != self.lane else { return self }
-        return TodayStoryAssignment(
-            id: id, entry: entry, lane: lane, score: score, confidence: confidence, reason: reason,
-            sortKey: sortKey, contentTypeLabel: lane == .theDeepRead ? (contentTypeLabel ?? kept) : nil,
+        return held(in: lane, contentType: lane == .theDeepRead ? (contentTypeLabel ?? kept) : nil)
+    }
+
+    /// The story as an edition on screen holds it: in `lane` with the content-type tag the card already shows, also
+    /// when the fresh assignment tags it differently or not at all.
+    func held(in lane: TodayLane, contentType: TodayContentType?, entry current: FeedEntry? = nil)
+        -> TodayStoryAssignment
+    {
+        TodayStoryAssignment(
+            id: id, entry: current ?? entry, lane: lane, score: score, confidence: confidence, reason: reason,
+            sortKey: sortKey, contentTypeLabel: lane == .theDeepRead ? contentType : nil,
             isCoverageConfident: isCoverageConfident, isDeveloping: isDeveloping,
             originalReportCount: originalReportCount, publisherCount: publisherCount,
             groupingConfidence: groupingConfidence, readingTimeMinutes: readingTimeMinutes,
@@ -136,7 +151,7 @@ extension TodayStoryAssignment {
     static func unplaced(_ entry: FeedEntry) -> TodayStoryAssignment {
         TodayStoryAssignment(
             id: entry.id, entry: entry, lane: .theLatest, score: 0, confidence: 0, reason: "listed_unassigned",
-            sortKey: entry.representative.pubDate, contentTypeLabel: nil, isCoverageConfident: false,
+            sortKey: entry.representative.orderDate, contentTypeLabel: nil, isCoverageConfident: false,
             isDeveloping: false, originalReportCount: 1, publisherCount: entry.publisherCount,
             groupingConfidence: 0, readingTimeMinutes: 0, interestMatch: 0, novelty: 0)
     }

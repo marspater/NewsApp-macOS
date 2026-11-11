@@ -669,6 +669,8 @@ struct ArticleListView: View {
                 let result = buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
                 switch result {
                 case .replaced:
+                    // The list was replaced, not held: Today lays its edition out afresh for it.
+                    todayGeneration += 1
                     cursor = page.last.map(ArticleQueryCursor.init)
                     hasMoreResults = morePages
                 case .refreshedInPlace:
@@ -802,7 +804,7 @@ struct ArticleListView: View {
         showPendingUpdates()
         if isTodayEdition {
             // The page returns to the masthead and each row to its leading edge; a card that keeps keyboard focus
-            // is scrolled back into view once the new edition is laid out.
+            // is scrolled back into view once the new edition is installed (`reloadTodayEdition`).
             withAnimation(reduceMotion ? nil : AppMotion.hover) {
                 proxy.scrollTo(Self.mastheadScrollID, anchor: .top)
             }
@@ -1087,10 +1089,10 @@ struct ArticleListView: View {
     /// The lead is an inset card like the others and shares the list measure (DESIGN.md 3.4, 12).
     /// Both collections retain their original ordering and existing lazy rendering.
     @ViewBuilder
-    private func articleGrid(proxy _: ScrollViewProxy) -> some View {
+    private func articleGrid(proxy: ScrollViewProxy) -> some View {
         let listed = entries
         if isTodayEdition {
-            todayPage(listed)
+            todayPage(listed, proxy: proxy)
         } else if isBriefing {
             BriefingView(
                 entries: listed,
@@ -1174,7 +1176,7 @@ struct ArticleListView: View {
     /// The Today edition of the listed stories. Its lanes are assigned off the main actor; until the first
     /// assignment is back the page below the masthead is empty, so no card ever changes lane in view.
     @ViewBuilder
-    private func todayPage(_ listed: [FeedEntry]) -> some View {
+    private func todayPage(_ listed: [FeedEntry], proxy: ScrollViewProxy) -> some View {
         // A stack rather than a group: the task below must run while the page is still empty.
         VStack(spacing: 0) {
             if let todayEdition {
@@ -1196,6 +1198,7 @@ struct ArticleListView: View {
                         leadSlideShown: { entry in
                             if todayEdition.lead.contains(where: { $0.id == focusedArticleID }) {
                                 focusedArticleID = entry.id
+                                todayLaneMemory[.theLead] = entry.id
                             }
                         }),
                     latestListCard: { entry in entryCard(entry) }
@@ -1207,13 +1210,13 @@ struct ArticleListView: View {
             id: "\(groupedEntries.revision):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
                 + "\(todayGeneration):\(queryIdentity)"
         ) {
-            await reloadTodayEdition(listed)
+            await reloadTodayEdition(listed, proxy: proxy)
         }
         .allowsWindowActivationEvents(true)
     }
 
     /// Lays the listed stories out as the Today edition and moves keyboard focus with it.
-    private func reloadTodayEdition(_ listed: [FeedEntry]) async {
+    private func reloadTodayEdition(_ listed: [FeedEntry], proxy: ScrollViewProxy) async {
         let previous = todayEdition
         // Bursts of store revisions (clustering, overviews) would lay the page out once each; they are debounced
         // as in the list. The first edition loads at once.
@@ -1231,13 +1234,31 @@ struct ArticleListView: View {
                 interestsResetAt: resetAt),
             keeping: keeps ? previous : nil, generation: todayGeneration)
         guard !Task.isCancelled else { return }
-        // Focus follows its card, or the rules of today.md when the card or its lane is gone.
-        if let previous, let focused = focusedArticleID {
-            focusedArticleID = edition.focusMap(latestColumns: todayLatestColumns)
-                .restoredFocus(focused, from: previous.focusMap(latestColumns: todayLatestColumns))
-        }
+        // A rebuilt edition has other cards at the same positions, so the lanes' image prefetch starts over.
+        if !keeps { todayPrefetch.reset() }
+        let isApplied = previous.map { $0.generation != edition.generation } ?? false
+        let restored = restoreTodayFocus(in: edition, from: previous)
         todayEdition = edition
+        // An applied update returns the page to the masthead; a card that kept focus is brought back into view.
+        if isApplied, let restored {
+            await Task.yield()
+            let lane = edition.focusMap(latestColumns: todayLatestColumns).lane(of: restored)
+            withAnimation(reduceMotion ? nil : AppMotion.hover) {
+                proxy.scrollTo(lane == .theLead ? TodayEditionView<EmptyView>.leadScrollID : restored)
+            }
+        }
+    }
 
+    /// Focus follows its card, or the rules of today.md when the card or its lane is gone. The card that takes
+    /// focus is also its lane's remembered card. Returns the focused card when the list has focus.
+    private func restoreTodayFocus(in edition: TodayEdition, from previous: TodayEdition?) -> String? {
+        guard let previous, let focused = focusedArticleID else { return nil }
+        let map = edition.focusMap(latestColumns: todayLatestColumns)
+        let restored = map.restoredFocus(focused, from: previous.focusMap(latestColumns: todayLatestColumns))
+        focusedArticleID = restored
+        guard let restored else { return nil }
+        if let lane = map.lane(of: restored) { todayLaneMemory[lane] = restored }
+        return listHasFocus ? restored : nil
     }
 
     private func open(_ entry: FeedEntry) {
