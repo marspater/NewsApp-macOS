@@ -128,7 +128,11 @@ final class ArticleStore: ObservableObject {
                     )
                 }
                 for move in AppSettings.movedFeeds {
-                    try? await database.moveFeed(from: move.from, to: move.to)
+                    do {
+                        try await database.moveFeed(from: move.from, to: move.to)
+                    } catch {
+                        logger.error("Moving stories from \(move.from) failed: \(error.localizedDescription)")
+                    }
                 }
                 // Overviews and summaries from an earlier macOS model regenerate with the current one when next requested.
                 // Only the app's own library tracks this; stores over other databases (tests, audits) are left as they are.
