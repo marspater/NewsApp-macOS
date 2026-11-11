@@ -223,7 +223,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 | `callout` | Secondary descriptions | `.callout` (12 pt) |
 | `label` | Disclosure rows, tags, inline controls | `.callout.weight(.medium)` |
 | `caption` | Dates, counts, status lines | `.subheadline` (11 pt) |
-| `eyebrow` | Publisher and kicker above a title | `.caption2.weight(.semibold)`, tracking `AppTypography.eyebrowTracking` (0.5 pt; *target* 0.06 em, Z6 #938), uppercase via `textCase` |
+| `eyebrow` | Publisher and kicker above a title | `.caption2.weight(.semibold)`, tracking `AppTypography.eyebrowTracking` (0.6 pt, 0.06 em), uppercase via `textCase` |
 | `cardHeadline(_:)` | Card headlines | List: serif 20 pt semibold; grid: 15 pt semibold |
 | Reader tokens | Reader and overview | `titleFont`, `leadFont`, `bodyFont`, heading, quote, caption and code functions of style and text scale |
 
@@ -238,7 +238,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 - Text: the system label colors (primary, secondary, tertiary, quaternary) through `AppColor`. Hierarchy never comes from lowering the opacity of primary text; the reader's softened body color is a reader token that returns to full contrast with Increase Contrast.
 - Accent: the person's system accent. It marks selection, focus, unread state, links, the active mode and at most one prominent action per view. Never decoration, never toolbar icons except a meaningful state, never large fills. The app defines no brand accent; if one is introduced, it goes in an asset catalog `AccentColor` with light, dark and increased-contrast values.
 - Intelligence (warm gold): only for labels and glyphs of generated content. Never body text or glass tint.
-- Original reports (teal): only the original-reports count on The Lead and Coverage cards. Light `#006F69`, dark `#65D4C5`, increased contrast `#005A55` and `#8FE8DB`, through one `AppColor` token (*target*, Z7 #1174). The Lead's foot sits on a dark image in both appearances, so it always resolves the dark value.
+- Original reports (teal): only the original-reports count on The Lead and Coverage cards. Light `#006F69`, dark `#65D4C5`, increased contrast `#005A55` and `#8FE8DB`, through `AppColor.originalReports`. The Lead's foot sits on a dark image in both appearances, so it always resolves the dark value.
 - Status: success, warning and danger system colors for icons and small fills; text stays in the label colors. Yellow never carries text. The one exception is a result the person's own action brings in, the test banner's status line in Settings › Notifications: it takes the accent-text token. The Library Database tag in Settings › Storage follows the library's state: accent when active, yellow when read-only, red when unavailable.
 - Fills: tags and neutral badges use the badge fill token; accent fills are 12 % (22 % with Increase Contrast).
 - Accent text: text and symbols in the accent use the accent-text token, which is the person's accent 15 % darker in light and 30 % lighter in dark, blended further in 5 % steps until it reaches 4.5:1 against white in light and the window background in dark (bright accents such as yellow, orange and green need it), because the system accent is one color in every appearance and gave 4.2:1 on the dark page. On the lead caption's dark scrim, the saved glyph and the intelligence tag use the lead text color instead. Text on a tinted tag or citation pill is the tint (the accent-text token for accent tags) mixed toward the primary text color (35 %, 50 % with Increase Contrast). Both keep at least 4.5:1 in light, dark and Increase Contrast.
@@ -248,7 +248,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 ## 12. Shape, spacing and elevation
 
 - Spacing uses `AppSpacing` (4 pt grid: 4, 8, 12, 16, 24, 32, 48). Two micro steps exist for text clusters only: 2 pt between stacked text lines and 6 pt between an eyebrow's parts. No other literal padding or spacing.
-- Radii: `AppRadius.control` (6) for small rectangles, `card` (12; *target* 16 for story cards, Z6 #938), `container` (16), and `Capsule()` for tags and pills. Use continuous corners. On macOS 26 and later, a shape inside another rounded container or near the window corner is concentric: `ConcentricRectangle(corners: .concentric(minimum: .fixed(AppRadius.card)), isUniform: true)`.
+- Radii: `AppRadius.control` (6) for small rectangles, `card` (12), `storyCard` (16, every `ArticleCardView`), `container` (16), and `Capsule()` for tags and pills. Use continuous corners. On macOS 26 and later, a shape inside another rounded container or near the window corner is concentric: `ConcentricRectangle(corners: .concentric(minimum: .fixed(AppRadius.card)), isUniform: true)`.
 - Never hard-code control heights or toolbar heights; the system owns them and changed them in macOS 26.
 - Depth comes from edge light and plane separation, never heavy or broad gray shadows. Content cards use the elevation below and nothing else. Glass brings its own depth (section 3.3).
 
@@ -258,7 +258,7 @@ macOS has no Dynamic Type. Chrome uses system text styles so it matches system c
 | Hover | Accent at 40 % (`accent-hover-border`); brighter top highlight | Y 2 blur 4 black 4 %, and Y 8 blur 24 black 6 % | 3 pt lift, image 1.02 inside its frame |
 | Keyboard focus | Solid 1.5 pt accent ring, 2 pt offset | As hover | As hover |
 
-- Dark keeps the same geometry on a lighter card surface; its opacities are tuned in Z6. *Target:* these values land in `AppShadow` with Z6 (#938); until then the current tokens apply.
+- Dark keeps the same geometry on a lighter card surface, with four times the shadow opacity and a quieter top highlight (8 %, 16 % on hover). The values are `AppShadow.cardRestingContact`, `cardRestingAmbient`, `cardHoverContact` and `cardHoverAmbient`, and `AppColor.cardTopHighlight`.
 - Layout tokens: `pageInset` 24, `cardGap` 16, list maximum width 1000, grid columns adaptive 300–420, `readingMeasure` 720.
 
 ## 13. Motion
@@ -333,6 +333,7 @@ Each pattern has one implementation; new code reuses it and extends it rather th
 | --- | --- | --- |
 | Tokens | `DesignSystem.swift` | Color, typography, spacing, radius, layout, shadow, motion |
 | Story card | `ArticleCardView.swift` | All story cards and their context menus |
+| Today card variants | `StoryCardVariant.swift` | The Developing, Standard, Feature, Coverage and Compact faces of the story card, their metadata (`StoryCardMetadata`), the status pill, progress rail and publisher monograms |
 | Event coverage | `EventCardView.swift` | Coverage disclosure and member rows |
 | Tag | `TagView` in `DesignSystem.swift` | Category, entity, Updated, Plan, the card's intelligence state tag and citation pills; inside Highlights and Perspectives the citation is an inline neutral chip (`InlineChip`, `sourcedAttributedString`), not a separate view |
 | Eyebrow | `EyebrowText` in `DesignSystem.swift` | Publisher and kicker lines in cards, reader and overview |
