@@ -74,8 +74,8 @@ struct ArticleDetailView: View {
     @State private var contentState: ArticleContentState = .loading
 
     @State private var experienceMode: ReaderExperienceMode = .sourcePublication
-    @State private var currentOverview: EventOverviewDocument? = nil
-    @State private var overviewLoadedInputHash: String? = nil
+    @State private var currentOverview: EventOverviewDocument?
+    @State private var overviewLoadedInputHash: String?
     @State private var highlightedPassage: String? = nil
     @State private var eventMemberArticles: [FeedArticle] = []
     /// Earlier events of the overview's developing story, keyed by the event they were found for.
