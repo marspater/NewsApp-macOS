@@ -29,8 +29,8 @@ extension NotificationService {
     /// Rendered width of the tall crop; the height is 1.5 times it.
     static let notificationImageWidth = 600
 
-    /// Converts an image to a standard 32-bit RGBA CGImage (e.g. from an 8-bit palette/indexed PNG, #1010).
-    static func convertToStandardRGBA(_ image: CGImage) -> CGImage {
+    /// Converts an image to a standard 32-bit RGBA CGImage (e.g. from an 8-bit palette/indexed PNG, #1010); nil when the context cannot be made.
+    static func convertToStandardRGBA(_ image: CGImage) -> CGImage? {
         let width = image.width
         let height = image.height
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
@@ -45,9 +45,9 @@ extension NotificationService {
                 space: colorSpace,
                 bitmapInfo: bitmapInfo
             )
-        else { return image }
+        else { return nil }
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        return context.makeImage() ?? image
+        return context.makeImage()
     }
 
     /// A portrait crop (2:3) of the image, at most 600 × 900, sharp at its trailing edge, that blurs progressively and
@@ -71,7 +71,9 @@ extension NotificationService {
         do { decoded = try SecureHTTPClient.decodeReaderImage(data) } catch { throw failure(.decode, error) }
         var image = notificationImage(decoded) ?? decoded
         if image.colorSpace?.model == .indexed || image.bitsPerPixel != 32 {
-            image = convertToStandardRGBA(image)
+            // A failed conversion must not hand the system a palette PNG it rejects (#1010).
+            guard let converted = convertToStandardRGBA(image) else { throw failure(.encode) }
+            image = converted
         }
         let encoded = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(encoded, UTType.png.identifier as CFString, 1, nil)

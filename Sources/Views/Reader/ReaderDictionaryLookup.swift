@@ -47,14 +47,14 @@ enum ReaderDictionaryLookup {
 
         let charIndex = layoutManager.characterIndex(
             for: point, in: textContainer, fractionOfDistanceBetweenInsertionPoints: nil)
-        guard charIndex >= 0 && charIndex < text.count else { return nil }
+        guard charIndex >= 0 && charIndex < text.utf16.count else { return nil }
 
         return word(at: charIndex, in: text)
     }
 
     /// Extracts the word around a character index in a string.
     static func word(at charIndex: Int, in string: String) -> String? {
-        guard charIndex >= 0 && charIndex < string.count else { return nil }
+        guard charIndex >= 0 && charIndex < string.utf16.count else { return nil }
         var foundWord: String?
         string.enumerateSubstrings(in: string.startIndex..<string.endIndex, options: [.byWords, .substringNotRequired])
         { _, range, _, stop in
@@ -121,6 +121,60 @@ enum ReaderDictionaryLookup {
         } else {
             showDefinition(for: fallbackText, at: localPoint, in: targetView)
         }
+    }
+}
+
+/// System fonts that match the SwiftUI reader faces, so word hit-testing lays text out like the rendered block.
+extension ReaderDictionaryLookup {
+    static func font(
+        size: CGFloat, weight: NSFont.Weight = .regular, design: NSFontDescriptor.SystemDesign = .default,
+        italic: Bool = false
+    ) -> NSFont {
+        var font = NSFont.systemFont(ofSize: size, weight: weight)
+        if let descriptor = font.fontDescriptor.withDesign(design),
+            let styled = NSFont(descriptor: descriptor, size: size)
+        {
+            font = styled
+        }
+        return italic ? NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) : font
+    }
+
+    static func bodyFont(for theme: ArticleThemeType, scale: CGFloat, italic: Bool = false) -> NSFont {
+        font(
+            size: AppTypography.bodySize(for: theme) * scale, design: theme == .casper ? .serif : .default,
+            italic: italic)
+    }
+
+    static func leadFont(for theme: ArticleThemeType, scale: CGFloat, italic: Bool = false) -> NSFont {
+        switch theme {
+        case .casper: return font(size: 20 * scale, design: .serif, italic: italic)
+        case .edition: return font(size: 18 * scale, italic: italic)
+        case .alto: return font(size: 16 * scale, weight: .medium, design: .monospaced, italic: italic)
+        }
+    }
+
+    static func headingFont(level: Int, theme: ArticleThemeType, scale: CGFloat) -> NSFont {
+        let design: NSFontDescriptor.SystemDesign =
+            theme == .casper ? .serif : (theme == .alto ? .monospaced : .default)
+        return font(
+            size: AppTypography.readerHeadingSize(level: level, theme: theme) * scale,
+            weight: level <= 2 ? .bold : .semibold, design: design)
+    }
+
+    static func codeFont(for theme: ArticleThemeType, scale: CGFloat) -> NSFont {
+        font(size: (AppTypography.bodySize(for: theme) * 0.85).rounded() * scale, design: .monospaced)
+    }
+
+    static func overviewFont(_ role: OverviewTextRole, scale: CGFloat) -> NSFont {
+        let weight: NSFont.Weight
+        switch role {
+        case .title, .section, .subheading: weight = .bold
+        case .emphasis, .eyebrow, .micro: weight = .semibold
+        case .bodyMedium, .metadata, .annotation, .captionMedium: weight = .medium
+        case .introduction, .fact, .body, .caption: weight = .regular
+        }
+        return font(
+            size: AppTypography.overviewSize(role) * scale, weight: weight, design: role == .title ? .serif : .default)
     }
 }
 

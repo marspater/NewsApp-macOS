@@ -135,7 +135,7 @@ final class ArticleStore: ObservableObject {
             if self.databaseHealthNotice == nil {
                 if let stats = try await migrationCoordinator?.migrateIfNeeded(), stats.failures > 0 {
                     logger.warning(
-                        "Legacy data migration completed with \(stats.failures) unreadable part(s); unreadable data preserved."
+                        "Legacy data migration found \(stats.failures) unreadable part(s); unreadable data preserved and retried on the next launch."
                     )
                 }
                 for move in AppSettings.movedFeeds {

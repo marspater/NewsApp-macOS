@@ -829,7 +829,11 @@ struct ArticleDetailView: View {
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityHeading(block.kind == .heading ? .h2 : .h3)
                 .textSelection(.enabled)
-                .readerLookUp(text: block.text)
+                .readerLookUp(
+                    text: block.text,
+                    font: ReaderDictionaryLookup.headingFont(
+                        level: block.kind == .heading ? 2 : 3, theme: themeManager.articleTheme, scale: readerTextScale)
+                )
         case .divider:
             Divider()
                 .opacity(Self.dividerOpacity(for: contrast))
@@ -848,7 +852,11 @@ struct ArticleDetailView: View {
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
-                .readerLookUp(text: block.text)
+                .readerLookUp(
+                    text: block.text,
+                    font: isLead
+                        ? ReaderDictionaryLookup.leadFont(for: themeManager.articleTheme, scale: readerTextScale)
+                        : ReaderDictionaryLookup.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
         default:
             readerWrappedBlock(block, index: index, overlay: overlay)
         }
@@ -868,7 +876,10 @@ struct ArticleDetailView: View {
                     .font(AppTypography.readerQuoteFont(for: themeManager.articleTheme, scale: readerTextScale))
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .textSelection(.enabled)
-                    .readerLookUp(text: block.text)
+                    .readerLookUp(
+                        text: block.text,
+                        font: ReaderDictionaryLookup.bodyFont(
+                            for: themeManager.articleTheme, scale: readerTextScale, italic: true))
             }
             .fixedSize(horizontal: false, vertical: true)
             .padding(.vertical, AppSpacing.xxs * readerTextScale)
@@ -882,7 +893,9 @@ struct ArticleDetailView: View {
                 // Not combined: the item is selectable text and may carry links (DESIGN.md 16).
                 Text(readerLinkedText(block, index: index, overlay: overlay))
                     .textSelection(.enabled)
-                    .readerLookUp(text: block.text)
+                    .readerLookUp(
+                        text: block.text,
+                        font: ReaderDictionaryLookup.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             }
             .font(AppTypography.bodyFont(for: themeManager.articleTheme, scale: readerTextScale))
             .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
@@ -892,7 +905,10 @@ struct ArticleDetailView: View {
                 Text(readerLinkedText(block, index: index, overlay: overlay))
                     .font(AppTypography.readerCodeFont(for: themeManager.articleTheme, scale: readerTextScale))
                     .textSelection(.enabled)
-                    .readerLookUp(text: block.text)
+                    .readerLookUp(
+                        text: block.text,
+                        font: ReaderDictionaryLookup.codeFont(for: themeManager.articleTheme, scale: readerTextScale)
+                    )
                     .fixedSize(horizontal: true, vertical: false)
                     .padding(AppSpacing.md * readerTextScale)
             }
@@ -905,7 +921,9 @@ struct ArticleDetailView: View {
                 .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
-                .readerLookUp(text: block.text)
+                .readerLookUp(
+                    text: block.text,
+                    font: ReaderDictionaryLookup.leadFont(for: themeManager.articleTheme, scale: readerTextScale))
         default:
             readerBoxedBlock(block, index: index, overlay: overlay)
         }
@@ -924,7 +942,10 @@ struct ArticleDetailView: View {
                     .lineSpacing(AppTypography.bodyLineSpacing(for: themeManager.articleTheme) * readerTextScale)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-                    .readerLookUp(text: block.text)
+                    .readerLookUp(
+                        text: block.text,
+                        font: ReaderDictionaryLookup.leadFont(
+                            for: themeManager.articleTheme, scale: readerTextScale, italic: true))
                 Divider().opacity(Self.dividerOpacity(for: contrast))
             }
         case .table:
