@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Angelia · Athena (editorial selection) owns this file. Experimental: the Today edition has no view code yet.
-// Register: docs/ANGELIA.md.
+// Angelia · Athena (editorial selection) owns this file. Register: docs/ANGELIA.md.
 
 import Foundation
 

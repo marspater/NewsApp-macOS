@@ -29,9 +29,9 @@ Paths are relative to `Sources/`.
 | **Mnemosyne** | Retain evidence and find it again | `Storage/DatabaseEngine*`, `ArticleStore*` · `EventCandidateFinder`, `EventMatchKey` · hybrid search (`DatabaseEngine+Search`) · `Intelligence/Editorial/EntityGraph` | Live |
 | **Clio** | Compose sourced overviews | `Intelligence/Overview/OverviewComposer`, `OverviewGenerationCoordinator`, `OverviewPassageSelector`, `OverviewPerspectivesExtractor`, `OverviewTimeline*`, `OverviewIndustryImpactExtractor`, `OverviewThematicAngleExtractor`, `PassageFactExtractor` · `Intelligence/Editorial/DualReaderAlignmentService`, `PerspectiveReports` (Compare Perspectives) | Live |
 | **Aletheia** | Check fidelity to the cited text | `OverviewClaimVerifier`, `GeneratedTextFidelity`, `OverviewQualityAuditor`, `CoverageSentimentEvaluator`, `GenerationPromptDefense` | Live. Checks agreement with the source, never external truth. |
-| **Athena** | Decide what deserves attention | `FiniteBriefing`, `BriefingPriority` · `Intelligence/Briefing/*` · `Intelligence/Events/StoryImportance` (`StoryImportance`, `StoryCurator`, `StoryImage*`) · `Coordinators/NotificationService` triage | Live |
+| **Athena** | Decide what deserves attention | `Intelligence/Today/*` (the six lanes of the Today edition) · `FiniteBriefing`, `BriefingPriority` · `Intelligence/Briefing/*` · `Intelligence/Events/StoryImportance` (`StoryImportance`, `StoryCurator`, `StoryImage*`) · `Coordinators/NotificationService` triage | Live |
 | | | `Intelligence/Events/EventJudge` (`EventJudgeReport`, the importance audit's input) | Evaluation only, no production caller |
-| | | `Intelligence/Today/*` (six lanes, shadow evaluation; no view code yet) · `Intelligence/Editorial/EditorialRanking`, `EditorialPersonalization` | Experimental, no production consumer |
+| | | `Intelligence/Editorial/EditorialRanking`, `EditorialPersonalization` | Experimental, no production consumer |
 | **Eris** | Assess World Tension | `Intelligence/Tension/*` (`WorldTensionService`, `TensionMethodology`, `Hotspot*`, `WorldTensionNearYou`) | Live |
 | **Kairos** | Detect what is new and accelerating | `Intelligence/Editorial/EditorialNovelty`, `EditorialMomentum` | Experimental, no production consumer |
 | **Angelia Core** | Shared model access and gates | `NewsTextModel`, `AppleIntelligenceAvailability`, `IntelligencePolicy` | Live |
