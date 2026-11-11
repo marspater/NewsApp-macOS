@@ -190,7 +190,8 @@ extension View {
 /// - A single responsive column stacking Hero -> Trailing column (World Tension, Since your last briefing) -> Executive sitrep.
 /// - Hiding any module leaves no gaps or holes.
 struct BriefingSituationalLayout: Layout {
-    static let defaultMinimumWidth: CGFloat = 900
+    /// Below this the trailing card (World Tension score row: 140 pt chart, spacing, score and level) no longer fits.
+    static let defaultMinimumWidth: CGFloat = 1000
 
     var leadingFraction: CGFloat = 2.0 / 3.0
     var minimumWidth: CGFloat = defaultMinimumWidth

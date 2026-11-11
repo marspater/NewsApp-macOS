@@ -211,9 +211,9 @@ enum BriefingWarRoomTests {
             trailingWide.minX == expectedLeadingWidth + spacing && trailingWide.minY == 0,
             "Trailing column sits on right")
 
-        // 2. Wide window boundary (900 pt):
+        // 2. Wide window boundary (1000 pt):
         let boundary = BriefingSituationalLayout.computeFrames(
-            width: 900,
+            width: 1000,
             heroHeight: heroHeight,
             trailingHeight: trailingHeight,
             sitrepHeight: sitrepHeight
@@ -221,6 +221,10 @@ enum BriefingWarRoomTests {
         check(boundary.hero?.minY == 0, "Hero at top on boundary")
         check(boundary.sitrep?.minY == heroHeight + spacing, "Sitrep directly under hero on boundary")
         check(boundary.trailing?.minX == (boundary.hero?.maxX ?? 0) + spacing, "Trailing beside hero on boundary")
+
+        let justBelow = BriefingSituationalLayout.computeFrames(
+            width: 999, heroHeight: heroHeight, trailingHeight: trailingHeight, sitrepHeight: sitrepHeight)
+        check(justBelow.trailing?.minX == 0, "Just under the boundary stacks in one column")
 
         // 3. Narrow window (600 pt):
         let narrow = BriefingSituationalLayout.computeFrames(
