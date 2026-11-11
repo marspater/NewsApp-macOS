@@ -276,6 +276,9 @@ final class ForceClickMonitorView: NSView {
         ReaderDictionaryLookup.performLookup(for: text, font: font, at: point, in: self)
     }
 
+    /// The text system measures from the top-left, so points in this view must too.
+    override var isFlipped: Bool { true }
+
     override func hitTest(_: NSPoint) -> NSView? {
         // Return nil so mouse clicks, selections, link activations pass straight through to SwiftUI Text
         nil
