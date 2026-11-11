@@ -1118,6 +1118,8 @@ class FeedManager: NSObject, ObservableObject {
                 work.cancel()
             }
             guard let self else { return }
+            // Stories the budget skipped stay pending for the next lookup.
+            if case .success(let report) = result { self.requestedImageIDs.subtract(report.deferredIDs) }
             if !Task.isCancelled {
                 self.imageLookupTask = nil
                 // Stories asked for while this lookup ran get their own.

@@ -196,8 +196,10 @@ struct TodayLaneSection: View {
     let actions: TodayEditionActions
 
     @Environment(\.effectiveReduceMotion) private var reduceMotion
-    /// The card the header's buttons last moved the row to.
-    @State private var pagedIndex = 0
+    /// Where the row is scrolled to and how far it can go, read from the row itself so the header's buttons follow
+    /// a trackpad or keyboard scroll too.
+    @State private var scrollX: CGFloat = 0
+    @State private var scrollMax: CGFloat = 0
     /// The row's own scroll offset, which the header's buttons set. A scroll reader's `scrollTo` moved the page
     /// instead of the row, and an id-bound position with view-aligned snapping did not move the row at all (live
     /// pass, 11 November 2026).
@@ -228,7 +230,6 @@ struct TodayLaneSection: View {
                         guard let target = kept ?? ids.first else { return }
                         withAnimation(reduceMotion ? nil : AppMotion.hover) {
                             if kept == nil {
-                                pagedIndex = 0
                                 rowPosition.scrollTo(edge: .leading)
                             } else {
                                 proxy.scrollTo(target)
@@ -260,6 +261,16 @@ struct TodayLaneSection: View {
         // The row is as tall as its tallest card; a lazy row would otherwise take the height of its first cards.
         .frame(height: rowHeight.map { $0 + AppSpacing.xs * 2 })
         .scrollPosition($rowPosition)
+        .onScrollGeometryChange(for: CGFloat.self) {
+            $0.contentOffset.x
+        } action: { _, offset in
+            scrollX = offset
+        }
+        .onScrollGeometryChange(for: CGFloat.self) {
+            max(0, $0.contentSize.width - $0.containerSize.width)
+        } action: { _, maximum in
+            scrollMax = maximum
+        }
         .scrollIndicators(.hidden)
         .modifier(UnderSidebarRow())
         .background(alignment: .topLeading) { heightProbe }
@@ -313,22 +324,22 @@ struct TodayLaneSection: View {
         return order.compactMap { longest[$0] }
     }
 
-    /// Moves the row by two cards; the row itself scrolls freely with the trackpad.
+    /// Moves the row by two cards from where it is scrolled to now; the row itself scrolls freely with the trackpad.
     private func pageButton(_ symbol: String, label: String, offset: Int) -> some View {
-        let index = min(pagedIndex, max(0, ids.count - 1))
-        let target = max(0, min(ids.count - 1, index + offset * 2))
         let cardWidth = lane.stories.first?.cardVariant.laneWidth ?? AppLayout.laneCardWidth
+        let step = cardWidth + AppLayout.cardGap
+        let index = (scrollX / step).rounded()
+        let target = max(0, min(scrollMax, (index + CGFloat(offset * 2)) * step))
         return Button {
-            pagedIndex = target
             withAnimation(reduceMotion ? nil : AppMotion.navigation) {
-                rowPosition.scrollTo(x: CGFloat(target) * (cardWidth + AppLayout.cardGap))
+                rowPosition.scrollTo(x: target)
             }
         } label: {
             Image(systemName: symbol)
         }
         .buttonStyle(.bordered)
         .buttonBorderShape(.circle)
-        .disabled(target == index)
+        .disabled(abs(target - scrollX) < 1)
         .help(label)
         .accessibilityLabel(label)
     }
