@@ -156,7 +156,9 @@ jobs:
   # more. Not a required check.
   today-captures:
     name: Today Captures (macOS 26, Apple Silicon)
-    if: github.event_name != 'pull_request'
+    needs: changes
+    # `changes` reports code == 'true' for every push and manual run; only a pull request can report false.
+    if: needs.changes.outputs.code == 'true' && github.event_name != 'pull_request'
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
