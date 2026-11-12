@@ -125,7 +125,7 @@ struct TodayEditionView<LatestListCard: View>: View {
                     }
                 }
                 .onGeometryChange(for: Int.self) { proxy in
-                    TodayEditionView.gridColumns(width: proxy.size.width)
+                    AppLayout.gridColumnCount(width: proxy.size.width, minimum: AppLayout.compactColumnMinimum)
                 } action: { columns in
                     actions.latestColumnsChanged(columns)
                 }
@@ -142,11 +142,6 @@ struct TodayEditionView<LatestListCard: View>: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(TodayLane.theLatest.rawValue). \(TodayLane.theLatest.subtitle)")
         .accessibilityRotorEntry(id: TodayLane.theLatest, in: lanesRotor)
-    }
-
-    /// How many adaptive columns of at least the Compact minimum fit `width`.
-    static func gridColumns(width: CGFloat) -> Int {
-        AppLayout.gridColumnCount(width: width, minimum: AppLayout.compactColumnMinimum)
     }
 }
 
