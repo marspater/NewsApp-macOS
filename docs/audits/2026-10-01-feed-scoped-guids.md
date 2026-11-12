@@ -2,7 +2,7 @@
 
 ## Scope and branch reconciliation
 
-Task #109 extends the merged identity and alias work (#167/#171). Started a fresh `codex/feed-scoped-guids` branch in the existing isolated worktree from main `4835e66`, preserving the original checkout and the user-managed PR branches. While implementation was running, the user merged reader PR #168 and UI PR #89. Rebased the unpublished commit onto main `aa7d915`; retained both reader v3 and identity invariants in the sole documentation conflict. No GitHub merges or force pushes were performed.
+Task #109 extends the merged identity and alias work (#167/#171). A fresh `codex/feed-scoped-guids` branch was started in the existing isolated worktree from main `4835e66`, preserving the original checkout and the PR branches I manage. While implementation was running, I merged reader PR #168 and UI PR #89. The unpublished commit was rebased onto main `aa7d915`; both reader v3 and identity invariants were retained in the sole documentation conflict. No GitHub merges or force pushes were performed.
 
 ## Implementation
 
@@ -27,4 +27,4 @@ Logs: `/tmp/news-guid-tests.log`, `/tmp/news-guid-focused.log`, `/tmp/news-guid-
 
 Legacy history did not record ownership of every GUID variant. Uncertain variants are resolved through known URLs when possible and otherwise kept separate. Existing corrupted cross-feed records cannot be reconstructed from absent original content; historical reconciliation remains #112.
 
-Phase B remains open: content fingerprint #110, validated redirect/canonical signals #111 and historical reconciliation #112 remain separate. Precision against the evaluation holdout is not claimed. The installed app and real user database were untouched. This is a storage and refresh integration change, with isolated deterministic verification; no live publisher or GUI launch claim is made. Hosted CI/security results are tracked separately on the new PR. Merging remains with Mars.
+Phase B remains open: content fingerprint #110, validated redirect/canonical signals #111 and historical reconciliation #112 remain separate. Precision against the evaluation holdout is not claimed. The installed app and real user database were untouched. This is a storage and refresh integration change, with isolated deterministic verification; no live publisher or GUI launch claim is made. Hosted CI/security results are tracked separately on the new PR. Merging remains with me.

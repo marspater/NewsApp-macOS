@@ -2,9 +2,9 @@
 
 ## Scope
 
-Issue #112 extends the fingerprint foundation (#174) and persistent aliases (#108). Mars merged #174/#175 while this implementation was underway; publication is rebased onto current main, including #176. Its overview migration retains v8; historical reconciliation uses v9. No production database, installed app, user-owned checkout or published history was changed.
+Issue #112 extends the fingerprint foundation (#174) and persistent aliases (#108). I merged #174/#175 while this implementation was underway; publication is rebased onto current main, including #176. Its overview migration retains v8; historical reconciliation uses v9. No production database, installed app, checkout of mine or published history was changed.
 
-Open PR links were checked: #175 linked #111; #174 lacked a Development link to #110, which was added and verified through GitHub and the API. Because that link closes the implementation issue on merge, its unmet >=99% precision holdout gate was explicitly retained in open evaluation issue #102. Both PRs were then merged by Mars.
+Open PR links were checked: #175 linked #111; #174 lacked a Development link to #110, which was added and verified through GitHub and the API. Because that link closes the implementation issue on merge, its unmet >=99% precision holdout gate was explicitly retained in open evaluation issue #102. I then merged both PRs.
 
 ## Implementation
 

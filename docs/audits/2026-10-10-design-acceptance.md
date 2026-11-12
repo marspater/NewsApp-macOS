@@ -36,7 +36,7 @@ The same harness compiled against `401c90a` (before phase 2) gives a before/afte
 | Before → after phase 2 (`401c90a` → `3370e42`) | 501 → 542 ms, p = 0.37 | 188 → 196 ms, p = 0.07 | 149 → 150 ms, p = 0.81 | 269.5 → 277.3 MiB, p = 0.001 |
 | Before → current main (`401c90a` → `4a6f53f`) | 481 → 489 ms (+1.7 %), p = 0.68 | 176 → 183 ms (+4.0 %), p = 0.025 | 134 → 134 ms, p = 0.96 | 268.4 → 273.1 MiB (+1.7 %), p = 0.011 |
 
-First-card time and refresh show no detectable change. Scroll-frame readback (+7 ms, a synchronous full-window bitmap read, not frame time) and peak RSS (+5 to +8 MiB of a process that includes Vision) are small but measurable. Since phase 2, the harness window carries the real glass toolbar, which is consistent with both. Both stay well inside the existing investigation budgets (575 ms first card, 300 MiB RSS; 2026-10-02 integrated budgets). Whether that satisfies "no regression" is an acceptance decision for Mars; it is not claimed as a pass here.
+First-card time and refresh show no detectable change. Scroll-frame readback (+7 ms, a synchronous full-window bitmap read, not frame time) and peak RSS (+5 to +8 MiB of a process that includes Vision) are small but measurable. Since phase 2, the harness window carries the real glass toolbar, which is consistent with both. Both stay well inside the existing investigation budgets (575 ms first card, 300 MiB RSS; 2026-10-02 integrated budgets). Whether that satisfies "no regression" is my acceptance decision; it is not claimed as a pass here.
 
 ## Phase 3 · live acceptance (#353)
 

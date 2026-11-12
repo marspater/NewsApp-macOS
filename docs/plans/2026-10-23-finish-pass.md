@@ -1,10 +1,10 @@
 # Finish pass — 23 October 2026
 
-Status: plan as approved by Mars on 23 October 2026 (baseline `origin/main` `0eeb74b`). Slices land as separate PRs; outcomes are recorded here as they merge.
+Status: plan as I approved it on 23 October 2026 (baseline `origin/main` `0eeb74b`). Slices land as separate PRs; outcomes are recorded here as they merge.
 
 ## Context
 
-Mars asked for a meticulous analysis of the current app (main `0eeb74b`, after #481) and a plan to bring it to "perfect", UI first, with the custom reader renderer called out. Planning decisions: keep the SwiftUI per-block renderer and polish it (no TextKit rewrite); Mars runs window-opening harnesses (I stay background-only); scope = reader + overview, list/cards/chrome, extraction feeding the renderer, lint/tokens.
+I asked for a meticulous analysis of the current app (main `0eeb74b`, after #481) and a plan to bring it to "perfect", UI first, with the custom reader renderer called out. Planning decisions: keep the SwiftUI per-block renderer and polish it (no TextKit rewrite); I run the window-opening harnesses (automated sessions stay background-only); scope = reader + overview, list/cards/chrome, extraction feeding the renderer, lint/tokens.
 
 **State.** No open PRs; only parked #264/#268 open. The 21 Oct plan is done (#470–#479). #481 merged, but `ARCHITECTURE.md:278-289` still says "In review" and one row is now wrong (selectedImage fallback). CHANGELOG lacks #475/#481. DESIGN.md §18 still lists Tag/Eyebrow/Intelligence label/Notice/Reading column as "planned" though they exist in `DesignSystem.swift`. CNA "(Updated: …)" still open. The design lint baseline is at zero, but the lint cannot see literal spacing/frames/opacity, raw environment values, ungated motion or copy. No test asserts rendered reader layout.
 
@@ -143,8 +143,8 @@ ARCHITECTURE: move #481 rows into invariants, fix selectedImage row, drop "In re
 - GlassSystem: dim with `appearsActive` or delete unused helpers (keep one if a floating control exists; otherwise delete and update DESIGN §3.3 in the same PR).
 - Lint: scan `Sources/App/NewsApp.swift` too; new ratchet rules `literal-spacing`, `literal-frame`, `literal-opacity`, `literal-stroke`, `system-font-design`, `raw-environment` (`colorSchemeContrast`, `accessibilityReduceMotion`), `foregroundColor`, `legacy-alias`, `article-copy` (`"[^"]*\b[Aa]rticle\b` in Text/Label/Button). Baselines set after slices 3–8; counts only go down.
 
-### Slice 10 — Appearance acceptance (Mars runs harnesses)
-Mars runs `script/appearance_matrix.sh` and `script/run_isolated.sh` (Reduce Motion, Reduce Transparency) over list, grid, reader (Casper/Edition/Alto; scale 0.9/1.0/1.3/1.5; a fixture story with headings, nested list, quote, pull quote, code, table, embed, portrait/landscape/small figures), overview, Briefing, Settings tabs, catalog, tension sheet — 900 pt and wide, light/dark/Increase Contrast. I review captures, fix token-level defects, write `docs/audits/2026-10-xx-finish-pass.md`, tick the outstanding checklists.
+### Slice 10 — Appearance acceptance (I run the harnesses)
+I run `script/appearance_matrix.sh` and `script/run_isolated.sh` (Reduce Motion, Reduce Transparency) over list, grid, reader (Casper/Edition/Alto; scale 0.9/1.0/1.3/1.5; a fixture story with headings, nested list, quote, pull quote, code, table, embed, portrait/landscape/small figures), overview, Briefing, Settings tabs, catalog, tension sheet — 900 pt and wide, light/dark/Increase Contrast. I review captures, fix token-level defects, write `docs/audits/2026-10-xx-finish-pass.md`, tick the outstanding checklists.
 
 ## Order
 0 and 1 first (small, independent). 2 → 4. 3 → 4 → 5. 6 after 3 and 4. 7 and 8 after 3 (tokens), independent of each other. 9 after 3–8. 10 last.
@@ -156,4 +156,4 @@ Mars runs `script/appearance_matrix.sh` and `script/run_isolated.sh` (Reduce Mot
 - Every slice: `./test.sh` (runs design_lint), `script/format.sh --check`, `./build.sh` in a staging directory (never over the real app).
 - Extraction: `./test.sh --parsing-regressions`, `--story-regressions`, live `./test.sh --catalog-reader-access` compared with `docs/audits/2026-10-21-catalog-reader-access.md`.
 - Headless unit tests: citation mapping, short-paragraph keep, br runs, table parse, nested levels, tolerant Kind decoding of v9 JSON, spacing function, heading ≥ body per theme, marker width, link base resolution, passage matcher, inline citation string.
-- UI: slice 10 by Mars; I report exactly what was and was not checked. Not covered: macOS 15/26 runtime (no machines), live VoiceOver (#268 parked).
+- UI: slice 10 is mine; the report says exactly what was and was not checked. Not covered: macOS 15/26 runtime (no machines), live VoiceOver (#268 parked).

@@ -1,6 +1,6 @@
 # Blind acceptance holdout (#737, 6 November 2026)
 
-Route 3, stage 0. The 3 November holdout has been read many times, so it becomes the development set. A new set is held for one read, for acceptance, at the end. Mars did not accept v1; the decision on v2 is at the end of this audit.
+Route 3, stage 0. The 3 November holdout has been read many times, so it becomes the development set. A new set is held for one read, for acceptance, at the end. I did not accept v1; the decision on v2 is at the end of this audit.
 
 ## Recipe
 
@@ -19,7 +19,7 @@ Route 3, stage 0. The 3 November holdout has been read many times, so it becomes
 | v1 | 63 | 30 | 96 | 45 | `cf40a54b378d36f9e52b8a16fa29dcb0e06dd62f367e12a9cf7388b9ab121e93` |
 | v2 | 16 | 43 | 130 | 37 | `69812093e80d64bd89e3d6d17ed9b67540514da8e4623891d8bad82650270cd4` |
 
-Mars's review of v1 found pairs labelled `same` only because they followed one trigger. v2 is a fresh pass by a new independent agent under this rule, and 61 labels differ (same to related 27, same to different 20, related to different 14):
+My review of v1 found pairs labelled `same` only because they followed one trigger. v2 is a fresh pass by a new independent agent under this rule, and 61 labels differ (same to related 27, same to different 20, related to different 14):
 
 - `same`: the same occurrence (same act, place, time, actors) reported twice.
 - `related`: another act in the same unfolding story.
@@ -30,7 +30,7 @@ Mars's review of v1 found pairs labelled `same` only because they followed one t
 
 The set is less than fully blind:
 
-- Mars reviewed v1 row by row.
+- I reviewed v1 row by row.
 - The orchestrating agent saw headlines and assessments of 11 rows in that review's message. It has read no other pairs or labels.
 - The v2 labeller saw v1's aggregate counts in the README, not its per-row labels. It read leads cut to 420 characters; two articles have no lead.
 - No matcher or model has been scored on the set.
@@ -41,7 +41,7 @@ With 16 `same` pairs, one pair moves strict recall by about 6 points. Story reca
 
 The matcher chose the candidates: high-scoring borderline pairs, singletons next to an event, and earliest members of two events sharing terms. Pairs inside one event and pairs the matcher saw no link in were not sampled, so false merges and some missed links can go unseen. Scores on this set do not estimate library-wide precision or recall.
 
-## Decision on the gate (Mars)
+## My decision on the gate
 
 - v2 stays sealed and unchanged as its own cohort. It is topped up by a later, independent draw (v3) before it serves as the final acceptance gate.
 - v3 comes from a later library snapshot and excludes every article and pair already used for development (the 3 November set), Stage 1 training or v2. Its sampling method and labels are frozen before anyone looks at Stage 1 results, and it is never used for tuning.

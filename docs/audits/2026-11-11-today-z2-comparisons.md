@@ -1,6 +1,6 @@
 # Today edition Z2: re-run and comparisons for In Motion and Your Beat (#934, 11 November 2026)
 
-Mars asked on 11 November 2026 for [the first shadow evaluation](2026-11-10-today-z2-shadow-evaluation.md) of [Z2 (#934)](https://github.com/marspater/NewsApp-macOS/issues/934) to be run again with his real subscriptions and his label corrections, and for two rules to be compared before he chooses: In Motion's update window and rising momentum, and Your Beat's publisher affinity. This audit holds that comparison. Nothing here is a decision: every variant is a default-off option or lives in the evaluation harness, `TodayEditionThresholds.standard` and the shipped rule are unchanged, and each section ends with a recommendation for Mars, marked as one. The first evaluation stays preliminary, and this run does not pass the Z2 gate.
+I asked on 11 November 2026 for [the first shadow evaluation](2026-11-10-today-z2-shadow-evaluation.md) of [Z2 (#934)](https://github.com/marspater/NewsApp-macOS/issues/934) to be run again with my real subscriptions and my label corrections, and for two rules to be compared before I choose: In Motion's update window and rising momentum, and Your Beat's publisher affinity. This audit holds that comparison. Nothing here is a decision: every variant is a default-off option or lives in the evaluation harness, `TodayEditionThresholds.standard` and the shipped rule are unchanged, and each section ends with a recommendation for me, marked as one. The first evaluation stays preliminary, and this run does not pass the Z2 gate.
 
 Aggregate numbers only. Titles, review sheets and label files stay under `~/news-eval/today-shadow-2026-11-11/` and `/private/tmp`.
 
@@ -11,7 +11,7 @@ Aggregate numbers only. Titles, review sheets and label files stay under `~/news
 | Library | The copy of 30 October 2026 the first run used (`~/news-eval/library-copy.sqlite3`): 7,442 articles, 37 fetched feeds, 99 stories read or saved in the 30 days before the clock, and 29.8 days of stories inside that window. Read through a copy under `/private/tmp`; the original is untouched |
 | Clock and window | `NEWS_TODAY_NOW=1793382432` (the newest story), 72 h candidate window, as in the first run |
 | Subscriptions | The reader's list exported from the app on 11 November 2026: 28 feeds. All 28 are among the 37 feeds the copy fetched; the other 9 fetched feeds are not on the list. The list is twelve days newer than the snapshot: a feed removed in between counts as never subscribed here |
-| Labels | The first run's single-pass reviewer labels (200 stories, 50 events) with Mars's spot-check applied; where his reading and the reviewer's differ, his wins |
+| Labels | The first run's single-pass reviewer labels (200 stories, 50 events) with my spot-check applied; where my reading and the reviewer's differ, mine wins |
 
 **What the subscription list did to the candidate pool.** It admits 612 of the 738 stories in the 72 h window (83 %) and 406 of the 522 stories of the last 24 h (78 %). Of the labelled set, 161 of 200 stories and 48 of 50 events are still candidates: 10 of 10 real updates, the borderline event, 7 of 8 repetitions and 30 of 31 initial reports.
 
@@ -21,9 +21,9 @@ Aggregate numbers only. Titles, review sheets and label files stay under `~/news
 | --- | --- | --- |
 | Event label (In Motion) | 4 | 2 `repetition` to `new_information`, 1 `repetition` to `borderline` (a class of its own, counted apart), 1 `new_information` to `repetition` |
 | Lead-worthy | 3 | 2 from no to yes, 1 from yes to no |
-| Expected lane | 3 | 1 from The Latest to In Motion (a story whose event he ruled a real update); 2 removed, because his ruling leaves no expected lane: the borderline event's story, and the story he ruled not Lead-worthy whose label expected The Lead |
+| Expected lane | 3 | 1 from The Latest to In Motion (a story whose event I ruled a real update); 2 removed, because my ruling leaves no expected lane: the borderline event's story, and the story I ruled not Lead-worthy whose label expected The Lead |
 
-The corrected events are 10 `new_information`, 8 `repetition`, 1 `borderline` and 31 `initial_report`. He ruled on 12 events; the stories of 9 of them are older than the 200 labelled stories, so only their event labels exist. Everything he did not rule on keeps its reviewer label: 7 of the 8 `repetition` labels and all 31 `initial_report` labels are the reviewer's alone, and he overturned all 3 `repetition` labels he checked.
+The corrected events are 10 `new_information`, 8 `repetition`, 1 `borderline` and 31 `initial_report`. I ruled on 12 events; the stories of 9 of them are older than the 200 labelled stories, so only their event labels exist. Everything I did not rule on keeps its reviewer label: 7 of the 8 `repetition` labels and all 31 `initial_report` labels are the reviewer's alone, and I overturned all 3 `repetition` labels I checked.
 
 ## Commands
 
@@ -78,13 +78,13 @@ Run A matches the first run after #1194 on every figure the two share. What the 
 
 - **Your Beat is wider, not narrower:** 56 % of the day's stories qualify before the cap, against 49 %. The pool lost 116 of the day's stories, and only 25 of them qualified, all through the interest match. The 155 stories that qualify through publisher affinity alone are all still in it: the four affinity publishers are on the list.
 - **The Deep Read shows content types again.** Only 4 stored reads of 8 min or more remain among the candidates (the other 4 of the first run came from feeds not on the list), so 4 of the 8 places go to stories classified by headline, section or URL (2 Explainer, 2 Opinion). Its purity is 4 of 5 on this pool: one of the classified stories is labelled for another lane.
-- **In Motion with the corrections reads as Mars found it:** the lane shows 5 stories, 4 real updates and the borderline one, no repetition, and misses 6 real updates. All 6 pass the headline test and are kept out by momentum alone (section 2).
+- **In Motion with the corrections reads as I found it:** the lane shows 5 stories, 4 real updates and the borderline one, no repetition, and misses 6 real updates. All 6 pass the headline test and are kept out by momentum alone (section 2).
 
 ### The Lead comparison still does not separate the three rankings
 
-All three read 4 of 5: each top five holds the same story, the one Mars ruled not Lead-worthy, and it is a Lead slide (of the lane's 5 slides 4 are labelled, 3 of them Lead-worthy). The lists share 4 of 5 stories pairwise, 7 distinct stories in all. His other two corrections cannot show at five: the stories he added as Lead-worthy have one report each; one is not a candidate under the real list, and the other ranks 66th by publisher count and by the Briefing signals and 97th by the Z2 score.
+All three read 4 of 5: each top five holds the same story, the one I ruled not Lead-worthy, and it is a Lead slide (of the lane's 5 slides 4 are labelled, 3 of them Lead-worthy). The lists share 4 of 5 stories pairwise, 7 distinct stories in all. My other two corrections cannot show at five: the stories I added as Lead-worthy have one report each; one is not a candidate under the real list, and the other ranks 66th by publisher count and by the Briefing signals and 97th by the Z2 score.
 
-**Proposal (not built).** Five places and one day cannot separate rankers that agree on the few widely covered stories; the difference is in the stories they order differently. I would label the union of each ranker's top 20 on three to five clocks (other days of this copy, or newer copies) blind and by more than one reader, as #737 does for pairs, and score each ranker on precision at 10 and average precision over the Lead-worthy stories, plus a pairwise read ("which of these two leads?") on the pairs the rankers order differently. A first look says depth does separate them: from the rank positions the private sheet of run C already holds, the top ten read 9 of 10 for publisher count, 9 of 10 for the Briefing signals and 7 of 10 for the Z2 score, and average precision over the 11 Lead-worthy stories among the 161 is 0.81, 0.82 and 0.70. That is 11 positives from one reviewer plus three corrections on one day, computed outside the harness: a reason to label properly before the weights are accepted, not a result.
+**Proposal (not built).** Five places and one day cannot separate rankers that agree on the few widely covered stories; the difference is in the stories they order differently. The proposal is to label the union of each ranker's top 20 on three to five clocks (other days of this copy, or newer copies) blind and by more than one reader, as #737 does for pairs, and to score each ranker on precision at 10 and average precision over the Lead-worthy stories, plus a pairwise read ("which of these two leads?") on the pairs the rankers order differently. A first look says depth does separate them: from the rank positions the private sheet of run C already holds, the top ten read 9 of 10 for publisher count, 9 of 10 for the Briefing signals and 7 of 10 for the Z2 score, and average precision over the 11 Lead-worthy stories among the 161 is 0.81, 0.82 and 0.70. That is 11 positives from one reviewer plus three corrections on one day, computed outside the harness: a reason to label properly before the weights are accepted, not a result.
 
 ## 2. In Motion: update window and rising momentum
 
@@ -138,12 +138,12 @@ Your Beat stays at 12: the places In Motion takes from it are refilled from the 
 **Limits that bear on the choice.**
 
 - The event labels answer the 24 h question: does a report of the last 24 h add something new? An event whose real update is 30 h old was labelled `initial_report` or `repetition` under that question. The 9 stories the 36 h window adds are therefore unjudged, not wrong, and this data cannot say what 36 h gains.
-- The repetition count rests on reviewer labels. Of the 6 repetitions that clear the bar without momentum, 1 was ruled a repetition by Mars; the other 5 are single-pass reviewer labels, and he overturned all 3 reviewer `repetition` labels he checked.
+- The repetition count rests on reviewer labels. Of the 6 repetitions that clear the bar without momentum, I ruled 1 a repetition; the other 5 are single-pass reviewer labels, and I overturned all 3 reviewer `repetition` labels I checked.
 - One copy, one clock, 48 events, drawn around the 24 h boundary.
 
-A private sheet lists the events that clear the bar in a variant and that Mars has not ruled on (`~/news-eval/today-shadow-2026-11-11/spot-check-in-motion-variants-for-mars.md`: 14 events: the 5 repetitions, the 2 initial reports and the 7 unlabelled stories, with every report's age and headline), so the two open points above can be settled by reading them.
+A private sheet lists the events that clear the bar in a variant and that I have not ruled on (`~/news-eval/today-shadow-2026-11-11/spot-check-in-motion-variants-for-mars.md`: 14 events: the 5 repetitions, the 2 initial reports and the 7 unlabelled stories, with every report's age and headline), so the two open points above can be settled by reading them.
 
-**Recommendation for Mars (not a decision).**
+**Recommendation for me (not a decision).**
 
 1. Take the two-question form with a **24 h** update window. It is the shipped lane on this copy and removes the trap of a literal 24-to-36 change.
 2. **Do not widen to 36 h on this evidence.** It adds no labelled real update, its 9 entrants are unjudged, 3 of them are first-day bursts, and with any momentum it pushes real updates out through the cap. If 36 h is still wanted, it needs the sheet's verdicts first and a guard for a story whose every report is in the 24 to 36 h band.
@@ -201,7 +201,7 @@ Cells are stories qualifying per day, of 406, before the cap. With no history Yo
 - **For a short history, affinity hardly matters; the interest match does.** With 5 stories read, 97 stories a day qualify by interest alone, more than with the whole history (74), and with 15 stories 118 do. The interest match is scaled by the largest weight in the reader's own profile, so in a small profile every matching keyword counts fully. Your Beat is full at 12 from five read stories under every option. Whether a five-story profile should fill the lane is a separate question from affinity, and no option here answers it.
 - **Outside Your Usual does not depend on the choice**, except with no history, where it has no profile to be outside of.
 
-**Recommendation for Mars (not a decision).**
+**Recommendation for me (not a decision).**
 
 1. Take affinity **per story published**, with a floor of 5 read or saved stories. It is the option that answers the concern as stated: the shipped signal picks four of the six busiest publishers, which the reader reads at a lower rate than the publishers the per-story signal picks, and it brings the day from 56 % to 24 % and the lane from 7 of 12 stories by one publisher to 3. The floor is not measured together with it: by the approximate check above each of the four publishers has at least 5 read stories, so it should change nothing for the whole history and should remove affinity from a 15-story one. It needs module work (a publisher's published count in the profile) and a re-run as a module option before it ships.
 2. If a change is wanted that is already in the module, make affinity a **booster at 0.30**: a tested, default-off threshold that needs no new data and brings the day from 56 % to 39 %. It is the smaller step: the same busy publishers keep 10 of 12 places.
@@ -211,7 +211,7 @@ Cells are stories qualifying per day, of 406, before the cap. With no history Yo
 ## Limits
 
 - One library copy at one clock, one reader. The subscription list is twelve days newer than the snapshot.
-- Reviewer labels are single-pass; Mars checked 20 stories and 12 events. Lead-worthiness is his one reading, as he says himself.
+- Reviewer labels are single-pass; I checked 20 stories and 12 events. Lead-worthiness is my one reading, and I say so myself.
 - 161 labelled stories and 48 labelled events are candidates under the real list; the conditional lanes hold few labelled stories, so their purity moves in steps of one story.
 - The Lead's photo rule (a story without a photo takes no slide while another has one, 11 November 2026) is not applied: the harness knows no story's photo state, as in the first run.
 - Starred feeds are not in the copy and are not measured. Publisher volume is counted over the 29.8 days of stories the copy holds.

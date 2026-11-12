@@ -74,7 +74,7 @@
       0.2554506870336849,
       0.445090792275351
     ],
-    "provenance": "Antigravity handoff supplied by Mars; aggregate result, not an independent tune replay"
+    "provenance": "Handoff I supplied; aggregate result, not an independent tune replay"
   },
   "upgrade": {
     "idempotent": true,
@@ -163,10 +163,10 @@
   "releaseDisposition": {
     "date": "2026-10-18",
     "acceptedWithLimitations": true,
-    "authorization": "Mars delegated completion judgment after receiving the measured result and remaining PLAN.md items",
+    "authorization": "I delegated completion judgment after receiving the measured result and remaining PLAN.md items",
     "precisionTargetMet": false,
     "original409ReplayCompleted": false,
-    "foregroundAppearanceAndKeyboard": "deferred at Mars request; not a passing check",
+    "foregroundAppearanceAndKeyboard": "deferred at my request; not a passing check",
     "tracking": "https://github.com/marspater/NewsApp-macOS/issues/439"
   },
   "integrationMerge": "624ea0848db179063e17b30c2332337831a5af06"

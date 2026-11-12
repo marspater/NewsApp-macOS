@@ -1,6 +1,6 @@
 # Release simplification: core validation — 17 October 2026
 
-Scope: Codex matching, visibility, refresh energy and Briefing slice of [#439](https://github.com/marspater/NewsApp-macOS/issues/439). Gemini's publisher-excerpt slice is separate and not included in these results.
+Scope: the matching, visibility, refresh energy and Briefing slice of [#439](https://github.com/marspater/NewsApp-macOS/issues/439). The publisher-excerpt slice is separate and not included in these results.
 
 ## Existing labeled regression data
 

@@ -53,7 +53,7 @@ Replay of each event over the 48 hours to its last fetch, with the values the sy
 
 The right-hand column is the policy this mapping refuses. It multiplies acceleration sevenfold by crediting feed blurbs as independence, which the momentum contract rules out.
 
-Copy groups: 50 multi-row groups hold 104 rows; 43 cross outlets, in 42 events. I read all 43 and saw no group that looked wrong: 22 are the sister sites Euronews and Africanews, the other 21 mostly identical agency-style headlines across Arab News, CNA, The Hindu and Dawn. That is one reader's check, not a labelled precision.
+Copy groups: 50 multi-row groups hold 104 rows; 43 cross outlets, in 42 events. All 43 were read and no group looked wrong: 22 are the sister sites Euronews and Africanews, the other 21 mostly identical agency-style headlines across Arab News, CNA, The Hindu and Dawn. That is one reader's check, not a labelled precision.
 
 Lowering the containment floor to 0.4 adds 6 groups and 14 rows, and known wire groups rise from 28.4% to 29.7% of members. The floor stays at 0.8, so outlets weaving the same agency paragraphs into their own story (0.39–0.54 shared on one plane crash) stay separate reports.
 

@@ -1,20 +1,20 @@
 # v2 completion (30 October 2026)
 
-On 30 October the release scope moved: **v2 = J, L, M, N, R (done) + O (#576), Q (#607), T (#669), Y (#744)**; K, P and S moved to v3 with U–X. The aim is a correct app installed on the owner's Mac from a local `v2.0.0` tag (no GitHub release; #566/#567 stay in v3).
+On 30 October the release scope moved: **v2 = J, L, M, N, R (done) + O (#576), Q (#607), T (#669), Y (#744)**; K, P and S moved to v3 with U–X. The aim is a correct app installed on my Mac from a local `v2.0.0` tag (no GitHub release; #566/#567 stay in v3).
 
 ## What finishes each epic
 
 | Epic | Pull requests | State |
 | --- | --- | --- |
-| T · Story Overview (#669) | #750 overview runners in `./test.sh` and CI · #753 Industry Impact precision (#670) · #755 "Earlier in This Story" lists the story's events (#671) · #756 offscreen captures (#669–#673) · #758 accent and tag text contrast (#754) | Captures sent; needs the owner's approval of DESIGN.md §11 and §17 and of the captures |
-| Y · Improvements (#744) | #751 library backup before migration, newer-schema guard, busy timeout, migration lock (#746, #747) · #752 `make run` uses a development bundle (#749) · #757 App Intents metadata in swiftc builds (#748) · #760 replay calibration accepted (#742) · #761 matcher v14: named storms and dated round-ups (#741, #739) · #763 notify once per story (#740) · #766 carry-in measured, rule stays (#738) · #768 story country signal, off (part of #737) · #773 matcher v15: reports from different headline places stay apart (#772) | #737 needs the owner's decision (see below); #769 (a load-sensitive socket test) is in the backlog |
+| T · Story Overview (#669) | #750 overview runners in `./test.sh` and CI · #753 Industry Impact precision (#670) · #755 "Earlier in This Story" lists the story's events (#671) · #756 offscreen captures (#669–#673) · #758 accent and tag text contrast (#754) | Captures sent; needs my approval of DESIGN.md §11 and §17 and of the captures |
+| Y · Improvements (#744) | #751 library backup before migration, newer-schema guard, busy timeout, migration lock (#746, #747) · #752 `make run` uses a development bundle (#749) · #757 App Intents metadata in swiftc builds (#748) · #760 replay calibration accepted (#742) · #761 matcher v14: named storms and dated round-ups (#741, #739) · #763 notify once per story (#740) · #766 carry-in measured, rule stays (#738) · #768 story country signal, off (part of #737) · #773 matcher v15: reports from different headline places stay apart (#772) | #737 needs my decision (see below); #769 (a load-sensitive socket test) is in the backlog |
 | O · Data and onboarding (#576) | #759 export saved stories and history (#565) · #767 diagnostics export (#564, replaces #762) · #765 onboarding as a six-step animated flow and permission timing (#562) · #770 back up and restore the library (#563, stacked on #751) | Ready once #751 merges |
 | Q · Briefing (#607) | #764 Dock badge counts today's Briefing and notified stories (#584) | Ready |
 
-## Decisions for the owner
+## Decisions for me
 
 - **#737 story recall.** The country signal (`NEWS_STORY_COUNTRY`) raises story precision 0.714 → 0.826 and story recall 0.106 → 0.202 on the 29 October library holdout and fixes the Jordan church case, but leaves 2.6 % wrong story groups (target ≤ 2 %) and moves the multi-publisher share 40.0 % → 40.6 % (target 60 %). It ships off. Keep the rest of #737 in v2, or move it to v3. Details: `docs/audits/2026-10-30-story-country-signal.md`.
-- **Open review threads kept for the owner:** #761 all-caps storm names and the edition-word exception to the different-day veto; #751 timing of the busy-timeout test.
+- **Open review threads kept for me:** #761 all-caps storm names and the edition-word exception to the different-day veto; #751 timing of the busy-timeout test.
 - **DESIGN.md rules:** §11 (accent text and tag text, #758) and §17 ("Earlier in This Story", #755).
 
 ## Merge order
@@ -27,7 +27,7 @@ All open v2 branches merge into one tree with a single trivial conflict in `CONT
 
 ## Verified before merging
 
-The combined tree of every open v2 branch (all of the above except #768, which is off by default, and #770, which came later; #770 passed the full suite on its own branch) passed `NEWS_TEST_FORCE=1 ./test.sh`, including the three standalone headless runners, with `NEWS_SNAPSHOT_DB` set to a copy of the owner's library:
+The combined tree of every open v2 branch (all of the above except #768, which is off by default, and #770, which came later; #770 passed the full suite on its own branch) passed `NEWS_TEST_FORCE=1 ./test.sh`, including the three standalone headless runners, with `NEWS_SNAPSHOT_DB` set to a copy of my library:
 
 | Library copy | Before | After |
 | --- | --- | --- |
@@ -37,7 +37,7 @@ The combined tree of every open v2 branch (all of the above except #768, which i
 | Saved | 0 | 0 |
 | Pre-migration backup | — | `news-before-v25-2026-10-30.sqlite3` beside the library, owner-only (0600), plus an empty `news.sqlite3.migration-lock` |
 
-The owner's library was first copied with SQLite's online backup API, which includes pages still in the write-ahead log: `sqlite3 "file:…/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-pre-v2-2026-10-30.sqlite3"` (owner-only, 0400; integrity check ok, schema 25). The tension file and preferences plist were copied beside it. News may have been running; the online backup is consistent either way. The install below takes a fresh copy with News quit.
+My library was first copied with SQLite's online backup API, which includes pages still in the write-ahead log: `sqlite3 "file:…/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-pre-v2-2026-10-30.sqlite3"` (owner-only, 0400; integrity check ok, schema 25). The tension file and preferences plist were copied beside it. News may have been running; the online backup is consistent either way. The install below takes a fresh copy with News quit.
 
 ## Install (after the merges)
 

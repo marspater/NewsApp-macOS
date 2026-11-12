@@ -2,7 +2,7 @@
 
 ## Scope
 
-Partial implementation of #110 on top of the merged feed-scoped GUID work (#173). The implementation is complete for conservative exact-text matching; acceptance against the labeled holdout is pending #102. Historical row merging remains #112. Mars handles GitHub merges.
+Partial implementation of #110 on top of the merged feed-scoped GUID work (#173). The implementation is complete for conservative exact-text matching; acceptance against the labeled holdout is pending #102. Historical row merging remains #112. I handle GitHub merges.
 
 ## Implementation
 

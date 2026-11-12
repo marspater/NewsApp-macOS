@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Convert the sentence encoder to Core ML and check it against the shipped `minilm.mlmodelc` (#555).
-Mars's Mac only, never CI: run it from the virtual environment built from `script/training/requirements.txt`.
+My Mac only, never CI: run it from the virtual environment built from `script/training/requirements.txt`.
 
 `convert_minilm.py OUT_DIR [--source hub|shipped]` builds `sentence-transformers/all-MiniLM-L6-v2` (pinned revision,
 downloaded from the Hugging Face Hub at conversion time; the shipped weights derive from it) or the shipped model's own

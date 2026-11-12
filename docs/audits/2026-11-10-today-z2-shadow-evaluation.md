@@ -1,6 +1,6 @@
 # Today edition Z2 shadow evaluation (#934, 10 November 2026)
 
-Shadow evaluation for [Z2 (#934)](https://github.com/marspater/NewsApp-macOS/issues/934) under [the signed-off Today edition specification](../plans/2026-11-09-today-edition-spec.md). Measured offline with `--today-shadow` (command below) on a migrated temporary copy of `~/news-eval/library-copy.sqlite3` (7,442 articles across 37 fetched feeds, 99 read/saved interactions over 30 days, latest snapshot timestamp `1793382432`). Aggregate metrics only are stored here and under `~/news-eval/today-shadow-2026-11-10/shadow-report.json`; all candidate titles and review sheets stay private under `/private/tmp/today-shadow-eval/`. Labels are single-pass agent labels awaiting Mars's 20-story spot check.
+Shadow evaluation for [Z2 (#934)](https://github.com/marspater/NewsApp-macOS/issues/934) under [the signed-off Today edition specification](../plans/2026-11-09-today-edition-spec.md). Measured offline with `--today-shadow` (command below) on a migrated temporary copy of `~/news-eval/library-copy.sqlite3` (7,442 articles across 37 fetched feeds, 99 read/saved interactions over 30 days, latest snapshot timestamp `1793382432`). Aggregate metrics only are stored here and under `~/news-eval/today-shadow-2026-11-10/shadow-report.json`; all candidate titles and review sheets stay private under `/private/tmp/today-shadow-eval/`. Labels are single-pass agent labels awaiting my 20-story spot check.
 
 ```sh
 NEWS_TEST_ATOM=Tests/NewsTests.swift \
@@ -67,7 +67,7 @@ On `200` labelled stories (`shadow-candidates-private.json`):
 | False positives (`repetition`) | `3` | Caused by topic false-merges and promo/podcast entries inside v27 clusters (`#737`) |
 | False negatives (`new_information`) | `7` | Real developments where event momentum was `.steady` or `.fading` rather than `.rising` |
 
-## Open Threshold Proposals for Mars Review
+## Open Threshold Proposals for My Review
 
 Before Z3 (`#935`) or Z4 (`#936`) renders these lanes in UI:
 1. **`Your Beat` publisher-affinity share:** Computing top-quartile publishers solely from the engaged set allowed high-volume news wires/dailies in the top quartile to qualify `~48 %` (`254 / 522`) of daily articles raw (capped cleanly at `12`, but high daily throughput). Confirm whether `topQuartilePublishers` should keep full weight (letting `score` select the top `12`) or tighten to a higher engagement ratio (e.g. `>= 10 %` of 30-day reads or top decile).
@@ -76,7 +76,7 @@ Before Z3 (`#935`) or Z4 (`#936`) renders these lanes in UI:
 
 ## Re-run after the Deep Read rule change (#1194, 10 November 2026)
 
-Mars accepted two changes to The Deep Read on 10 November 2026 ([decision](https://github.com/marspater/NewsApp-macOS/issues/1194#issuecomment-6775855594)): over its cap the lane keeps the longest stored text, then the surer content type, then the newest report; and a phrase found only in the feed summary does not classify a story whose stored text is under 8 min. Same library copy, same pinned clock and the same labels as above; only the lines below changed.
+I accepted two changes to The Deep Read on 10 November 2026 ([decision](https://github.com/marspater/NewsApp-macOS/issues/1194#issuecomment-6775855594)): over its cap the lane keeps the longest stored text, then the surer content type, then the newest report; and a phrase found only in the feed summary does not classify a story whose stored text is under 8 min. Same library copy, same pinned clock and the same labels as above; only the lines below changed.
 
 | Measure | Before | After |
 | --- | --- | --- |
@@ -94,4 +94,4 @@ What the change costs: all `8` places now go to stored long reads, so the `26` s
 
 The limits above still hold: one library copy at one clock, single-pass reviewer labels, the feeds found in the copy and not the reader's subscriptions. This re-run does not pass the Z2 gate in #934.
 
-The re-run with the reader's real subscriptions and Mars's label corrections, and the comparisons for In Motion and Your Beat, are in [the audit of 11 November 2026](2026-11-11-today-z2-comparisons.md).
+The re-run with the reader's real subscriptions and my label corrections, and the comparisons for In Motion and Your Beat, are in [the audit of 11 November 2026](2026-11-11-today-z2-comparisons.md).

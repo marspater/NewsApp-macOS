@@ -11,8 +11,8 @@ measured here ever used it.
   the 14 days before 24 October 2026 (3,965 stories). The copy and the labelled file stay outside the repository.
 - 200 stories drawn with a fixed seed; the id list is kept beside the labels so `--export-categories`
   (`NEWS_CATEGORY_IDS`) re-exports exactly the same stories after a rule change.
-- Labels: Claude labelled every story into the app's 12 categories from headline and summary, following the
-  decision of 24 October (Claude labels, Mars spot-checks). Label distribution: World 98, Technology 23, Business 18,
+- Labels: an automated review labelled every story into the app's 12 categories from headline and summary, following the
+  decision of 24 October (automated labels, I spot-check). Label distribution: World 98, Technology 23, Business 18,
   Sports 17, Science 11, Politics 10, Health 9, Entertainment 8, Lifestyle 3, Travel 1, Food 1, Fashion 1.
 - Protocol: a story about a foreign country's politics, conflict or disaster is World; national politics (the
   United States, the United Kingdom as covered by their own feeds) is Politics; a company, market, price or tax story
@@ -93,7 +93,7 @@ from.
 ### Second-pass result
 
 Sample 2 is a fresh draw from a newer read-only library copy (26 October, 6,400 stories, the 14 days before 26
-October; `NEWS_CATEGORY_SEED=2026-10-26`, the 15 stories already in sample 1 skipped), labelled by Claude with the same
+October; `NEWS_CATEGORY_SEED=2026-10-26`, the 15 stories already in sample 1 skipped), labelled by the same automated review with the same
 protocol before any classifier output was looked at, and scored once, after the rules were frozen. No rule was written
 from sample 2.
 
@@ -120,16 +120,16 @@ deals read as Business (3). These need a broader vocabulary or a different metho
 
 ### Spot-check of the labels
 
-At Mars's request the coordinating session checked the labels on 26 October: every row where the second pass disagrees
+At my request the coordinating session checked the labels on 26 October: every row where the second pass disagrees
 with the label (19 on sample 1, 59 on sample 2) and 10 random agreements per sample. It corrected two labels: "Kompany
 taken to hospital after collapsing at training" is Health (sample 1; the protocol files a public figure's health as
 Health), and "Why is Ukraine so reliant on Starlink and can Europe plug the gap?" is World (sample 2, as sample 1's
-Starlink story). Borderline rows stay as labelled. The check was done by another Claude session, so it is not
+Starlink story). Borderline rows stay as labelled. The check was done by another session of the same automated reviewer, so it is not
 independent of the labeller.
 
 ### Second-pass limits
 
-- One labeller (Claude) for both samples, spot-checked by another Claude session at Mars's request; no human check. Borderline protocol cases (a US politician's statement
+- One automated labeller for both samples, spot-checked by another session of the same reviewer at my request; no human check. Borderline protocol cases (a US politician's statement
   about a foreign country, royals, energy projects) can be read either way.
 - Club and athlete names carry no cue ("Al-Nassr survive Al-Faisaly scare", "Anderson not offered new Lancashire
   contract"); a gazetteer of clubs was not added.

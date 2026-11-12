@@ -39,6 +39,6 @@ Repeated refreshes measured 2.85–4.03 s, materially slower than first ingestio
 
 ## Remaining acceptance
 
-#104 stays open: rendered first-card timing, actual app peak memory, controlled real transport/cancellation and FoundationModels analysis costs have not been measured here. Phase E's model work is excluded. #153 overview p50/p95 and full end-to-end targets remain unmeasured. #102 still requires an independently labeled holdout; synthetic timing fixtures establish no matching precision. G is complete per Mars and is unchanged.
+#104 stays open: rendered first-card timing, actual app peak memory, controlled real transport/cancellation and FoundationModels analysis costs have not been measured here. Phase E's model work is excluded. #153 overview p50/p95 and full end-to-end targets remain unmeasured. #102 still requires an independently labeled holdout; synthetic timing fixtures establish no matching precision. G is complete by my decision and is unchanged.
 
 The optimized benchmark completed with all workload assertions. Full regression/commit-hook results and PR state are logged on the issues.

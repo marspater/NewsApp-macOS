@@ -109,7 +109,7 @@ These rules apply to v2 and later batches. A reviewer who disagrees records the 
 
 Under these rules the parliamentary housing vote and the Saturday rallies are different events, the failed execution and its medical aftermath are one event while the commissioner's resignation is another, and the Northern Bridge strike, the earlier Southern Bridge strikes and the new bridge traffic rules are three events. All 29 proposed assignments in those families follow the rules ([audit](../../../docs/audits/2026-10-03-event-boundaries-fingerprint-scope.md)); this was a second copilot pass, not independent adjudication.
 
-The public manifest contains URLs, feed metadata, proposed assignments and reasons only. Captured titles, descriptions and bodies stay in Mars's private folder, `/Users/marspater/Documents/NewsHoldout-2026-10-03/`, with directory mode 0700 and file mode 0600. Feed timestamps are captured values; they have not been independently verified on publisher pages. Proposals and singleton boundaries still need independent adjudication. Real quarterly-report and identical-headline hard negatives remain missing.
+The public manifest contains URLs, feed metadata, proposed assignments and reasons only. Captured titles, descriptions and bodies stay in my private folder, `/Users/marspater/Documents/NewsHoldout-2026-10-03/`, with directory mode 0700 and file mode 0600. Feed timestamps are captured values; they have not been independently verified on publisher pages. Proposals and singleton boundaries still need independent adjudication. Real quarterly-report and identical-headline hard negatives remain missing.
 
 Validate the manifest and prepare a fresh private review directory:
 
@@ -182,7 +182,7 @@ Every private evidence writer requires an existing output directory owned by the
 
 ## Independent diversity pair adjudication — 4 October 2026
 
-Mars submitted decisions for the 26 diversity pairs and clarified `diversity-024` as `same_event` for clustering, with possible timeline context. `publisher-diversity-v2.json` supersedes v1 by checksum, assigns `doc-0931` to `g7-reserve-release`, and removes the now-empty reversal singleton. It retains every captured input, family split and other pair label. This is a reviewer-approved exception grouping related fuel-policy decisions; the general separate-action rule remains unchanged. Original v1 bytes and the submitted CSV are preserved.
+I submitted decisions for the 26 diversity pairs and clarified `diversity-024` as `same_event` for clustering, with possible timeline context. `publisher-diversity-v2.json` supersedes v1 by checksum, assigns `doc-0931` to `g7-reserve-release`, and removes the now-empty reversal singleton. It retains every captured input, family split and other pair label. This is a reviewer-approved exception grouping related fuel-policy decisions; the general separate-action rule remains unchanged. Original v1 bytes and the submitted CSV are preserved.
 
 The private receipt records 26 accepted pair decisions (15 same-event, 11 different; 16 tune, ten holdout), original approval wording/comments and the later clarification. “Hard accepted” denotes approval strength; the two cross-topic negatives remain easy negatives. Timeline suggestions on other negative pairs do not change their `different` labels or implement a new feature.
 
@@ -190,7 +190,7 @@ The original 400 and supplemental 62 review sheets still have blank decisions. T
 
 ## Accepted original pair review and singleton correction — 4 October 2026
 
-Mars submitted the reviewed `v2-pair-review-2026-10-04/` packet. Its 400 concrete decisions match every frozen v2 pair ID, side, split, proposed label and reason: 199 same-event, 195 different and six same-document (263 tune, 137 holdout). The receipt retains the declared copilot authorship and subsequent user acceptance; this is not described as blind independent annotation. Combined with the diversity sheet, 426 of 488 sampled pair decisions are accepted. The 62 supplemental pairs remain unreviewed.
+I submitted the reviewed `v2-pair-review-2026-10-04/` packet. Its 400 concrete decisions match every frozen v2 pair ID, side, split, proposed label and reason: 199 same-event, 195 different and six same-document (263 tune, 137 holdout). The receipt retains the declared copilot authorship and subsequent user acceptance; this is not described as blind independent annotation. Combined with the diversity sheet, 426 of 488 sampled pair decisions are accepted. The 62 supplemental pairs remain unreviewed.
 
 The accepted review identifies two singleton reports of the same October 2 terror charge against Joshua Kerry, including the planned attack on Nigel Farage. Captured inputs and preserved publisher text support the same-occurrence assignment. `publisher-review-v3.json` supersedes v2 by checksum, moves `doc-0305` into `occurrence-0091`, and removes the empty `occurrence-0305`. The base now has 99 proposed occurrences; every sampled label, capture field and document split is unchanged. Validation checks the exact declared correction, including with a recomputed artifact hash. Original v2, timestamp evidence and supplement/diversity predecessor references remain immutable.
 

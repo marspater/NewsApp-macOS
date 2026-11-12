@@ -1,7 +1,7 @@
 # Story singletons — 27 October 2026
 
 Refs #581 (story layer follow-up), #574. Measures the story pass's attachment of reports alone ("singletons") to the
-story of an event, on matcher v13 (#688). Labelled by Claude; Mars delegated the spot-check of the group review to the
+story of an event, on matcher v13 (#688). Labelled by an automated review; I delegated the spot-check of the group review to the
 coordinator, who draws the sample from the review sheet independently.
 
 ## Setup
@@ -68,8 +68,8 @@ number it does not have. Merging these needs a different story signal (#627's th
 
 First run (commit 1836f73): all 24 groups were reviewed (the copy has 24, not the 100 the acceptance names): 8 joined
 by event-to-event links (two of them also carry an attached report), 16 that exist only because a report attached
-alone. Labels by Claude: 24 right, 0 wrong (0 of 8 and 0 of 16); every one of the 18 attachments right. The
-orchestrator, to whom Mars delegated the spot-check, then reviewed all 24 groups independently of these labels: 0
+alone. Automated-review labels: 24 right, 0 wrong (0 of 8 and 0 of 16); every one of the 18 attachments right. The
+orchestrator, to whom I delegated the spot-check, then reviewed all 24 groups independently of these labels: 0
 wrong. Three were borderline and accepted: the 9to5Mac iOS 27.2 bundle, a Yemeni leader's statement on the Houthis
 beside the Houthi strikes on Saudi Arabia, and a Le Pen poll beside her campaign kick-off. Sheet:
 `~/news-eval/m581-singletons-2026-10-27/story-group-review.csv` (`0600`, SHA-256 `fc0e3bad…dc4e1`).

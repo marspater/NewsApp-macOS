@@ -23,4 +23,4 @@ Synthetic regressions cover an explicit rejected minority, hard temporal/languag
 
 ## Remaining gate
 
-The 9 October historical replay is not rerun or relabelled. These controlled checks establish the veto rules, not attribution for each historical false merge and not a ≥0.97 precision claim. The model may still incorrectly answer SAME to related acts with no detected contradiction. #307 remains open for the revised matcher freeze, a fresh English sample captured after 9 October, release-precision measurement and Mars acceptance. #314 relation links remain separate from clustering.
+The 9 October historical replay is not rerun or relabelled. These controlled checks establish the veto rules, not attribution for each historical false merge and not a ≥0.97 precision claim. The model may still incorrectly answer SAME to related acts with no detected contradiction. #307 remains open for the revised matcher freeze, a fresh English sample captured after 9 October, release-precision measurement and my acceptance. #314 relation links remain separate from clustering.

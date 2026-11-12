@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Fine-tune the sentence encoder on news pairs (#628, M18) and export it like `convert_minilm.py`.
-Mars's Mac only, never CI: run it from the virtual environment built from `script/training/requirements.txt`.
+My Mac only, never CI: run it from the virtual environment built from `script/training/requirements.txt`.
 
 `train_embedding.py OUT_DIR --pairs A.csv [B.csv ...] --exclude-headlines FILE --holdout HOLDOUT.json
 --tune-corpus CORPUS.json` starts from

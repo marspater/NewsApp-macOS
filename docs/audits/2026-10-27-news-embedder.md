@@ -1,6 +1,6 @@
 # News-tuned sentence encoder (M18) — 27 October 2026
 
-Refs #628, #574 (epic M). The first candidate fails the gate. `minilm.mlmodelc` and `SentenceEmbedder.modelVersion` 2 stay. `script/training/train_embedding.py` and this record are committed, as Mars decided for a failed candidate. Receipts are in `~/news-eval/m18-2026-10-27/` (`0700`). The private English holdout was not read.
+Refs #628, #574 (epic M). The first candidate fails the gate. `minilm.mlmodelc` and `SentenceEmbedder.modelVersion` 2 stay. `script/training/train_embedding.py` and this record are committed, as I decided for a failed candidate. Receipts are in `~/news-eval/m18-2026-10-27/` (`0700`). The private English holdout was not read.
 
 ## Training
 
@@ -90,7 +90,7 @@ The setting was chosen on tune and the authored corpus only:
 
 Chosen setting: veto 0.68 and rescue 0.85. This is the highest tune recall with no false pair. At 0.66 the first false pair appears; 0.85 sits clear of the false pairs at 0.75.
 
-Library holdout: the only two reads, and the last ones on this set. Mars has since retired the 24 October holdout as read too often; later candidates are gated on a fresh, independently labelled set. The copy is `library-2026-10-27.sqlite3`, the holdout 219 pairs, `NEWS_HOLDOUT_NOW=1792854000`, pair cutoff 0.90, prefix off.
+Library holdout: the only two reads, and the last ones on this set. I have since retired the 24 October holdout as read too often; later candidates are gated on a fresh, independently labelled set. The copy is `library-2026-10-27.sqlite3`, the holdout 219 pairs, `NEWS_HOLDOUT_NOW=1792854000`, pair cutoff 0.90, prefix off.
 
 | Read | Strict event (same / related / different linked) | Strict recall | Story level (same or related / different) | Story recall |
 | --- | --- | --- | --- | --- |
@@ -106,7 +106,7 @@ Its one gain is a story-level wrong link fewer. The baseline here differs from t
 
 ## Reading
 
-- Decision (Mars, 27 October): the candidate fails on the gate in force when it was trained. It is not re-read on the fresh set, which would be gate-shopping. Version 2 stays. The trained state stays in the receipts (`run-1/embedding-state.pt`, SHA-256 `b39b304f…9d19c6`).
+- My decision (27 October): the candidate fails on the gate in force when it was trained. It is not re-read on the fresh set, which would be gate-shopping. Version 2 stays. The trained state stays in the receipts (`run-1/embedding-state.pt`, SHA-256 `b39b304f…9d19c6`).
 
 - The tuned encoder wins on tune and the corpus at its chosen setting (48 / 0 / 45 against 44 / 0 / 49 at 0.68 / 0.85), but loses on the holdout (strict 12 / 0 / 3 and story 17 / 4, against 15 / 1 / 2 and 19 / 5).
 - It pulls rule-matched cross-publisher pairs together. It also pulls up the cosine of hard negatives, so the matcher's 0.55 veto lets through false rule matches: 14 on tune. A stricter veto removes them, and that costs same-event recall.

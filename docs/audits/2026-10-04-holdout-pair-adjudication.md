@@ -2,7 +2,7 @@
 
 Refs #102, #127. Base `8ffba31` after #253/#254 merged. No production code, thresholds, app state or installation changes.
 
-Mars submitted the completed 26-row diversity sheet. Every pair ID, side, split, proposed label and reason matched the frozen v1 manifest. Twenty-five approvals accepted their proposals; the remaining partial approval was clarified directly as one event for clustering, with possible timeline context.
+I submitted the completed 26-row diversity sheet. Every pair ID, side, split, proposed label and reason matched the frozen v1 manifest. Twenty-five approvals accepted their proposals; the remaining partial approval was clarified directly as one event for clustering, with possible timeline context.
 
 The frozen v2 manifest changes only the scoped fuel-policy grouping: `diversity-024` becomes `same_event`, `doc-0931` joins `g7-reserve-release`, and the empty reversal singleton is removed. Its checksum and predecessor link are validated; the checker rejects any additional change, including with a recalculated checksum. Other assignments, input dates and splits remain unchanged. The separate-action rule still applies elsewhere.
 
@@ -16,7 +16,7 @@ Validation: submitted CSV identity/metadata checks; frozen proposal/capture hash
 
 ## Original 400-pair review accepted later on 4 October
 
-Mars submitted the reviewed original-batch packet. Its declared author is a coding copilot; the acceptance receipt records that provenance separately from the user's acceptance. All 400 IDs, sides, splits, proposals and reasons match v2, and all decisions retain their proposed labels: 199 same-event, 195 different, six same-document. With the completed diversity sheet, 426 of 488 sampled decisions are accepted (279 tune, 147 holdout). The earlier statement that 400 decisions remain blank describes the initial diversity-only receipt; the original blank sheet remains preserved, while the new submitted review provides the decisions.
+I submitted the reviewed original-batch packet. Its declared author is an automated review; the acceptance receipt records that provenance separately from my acceptance. All 400 IDs, sides, splits, proposals and reasons match v2, and all decisions retain their proposed labels: 199 same-event, 195 different, six same-document. With the completed diversity sheet, 426 of 488 sampled decisions are accepted (279 tune, 147 holdout). The earlier statement that 400 decisions remain blank describes the initial diversity-only receipt; the original blank sheet remains preserved, while the new submitted review provides the decisions.
 
 The review found a missing positive link outside its sampled edges: `doc-0091` and `doc-0305` report the same charge. The saved BBC/DW text confirms the same defendant, charge and target; native NFC/whitespace-normalized text hashes match preserved extraction evidence. A frozen base v3 assigns both to `occurrence-0091`, removes the empty singleton and retains every captured input and sampled label. Both documents remain in tune. There are 99 base occurrences after this correction. A new checksum and v2 predecessor link preserve reproducibility; the evidence validator rejects undeclared changes even with a recomputed checksum.
 

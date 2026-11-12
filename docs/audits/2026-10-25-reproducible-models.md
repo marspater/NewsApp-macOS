@@ -1,6 +1,6 @@
 # Reproducible models — 25 October 2026
 
-Refs #555, #574 (epic M). Run on Mars's Mac in the training venv (`script/training/requirements.txt`: Python 3.13.13, torch 2.14.1, transformers 5.20.2, coremltools 9.0); outputs under `~/news-eval/minilm-2026-10-25/` (`0700`), nothing of them enters the repository.
+Refs #555, #574 (epic M). Run on my Mac in the training venv (`script/training/requirements.txt`: Python 3.13.13, torch 2.14.1, transformers 5.20.2, coremltools 9.0); outputs under `~/news-eval/minilm-2026-10-25/` (`0700`), nothing of them enters the repository.
 
 ## What the repository lacked
 

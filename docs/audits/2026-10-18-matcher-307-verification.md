@@ -2,8 +2,8 @@
 
 ## Release disposition — 18 October 2026
 
-After receiving the measured result and the remaining PLAN.md items, Mars directed:
-"start working. i accept your and antigravity judgment". The delegated release
+After receiving the measured result and the remaining PLAN.md items, I directed that
+work start and accepted the judgment of both automated passes. The delegated release
 decision is to accept this implementation with its documented limitations:
 93.33% precision and 36.84% recall on the reused English holdout, one false pair,
 and no replay of the unavailable original #409 export. The 97% target remains
@@ -15,7 +15,7 @@ PR #442 merged as `624ea0848db179063e17b30c2332337831a5af06`. Its hosted arm64
 tests and build passed; Swift CodeQL was still running when this addendum was
 written. Final hosted-check evidence and issue/board closeout are recorded in
 [#439](https://github.com/marspater/NewsApp-macOS/issues/439).
-Foreground appearance/keyboard work remains deferred at Mars's request, with no
+Foreground appearance/keyboard work remains deferred at my request, with no
 visual pass claimed. #264/#268/#314 stay parked and #334 stays deferred.
 
 ## Result
@@ -36,7 +36,7 @@ independent acceptance sample. The initial recommendation was to keep #307 and
 
 ## Revision and integration
 
-Antigravity handed off `eaa4527` after #441 had already merged the earlier
+The implementation pass handed off `eaa4527` after #441 had already merged the earlier
 `2c5414b` as `6bad440`. Consequently, #441's green CI does **not** validate the
 later v6 bump and Unicode/upgrade regressions. The follow-up cherry-picks
 `eaa4527` onto current main; its production matcher is byte-identical to the
@@ -78,8 +78,8 @@ test executable then completed the full offline regression suite successfully.
 reported arm64, `codesign --verify --deep --strict` passed, and the ad-hoc bundle
 retained App Sandbox. It was neither launched nor installed.
 
-Antigravity's supplied tune result is 32 TP / 0 FP / 61 FN on 105 articles:
-100% precision (89.28–100%) and 34.41% recall (25.55–44.51%). This is owner-supplied
+The implementation pass's supplied tune result is 32 TP / 0 FP / 61 FN on 105 articles:
+100% precision (89.28–100%) and 34.41% recall (25.55–44.51%). This is implementer-supplied
 tune evidence, not a second independent replay. Its missing dedicated tune
 receipt/files are not silently represented as published artifacts.
 

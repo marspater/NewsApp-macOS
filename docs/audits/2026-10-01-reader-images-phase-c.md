@@ -2,7 +2,7 @@
 
 ## Run plan and boundaries
 
-Handle phase C as one run: trace extraction → feed parsing → storage → reader; retain inline formatting and image attribution; curate publisher media; stabilize images and adapt typography; run offline regressions, native QA and a staged build; publish one linked PR. Phases E and G are owned by other agents and remain outside this implementation. Image HTTP-cache work (#161) remains separate. Do not merge PRs or install over the user's app.
+Handle phase C as one run: trace extraction → feed parsing → storage → reader; retain inline formatting and image attribution; curate publisher media; stabilize images and adapt typography; run offline regressions, native QA and a staged build; publish one linked PR. Phases E and G are owned by other agents and remain outside this implementation. Image HTTP-cache work (#161) remains separate. Do not merge PRs or install over my app.
 
 ## Implementation
 

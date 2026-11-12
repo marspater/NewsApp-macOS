@@ -15,7 +15,7 @@
 import Foundation
 
 // Opt-in audit tooling for `--overviews-live` and the overview quality tests (#549). It left the shipping target
-// because the app reaches only `OverviewQualityAuditor.auditClaim`; Mars keeps the tooling available, so it moved
+// because the app reaches only `OverviewQualityAuditor.auditClaim`; the tooling stays available, so it moved
 // here rather than being deleted. Types and functions are unchanged.
 
 /// Serializable summary of a single claim audit result for persistence and reporting.

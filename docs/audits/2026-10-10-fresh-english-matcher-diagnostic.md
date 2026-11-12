@@ -1,13 +1,13 @@
 # Fresh English matcher diagnostic — 10 October 2026
 
-Refs #307. This is targeted diagnostic evidence with provisional copilot labels, not independent release acceptance.
+Refs #307. This is targeted diagnostic evidence with provisional automated-review labels, not independent release acceptance.
 
 ## Frozen inputs and protocol
 
 - Source `ade184a4f0cb8eb5f4636be4758a9bee878bde0a`, matcher version 3, unchanged judge instructions and production matching policies.
 - One new protected catalog capture: 39 English feeds, zero failures, 1,278 observations; 1,013 distinct URLs dated within the preceding 72 hours. No app library/settings access or scheduled capture.
 - Selected coverage families from captured headlines/leads before predictions: 88 English articles, 18 publisher families, 17 proposed occurrence groups, 638 positive pairs. Related-but-separate acts were deliberately included. Two large occurrence groups dominate the positive denominator; this is not representative random sampling.
-- Copilot labels follow the corpus README occurrence rules. Verbal reactions and pegged profiles stay with their occurrence; new attacks, decisions and meetings remain separate. Policy-license, visa/residency and multi-attack/outage boundaries require Mars confirmation. Labels/text/checksums were frozen before scoring and were not changed afterwards.
+- The automated-review labels follow the corpus README occurrence rules. Verbal reactions and pegged profiles stay with their occurrence; new attacks, decisions and meetings remain separate. Policy-license, visa/residency and multi-attack/outage boundaries require my confirmation. Labels/text/checksums were frozen before scoring and were not changed afterwards.
 - An initial export-selector preflight selected zero records and produced no article memberships or passes. A new export corrected only split metadata; the empty receipt and original export were preserved. The corrected new dataset was scored once per mode in separate processes with the same private binary. The sealed historical dataset was neither read nor replayed.
 - Full native tests passed on the frozen isolated revision before scoring. Publisher text, URLs, captured timestamps, annotation reasons and memberships remain private. Public [aggregate evidence](../benchmarks/2026-10-10-fresh-matcher-diagnostic.json) includes checksums and publisher-family denominators.
 
@@ -34,4 +34,4 @@ Remove those overrides and reuse `EventClusterer.run` defaults. A deterministic 
 
 ## Remaining gate
 
-Keep #307 open. Related acts can share enough headline/lead vocabulary to pass admission without a hard factual contradiction; hard vetoes alone do not establish occurrence precision. Narrowing requires controlled development cases and a separate fresh, frozen acceptance sample using the corrected production-budget evaluator. Mars must confirm provisional boundaries and accept the final result. No installation, production-library mutation, model tuning or release acceptance is claimed.
+Keep #307 open. Related acts can share enough headline/lead vocabulary to pass admission without a hard factual contradiction; hard vetoes alone do not establish occurrence precision. Narrowing requires controlled development cases and a separate fresh, frozen acceptance sample using the corrected production-budget evaluator. I must confirm provisional boundaries and accept the final result. No installation, production-library mutation, model tuning or release acceptance is claimed.

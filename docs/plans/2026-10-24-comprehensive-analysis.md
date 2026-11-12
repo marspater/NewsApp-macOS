@@ -1,12 +1,12 @@
 # Comprehensive analysis and improvement plan — 24 October 2026
 
-Status: plan as approved by Mars on 24 October 2026 (baseline `origin/main` `00382fe`). Slices land as separate PRs; outcomes are recorded in section "Outcomes" as they merge.
+Status: plan as I approved it on 24 October 2026 (baseline `origin/main` `00382fe`). Slices land as separate PRs; outcomes are recorded in section "Outcomes" as they merge.
 
 Baseline: `origin/main` `00382fe` (after #489). Worktree branch `mars/app-comprehensive-analysis-2b842c`. CI and Security green, `script/format.sh --check` and `script/design_lint.sh` pass locally, no open PRs, only parked #264/#268 open.
 
 ## Context
 
-Mars asked for a full analysis of the app: missing features, code that does not work, dead code, continuous improvements. Three exploration passes (dead code, correctness, gaps vs. the 21/23 October plans) produced the findings below; every item cited here was re-verified in code. Mars decided: wire up retention (not delete it); scope = bugs + dead code, small missing features, and the open finish-pass slices 4–10; keep opt-in audit tooling (TensionCalibrator, OverviewQualityAuditor), delete the other test-only production code.
+I asked for a full analysis of the app: missing features, code that does not work, dead code, continuous improvements. Three exploration passes (dead code, correctness, gaps vs. the 21/23 October plans) produced the findings below; every item cited here was re-verified in code. I decided: wire up retention (not delete it); scope = bugs + dead code, small missing features, and the open finish-pass slices 4–10; keep opt-in audit tooling (TensionCalibrator, OverviewQualityAuditor), delete the other test-only production code.
 
 Short names: FM `Sources/Coordinators/FeedManager.swift`, DB `Sources/Storage/DatabaseEngine.swift`, DBE `DatabaseEngine+Events.swift`, AS `Sources/Storage/ArticleStore.swift`, ADV `Sources/Views/ArticleDetailView.swift`, RSV `ReaderSupportViews.swift`, EOV `EventOverviewReaderView.swift`, DS `DesignSystem.swift`, CEP `Sources/Intelligence/ContentExtractionPipeline.swift`, NS `NotificationService.swift`.
 
@@ -89,7 +89,7 @@ Every slice: `./test.sh`, `script/format.sh --check`, `./build.sh` in a staging 
 - CI: add `script/format.sh --check` step to `ci.yml` test job, CircleCI `checks` job and `codemagic.yaml`.
 
 ### Slices E–K — Finish-pass slices 4–10
-Execute as written in `docs/plans/2026-10-23-finish-pass.md` (slices 4, 5, 6, 7, 8, 9, 10 in that order: 4 → 5; 6 after 4; 7 and 8 independent; 9 after 3–8; 10 last, Mars runs harnesses). Slice 2 leftover (`iframe`/`video` → `.embed` at `CEP:710`) goes into slice 4. The agent-verified open-item list above is the checklist; tick each `file:line` as it closes. Slice 9 also deletes whatever `DS` tokens slice C left because they gained callers.
+Execute as written in `docs/plans/2026-10-23-finish-pass.md` (slices 4, 5, 6, 7, 8, 9, 10 in that order: 4 → 5; 6 after 4; 7 and 8 independent; 9 after 3–8; 10 last, I run the harnesses). Slice 2 leftover (`iframe`/`video` → `.embed` at `CEP:710`) goes into slice 4. The agent-verified open-item list above is the checklist; tick each `file:line` as it closes. Slice 9 also deletes whatever `DS` tokens slice C left because they gained callers.
 
 ## Order
 A → B → C (C after A/B so deletions do not conflict with fixes in FM/DB/ADV) → D → E…K. A, B and D are independent of each other except for the shared `SettingsView`/`NewsApp` files; land them sequentially to avoid conflicts.
@@ -103,12 +103,12 @@ A → B → C (C after A/B so deletions do not conflict with fixes in FM/DB/ADV)
 - Slice B: proxy restart test over the controlled socket fixtures (`./test.sh --transport-cancellation` still passes); notification ID stability test (two launches = same ID string).
 - Slice C: `./test.sh` + `script/build_test_runner.sh` + `script/native_performance_baseline.sh --help`-level syntax check compile; grep each deleted symbol repo-wide = 0.
 - Slice D: shortcut table test (every `keyboardShortcut` in `NewsApp` appears in the window); CI configs run format check on the PR.
-- Slices E–K: per the finish-pass plan's verification list; slice 10 by Mars.
+- Slices E–K: per the finish-pass plan's verification list; slice 10 is mine.
 - Not covered: macOS 15/26 runtime, live VoiceOver (#268 parked), real sleep/wake (fix 3 is tested by calling `cancelRefresh` directly).
 
 ## Outcomes — 24 October 2026
 
-Every slice is open for review as a pull request; all were built, tested (`./test.sh` via the pre-commit hook), formatted and staged-built. Mars runs the appearance harnesses (finish-pass slice 10) once the stack lands.
+Every slice is open for review as a pull request; all were built, tested (`./test.sh` via the pre-commit hook), formatted and staged-built. I run the appearance harnesses (finish-pass slice 10) once the stack lands.
 
 | Slice | PR | Base | Notes |
 |---|---|---|---|

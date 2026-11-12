@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Export the shipped models as fixed-length functions and compress their weights (#554).
-Mars's Mac only, never CI: run it from the virtual environment built from `script/training/requirements.txt`.
+My Mac only, never CI: run it from the virtual environment built from `script/training/requirements.txt`.
 
 `compress_models.py OUT_DIR --pair-state STATE.pt [--mode fp16|int8|pal8]` writes, under OUT_DIR/MODE/:
 - `minilm.mlpackage`: the sentence encoder from the pinned Hub revision (the shipped weights), one function per

@@ -10,7 +10,7 @@ The native fingerprint review on **tuning only** found 933 observations, 91 elig
 
 ## Provisional annotation batch
 
-The separate [v2 proposal](../../Tests/Fixtures/story-corpus/publisher-review-v2.json) has 183 observations, 100 proposed occurrence IDs and 400 proposed pairs (263 tune / 137 holdout): 6 same-document, 199 same-event, 195 different. Forty occurrence IDs have several observations and sixty are singletons. Candidate retrieval used title terms, not production matcher or embedding predictions. Assignments were proposed from captured publisher headlines/descriptions by one coding copilot; they are **not independent gold adjudications**.
+The separate [v2 proposal](../../Tests/Fixtures/story-corpus/publisher-review-v2.json) has 183 observations, 100 proposed occurrence IDs and 400 proposed pairs (263 tune / 137 holdout): 6 same-document, 199 same-event, 195 different. Forty occurrence IDs have several observations and sixty are singletons. Candidate retrieval used title terms, not production matcher or embedding predictions. Assignments were proposed from captured publisher headlines/descriptions by one automated review; they are **not independent gold adjudications**.
 
 All seven languages occur in the observations, but most positives are English. The holdout contains 74 proposed same-event pairs, of which 36 come from one Spanish housing rally. Pair counts are correlated and cannot be treated as 74 independent positive events or used to claim broad >=97% performance. Further collection must improve event diversity.
 

@@ -1,6 +1,6 @@
 # Installed-library migration check — 9 October 2026
 
-The production bundle built from `main` commit `c5a8fe0ac767c6adae3c33c587688fa80e29780d` successfully migrated a read-only backup of the installed library from schema v16 to v20. This records the completed migration and runtime checks for [#305](https://github.com/marspater/NewsApp-macOS/issues/305). Live macOS notification delivery remains unverified and, at Mars’s request, is deferred to real compiled-app validation in [#334](https://github.com/marspater/NewsApp-macOS/issues/334).
+The production bundle built from `main` commit `c5a8fe0ac767c6adae3c33c587688fa80e29780d` successfully migrated a read-only backup of the installed library from schema v16 to v20. This records the completed migration and runtime checks for [#305](https://github.com/marspater/NewsApp-macOS/issues/305). Live macOS notification delivery remains unverified and, at my request, is deferred to real compiled-app validation in [#334](https://github.com/marspater/NewsApp-macOS/issues/334).
 
 ## Isolation and build
 
@@ -44,13 +44,13 @@ One newly fetched page retained a newsletter banner and signup block in its read
 
 ## Notification boundary and checks
 
-The initial native UserNotifications settings query under the isolated bundle identifier returned authorization status `notDetermined`. Mars then approved enabling notifications for the temporary bundle. The authorization request returned `UNErrorDomain`, code 1, “Notifications are not allowed for this application,” with `granted = false`.
+The initial native UserNotifications settings query under the isolated bundle identifier returned authorization status `notDetermined`. I then approved enabling notifications for the temporary bundle. The authorization request returned `UNErrorDomain`, code 1, “Notifications are not allowed for this application,” with `granted = false`.
 
 A diagnostic-only rebuild captured the existing AppDelegate authorization callback in the temporary container and confirmed the same rejection as the native helper. The diagnostic changed only result capture, not the permission request or application logic, and was not committed to the repository. No permission was granted. Live operating-system banner delivery and its timing remain unverified; production settings were preserved.
 
 `./test.sh --story-regressions` passed, including `testStoryVisibility`: the production FeedManager dispatches its notification callback after importance rating while publisher-image lookups remain blocked on an explicit gate. That is deterministic dispatch-order proof, separate from macOS delivery. The full commit-hook regressions also passed when publishing this audit.
 
-The approved LaunchServices registration refresh completed and the existing app authorization callback returned the same rejection. The notification daemon could not find or validate the temporary client identity; the underlying cause remains undiagnosed. On 9 October Mars deferred delivery validation to the real compiled app. [#334](https://github.com/marspater/NewsApp-macOS/issues/334) tracks actual notification presentation, image-lookup timing and click-through on that build. No notification permission or registration approval is pending.
+The approved LaunchServices registration refresh completed and the existing app authorization callback returned the same rejection. The notification daemon could not find or validate the temporary client identity; the underlying cause remains undiagnosed. On 9 October I deferred delivery validation to the real compiled app. [#334](https://github.com/marspater/NewsApp-macOS/issues/334) tracks actual notification presentation, image-lookup timing and click-through on that build. No notification permission or registration approval is pending.
 
 No sealed holdout replay, parked-language or VoiceOver acceptance, distribution, notarization or installation was performed. The isolated migration scope in #305 is complete and remains In review through PR #332 until merge. Notification delivery was deferred, not passed.
 

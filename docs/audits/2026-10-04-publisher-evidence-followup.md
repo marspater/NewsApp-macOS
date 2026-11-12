@@ -30,7 +30,7 @@ Real negative evidence now includes:
 
 Financial releases and weekly editions mostly fall outside the clusterer's 36-hour window. They cover real repeated language but cannot prove near-window false-merge rejection. Kharkiv, financing and action/response negatives provide separate operational cases.
 
-Only Irene Butter's death adds a fresh event-positive occurrence to holdout. Most new events hash to tune; related Ukrainian statements/strikes stay with existing families. Holdout diversity remains insufficient. Do not change family names or move documents to manufacture support. The private `supplement-review-v2.md` separates captured feed text from later publisher-page text and keeps `supplement-pairs.csv` approvals blank; these proposals remain one copilot's source review, not independent gold.
+Only Irene Butter's death adds a fresh event-positive occurrence to holdout. Most new events hash to tune; related Ukrainian statements/strikes stay with existing families. Holdout diversity remains insufficient. Do not change family names or move documents to manufacture support. The private `supplement-review-v2.md` separates captured feed text from later publisher-page text and keeps `supplement-pairs.csv` approvals blank; these proposals remain one automated source review, not independent gold.
 
 ## Full-text feeds and observed URL variants
 
@@ -48,7 +48,7 @@ Six same-origin NOS/Dawn path pairs enter the supplementary document-only sheet.
 
 #251 has now resolved the earlier gate-scope decision: it bounds false merges over distinct eligible holdout documents, retaining ≥99% precision when at least 100 candidates exist. It requires fresh captures from October 4, rather than treating inspected October 3 data as acceptance evidence. The page probes here do not change that gate, establish recall, or justify removing host, source-name, exact-time or text-kind keys from fingerprints.
 
-A fresh unscored capture with the catalog and merged `fingerprint-feeds.json` is saved privately at `/Users/marspater/Documents/NewsHoldout-2026-10-04/fingerprint-captures/capture-1791070282648.json`: 2915 items from 88 of 89 requested feeds. Capture time was `2026-10-03T23:31:22.648532Z`, which is October 4 in the user's Europe/Warsaw timezone. SHA-256: `e3f832b355ceb3e0ecb46c69d2888bbf06cf70b38c3860ade8a72c6fed99f15d`. Its holdout has not been inspected or scored. This is collection evidence only, ready for the subsequent one-time fingerprint acceptance review.
+A fresh unscored capture with the catalog and merged `fingerprint-feeds.json` is saved privately at `/Users/marspater/Documents/NewsHoldout-2026-10-04/fingerprint-captures/capture-1791070282648.json`: 2915 items from 88 of 89 requested feeds. Capture time was `2026-10-03T23:31:22.648532Z`, which is October 4 in my Europe/Warsaw timezone. SHA-256: `e3f832b355ceb3e0ecb46c69d2888bbf06cf70b38c3860ade8a72c6fed99f15d`. Its holdout has not been inspected or scored. This is collection evidence only, ready for the subsequent one-time fingerprint acceptance review.
 
 ## Validation
 

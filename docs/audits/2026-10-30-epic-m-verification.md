@@ -55,7 +55,7 @@ The story pass (#581) runs only when a clustering pass processed a report or cha
 
 ## Spot-checks of the 24 October files
 
-The 20-pair spot-checks noted as pending in `2026-10-24-pair-decision-review.md` and `2026-10-24-library-clustering-diagnosis.md` were not done. The pair review fed #688 instead (same-publisher false merges on the sample fell from 7 of 8 to 2 of 8). The 24 October holdout was retired on 27 October, before any spot-check, and the fresh set above was spot-checked by the coordinator. On 27 October Mars delegated spot-checks of Claude-labelled sets to an independent reviewer.
+The 20-pair spot-checks noted as pending in `2026-10-24-pair-decision-review.md` and `2026-10-24-library-clustering-diagnosis.md` were not done. The pair review fed #688 instead (same-publisher false merges on the sample fell from 7 of 8 to 2 of 8). The 24 October holdout was retired on 27 October, before any spot-check, and the fresh set above was spot-checked by the coordinator. On 27 October I delegated spot-checks of automatically labelled sets to an independent reviewer.
 
 ## Acceptance as measured
 

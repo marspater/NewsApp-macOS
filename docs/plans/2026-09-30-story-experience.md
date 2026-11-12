@@ -14,8 +14,8 @@ Merged follow-ups:
 
 | Work | Implementation and evidence | Remaining acceptance |
 | --- | --- | --- |
-| Event grouping (#286–#288, #404, #409) | Country aliases, casualty changes, whole-event compatibility, fragment merges and on-device judging. Explicit DIFFERENT verdicts and hard factual conflicts now veto event admission and fragment merges ([guards](../audits/2026-10-10-event-hard-conflict-guards.md)); matcher replays use the production judgement and article budgets | Below the ≥0.97 precision target. [Historical replay](../audits/2026-10-09-current-matcher-replay.md): judge-off 0.955 / 0.553 precision/recall, judge-on 0.545 / 0.947. [Fresh diagnostic](../audits/2026-10-10-fresh-english-matcher-diagnostic.md) on proposed labels: judge-off 0.799 / 0.337, judge-on 0.835 / 0.303; judge-on exceeded production budgets, so it is diagnostic only. Mars's label review, narrowing and a fresh acceptance sample remain in #307 |
-| Importance / waiting (#289, #336, #346) | 667 active publications rated; 64 waiting; zero rated-major publications hidden. Mars's three borderline rules are implemented, and a review tool for minor ratings and their stability is merged | Independent labels and stability in #309 |
+| Event grouping (#286–#288, #404, #409) | Country aliases, casualty changes, whole-event compatibility, fragment merges and on-device judging. Explicit DIFFERENT verdicts and hard factual conflicts now veto event admission and fragment merges ([guards](../audits/2026-10-10-event-hard-conflict-guards.md)); matcher replays use the production judgement and article budgets | Below the ≥0.97 precision target. [Historical replay](../audits/2026-10-09-current-matcher-replay.md): judge-off 0.955 / 0.553 precision/recall, judge-on 0.545 / 0.947. [Fresh diagnostic](../audits/2026-10-10-fresh-english-matcher-diagnostic.md) on proposed labels: judge-off 0.799 / 0.337, judge-on 0.835 / 0.303; judge-on exceeded production budgets, so it is diagnostic only. My label review, narrowing and a fresh acceptance sample remain in #307 |
+| Importance / waiting (#289, #336, #346) | 667 active publications rated; 64 waiting; zero rated-major publications hidden. My three borderline rules are implemented, and a review tool for minor ratings and their stability is merged | Independent labels and stability in #309 |
 | Publisher images (#290, #339, #340) | In-article figure fallback (#312) and remembered site defaults (schema v21, #338). On the 9 October denominator, 465 / 473 cards have a relevant image ([fallback audit](../audits/2026-10-09-card-image-figure-fallback.md)) | None. Eight single-story placeholders remain where pages offer no relevant image: five site-default-only pages and three bot challenges |
 | Plain-text overviews (#291, #345) | Five of eight live drafts accepted, 40 retained claims reviewed with zero detected critical errors; the three labelled controls fell back. The live audit now records outcomes, latency and perspective coverage | Independent accepted-draft controls, error bounds and latency in #308 |
 | Review integrity (#405) | Overview and importance reports reject labels whose reviewed inputs changed and keep the last valid report ([audit](../audits/2026-10-10-review-input-integrity.md)) | Measurement integrity only; not acceptance evidence for #308/#309 |
@@ -23,7 +23,7 @@ Merged follow-ups:
 | Related events (#403) | Read-only backend for earlier related-event candidates with bounded retrieval and direct actor, place and topic evidence ([audit](../audits/2026-10-10-related-event-backend.md)) | Reader links and a reviewed wrong-link measurement in #314 |
 | Reliability (#296/#297, #332, #342–#344) | Parser/card/clustering corrections, image-URL index, provisional overview/summary retry and schema v20 model-generation invalidation. Copied-library v16 → v20 migration, preserved state and regeneration passed (#305). The backup's orphan state row is not producible by the app, and a regression pins it (#331). The legacy cache import completes | OS notification delivery is deferred to the real compiled app in #334 |
 | Reader (#337, #408) | BBC newsletter banners and signup prose are removed (#330); responsive figure captions (The Guardian) appear once | Fixture regressions only; neither fix was rechecked on a live page in the app |
-| Design language (#347, #349, #358–#361, #363, #365–#368, #377–#379, #394–#396, #398–#400, #402, #407) | All seven phases of the [adoption plan](2026-10-09-design-language-adoption.md) are merged. The acceptance pass fixed a frozen adaptive overview color, card contrast with Increase Contrast and sidebar keyboard focus ([acceptance](../audits/2026-10-10-design-acceptance.md)) | None. Mars accepted phases 2–4 on 10 October; macOS 15/26 runtime, live OPML drops and the feed-failure view are out of scope |
+| Design language (#347, #349, #358–#361, #363, #365–#368, #377–#379, #394–#396, #398–#400, #402, #407) | All seven phases of the [adoption plan](2026-10-09-design-language-adoption.md) are merged. The acceptance pass fixed a frozen adaptive overview color, card contrast with Increase Contrast and sidebar keyboard focus ([acceptance](../audits/2026-10-10-design-acceptance.md)) | None. I accepted phases 2–4 on 10 October; macOS 15/26 runtime, live OPML drops and the feed-failure view are out of scope |
 | Tension retention (#321; #310 closed) | Waiting-story expiry preserves panel history while collection is enabled | Real-panel calibration #235 remains outside the core release |
 | PR maintenance (#299–#303/#306, #325–#327, #370–#376, #380, #382, #386–#392) | Reviewed cleanup, bounded read/save alias resolution, completion-claim regression and reused cache size keys; later automated PRs add tests, extract database and extraction helpers, batch enrichment enqueueing and keep WebKit data stores non-persistent | No new release gate |
 
@@ -33,7 +33,7 @@ Follow-up status as of this update:
 
 | Issue | Status / scope | Work |
 | --- | --- | --- |
-| #307 | In progress · P1 | Guards and production-budget replays are merged; the fresh diagnostic is below target. Mars's label review, narrowing and a fresh acceptance sample remain |
+| #307 | In progress · P1 | Guards and production-budget replays are merged; the fresh diagnostic is below target. My label review, narrowing and a fresh acceptance sample remain |
 | #308 | In progress · P1 | Independent overview claim review, error bounds and latency |
 | #309 | In progress · P2 | Rules and review tooling are merged; independent labels and stability measurements remain |
 | #313 | In progress · P2 · idea | Live perspective coverage, then the model-proposal decision |
@@ -41,19 +41,19 @@ Follow-up status as of this update:
 | #334 | Backlog · P1 · deferred | Actual notification delivery and timing in the real compiled app |
 | #350 | Done | Design language: all seven phases (#351–#357) are Done |
 | #305, #311, #312, #315, #330, #331, #338 | Done | #305 by #332; #311 by #328; #312 by #339 and #340; #315 by #329; #330 by #337; #331 by #342; #338 by #340 |
-| #264/#268 | Parked | Non-English event matching and spoken VoiceOver; resume only at Mars's request |
+| #264/#268 | Parked | Non-English event matching and spoken VoiceOver; resume only when I reopen them |
 | #99/#235/#244 | Optional / outside core release | Tension experiment/calibration and source discovery |
 
 Dated progress entries are in [#90](https://github.com/marspater/NewsApp-macOS/issues/90) and, for the design language, [#350](https://github.com/marspater/NewsApp-macOS/issues/350).
 
 ## Historical scope decision — 5 October 2026
 
-Рішення Mars: перший реліз — **лише англійською**.
+Моє рішення: перший реліз — **лише англійською**.
 
 - Каталог пропонує тільки англомовні канали (`FeedCatalog.supportedLanguages`). Канали українською, німецькою, французькою, італійською, нідерландською й польською лишаються в коді як відкладені, а попередні підписки на них знімаються під час запуску (#269). Причина: macOS не має моделі частин мови для цих мов, тож їхні матеріали не утворюють подій; словниковий fallback не пройшов перевірку точності на живих даних (#264, відкладено).
 - Живу перевірку VoiceOver (мовлення, ротор, рівні заголовків) відкладено (#268); #155 закрито. Нативна доступність у коді лишається.
-- Задачі з міткою `parked` не входять у реліз; братися за них лише після рішення Mars.
-- Holdout подій виміряно один раз: точність 0.958 (23/24) проти цілі ≥97%, повнота 0.291; Mars прийняв результат 5 жовтня 2026 — у #102 ([аудит](../audits/2026-10-05-event-corpus-holdout.md)). Embeddings не впроваджено (#127).
+- Задачі з міткою `parked` не входять у реліз; братися за них лише після мого рішення.
+- Holdout подій виміряно один раз: точність 0.958 (23/24) проти цілі ≥97%, повнота 0.291; я прийняв результат 5 жовтня 2026 — у #102 ([аудит](../audits/2026-10-05-event-corpus-holdout.md)). Embeddings не впроваджено (#127).
 
 ## Historical release status — 5 October 2026
 
@@ -66,7 +66,7 @@ Dated progress entries are in [#90](https://github.com/marspater/NewsApp-macOS/i
 | Final verification/program #98/#90 | In review with final evidence consolidation | Merge the final evidence PR |
 | Optional #99/#235 and #244 | Backlog, outside core release | No new work in this completion queue |
 
-#102's event holdout is accepted by Mars (23/24, recall 0.291); it was not replayed and the matcher is unchanged. PR #272 is merged at `7ffc3e3`, limiting capture/review to the English-only policy while preserving historical files. Count-only readiness established 841 distinct eligible held-out English documents without comparing pairs, reading labels or writing review files. The final fingerprint acceptance then ran once: zero different-URL matches, undefined precision, Wilson 95% false-merge upper bound **0.455%**, and `releaseGatePassed=true`. [Final holdout and core evidence reconciliation](../audits/2026-10-05-core-release-acceptance.md). The core phases are ready to close when this final evidence PR merges. Non-English matching #264 and live VoiceOver #268 remain parked; optional #99/#235/#244 remain outside the release. Existing capture scheduling was not changed or duplicated; further samples are not required for this gate.
+I accepted #102's event holdout (23/24, recall 0.291); it was not replayed and the matcher is unchanged. PR #272 is merged at `7ffc3e3`, limiting capture/review to the English-only policy while preserving historical files. Count-only readiness established 841 distinct eligible held-out English documents without comparing pairs, reading labels or writing review files. The final fingerprint acceptance then ran once: zero different-URL matches, undefined precision, Wilson 95% false-merge upper bound **0.455%**, and `releaseGatePassed=true`. [Final holdout and core evidence reconciliation](../audits/2026-10-05-core-release-acceptance.md). The core phases are ready to close when this final evidence PR merges. Non-English matching #264 and live VoiceOver #268 remain parked; optional #99/#235/#244 remain outside the release. Existing capture scheduling was not changed or duplicated; further samples are not required for this gate.
 
 The earlier progress table below is a dated snapshot, superseded by this reconciliation.
 

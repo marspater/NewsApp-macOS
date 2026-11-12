@@ -13,11 +13,11 @@ All four important records confirmed by the supplied report have saved `waiting:
 
 Two important labels concern military-site reports with a physical breach or criminal-damage allegation, going beyond simple trespass. They describe the same development. The other two concern national manufacturing regulation and multi-day public protests with many reported arrests. Individual records are therefore not independent events; the nominal row-level interval is descriptive, not general release acceptance. Exact titles, summaries, IDs and rationales stay in a private adjudication sheet.
 
-The review follows Mars's 9 October decisions on media-business changes, military incidents and staple prices. The earlier regional staple-price case remains minor; a quoted broader cost claim is flagged for scope adjudication. Generic feature/live-blog format does not defeat a specific reported security-consequence exception. The adjudication report supplied by Mars confirms the four important judgments and four borderline minor cases. This does not automatically change stored ratings or grant fresh-window acceptance.
+The review follows my 9 October decisions on media-business changes, military incidents and staple prices. The earlier regional staple-price case remains minor; a quoted broader cost claim is flagged for scope adjudication. Generic feature/live-blog format does not defeat a specific reported security-consequence exception. The adjudication report I supplied confirms the four important judgments and four borderline minor cases. This does not automatically change stored ratings or grant fresh-window acceptance.
 
 ## Supplied adjudication — 10 October 2026
 
-The report supplied by Mars explicitly confirms all eight priority cases: four important and four minor. Its summary retains the overall 4 important / 66 minor result. The remaining 62 minor records do not have individual decisions in the report; those retain Agent 1's original labels rather than being presented as newly reviewed by Mars. Abbreviated story identifiers in the report resolve uniquely to the private priority sheet.
+The report I supplied explicitly confirms all eight priority cases: four important and four minor. Its summary retains the overall 4 important / 66 minor result. The remaining 62 minor records do not have individual decisions in the report; those retain Agent 1's original labels rather than being presented as newly reviewed by me. Abbreviated story identifiers in the report resolve uniquely to the private priority sheet.
 
 The report's referenced CSV exports were not supplied. Agent 1 reconstructed a separate private sheet, recorded the distinction between individual report decisions and retained labels, and reran the existing field-binding validator and aggregate reporter. Original source fields and reviewer files remain unchanged. Rates are unchanged. Fresh-window eligibility and the model-update retention policy remain open; no rating behavior is changed.
 
@@ -25,7 +25,7 @@ The report's referenced CSV exports were not supplied. Agent 1 reconstructed a s
 
 All 70 selected IDs, titles and summaries match the saved first-rating trace, which records them as minor. The packet also contains 70 minor re-rate outputs: agreement **70/70 (100%)**, Wilson 95% **94.80–100%**, no missing answer or changed level. This reanalyses saved values; no new on-device call is run and no execution receipt or producer commit is embedded.
 
-The current harness samples a repeat response from the same model, whereas production rating is greedy. A capture without its producer commit does not establish which sampling/version produced these saved outputs. Same-model agreement does not demonstrate correctness or behavior across a macOS model update. Mars's keep-versus-re-rate policy decision remains open.
+The current harness samples a repeat response from the same model, whereas production rating is greedy. A capture without its producer commit does not establish which sampling/version produced these saved outputs. Same-model agreement does not demonstrate correctness or behavior across a macOS model update. My keep-versus-re-rate policy decision remains open.
 
 ## Scope and verification limits
 
