@@ -26,7 +26,8 @@ import Foundation
 /// when it was reported. Sentences from articles without a known publication date are left out.
 ///
 /// This builder is the only source of an overview's timeline (#1241). Items carry `dateKind == .stated` and no
-/// `eventDate`: a resolved date may hold a placed year, so it orders items here and never reaches the reader.
+/// `eventDate`: a resolved date may hold a placed year, so it goes only to `orderingDateMayHoldInferredYear`, which
+/// orders and filters (Briefing) and is never displayed.
 enum OverviewTimelineBuilder {
     struct Timeline: Sendable, Equatable {
         var items: [OverviewTimelineItem] = []
@@ -180,7 +181,8 @@ enum OverviewTimelineBuilder {
                     dateKind: .stated,
                     summary: entry.quote,
                     citationIDs: citationIDs,
-                    isFuturePlan: entry.isPlan
+                    isFuturePlan: entry.isPlan,
+                    orderingDateMayHoldInferredYear: entry.resolved
                 ))
         }
         return timeline

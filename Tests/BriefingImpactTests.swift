@@ -36,6 +36,7 @@ enum BriefingImpactTests {
         industryGrouping()
         driversCoverage()
         timelineOrdering()
+        timelineBuilderPartialDates()
         await dynamicIndicatorsAndOverviewQuality()
         await comprehensiveCoverageVerification()
         print("Finished \(checks) Briefing strategic impact checks with \(failures) failures.")
@@ -182,6 +183,39 @@ enum BriefingImpactTests {
             rows.map(\.coverageText) == ["well covered", "well covered", "thin coverage", "one report"],
             "coverage apart")
         check(BriefingDriversData.make([]) == nil, "no classified events is nil")
+    }
+
+    /// #1241: builder items carry no event date; their ordering date places them in the story thread, and the row
+    /// shows the stated text, so a date stated without a year is shown without one.
+    static func timelineBuilderPartialDates() {
+        let article = FeedArticle(
+            storedID: "brief-1241", title: "Port strike", link: "https://example.com/brief-1241", guid: "brief-1241",
+            description: "", pubDate: now - 3_600, source: "Wire")
+        let sentences = [
+            "The ports reopened on 28 October.",
+            "Contract talks collapsed on 1 October 2026.",
+            "The strike began on 26 October.",
+        ]
+        let passages = sentences.enumerated().map {
+            EvidencePassage(id: "brief-p\($0.offset)", articleID: article.id, text: $0.element, ordinal: $0.offset)
+        }
+        let facts = passages.map {
+            PassageAnchoredFact(
+                id: "f-\($0.id)", statement: $0.text, passageID: $0.id, quote: $0.text, articleID: article.id)
+        }
+        let timeline = OverviewTimelineBuilder.build(
+            facts: facts, passages: passages, articles: [article], locale: Locale(identifier: "en_US")
+        ).items
+        check(timeline.allSatisfy { $0.eventDate == nil }, "builder items carry no event date")
+        let items = BriefingTimelineData.items(timeline, now: now)
+        check(
+            items?.map(\.summary) == [sentences[1], sentences[2], sentences[0]],
+            "builder items, partial dates included, appear in date order")
+        let partial = items?.first { $0.summary == sentences[2] }
+        check(
+            partial?.dayText == "Oct 26",
+            "a date stated without a year is shown without one: \(partial?.dayText ?? "-")")
+        check(items?.first?.dayText.contains("2026") == true, "a stated year is shown")
     }
 
     static func timelineOrdering() {

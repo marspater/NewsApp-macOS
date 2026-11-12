@@ -165,8 +165,8 @@ public enum ReaderExperienceMode: String, CaseIterable, Sendable, Identifiable {
 /// An entry in an event overview's chronological timeline.
 ///
 /// `dateKind` says what `dateText` is, so the reader never infers it from which `Date` happens to be set (#1241).
-/// `eventDate` and `publicationDate` are optional full timestamps for ordering; a partial stated date (no year)
-/// stays text only and never gets an invented year.
+/// `eventDate` and `publicationDate` are optional full timestamps; a partial stated date (no year) is shown as text
+/// only and never gets an invented year. Its place in time for ordering is `orderingDateMayHoldInferredYear`.
 public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     /// Where `dateText` comes from.
     public enum DateKind: String, Codable, Hashable, Sendable {
@@ -184,6 +184,10 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     public let isFuturePlan: Bool
     public let eventDate: Date?
     public let publicationDate: Date?
+    /// Ordering only: where a stated date falls in time, for filtering and sorting (Briefing). A date the source
+    /// states without a year holds an inferred year here, so this value must never be formatted for display;
+    /// `dateText` is what is shown.
+    public let orderingDateMayHoldInferredYear: Date?
 
     public init(
         id: String = UUID().uuidString,
@@ -193,7 +197,8 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         citationIDs: [String] = [],
         isFuturePlan: Bool = false,
         eventDate: Date? = nil,
-        publicationDate: Date? = nil
+        publicationDate: Date? = nil,
+        orderingDateMayHoldInferredYear: Date? = nil
     ) {
         self.id = id
         self.dateText = dateText
@@ -203,10 +208,12 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         self.isFuturePlan = isFuturePlan
         self.eventDate = eventDate
         self.publicationDate = publicationDate
+        self.orderingDateMayHoldInferredYear = orderingDateMayHoldInferredYear
     }
 
     enum CodingKeys: String, CodingKey {
         case id, dateText, dateKind, summary, citationIDs, isFuturePlan, eventDate, publicationDate
+        case orderingDateMayHoldInferredYear
     }
 
     public init(from decoder: Decoder) throws {
@@ -221,6 +228,8 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         isFuturePlan = try container.decode(Bool.self, forKey: .isFuturePlan)
         eventDate = try container.decodeIfPresent(Date.self, forKey: .eventDate)
         publicationDate = try container.decodeIfPresent(Date.self, forKey: .publicationDate)
+        orderingDateMayHoldInferredYear = try container.decodeIfPresent(
+            Date.self, forKey: .orderingDateMayHoldInferredYear)
     }
 }
 

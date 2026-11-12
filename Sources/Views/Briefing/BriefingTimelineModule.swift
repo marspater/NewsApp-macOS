@@ -49,17 +49,23 @@ struct BriefingTimelineData: Equatable, Sendable {
     static func merged(_ timelines: [[OverviewTimelineItem]], now: Date) -> [OverviewTimelineItem] {
         var seen = Set<String>()
         return timelines.joined().filter { item in
-            guard !item.isFuturePlan, let date = item.eventDate ?? item.publicationDate, date <= now else {
+            guard !item.isFuturePlan, let date = orderingDate(of: item), date <= now else {
                 return false
             }
             return seen.insert(item.summary).inserted
         }
     }
 
+    /// Where an item falls in time, for filtering and order only; the row shows the item's `dateText`, so an inferred
+    /// year in the builder's ordering date never appears (#1241).
+    static func orderingDate(of item: OverviewTimelineItem) -> Date? {
+        item.eventDate ?? item.orderingDateMayHoldInferredYear ?? item.publicationDate
+    }
+
     /// Past, dated items in date order, the latest five; nil with fewer than two.
     static func items(_ timeline: [OverviewTimelineItem], now: Date) -> [Item]? {
         let dated = timeline.compactMap { item -> Item? in
-            guard !item.isFuturePlan, let date = item.eventDate ?? item.publicationDate, date <= now else { return nil }
+            guard !item.isFuturePlan, let date = orderingDate(of: item), date <= now else { return nil }
             let fact = PassageAnchoredFact(
                 id: item.id, statement: item.summary, passageID: item.id, quote: item.summary, articleID: "")
             return Item(
