@@ -2,6 +2,10 @@
 
 ## Changes
 
+## Angelia sub-systems
+
+<!-- Each domain of docs/ANGELIA.md whose code this PR changes, with its job on first use ("Clio · sourced overviews"), then the domains it affects without changing their code. Write "None" for a PR outside Angelia. -->
+
 ## Testing
 
 <!-- Report each check separately and only as run. A build is not evidence of installation, launch or live network behaviour. -->
