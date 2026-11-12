@@ -14,10 +14,6 @@ on:
   pull_request:
     types: [ opened, synchronize, reopened, ready_for_review, closed ]
     branches: [ main ]
-    paths-ignore:
-      - 'docs/**'
-      - '**.md'
-      - 'LICENSE'
   workflow_dispatch:
 
 concurrency:
@@ -28,11 +24,40 @@ permissions:
   contents: read
 
 jobs:
+  # The two macOS jobs are required checks on main, so the workflow starts for every pull request and this job
+  # decides whether they have anything to test. A skipped job satisfies a required check; a workflow that never
+  # starts leaves it waiting. Same rule as the push filter above: Markdown, docs/ and LICENSE change nothing.
+  changes:
+    name: Changed paths
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Checkout Code
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Detect documentation-only changes
+        id: filter
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          code=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            changed=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
+            if [ -z "$(echo "$changed" | grep -vE '(\.md$|^docs/|^LICENSE$)')" ]; then code=false; fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   # macOS 26 runtime coverage (#663): CircleCI and Codemagic already run this suite on macOS 27 with Xcode 27.
   # The runner has no Xcode 27, so code built only with the macOS 27 SDK is left out here.
   test-arm64:
     name: Test (macOS 26, Apple Silicon)
-    if: github.event.action != 'closed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
@@ -126,7 +151,8 @@ jobs:
 
   build-arm64:
     name: Build Verification (Apple Silicon)
-    if: github.event.action != 'closed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: xcode-27
     timeout-minutes: 20
     steps:

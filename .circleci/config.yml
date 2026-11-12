@@ -1,5 +1,33 @@
 version: 2.1
 
+commands:
+  # Stops a macOS job early when the change cannot alter the app or its tests: documentation, changelog fragments,
+  # GitHub and Codemagic configuration, review-bot and linter configuration. Anything else runs, so an unknown
+  # path never skips a test. `.circleci/` is not on the list: a change to this pipeline must exercise it.
+  halt-unless-app-changed:
+    steps:
+      - run:
+          name: "Skip changes that cannot affect the app"
+          command: |
+            git fetch -q origin main || true
+            base=$(git merge-base HEAD FETCH_HEAD 2>/dev/null || true)
+            if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then base=HEAD~1; fi
+            unaffecting='(\.md$|^docs/|^LICENSE$|^NOTICE$|^changelog/|^\.github/|^codemagic\.yaml$|^\.codacy|^\.coderabbit\.yaml$|^\.sonarcloud\.properties$|^\.claude/|^\.gitignore$)'
+            if changed=$(git diff --name-only "$base" HEAD) && [ -z "$(echo "$changed" | grep -vE "$unaffecting")" ]; then
+              echo "No app, test or pipeline file changed since $base; skipping."
+              circleci-agent step halt
+            fi
+  prepare-macos:
+    steps:
+      - run:
+          name: "Ensure permissions"
+          command: chmod +x test.sh build.sh build_release.sh script/build_test_runner.sh script/ci_testsuite.sh
+      # Same paths and key scheme as the GitHub Actions cache. The release marker job (deploy-marker) builds nothing.
+      - restore_cache:
+          keys:
+            - swiftpm-macos-xcode27-{{ checksum "Package.resolved" }}
+            - swiftpm-macos-xcode27-
+
 jobs:
   # Toolchain-free checks on a cheap Docker executor, so a failure here never starts a macOS machine.
   checks:
@@ -22,60 +50,63 @@ jobs:
       xcode: "27.0"
     steps:
       - checkout
-      - run:
-          name: "Skip documentation-only changes"
-          command: |
-            # Same rule as the pre-commit hook and the GitHub paths-ignore: Markdown anywhere or anything under docs/.
-            git fetch -q origin main || true
-            base=$(git merge-base HEAD FETCH_HEAD 2>/dev/null || true)
-            if [ -z "$base" ] || [ "$base" = "$(git rev-parse HEAD)" ]; then base=HEAD~1; fi
-            if changed=$(git diff --name-only "$base" HEAD) && [ -z "$(echo "$changed" | grep -vE '(\.md$|^docs/)')" ]; then
-              echo "Documentation-only change since $base; skipping macOS tests."
-              circleci-agent step halt
-            fi
-      - run:
-          name: "Ensure permissions"
-          command: chmod +x test.sh build.sh build_release.sh script/build_test_runner.sh script/ci_testsuite.sh
-      # Same paths and key scheme as the GitHub Actions cache. The release marker job (deploy-marker) builds nothing.
-      - restore_cache:
-          keys:
-            - swiftpm-macos-xcode27-{{ checksum "Package.resolved" }}
-            - swiftpm-macos-xcode27-
+      - halt-unless-app-changed
+      - prepare-macos
       - run:
           name: "Run unit tests and regressions via Smarter Testing"
-          command: circleci testsuite run "unit tests"
-      # Native Swift Testing target (#1070), as on GitHub Actions; it holds the publisher-excerpt checks (#577).
-      - run:
-          name: "Run native tests"
-          command: |
-            set -o pipefail
-            xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-              -derivedDataPath build/DerivedData -testPlan Release \
-              -resultBundlePath build/ci/NewsTests.xcresult -quiet
-      - store_artifacts:
-          path: build/ci/NewsTests.xcresult
-          destination: native-tests-xcresult
-      # NewsUITests (#1070), as on GitHub Actions.
-      - run:
-          name: "Run UI tests"
-          command: |
-            set -o pipefail
-            xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-              -derivedDataPath build/DerivedData -testPlan UITests -only-testing:NewsUITests \
-              -resultBundlePath build/ci/NewsUITests.xcresult -quiet
-      - store_artifacts:
-          path: build/ci/NewsUITests.xcresult
-          destination: ui-tests-xcresult
-          when: always
-      - run:
-          name: "Verify Swift Package Manager build"
-          command: swift build --force-resolved-versions --target News
+          # Impact analysis runs in its own job on main (impact-analysis), off this job's path.
+          command: circleci testsuite run "unit tests" --analyze-tests=none
+      # Pull requests stop here: GitHub Actions runs the native tests, the UI tests and the package build on every
+      # pull request, and its two jobs are required checks. Main still runs them here on macOS 27 with Xcode 27.
+      - when:
+          condition:
+            equal: [ main, << pipeline.git.branch >> ]
+          steps:
+            # Native Swift Testing target (#1070), as on GitHub Actions; it holds the publisher-excerpt checks (#577).
+            - run:
+                name: "Run native tests"
+                command: |
+                  set -o pipefail
+                  xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+                    -derivedDataPath build/DerivedData -testPlan Release \
+                    -resultBundlePath build/ci/NewsTests.xcresult -quiet
+            - store_artifacts:
+                path: build/ci/NewsTests.xcresult
+                destination: native-tests-xcresult
+            # NewsUITests (#1070), as on GitHub Actions.
+            - run:
+                name: "Run UI tests"
+                command: |
+                  set -o pipefail
+                  xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+                    -derivedDataPath build/DerivedData -testPlan UITests -only-testing:NewsUITests \
+                    -resultBundlePath build/ci/NewsUITests.xcresult -quiet
+            - store_artifacts:
+                path: build/ci/NewsUITests.xcresult
+                destination: ui-tests-xcresult
+                when: always
+            - run:
+                name: "Verify Swift Package Manager build"
+                command: swift build --force-resolved-versions --target News
       - save_cache:
           key: swiftpm-macos-xcode27-{{ checksum "Package.resolved" }}
           paths:
             - .build
             - build/DerivedData/SourcePackages
             - ~/Library/Caches/org.swift.swiftpm
+
+  # Refreshes Smarter Testing's impact data from coverage. It compiles the runner with coverage and reruns the
+  # impacted atoms, so it runs beside test-macos on main and nothing waits for it.
+  impact-analysis:
+    macos:
+      xcode: "27.0"
+    steps:
+      - checkout
+      - halt-unless-app-changed
+      - prepare-macos
+      - run:
+          name: "Analyze test impact"
+          command: circleci testsuite run "unit tests" --run-tests=none --analyze-tests=impacted
 
   # Records a deployment of main in CircleCI's release tracking once test-macos passed. It builds nothing: the
   # arm64 verification build already runs on Codemagic and in GitHub's build job (audit item A5, 6 November 2026).
@@ -108,6 +139,12 @@ workflows:
       - test-macos:
           requires:
             - checks
+      - impact-analysis:
+          requires:
+            - checks
+          filters:
+            branches:
+              only: main
       - deploy-marker:
           requires:
             - test-macos
