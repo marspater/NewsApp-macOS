@@ -62,7 +62,7 @@ TEST_RUNNER_NEWS_ENTITY_PERF=1 xcodebuild test -project News.xcodeproj -scheme N
 NEWS_NATIVE_BODY_COUNTS=1 NEWS_NATIVE_HARNESS=Tests/Harness/ListInvalidationBaseline.swift script/native_performance_baseline.sh DIR # Offscreen (no window): store publications, view body evaluations and main-thread time for an enrichment burst and a 29-feed refresh with Today and with a story open, plus scrolled-frame time (#778); NEWS_INVALIDATION_GRID=1 for the grid
 make run                             # Build and launch "News Dev.app" as com.marspater.news.dev: its own container, library and settings; the real library is never opened (#749)
 ./script/build_and_run.sh --real-library # Build and launch with the installed app's id: opens and migrates the real library, closing any running News first
-./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver
+./script/run_isolated.sh [OPTIONS]   # Launch isolated app with simulated Increase Contrast, Reduce Motion, VoiceOver; --bundle-id com.marspater.news.<team> and --name-suffix "<Team>" give a team its own container and a recognisable app name
 ./script/launch_baseline.sh       # Production bundle under a separate identifier: launch to first card and memory, seeded library
 ./test.sh --performance-baseline  # Opt-in optimized synthetic core-service timings
 ./test.sh --search-memory         # Opt-in: process footprint over 500 searches of a 5,000-story library through the embedder, pages and counts; fails above 6 MiB growth (#708; NEWS_SEARCH_MEMORY_BLOCKS, NEWS_SEARCH_MEMORY_LIMIT_MB)
