@@ -19,7 +19,7 @@ The check ran in the shadow harness, not in a window. The app takes the clock fr
 
 Inputs as in [the pool audit](2026-11-12-today-evaluated-pool.md): the copy of 30 October, my 28 feeds, `eddd2ae`. Labels:
 
-- **Reviewed set:** 50 events, labelled by the first reviewer on 10 November. I ruled on 12 of them on 11 November (4 changes). 48 are candidates under my subscriptions: 10 real updates, 8 repetitions, 1 borderline, 29 initial reports.
+- **Reviewed set:** 50 events, labelled by the first reviewer on 10 November. I ruled on 12 of them on 11 November (4 changes). 48 are candidates under my subscriptions: 10 real updates, 7 repetitions, 1 borderline, 30 initial reports.
 - **The 14 disputed events:** those that clear the bar in some variant and that I have not ruled on. The first reviewer had labelled 7 (5 repetition, 2 initial report); 7 had no label. A second reviewer labelled all 14 on 12 November, blind: it saw each event's reports with their ages and headlines, and neither the first labels nor which variant shows what.
 
 ## Result on the 72-hour pool
