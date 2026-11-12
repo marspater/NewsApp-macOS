@@ -1364,6 +1364,69 @@ extension NewsTests {
             TodayRestoreOutcome.decide(sameArrangement: false, isTouched: false, awaitsNewDay: true), .held,
             "No swap while another day's page is on its way")
 
+        // The held path (#937): the reader touched the restored page before the fresh edition was ready.
+        let restoredPage = try restore(["a", "b", "c", "d", "e"]).get()
+        let freshPlan = TodayEditionPlan(
+            lanes: [
+                TodayLaneResult(lane: .theLead, qualifies: true, entries: [story("e", .theLead)]),
+                TodayLaneResult(
+                    lane: .theLatest, qualifies: true,
+                    entries: ["a", "b", "c", "d"].map { story($0, .theLatest) }),
+            ])
+        let freshBehind = TodayEdition.make(entries: entries(["a", "b", "c", "d", "e"]), plan: freshPlan)
+        assertFalse(
+            TodayEdition.keepsLanes(of: restoredPage, isHolding: true, generation: 0),
+            "A restored edition is never kept: the fresh one behind it is laid out from the assignment")
+        assertEqual(
+            TodayRestoreOutcome.decide(
+                sameArrangement: freshBehind.hasSameArrangement(as: restoredPage), isTouched: true,
+                awaitsNewDay: false), .held, "A touched page holds its restored cards")
+        let heldPage = restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e"]), fresh: freshBehind)
+        assertTrue(!heldPage.isRestored && shape(heldPage) == shape(restoredPage), "The cards stay as they were")
+        assertEqual(heldPage.metadata["a"]?.imageURL, photo, "A held Lead slide keeps the photo it showed")
+        var leftFeed = freshBehind
+        leftFeed.excludedIDs = ["d"]
+        assertEqual(
+            shape(restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e", "page2"]), fresh: leftFeed)),
+            ["The Lead: a,b", "The Deep Read: c", "The Latest: e,page2"],
+            "Held, a story of a feed left since leaves Today and a further page joins The Latest")
+        let page2Photo = URL(string: "https://images.example/page2.jpg")!
+        var page2Details = TodayCardDetails()
+        page2Details.eventImages = ["page2": page2Photo]
+        let freshWithPage2 = TodayEdition.make(
+            entries: entries(["a", "b", "c", "d", "e", "page2"]), plan: freshPlan, details: page2Details)
+        assertEqual(
+            restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e", "page2"]), fresh: freshWithPage2)
+                .metadata["page2"]?.imageURL, page2Photo,
+            "A story the list gained takes its event photo from the fresh edition")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: false, awaitsNewDay: true, isApplied: true),
+            .swapped, "The new day's page, which only replaces an untouched list, takes the page")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: true, awaitsNewDay: false, isApplied: true),
+            .swapped, "An update the reader applied over the restored edition takes the page, touched or not")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: true, isTouched: false, awaitsNewDay: false, isApplied: true),
+            .swapped, "Applied, the fresh edition keeps its new generation instead of confirming the old one")
+        assertTrue(
+            TodayEdition.keepsLanes(of: heldPage, isHolding: true, generation: 0),
+            "Later store revisions keep the held cards in their lanes")
+        let afterRevision = TodayEdition.make(
+            entries: entries(["a", "b", "c", "d", "e", "late"]), plan: freshPlan, keeping: heldPage)
+        assertEqual(
+            shape(afterRevision), ["The Lead: a,b", "Your Beat: d", "The Deep Read: c", "The Latest: e,late"],
+            "Until Show Updates nothing moves; a story the list gained joins The Latest")
+        assertFalse(
+            TodayEdition.keepsLanes(of: heldPage, isHolding: true, generation: 1),
+            "Show Updates starts a new generation, so the page is laid out afresh")
+        assertTrue(
+            TodayEdition.make(entries: entries(["a", "b", "c", "d", "e"]), plan: freshPlan, generation: 1)
+                .hasSameArrangement(as: freshBehind), "Show Updates shows the fresh edition")
+        assertFalse(
+            TodayEdition.keepsLanes(of: heldPage, isHolding: false, generation: 0),
+            "A refresh the reader asked for lays the page out afresh too")
+        assertFalse(TodayEdition.keepsLanes(of: nil, isHolding: true, generation: 0), "A first edition has none")
+
         // The side file: nothing stored reads as nothing, a stored edition comes back, nil removes it.
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()

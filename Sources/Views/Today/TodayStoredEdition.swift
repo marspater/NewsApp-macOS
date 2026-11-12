@@ -167,6 +167,35 @@ struct TodayStoredEdition: Codable, Equatable, Sendable {
 }
 
 extension TodayEdition {
+    /// Whether the next layout keeps the lanes of the edition on screen (`make(…keeping:)`): while the list is held,
+    /// for the generation it was built for. A restored edition is never kept; an applied update (a new generation)
+    /// lays the page out afresh.
+    static func keepsLanes(of previous: TodayEdition?, isHolding: Bool, generation: Int) -> Bool {
+        guard let previous, !previous.isRestored else { return false }
+        return isHolding && previous.generation == generation
+    }
+
+    /// A restored edition the reader has started using, as an ordinary held edition for the stories listed now: its
+    /// cards stay in their lanes with the photos and accounts they showed, a story that left the list leaves its
+    /// lane, a story the list gained joins The Latest, and stories of feeds the reader has left (`fresh`'s
+    /// exclusions) leave Today. The fresh edition waits behind the updates button.
+    func heldBehindUpdates(for entries: [FeedEntry], fresh: TodayEdition) -> TodayEdition {
+        // The held cards keep what they showed; a story the list gained takes its card values and event photo from
+        // the fresh edition, which assigned it.
+        var details = TodayCardDetails()
+        details.eventImages = fresh.metadata.compactMapValues(\.imageURL).merging(
+            metadata.compactMapValues(\.imageURL)
+        ) { _, held in held }
+        details.differingAccounts = metadata.compactMapValues(\.differingAccount)
+        details.unsubscribedIDs = fresh.excludedIDs
+        let freshPlan = TodayEditionPlan(
+            lanes: fresh.lanes.map { TodayLaneResult(lane: $0.lane, qualifies: true, entries: $0.stories) })
+        var held = TodayEdition.make(
+            entries: entries, plan: freshPlan, details: details, keeping: self, generation: generation)
+        held.analysisGeneration = analysisGeneration
+        return held
+    }
+
     /// The same stories in the same lanes and order: a fresh edition that only confirms the one on screen.
     func hasSameArrangement(as other: TodayEdition) -> Bool {
         lanes.map(\.lane) == other.lanes.map(\.lane)
@@ -183,7 +212,15 @@ enum TodayRestoreOutcome: String, Equatable {
     /// It differs and the page is in use, or another day's page is on its way: it waits behind the updates button.
     case held
 
-    static func decide(sameArrangement: Bool, isTouched: Bool, awaitsNewDay: Bool) -> TodayRestoreOutcome {
+    /// `isApplied`: the fresh edition belongs to a newer list generation than the restored one, so the list was laid
+    /// out afresh while the restored edition was on screen. On a touched page only the reader does that (Show
+    /// Updates, a refresh they asked for, closing a story after a subscription's first refresh, an event
+    /// correction); the new day's page does it only on an untouched page. Either way the fresh edition takes the
+    /// page, touched or not, with its own generation.
+    static func decide(sameArrangement: Bool, isTouched: Bool, awaitsNewDay: Bool, isApplied: Bool = false)
+        -> TodayRestoreOutcome
+    {
+        if isApplied { return .swapped }
         if sameArrangement { return .confirmed }
         return isTouched || awaitsNewDay ? .held : .swapped
     }

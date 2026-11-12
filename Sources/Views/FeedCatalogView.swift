@@ -132,7 +132,10 @@ struct FeedCatalogView: View {
         }
         // One width while open: suggested topics recomputing after a subscription never resize the sheet.
         .frame(width: AppLayout.catalogSheetWidth)
-        .frame(minHeight: AppLayout.catalogSheetMinHeight)
+        .frame(
+            minHeight: AppLayout.catalogSheetMinHeight, idealHeight: AppLayout.catalogSheetHeight,
+            maxHeight: AppLayout.catalogSheetHeight
+        )
         .navigationTitle(Self.navigationTitleText)
         .toolbar(removing: .title)
         .toolbar {

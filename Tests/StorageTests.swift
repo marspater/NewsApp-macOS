@@ -69,8 +69,36 @@ extension NewsTests {
             ("testPruneResilienceWhenVacuumFails", { try await testPruneResilienceWhenVacuumFails() }),
             ("testStorageHardeningItems", { try await testStorageHardeningItems() }),
             ("testMovedFeedSubscriptionMigration", { try await testMovedFeedSubscriptionMigration() }),
+            ("testSeededLaunchLibraryIsClassified", { try await testSeededLaunchLibraryIsClassified() }),
         ]
         try await runSuite(tests)
+    }
+
+    /// #1272: the launch library the isolated and launch-baseline scripts seed carries its categories, so opening it
+    /// runs no open-time backfill over its 10,000 stories.
+    static func testSeededLaunchLibraryIsClassified() async throws {
+        print("  - Testing the seeded launch library carries its categories (#1272)...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("launch.sqlite3").path
+        try await seedLaunchLibrary(path: path, stories: 50)
+        // Read the file directly: opening it through DatabaseEngine would run the backfill this test rules out.
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(handle)
+            throw StoryCorpus.Failure.invalid("Cannot open \(path)")
+        }
+        defer { sqlite3_close(handle) }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard
+            sqlite3_prepare_v2(
+                handle, "SELECT count(*), sum(category IS NULL) FROM article_enrichment;", -1, &statement, nil)
+                == SQLITE_OK, sqlite3_step(statement) == SQLITE_ROW
+        else { throw StoryCorpus.Failure.invalid("Cannot count enrichment rows") }
+        assertEqual(sqlite3_column_int64(statement, 0), 50, "Every seeded story has an enrichment row")
+        assertEqual(sqlite3_column_int64(statement, 1), 0, "No seeded story waits for the open-time topic backfill")
     }
 
     static func testUnchangedFTSRefresh() async throws {

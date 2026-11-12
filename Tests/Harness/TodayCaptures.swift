@@ -286,6 +286,7 @@ struct TodayCaptures {
 
     /// The page at the detail width of a 1,440 pt window and of the 900 pt minimum window, full and partly filled
     /// (The Lead and The Latest only), with a masthead stand-in in the list's tokens above it.
+    /// The capture must be taller than the page: a shorter one centres it and cuts the masthead and the last row.
     @MainActor
     static func capturePage(into output: URL) -> Int {
         let readManager = ReadManager()
@@ -325,7 +326,7 @@ struct TodayCaptures {
             for (name, dark, contrast) in appearances where contrast == .standard || window == 1440 {
                 failures += render(
                     page(full, size: CGSize(width: width, height: 2700)), name: "today-\(window)pt-\(name)",
-                    size: NSSize(width: CGFloat(width), height: width > 1000 ? 2500 : 3100), dark: dark,
+                    size: NSSize(width: CGFloat(width), height: width > 1000 ? 2800 : 3100), dark: dark,
                     contrast: contrast, into: output)
             }
         }
