@@ -522,7 +522,7 @@ struct NewsTests {
 
     /// Writes a new 10,000-story library for `script/launch_baseline.sh`: unread, recent and already clustered,
     /// so launch measures loading a steady-state archive rather than a first-run clustering backlog.
-    static func seedLaunchLibrary(path: String) async throws {
+    static func seedLaunchLibrary(path: String, stories: Int = 10_000) async throws {
         guard !FileManager.default.fileExists(atPath: path) else {
             throw StoryCorpus.Failure.invalid("Refusing to overwrite \(path)")
         }
@@ -532,7 +532,7 @@ struct NewsTests {
         let prose = (1...20).map {
             "Researchers in London compared observation \($0) with the published evidence and documented the results."
         }.joined(separator: " ")
-        let archive = (0..<10_000).map { index in
+        let archive = (0..<stories).map { index in
             FeedArticle(
                 title: "Research report \(index)", link: "https://launch.invalid/article/\(index)",
                 guid: "launch-\(index)",
@@ -542,6 +542,15 @@ struct NewsTests {
         }
         try await db.upsertArticles(archive, feedUrl: "https://launch.invalid/feed.xml")
         try await db.markEventMatchProcessed(archive.map(\.id), matcherVersion: EventMatcher.version, at: now)
+        // The app classifies stories as it stores them; an upsert does not. Without a category every launch of the
+        // seeded library classifies every row in the open-time backfill, holding the database for minutes
+        // (#1272). The stories share their text, so one classification serves them all.
+        let category =
+            NaturalLanguageTopicClassifier.classifyContent(
+                title: archive[0].title, description: "Research evidence", text: prose)?
+            .category ?? NewsCategory.world.rawValue
+        try await db.executeSimple(
+            "UPDATE article_enrichment SET category = '\(category)' WHERE category IS NULL;")
         await db.close()
         print("Seeded \(archive.count) stories at \(path)")
     }
