@@ -228,6 +228,8 @@ struct ArticleListView: View {
     @State private var columnSize = CGSize(
         width: AppLayout.mainWindowMinimumWidth, height: AppLayout.mainWindowMinimumHeight)
     @State private var todayPrefetch = TodayLanePrefetch()
+    /// The latest store of the edition for the next launch (#937).
+    @State private var todayStoreTask: Task<Void, Never>?
 
     private var todayFocusMap: TodayFocusMap? {
         isTodayEdition ? todayEdition?.focusMap(latestColumns: gridLayout ? todayLayout.latestColumns : 1) : nil
@@ -1391,7 +1393,7 @@ struct ArticleListView: View {
         guard !Task.isCancelled else { return }
         // A complete edition is kept for the next launch, unless its stories are still being grouped.
         if edition.isAssigned, !feedManager.holdsUngroupedStories {
-            Task { await articleStore.storeTodayEdition(edition, reader: reader) }
+            todayStoreTask = articleStore.storeTodayEdition(edition, reader: reader, after: todayStoreTask)
         }
         if showsRestored, let previous {
             // A failed assignment lays every story out in The Latest; the restored page stays until one succeeds.
