@@ -57,6 +57,7 @@ extension NewsTests {
             ),
             ("testPromptInjectionDefenses", { try await testPromptInjectionDefenses(fixtureHost: fixtureHost) }),
             ("testPassageAnchoredFactExtraction", { try await testPassageAnchoredFactExtraction() }),
+            ("testCutDescriptionTails", { try await testCutDescriptionTails(fixtureHost: fixtureHost) }),
             (
                 "testHighlightsSkipFeedBoilerplateAndHeadings",
                 { try testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: fixtureHost) }
@@ -3027,6 +3028,116 @@ extension NewsTests {
 
     /// #1251: feed self-attribution never becomes a fact, headings never take a Highlights slot, and the first pass gives
     /// each publisher (not each article) its best statement, so a material statement is not displaced.
+    /// #1253: the cut-off last sentence of a feed description never takes a Highlights slot; a complete description
+    /// without a final full stop stays, and every other consumer keeps its inputs.
+    static func testCutDescriptionTails(fixtureHost: String = "example.com") async throws {
+        print("  - Testing that a feed description's cut-off last sentence is no Highlight (#1253)...")
+        func article(_ id: String, _ source: String, _ description: String, full: String? = nil) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Homes demolished as the port strike spreads (\(id))",
+                link: "https://\(fixtureHost)/\(id)",
+                guid: id, description: description, pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: source,
+                fullContent: full)
+        }
+        func tail(_ text: String, of article: FeedArticle) -> PassageAnchoredFact {
+            PassageAnchoredFact(statement: text, passageID: "\(article.id)_p0", quote: text, articleID: article.id)
+        }
+        let capped = article("cap", "Gulf Daily", "Officials met on Sunday. Other homes were demolis")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Other homes were demolis", of: capped), of: capped, atFeedCap: true),
+            "A description cut mid-word at its feed's cap ends in a cut tail")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Other homes were demolis", of: capped), of: capped, atFeedCap: false),
+            "Without a cap or a marker a missing full stop alone cuts nothing")
+        let quoted = article(
+            "quote", "Gulf Daily", "The minister spoke to reporters. “There is no plan to withdraw the")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("“There is no plan to withdraw the", of: quoted), of: quoted, atFeedCap: false),
+            "A description cut inside a quotation ends in a cut tail")
+        let marked = article(
+            "marked", "Tech Wire", "Apple shipped the update today. It adds a way to send live video […]")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("It adds a way to send live video […]", of: marked), of: marked, atFeedCap: false),
+            "A description the feed marks as cut ends in a cut tail")
+        let complete = article("complete", "City Times", "The suspect was held without bond, court records showed")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("The suspect was held without bond, court records showed", of: complete), of: complete,
+                atFeedCap: false),
+            "A complete description without a final full stop stays")
+        let inches = article(
+            "inches", "Tech Wire",
+            "Apple shipped it today. Apple introduced a new 13\" tablet with an improved display.")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Apple introduced a new 13\" tablet with an improved display.", of: inches), of: inches,
+                atFeedCap: false),
+            "An inch mark is no open quotation")
+        let named = article(
+            "named", "Tech Wire", "Apple held an event. Apple introduced a new device called \"iPhone 17\".")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Apple introduced a new device called \"iPhone 17\".", of: named), of: named, atFeedCap: false),
+            "A quoted name ending in a number is a closed quotation")
+        let open = article("open", "Tech Wire", "Apple held an event. The chief executive said \"the device ships in 2")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("The chief executive said \"the device ships in 2", of: open), of: open, atFeedCap: false),
+            "A straight quotation left open is still a cut tail")
+        assertTrue(
+            OverviewComposer.inputTextHash(passages: [], eventTitle: "e", cappedDescriptionArticleIDs: ["a"])
+                != OverviewComposer.inputTextHash(passages: [], eventTitle: "e"),
+            "A newly found cap changes the stored overview's inputs, so it is regenerated")
+        let full = article(
+            "full", "Gulf Daily", "Other homes were demolis", full: "Other homes were demolished on the coast road.")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Other homes were demolis", of: full), of: full, atFeedCap: true),
+            "An article with its own stored text is not judged by its description")
+
+        // Only Highlights change: the timeline, the thematic angle and the fact pool read the cut tail as before.
+        let members = [
+            article(
+                "m1", "Gulf Daily",
+                "The port strike spread to the coast on 3 November. Homes were demolished as the port strike spread on 4 November"
+            ),
+            article("m2", "City Times", "Dock workers joined the port strike on 2 November as homes were demolished."),
+        ]
+        let passages = members.map {
+            EvidencePassage(id: "\($0.id)_p0", articleID: $0.id, text: $0.description, ordinal: 0)
+        }
+        let facts = PassageFactExtractor.deterministicExtract(passages: passages)
+        let plain = OverviewComposer.composeOverview(
+            eventID: "e-1253", eventTitle: "Port strike", verifiedFacts: facts, passages: passages, articles: members)
+        let cut = OverviewComposer.composeOverview(
+            eventID: "e-1253", eventTitle: "Port strike", verifiedFacts: facts, passages: passages, articles: members,
+            cappedDescriptionArticleIDs: ["m1"])
+        let tailText = "Homes were demolished as the port strike spread on 4 November"
+        assertTrue(
+            plain.facts.contains { $0.text.contains(tailText) }, "Control: the tail is a Highlight without a cap")
+        assertFalse(cut.facts.contains { $0.text.contains(tailText) }, "The tail at its feed's cap is no Highlight")
+        assertEqual(cut.timeline, plain.timeline, "The timeline keeps its inputs")
+        assertEqual(cut.thematicAngle?.title, plain.thematicAngle?.title, "The thematic angle keeps its inputs")
+
+        // The library knows a feed's fixed cap: its longest description length, shared by at least five descriptions.
+        let database = DatabaseEngine(path: ":memory:")
+        try await database.open()
+        let capText = String(repeating: "a", count: 40)
+        let stored =
+            (0..<5).map { article("cap-\($0)", "Gulf Daily", capText) } + [article("short", "Gulf Daily", "Short one.")]
+            + (0..<4).map { article("other-\($0)", "City Times", capText) }
+        _ = try await database.upsertArticles(stored)
+        let flagged = try await database.cappedDescriptionArticleIDs(stored.map(\.id))
+        assertEqual(
+            flagged, Set((0..<5).map { "cap-\($0)" }), "Only a feed whose longest length is shared five times has a cap"
+        )
+        await database.close()
+    }
+
     static func testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: String = "example.com") throws {
         print("  - Testing Highlights without feed boilerplate or headings, one first pick per publisher (#1251)...")
         // Boilerplate: the self-referential forms go, whatever the site; crediting another outlet's report stays.

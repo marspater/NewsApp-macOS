@@ -116,6 +116,51 @@ public struct OverviewComposer: Sendable {
         selfAttribution.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
     }
 
+    /// What a stored overview was built from: its passages' fingerprints and, when any member's description sits at its
+    /// feed's cap, those members (#1253). A cap found later changes the hash, so the overview is regenerated. The
+    /// coordinator and the composer use this one definition, so a stored overview matches its request.
+    static func inputTextHash(
+        passages: [EvidencePassage], eventTitle: String, cappedDescriptionArticleIDs: Set<String> = []
+    ) -> String {
+        let fingerprints = passages.map(\.fingerprint).sorted().joined(separator: ":")
+        let capped =
+            cappedDescriptionArticleIDs.isEmpty
+            ? "" : "|capped:" + cappedDescriptionArticleIDs.sorted().joined(separator: ",")
+        return ArticleIdentity.sha256Hex((fingerprints.isEmpty ? eventTitle : fingerprints) + capped)
+    }
+
+    /// The last sentence of a feed description that the feed cut off (#1253). It applies only when the article has no
+    /// stored text of its own, so the description is all the evidence, and the sentence ends that description. It is
+    /// cut when the description ends with an ellipsis marker ("…", "...", "[…]"), when it has no closing punctuation and
+    /// is exactly its feed's fixed cap (`atFeedCap`), or when the sentence opens a quotation it never closes. A complete
+    /// description without a final full stop below any cap is not cut.
+    static func isCutDescriptionTail(_ fact: PassageAnchoredFact, of article: FeedArticle, atFeedCap: Bool) -> Bool {
+        guard article.readerDocument?.blocks.isEmpty != false, (article.fullContent ?? "").isEmpty else { return false }
+        let description = article.description.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sentence = fact.quote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sentence.isEmpty, description.hasSuffix(sentence) else { return false }
+        if ["…", "...", "[…]", "[...]"].contains(where: { description.hasSuffix($0) }) { return true }
+        let closed = description.range(of: #"[.!?…]["'”’)\]]*$"#, options: .regularExpression) != nil
+        if atFeedCap && !closed { return true }
+        let opens = sentence.filter { $0 == "“" }.count
+        let closes = sentence.filter { $0 == "”" }.count
+        // Straight quotes by state: inside an open quotation one closes it ("iPhone 17"); outside, one right after a
+        // digit is an inch mark (13" tablet); otherwise it opens a quotation.
+        var openStraight = false
+        var previous: Character?
+        for character in sentence {
+            if character == "\"" {
+                if openStraight {
+                    openStraight = false
+                } else if previous?.isNumber != true {
+                    openStraight = true
+                }
+            }
+            previous = character
+        }
+        return opens > closes || openStraight
+    }
+
     /// A heading or label rather than a statement ("iPad mini (eighth generation, 2026)", "Related Roundups: …"): no
     /// closing ".", "!", "?" or "…" (also inside a closing quote or bracket), a label's shape (a colon, a bracket, or
     /// mostly capitalised words) and no verb. No one condition is enough: feed descriptions often lack a final full
@@ -251,7 +296,8 @@ public struct OverviewComposer: Sendable {
         passages: [EvidencePassage],
         articles: [FeedArticle],
         leadImage: OverviewLeadImage? = nil,
-        membershipVersion: Int = 1
+        membershipVersion: Int = 1,
+        cappedDescriptionArticleIDs: Set<String> = []
     ) -> EventOverviewDocument {
         let passagesByID = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0) })
         let articlesByID = Dictionary(uniqueKeysWithValues: articles.map { ($0.id, $0) })
@@ -263,8 +309,8 @@ public struct OverviewComposer: Sendable {
         }
 
         // Compute deterministic input text hash from passage fingerprints
-        let sortedFingerprints = passages.map { $0.fingerprint }.sorted().joined(separator: ":")
-        let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
+        let inputTextHash = Self.inputTextHash(
+            passages: passages, eventTitle: eventTitle, cappedDescriptionArticleIDs: cappedDescriptionArticleIDs)
 
         let versionContext = OverviewVersionContext(
             membershipVersion: membershipVersion,
@@ -277,7 +323,14 @@ public struct OverviewComposer: Sendable {
         // Timeline items come from every valid fact, not only the key facts shown above them.
         let timeline = OverviewTimelineBuilder.build(facts: validFacts, passages: passages, articles: articles)
 
-        let selectedFacts = highlights(from: validFacts, articles: articles)
+        // A feed description's cut-off last sentence never takes a Highlights slot (#1253); every other consumer keeps
+        // the full pool.
+        let selectedFacts = highlights(
+            from: validFacts.filter { fact in
+                guard let article = articlesByID[fact.articleID] else { return true }
+                return !isCutDescriptionTail(
+                    fact, of: article, atFeedCap: cappedDescriptionArticleIDs.contains(article.id))
+            }, articles: articles)
 
         var overviewFacts: [OverviewFact] = []
         var citations: [OverviewCitation] = []

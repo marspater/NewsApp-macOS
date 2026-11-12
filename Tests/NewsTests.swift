@@ -422,6 +422,7 @@ struct NewsTests {
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
             try testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: fixtureHost)
+            try await testCutDescriptionTails(fixtureHost: fixtureHost)
             try await testPlainTextGeneration(fixtureHost: fixtureHost)
             try await testOverviewPublisherEvidence(fixtureHost: fixtureHost)
             try await testOverviewQualityAuditAndReleaseGate(fixtureHost: fixtureHost)

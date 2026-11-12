@@ -150,8 +150,12 @@ actor OverviewGenerationCoordinator {
             from: articles,
             budget: OverviewTokenBudget()
         )
-        let sortedFingerprints = selection.passages.map { $0.fingerprint }.sorted().joined(separator: ":")
-        let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
+        // Descriptions their feed cut at a fixed length; their last sentence never becomes a Highlight (#1253). Read
+        // before the cache and in-flight checks: the set is part of the inputs, and no wait may fall between joining a
+        // running generation and registering a new one.
+        let cappedDescriptions = (try? await targetStore.database.cappedDescriptionArticleIDs(articles.map(\.id))) ?? []
+        let inputTextHash = OverviewComposer.inputTextHash(
+            passages: selection.passages, eventTitle: eventTitle, cappedDescriptionArticleIDs: cappedDescriptions)
         recordRequestedInputs(eventID: eventID, membershipVersion: membershipVersion, inputTextHash: inputTextHash)
         // The generation this request starts under; a clear of derived data before the commit refuses it (#844).
         let analysisGeneration = await targetStore.database.analysisGeneration
@@ -219,7 +223,8 @@ actor OverviewGenerationCoordinator {
                     passages: passages,
                     articles: articles,
                     leadImage: OverviewComposer.leadImage(from: articles),
-                    membershipVersion: membershipVersion
+                    membershipVersion: membershipVersion,
+                    cappedDescriptionArticleIDs: cappedDescriptions
                 )
 
                 return overview
