@@ -40,6 +40,7 @@ jobs:
         run: |
           python3 -m unittest discover -s script -p 'test_summarize_signposts.py'
           python3 -m unittest discover -s script -p 'test_compare_profile.py'
+          python3 -m unittest discover -s script -p 'test_summarize_launches.py'
 
       - name: Record Signposts
         run: script/profile_signposts.sh "$RUNNER_TEMP/profile"

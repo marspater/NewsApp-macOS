@@ -4,6 +4,8 @@ set -euo pipefail
 # Launch the production app bundle repeatedly against a seeded 10,000-story library and record time to the
 # first story card and process memory. The bundle is rebuilt under a separate identifier, so its sandbox
 # container, database and preferences are distinct from the installed app; the real library is never opened.
+# The library is seeded once, so a later launch may find the Today edition the one before it stored; each launch
+# records whether its first card came from a stored edition (first_card_restored, stored_edition).
 cd "$(dirname "$0")/.."
 BUNDLE_ID="com.marspater.news.launchcheck"
 CONTAINER="$HOME/Library/Containers/$BUNDLE_ID/Data"
@@ -74,6 +76,8 @@ for index in $(seq 1 "$LAUNCHES"); do launch_once "$index"; done
 
 python3 - "$OUTPUT" "$LAUNCHES" <<'PY'
 import datetime, json, platform, re, subprocess, sys
+sys.path.insert(0, "script")
+import summarize_launches
 out, launches = sys.argv[1], int(sys.argv[2])
 def footprint(path, label):
     text = open(path).read()
@@ -86,8 +90,14 @@ for i in range(1, launches + 1):
     logged = datetime.datetime.strptime(line["timestamp"][:26], "%Y-%m-%d %H:%M:%S.%f")
     offset = line["timestamp"][26:]
     logged = logged.replace(tzinfo=datetime.timezone(datetime.timedelta(hours=int(offset[:3]), minutes=int(offset[0] + offset[3:]))))
+    stages = summarize_launches.parse_launch(open(f"{out}/launch-{i}.ndjson").read())
     samples.append({
         "launch": i,
+        # A launch after the first can show the edition the one before stored (#937), which is a shorter path to
+        # the first card: the two states are told apart, never averaged as one.
+        "first_card_restored": stages["restored"],
+        "stored_edition": stages["restore_outcome"],
+        "fresh_edition_ready_ms": stages["fresh_ready_ms"],
         "process_start_to_first_card_ms": float(re.search(r"ms_since_process_start=([\d.]+)", line["eventMessage"])[1]),
         "open_to_first_card_ms": round((logged.timestamp() - start) * 1000, 3),
         "footprint_at_first_card_mib": footprint(f"{out}/launch-{i}.first-card.vmmap", "Physical footprint"),
