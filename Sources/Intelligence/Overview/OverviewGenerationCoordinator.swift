@@ -195,6 +195,8 @@ actor OverviewGenerationCoordinator {
         }
 
         let passages = selection.passages
+        // Descriptions their feed cut at a fixed length; their last sentence never becomes a Highlight (#1253).
+        let cappedDescriptions = (try? await targetStore.database.cappedDescriptionArticleIDs(articles.map(\.id))) ?? []
 
         // 4. Reuse EnrichmentQueue to schedule generation under bounded concurrency
         let task = Task<EventOverviewDocument?, Never> { [weak self] in
@@ -219,7 +221,8 @@ actor OverviewGenerationCoordinator {
                     passages: passages,
                     articles: articles,
                     leadImage: OverviewComposer.leadImage(from: articles),
-                    membershipVersion: membershipVersion
+                    membershipVersion: membershipVersion,
+                    cappedDescriptionArticleIDs: cappedDescriptions
                 )
 
                 return overview

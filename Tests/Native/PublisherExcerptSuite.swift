@@ -33,6 +33,7 @@ extension NativeSuites {
         @Test func cancellationAndSupersession() async { await Self.testCancellationAndSupersession() }
         @Test func retainedDeterministicSections() { Self.testRetainedDeterministicSections() }
         @Test func highlightSelection() { Self.testHighlightSelection() }
+        @Test func cutDescriptionTails() { Self.testCutDescriptionTails() }
     }
 }
 
@@ -121,11 +122,12 @@ extension NativeSuites.PublisherExcerptSuite {
 extension NativeSuites.PublisherExcerptSuite {
     // MARK: - 1. Version Bump
     static func testCurrentAnalysisVersionBumped() {
-        print("  - Testing current analysis version is 13...")
+        print("  - Testing current analysis version is 14...")
         expectTrue(
-            EventOverviewDocument.currentAnalysisVersion == 13,
-            "EventOverviewDocument.currentAnalysisVersion is 13: overviews cached before publisher excerpts (11), the"
-                + " Industry Impact story check (12) and the Highlight cleanup (13) recompute")
+            EventOverviewDocument.currentAnalysisVersion == 14,
+            "EventOverviewDocument.currentAnalysisVersion is 14: overviews cached before publisher excerpts (11), the"
+                + " Industry Impact story check (12), the Highlight cleanup (13) and cut description tails (14) recompute"
+        )
     }
 
     // MARK: - 2. Exact Excerpt / Citation Correspondence
@@ -541,5 +543,36 @@ extension NativeSuites.PublisherExcerptSuite {
 extension Task where Success == Never, Failure == Never {
     fileprivate static func cancelPublisherExcerptVisitor() {
         withUnsafeCurrentTask { $0?.cancel() }
+    }
+}
+
+extension NativeSuites.PublisherExcerptSuite {
+    /// #1253: a feed description's cut-off last sentence is recognised; a complete one without a full stop is not.
+    static func testCutDescriptionTails() {
+        print("  - Testing cut feed description tails...")
+        func article(_ id: String, _ description: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Port strike", link: "https://example.com/\(id)", guid: id,
+                description: description, pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Gulf Daily")
+        }
+        func isCut(_ description: String, _ sentence: String, atFeedCap: Bool) -> Bool {
+            let item = article("a", description)
+            return OverviewComposer.isCutDescriptionTail(
+                PassageAnchoredFact(statement: sentence, passageID: "a_p0", quote: sentence, articleID: "a"), of: item,
+                atFeedCap: atFeedCap)
+        }
+        expectTrue(
+            isCut("Officials met. Other homes were demolis", "Other homes were demolis", atFeedCap: true),
+            "Cut mid-word at a cap")
+        expectTrue(
+            isCut("He spoke. “There is no plan to withdraw the", "“There is no plan to withdraw the", atFeedCap: false),
+            "Cut inside a quotation")
+        expectTrue(
+            isCut("It shipped. It adds live video […]", "It adds live video […]", atFeedCap: false), "Marked cut")
+        expectTrue(
+            !isCut(
+                "The suspect was held without bond, court records showed",
+                "The suspect was held without bond, court records showed", atFeedCap: false),
+            "A complete description without a final full stop stays")
     }
 }

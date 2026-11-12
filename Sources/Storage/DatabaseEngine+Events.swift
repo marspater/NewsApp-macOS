@@ -578,6 +578,26 @@ extension DatabaseEngine {
         return result
     }
 
+    /// Of `articleIDs`, those whose description is exactly its feed's fixed cap: the feed's longest description length,
+    /// shared by at least five of its descriptions in the library. Such a feed cuts its descriptions there (#1253).
+    // ponytail: scans every description per call; keep a per-source cap table if libraries grow past ~100k stories.
+    func cappedDescriptionArticleIDs(_ articleIDs: [String]) throws -> Set<String> {
+        guard !articleIDs.isEmpty else { return [] }
+        let placeholders = Array(repeating: "?", count: articleIDs.count).joined(separator: ",")
+        let sql = """
+            WITH lengths AS (
+                SELECT source, length(trim(description)) AS l FROM articles WHERE description != ''),
+            caps AS (
+                SELECT source, MAX(l) AS cap FROM lengths GROUP BY source),
+            fixed AS (
+                SELECT caps.source, caps.cap FROM caps
+                WHERE (SELECT COUNT(*) FROM lengths WHERE lengths.source = caps.source AND lengths.l = caps.cap) >= 5)
+            SELECT a.id FROM articles a JOIN fixed ON fixed.source = a.source
+            WHERE a.id IN (\(placeholders)) AND length(trim(a.description)) = fixed.cap;
+            """
+        return Set(try eventRows(sql, articleIDs.map { .text($0) }).compactMap { $0[0] })
+    }
+
     /// Live events of the story that `eventID` (any of its events, or the story id) belongs to, the story's own id first.
     func storyEventIDs(_ eventID: String) throws -> [String] {
         let storyID = try storyID(forEvent: eventID) ?? eventID

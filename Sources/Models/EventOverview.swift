@@ -427,8 +427,8 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// word overlap with coverage headlines; fragments under five words excluded. 10: sentences closed by their
     /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
     /// 11: conditional Industry Impact section (#670). 13: no feed footer or heading Highlights, one first-pass Highlight
-    /// per publisher (#1251).
-    public static let currentAnalysisVersion = 13
+    /// per publisher (#1251). 14: no cut-off feed description tail as a Highlight (#1253).
+    public static let currentAnalysisVersion = 14
 
     public let id: String
     public let eventID: String
