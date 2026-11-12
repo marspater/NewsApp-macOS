@@ -62,7 +62,8 @@ struct BriefingTimelineData: Equatable, Sendable {
                     datePrecision: item.datePrecision, summary: item.summary, citationIDs: item.citationIDs,
                     isFuturePlan: item.isFuturePlan,
                     eventDate: item.eventDate, publicationDate: item.publicationDate,
-                    orderingDateMayHoldInferredYear: item.orderingDateMayHoldInferredYear)
+                    orderingDateMayHoldInferredYear: item.orderingDateMayHoldInferredYear,
+                    orderingEndDateMayHoldInferredYear: item.orderingEndDateMayHoldInferredYear)
             }
         }.filter { item in
             guard !item.isFuturePlan, let date = orderingDate(of: item), date <= now else {
@@ -75,9 +76,11 @@ struct BriefingTimelineData: Equatable, Sendable {
     /// Where an item's occurrence date falls, for filtering and order only; the row shows the item's `dateText`, so
     /// an inferred year in the builder's ordering date never appears (#1241). Only a stated date with a known
     /// precision counts: anchors ("Yesterday morning") are relative to the source's day, and a publication date is
-    /// no occurrence date, so neither forms or orders a thread.
+    /// no occurrence date, so neither forms or orders a thread. A range or list ("19 to 28 November") is no single
+    /// occurrence date either: it is never a turning point and never starts a "day N" count (#1249).
     static func orderingDate(of item: OverviewTimelineItem) -> Date? {
-        guard item.dateKind == .stated, item.datePrecision != nil else { return nil }
+        guard item.dateKind == .stated, item.datePrecision != nil, item.orderingEndDateMayHoldInferredYear == nil
+        else { return nil }
         return item.eventDate ?? item.orderingDateMayHoldInferredYear
     }
 
