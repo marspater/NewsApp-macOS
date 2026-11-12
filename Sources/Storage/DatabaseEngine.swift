@@ -35,6 +35,7 @@ actor DatabaseEngine {
     }
     let dbPath: String
     private var inMemoryWorldTension: [WorldTensionReading] = []
+    private var inMemoryTodayEdition: Data?
     private var collectionOnlyFeedURLs: [String] = []
     /// The last library counts, valid while no write has happened since: `sqlite3_total_changes` moves on every write,
     /// triggers included, so no write path can leave a stale count behind (#839).
@@ -874,6 +875,9 @@ actor DatabaseEngine {
                 try fileManager.removeItem(at: worldTensionURL)
             }
         }
+        // The last Today edition describes the library being replaced. It goes before the tension history changes, so
+        // a file that cannot be removed stops the restore with nothing replaced.
+        if fileManager.fileExists(atPath: todayEditionURL.path) { try fileManager.removeItem(at: todayEditionURL) }
         // A backup carrying tension history replaces the side file; a backup without the entry keeps the existing file (#1203).
         if backupHasTension { try putTension(extras["world-tension"]) }
 
@@ -4394,11 +4398,15 @@ actor DatabaseEngine {
     }
 
     /// After a committed clear: bump the generation, so every clear of derived data refuses the writes still in
-    /// flight (#844), then rewrite the World Tension history. The generation moves first, so a failed rewrite
-    /// cannot leave stale work writable; the clear is repeatable.
+    /// flight (#844), then remove the stored Today edition and rewrite the World Tension history. The generation
+    /// moves first, so a failed rewrite cannot leave stale work writable; the clear is repeatable.
     private func finishAnalysisClear() throws {
         analysisGeneration &+= 1
+        // The stored Today edition holds differing accounts read from the cleared analysis. Both side files are
+        // cleared even when one fails; the first failure is reported.
+        let editionRemoval = Result { try storeTodayEdition(nil) }
         try clearWorldTensionHistory()
+        try editionRemoval.get()
     }
 
     /// Clears persisted article body text from local storage.
@@ -5380,6 +5388,49 @@ actor DatabaseEngine {
 
     private var worldTensionURL: URL {
         URL(fileURLWithPath: dbPath + ".world-tension-v2.json")
+    }
+
+    // MARK: - Last Today edition (#937)
+
+    /// The last complete Today edition, kept beside the library like the World Tension history. It can always be
+    /// worked out again, so it is not part of a backup, and a restored library starts without one.
+    private var todayEditionURL: URL {
+        URL(fileURLWithPath: dbPath + ".today-edition.json")
+    }
+
+    private static let todayEditionByteLimit = 1024 * 1024
+
+    /// The stored edition's bytes, or nil when there is none or the file is not a plausible one.
+    func storedTodayEdition() -> Data? {
+        guard db != nil else { return nil }
+        if dbPath == ":memory:" { return inMemoryTodayEdition }
+        guard let file = try? FileHandle(forReadingFrom: todayEditionURL) else { return nil }
+        defer { try? file.close() }
+        guard let data = try? file.read(upToCount: Self.todayEditionByteLimit + 1),
+            data.count <= Self.todayEditionByteLimit
+        else { return nil }
+        return data
+    }
+
+    /// Replaces the stored edition; nil removes it. A read-only or closed library keeps what it has, and an edition
+    /// read under another analysis generation (`expectedGeneration`) is not stored: a clear has removed its data.
+    func storeTodayEdition(_ data: Data?, expectedGeneration: Int? = nil) throws {
+        guard db != nil else { throw CocoaError(.fileNoSuchFile) }
+        try requireWritable()
+        if let expectedGeneration, expectedGeneration != analysisGeneration { return }
+        if dbPath == ":memory:" {
+            inMemoryTodayEdition = data
+            return
+        }
+        guard let data else {
+            if FileManager.default.fileExists(atPath: todayEditionURL.path) {
+                try FileManager.default.removeItem(at: todayEditionURL)
+            }
+            return
+        }
+        guard data.count <= Self.todayEditionByteLimit else { throw CocoaError(.fileWriteOutOfSpace) }
+        try data.write(to: todayEditionURL, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: todayEditionURL.path)
     }
 
     /// Throws when the library was opened read-only (a newer schema, or a failed pre-migration copy).

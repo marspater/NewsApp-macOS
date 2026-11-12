@@ -38,14 +38,26 @@ enum NewsSignposts {
     /// Records, once per process, when the first story card appears: an Instruments event plus a log line
     /// with the time since the process started, so launch can be measured on the shipping app.
     @MainActor
-    static func firstCardAppeared() {
+    static func firstCardAppeared(restored: Bool = false) {
         guard !firstCardReported else { return }
         firstCardReported = true
         launch.emitEvent("FirstCard")
         guard let start = processStart() else { return }
         let elapsed = Date().timeIntervalSince(start)
+        // A card of a restored edition is on screen sooner than its fresh edition is ready: the two are told apart.
         launchLog.notice(
-            "First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public)"
+            "First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public) restored=\(restored, privacy: .public)"
+        )
+    }
+
+    /// Logs an event of the launch with the time since the process started, also after the first card: when the
+    /// fresh Today edition is ready behind a restored one, and what became of it (#937).
+    @MainActor
+    static func launchEvent(_ name: String, detail: String) {
+        guard let start = processStart() else { return }
+        let elapsed = Date().timeIntervalSince(start) * 1000
+        launchLog.notice(
+            "Launch event \(name, privacy: .public) \(detail, privacy: .public) ms_since_process_start=\(elapsed, format: .fixed(precision: 3), privacy: .public)"
         )
     }
 

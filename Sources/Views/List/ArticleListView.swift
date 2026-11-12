@@ -161,6 +161,10 @@ struct ArticleListView: View {
     /// The reader has scrolled this list since it was loaded.
     @State private var hasScrolledList = false
     @State private var newDay = FeedUpdateBuffer.NewDayHandoff()
+    /// The last launch's edition was tried for this list; it is tried once.
+    @State private var hasTriedStoredEdition = false
+    /// A fresh edition differs from the restored one on a page in use: the updates button offers it.
+    @State private var todayAwaitsFreshEdition = false
     /// Reloads the list once a refresh the reader asked for has finished.
     @State private var refreshReloads = 0
     /// A refresh the reader started: its results replace the list as they arrive instead of queueing behind
@@ -665,6 +669,7 @@ struct ArticleListView: View {
             groupedEntries.resetPrefetch()
             todayPrefetch.reset()
             todayEdition = nil
+            todayAwaitsFreshEdition = false
             hasScrolledList = false
             newDay.reset()
             cursor = nil
@@ -857,7 +862,10 @@ struct ArticleListView: View {
     }
 
     private func applyPendingUpdates(proxy: ScrollViewProxy) {
-        guard buffer.pending != nil else { return }
+        // A fresh edition waiting behind a restored one is an update too: the edition is laid out afresh.
+        if buffer.pending == nil, todayAwaitsFreshEdition { todayGeneration += 1 }
+        guard buffer.pending != nil || todayAwaitsFreshEdition else { return }
+        todayAwaitsFreshEdition = false
         showPendingUpdates()
         if isTodayEdition {
             // The page returns to the masthead and each row to its leading edge; a card that keeps keyboard focus
@@ -993,7 +1001,7 @@ struct ArticleListView: View {
                 .help("Back to \(previousTopic)")
             }
         }
-        if articlePath.isEmpty, buffer.pending != nil {
+        if articlePath.isEmpty, buffer.pending != nil || (isTodayEdition && todayAwaitsFreshEdition) {
             ToolbarItem(placement: .navigation) { updatesButton(proxy: proxy) }
         }
         // With the duplicate title removed nothing fills the toolbar, so macOS 26 and later would lay the list
@@ -1279,13 +1287,16 @@ struct ArticleListView: View {
                     actions: TodayEditionActions(
                         open: { entry in open(entry) },
                         cardAppeared: { id in
-                            NewsSignposts.firstCardAppeared()
+                            NewsSignposts.firstCardAppeared(restored: todayEdition.isRestored)
                             todayPrefetch.cardAppeared(id, in: todayEdition, using: imageLoader)
                         },
                         latestColumnsChanged: { todayLayout.latestColumns = $0 },
+                        laneMovedByReader: { todayLayout.hasMovedLane = true },
                         leadingCardChanged: { lane, id in todayLayout.laneLeading[lane] = id },
-                        // A slide held keyboard focus and the reader clicked to another: focus follows what shows.
+                        // The reader chose a slide: the page is in use. When a slide held keyboard focus,
+                        // focus follows what shows.
                         leadSlideShown: { entry in
+                            todayLayout.hasMovedLane = true
                             if todayEdition.lead.contains(where: { $0.id == focusedArticleID }) {
                                 focusedArticleID = entry.id
                                 todayLaneMemory[.theLead] = entry.id
@@ -1306,26 +1317,70 @@ struct ArticleListView: View {
         .allowsWindowActivationEvents(true)
     }
 
+    /// Shows the edition kept at the last launch, when it still describes these stories. False when the task was
+    /// cancelled: the attempt is not counted, so the task that replaces it tries again.
+    private func restoreStoredTodayEdition(_ listed: [FeedEntry], reader: TodayReader) async -> Bool {
+        let result = await articleStore.restoredTodayEdition(
+            entries: listed, reader: reader, generation: todayGeneration)
+        guard !Task.isCancelled else { return false }
+        hasTriedStoredEdition = true
+        switch result {
+        case .success(let restored):
+            todayEdition = restored
+            NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=shown")
+        case .failure(let rejection):
+            NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=\(rejection.rawValue)")
+        case nil:
+            NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=none")
+        }
+        return true
+    }
+
     /// Lays the listed stories out as the Today edition and moves keyboard focus with it.
     private func reloadTodayEdition(_ listed: [FeedEntry], proxy: ScrollViewProxy) async {
+        let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
+        let reader = TodayReader(
+            failedImageURLs: DecodedImageCache.failedURLs, subscribedFeedURLs: Set(appSettings.feedURLs),
+            starredFeedURLs: appSettings.starredFeedURLs, interestsResetAt: resetAt)
+        // The first page of a launch is laid out at once from the edition kept at the last one, when it still
+        // describes these stories; the fresh edition is worked out behind it (#937).
+        if todayEdition == nil, !hasTriedStoredEdition, !listed.isEmpty {
+            guard await restoreStoredTodayEdition(listed, reader: reader) else { return }
+        }
         let previous = todayEdition
+        let showsRestored = previous?.isRestored == true
         // Bursts of store revisions (clustering, overviews) would lay the page out once each; they are debounced
-        // as in the list. The first edition loads at once.
-        if previous != nil {
+        // as in the list. The first edition loads at once, and so does the fresh one behind a restored edition.
+        if previous != nil, !showsRestored {
             do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
         }
         // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
-        // for or another day's stories lay the edition out afresh.
-        let keeps = isHoldingList && previous?.generation == todayGeneration
+        // for or another day's stories lay the edition out afresh. A restored edition is never the one kept.
+        // While another day's page waits for its grouping, the edition on screen is not laid out again from the
+        // earlier day's stories: the next edition is the new day's.
+        let keeps =
+            !showsRestored && (isHoldingList || newDay.isWaiting) && previous?.generation == todayGeneration
         NewsSignposts.launchMilestone("today_edition_requested")
-        let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
-        let edition = await articleStore.todayEdition(
-            entries: listed,
-            reader: TodayReader(
-                failedImageURLs: DecodedImageCache.failedURLs, subscribedFeedURLs: Set(appSettings.feedURLs),
-                starredFeedURLs: appSettings.starredFeedURLs, interestsResetAt: resetAt),
-            keeping: keeps ? previous : nil, generation: todayGeneration)
+        var edition = await articleStore.todayEdition(
+            entries: listed, reader: reader, keeping: keeps ? previous : nil, generation: todayGeneration)
         guard !Task.isCancelled else { return }
+        // A complete edition is kept for the next launch, unless its stories are still being grouped.
+        if edition.isAssigned, !feedManager.holdsUngroupedStories {
+            Task { await articleStore.storeTodayEdition(edition, reader: reader) }
+        }
+        if showsRestored, let previous {
+            // A failed assignment lays every story out in The Latest; the restored page stays until one succeeds.
+            guard edition.isAssigned, settleFreshEdition(&edition, behind: previous) else { return }
+        }
+        await installTodayEdition(edition, replacing: previous, keeps: keeps, proxy: proxy)
+    }
+
+    /// Puts a laid-out edition on the page and moves keyboard focus with it.
+    private func installTodayEdition(
+        _ edition: TodayEdition, replacing previous: TodayEdition?, keeps: Bool, proxy: ScrollViewProxy
+    ) async {
+        // An edition laid out afresh is the one that was waiting, if any was.
+        if !keeps { todayAwaitsFreshEdition = false }
         // A rebuilt edition has other cards at the same positions, so the lanes' image prefetch starts over.
         if !keeps { todayPrefetch.reset() }
         let isApplied = previous.map { $0.generation != edition.generation } ?? false
@@ -1342,6 +1397,35 @@ struct ArticleListView: View {
                 proxy.scrollTo(lane == .theLead ? TodayEditionView<EmptyView>.leadScrollID : restored)
             }
         }
+    }
+
+    /// The fresh edition is ready behind the restored one on screen. False when the page in use keeps its cards as
+    /// an ordinary held edition and the fresh one is offered behind the updates button.
+    private func settleFreshEdition(_ edition: inout TodayEdition, behind previous: TodayEdition) -> Bool {
+        let awaitsNewDay = buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories
+        let outcome = TodayRestoreOutcome.decide(
+            sameArrangement: edition.hasSameArrangement(as: previous),
+            isTouched: hasScrolledList || focusedArticleID != nil || !articlePath.isEmpty
+                || todayLayout.hasMovedLane || NSWorkspace.shared.isVoiceOverEnabled,
+            awaitsNewDay: awaitsNewDay)
+        NewsSignposts.launchEvent(
+            "today_fresh_edition_ready",
+            detail: "outcome=\(outcome.rawValue) scrolled=\(hasScrolledList) focused=\(focusedArticleID != nil) "
+                + "reading=\(!articlePath.isEmpty) lane_moved=\(todayLayout.hasMovedLane) "
+                + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) new_day=\(awaitsNewDay)")
+        switch outcome {
+        case .held:
+            var kept = previous
+            kept.isRestored = false
+            todayEdition = kept
+            todayAwaitsFreshEdition = true
+            return false
+        case .confirmed:
+            edition.generation = previous.generation
+        case .swapped:
+            break
+        }
+        return true
     }
 
     /// Focus follows its card, or the rules of today.md when the card or its lane is gone. The card that takes
@@ -1913,6 +1997,9 @@ struct KeyboardShortcutsView: View {
 @MainActor final class TodayLayoutReport {
     var latestColumns = 1
     var laneLeading: [TodayLane: String] = [:]
+    /// The reader scrolled or paged a lane row sideways, or chose a Lead slide: the page is in use. A row's own
+    /// layout reports are not that.
+    var hasMovedLane = false
 }
 
 /// Decodes the next cards of a lane before they scroll into view (#591, #936): a card appearing asks for the

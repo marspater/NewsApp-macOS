@@ -25,6 +25,10 @@ struct TodayEditionActions {
     var latestColumnsChanged: (Int) -> Void = { _ in
         // No keyboard map by default.
     }
+    /// The reader scrolled a lane's row or paged it with its buttons.
+    var laneMovedByReader: () -> Void = {
+        // Nothing depends on it by default.
+    }
     /// A lane's row scrolled: the card at its leading edge, which an arrow key entering the lane lands on.
     var leadingCardChanged: (TodayLane, String?) -> Void = { _, _ in
         // No keyboard map by default.
@@ -278,6 +282,9 @@ struct TodayLaneSection: View {
         } action: { _, maximum in
             scrollMax = maximum
         }
+        .onScrollPhaseChange { _, phase in
+            if phase == .interacting { actions.laneMovedByReader() }
+        }
         .scrollIndicators(.hidden)
         .modifier(UnderSidebarRow())
         .background(alignment: .topLeading) { heightProbe }
@@ -342,6 +349,7 @@ struct TodayLaneSection: View {
         let index = (scrollX / step).rounded()
         let target = max(0, min(scrollMax, (index + CGFloat(offset * 2)) * step))
         return Button {
+            actions.laneMovedByReader()
             withAnimation(reduceMotion ? nil : AppMotion.navigation) {
                 rowPosition.scrollTo(x: target)
             }
