@@ -545,6 +545,12 @@ struct ArticleListView: View {
     }
 
     private func performQueryReload() async {
+        // While the library opens, a query would wait behind the store's first snapshot and then be cancelled by
+        // the revision that snapshot publishes, twice over at launch (#937). The list waits for it and loads once.
+        if !articleStore.isReady {
+            await articleStore.waitForStartup()
+            guard !Task.isCancelled else { return }
+        }
         let identity = queryIdentity
         let runID = UUID()
         if isBriefing {
@@ -660,6 +666,10 @@ struct ArticleListView: View {
             let fetched = try await fetchPage(
                 after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting, queryVector: queryVector)
             try Task.checkCancellation()
+            NewsSignposts.launchMilestone("list_page_fetched")
+            // Today's lanes need every listed story's language score; it is worked out while the counts and the
+            // grouping below are read, not after them (#937).
+            if isTodayEdition { NotificationService.shared.prepareImportance(of: Array(fetched.prefix(200))) }
             if !isPaging {
                 var hidden = 0
                 if !muting.isEmpty { hidden = try await countMuted(muting, queryVector: queryVector) }
@@ -1286,6 +1296,7 @@ struct ArticleListView: View {
         // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
         // for or another day's stories lay the edition out afresh.
         let keeps = isHoldingList && previous?.generation == todayGeneration
+        NewsSignposts.launchMilestone("today_edition_requested")
         let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
         let edition = await articleStore.todayEdition(
             entries: listed,
@@ -1299,6 +1310,7 @@ struct ArticleListView: View {
         let isApplied = previous.map { $0.generation != edition.generation } ?? false
         let restored = restoreTodayFocus(in: edition, from: previous)
         todayEdition = edition
+        NewsSignposts.launchMilestone("today_edition_installed")
         // Photos the top of the page still lacks are looked up first.
         feedManager.requestStoryImages(for: edition.imagelessShownIDs)
         // An applied update returns the page to the masthead; a card that kept focus is brought back into view.

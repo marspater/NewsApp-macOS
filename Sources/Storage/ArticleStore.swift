@@ -131,8 +131,10 @@ final class ArticleStore: ObservableObject {
     }
 
     func initialize() async {
+        var timer = NewsSignposts.StageTimer("Library startup")
         do {
             try await database.open()
+            timer.lap("open")
             self.databaseHealthNotice = await database.databaseHealthNotice()
             if self.databaseHealthNotice == nil {
                 if let stats = try await migrationCoordinator?.migrateIfNeeded(), stats.failures > 0 {
@@ -161,7 +163,9 @@ final class ArticleStore: ObservableObject {
                     await database.setCollectionOnlyFeedURLs(Array(hidden))
                 }
             }
+            timer.lap("migration_and_checks")
             let loaded = await refreshState()
+            timer.lap("first_snapshot")
             self.isReady = loaded
             startupFailed = !loaded
             if !loaded {

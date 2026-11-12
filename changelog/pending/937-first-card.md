@@ -1,0 +1,1 @@
+- Today's first card appears sooner after launch: the list loads once when the library has opened instead of three times, the language scores of a page are worked out while the list loads and remembered, and a repeated state reload at launch is skipped. The launch log (`Launch` category) now names how long each stage took (#937).

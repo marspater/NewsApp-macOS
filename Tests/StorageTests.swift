@@ -306,7 +306,9 @@ extension NewsTests {
         let panelURL = "https://example.com/panel-counts.xml"
         let panelStory = story(20)
         try await db.upsertArticles([panelStory], feedUrl: panelURL)
-        await db.setCollectionOnlyFeedURLs([panelURL])
+        let panelChanged = await db.setCollectionOnlyFeedURLs([panelURL])
+        let panelRepeated = await db.setCollectionOnlyFeedURLs([panelURL])
+        assertEqual([panelChanged, panelRepeated], [true, false], "The same hidden feeds again change nothing (#937)")
         try await db.markRead(articleId: panelStory.id, isRead: true)
         let withPanelRead = try await db.counts()
         try await db.markRead(articleId: panelStory.id, isRead: false)

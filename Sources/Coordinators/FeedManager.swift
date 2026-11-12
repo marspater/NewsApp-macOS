@@ -181,8 +181,9 @@ class FeedManager: NSObject, ObservableObject {
                 subscriptionTask?.cancel()
                 subscriptionTask = Task { [articleStore] in
                     guard !Task.isCancelled else { return }
-                    await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden))
-                    guard !Task.isCancelled else { return }
+                    // The first value repeats what the store set while opening: nothing to reload (#937).
+                    guard await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden)), !Task.isCancelled
+                    else { return }
                     await articleStore.refreshState()
                 }
             }
