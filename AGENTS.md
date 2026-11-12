@@ -43,6 +43,7 @@ These instructions govern agent workflow, not the project specification.
   - Issues, progress notes, commit bodies and reports name the domain, with its job on first use ("Clio · sourced overviews").
   - A PR that touches Angelia code lists each sub-system it changes under "Angelia sub-systems" in its description.
   - The same PR lists separately the sub-systems affected without a change to their code.
-  - A change in `Sources/Views/` names the domain whose output the view shows and says that the change is in a view.
+  - A change to a view that shows a domain's output names that domain and says that the change is in a view.
+  - Shared view code that shows no domain's output (design tokens, settings, window chrome) names none.
   - Swift names stay descriptive.
 - Keep output concise and evidence-led. Ask only for missing decisions that block safe progress; complete independent authorized work while waiting.
