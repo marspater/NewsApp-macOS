@@ -220,7 +220,7 @@ def main(argv):
     meta = {}
     if "--meta" in args:
         index = args.index("--meta")
-        meta = dict(item.split("=", 1) for item in args[index + 1:])
+        meta = {key: value for key, value in (item.split("=", 1) for item in args[index + 1:])}
         del args[index:]
     discard = 1
     if "--discard" in args:

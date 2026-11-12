@@ -92,14 +92,15 @@ NAME=${NAME_DIR##*/}
 
 # Starts the app on a fresh copy of the library, with the given stored edition beside it or none.
 launch() { # <app> <stored edition or ""> <arm>
-    local extra="NEWS_PAIRED_ARGS_$3"
+    local app="$1" stored="$2" arm="$3" extra
+    extra="NEWS_PAIRED_ARGS_$arm"
     rm -f "$LIB/$NAME.sqlite3"*
     cp "$PRISTINE" "$LIB/$NAME.sqlite3"
-    [[ -z "$2" ]] || cp "$2" "$LIB/$NAME.sqlite3.today-edition.json"
+    [[ -z "$stored" ]] || cp "$stored" "$LIB/$NAME.sqlite3.today-edition.json"
     # The executable directly, as xctrace launches it: the environment is certain to reach it. The arm's further
     # arguments are split on spaces on purpose.
     # shellcheck disable=SC2086
-    NEWS_LIBRARY_NAME="$NAME" "$1/Contents/MacOS/News" -first_launch_completed YES -notifications_enabled NO \
+    NEWS_LIBRARY_NAME="$NAME" "$app/Contents/MacOS/News" -first_launch_completed YES -notifications_enabled NO \
         ${!extra-} >/dev/null 2>&1 &
     PID=$!
     disown "$PID" # no "Terminated" line from the shell when the launch is ended
@@ -110,7 +111,8 @@ launch() { # <app> <stored edition or ""> <arm>
 }
 
 index_of() { # <arm>; prints its position or nothing
-    for i in "${!ARMS[@]}"; do [[ "${ARMS[$i]}" != "$1" ]] || { echo "$i"; return; }; done
+    local requested="$1" i
+    for i in "${!ARMS[@]}"; do [[ "${ARMS[$i]}" != "$requested" ]] || { echo "$i"; return; }; done
 }
 
 # Each warm or swap arm starts from the edition a seeding launch of its own app stored on the same copy.
@@ -135,50 +137,40 @@ PY
 done
 
 # Sample swap memory only once the actual fresh-edition swap has been logged for this process.
-wait_for_fresh_edition() { # <launch start> <pid> <any|swapped>
-    local started="$1" pid="$2" expected="$3" lines
-    local deadline=$((SECONDS + ${NEWS_PAIRED_SWAP_WAIT:-60}))
-    while ((SECONDS <= deadline)); do
-        kill -0 "$pid" 2>/dev/null || return 1
-        lines=$(/usr/bin/log show --start "$started" --info --predicate \
-            "subsystem == \"com.marspater.news\" AND category == \"Launch\" AND processIdentifier == $pid" \
-            2>/dev/null || true)
-        if [[ "$lines" == *"today_fresh_edition_ready outcome="* ]]; then
-            [[ "$expected" == any || "$lines" == *"today_fresh_edition_ready outcome=swapped "* ]]
-            return $?
-        fi
-        sleep 1
-    done
-    return 1
-}
+source script/paired_launch_wait.sh
 
 one() { # <round> <arm> <app>
-    local stem="$OUT/r$1-$2" stored="" start
-    case "${2%%_*}" in warm | swap) stored="$OUT/seed-$2.today-edition.json" ;; esac
+    local round="$1" arm="$2" app="$3" stem stored="" start
+    stem="$OUT/r$round-$arm"
+    case "${arm%%_*}" in
+        warm | swap) stored="$OUT/seed-$arm.today-edition.json" ;;
+        baseline | cold) ;;
+        *) echo "❌ Unknown arm $arm" >&2; return 1 ;;
+    esac
     sleep 2
     sysctl -n vm.loadavg | awk '{print $2}' > "$stem.load"
     start=$(date -v-2S '+%Y-%m-%d %H:%M:%S')
-    launch "$3" "$stored" "$2"
+    launch "$app" "$stored" "$arm"
     local can_sample=1
-    if [[ "${2%%_*}" == swap ]] && ! wait_for_fresh_edition "$start" "$PID" swapped; then
-        echo "⚠️ Round $1 $2: no observed swap; skipping post-swap memory." >&2
+    if [[ "${arm%%_*}" == swap ]] && ! wait_for_fresh_edition "$start" "$PID" swapped; then
+        echo "⚠️ Round $round $arm: no observed swap; skipping post-swap memory." >&2
         can_sample=0
     fi
     if [[ "$can_sample" == 1 ]]; then
         footprint -p "$PID" > "$stem.settled.footprint" 2>&1 || true
         if [[ "${NEWS_PAIRED_HOLD:-0}" == 1 ]]; then
-            read -r -p "Round $1 $2: scroll as planned, then press Return " _
+            read -r -p "Round $round $arm: scroll as planned, then press Return " _
             footprint -p "$PID" > "$stem.scrolled.footprint" 2>&1 || true
         fi
     fi
-    if [[ "${2%%_*}" == warm ]] && ! wait_for_fresh_edition "$start" "$PID" any; then
-        echo "⚠️ Round $1 $2: no fresh-edition result observed before timeout or app exit." >&2
+    if [[ "${arm%%_*}" == warm ]] && ! wait_for_fresh_edition "$start" "$PID" any; then
+        echo "⚠️ Round $round $arm: no fresh-edition result observed before timeout or app exit." >&2
     fi
     /usr/bin/log show --start "$start" --info --predicate \
         "subsystem == \"com.marspater.news\" AND category == \"Launch\" AND processIdentifier == $PID" \
         > "$stem.log" 2>/dev/null
     quit
-    echo "round $1 $2: $(sed -n 's/.*\(First card visible .*\)/\1/p' "$stem.log" | head -1)"
+    echo "round $round $arm: $(sed -n 's/.*\(First card visible .*\)/\1/p' "$stem.log" | head -1)"
 }
 
 COUNT=${#ARMS[@]}
