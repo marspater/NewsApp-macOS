@@ -284,6 +284,11 @@ struct FeedUpdateBuffer: Equatable, Sendable {
             if showsOnlyEarlierDays, isGrouping || wasGroupingAtFetch { isWaiting = true }
         }
 
+        /// The page on screen was laid out from stories the grouping has not processed yet, such as a launch page
+        /// after a refresh was cut short: like an earlier day's page, it gives way to the grouped page once while the
+        /// reader has not touched it (#937).
+        mutating func notePageAwaitsGrouping() { isWaiting = true }
+
         /// The list was replaced or loaded anew.
         mutating func reset() { isWaiting = false }
 

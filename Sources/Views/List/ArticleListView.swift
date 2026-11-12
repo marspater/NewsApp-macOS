@@ -743,7 +743,8 @@ struct ArticleListView: View {
                     cursor = page.last.map(ArticleQueryCursor.init)
                     hasMoreResults = morePages
                 case .refreshedInPlace:
-                    break
+                    // The grouping has ended and moved nothing on the page: there is no grouped page to wait for.
+                    if !groupingAtFetch, !feedManager.isGroupingNewStories { newDay.reset() }
                 case .waiting:
                     pendingHasMore = morePages
                 }
@@ -1374,6 +1375,16 @@ struct ArticleListView: View {
             guard edition.isAssigned, settleFreshEdition(&edition, behind: previous) else { return }
         }
         await installTodayEdition(edition, replacing: previous, keeps: keeps, proxy: proxy)
+        if !keeps, await pageAwaitsGrouping(listed) { newDay.notePageAwaitsGrouping() }
+    }
+
+    /// The page holds stories the grouping has not processed while a grouping is running or still to come at launch,
+    /// such as the stories of a refresh cut short by quitting. Only asked then: later, a story the matcher leaves
+    /// unprocessed must not keep the page waiting.
+    private func pageAwaitsGrouping(_ listed: [FeedEntry]) async -> Bool {
+        guard feedManager.isGroupingNewStories || feedManager.lastClusteringPass == nil else { return false }
+        let rows = try? await articleStore.database.eventMatchRows(articleIDs: listed.map(\.id))
+        return rows?.contains { !$0.previouslyMatched } ?? false
     }
 
     /// Puts a laid-out edition on the page and moves keyboard focus with it.
