@@ -110,11 +110,42 @@ The first page (200 stories, 176 entries) took 48 ms for the context and 38 to 3
 - The harness lists the page as the app does at launch. It does not model a held list, "Show Updates", a restored edition (#1243) or a refresh during reading.
 - Publisher shares are counted on event groups; one occurrence split into two events counts twice (#737).
 
-## Reading for my decision (not a decision)
+## The choice for gate 6
 
-1. The evaluated pool and the app's pool differ by a factor of four in candidates and by 3 hours against 72 in span. The Z2 figures for lane distribution and for In Motion do not describe what a reader sees at launch; those for Your Beat's share, completeness and duplicates do.
-2. Two ways to close the gate remain, as on #934: accept the evaluation on the page pool as measured here, with In Motion often hidden at launch; or change what the app assigns over (for example every story of 24 hours, or the page plus the stories of the last day), which is a change to a shipped default and needs its own measurement of the load time.
-3. Whichever pool is chosen, The Lead's ranking is not settled by these labels. That is the blind comparison prepared in `docs/TOOLING.md`.
+**(a) Accept the page pool.** The app stays as it is and the Z2 evaluation is the one in this audit's first-page column. What that accepts: the edition at launch is built from the last 3 hours or so, In Motion is often hidden, The Deep Read is thinner, and the lanes change when further pages load. In Motion on that pool has no usable labels (1 real update among its candidates), so its gate would need a new reviewed set made on first pages.
+
+**(b) The app assigns over the 72-hour window while the list keeps paging.** The lanes are then the ones the spec describes and the ones both Z2 audits measured, whatever the last hours held. The Latest stays the paged list.
+
+### Cost of (b), from these runs
+
+One pass each in the optimized runner with the Mac in use; the assignment time here includes each story's language score, which the app works out while the list loads (#1235) and so pays earlier.
+
+| Pool | Stories; entries; candidates | Context read | Assignment with language scores |
+| --- | --- | --- | --- |
+| First page | 200; 176; 144 | 33 ms | 89 ms |
+| 2 pages | 400; 325; 249 | 120 ms | 378 ms |
+| 3 pages | 600; 473; 358 | 145 ms | 490 ms |
+| 72 hours | 937; 738; 612 | 106 ms | 404 ms |
+
+- The 72-hour pool costs about three to four times the first page: roughly 0.5 s against 0.12 s for context and assignment together on this copy. With the scores prepared ahead, as the app does for its page, the assignment alone was 38 ms for the first page (median of three); the same figure for the window was not taken.
+- Memory was not measured. The pool adds the stories of 72 hours as list rows (937 here) for the length of the assignment; the plan keeps the entries of the lanes only if The Latest keeps coming from the list.
+- The first card is already over its reference on a cold launch (#937). (b) adds to that unless the wider assignment runs behind a page that is already shown, which is what the restored edition of #1243 does on a warm launch.
+
+### What (b) would change, in files this audit does not touch
+
+No part of it can be offered from `Sources/Intelligence/` alone: the pool is chosen where the edition is requested, in view code.
+
+- **`ArticleListView.reloadTodayEdition`** passes `listed`, the grouped page, as the pool. It would ask the store for the window's stories as well (`fetchArticles(section: "Today", options: ArticleFetchOptions(publicationWindow: …))` already exists in the engine, with the list's muting and read filter), group them, and pass both. The task that reloads the edition is keyed on the listed page's revision; it would also have to follow the window's stories, which change with every refresh.
+- **`ArticleStore.todayEdition`** would load the context and assign over the window's entries, and prepare their language scores and event photos (today: the page's 200 stories and at most 60 events).
+- **`TodayEdition.make`** already shows a lane's stories from the plan and fills The Latest from the listed stories no lane took, so a fresh edition works with a wider plan. Three places assume that every lane story is on the listed page and would drop the others: the held edition (`where listedIDs.contains(story.id)`), the stored edition's restore check (#1243), and the removal of a story that left the list.
+- **Paging:** a story placed in a lane from beyond the first page must not appear a second time when its page loads into The Latest; `make` already excludes placed stories, the held path would need the same.
+- **Tests and budget:** the Today tests of the edition layout, and the Z5 runs of #937 with the option on.
+
+It can ship as an option that is off by default (a pool setting read in `reloadTodayEdition`), so the freeze on shipped defaults holds until I turn it on.
+
+### Recommendation
+
+**(b), built off by default and measured before it is turned on.** The lanes, their bars and all the evidence so far describe a day-scale pool; on the page pool the edition depends on how much was published in the last three hours, In Motion mostly does not show, and the labels cannot judge it. Accepting (a) would mean accepting an edition that was not the one specified or evaluated, and re-labelling for it. The cost of (b) is real and falls on the first card, so it goes behind the Z5 first-card work and not in front of it. Until (b) is built and measured, this gate stays open and nothing shipped changes.
 
 ## Ledger
 
