@@ -199,9 +199,11 @@ enum TodayEditionAssigner {
         }
         let ordered = evaluated.sorted(by: leadPrecedes)
         guard let first = ordered.first else { return ([], []) }
-        var winners = [
-            LanePlacement(story: first, confidence: max(0.50, leadConfidence(first)), reason: "lead_top_story")
-        ]
+        let topStory = LanePlacement(
+            story: first, confidence: max(0.50, leadConfidence(first)), reason: "lead_top_story")
+        // No story has a photo (offline, text-only feeds): the top story alone, not up to five placeholder slides.
+        if pictured.isEmpty { return ([topStory], Array(ordered.dropFirst())) }
+        var winners = [topStory]
         var pool: [EvaluatedStory] = []
         for story in ordered.dropFirst() {
             if winners.count < (TodayLane.theLead.cap ?? 5), let slide = leadSlide(story, thresholds: thresholds) {

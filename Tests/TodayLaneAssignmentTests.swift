@@ -1457,7 +1457,14 @@ extension NewsTests {
                 ])
         }
         let entries = [event("a", minutesAgo: 30), event("b", minutesAgo: 40)]
-        var context = TodayAssignmentContext(now: referenceNow)
+        // Both clear the bar of slides 2 to 5, so The Lead would hold both.
+        func major(_ id: String) -> TodayStorySignals {
+            TodayStorySignals(
+                memberFullTexts: (1...3).map { "Reporter \($0) at bridge \(id) spoke with crews and residents." },
+                nlImportanceOverride: 0.85, resolvedImportanceOverride: .major)
+        }
+        var context = TodayAssignmentContext(
+            now: referenceNow, signalsByEntryID: ["a1": major("a"), "b1": major("b")])
         let open = TodayEditionAssigner.assign(entries: entries, context: context)
         guard let top = open.entries(for: .theLead).first?.id else {
             assertTrue(false, "The Lead has a first slide")
@@ -1469,9 +1476,10 @@ extension NewsTests {
         assertTrue(pictured.allAssignments.contains { $0.id == top }, "It is still in the edition, in another lane")
         assertEqual(pictured.entries(for: .theLead).count, 1, "The pictured story leads")
         context.imagelessEntryIDs = Set(entries.map(\.id))
-        assertEqual(
-            TodayEditionAssigner.assign(entries: entries, context: context).entries(for: .theLead).first?.id, top,
-            "With no photo anywhere, the top story still leads")
+        let noPhotos = TodayEditionAssigner.assign(entries: entries, context: context).entries(for: .theLead)
+        assertEqual(noPhotos.first?.id, top, "With no photo anywhere, the top story still leads")
+        assertTrue(open.entries(for: .theLead).count > 1, "With photos both stories are slides")
+        assertEqual(noPhotos.count, 1, "With no photo anywhere, only the top story leads, not placeholder slides")
 
         // Subscriptions: a story of a feed the reader left, one of a kept feed and one whose feed is not known.
         let left = makeArticle(
