@@ -5286,6 +5286,12 @@ extension NewsTests {
         for row in rows where row.orderingEndDateMayHoldInferredYear != nil {
             assertEqual(BriefingTimelineData.orderingDate(of: row), nil, "Briefing has no date for \(row.dateText)")
         }
+        let rangePrecisionOnly = OverviewTimelineItem(
+            id: "range-only", dateText: "19–28 Nov", dateKind: .stated, datePrecision: .range,
+            summary: "The talks are scheduled for 19–28 November.", orderingDateMayHoldInferredYear: day(2026, 11, 19))
+        assertEqual(
+            BriefingTimelineData.orderingDate(of: rangePrecisionOnly), nil,
+            "Briefing excludes .range precision even without an end date")
         let now = day(2026, 11, 8)
         let merged = BriefingTimelineData.merged([("e", rows)], now: now)
         assertEqual(merged.map(\.dateText).count, 1, "Briefing keeps only the single date")

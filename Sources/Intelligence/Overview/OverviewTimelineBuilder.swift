@@ -59,6 +59,12 @@ enum OverviewTimelineBuilder {
         case span(StatedSpan)
     }
 
+    struct StatedExpressionMatch: Hashable, Sendable {
+        let expression: StatedExpression
+        let range: NSRange
+        let isCombined: Bool
+    }
+
     /// A single dated sentence is not a timeline.
     static let minimumDistinctDates = 2
     static let maximumItems = 8
@@ -380,9 +386,11 @@ enum OverviewTimelineBuilder {
                 true
             ),
         ]
-        return sources.compactMap { pattern, monthFirst in
-            (try? NSRegularExpression(pattern: pattern)).map { ($0, monthFirst) }
+        var compiled: [(regex: NSRegularExpression, monthFirst: Bool)] = []
+        for (pattern, monthFirst) in sources {
+            if let regex = try? NSRegularExpression(pattern: pattern) { compiled.append((regex, monthFirst)) }
         }
+        return compiled
     }()
 
     private static let rangeBetweenDates =
@@ -393,12 +401,25 @@ enum OverviewTimelineBuilder {
     /// states none, several unrelated dates (separate clauses, a range or list plus another date), a reversed
     /// range, an expression whose parts cannot share a precision or year, or an impossible date.
     static func statedExpression(in sentence: String) -> StatedExpression? {
+        statedExpressionMatch(in: sentence)?.expression
+    }
+
+    /// The parsed `StatedExpression` together with its matched character range in `sentence`.
+    static func statedExpressionMatch(in sentence: String) -> StatedExpressionMatch? {
         let range = NSRange(sentence.startIndex..., in: sentence)
         guard let atoms = dateAtoms(in: sentence, range: range), let first = atoms.first, let last = atoms.last,
             !hasBareMonthEndpoint(before: first.range, after: last.range, in: sentence)
         else { return nil }
-        if atoms.count == 1 { return first.span.map { .span($0) } ?? first.date.map { .date($0) } }
-        return combined(atoms, in: sentence)
+        if atoms.count == 1 {
+            let expression = first.span.map(StatedExpression.span) ?? first.date.map(StatedExpression.date)
+            return expression.map { StatedExpressionMatch(expression: $0, range: first.range, isCombined: false) }
+        }
+        guard let expression = combined(atoms, in: sentence) else { return nil }
+        if case .date = expression {
+            return StatedExpressionMatch(expression: expression, range: first.range, isCombined: false)
+        }
+        return StatedExpressionMatch(
+            expression: expression, range: NSUnionRange(first.range, last.range), isCombined: true)
     }
 
     /// A bare month beside a parsed date cannot supply the precision or year needed for a range.

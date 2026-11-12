@@ -35,6 +35,7 @@ enum BriefingSignalsTests {
         forwardWatchEvaluation()
         forwardWatchCitations()
         forwardWatchMerge()
+        forwardWatchRanges()
         print("Finished \(checks) Briefing signals checks with \(failures) failures.")
         if failures > 0 { recordFailure("BriefingSignalsTests: \(failures) check failure(s)") }
     }
@@ -246,5 +247,41 @@ enum BriefingSignalsTests {
         check(data?.rows.first?.caption == "Tuesday, as reported by 2 publishers", "merged caption")
         check(data?.rows.last?.caption == "Stated by Harbor Times, cited once", "single citation caption")
         check(BriefingForwardWatchData.make([]) == nil, "no item hides the module")
+    }
+
+    /// #1249: future date ranges and lists keep their complete verbatim wording in Forward Watch instead of
+    /// truncating to one endpoint or dropping the item.
+    static func forwardWatchRanges() {
+        let cases: [(sentence: String, kind: ForwardWatchItem.Kind, dateText: String)] = [
+            ("The talks are scheduled for 19–28 November", .scheduled, "19–28 November"),
+            ("Talks are scheduled from 19 to 28 November.", .scheduled, "from 19 to 28 November"),
+            ("Negotiations are scheduled between 19 and 28 November.", .scheduled, "between 19 and 28 November"),
+            ("Talks are scheduled on November 19-28, 2026.", .scheduled, "on November 19-28, 2026"),
+            ("The summit is scheduled from 28 December to 3 January.", .scheduled, "from 28 December to 3 January"),
+            ("Hearings are scheduled for 19 and 21 November.", .scheduled, "19 and 21 November"),
+            (
+                "The committee is expected to meet from 19 to 28 November.", .expected,
+                "from 19 to 28 November"
+            ),
+            (
+                "If talks fail, strikes could begin 19–28 November.", .conditional,
+                "19–28 November"
+            ),
+        ]
+        for entry in cases {
+            let found = extract(entry.sentence).first
+            check(found?.kind == entry.kind, "range kind for: \(entry.sentence)")
+            check(
+                found?.dateText == entry.dateText,
+                "range dateText '\(entry.dateText)' for: \(entry.sentence), got '\(found?.dateText ?? "nil")'")
+            if let dateText = found?.dateText {
+                check(entry.sentence.contains(dateText), "verbatim substring for: \(entry.sentence)")
+            }
+        }
+        check(extract("The talks were scheduled for 19–25 October.").isEmpty, "past range stays excluded")
+        check(extract("The talks took place from 10 to 15 October.").isEmpty, "past full-date range stays excluded")
+        let ongoing = ForwardWatchExtractor.classify(
+            "The talks are scheduled for 25–30 October.", publishedAt: now)
+        check(ongoing?.0 == .scheduled && ongoing?.1 == "25–30 October", "ongoing range keeps its complete span")
     }
 }

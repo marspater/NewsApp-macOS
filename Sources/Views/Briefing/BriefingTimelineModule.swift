@@ -79,7 +79,8 @@ struct BriefingTimelineData: Equatable, Sendable {
     /// no occurrence date, so neither forms or orders a thread. A range or list ("19 to 28 November") is no single
     /// occurrence date either: it is never a turning point and never starts a "day N" count (#1249).
     static func orderingDate(of item: OverviewTimelineItem) -> Date? {
-        guard item.dateKind == .stated, item.datePrecision != nil, item.orderingEndDateMayHoldInferredYear == nil
+        guard item.dateKind == .stated, let precision = item.datePrecision, precision != .range,
+            item.orderingEndDateMayHoldInferredYear == nil
         else { return nil }
         return item.eventDate ?? item.orderingDateMayHoldInferredYear
     }

@@ -114,17 +114,51 @@ enum ForwardWatchExtractor {
         return condition && matches(lower, Pattern.consequence)
     }
 
-    /// A day or date ahead of publication, exactly as written. A calendar date must not be in the past; a weekday or
-    /// "next week" needs a future marker so "met on Tuesday" never counts.
+    /// A day, date, or date range ahead of publication, exactly as written. A calendar date (or the end of a range or
+    /// list) must not be in the past; a weekday or "next week" needs a future marker so "met on Tuesday" never counts.
     private static func scheduleDate(in sentence: String, publishedAt: Date) -> String? {
-        if let stated = OverviewTimelineBuilder.singleStatedDate(in: sentence),
-            let resolved = OverviewTimelineBuilder.resolve(stated, publishedAt: publishedAt)
-        {
-            guard resolved >= Calendar.utc.startOfDay(for: publishedAt) else { return nil }
-            return firstMatch(sentence, Pattern.calendarDate)
+        if let match = OverviewTimelineBuilder.statedExpressionMatch(in: sentence) {
+            let today = Calendar.utc.startOfDay(for: publishedAt)
+            switch match.expression {
+            case .date(let stated):
+                guard let resolved = OverviewTimelineBuilder.resolve(stated, publishedAt: publishedAt),
+                    resolved >= today
+                else { return nil }
+                return firstMatch(sentence, Pattern.calendarDate)
+                    ?? verbatimDateText(in: sentence, matchRange: match.range, isRange: false, isCombined: false)
+            case .span(let span):
+                guard let placed = OverviewTimelineBuilder.placedDates(of: span, publishedAt: publishedAt),
+                    let latest = placed.map(\.at).max(), latest >= today
+                else { return nil }
+                return verbatimDateText(
+                    in: sentence, matchRange: match.range, isRange: span.isRange, isCombined: match.isCombined)
+            }
         }
         guard matches(sentence.lowercased(), Pattern.futureMarker) else { return nil }
         return firstMatch(sentence, Pattern.relativeDay)
+    }
+
+    /// Slices the verbatim date expression from `sentence`, keeping the leading preposition (`from`/`between` for a
+    /// range, or `on`/`in` for a single phrase) when present.
+    private static func verbatimDateText(
+        in sentence: String, matchRange: NSRange, isRange: Bool, isCombined: Bool
+    ) -> String? {
+        guard let range = Range(matchRange, in: sentence) else { return nil }
+        var end = range.upperBound
+        while end > range.lowerBound, sentence[sentence.index(before: end)] == "." {
+            end = sentence.index(before: end)
+        }
+        guard end > range.lowerBound else { return nil }
+        let prefix = sentence[..<range.lowerBound]
+        if isRange,
+            let lead = prefix.range(of: #"\b(?:from|between)\s+$"#, options: [.regularExpression, .caseInsensitive])
+        {
+            return String(sentence[lead.lowerBound..<end])
+        }
+        if !isCombined, let lead = prefix.range(of: #"\b(?:on|in)\s+$"#, options: .regularExpression) {
+            return String(sentence[lead.lowerBound..<end])
+        }
+        return String(sentence[range.lowerBound..<end])
     }
 
     private static func matches(_ text: String, _ regex: NSRegularExpression) -> Bool {
