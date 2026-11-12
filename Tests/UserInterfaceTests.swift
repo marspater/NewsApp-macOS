@@ -1149,15 +1149,18 @@ extension NewsTests {
                 article.imageUrl, "https://cdn.example/cancelled-found-1.jpg",
                 "Article with looked-up photo receives the image")
 
+            // The cancelled pass's own late signal can still advance the revision, so the completed pass is checked by
+            // its callback: it reports the photo it saved before it returns, once.
+            let completedSaves = OSAllocatedUnfairLock(initialState: 0)
             let completedReport = try await StoryCurator.run(in: cancelDb, imageFinder: cancelFinder, now: now) {
+                completedSaves.withLock { $0 += 1 }
                 Task { @MainActor in
                     store.noteStoryImageSaved()
                 }
             }
             assertEqual(completedReport.imagesFound, 1, "Completed pass continues to behave properly")
-            await eventually("A completed pass advances the store revision too") {
-                await store.revision > currentRev
-            }
+            assertEqual(
+                completedSaves.withLock { $0 }, 1, "A completed pass reports its saved photo once, before it returns")
             await cancelDb.close()
         }
 

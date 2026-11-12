@@ -378,6 +378,15 @@ extension NewsTests {
         assertTrue(
             both?.reasons.count == 2 && both?.reasons.first?.contains("10 publishers") == true,
             "The sheet says what was counted")
+        let parts = WorldTensionNearYou.evidence(war(5) + home(3), region: poland, endingAt: now, worldScore: 40)
+        assertTrue(
+            parts?.neighbourReason?.contains("War next door +9°") == true
+                && parts?.neighbourReason?.contains("5 publishers") == true,
+            "The sheet names the war next door with its degrees and publishers")
+        assertTrue(
+            parts?.domesticReason?.contains("Poland at home +2°") == true
+                && parts?.domesticReason?.contains("3 publishers") == true,
+            "The sheet names the crisis at home with its degrees and publishers")
 
         let reasons = WorldTensionFactor.allCases.map {
             WorldTensionAssessment.Reason(factor: $0, explanation: "A fictional reason for the test.")
