@@ -128,12 +128,13 @@ enum TodayEditionAssigner {
 
     /// Subscribed entries, deduplicated by story identity so an event never enters twice.
     private static func eligibleEntries(_ entries: [FeedEntry], context: TodayAssignmentContext) -> [FeedEntry] {
+        let subscribedKeys = context.subscribedFeedURLs.map(feedKeys)
         var seenStoryKeys = Set<String>()
         var eligible: [FeedEntry] = []
         for entry in entries {
             let signals = context.signalsByEntryID[entry.id]
-            if let subscribed = context.subscribedFeedURLs,
-                !isSubscribed(entry, signals: signals, in: subscribed)
+            if let subscribed = context.subscribedFeedURLs, let subscribedKeys,
+                !isSubscribed(entry, signals: signals, in: subscribed, keys: subscribedKeys)
             {
                 continue
             }
@@ -153,11 +154,12 @@ enum TodayEditionAssigner {
     /// the stored feed identity never hides an eligible story.
     static func unsubscribedEntryIDs(_ entries: [FeedEntry], context: TodayAssignmentContext) -> Set<String> {
         guard let subscribed = context.subscribedFeedURLs else { return [] }
+        let keys = feedKeys(subscribed)
         return Set(
             entries.filter { entry in
                 let signals = context.signalsByEntryID[entry.id]
                 return !feedURLs(of: entry, signals: signals).isEmpty
-                    && !isSubscribed(entry, signals: signals, in: subscribed)
+                    && !isSubscribed(entry, signals: signals, in: subscribed, keys: keys)
             }.map(\.id))
     }
 
@@ -165,12 +167,17 @@ enum TodayEditionAssigner {
         Set(entry.visibleArticles.compactMap(\.identityFeedURL)).union(signals?.feedURLs ?? [])
     }
 
+    /// The subscriptions as feed keys, worked out once per pass rather than once per story.
+    private static func feedKeys(_ subscribed: Set<String>) -> Set<String> {
+        Set(subscribed.map(AppSettings.feedKey))
+    }
+
     private static func isSubscribed(
         _ entry: FeedEntry,
         signals: TodayStorySignals?,
-        in subscribed: Set<String>
+        in subscribed: Set<String>,
+        keys subscribedKeys: Set<String>
     ) -> Bool {
-        let subscribedKeys = Set(subscribed.map(AppSettings.feedKey))
         let candidateURLs = feedURLs(of: entry, signals: signals)
         return candidateURLs.contains { url in
             subscribed.contains(url) || subscribedKeys.contains(AppSettings.feedKey(url))
