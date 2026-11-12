@@ -113,7 +113,7 @@ One name means one thing. Before adding a name, check this table and the names a
 | `your_beat_qualifying_24h` | A Today shadow run: stories of the last 24 h that clear Your Beat's bar, before its cap |
 | `your_beat_top_share`, `your_beat_top3_share` | A Today shadow run: among those stories, the share of the busiest publisher and of the busiest three |
 | `your_beat_shown_top_share`, `your_beat_shown_top3_share` | A Today shadow run: the same two shares inside Your Beat as the 72 h edition shows it |
-| `your_beat_qualifying_24h_newest15`, `your_beat_qualifying_24h_newest5` | A Today shadow run: `your_beat_qualifying_24h` with the reading history cut to its newest 15 and its newest 5 stories |
+| `your_beat_qualifying_24h_newest50`, `your_beat_qualifying_24h_newest25`, `your_beat_qualifying_24h_newest15`, `your_beat_qualifying_24h_newest5` | A Today shadow run: `your_beat_qualifying_24h` with the reading history cut to its newest 50, 25, 15 and 5 stories |
 | `outside_clearing` | A Today shadow run: stories that clear Outside Your Usual's bar, before its cap |
 
 A rescored run keeps its replay and changes only the labels; its `dataset` names the label set, for example `validation-2026-10-29+reviewed-labels-pegged-as-same`.

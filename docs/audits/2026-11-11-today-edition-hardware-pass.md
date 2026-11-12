@@ -69,4 +69,17 @@ First card after process start, from the app's own `First card visible` log line
 
 None of the three budgets Z5 (#937) names is recorded as met.
 
+### Paired launch comparison, 12 November 2026
+
+I asked for a paired Release comparison against the build before Today. Baseline `ba1853e` and current `main` `f742e0b`, both Release, ad-hoc signed, bundle id `com.marspater.news.isolatedqa`, macOS 27.2.1, dark appearance. Seven alternating rounds, the first discarded; the same library copy (3,056 articles) was restored before every launch, and each window opened in the background and ran 25 seconds. The criterion was fixed before the run: confirmed if the median on `main` exceeds the baseline's by more than 10 % and `main` is slower in at least 5 of 6 rounds.
+
+| Build | First card, ms: median (range) | Footprint after 25 s, median | Peak, median |
+| --- | --- | --- | --- |
+| Baseline `ba1853e` | 906 (844 to 967) | 426 MB | 456 MB |
+| `main` `f742e0b` | 1,200 (1,136 to 1,232) | 557 MB | 599 MB |
+
+- **The slower first card is confirmed:** 294 ms at the median (32 %), slower in 6 of 6 rounds by 178 to 357 ms, and the two ranges do not overlap.
+- **This was not a quiet Mac.** The load average was 3.8 to 7.1 during the run (the Mac was in use), and both builds are slower than in the rows above. The difference between the builds stands; the absolute figures are not budget figures. A run on an idle Mac is still owed before a budget is set.
+- **Memory:** `main` holds about 130 MB more after 25 seconds and about 140 MB more at its peak. The footprints here are higher than above for both builds. The cause was not looked into; the rows above relaunched a library left in place, and here it was restored before every launch.
+
 **Options for the first card, for Mars:** keep the wait and set Today's budget from a clean measurement; or remember the last edition's lanes and lay the page out from them at launch, refreshing the assignment in place afterwards, which removes the wait at the price of a new stored value.

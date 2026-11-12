@@ -17,7 +17,7 @@ import Foundation
 /// The comparisons of 11 November 2026 for Z2 (`#934`), run inside `--today-shadow` on the same copy, clock and
 /// subscription list as the main report. In Motion: the shipped rule beside an update window of 24 h and 36 h, each
 /// with and without rising momentum. Your Beat: the shipped publisher affinity beside narrower ones, each for the
-/// whole reading history, its newest 15 and 5 stories, and none. The report holds counts only; one private sheet
+/// whole reading history, its newest 50, 25, 15 and 5 stories, and none. The report holds counts only; one private sheet
 /// lists the stories each In Motion variant lets through.
 extension TodayShadowEvaluation {
     struct ComparisonInputs {
@@ -268,7 +268,7 @@ extension TodayShadowEvaluation {
         }
 
         let histories: [(name: String, limit: Int)] = [
-            ("whole", 200), ("newest-15", 15), ("newest-5", 5), ("none", 0),
+            ("whole", 200), ("newest-50", 50), ("newest-25", 25), ("newest-15", 15), ("newest-5", 5), ("none", 0),
         ]
         var reports: [YourBeatVariantReport] = []
         for history in histories {
@@ -289,16 +289,27 @@ extension TodayShadowEvaluation {
             func withMinimum(_ stories: Int) -> Set<String> {
                 shippedAffinity.filter { storiesRead[$0, default: 0] >= stories }
             }
+            func perStory(_ publishers: [String: Double]) -> Set<String> {
+                topQuartile(publishers) { key, _ in
+                    windowWeights[key, default: 0] / Double(max(1, published[key, default: 0]))
+                }
+            }
             let rules: [(name: String, affinity: Set<String>, interestMinimum: Double)] = [
                 ("current", shippedAffinity, 0),
                 ("booster-0.20", shippedAffinity, 0.20),
                 ("booster-0.30", shippedAffinity, 0.30),
                 ("booster-0.40", shippedAffinity, 0.40),
+                ("per-story-published", perStory(engaged), 0),
+                // The combined rule of 12 November 2026, in its two readings: the floor of 5 read or saved
+                // stories removes publishers from the per-story quartile, or the quartile is taken among the
+                // publishers that reach the floor.
                 (
-                    "per-story-published",
-                    topQuartile(engaged) { key, _ in
-                        windowWeights[key, default: 0] / Double(max(1, published[key, default: 0]))
-                    }, 0
+                    "per-story-then-minimum-5",
+                    perStory(engaged).filter { storiesRead[$0, default: 0] >= 5 }, 0
+                ),
+                (
+                    "per-story-among-minimum-5",
+                    perStory(engaged.filter { storiesRead[$0.key, default: 0] >= 5 }), 0
                 ),
                 ("minimum-3-stories", withMinimum(3), 0),
                 ("minimum-5-stories", withMinimum(5), 0),
