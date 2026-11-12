@@ -1,0 +1,147 @@
+#!/bin/bash
+# Paired launches for Today's first card and its memory (#937): each arm's app starts on the same library copy,
+# restored before every launch, in an order that rotates by round. It opens the app in a window, so it runs only
+# when the Mac is free for a measurement (docs/audits/2026-11-07-build-measurement-protocol.md); never in CI.
+#   script/paired_launch.sh OUT ROUNDS arm=/path/News.app [arm=/path/News.app ...]
+# Arms; script/summarize_launches.py counts a launch only when its log shows the arm's state:
+#   baseline  a build before the Today edition
+#   cold      nothing stored: the page waits for the lane assignment
+#   warm      the edition stored by a seeding launch on the same copy: the page shows it at once
+#   swap      that edition with one lane row reversed, so the fresh edition differs and takes the untouched page
+# Every app is a Profile build (always com.marspater.news.dev); the library is a copy named by NEWS_LIBRARY_NAME in
+# the development container, so neither the development library nor the real one is opened. The container's
+# settings and caches are the development build's own and are shared by every arm.
+#   NEWS_PAIRED_LIBRARY    the copy every launch starts from (required): a SQLite backup, never a library in use
+#   NEWS_PAIRED_SETTLE     seconds from launch to the memory sample (default 20)
+#   NEWS_PAIRED_HOLD=1     after the sample, wait for Return and sample again as "scrolled": for scrolling by hand
+#   NEWS_PAIRED_MAX_LOAD   refuse to start above this one-minute load average (default 2.5)
+set -euo pipefail
+[[ $# -ge 3 ]] || { sed -n '2,17p' "$0" >&2; exit 2; }
+cd "$(dirname "$0")/.."
+OUT=$1 ROUNDS=$2
+shift 2
+BUNDLE_ID=com.marspater.news.dev
+NAME=paired-launch
+LIB="$HOME/Library/Containers/$BUNDLE_ID/Data/Library/Application Support/com.marspater.news"
+PRISTINE="${NEWS_PAIRED_LIBRARY:?Set NEWS_PAIRED_LIBRARY to the library copy every launch starts from}"
+SETTLE="${NEWS_PAIRED_SETTLE:-20}"
+LOCK=/tmp/news-measure.lock # shared with script/measure_build.sh: one measurement per Mac
+
+ARMS=() APPS=()
+for spec in "$@"; do
+    arm=${spec%%=*} app=${spec#*=}
+    [[ "$arm" =~ ^(baseline|cold|warm|swap)$ ]] || { echo "❌ Unknown arm $arm" >&2; exit 2; }
+    # ${ARMS[*]-}: macOS bash 3.2 treats an empty array as unbound under `set -u`.
+    [[ " ${ARMS[*]-} " != *" $arm "* ]] || { echo "❌ Arm $arm is named twice" >&2; exit 2; }
+    app=$(cd "$app" && pwd -P)
+    # Never the real app: its container holds the reader's library.
+    id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")
+    [[ "$id" == "$BUNDLE_ID" ]] || { echo "❌ $app is $id, expected $BUNDLE_ID; refusing to launch" >&2; exit 1; }
+    ARMS+=("$arm") APPS+=("$app")
+done
+[[ -f "$PRISTINE" && -d "$LIB" ]] || { echo "❌ Missing $PRISTINE or the development container's library folder" >&2; exit 1; }
+# Anchored, so the shell of a session that waits for a free Mac with these words in its command does not match.
+if pgrep -f '[x]codebuild -project|^/bin/bash \./test\.sh' >/dev/null; then
+    echo "❌ A build or test run is active; not measuring." >&2
+    exit 1
+fi
+if pgrep -x News >/dev/null; then echo "❌ A News app is running; quit it first." >&2; exit 1; fi
+LOAD=$(sysctl -n vm.loadavg | awk '{print $2}')
+if awk -v load="$LOAD" -v limit="${NEWS_PAIRED_MAX_LOAD:-2.5}" 'BEGIN { exit !(load > limit) }'; then
+    echo "❌ Load average $LOAD: the Mac is not idle." >&2
+    exit 1
+fi
+mkdir "$LOCK" 2>/dev/null || { echo "❌ Another measurement holds $LOCK." >&2; exit 1; }
+PID=""
+trap cleanup EXIT
+mkdir -p "$OUT"
+OUT=$(cd "$OUT" && pwd)
+chmod 700 "$OUT" # the stored edition kept here can hold a sentence of a report
+
+quit() {
+    [[ -n "$PID" ]] || return 0
+    kill "$PID" 2>/dev/null || true
+    for _ in $(seq 1 200); do kill -0 "$PID" 2>/dev/null || break; sleep 0.05; done
+    kill -KILL "$PID" 2>/dev/null || true
+    wait "$PID" 2>/dev/null || true
+    PID=""
+}
+cleanup() {
+    quit
+    rm -f "$LIB/$NAME.sqlite3"*
+    rm -rf "$LOCK" # last, so cleanup never overlaps a next run
+}
+
+# Starts the app on a fresh copy of the library, with the given stored edition beside it or none.
+launch() { # <app> <stored edition or "">
+    rm -f "$LIB/$NAME.sqlite3"*
+    cp "$PRISTINE" "$LIB/$NAME.sqlite3"
+    [[ -z "$2" ]] || cp "$2" "$LIB/$NAME.sqlite3.today-edition.json"
+    # The executable directly, as xctrace launches it: the environment is certain to reach it.
+    NEWS_LIBRARY_NAME="$NAME" "$1/Contents/MacOS/News" -first_launch_completed YES -notifications_enabled NO \
+        >/dev/null 2>&1 &
+    PID=$!
+    sleep "$SETTLE"
+    # lsof can exit non-zero beside a complete listing, so its output is read, not its status.
+    [[ "$(lsof -p "$PID" 2>/dev/null || true)" == *"/$NAME.sqlite3"* ]] \
+        || { echo "❌ The app did not open the $NAME library; stopping." >&2; exit 1; }
+}
+
+index_of() { # <arm>; prints its position or nothing
+    for i in "${!ARMS[@]}"; do [[ "${ARMS[$i]}" != "$1" ]] || { echo "$i"; return; }; done
+}
+
+SEED="$OUT/seed.today-edition.json"
+SWAP_SEED="$OUT/seed-swap.today-edition.json"
+seeder=$(index_of warm)
+seeder=${seeder:-$(index_of swap)}
+if [[ -n "$seeder" ]]; then
+    launch "${APPS[$seeder]}" ""
+    quit
+    cp "$LIB/$NAME.sqlite3.today-edition.json" "$SEED" \
+        || { echo "❌ The seeding launch stored no edition; the warm and swap arms cannot run." >&2; exit 1; }
+fi
+if [[ -n "$(index_of swap)" ]]; then
+    python3 - "$SEED" "$SWAP_SEED" <<'PY'
+import json, sys
+edition = json.load(open(sys.argv[1]))
+row = next((lane for lane in edition["lanes"]
+            if lane["lane"] not in ("The Lead", "The Latest") and len(lane["stories"]) > 1), None)
+if row is None:
+    sys.exit("No lane row with two stories to reverse for the swap arm")
+row["stories"].reverse()
+json.dump(edition, open(sys.argv[2], "w"))
+PY
+fi
+
+one() { # <round> <arm> <app>
+    local stem="$OUT/r$1-$2" stored="" start
+    case "$2" in warm) stored=$SEED ;; swap) stored=$SWAP_SEED ;; esac
+    sleep 2
+    sysctl -n vm.loadavg | awk '{print $2}' > "$stem.load"
+    start=$(date -v-2S '+%Y-%m-%d %H:%M:%S')
+    launch "$3" "$stored"
+    footprint -p "$PID" > "$stem.settled.footprint" 2>&1 || true
+    if [[ "${NEWS_PAIRED_HOLD:-0}" == 1 ]]; then
+        read -r -p "Round $1 $2: scroll as planned, then press Return " _
+        footprint -p "$PID" > "$stem.scrolled.footprint" 2>&1 || true
+    fi
+    /usr/bin/log show --start "$start" --info --predicate \
+        "subsystem == \"com.marspater.news\" AND category == \"Launch\" AND processIdentifier == $PID" \
+        > "$stem.log" 2>/dev/null
+    quit
+    echo "round $1 $2: $(sed -n 's/.*\(First card visible .*\)/\1/p' "$stem.log" | head -1)"
+}
+
+COUNT=${#ARMS[@]}
+for round in $(seq 1 "$ROUNDS"); do
+    for step in $(seq 0 $((COUNT - 1))); do
+        i=$(((round - 1 + step) % COUNT))
+        one "$round" "${ARMS[$i]}" "${APPS[$i]}"
+    done
+done
+
+python3 script/summarize_launches.py "$OUT" --meta "script_revision=$(git rev-parse HEAD)" "rounds=$ROUNDS" \
+    "settle_seconds=$SETTLE" "hardware=$(sysctl -n hw.model)" "os=$(sw_vers -productVersion)" \
+    "load_at_start=$LOAD"
+echo "Paired launches: $OUT"
