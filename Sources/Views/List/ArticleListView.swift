@@ -1352,8 +1352,8 @@ struct ArticleListView: View {
         // for or another day's stories lay the edition out afresh. A restored edition is never the one kept.
         // While another day's page waits for its grouping, the edition on screen is not laid out again from the
         // earlier day's stories: the next edition is the new day's.
-        let keeps =
-            !showsRestored && (isHoldingList || newDay.isWaiting) && previous?.generation == todayGeneration
+        let keeps = TodayEdition.keepsLanes(
+            of: previous, isHolding: isHoldingList || newDay.isWaiting, generation: todayGeneration)
         NewsSignposts.launchMilestone("today_edition_requested")
         var edition = await articleStore.todayEdition(
             entries: listed, reader: reader, keeping: keeps ? previous : nil, generation: todayGeneration)
@@ -1409,9 +1409,7 @@ struct ArticleListView: View {
                 + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) new_day=\(awaitsNewDay)")
         switch outcome {
         case .held:
-            var kept = previous
-            kept.isRestored = false
-            todayEdition = kept
+            todayEdition = previous.heldBehindUpdates
             todayAwaitsFreshEdition = true
             return false
         case .confirmed:
