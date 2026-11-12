@@ -45,7 +45,7 @@ def review_rows(data):
     """The key's stories in an order that depends only on their ids, so it says nothing about a ranking."""
     rows = [{'story': row['id'], 'publisher': row['publisher'], 'title': row['title'], 'summary': row['summary'],
              'label': '', 'note': ''} for row in data['stories']]
-    salt = '\n'.join(row['story'] for row in rows)
+    salt = '\n'.join(sorted(row['story'] for row in rows))
     return sorted(rows, key=lambda row: hashlib.sha256(f"{salt}\n{row['story']}".encode()).hexdigest())
 
 
