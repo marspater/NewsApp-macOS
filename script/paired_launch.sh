@@ -24,10 +24,13 @@ cd "$(dirname "$0")/.."
 OUT=$1 ROUNDS=$2
 shift 2
 BUNDLE_ID=com.marspater.news.dev
-NAME=paired-launch
+NAME=""
+NAME_DIR=""
 LIB="$HOME/Library/Containers/$BUNDLE_ID/Data/Library/Application Support/com.marspater.news"
 PRISTINE="${NEWS_PAIRED_LIBRARY:?Set NEWS_PAIRED_LIBRARY to the library copy every launch starts from}"
 SETTLE="${NEWS_PAIRED_SETTLE:-20}"
+[[ "$ROUNDS" =~ ^[1-9][0-9]*$ && "$SETTLE" =~ ^[1-9][0-9]*$ && "${NEWS_PAIRED_SWAP_WAIT:-60}" =~ ^[1-9][0-9]*$ ]] \
+    || { echo "❌ ROUNDS, NEWS_PAIRED_SETTLE and NEWS_PAIRED_SWAP_WAIT must be positive integers." >&2; exit 2; }
 LOCK=/tmp/news-measure.lock # shared with script/measure_build.sh: one measurement per Mac
 
 ARMS=() APPS=()
@@ -54,13 +57,17 @@ if awk -v load="$LOAD" -v limit="${NEWS_PAIRED_MAX_LOAD:-2.5}" 'BEGIN { exit !(l
     echo "❌ Load average $LOAD: the Mac is not idle." >&2
     exit 1
 fi
-mkdir "$LOCK" 2>/dev/null || { echo "❌ Another measurement holds $LOCK." >&2; exit 1; }
-PID=""
-trap cleanup EXIT
+# Refuse nonempty output directories: a previous run's files must not pollute the current sample.
+# Do all output setup before locking, so failure leaves the shared lock untouched.
 mkdir -p "$OUT"
-OUT=$(cd "$OUT" && pwd)
-chmod 700 "$OUT" # the stored edition kept here can hold a sentence of a report
+OUT=$(cd "$OUT" && pwd -P)
+if [[ -n "$(find "$OUT" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    echo "❌ $OUT is not empty; choose a fresh output directory." >&2
+    exit 1
+fi
+chmod 700 "$OUT" # stored editions can contain a sentence of a report
 
+PID=""
 quit() {
     [[ -n "$PID" ]] || return 0
     kill "$PID" 2>/dev/null || true
@@ -71,9 +78,16 @@ quit() {
 }
 cleanup() {
     quit
-    rm -f "$LIB/$NAME.sqlite3"*
-    rm -rf "$LOCK" # last, so cleanup never overlaps a next run
+    # Delete only this invocation's randomly named working library.
+    if [[ -n "$NAME" ]]; then rm -f "$LIB/$NAME.sqlite3"*; fi
+    if [[ -n "$NAME_DIR" ]]; then rmdir "$NAME_DIR" 2>/dev/null || true; fi
+    rmdir "$LOCK" 2>/dev/null || true # last, after owned working files are removed
 }
+
+mkdir "$LOCK" 2>/dev/null || { echo "❌ Another measurement holds $LOCK." >&2; exit 1; }
+trap cleanup EXIT
+NAME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/paired-launch-XXXXXX")
+NAME=${NAME_DIR##*/}
 
 # Starts the app on a fresh copy of the library, with the given stored edition beside it or none.
 launch() { # <app> <stored edition or ""> <arm>
@@ -119,6 +133,22 @@ json.dump(edition, open(sys.argv[1], "w"))
 PY
 done
 
+# Sample swap memory only once the actual fresh-edition swap has been logged for this process.
+wait_for_swap() { # <launch start> <pid>
+    local started="$1" pid="$2" lines
+    local deadline=$((SECONDS + ${NEWS_PAIRED_SWAP_WAIT:-60}))
+    while ((SECONDS <= deadline)); do
+        kill -0 "$pid" 2>/dev/null || return 1
+        lines=$(/usr/bin/log show --start "$started" --info --predicate \
+            "subsystem == \"com.marspater.news\" AND category == \"Launch\" AND processIdentifier == $pid" \
+            2>/dev/null || true)
+        if [[ "$lines" == *"today_fresh_edition_ready outcome=swapped "* ]]; then return 0; fi
+        if [[ "$lines" == *"today_fresh_edition_ready outcome="* ]]; then return 1; fi
+        sleep 1
+    done
+    return 1
+}
+
 one() { # <round> <arm> <app>
     local stem="$OUT/r$1-$2" stored="" start
     case "${2%%_*}" in warm | swap) stored="$OUT/seed-$2.today-edition.json" ;; esac
@@ -126,10 +156,17 @@ one() { # <round> <arm> <app>
     sysctl -n vm.loadavg | awk '{print $2}' > "$stem.load"
     start=$(date -v-2S '+%Y-%m-%d %H:%M:%S')
     launch "$3" "$stored" "$2"
-    footprint -p "$PID" > "$stem.settled.footprint" 2>&1 || true
-    if [[ "${NEWS_PAIRED_HOLD:-0}" == 1 ]]; then
-        read -r -p "Round $1 $2: scroll as planned, then press Return " _
-        footprint -p "$PID" > "$stem.scrolled.footprint" 2>&1 || true
+    local can_sample=1
+    if [[ "${2%%_*}" == swap ]] && ! wait_for_swap "$start" "$PID"; then
+        echo "⚠️ Round $1 $2: no observed swap; skipping post-swap memory." >&2
+        can_sample=0
+    fi
+    if [[ "$can_sample" == 1 ]]; then
+        footprint -p "$PID" > "$stem.settled.footprint" 2>&1 || true
+        if [[ "${NEWS_PAIRED_HOLD:-0}" == 1 ]]; then
+            read -r -p "Round $1 $2: scroll as planned, then press Return " _
+            footprint -p "$PID" > "$stem.scrolled.footprint" 2>&1 || true
+        fi
     fi
     /usr/bin/log show --start "$start" --info --predicate \
         "subsystem == \"com.marspater.news\" AND category == \"Launch\" AND processIdentifier == $PID" \
