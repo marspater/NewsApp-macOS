@@ -167,15 +167,23 @@ public struct OverviewComposer: Sendable {
     /// A page's title block: the article's own title, bare or followed only by a dateline ("Nov 10, 2026 6:40 PM
     /// EST."). The dateline's closing full stop hides it from `isHeading`, so the title is matched directly. A title
     /// followed by a real sentence is a statement (#1266).
+    // Requiring a separator before every token prevents an untrusted digit run from being split in exponentially
+    // many ways. Explicit month and weekday names avoid mistaking "monthly" for "Monday" (#1266).
     private static let datelineRemainder: NSRegularExpression = {
+        let months =
+            "jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|"
+            + "september|oct|october|nov|november|dec|december"
+        let weekdays =
+            "mon|monday|tue|tues|tuesday|wed|weds|wednesday|thu|thur|thurs|thursday|fri|friday|sat|"
+            + "saturday|sun|sunday"
         let words =
-            "published|updated|posted|on|at|am|pm|a\\.m|p\\.m|utc|gmt|[ecmpa][sd]?t|e?e[sd]?t|ce[sd]?t|bst|ist|jst|aest|aedt|"
-            + "(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*|"
-            + "(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*"
+            "published|updated|posted|on|at|am|pm|a\\.m|p\\.m|utc|gmt|et|est|edt|ct|cst|cdt|"
+            + "mt|mst|mdt|pt|pst|pdt|ast|adt|eet|eest|cet|cest|bst|ist|jst|aest|aedt|"
+            + months + "|" + weekdays
         let token = #"(?:\d{1,4}(?::\d{2}){0,2}(?:st|nd|rd|th)?|"# + words + #")"#
         guard
             let expression = try? NSRegularExpression(
-                pattern: #"^(?:[\s,.|·•–—-]*"# + token + #")*[\s,.|·•–—-]*$"#, options: [.caseInsensitive])
+                pattern: #"^(?:[\s,.|·•–—-]+"# + token + #")+[\s,.|·•–—-]*$"#, options: [.caseInsensitive])
         else { preconditionFailure("The dateline pattern is valid") }
         return expression
     }()

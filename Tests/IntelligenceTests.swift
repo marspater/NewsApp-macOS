@@ -3160,6 +3160,25 @@ extension NewsTests {
             "A title followed by a sentence is a statement")
         assertFalse(OverviewComposer.isTitleBlock("\(dateline)", title: ""), "No title, no title block")
 
+        assertTrue(
+            OverviewComposer.isTitleBlock("\(title) Monday, November 10, 2026 6:40 PM EST.", title: title),
+            "Full weekday and month names are valid dateline tokens")
+        assertFalse(
+            OverviewComposer.isTitleBlock("\(title) \(String(repeating: "1234567890", count: 4))x.", title: title),
+            "Uninterrupted digits followed by text must not match as a dateline")
+
+        let bankTitle = "The central bank will review interest rates"
+        let monthly = "\(bankTitle) monthly."
+        let bankArticle = FeedArticle(
+            storedID: "bank", title: bankTitle, link: "https://example.com/bank", guid: "bank", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Bank News")
+        let monthlyFact = PassageAnchoredFact(
+            id: "bank-monthly", statement: monthly, passageID: "bank-p", quote: monthly, articleID: "bank")
+        assertFalse(OverviewComposer.isTitleBlock(monthly, title: bankTitle), "Monthly is not Monday")
+        assertEqual(
+            OverviewComposer.highlights(from: [monthlyFact], articles: [bankArticle]).map(\.statement), [monthly],
+            "The complete monthly statement stays a Highlight")
+
         let passages = [
             EvidencePassage(
                 id: "t1-head", articleID: "t1",

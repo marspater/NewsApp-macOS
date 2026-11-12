@@ -130,6 +130,25 @@ extension NativeSuites.PublisherExcerptSuite {
             pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Harbour Daily")
         let dateline = "Nov 10, 2026 6:40 PM EST."
         expectTrue(OverviewComposer.isTitleBlock("\(title) \(dateline)", title: title), "Title and dateline")
+
+        expectTrue(
+            OverviewComposer.isTitleBlock("\(title) Monday, November 10, 2026 6:40 PM EST.", title: title),
+            "Full weekday and month names remain datelines")
+        expectTrue(
+            !OverviewComposer.isTitleBlock("\(title) \(String(repeating: "1234567890", count: 4))x.", title: title),
+            "An uninterrupted digit run with trailing text must not match")
+
+        let bankTitle = "The central bank will review interest rates"
+        let monthly = "\(bankTitle) monthly."
+        let bankArticle = FeedArticle(
+            storedID: "bank", title: bankTitle, link: "https://example.com/bank", guid: "bank", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Bank News")
+        let monthlyFact = PassageAnchoredFact(
+            id: "bank-monthly", statement: monthly, passageID: "bank-p", quote: monthly, articleID: "bank")
+        expectTrue(!OverviewComposer.isTitleBlock(monthly, title: bankTitle), "Monthly is not Monday")
+        expectTrue(
+            OverviewComposer.highlights(from: [monthlyFact], articles: [bankArticle]).map(\.statement) == [monthly],
+            "The monthly sentence is not discarded as a dateline")
         expectTrue(
             !OverviewComposer.isTitleBlock("\(title) Union leaders said the strike would continue.", title: title),
             "A title followed by a sentence is a statement")
