@@ -81,7 +81,7 @@ Reviewed and left alone, with the reason: `EventMatchKey.language` on short head
 
 ## Local measurement and decisions — 24 October 2026 (#509, #508)
 
-Run on Mars's Mac (Xcode 27.0 `27A266a`, Swift 6.4, macOS 27.0.1, arm64) from this branch. Private corpus SHA-256 `868c62a0ec973d07aa2ca3d63de8623fbe866359d1e082fadacd7bd456acf2a0`, English only, judge off, production article budget, MiniLM available (`Sources/Resources/Models`). Receipts: `~/Documents/NewsHoldout-2026-10-03/hardening-replay-2026-10-24/` (private, mode 0700). Aggregates: [`docs/benchmarks/2026-10-24-matcher-hardening-holdout.json`](../benchmarks/2026-10-24-matcher-hardening-holdout.json). Ids only below; no headlines.
+Run on my Mac (Xcode 27.0 `27A266a`, Swift 6.4, macOS 27.0.1, arm64) from this branch. Private corpus SHA-256 `868c62a0ec973d07aa2ca3d63de8623fbe866359d1e082fadacd7bd456acf2a0`, English only, judge off, production article budget, MiniLM available (`Sources/Resources/Models`). Receipts: `~/Documents/NewsHoldout-2026-10-03/hardening-replay-2026-10-24/` (private, mode 0700). Aggregates: [`docs/benchmarks/2026-10-24-matcher-hardening-holdout.json`](../benchmarks/2026-10-24-matcher-hardening-holdout.json). Ids only below; no headlines.
 
 ### Holdout (49 English articles, 38 labeled pairs)
 

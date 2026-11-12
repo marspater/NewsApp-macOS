@@ -4,7 +4,7 @@ Refs #547 (epic L, #573). Source: `mars/l-547-perspectives`, stacked on #650. Sa
 
 ## Perspectives
 
-Target: at least 60 % of multi-source events with two or more perspectives; Mars raised it on review to clearly above 61 %, on every stored-text replay and on a fresh live run, since run-to-run noise spans about two points. The 10 October figure (25/55, 45 %) came from a different window.
+Target: at least 60 % of multi-source events with two or more perspectives; I raised it on review to clearly above 61 %, on every stored-text replay and on a fresh live run, since run-to-run noise spans about two points. The 10 October figure (25/55, 45 %) came from a different window.
 
 Live runs (fresh library copy, publisher text fetched):
 
@@ -50,7 +50,7 @@ Second pass, after the 61 % review (general forms found in the 46 events still b
 - After the coordinator check: a position ends before a contrast clause with another party (", while organisers put the figure at…", ", whereas the SNS…"). A quoted fragment of a few words takes the clause that holds it: the sentence up to the quotation when the quote precedes its speaker ("The damage was estimated "at hundreds of millions euros", the CCI said"), and the rest of the sentence when it follows the speaker. A quotation ending in a full stop is not given to the speaker of the next sentence. A merged voice cites the passage its position comes from first.
 - Not statements: a statement before its tag that itself reports a named speaker ("Clayton said in a memo…, according to a U.S. official"), a channel phrase reaching into the next sentence, and the rest of a sentence after a dashed aside ("– which Rio's City Hall said attracted about 1.1 million people –").
 
-Precision. All labels are mine, pending Mars; row-by-row verdicts are in the private review notes.
+Precision. All labels come from the implementation's own automated review, pending my acceptance; row-by-row verdicts are in the private review notes.
 - First pass: on run C, 81 perspectives were new or changed against run A. 75 are correct (92.6 %, Wilson 95 % 84.8–96.6 %). The first review counted 76; a sentence-ending quotation given to the next speaker (Orgeta Likaj) was mislabelled correct and is corrected here. All six errors are fixed in the final code.
 - Second pass: two review rounds on the rows it added across the A, B, C and G texts. The first round found 10 defects in 70 rows (85.7 %): numbers cut at a decimal, a channel phrase reaching into the next sentence, a nested report, document and post speakers, a split UNESCO name, an alias, "Many", an official shortened to "Trump administration", and a statement running past an aside. All were fixed with regression cases. A coordinator check of the 72 rows against their full passages found 71 correct: one position carried the organisers' figure after "while", three positions were bare quoted fragments, and one merged voice cited the wrong passage. With the fixes above, the final set is **72 rows, all correct (Wilson 95 % 94.9–100 %)**, one borderline (a newspaper as speaker), no new critical kind. Every row the fixes changed was re-read: the five flagged rows, three contrast cuts, two widened fragments, and two removed defects. Of the 20 rows the second pass removes, 13 are the same voice with a cleaner speaker or position, 6 were defects, and 1 correct row of nested speech is lost.
 
@@ -77,7 +77,7 @@ Six of ten mismatched on the baseline; all ten match now. New verifier checks: t
 
 ## Claim review
 
-Thirty claims drawn at random (seed 547) from the accepted model overviews of a run, each checked against its cited passage. The criterion follows the 10 October review: supported by the exact cited passage; allegations and disputed assessments keep their reporting frame; ordinary reported facts need not keep every reporting wrapper. I did the review myself, so it is not independent of the implementation; it is pending Mars's acceptance.
+Thirty claims drawn at random (seed 547) from the accepted model overviews of a run, each checked against its cited passage. The criterion follows the 10 October review: supported by the exact cited passage; allegations and disputed assessments keep their reporting frame; ordinary reported facts need not keep every reporting wrapper. The review was done by the same automated pass that wrote the implementation, so it is not independent of it; it is pending my acceptance.
 
 | Run | Accepted overviews / claims | Critical | Unsupported | Finding |
 | --- | --- | ---: | ---: | --- |
@@ -90,6 +90,6 @@ The final sample has 0 critical errors (Wilson 95 % upper bound 11.4 %) and 1 un
 ## Limits
 
 - One window, from a library last refreshed on 25 October; later news may differ.
-- One reviewer, not independent of the implementation. The claim and perspective labels are proposals pending Mars.
+- One reviewer, not independent of the implementation. The claim and perspective labels are proposals pending my acceptance.
 - Coverage counts perspectives as shown by the deterministic overview; it is not a precision measure.
 - No installation, app launch or UI check; the generative path stays off in the app.

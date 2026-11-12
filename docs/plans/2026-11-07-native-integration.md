@@ -1,6 +1,6 @@
 # Native integration plan (#577, #1070, #1113)
 
-Date: 7 November 2026. The external audit was reviewed at 312ec37 and checked against main 2976e53 plus PR #1114 (since merged). The maintainer's review approved items A to G with two corrections, applied below: Swift 6 language mode is switched per target, not per file, and `NEWS_LIBRARY_NAME` is a validated name. B is bounded to one reversible vertical slice and blocks nothing.
+Date: 7 November 2026. The external audit was reviewed at 312ec37 and checked against main 2976e53 plus PR #1114 (since merged). My review approved items A to G with two corrections, applied below: Swift 6 language mode is switched per target, not per file, and `NEWS_LIBRARY_NAME` is a validated name. B is bounded to one reversible vertical slice and blocks nothing.
 
 ## 1. Claims verified
 

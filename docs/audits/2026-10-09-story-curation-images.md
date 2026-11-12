@@ -6,7 +6,7 @@ The installed library was opened read-only and copied with SQLite's backup API t
 
 The snapshot had 1,611 stored rows, 1,609 visible publications after migration/reconciliation, and 667 publications in the active 72-hour window. Every active publication received a plain-text on-device rating: 158 major, 444 notable, 65 minor; zero remained unrated. The waiting predicate hid 64 publications. **Zero rated major publications were hidden.** This audits the predicate and this sample; model ratings are judgments, not independent truth labels. Membership was the copied library's existing membership, not a newly replayed clustering evaluation.
 
-All 65 minor ratings were reviewed locally. No clear major story was found among them. Borderline general-interest cases for Mars's review are BBC Radio 4 programme cuts, arrests for suspected trespass at an RAF base, and a flour-price increase. The local `ratings-private.json` retains the full review material; publisher summaries are not committed or included in public PRs.
+All 65 minor ratings were reviewed locally. No clear major story was found among them. Borderline general-interest cases for my review are BBC Radio 4 programme cuts, arrests for suspected trespass at an RAF base, and a flour-price increase. The local `ratings-private.json` retains the full review material; publisher summaries are not committed or included in public PRs.
 
 Curation now rejects a result if the headline or feed summary changed during inference. Notification triage waits for clustering/curation and reads the waiting predicate from committed storage. Unrated stories remain eligible. Feed collection publishes and ends its spinner before this follow-up work; a second refresh can collect while triage is running.
 

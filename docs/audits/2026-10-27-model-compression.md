@@ -4,7 +4,7 @@ Refs #554, #574 (epic M). Both models stay fp16: neither 8-bit variant meets the
 
 ## Scope
 
-Mars dropped the earlier 30 MB size target on 27 October: a bigger bundle is fine. Only two variants were measured, int8 linear quantization and 8-bit palettization. An 8-bit model ships only if it is decision-identical:
+I dropped the earlier 30 MB size target on 27 October: a bigger bundle is fine. Only two variants were measured, int8 linear quantization and 8-bit palettization. An 8-bit model ships only if it is decision-identical:
 
 - tune and authored corpus identical;
 - pair-model probability within 0.01 of the fp16 model;

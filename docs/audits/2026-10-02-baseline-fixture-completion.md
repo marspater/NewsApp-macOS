@@ -14,7 +14,7 @@ Complete the earliest remaining offline gates (#100, #101 and #107) before addin
 
 Existing tests cover protected redirect response destinations, canonical mismatch/unsafe/cross-origin rejection, GUID changes/collisions, overlapping feeds, publication-date changes, matching headlines of different stories, and copied-library reconciliation. A cross-origin mobile hostname is not automatically aliased by a canonical declaration; existing same-origin policy deliberately refuses it. A protected redirect can supply destination evidence.
 
-These fixtures confirm known mechanisms and expected outcomes. They do not establish the cause of every duplicate in the user's library. No real library is inspected or mutated, and no holdout precision is claimed (#102 remains open).
+These fixtures confirm known mechanisms and expected outcomes. They do not establish the cause of every duplicate in my library. No real library is inspected or mutated, and no holdout precision is claimed (#102 remains open).
 
 ## Reader evidence
 

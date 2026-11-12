@@ -1,6 +1,6 @@
 # SwiftSoup / FeedKit integration — 18 October 2026
 
-Wave 2 of the authorized parallel execution plan. Branch `feat/swiftsoup-and-feedkit`, based on `origin/main` at `17f4f29` (Wave 1's documentation merge; production baseline unchanged from `aa795a4`). Gemini's matcher, clustering, candidates, storage, migration and corpus files are untouched.
+Wave 2 of the authorized parallel execution plan. Branch `feat/swiftsoup-and-feedkit`, based on `origin/main` at `17f4f29` (Wave 1's documentation merge; production baseline unchanged from `aa795a4`). The matcher, clustering, candidates, storage, migration and corpus files owned by the parallel track are untouched.
 
 ## Implementation
 
@@ -14,7 +14,7 @@ JSON Feed uses FeedKit's typed model after existing aliases are normalized and i
 
 ### Author metadata boundary
 
-FeedKit recognizes Dublin Core creators and Atom/JSON authors, but `FeedArticle` has no author field. This slice does not invent an author-as-publisher mapping or change Gemini-owned persistence. The plan's requested persisted creator mapping is therefore **not implemented**; an explicit domain/persistence follow-up is required if author retention is wanted. No author display or preservation claim is made.
+FeedKit recognizes Dublin Core creators and Atom/JSON authors, but `FeedArticle` has no author field. This slice does not invent an author-as-publisher mapping or change persistence owned by the parallel track. The plan's requested persisted creator mapping is therefore **not implemented**; an explicit domain/persistence follow-up is required if author retention is wanted. No author display or preservation claim is made.
 
 ## Validation
 

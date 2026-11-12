@@ -1,11 +1,11 @@
 # Current event matcher: English regression replay — 9 October 2026
 
-Refs #307, #90, #94. This is the historical regression replay Mars requested, not the fresh release gate. Production matching and judge instructions were unchanged during this evaluation.
+Refs #307, #90, #94. This is the historical regression replay I requested, not the fresh release gate. Production matching and judge instructions were unchanged during this evaluation.
 
 ## Frozen input and method
 
 - Production source: main `651729b6de4ec02972282f5211667f07a01a172f`. Evaluation-only harness: `9329091bd4e0435507689a02e4f5eb2328932460`; the required full test hook passed before scoring.
-- Accepted private export SHA-256: `868c62a0ec973d07aa2ca3d63de8623fbe866359d1e082fadacd7bd456acf2a0`, identical to the earlier accepted corpus. Labels remain accepted copilot reviews, not blind independent annotation.
+- Accepted private export SHA-256: `868c62a0ec973d07aa2ca3d63de8623fbe866359d1e082fadacd7bd456acf2a0`, identical to the earlier accepted corpus. Labels remain accepted automated reviews, not blind independent annotation.
 - The freeze receipt, all Swift source/test hashes and settings were written before scoring (receipt SHA-256 `8560e7e1f6744bfa54f88e329ae934fb520433b3d0ab0e7c24573f6bc5355081`). Publisher text, labels and memberships stay private.
 - Apple M5, arm64, macOS 27.0.1 (26A434), Xcode 27.0 (27A266a), Apple Swift 6.4. Each judge mode uses a fresh process and in-memory database. Input is restricted to production-detected English before ingestion, sorted by publication date and ID, with the existing six-hour refresh steps.
 - Candidate and matching policies use production defaults. The existing evaluator has unlimited article and judge budgets per pass; production caps are 2,000 articles and 150 settled judgements. Per-pass counts are retained so this difference remains assessable.
@@ -93,4 +93,4 @@ The final membership review covers all four mixed groups, including groups produ
 - This change adds evaluation output only. It changes no production thresholds, judge prompts, settings, library, installed bundle or notifications. No app build/install/launch or fresh release acceptance is claimed.
 - Pairwise Wilson intervals describe these counts; pairs from the same event or publisher are correlated. The sample is small, historically selected and already accepted/reviewed, so this is regression evidence rather than a fresh generalization result.
 - #307 stays open. Narrow related-act joins using tune/controlled cases, freeze the revised matcher, then capture and label a fresh English sample **after 9 October** for the release gate. Weight that sample toward multi-fragment related-act chains, alongside unrelated negatives. Do not rerun or relabel this historical holdout to claim improvement.
-- Copilot error classifications remain pending Mars's acceptance. #308 overview controls, #309 importance labels/stability and deferred #334 real-app notification delivery retain their separate gates; #264/#268 remain parked.
+- The automated error classifications remain pending my acceptance. #308 overview controls, #309 importance labels/stability and deferred #334 real-app notification delivery retain their separate gates; #264/#268 remain parked.

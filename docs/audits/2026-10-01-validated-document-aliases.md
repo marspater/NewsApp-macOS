@@ -2,7 +2,7 @@
 
 ## Scope
 
-Issue #111 builds on merged GUID/URL aliases (#108/#109). Started a focused branch from current main `2c57782`; the separate fingerprint PR #174 remains with Mars to merge. No history rewrite of a published branch, installation or production data changes.
+Issue #111 builds on merged GUID/URL aliases (#108/#109). A focused branch was started from current main `2c57782`; the separate fingerprint PR #174 remains for me to merge. No history rewrite of a published branch, installation or production data changes.
 
 ## Implementation
 
@@ -24,4 +24,4 @@ Logs: `/tmp/news-canonical-focused.log`, `/tmp/news-canonical-tests.log`, `/tmp/
 
 ## Limits
 
-Only the fetched final destination is recorded, not every intermediate redirect hop. Exact-origin and matching title/prose rules intentionally reject uncertain canonical mappings; no cross-origin canonical or canonical chain is followed as identity evidence. One optional probe may add protected-client timeout latency to opening an article. Existing conflicting rows are retained for #112; holdout evaluation remains #102 and Phase B is not complete. Mars handles GitHub merging.
+Only the fetched final destination is recorded, not every intermediate redirect hop. Exact-origin and matching title/prose rules intentionally reject uncertain canonical mappings; no cross-origin canonical or canonical chain is followed as identity evidence. One optional probe may add protected-client timeout latency to opening an article. Existing conflicting rows are retained for #112; holdout evaluation remains #102 and Phase B is not complete. I handle GitHub merging.

@@ -1,13 +1,13 @@
 # Three-way pair model (M17) — 27 October 2026
 
-Refs #627 (M17), #574 (epic M), #624, #625. Run on Mars's Mac in the training venv (`script/training/requirements.txt`: Python 3.13, torch 2.14.1, transformers 5.20.2, coremltools 9.0). Receipts under `~/news-eval/m17-2026-10-27/` (`0700`, CSVs `0600`); nothing of them enters the repository. Labelled data, the library copy and the holdout stay private; this file carries counts only.
+Refs #627 (M17), #574 (epic M), #624, #625. Run on my Mac in the training venv (`script/training/requirements.txt`: Python 3.13, torch 2.14.1, transformers 5.20.2, coremltools 9.0). Receipts under `~/news-eval/m17-2026-10-27/` (`0700`, CSVs `0600`); nothing of them enters the repository. Labelled data, the library copy and the holdout stay private; this file carries counts only.
 
 ## Setup
 
 - Library copy: `~/news-eval/library-2026-10-27.sqlite3`, a read-only backup of the live library (6,400 articles, newest 25 October 18:05 UTC, schema v25, matcher v11 events), SHA-256 `d8a8095e…cbf4`; every run reads a scratch copy.
 - Library holdout (#579): `library-holdout-2026-10-24.json`, SHA-256 `bbb4ded1…10b9`, 219 pairs (44 same / 25 related / 150 different), all of whose 311 articles resolve in the copy. The copy is a day newer than the one the holdout was drawn from, and the re-clustering reads only stories dated within 72 h of `now`, so with `now` at the copy's newest story 159 holdout articles were never re-clustered (only 89 pairs inside the window). Every holdout run therefore pins the clock to when the holdout was drawn: `NEWS_HOLDOUT_NOW=1792854000` (24 October 15:00 UTC). Then no holdout article lies before `now − 72 h`; 417 articles are dated after the anchor and are still clustered, 5 of them holdout articles (in 3 `same` and 2 `different` pairs).
 - No text prefix (#626): `NEWS_PAIR_PREFIX=0`, the default since 46e46ab.
-- Dual gate (#627, approved by Mars on #574), relative to the branch below (v12; v13 = v12 at 0.9 on this setup): strict event `same` ≥ 15 and `different` ≤ 2; story level `different` < 3 and same-or-related pairs in one story > 20; tune 44 / 0 / 49; authored corpus unchanged.
+- Dual gate (#627, which I approved on #574), relative to the branch below (v12; v13 = v12 at 0.9 on this setup): strict event `same` ≥ 15 and `different` ≤ 2; story level `different` < 3 and same-or-related pairs in one story > 20; tune 44 / 0 / 49; authored corpus unchanged.
 
 ## Baseline: v12 under the dual gate
 
@@ -47,7 +47,7 @@ No training row may carry a library-holdout or a tune-corpus article. Checked th
 
 ## Candidates
 
-Training config (Mars, 25 October, for every primary candidate): three-way head, cross-entropy against the classes a row allows, label smoothing 0.05, no class weight on top of row weights, stage 2 three epochs at 1.5e-5 with `bert.embeddings` and `encoder.layer[:2]` frozen, no prefix, `--exclude-headlines`. Stage 1 (run-b2): WCEP 40,000 + GDELT 15,435 rows, two epochs at 3e-5, all layers.
+Training config (decided 25 October, for every primary candidate): three-way head, cross-entropy against the classes a row allows, label smoothing 0.05, no class weight on top of row weights, stage 2 three epochs at 1.5e-5 with `bert.embeddings` and `encoder.layer[:2]` frozen, no prefix, `--exclude-headlines`. Stage 1 (run-b2): WCEP 40,000 + GDELT 15,435 rows, two epochs at 3e-5, all layers.
 
 Admission rules (#627): `same` admits a borderline pair when p_same ≥ c; `story` admits when p_same + p_related ≥ c, p_same > p_related and p_different ≤ 0.10. A three-way softmax with label smoothing does not put p_same on the binary model's scale, so the rule and cutoff are chosen on the tune replay (the highest cutoff that keeps the best tune recall with no false pair) and checked on the held-out split of the training rows (exact `same` rows against rows that exclude `same`); the library holdout is then read once.
 
@@ -67,7 +67,7 @@ Every read of the library holdout by this program on 27 October, in order (`NEWS
 3. run-b1, rule `same`, 0.5 / 0.6 / 0.7 / 0.8 / 0.9, before the one-read rule: strict 17/2/5, 15/2/5, 13/1/5, 14/0/3, 8/1/2; story 20/6, 18/6, 14/6, 15/4, 13/3.
 4. run-b2, rule `story`, 0.93 (the one read).
 5. a1, a2 and a3, rule `story`, 0.93, one read each, on the v13 runner.
-6. Shipped model with the knob off, and the story signal at s = 0.80 and 0.90 (shipped binary model), pair cutoff 0.9, on the #696 tip. No further reads: Mars stopped holdout reads until a fresh set exists.
+6. Shipped model with the knob off, and the story signal at s = 0.80 and 0.90 (shipped binary model), pair cutoff 0.9, on the #696 tip. No further reads: I stopped holdout reads until a fresh set exists.
 
 Three earlier reads on the copy's own clock (before the anchor) and on the 24 October snapshot were discarded as measurement errors.
 
@@ -86,7 +86,7 @@ Runner built at ce0d5b0 (slice B with PR #695's slice A, which carries #694: mat
 
 The new story layer joins one more `different` pair at story level than v12 did. The gate stays relative to v13 at 0.9.
 
-Ablations (deviations from Mars's config, approved as ablations; each is stage 2 from run-b2's stage-1 state, otherwise as b2). The tune sweeps for a1 and a2 ran on the v12 runner and were re-checked at the chosen setting on the v13 runner; a3 was swept on the v13 runner.
+Ablations (deviations from my config, approved as ablations; each is stage 2 from run-b2's stage-1 state, otherwise as b2). The tune sweeps for a1 and a2 ran on the v12 runner and were re-checked at the chosen setting on the v13 runner; a3 was swept on the v13 runner.
 
 | Run | Change | Held-out same AUC | Held-out at the chosen setting | Tune keeping 44 / 0 | Corpus | Chosen | Holdout read (v13 runner) |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -108,13 +108,13 @@ The holdout reads of this section: a1, a2 and a3, each once, rule `story` 0.93, 
 
 ## Decision
 
-No candidate passes the dual gate. The best strict result is 12 `same` (gate ≥ 15). Every candidate loses three or more `same` links that v13 makes, and none removes a wrong link without losing others. Following Mars's rule for a failed retrain: the shipped `pairscorer.mlmodelc` (binary, v11 weights) and `EventMatcher.version` stay; the three-way code path ships, so `PairScorer` reads either kind of model and admission still gates on p_same. Recommended next lever, outside M17: admission. The wrong links of every candidate come in through other members of an event (the two-thirds rule carries a report in once one pair of other reports is confirmed), not through their own pair scores, so later matcher work should look at third-member carry-in. The story-level signal (p_same + p_related) is wired behind `EventMatchPolicy.storyModelThreshold`, off by default (see "Story signal"). The training data teaches multi-day acts of one running story as `12`, and the lever the runs point at is admission (third-member carry-in), not the pair head.
+No candidate passes the dual gate. The best strict result is 12 `same` (gate ≥ 15). Every candidate loses three or more `same` links that v13 makes, and none removes a wrong link without losing others. Following my rule for a failed retrain: the shipped `pairscorer.mlmodelc` (binary, v11 weights) and `EventMatcher.version` stay; the three-way code path ships, so `PairScorer` reads either kind of model and admission still gates on p_same. Recommended next lever, outside M17: admission. The wrong links of every candidate come in through other members of an event (the two-thirds rule carries a report in once one pair of other reports is confirmed), not through their own pair scores, so later matcher work should look at third-member carry-in. The story-level signal (p_same + p_related) is wired behind `EventMatchPolicy.storyModelThreshold`, off by default (see "Story signal"). The training data teaches multi-day acts of one running story as `12`, and the lever the runs point at is admission (third-member carry-in), not the pair head.
 
 ## Story signal (timeboxed experiment)
 
 `EventMatchPolicy.storyModelThreshold` (off by default, `NEWS_STORY_MODEL=s` to evaluate) gives the story pass a second link signal: two events, or a report alone and an event, are one story when two thirds of their cross pairs (earliest five members) score p_same + p_related ≥ s with p_different ≤ 0.15, have no conflict other than a different act, share one specific name that is not a common actor, and share a keyword or reach cosine 0.55. Event admission is untouched: with the knob off, the 3-way code path with shipped weights gives v13's decisions exactly (runner at the #696 tip: holdout 0.9 strict 15 / 1 / 2, story 19 / 4; corpus 23 / 0; tune 44 / 0 / 49, 43 / 0 / 50 at 0.95), so no matcher version bump. Receipts `story-signal/`.
 
-Two story models were tried. The shipped binary model (related 0, so the signal is p_same) was measured on the gate setup as asked, with two holdout reads (s = 0.80 and 0.90, both at pair cutoff 0.9) before Mars stopped holdout reads until a fresh set exists. run-a2 as a separate story model (`NEWS_STORY_MODEL_PATH`; it would ship as `storyscorer.mlmodelc`) was measured without reading the holdout: the library copy re-clustered with the pinned clock and scored against an empty pair file, for its story groups only, plus tune and the authored corpus scored by event and by story (`NEWS_SCORE_STORIES=1`: two events of one story count as one). Added story groups (groups whose events are not all in one baseline group; baseline 12 groups) were labelled by Claude for the coordinator's spot-check (`*-added.csv`, columns as `story-groups.csv` plus `label` and `note`).
+Two story models were tried. The shipped binary model (related 0, so the signal is p_same) was measured on the gate setup as asked, with two holdout reads (s = 0.80 and 0.90, both at pair cutoff 0.9) before I stopped holdout reads until a fresh set exists. run-a2 as a separate story model (`NEWS_STORY_MODEL_PATH`; it would ship as `storyscorer.mlmodelc`) was measured without reading the holdout: the library copy re-clustered with the pinned clock and scored against an empty pair file, for its story groups only, plus tune and the authored corpus scored by event and by story (`NEWS_SCORE_STORIES=1`: two events of one story count as one). Added story groups (groups whose events are not all in one baseline group; baseline 12 groups) were labelled by an automated review for the coordinator's spot-check (`*-added.csv`, columns as `story-groups.csv` plus `label` and `note`).
 
 | Story model | s | Groups | Added | Wrong added | Named cases | Holdout (strict; story) | Corpus by story | Tune by story |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -127,4 +127,4 @@ Two story models were tried. The shipped binary model (related 0, so the signal 
 
 The wrong added groups: an iPhone Duo explainer joined to an executive interview about launch availability (every setting; the holdout labels such pairs different), and, for the binary model at 0.80, a call for Witkoff to resign joined to Ukraine's Starlink access. Jordan church, France 70,000 police and Pope Leo form no multi-event group on this copy with any setting; the Ebola case consolidates only the two Kenya reports. Event-level tune and corpus are unchanged by construction (the story pass never moves members). Story-level corpus: the knob off joins the corpus's two missed pairs through stories without a false pair; run-a2 adds four false story pairs at every s.
 
-Result: no setting meets ≤ 2 % wrong added groups (the best is 9 %), and run-a2 adds four false story pairs on the authored corpus, so the knob stays off and no story model ships. (Note, 30 October: the authored corpus carries event labels only, so a story-level pair across two events of one story counted as false; the four may include correct story links. The decision rests on the wrong added groups, which hold on their own. `NEWS_SCORE_STORIES` was removed for this reason; story-level scoring uses the story regressions and the holdout's story level.) The code path stays, off, for the fresh labelled set Mars is arranging (29 October).
+Result: no setting meets ≤ 2 % wrong added groups (the best is 9 %), and run-a2 adds four false story pairs on the authored corpus, so the knob stays off and no story model ships. (Note, 30 October: the authored corpus carries event labels only, so a story-level pair across two events of one story counted as false; the four may include correct story links. The decision rests on the wrong added groups, which hold on their own. `NEWS_SCORE_STORIES` was removed for this reason; story-level scoring uses the story regressions and the holdout's story level.) The code path stays, off, for the fresh labelled set I am arranging (29 October).

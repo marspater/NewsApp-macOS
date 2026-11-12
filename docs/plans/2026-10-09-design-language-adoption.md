@@ -9,7 +9,7 @@ Tracked in #350, with one issue per phase.
 | Phase | Issue | Merged PRs | Status |
 | --- | --- | --- | --- |
 | 1 Foundations and guardrails | #351 | #358 | Done |
-| 2 Native window chrome | #352 | #349, #359, #360, #367; acceptance fixes in #407 | Done: Mars accepted the small measured scroll-readback and peak-memory increases as no regression |
+| 2 Native window chrome | #352 | #349, #359, #360, #367; acceptance fixes in #407 | Done: I accepted the small measured scroll-readback and peak-memory increases as no regression |
 | 3 Sidebar, search and states | #353 | #361, #394–#396; sidebar focus fix in #407 | Done: live checks pass; OPML drops and the feed-failure view are out of scope |
 | 4 Content consistency | #354 | #363, #398–#400; appearance fixes in #407 | Done: lint at zero; the light, dark and emulated Increase Contrast matrix passes after the fixes |
 | 5 Reader | #355 | #349, #402 | Done |
@@ -26,7 +26,7 @@ Out of scope: parked work (#264 non-English feeds, #268 live VoiceOver QA), new 
 
 ## Decisions
 
-Mars accepted every recommended option with the design sketch on 9 October 2026 (#350), and the rules in DESIGN.md use them. Changing a decision changes the matching rule before its phase starts.
+I accepted every recommended option with the design sketch on 9 October 2026 (#350), and the rules in DESIGN.md use them. Changing a decision changes the matching rule before its phase starts.
 
 | ID | Decision | Recommended | Alternative | Phase |
 | --- | --- | --- | --- | --- |

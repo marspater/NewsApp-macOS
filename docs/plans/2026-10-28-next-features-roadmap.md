@@ -1,9 +1,9 @@
 # Next features roadmap (v2+ Horizons) — 28 October 2026
 
-**Status:** Approved by Mars on 28 October 2026; epics U–X (#706, #710, #714, #719) and sub-issues #707–#709, #711–#713, #715–#718, #720–#723 logged on GitHub and Project #2 (Milestones 21–24).  
+**Status:** I approved it on 28 October 2026; epics U–X (#706, #710, #714, #719) and sub-issues #707–#709, #711–#713, #715–#718, #720–#723 logged on GitHub and Project #2 (Milestones 21–24).  
 **Baseline:** `origin/main` (post-Epic R Situation Board Briefing; Epic T in review via PR #705; Milestones J–P active).  
 **Update 3 November 2026 (#569):** the v2 boundary moved on 30 October to J, L, M, N, O, Q, R, T and Y ([v2 completion](2026-10-30-v2-completion.md)); K, P and S moved to v3 with U–X, so "v2 (Milestones J–T)" below means that set. Schema v28 (#817) and v29 (#849) are taken; V1 takes the next free version, v30 as of this update.  
-**Decisions taken by Mars on 28 October 2026:**
+**My decisions on 28 October 2026:**
 - Approved core feature set across four post-v2 horizons: Discovery, Active Reading, Editorial Intelligence, and Desktop Presence.
 - **Quick Look (U1, #707):** Approved to land early as long as it has zero blocking dependencies from the rest of v2.
 - **Widgets (Epic X, #719):** Approved in scope, but strictly blocked on the full completion of v2 (Milestones J–T) and all prior features from this roadmap (Epics U, V, W).
@@ -157,7 +157,7 @@ Extends News onto the macOS Sequoia/Sonoma/Tahoe desktop and Notification Center
 
 ## 4. Parked Ideas & Explorations (No Active Plans for Production)
 
-The following items were brainstormed and reviewed by Mars on 28 October 2026, with the decision to keep them purely as recorded ideas/experiments without scheduling implementation PRs:
+The following items were brainstormed, and I reviewed them on 28 October 2026 and decided to keep them purely as recorded ideas/experiments without scheduling implementation PRs:
 
 1. **Glanceable Menu Bar Popover (Companion Mode):** An interactive 320 pt popover opening from the menu bar icon showing Briefing's top 3 headlines and World Tension. (Parked; Issue #561 `MenuBarExtra` menu remains the shipping implementation).
 2. **Native On-Device Spoken Edition (`AVSpeechSynthesizer`):** Offline speech synthesis with Apple Neural Voices for hands-free listening to Briefing and articles. (Parked; out of immediate scope).

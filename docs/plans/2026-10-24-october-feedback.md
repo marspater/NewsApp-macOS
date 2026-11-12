@@ -2,13 +2,13 @@
 
 ## Context
 
-After the future development plan (epics #571–#577) was logged, Mars sent 17 feedback items from daily use plus "more clustering, better logic", and answered: no labeling by Mars (Claude labels); Briefing needs sketches to choose from and DESIGN.md may change; one click opens a story. Every item below was traced to code (`path:line`, main checkout `2334b79`) and, for clustering, measured on a read-only copy of the live library (5,998 articles, schema v25). Deliverable: new sub-issues under the existing epics where they fit, two new epics (Q polish, R Briefing), epic M retitled and un-frozen, all on board #2.
+After the future development plan (epics #571–#577) was logged, I sent 17 feedback items from daily use plus "more clustering, better logic", and answered: I do no labelling (an automated reviewer labels); Briefing needs sketches to choose from and DESIGN.md may change; one click opens a story. Every item below was traced to code (`path:line`, main checkout `2334b79`) and, for clustering, measured on a read-only copy of the live library (5,998 articles, schema v25). Deliverable: new sub-issues under the existing epics where they fit, two new epics (Q polish, R Briefing), epic M retitled and un-frozen, all on board #2.
 
 ## 1. Findings
 
 ### Clustering ("more clustering, better logic")
 
-Library copy, last 3 days: 1,541 stories, 689 (45%) in an event; 668 multi-member events; `pair_assessments`: 1,405 match / 470 borderline / 56 related-act. The holdout (49 articles) is saturated at recall 1.0, so it cannot show what Mars sees. The library can:
+Library copy, last 3 days: 1,541 stories, 689 (45%) in an event; 668 multi-member events; `pair_assessments`: 1,405 match / 470 borderline / 56 related-act. The holdout (49 articles) is saturated at recall 1.0, so it cannot show what I see. The library can:
 
 | Symptom | Example (3-day window) | Mechanism |
 |---|---|---|
@@ -18,11 +18,11 @@ Library copy, last 3 days: 1,541 stories, 689 (45%) in an event; 668 multi-membe
 | Same-source duplicates | 12 same-title same-source pairs in 7 days (CNA, 9to5Mac) | Different GUID/URL → two articles; no title-level alias |
 | Sub-stories legitimately apart | Ebola: Kenya deaths, Nigeria case, vaccine trial, Africa CDC meeting | Correct at act level; wanted as one *story* with a timeline |
 
-Conclusion: precision engineering is done; what is missing is (a) a **story** layer above act-level events, (b) anchors for headline-initial, Title-Case, organization and product names, (c) fragment merging that can use the pair model, (d) a holdout drawn from the library. Mars will not label; Claude labels under the recorded protocol (memory: Mars delegates bulk pair review).
+Conclusion: precision engineering is done; what is missing is (a) a **story** layer above act-level events, (b) anchors for headline-initial, Title-Case, organization and product names, (c) fragment merging that can use the pair model, (d) a holdout drawn from the library. I will not label; an automated reviewer labels under the recorded protocol, and I delegate bulk pair review.
 
-**Priority 1 (Mars, 24 Oct): with many subscriptions the same story arrives from many feeds and must show as one card.** M6–M10 run first, before any Q/R work except the three one-line breakage fixes (Q1, Q3, L10), and the story-level target is measured on the library copy, not the old holdout.
+**Priority 1 (mine, 24 October): with many subscriptions the same story arrives from many feeds and must show as one card.** M6–M10 run first, before any Q/R work except the three one-line breakage fixes (Q1, Q3, L10), and the story-level target is measured on the library copy, not the old holdout.
 
-### Notifications (Mars, 24 Oct, in Polish)
+### Notifications (my feedback, 24 October, in Polish)
 
 | Item | Root cause / feasibility | Goes to |
 |---|---|---|
@@ -54,15 +54,15 @@ Conclusion: precision engineering is done; what is missing is (a) a **story** la
 
 ## 2. Issues to log
 
-Conventions as before (one PR each, tests with the slice, CHANGELOG, board move, DESIGN checklist for UI, no AI attribution lines). Priority P0 = visible breakage or Mars's explicit asks.
+Conventions as before (one PR each, tests with the slice, CHANGELOG, board move, DESIGN checklist for UI, no AI attribution lines). Priority P0 = visible breakage or my explicit asks.
 
 ### Epic M (#574, retitled "M · Matching: story-level grouping and measured matcher iteration", un-frozen)
 
 | # | Issue | Scope | Acceptance | Effort | Pri |
 |---|---|---|---|---|---|
-| M6 (#579) | Library clustering diagnosis and a Claude-labelled holdout | Write `docs/audits/2026-10-24-library-clustering-diagnosis.md` with the table above and the counts; `--review-pairs` (M1) exports 200 borderline/singleton candidate pairs from the library copy; Claude labels them under a recorded protocol (same event / related act / different), Mars spot-checks 20; the file becomes the private "library holdout" for M7–M9 gates. | Audit in repo; holdout file outside the repo with SHA-256 recorded; protocol in CONTRIBUTING. | M | P0 |
+| M6 (#579) | Library clustering diagnosis and a machine-labelled holdout | Write `docs/audits/2026-10-24-library-clustering-diagnosis.md` with the table above and the counts; `--review-pairs` (M1) exports 200 borderline/singleton candidate pairs from the library copy; an automated reviewer labels them under a recorded protocol (same event / related act / different), I spot-check 20; the file becomes the private "library holdout" for M7–M9 gates. | Audit in repo; holdout file outside the repo with SHA-256 recorded; protocol in CONTRIBUTING. | M | P0 |
 | M7 (#580) | Headline names as anchors: sentence-initial, Title-Case, organizations, products (matcher v12) | Sentence-initial capitalized words count as names when NLTagger types them as noun/proper or when they are not dictionary words (drop the lemma-only test at EventMatcher.swift:305); Title-Case headlines keep NER names and multi-word capitalized runs; organization and product tokens with versions ("iOS 27.2", "GPT-5") become anchors; stored signals recompute (`storageVersion` 2). | Authored corpus TP ≥ 22 / FP 0; library holdout precision ≥ 0.97; the OpenAI, iOS 27.2 and Pope examples merge; `testEventMatcherRules` cases. | M | P0 |
-| M8 (#581) | Story layer: one card per story | A *story* = connected component of events linked by `related-act` rows or by fragment compatibility within 72 h (schema v26: `story_id` on events, or a `stories` table); cards, Briefing, notifications and "Earlier in This Story" present stories; the overview becomes a story overview with acts as timeline sections; "Not the Same Event" works at story level; ARCHITECTURE and DESIGN updated. | Eagle's Nest, Jordan church, France police examples become one card each on the library copy; share of recent stories in a multi-source card ≥ 60% (from 45%); Claude reviews 100 story groups, ≤ 2 wrong; precision at pair level unchanged. | L | P0 |
+| M8 (#581) | Story layer: one card per story | A *story* = connected component of events linked by `related-act` rows or by fragment compatibility within 72 h (schema v26: `story_id` on events, or a `stories` table); cards, Briefing, notifications and "Earlier in This Story" present stories; the overview becomes a story overview with acts as timeline sections; "Not the Same Event" works at story level; ARCHITECTURE and DESIGN updated. | Eagle's Nest, Jordan church, France police examples become one card each on the library copy; share of recent stories in a multi-source card ≥ 60% (from 45%); an automated review covers 100 story groups, ≤ 2 wrong; precision at pair level unchanged. | L | P0 |
 | M9 (#582) | Fragment merge and pair-model gates | `mergeFragments` asks the pair model for cross pairs the rules leave borderline; admission tolerates one unanchored pair in events of ≥ 4 when the model confirms it; pair-model cutoff 0.9 → 0.8 (tune identical 44/0); the model may score anchor-less pairs at cosine ≥ 0.85 within 24 h. Each change measured separately. | Tune replay FP 0; library holdout precision ≥ 0.97 per change; authored corpus unchanged; merges counted before/after on the library copy. | M | P1 |
 | M10 (#583) | Same-publisher duplicate items alias instead of two stories | Same source, same normalised title, within 24 h → v7-style alias to the existing article (identity resolution order unchanged for others). | 12 duplicate pairs in the 7-day library copy become one story each; existing identity tests pass. | S | P1 |
 
@@ -100,22 +100,22 @@ M1–M5 stay; M4 (model size) and M3 keep their gates. Previous "frozen" wording
 | Q8 (#600) | Feed catalog categories | Replace the segmented control with a horizontally scrolling `TagView` row (trackpad scroll, selection trait) or a menu `Picker`; fixed sheet width (`AppLayout.sheetWidth`); the gaps section no longer resizes the sheet. | Captures at 900 pt; all 9 categories reachable by trackpad and keyboard. | S | P1 |
 | Q9 (#601) | Refresh and queued updates affordance | Refresh tooltip "Check feeds for new stories"; queued button "Show N New Stories" with tooltip "Stories that arrived in the background"; Help › Keyboard Shortcuts lists both; no behaviour change. | Copy per DESIGN §17. | XS | P2 |
 | Q10 (#602) | Launch: one settle animation, heavy work after first frame | Show the cached snapshot in one spring transition (`AppMotion.navigation`, nil under Reduce Motion) once the first page and its card images are ready; `fetchFeeds` waits for the cached snapshot; clustering and image lookup start after the first frame; no per-card pop-in during launch. | Launch baseline first-card time not worse; captures show one transition; Reduce Motion path verified. | M | P1 |
-| Q0 (#592) | DESIGN.md review and revision | Review the document against the current app and this feedback: one sparkle per page rule, generated-content copy ("Generated summary"), overview defaults (sources collapsed), click semantics (single click opens), launch motion, Briefing section placeholder for R, grouped-card guidance for the tension sheet; remove rules that no longer hold; Mars approves. | PR with the diff and a changelog of rule changes. | S | P0 |
+| Q0 (#592) | DESIGN.md review and revision | Review the document against the current app and this feedback: one sparkle per page rule, generated-content copy ("Generated summary"), overview defaults (sources collapsed), click semantics (single click opens), launch motion, Briefing section placeholder for R, grouped-card guidance for the tension sheet; remove rules that no longer hold; I approve. | PR with the diff and a changelog of rule changes. | S | P0 |
 
 ### Epic R (#608) · Briefing redesign (milestone R)
 
 | # | Issue | Scope | Acceptance | Effort | Pri |
 |---|---|---|---|---|---|
-Decision (Mars, 24 Oct, after three sketches shown in chat): **Situation board (A) with a hero carousel on top**: the most important events rotate with their pictures every 30–60 s; below, the tension strip with drivers, then dense story tiles with one cited key fact and publisher count, grouped by region/topic.
+Decision (mine, 24 October, after three sketches): **Situation board (A) with a hero carousel on top**: the most important events rotate with their pictures every 30–60 s; below, the tension strip with drivers, then dense story tiles with one cited key fact and publisher count, grouped by region/topic.
 
 | # | Issue | Scope | Acceptance | Effort | Pri |
 |---|---|---|---|---|---|
-| R1 (#603) | Briefing spec and high-fidelity mock | Spec the chosen layout: hero carousel (top 3–5 stories by publisher count, image from any member, 45 s rotation, pause on hover/focus, manual arrows and dots, stops under Reduce Motion and shows the first only), tension strip (reading, 7-day trend from L9, three drivers), tile grid (region/topic groups, key fact from overview highlights, publisher count, time, read state), keyboard model, empty/complete states; one mock per appearance at 900 pt and wide. | Mars approves the mock. | S | P0 |
-| R2 (#604) | DESIGN.md Briefing section and motion rule | New §8.4 Briefing: tokens, carousel rules (the only auto-advancing motion in the app, slow cross-fade, never under Reduce Motion, never while a story is open), tile anatomy, copy; amend §13 to allow it explicitly. | Mars approves. | S | P0 |
+| R1 (#603) | Briefing spec and high-fidelity mock | Spec the chosen layout: hero carousel (top 3–5 stories by publisher count, image from any member, 45 s rotation, pause on hover/focus, manual arrows and dots, stops under Reduce Motion and shows the first only), tension strip (reading, 7-day trend from L9, three drivers), tile grid (region/topic groups, key fact from overview highlights, publisher count, time, read state), keyboard model, empty/complete states; one mock per appearance at 900 pt and wide. | I approve the mock. | S | P0 |
+| R2 (#604) | DESIGN.md Briefing section and motion rule | New §8.4 Briefing: tokens, carousel rules (the only auto-advancing motion in the app, slow cross-fade, never under Reduce Motion, never while a story is open), tile anatomy, copy; amend §13 to allow it explicitly. | I approve. | S | P0 |
 | R3 (#605) | Briefing shell and data | New `BriefingView` behind the sidebar item; data: 10 stories → story groups (M8 when landed, events until then), key fact per story from its overview highlights (deterministic, cited), tension reading and drivers, images via `bestCardImage` over all members (Q3), read state. | Renders on the library copy; j/k and arrows; VoiceOver labels; carousel timer verified. | L | P1 |
-| R4 (#606) | Briefing polish and acceptance | Appearance matrix (light, dark, Increase Contrast, Reduce Motion, 900/1600 pt), Mars runs harnesses; "New Briefing"; empty and complete states. | Dated audit; checklist ticked. | M | P1 |
+| R4 (#606) | Briefing polish and acceptance | Appearance matrix (light, dark, Increase Contrast, Reduce Motion, 900/1600 pt), I run the harnesses; "New Briefing"; empty and complete states. | Dated audit; checklist ticked. | M | P1 |
 
-Order: (1) Q1, Q3, L10 one-line breakage fixes; (2) clustering, priority 1: M6 → M7 → M10 → M9 → M8; (3) L2, L12, L8, L11 (notifications, badge, mute preset); (4) Q0 and R1/R2 (design decisions, Mars approves) then R3–R4; (5) Q2, Q4–Q10, K5, L9, L13.
+Order: (1) Q1, Q3, L10 one-line breakage fixes; (2) clustering, priority 1: M6 → M7 → M10 → M9 → M8; (3) L2, L12, L8, L11 (notifications, badge, mute preset); (4) Q0 and R1/R2 (design decisions, I approve) then R3–R4; (5) Q2, Q4–Q10, K5, L9, L13.
 
 ## 3. Logged on GitHub and the board (24 October 2026)
 
@@ -126,8 +126,8 @@ Issues #579–#608 created the same day: epics #607 (Q) and #608 (R), milestones
 - Board #2: all new items Backlog with Priority; Ready for Q1, Q3, L10, M6, M7, L2, L12, L8, L11, Q0, R1 (`gh project item-add` / `item-edit`, field IDs as in the first plan).
 - Append the epic bodies of #572/#573/#574 with the new rows (`gh issue edit`).
 - Record the library diagnosis as `docs/audits/2026-10-24-library-clustering-diagnosis.md` and this plan as `docs/plans/2026-10-24-october-feedback.md` on branch `mars/october-feedback-plan`, PR against `main` (the first plan's PR #578 is still open; this one is independent).
-- Update memory: matcher un-frozen with Claude-labelled library holdout; Briefing redesign pending Mars's sketch choice; single-click opens.
-- The three sketches were shown in chat and Mars chose A + hero carousel; R1 now produces the high-fidelity mock of that choice.
+- Recorded: matcher un-frozen with the machine-labelled library holdout; Briefing redesign pending my sketch choice; single-click opens.
+- I chose A + hero carousel from the three sketches; R1 now produces the high-fidelity mock of that choice.
 
 ## 4. Verification
 

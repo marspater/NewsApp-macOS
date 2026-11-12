@@ -26,7 +26,7 @@ The agreed gate bounds false merges per eligible canonical document; precision a
 | Acceptance stream | Recorded evidence and boundary |
 | --- | --- |
 | Identity, aliases and migrations (#91/#92) | [Foundation](2026-10-01-story-foundation.md), [copied-database migrations and resilience](2026-10-02-resilience-and-migration-coverage.md), full native regressions; fingerprint gate now passed |
-| Event corpus (#102/#94) | [One-shot event holdout](2026-10-05-event-corpus-holdout.md): 23/24 precision, overall recall 0.291, English recall 0.605; Mars accepted the single vote/protest boundary error on 5 October. No replay or post-holdout tuning |
+| Event corpus (#102/#94) | [One-shot event holdout](2026-10-05-event-corpus-holdout.md): 23/24 precision, overall recall 0.291, English recall 0.605; I accepted the single vote/protest boundary error on 5 October. No replay or post-holdout tuning |
 | Reader (#93) | [Structural/live publisher evidence](2026-10-04-reader-structure.md), merged #261; originals, figures and split-anchor teaser regressions retained |
 | Overview (#95) | Integrated deterministic cited overviews; [provenance and stale-write rejection](2026-10-04-publisher-content-provenance.md), lifecycle/invalidation regressions and persisted readback in the combined workload. No model path activated |
 | Performance (#104/#153) | [Cold launch](2026-10-05-cold-launch.md): 1,203.3 ms first card, warm median 625.8 ms. [Combined app workload](2026-10-05-full-app-workload.md): final app-process peak 195.8 MiB, sizing maximum 214.2 MiB, 270 MiB investigation trigger; ten cited/persisted overviews, five native Web completions and 78 decoded images |

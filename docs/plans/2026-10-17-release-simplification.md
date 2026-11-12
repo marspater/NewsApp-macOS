@@ -1,4 +1,4 @@
-# ADR: Release simplification with two parallel agents
+# ADR: Release simplification with two parallel workstreams
 
 Status: Completed and Merged on 18 October 2026 (tracked in #439).
 Base: origin/main 807e34e800fc48afd670fbcda8d320f6fb06d8e6.
@@ -13,7 +13,7 @@ Shipped: origin/main at 7143901 (Wave 1 and Wave 2 merged).
 - Keep the 97% point-precision target with nonzero predictions; report recall, support, false merges and Wilson intervals separately. #409 labels remain provisional. No claim of fresh independent acceptance.
 - #314 is parked and outside release; retain its backend and merged #438 changes. #313 stays closed. #334 remains deferred. SwiftSoup and external embedding models are postponed.
 
-## Agent 1 — Codex
+## Workstream 1 — Core
 Own matching, all storage, FeedManager, EventFeed/Briefing, ArticleListView, shared Tests/NewsTests.swift and corpus runner, compilation/build scripts, CI, shared documentation and issue/project updates.
 
 ### Matching
@@ -35,11 +35,11 @@ Own matching, all storage, FeedManager, EventFeed/Briefing, ArticleListView, sha
 - Fetch bounded Briefing metadata in one database read; diversity first, then coverage, stored importance, time and ID.
 
 ### Integration
-- Own shared tests, build/CI wiring and documentation; update old overview expectations after Gemini handoff without weakening retained safeguards.
+- Own shared tests, build/CI wiring and documentation; update old overview expectations after the excerpts handoff without weakening retained safeguards.
 - Snapshot/unload the isolated relation collector and verify job/process absence; preserve its files and evidence.
 - Recover original private #409 replay export. If unavailable, report missing input and leave that comparison/#307 incomplete; do not reconstruct labels from public aggregates.
 
-## Agent 2 — Gemini
+## Workstream 2 — Excerpts
 Own exclusively:
 - Sources/Intelligence/Overview*.swift
 - Sources/Intelligence/PassageFactExtractor.swift only for excerpt correctness
@@ -63,29 +63,29 @@ Own exclusively:
 - Supply standalone @main regression harness in Tests/PublisherExcerptTests.swift runnable with:
   NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift ./script/native_performance_baseline.sh
 - Cover exact excerpts/citations, attribution controls, empty-summary render/store, stale cache invalidation, AI-off, cancellation and retained deterministic sections.
-- Return commits, changed files, commands/results and exact shared-test expectations for Codex to update.
+- Return commits, changed files, commands/results and exact shared-test expectations for the core workstream to update.
 - Do not publish PRs or alter issue/project status.
 
 ## Parallel working contract
-- Use separate worktrees from the same pinned origin/main: mars/release-core (Codex), mars/release-excerpts (Gemini).
+- Use separate worktrees from the same pinned origin/main: mars/release-core, mars/release-excerpts.
 - Never edit another owner's files. Required cross-boundary edits go in handoff to their owner.
 - Use isolated databases/preferences/build outputs/module caches; preserve original data and evidence packets.
 - No label changes, new dependencies, installation, permission changes, notification delivery validation or production-library repair.
-- Codex alone integrates finished Gemini commits, updates shared wiring, performs combined validation and publishes.
-- Gemini is reserved/Ready until actually started; assignment is not execution.
+- The core workstream alone integrates finished excerpts commits, updates shared wiring, performs combined validation and publishes.
+- The excerpts workstream is reserved/Ready until actually started; assignment is not execution.
 
 ## Validation
 - Matcher regressions: separate acts with common actors, country-only overlap, contradictions, chains, two-thirds behavior, changing tolls, active upgrades, archived groups and saved/read preservation.
 - Visibility: minor-rated stories remain visible beyond 24h; tombstones no longer suppress reingestion; images/notification eligibility retained.
 - Energy: zero production event-judge/importance-rating calls after refresh while image lookup still runs.
 - Briefing: ranking/diversity, unrated inputs, stable ties, frozen sessions.
-- Overviews: Gemini harness and retained citation/lifecycle/security tests; storage round-trip with empty summary.
+- Overviews: excerpts harness and retained citation/lifecycle/security tests; storage round-trip with empty summary.
 - Freeze revised source/settings before final #102 English holdout and #409 comparisons. Use production article budgets. Report results separately with provenance and limits.
 - Use copied collector only for automated splitting/idempotence/budget/data-preservation checks; unlabeled data does not establish precision.
 - Run full regressions, excerpt harness, SwiftPM compile, isolated arm64 build/signature, and affected native UI checks. Include design checklist in UI PRs.
-- #307 remains open until measured target and Mars acceptance. #308/#309 close only after replacement behavior is validated and merged. Do not claim installation or OS-notification acceptance.
+- #307 remains open until measured target and my acceptance. #308/#309 close only after replacement behavior is validated and merged. Do not claim installation or OS-notification acceptance.
 
 
 ## Implementation progress
-- Codex core slice: `124e3a2`; full regressions, SwiftPM, 160 native UI checks, staged arm64/signature and copied-collector checks passed. Existing English tune precision 89.7% and holdout precision 92.3% miss the 97% target; #307 remains unresolved, and the original #409 private input remains missing.
-- Gemini completed `91fb5d4`, integrated as `972253b`. Codex owns subsequent shared tests, persistence/energy integration, CI and combined verification. No installation, hosted CI or release acceptance is implied.
+- Core slice: `124e3a2`; full regressions, SwiftPM, 160 native UI checks, staged arm64/signature and copied-collector checks passed. Existing English tune precision 89.7% and holdout precision 92.3% miss the 97% target; #307 remains unresolved, and the original #409 private input remains missing.
+- The excerpts workstream completed `91fb5d4`, integrated as `972253b`. The core workstream owns subsequent shared tests, persistence/energy integration, CI and combined verification. No installation, hosted CI or release acceptance is implied.

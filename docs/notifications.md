@@ -205,7 +205,7 @@ Nothing is deleted or hidden in any case.
 ## Storage
 
 Three side tables, created with `CREATE TABLE IF NOT EXISTS` on open, with no `user_version` (the side-table approach
-Mars approved for #545 on 26 Oct):
+I approved for #545 on 26 October):
 
 - `event_notifications(event_id PRIMARY KEY, notified_at, lead_key, lane)`: exists (#545). Gains `lane`: 0 normal,
   1 starred, 2 priority. A database from an earlier build gets the column through one guarded `ALTER TABLE`. Written

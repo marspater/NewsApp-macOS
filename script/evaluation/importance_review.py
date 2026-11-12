@@ -90,7 +90,7 @@ def report(directory):
         'review': review, 'stability': stability(rows),
         'decisionInputs': {'labellingComplete': bool(rows) and review['unlabelled'] == 0,
                            'hiddenImportantObserved': review['hiddenImportant']['count'] > 0,
-                           'modelUpdateDecision': 'Ratings are kept across macOS model updates (#297); Mars decides '
+                           'modelUpdateDecision': 'Ratings are kept across macOS model updates (#297); I decide '
                                                   'whether to re-rate still-waiting stories after an update.'},
         'limitations': 'Labels judge the headline and summary the model saw. A label reflects one reviewer. '
                        'Unread waiting stories are deleted 24 hours after their event\'s first report, so the run '

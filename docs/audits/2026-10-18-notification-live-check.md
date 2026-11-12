@@ -4,7 +4,7 @@ Wave 1 follow-up for [#334](https://github.com/marspater/NewsApp-macOS/issues/33
 
 ## Result and remaining acceptance
 
-The real compiled News app refreshed the real library, submitted three full notifications, and macOS logged two banner presentations. Mars clicked one notification; the daemon forwarded its response to that exact running executable, and the app opened a publisher story in its reader.
+The real compiled News app refreshed the real library, submitted three full notifications, and macOS logged two banner presentations. I clicked one notification; the daemon forwarded its response to that exact running executable, and the app opened a publisher story in its reader.
 
 **Still unverified:** whether publisher-image lookup was unfinished at the instant of live OS delivery. The production control flow starts `lookUpStoryImages()` after clustering and does not await it before notification triage; the full regression suite passed the existing blocked-image dispatch check. That is separate evidence and does not establish live timing. Keep #334 open for this remaining acceptance criterion.
 
@@ -17,7 +17,7 @@ The real compiled News app refreshed the real library, submitted three full noti
 - CDHash `aeddf772173d06080d486b764c3f34655a65b42d`.
 - Executable SHA-256 `3a231dddb7164ec78e4b2038313b8e0df876b4a494e4a37314034f447eb10508`.
 - Host macOS 27.0.1 (26A434); Xcode selected at `/Applications/Xcode.app/Contents/Developer`; deployment target macOS 15.
-- System Settings initially showed News notifications off. Mars explicitly authorized enabling them for this audit. The resulting UI showed notifications on, Desktop/Notification Centre/Lock Screen enabled, Temporary alert style, sound and badges on. Notifications remain enabled. Authorization was observed in System Settings, not by an instrumented `getNotificationSettings` call.
+- System Settings initially showed News notifications off. I explicitly authorized enabling them for this audit. The resulting UI showed notifications on, Desktop/Notification Centre/Lock Screen enabled, Temporary alert style, sound and badges on. Notifications remain enabled. Authorization was observed in System Settings, not by an instrumented `getNotificationSettings` call.
 
 ## Runtime observations
 
@@ -27,10 +27,10 @@ The real compiled News app refreshed the real library, submitted three full noti
 | 06:37 | The production UI completed refresh and offered 173 new visible stories. The database gained 486 article rows; these are different denominators. |
 | 06:37:33.099, .546, .547 | `NotificationService` logged three successful full-notification submissions. |
 | 06:37:33.798–.799 | `usernoted` logged delivery of two requests to alert/lock-screen/notification-centre destinations and presentation as banners. The daemon also recorded Focus delay-delivery decisions; no Focus setting was changed. No third banner is claimed. |
-| 06:42:04.731–.734 | Following Mars's click, `usernoted` received the contents/default action for one of those requests, notified PID 42330, and brought the exact worktree bundle forward. |
+| 06:42:04.731–.734 | Following my click, `usernoted` received the contents/default action for one of those requests, notified PID 42330, and brought the exact worktree bundle forward. |
 | After click | Accessibility inspection showed the publisher reader and story heading, with the unread count decreasing by one. Story content and private identifiers are omitted here. |
 
-The desktop tool timed out trying to inspect Notification Centre itself. Banner evidence therefore comes from the daemon, not a screenshot. Click-through combines Mars's action, the daemon response, and the app's resulting reader UI; the notification's displayed title was not independently captured for comparison.
+The desktop tool timed out trying to inspect Notification Centre itself. Banner evidence therefore comes from the daemon, not a screenshot. Click-through combines my action, the daemon response, and the app's resulting reader UI; the notification's displayed title was not independently captured for comparison.
 
 One unrelated `ArticleStore` enrichment-update error appeared at 06:37:42.867 with a privacy-redacted cause. Its cause was not established; no storage change or claim of an error-free refresh is included in this audit.
 
@@ -51,4 +51,4 @@ Raw file hashes differ because this was a real refresh and window launch. SQLite
 
 The full `./test.sh`, `./build.sh`, strict signature verification and catalog-review validation passed. Private logs: `/private/tmp/news-wave1-tests.log`, `/private/tmp/news-wave1-build.log`, `/private/tmp/news-wave1-runtime.log`, `/private/tmp/news-wave1-delivery.log`, `/private/tmp/news-wave1-clickthrough.log`. These local artifacts are not committed and are not durable CI evidence.
 
-To finish #334, capture explicit start/end timing for production image lookup alongside a new eligible-story refresh and OS delivery. Also compare the notification's displayed title with the reader destination directly. Do not replace this remaining check with the already-passing injected-callback regression. This audit establishes no installation, distribution, hosted CI or Gemini embedding-track acceptance.
+To finish #334, capture explicit start/end timing for production image lookup alongside a new eligible-story refresh and OS delivery. Also compare the notification's displayed title with the reader destination directly. Do not replace this remaining check with the already-passing injected-callback regression. This audit establishes no installation, distribution, hosted CI or acceptance of the separate embedding track.

@@ -33,7 +33,7 @@ The existing patterns required a quotation or an adjacent "said that". Speaker c
 | Passages with unmatched speech | 232 | 153 |
 | First gap: speech not matched | 30 | 9 |
 
-Precision: I reviewed all 98 extracted perspectives as a copilot review, pending Mars's acceptance. The criterion: the participant identifies the actual speaker (extra descriptive words tolerated), and the position is something that speaker said. 87 were correct (88.8 %, Wilson 95 % 81.0–93.6 %). The 11 errors:
+Precision: all 98 extracted perspectives were reviewed by an automated review, pending my acceptance. The criterion: the participant identifies the actual speaker (extra descriptive words tolerated), and the position is something that speaker said. 87 were correct (88.8 %, Wilson 95 % 81.0–93.6 %). The 11 errors:
 
 | Error | Count |
 | --- | ---: |

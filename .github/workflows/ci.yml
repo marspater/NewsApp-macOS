@@ -104,7 +104,7 @@ jobs:
           retention-days: 14
 
       # NewsUITests (#1070): smoke flows against the Debug app on a fresh library and a fixture feed. Agents never
-      # run UI automation on the maintainer's Mac, so CI is where these run.
+      # run UI automation on my Mac, so CI is where these run.
       - name: Run UI Tests
         run: |
           set -o pipefail

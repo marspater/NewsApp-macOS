@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Train the in-house pair cross-encoder (#525) from the shipped MiniLM weights and export it to Core ML.
 
-Mars's Mac only, never CI: run it from a virtual environment built from `script/training/requirements.txt`.
+My Mac only, never CI: run it from a virtual environment built from `script/training/requirements.txt`.
 
 `train_pair_model.py PAIRS.csv OUT_DIR [--pretrain A.csv B.csv ...]` reads the private `./test.sh --export-pairs` CSV
 (headline and lead text with the app's own word pieces, `weight` and `marginal` columns), fine-tunes a three-way pair
@@ -83,7 +83,7 @@ class Stage:
     smoothing: float = SMOOTHING
 
 
-# Mars's 25 October configuration (#624, #627): stage 2 with the lower layers frozen, stage 1 over every layer.
+# The 25 October configuration (#624, #627): stage 2 with the lower layers frozen, stage 1 over every layer.
 LIBRARY_STAGE = Stage(3, 1.5e-5, FROZEN_LAYERS)
 PRETRAIN_STAGE = Stage(2, 3e-5)
 

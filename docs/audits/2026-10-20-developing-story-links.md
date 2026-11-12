@@ -9,7 +9,7 @@ Aggregate evidence for showing "Earlier in This Story" links in event overviews.
 - **Collector:** the isolated relation collector library, frozen 17 October 2026 (504 events).
 - **Current:** the daily-use library on 20 October 2026 (353 events).
 
-`script/evaluation/relation_review.py sheet` produced blind sheets that mix proposed links with the hardest rejected candidates (controls). One reviewer (the coding agent, under Mars's standing delegation for pair review) labelled each pair `related`, `unrelated` or `unsure`; `report` computed the rates. Labels from the first collector run were carried over to identical pairs in later runs.
+`script/evaluation/relation_review.py sheet` produced blind sheets that mix proposed links with the hardest rejected candidates (controls). One reviewer (an automated review, under my standing delegation for pair review) labelled each pair `related`, `unrelated` or `unsure`; `report` computed the rates. Labels from the first collector run were carried over to identical pairs in later runs.
 
 ## Results
 

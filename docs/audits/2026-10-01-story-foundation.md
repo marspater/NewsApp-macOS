@@ -35,4 +35,4 @@ Image selection is currently limited to publisher metadata and figures. Responsi
 
 The larger labeled duplicate/cluster corpus, model benchmark, multi-source summaries, timelines, perspectives, incremental feed validators and tension index remain planned work. No precision/recall claim or complete project-readiness claim is made.
 
-The user's existing icon edits were left untouched. Earlier image-cache changes are still present in the working tree and are not represented as newly completed work here. Real saved stories, read history and installed app were not changed by these checks.
+My existing icon edits were left untouched. Earlier image-cache changes are still present in the working tree and are not represented as newly completed work here. Real saved stories, read history and installed app were not changed by these checks.

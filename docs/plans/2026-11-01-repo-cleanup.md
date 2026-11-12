@@ -24,7 +24,7 @@ No `.orig`, `.bak`, `.tmp`, `.rej` or editor backup files exist. `git status --i
 `.antigravity/`, `.codacy/`, `.swiftpm/`, `.claude/settings.local.json` and `all state of
 local tools.
 
-### Second pass, after Mars's review (same day)
+### Second pass, after my review (same day)
 
 Every remaining worktree and branch was reviewed: a branch whose pull request is merged or closed is stale (its
 work is on `main` as a squash); a branch with no pull request was checked for commits not on `main`, whether it
@@ -97,7 +97,7 @@ notes from `TensionMethodology.swift`, `calibrate_tension.py` and `ARCHITECTURE.
 | `native_performance_baseline.sh` | all three CI providers with `NEWS_NATIVE_HARNESS=Tests/PublisherExcerptTests.swift`; by hand for the other harnesses |
 | `evaluation/{evaluate, publisher_review, publisher_dates, overview_review, importance_review, relation_review, catalog_review, fit_pair_head, calibrate_tension}.py` | `test.sh` self-checks; CircleCI `checks` (all but `calibrate_tension`) |
 | `training/pretrain_pairs.py` (`--self-check`) | `test.sh` |
-| `training/{train_pair_model, train_embedding, convert_minilm, compress_models}.py`, `wordpiece.py`, `requirements.txt` | by hand on Mars's Mac only (the four training scripts' docstrings say "Mars's Mac only, never CI"); `wordpiece.py` is the tokenizer the other three import and `requirements.txt` their virtual environment |
+| `training/{train_pair_model, train_embedding, convert_minilm, compress_models}.py`, `wordpiece.py`, `requirements.txt` | by hand on my Mac only (the four training scripts' docstrings say "My Mac only, never CI"); `wordpiece.py` is the tokenizer the other three import and `requirements.txt` their virtual environment |
 | `evaluation/sample_pairs.py`, `evaluation/build_corpus.py` | by hand (`CONTRIBUTING.md`; the story-corpus fixture README) |
 | `build_and_run.sh` | `make run`, `README.md` |
 | `distribution/{notarize, package_dmg}.sh` | by hand at release; `NewsTests.swift` checks their text |

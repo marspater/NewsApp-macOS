@@ -1713,7 +1713,7 @@ extension NewsTests {
         assertEqual(OnDeviceImportanceJudge.level("Major."), .major, "MAJOR is major")
         assertEqual(OnDeviceImportanceJudge.level("notable"), .notable, "NOTABLE is notable")
         assertTrue(OnDeviceImportanceJudge.level("It depends") == nil, "Anything else is no rating")
-        // #309: Mars's rulings on the three borderline single-source stories.
+        // #309: the rulings on the three borderline single-source stories.
         let instructions = OnDeviceImportanceJudge.prompt(
             EventJudgeReport(id: "r", title: "Flour price rises", summary: ""))
         for rule in [

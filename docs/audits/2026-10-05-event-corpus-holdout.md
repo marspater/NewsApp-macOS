@@ -4,7 +4,7 @@ Refs #102, #127, #94, #90. Matcher frozen at main `3760849` (EventMatcher, Event
 
 ## Input
 
-The accepted private export (`reviewed-event-corpus.json`, SHA-256 `868c62a0…a2ca3d63de8623fbe866359d1e082fadacd7bd456acf2a0`) holds 231 distinct native URLs: 168 tune and 63 holdout. Six same-URL copies are scored once and 24 accepted exclusions stay out. Labels are a copilot review accepted by Mars, not blind independent annotation.
+The accepted private export (`reviewed-event-corpus.json`, SHA-256 `868c62a0…a2ca3d63de8623fbe866359d1e082fadacd7bd456acf2a0`) holds 231 distinct native URLs: 168 tune and 63 holdout. Six same-URL copies are scored once and 24 accepted exclusions stay out. Labels are an automated review that I accepted, not blind independent annotation.
 
 ## Tune (4 October)
 
@@ -48,4 +48,4 @@ Embeddings on the holdout at 0.20 (English and German pairs within the window): 
 
 - 24 predicted holdout pairs cannot distinguish 96% from 99% precision. Recall is low by design and almost entirely English.
 - The fingerprint (identity) gate is separate and still needs fresh holdout captures from 4 October on, reviewed once; one capture on 4 October gave 143 eligible tuning documents and no different-URL candidate.
-- Labels are accepted copilot reviews, not blind annotation.
+- Labels are accepted automated reviews, not blind annotation.

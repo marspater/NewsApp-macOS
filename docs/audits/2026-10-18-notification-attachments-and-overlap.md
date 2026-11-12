@@ -1,6 +1,6 @@
 # Notification attachments and live lookup overlap — 18 October 2026
 
-Baseline: main `68ea4a6` (merged #445–#448), with the notification fix in this PR. The earlier [real compiled-app audit](2026-10-18-notification-live-check.md) records real refresh delivery and Mars's click-through. This follow-up addresses its missing overlap evidence and the reported absence of notification images.
+Baseline: main `68ea4a6` (merged #445–#448), with the notification fix in this PR. The earlier [real compiled-app audit](2026-10-18-notification-live-check.md) records real refresh delivery and my click-through. This follow-up addresses its missing overlap evidence and the reported absence of notification images.
 
 ## Reproduced defect and fix
 

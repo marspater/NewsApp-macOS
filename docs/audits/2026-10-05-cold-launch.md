@@ -4,7 +4,7 @@ Refs #104, #153, #90. Apple M5 / 24 GiB (Mac17,3), macOS 27.0.1. Method and bund
 
 ## Conditions
 
-Mars ran `sudo purge && ./script/launch_baseline.sh <private dir>` from the local main checkout (`03a0a8e`; the launch path is unchanged on `aed9f8c`). The script builds the bundle and seeds its library after the purge, so the first measured launch is the first launch of a newly built bundle after the file cache was purged. The build itself reads compiler and SDK files back into the cache; this is the closest cold measurement available without a reboot. Launches 2–5 follow immediately and are warm.
+I ran `sudo purge && ./script/launch_baseline.sh <private dir>` from the local main checkout (`03a0a8e`; the launch path is unchanged on `aed9f8c`). The script builds the bundle and seeds its library after the purge, so the first measured launch is the first launch of a newly built bundle after the file cache was purged. The build itself reads compiler and SDK files back into the cache; this is the closest cold measurement available without a reboot. Launches 2–5 follow immediately and are warm.
 
 ## Results
 

@@ -1,8 +1,8 @@
 # Veto share out of sample (#737, 10 November 2026)
 
-Follows [the recall levers audit](2026-11-05-recall-levers.md) and [the evidence head audit](2026-11-09-evidence-head.md). **Setting g fails out of sample; no default changes and no matcher code is proposed.** This change amends one clause of the matcher gate in CONTRIBUTING.md (Mars, 10 November) and records the measurement.
+Follows [the recall levers audit](2026-11-05-recall-levers.md) and [the evidence head audit](2026-11-09-evidence-head.md). **Setting g fails out of sample; no default changes and no matcher code is proposed.** This change amends one clause of the matcher gate in CONTRIBUTING.md (decided 10 November) and records the measurement.
 
-Build a8da29b (matcher code equal to `main` at 64ae7a4), matcher v15. Receipts are private under `~/news-eval/clustering-737-2026-11-09/`; this file carries counts only. Stage 1 and validation labels are single-pass agent labels, unreviewed by Mars.
+Build a8da29b (matcher code equal to `main` at 64ae7a4), matcher v15. Receipts are private under `~/news-eval/clustering-737-2026-11-09/`; this file carries counts only. Stage 1 and validation labels are single-pass agent labels, which I have not reviewed.
 
 ## Setting
 

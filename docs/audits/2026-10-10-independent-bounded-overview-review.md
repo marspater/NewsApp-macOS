@@ -18,7 +18,7 @@ The private copy freezes 65 original capture files. Included output hashes match
 
 Critical-error Wilson 95% interval: **0.80–5.15%**, upper bound **5.15%**; unsupported-only interval: **0.52–4.42%**. Critical labels affect 3/38 accepted overviews; all seven exceptions affect 5/38. Repeated claims and shared events limit the interpretation of per-claim intervals.
 
-These are Agent 1 proposals, not Mars-adjudicated decisions. One testimonial paraphrase is borderline: the speaker is named as the affected person, but the testimonial assessment loses its reporting frame. Its severity remains explicitly pending. The other three critical labels concern two truncated military assessments ending at a speaker-title abbreviation and one pending legal allegation recast as established conduct. The three unsupported claims use citations that do not establish all of the displayed assertion. Another packet passage or title cannot repair the selected citation. Even if the borderline case becomes supported, three critical labels remain.
+These are Agent 1 proposals, not decisions I adjudicated. One testimonial paraphrase is borderline: the speaker is named as the affected person, but the testimonial assessment loses its reporting frame. Its severity remains explicitly pending. The other three critical labels concern two truncated military assessments ending at a speaker-title abbreviation and one pending legal allegation recast as established conduct. The three unsupported claims use citations that do not establish all of the displayed assertion. Another packet passage or title cannot repair the selected citation. Even if the borderline case becomes supported, three critical labels remain.
 
 ## Current-revision deterministic replay
 
