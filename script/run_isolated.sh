@@ -39,8 +39,9 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
-# Only an isolated identifier: never the real app's or the development build's container.
-if [[ ! "$BUNDLE_ID" =~ ^com\.marspater\.news\.[A-Za-z0-9]+$ || "$BUNDLE_ID" == com.marspater.news.dev ]]; then
+# Only an isolated identifier: never the real app's or the development build's container (case-insensitive on APFS).
+BUNDLE_ID_LOWER=$(printf '%s' "$BUNDLE_ID" | tr '[:upper:]' '[:lower:]')
+if [[ ! "$BUNDLE_ID" =~ ^com\.marspater\.news\.[A-Za-z0-9]+$ || "$BUNDLE_ID_LOWER" == "com.marspater.news.dev" ]]; then
     echo "❌ --bundle-id must be com.marspater.news.<name>, not the development build's: $BUNDLE_ID" >&2
     exit 1
 fi
