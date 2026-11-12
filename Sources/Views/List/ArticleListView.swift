@@ -630,9 +630,15 @@ struct ArticleListView: View {
                 }
                 // The edition's stories are frozen, but a photo the page lookup recorded after the selection belongs
                 // on its card: without this a story from a feed without images stays bare for the whole edition (#1201).
-                // The same curation as a list's stories and a banner's story, so all three show one photo.
                 let frozen = briefing?.articles ?? []
-                let briefingArticles = (try? await articleStore.database.curateImages(in: frozen)) ?? frozen
+                let photos =
+                    (try? await articleStore.database.storyImages(
+                        for: frozen.filter { $0.imageUrl == nil }.map(\.id))) ?? [:]
+                let briefingArticles = frozen.map { story in
+                    var story = story
+                    if story.imageUrl == nil { story.imageUrl = photos[story.id] }
+                    return story
+                }
                 let events = (try? await articleStore.eventFeedSummaries(for: briefingArticles.map(\.id))) ?? []
                 try Task.checkCancellation()
                 let snapshot = FeedSnapshot(articles: briefingArticles, events: events)
