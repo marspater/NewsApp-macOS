@@ -1400,6 +1400,20 @@ extension NewsTests {
         assertTrue(same.isRestored && !same.isAssigned, "A restored edition is marked, and is not one to store again")
         assertTrue(same.hasSameArrangement(as: fresh), "A fresh edition of the same arrangement confirms it")
         assertEqual(same.metadata["a"]?.imageURL, photo, "A Lead slide keeps the event photo its card showed")
+        // The slide, the photo rule, the prefetch and the lane cards share one source (`imageURL(of:)`): a report
+        // that has gained its own photo since the edition was kept shows that photo, not the stored event photo.
+        var ownPhoto = makeArticle(id: "a", title: "a", pubDate: referenceNow)
+        ownPhoto.imageUrl = "https://images.example/a-own.jpg"
+        let withOwn = try stored.restored(
+            entries: [.article(ownPhoto)] + entries(["b", "c", "d", "e"]), identity: identity,
+            now: referenceNow.addingTimeInterval(60)
+        ).get()
+        assertEqual(
+            withOwn.leadImages["a"]?.absoluteString, "https://images.example/a-own.jpg",
+            "The Lead's slide shows the report's own photo, as its card and the prefetch do")
+        assertEqual(
+            withOwn.metadata["a"]?.imageURL, photo,
+            "The card metadata still holds the stored event photo, which the slide no longer takes first")
         assertEqual(same.metadata["c"]?.contentType, "Explainer", "A Deep Read card keeps its tag")
 
         let changed = try restore(["a", "b", "d", "e", "new"]).get()
