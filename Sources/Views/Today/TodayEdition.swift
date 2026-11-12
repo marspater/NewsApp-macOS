@@ -243,6 +243,17 @@ extension ArticleStore {
         }.value
     }
 
+    /// Keeps a complete edition for the next launch after the store before it, so an older edition never lands after a
+    /// newer one. Returns the store, which the next one waits for.
+    func storeTodayEdition(_ edition: TodayEdition, reader: TodayReader, after earlier: Task<Void, Never>?)
+        -> Task<Void, Never>
+    {
+        Task {
+            await earlier?.value
+            await storeTodayEdition(edition, reader: reader)
+        }
+    }
+
     /// Keeps a complete edition for the next launch. A failure only costs that launch its head start.
     func storeTodayEdition(_ edition: TodayEdition, reader: TodayReader) async {
         let identity = TodayStoredEdition.identity(
@@ -267,7 +278,7 @@ extension ArticleStore {
         var timer = previous == nil ? NewsSignposts.StageTimer("Today edition") : nil
         let analysisGeneration = await database.analysisGeneration
         do {
-            var context = try await database.loadTodayAssignmentContext(
+            let context = try await database.loadTodayAssignmentContext(
                 entries: entries, now: now, starredFeedURLs: reader.starredFeedURLs,
                 subscribedFeedURLs: reader.subscribedFeedURLs, resetAt: reader.interestsResetAt)
             try Task.checkCancellation()
@@ -289,15 +300,27 @@ extension ArticleStore {
                 details.eventImages[entry.id] = image
             }
             timer?.lap("event_images", count: min(60, unpictured.count))
-            details.unsubscribedIDs = TodayEditionAssigner.unsubscribedEntryIDs(entries, context: context)
-            context.imagelessEntryIDs = Set(
-                entries.filter { entry in
-                    guard let image = entry.cardImageURL ?? details.eventImages[entry.id] else { return true }
-                    return reader.failedImageURLs.contains(image)
-                }.map(\.id))
-            let plan = await Task.detached(priority: .userInitiated) {
-                TodayEditionAssigner.assign(entries: entries, context: context)
-            }.value
+            let eventImages = details.eventImages
+            let failedImages = reader.failedImageURLs
+            // A cancelled reload (a newer revision replaced it) stops before the assignment when it can; the
+            // assignment itself runs to its end once started.
+            let assignment = Task.detached(priority: .userInitiated) { [context] in
+                var context = context
+                context.imagelessEntryIDs = Set(
+                    entries.filter { entry in
+                        guard let image = entry.cardImageURL ?? eventImages[entry.id] else { return true }
+                        return failedImages.contains(image)
+                    }.map(\.id))
+                let unsubscribed = TodayEditionAssigner.unsubscribedEntryIDs(entries, context: context)
+                try Task.checkCancellation()
+                return (TodayEditionAssigner.assign(entries: entries, context: context), unsubscribed)
+            }
+            let (plan, unsubscribed) = try await withTaskCancellationHandler {
+                try await assignment.value
+            } onCancel: {
+                assignment.cancel()
+            }
+            details.unsubscribedIDs = unsubscribed
             try Task.checkCancellation()
             timer?.lap("assignment", count: entries.count { if case .event = $0 { true } else { false } })
             details.differingAccounts = (try? await database.todayDifferingAccounts(for: plan)) ?? [:]
@@ -312,6 +335,9 @@ extension ArticleStore {
             assigned.isAssigned = previous == nil
             assigned.analysisGeneration = analysisGeneration
             return assigned
+        } catch let error where error is CancellationError && Task.isCancelled {
+            // The caller discards a cancelled reload's edition; laying a fallback out on the main actor is waste.
+            return TodayEdition(generation: generation)
         } catch {
             return TodayEdition.make(
                 entries: entries, plan: TodayEditionPlan(lanes: []), keeping: previous, generation: generation)

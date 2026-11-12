@@ -49,6 +49,7 @@ extension NewsTests {
             ("testLeadNeedsAPhotoAndLeftFeedsLeaveToday", { testTodayLeadPhotoAndLeftFeeds() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
+            ("testCancelledReloadLaysNoFallbackOut", { try await testTodayCancelledReload() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
             ("testLoaderSectorImpactNeedsStoredSection", { try await testTodayLoaderSectorImpactNeedsStoredSection() }),
             ("testFullEditionIsDeterministicPerLaneWithOneLanePerStory", { testTodayFullEditionContract() }),
@@ -1635,6 +1636,43 @@ extension NewsTests {
                 title: "Central bank revises long-term inflation target", score: 0.7, publishers: 2),
             "Notification priority does not trigger while story still leads Today"
         )
+    }
+
+    /// #937: a reload cancelled by a newer revision returns an empty edition its caller discards, instead of laying a
+    /// fallback edition out on the main actor; an uncancelled one lays the page out.
+    @MainActor
+    static func testTodayCancelledReload() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        defer { Task { await db.close() } }
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        let entries: [FeedEntry] = [.article(makeArticle(id: "c1", title: "Port reopens", pubDate: referenceNow))]
+        let reader = TodayReader(subscribedFeedURLs: ["https://global.example/rss"], starredFeedURLs: [])
+        let cancelled = Task { @MainActor in
+            await store.todayEdition(entries: entries, reader: reader, keeping: nil, generation: 3)
+        }
+        cancelled.cancel()
+        let discarded = await cancelled.value
+        assertTrue(discarded.lanes.isEmpty && discarded.generation == 3, "A cancelled reload lays nothing out")
+        let laidOut = await store.todayEdition(entries: entries, reader: reader, keeping: nil, generation: 4)
+        assertEqual(laidOut.storyIDs, ["c1"], "An uncancelled reload lays the page out")
+
+        // Stores run in order (F7): an older edition whose store is slow does not land after a newer one.
+        func edition(_ id: String) -> TodayEdition {
+            var made = TodayEdition.make(
+                entries: [.article(makeArticle(id: id, title: id, pubDate: referenceNow))],
+                plan: TodayEditionPlan(lanes: []))
+            made.isAssigned = true
+            return made
+        }
+        let slowOlder = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(60))
+            await store.storeTodayEdition(edition("older"), reader: reader)
+        }
+        await store.storeTodayEdition(edition("newer"), reader: reader, after: slowOlder).value
+        let kept = try await db.storedTodayEdition().map { try JSONDecoder().decode(TodayStoredEdition.self, from: $0) }
+        assertEqual(
+            kept?.lanes.flatMap { $0.stories.map(\.id) }, ["newer"], "The newer edition is the one kept")
     }
 
     static func testTodayDeterminismAndDatabaseLoader() async throws {
