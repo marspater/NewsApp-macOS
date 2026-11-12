@@ -39,6 +39,7 @@ extension NewsTests {
             ("testSubscriptionPoolAndZeroDuplicatesAndLatestSafetyNet", { testTodaySubscriptionPoolAndSafetyNet() }),
             ("testCoverageGateAndDevelopingPill", { testTodayCoverageGateAndDevelopingPill() }),
             ("testCardMetadataHasRealSourcesOrIsHidden", { testTodayCardMetadata() }),
+            ("testCardMetadataIsBuiltWithTheLayout", { await testTodayCardDetailsOffMainActor() }),
             ("testFocusMovesWithinAndBetweenLanes", { testTodayFocusMap() }),
             ("testFocusIsRestoredWhenTheEditionChanges", { testTodayFocusRestore() }),
             ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
@@ -1053,6 +1054,19 @@ extension NewsTests {
     }
 
     /// Z7 (#1174): every card field comes from the assignment or the event, and a field without data stays nil.
+    /// #1174: a card's metadata is worked out while the edition is laid out, in a detached task as
+    /// `ArticleStore.todayEdition` does, so a card body only reads it: the reading time counted from stored text is
+    /// there before any card is drawn.
+    static func testTodayCardDetailsOffMainActor() async {
+        let story = makeArticle(
+            id: "off-main", title: "Ministers agree a plan", pubDate: referenceNow.addingTimeInterval(-600),
+            fullContent: Array(repeating: "word", count: 1200).joined(separator: " "))
+        let entries: [FeedEntry] = [.article(story)]
+        let plan = TodayEditionAssigner.assign(entries: entries, context: TodayAssignmentContext(now: referenceNow))
+        let edition = await Task.detached { TodayEdition.make(entries: entries, plan: plan) }.value
+        assertEqual(edition.metadata["off-main"]?.readingMinutes, 6, "Reading time is counted with the layout")
+    }
+
     static func testTodayCardMetadata() {
         let day = 86_400.0
         let event = makeEventEntry(
