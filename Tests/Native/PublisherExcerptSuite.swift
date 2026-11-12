@@ -54,6 +54,7 @@ extension NativeSuites.PublisherExcerptSuite {
             "The Post reported that the video appeared first on Telegram.",
             "The article was published on 3 November in Nature.",
             "The post was published on Tuesday and drew criticism from opposition leaders.",
+            "This post was originally published on Harbour Daily but officials denied the claim.",
         ] {
             expectTrue(!OverviewComposer.isSelfAttribution(sentence), "A report about a publication: \(sentence)")
         }

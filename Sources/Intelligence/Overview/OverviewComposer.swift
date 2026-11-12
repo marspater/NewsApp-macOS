@@ -102,7 +102,10 @@ public struct OverviewComposer: Sendable {
             + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+(?-i:post)\b.*?\b(?:appeared\s+first|(?:first|originally)\s+appeared))"#
         let months = "january|february|march|april|may|june|july|august|september|october|november|december"
         let days = "monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday"
-        let site = #"\s+(?:on|at)\s+(?!.*\b(?:"# + months + "|" + days + #")\b)[^,;:]{1,60}?[.!]?\s*$"#
+        // A site name ends the sentence: no date, weekday or clause ("… on Harbour Daily but officials denied it.").
+        let clauses = "but|which|while|because|although|though|after|before|when|whereas|who|that|so|yet"
+        let site =
+            #"\s+(?:on|at)\s+(?!.*\b(?:"# + months + "|" + days + "|" + clauses + #")\b)[^,;:]{1,60}?[.!]?\s*$"#
         guard let expression = try? NSRegularExpression(pattern: opening + site, options: [.caseInsensitive]) else {
             preconditionFailure("The self-attribution pattern is valid")
         }

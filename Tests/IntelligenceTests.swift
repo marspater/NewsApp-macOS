@@ -3017,6 +3017,7 @@ extension NewsTests {
             "This story was first published on Monday by the regional broadcaster.",
             "The Post reported that the video appeared first on Telegram.",
             "The post was published on Tuesday and drew criticism from opposition leaders.",
+            "This post was originally published on Harbour Daily but officials denied the claim.",
         ] {
             assertFalse(
                 OverviewComposer.isSelfAttribution(sentence), "A report about a publication is a fact: \(sentence)")
