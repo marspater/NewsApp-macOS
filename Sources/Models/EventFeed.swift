@@ -276,18 +276,34 @@ struct FeedUpdateBuffer: Equatable, Sendable {
     struct NewDayHandoff: Equatable, Sendable {
         private(set) var isWaiting = false
 
-        /// Call before each refreshed page is received.
-        mutating func noteRefreshedPage(showsOnlyEarlierDays: Bool, isGrouping: Bool) {
-            if showsOnlyEarlierDays, isGrouping { isWaiting = true }
+        /// Call before each refreshed page is received. `wasGroupingAtFetch`: the grouping was running when that page
+        /// was read. A page read mid-grouping still holds once the grouping has ended: the reload that its end starts
+        /// reads the grouped page (#937).
+        mutating func noteRefreshedPage(showsOnlyEarlierDays: Bool, isGrouping: Bool, wasGroupingAtFetch: Bool = false)
+        {
+            if showsOnlyEarlierDays, isGrouping || wasGroupingAtFetch { isWaiting = true }
+        }
+
+        /// The page on screen was laid out from stories the grouping has not processed yet, such as a launch page
+        /// after a refresh was cut short: like an earlier day's page, it gives way to the grouped page once while the
+        /// reader has not touched it (#937).
+        mutating func notePageAwaitsGrouping() { isWaiting = true }
+
+        /// A page waits for its grouping only when most of its stories are unprocessed (a refresh cut short), not for a
+        /// few leftovers the matcher has not reached.
+        static func isMostlyUngrouped(unprocessed: Int, of total: Int) -> Bool {
+            total > 0 && unprocessed * 2 > total
         }
 
         /// The list was replaced or loaded anew.
         mutating func reset() { isWaiting = false }
 
         /// Whether the list holds its stories, or nil when the handoff does not apply and the ordinary rule decides.
-        func holds(showsOnlyEarlierDays: Bool, isGrouping: Bool, isTouched: Bool) -> Bool? {
+        func holds(
+            showsOnlyEarlierDays: Bool, isGrouping: Bool, wasGroupingAtFetch: Bool = false, isTouched: Bool
+        ) -> Bool? {
             guard showsOnlyEarlierDays || isWaiting else { return nil }
-            return isGrouping || isTouched
+            return isGrouping || wasGroupingAtFetch || isTouched
         }
     }
 

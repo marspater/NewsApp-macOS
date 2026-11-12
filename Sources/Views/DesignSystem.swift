@@ -325,9 +325,16 @@ enum AppLayout {
     static let readerFigureMaxHeight: CGFloat = 560
     static let progressBarHeight: CGFloat = 2
     static let catalogSheetWidth: CGFloat = 720
-    static let catalogSheetMinHeight: CGFloat = 560
+    /// Opens from Settings like Publisher Health, so it takes the same bounds (#1265).
+    static let catalogSheetMinHeight: CGFloat = publisherHealthSheetMinHeight
+    static let catalogSheetHeight: CGFloat = publisherHealthSheetIdealHeight
     static let publisherHealthSheetWidth: CGFloat = 720
-    static let publisherHealthSheetMinHeight: CGFloat = 560
+    /// The sheet opens below the Settings window's toolbar, where the 560 pt pane leaves room for its content plus the
+    /// sheet's own bottom bar with Done; a 560 pt content height put Done below the window edge (#1265). The table
+    /// scrolls, so the header, footnote and Done stay visible.
+    static let publisherHealthSheetMinHeight: CGFloat = 400
+    static let publisherHealthSheetIdealHeight: CGFloat = 480
+    static let publisherHealthSheetMaxHeight: CGFloat = publisherHealthSheetIdealHeight
     static let publisherHealthFeedColumnMinWidth: CGFloat = 150
     static let publisherHealthNumberColumnWidth: CGFloat = 68
     static let publisherHealthTextColumnWidth: CGFloat = 72
@@ -977,11 +984,12 @@ struct PhotoControlSurface<S: Shape>: ViewModifier {
     let shape: S
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
-            // The dark backing sits between the glass and the marks: in an inactive window the glass turns pale
-            // whatever its tint, and white dots and arrows vanished on it (live pass, 11 November 2026).
+            // The marks are the glass's own content, so they draw above it. Glass placed behind them as a background
+            // was composited over them by the shared container: in an inactive window it turns pale and the white
+            // dots and arrows vanished, also with a dark backing (live passes, 11 and 12 November 2026).
             content
                 .background(AppColor.carouselControl, in: shape)
-                .background { Color.clear.glassEffect(.regular, in: shape) }
+                .glassEffect(.regular, in: shape)
         } else {
             content.background(AppColor.carouselControl, in: shape).background(.regularMaterial, in: shape)
         }

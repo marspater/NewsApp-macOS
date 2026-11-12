@@ -2422,6 +2422,68 @@ extension NewsTests {
         assertEqual(
             handoff.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: true), true,
             "A page the reader scrolled or focused keeps its stories; the new ones wait behind the button")
+        // A page read while the grouping ran and received after it ended is still one report a story: the reload
+        // that the grouping's end starts reads the grouped page (#937).
+        var raced = FeedUpdateBuffer.NewDayHandoff()
+        raced.noteRefreshedPage(showsOnlyEarlierDays: true, isGrouping: false, wasGroupingAtFetch: true)
+        let readMidGrouping = raced.holds(
+            showsOnlyEarlierDays: true, isGrouping: false, wasGroupingAtFetch: true, isTouched: false)
+        assertEqual(readMidGrouping, true, "A page read mid-grouping does not take the page once grouping ends")
+        var racedMorning = FeedUpdateBuffer()
+        racedMorning.replace(with: FeedSnapshot(articles: [yesterday]))
+        assertEqual(
+            racedMorning.receive(ungrouped, holding: readMidGrouping ?? false, mode: .events), .waiting,
+            "The earlier edition stays for the grouped page")
+        assertEqual(
+            raced.holds(showsOnlyEarlierDays: true, isGrouping: false, isTouched: false), false,
+            "The page read after the grouping takes an untouched page")
+        // A launch page of stories the grouping has not processed (a refresh cut short by quitting) gives way to the
+        // grouped page like an earlier day's page: once, while untouched; a touched page holds as before (#937).
+        assertTrue(
+            FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(unprocessed: 638, of: 649),
+            "A page of a refresh cut short waits for its grouping")
+        assertFalse(
+            FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(unprocessed: 3, of: 200),
+            "A few leftovers do not make an ordinary launch page give way to a refresh")
+        assertFalse(FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(unprocessed: 0, of: 0), "An empty page does not")
+        var launchPage = FeedUpdateBuffer.NewDayHandoff()
+        assertEqual(
+            launchPage.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: false), nil,
+            "A grouped page of today's stories follows the ordinary rule")
+        launchPage.notePageAwaitsGrouping()
+        assertEqual(
+            launchPage.holds(showsOnlyEarlierDays: false, isGrouping: true, isTouched: false), true,
+            "While the grouping runs the ungrouped page stays")
+        assertEqual(
+            launchPage.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: true), true,
+            "A page the reader scrolled or focused keeps its cards; the grouped page waits behind Show Updates")
+        let launchGrouped = launchPage.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: false)
+        assertEqual(launchGrouped, false, "Once grouped, the grouped page takes an untouched page")
+        var launchList = FeedUpdateBuffer()
+        let single1 = dated("s1", morning)
+        let single2 = dated("s2", morning)
+        launchList.replace(with: FeedSnapshot(articles: [single1, single2]))
+        let groupedLaunch = FeedSnapshot(
+            articles: [single1, single2],
+            events: [
+                EventFeedSummary(
+                    eventID: "e-launch", membershipVersion: 2, seenVersion: nil,
+                    members: [
+                        EventFeedMember(
+                            articleID: "s1", source: "One", title: "s1", date: morning, joinedVersion: 1, isRead: false,
+                            isSaved: false),
+                        EventFeedMember(
+                            articleID: "s2", source: "Two", title: "s2", date: morning, joinedVersion: 2, isRead: false,
+                            isSaved: false),
+                    ])
+            ])
+        assertEqual(
+            launchList.receive(groupedLaunch, holding: launchGrouped ?? true, mode: .events), .replaced,
+            "The grouped page replaces the ungrouped one")
+        launchPage.reset()
+        assertEqual(
+            launchPage.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: false), nil,
+            "After the replacement the ordinary rule holds new stories again")
         let afterGrouping = handoff.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: false)
         assertEqual(afterGrouping, false, "Once grouped, the new day takes an untouched page")
         assertEqual(

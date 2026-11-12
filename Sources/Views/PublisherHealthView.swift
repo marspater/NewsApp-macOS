@@ -25,7 +25,11 @@ struct PublisherHealthView: View {
     var body: some View {
         PublisherHealthContent(phase: phase)
             .frame(width: AppLayout.publisherHealthSheetWidth)
-            .frame(minHeight: AppLayout.publisherHealthSheetMinHeight)
+            .frame(
+                minHeight: AppLayout.publisherHealthSheetMinHeight,
+                idealHeight: AppLayout.publisherHealthSheetIdealHeight,
+                maxHeight: AppLayout.publisherHealthSheetMaxHeight
+            )
             .navigationTitle("Publisher Health")
             .toolbar(removing: .title)
             .toolbar {

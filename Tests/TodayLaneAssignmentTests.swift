@@ -39,6 +39,7 @@ extension NewsTests {
             ("testSubscriptionPoolAndZeroDuplicatesAndLatestSafetyNet", { testTodaySubscriptionPoolAndSafetyNet() }),
             ("testCoverageGateAndDevelopingPill", { testTodayCoverageGateAndDevelopingPill() }),
             ("testCardMetadataHasRealSourcesOrIsHidden", { testTodayCardMetadata() }),
+            ("testCardMetadataIsBuiltWithTheLayout", { await testTodayCardDetailsOffMainActor() }),
             ("testFocusMovesWithinAndBetweenLanes", { testTodayFocusMap() }),
             ("testFocusIsRestoredWhenTheEditionChanges", { testTodayFocusRestore() }),
             ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
@@ -48,8 +49,13 @@ extension NewsTests {
             ("testLeadNeedsAPhotoAndLeftFeedsLeaveToday", { testTodayLeadPhotoAndLeftFeeds() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
+            ("testCancelledReloadLaysNoFallbackOut", { try await testTodayCancelledReload() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
             ("testLoaderSectorImpactNeedsStoredSection", { try await testTodayLoaderSectorImpactNeedsStoredSection() }),
+            ("testFullEditionIsDeterministicPerLaneWithOneLanePerStory", { testTodayFullEditionContract() }),
+            ("testOutputHoldsNoTopicLaneAndNoBriefingAnalysis", { testTodayOutputHasNoTopicLaneOrAnalysis() }),
+            ("testNotifyingStoryNeedNotLeadToday", { testTodayNotifyingStoryNeedNotLead() }),
+            ("testYourBeatPerStoryAffinityIsOffByDefault", { try await testTodayYourBeatPerStoryAffinity() }),
         ]
         try await runSuite(tests)
     }
@@ -1051,6 +1057,19 @@ extension NewsTests {
     }
 
     /// Z7 (#1174): every card field comes from the assignment or the event, and a field without data stays nil.
+    /// #1174: a card's metadata is worked out while the edition is laid out, in a detached task as
+    /// `ArticleStore.todayEdition` does, so a card body only reads it: the reading time counted from stored text is
+    /// there before any card is drawn.
+    static func testTodayCardDetailsOffMainActor() async {
+        let story = makeArticle(
+            id: "off-main", title: "Ministers agree a plan", pubDate: referenceNow.addingTimeInterval(-600),
+            fullContent: Array(repeating: "word", count: 1200).joined(separator: " "))
+        let entries: [FeedEntry] = [.article(story)]
+        let plan = TodayEditionAssigner.assign(entries: entries, context: TodayAssignmentContext(now: referenceNow))
+        let edition = await Task.detached { TodayEdition.make(entries: entries, plan: plan) }.value
+        assertEqual(edition.metadata["off-main"]?.readingMinutes, 6, "Reading time is counted with the layout")
+    }
+
     static func testTodayCardMetadata() {
         let day = 86_400.0
         let event = makeEventEntry(
@@ -1378,6 +1397,69 @@ extension NewsTests {
             TodayRestoreOutcome.decide(sameArrangement: false, isTouched: false, awaitsNewDay: true), .held,
             "No swap while another day's page is on its way")
 
+        // The held path (#937): the reader touched the restored page before the fresh edition was ready.
+        let restoredPage = try restore(["a", "b", "c", "d", "e"]).get()
+        let freshPlan = TodayEditionPlan(
+            lanes: [
+                TodayLaneResult(lane: .theLead, qualifies: true, entries: [story("e", .theLead)]),
+                TodayLaneResult(
+                    lane: .theLatest, qualifies: true,
+                    entries: ["a", "b", "c", "d"].map { story($0, .theLatest) }),
+            ])
+        let freshBehind = TodayEdition.make(entries: entries(["a", "b", "c", "d", "e"]), plan: freshPlan)
+        assertFalse(
+            TodayEdition.keepsLanes(of: restoredPage, isHolding: true, generation: 0),
+            "A restored edition is never kept: the fresh one behind it is laid out from the assignment")
+        assertEqual(
+            TodayRestoreOutcome.decide(
+                sameArrangement: freshBehind.hasSameArrangement(as: restoredPage), isTouched: true,
+                awaitsNewDay: false), .held, "A touched page holds its restored cards")
+        let heldPage = restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e"]), fresh: freshBehind)
+        assertTrue(!heldPage.isRestored && shape(heldPage) == shape(restoredPage), "The cards stay as they were")
+        assertEqual(heldPage.metadata["a"]?.imageURL, photo, "A held Lead slide keeps the photo it showed")
+        var leftFeed = freshBehind
+        leftFeed.excludedIDs = ["d"]
+        assertEqual(
+            shape(restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e", "page2"]), fresh: leftFeed)),
+            ["The Lead: a,b", "The Deep Read: c", "The Latest: e,page2"],
+            "Held, a story of a feed left since leaves Today and a further page joins The Latest")
+        let page2Photo = URL(string: "https://images.example/page2.jpg")!
+        var page2Details = TodayCardDetails()
+        page2Details.eventImages = ["page2": page2Photo]
+        let freshWithPage2 = TodayEdition.make(
+            entries: entries(["a", "b", "c", "d", "e", "page2"]), plan: freshPlan, details: page2Details)
+        assertEqual(
+            restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e", "page2"]), fresh: freshWithPage2)
+                .metadata["page2"]?.imageURL, page2Photo,
+            "A story the list gained takes its event photo from the fresh edition")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: false, awaitsNewDay: true, isApplied: true),
+            .swapped, "The new day's page, which only replaces an untouched list, takes the page")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: true, awaitsNewDay: false, isApplied: true),
+            .swapped, "An update the reader applied over the restored edition takes the page, touched or not")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: true, isTouched: false, awaitsNewDay: false, isApplied: true),
+            .swapped, "Applied, the fresh edition keeps its new generation instead of confirming the old one")
+        assertTrue(
+            TodayEdition.keepsLanes(of: heldPage, isHolding: true, generation: 0),
+            "Later store revisions keep the held cards in their lanes")
+        let afterRevision = TodayEdition.make(
+            entries: entries(["a", "b", "c", "d", "e", "late"]), plan: freshPlan, keeping: heldPage)
+        assertEqual(
+            shape(afterRevision), ["The Lead: a,b", "Your Beat: d", "The Deep Read: c", "The Latest: e,late"],
+            "Until Show Updates nothing moves; a story the list gained joins The Latest")
+        assertFalse(
+            TodayEdition.keepsLanes(of: heldPage, isHolding: true, generation: 1),
+            "Show Updates starts a new generation, so the page is laid out afresh")
+        assertTrue(
+            TodayEdition.make(entries: entries(["a", "b", "c", "d", "e"]), plan: freshPlan, generation: 1)
+                .hasSameArrangement(as: freshBehind), "Show Updates shows the fresh edition")
+        assertFalse(
+            TodayEdition.keepsLanes(of: heldPage, isHolding: false, generation: 0),
+            "A refresh the reader asked for lays the page out afresh too")
+        assertFalse(TodayEdition.keepsLanes(of: nil, isHolding: true, generation: 0), "A first edition has none")
+
         // The side file: nothing stored reads as nothing, a stored edition comes back, nil removes it.
         let db = DatabaseEngine(path: ":memory:")
         try await db.open()
@@ -1471,7 +1553,14 @@ extension NewsTests {
                 ])
         }
         let entries = [event("a", minutesAgo: 30), event("b", minutesAgo: 40)]
-        var context = TodayAssignmentContext(now: referenceNow)
+        // Both clear the bar of slides 2 to 5, so The Lead would hold both.
+        func major(_ id: String) -> TodayStorySignals {
+            TodayStorySignals(
+                memberFullTexts: (1...3).map { "Reporter \($0) at bridge \(id) spoke with crews and residents." },
+                nlImportanceOverride: 0.85, resolvedImportanceOverride: .major)
+        }
+        var context = TodayAssignmentContext(
+            now: referenceNow, signalsByEntryID: ["a1": major("a"), "b1": major("b")])
         let open = TodayEditionAssigner.assign(entries: entries, context: context)
         guard let top = open.entries(for: .theLead).first?.id else {
             assertTrue(false, "The Lead has a first slide")
@@ -1483,9 +1572,10 @@ extension NewsTests {
         assertTrue(pictured.allAssignments.contains { $0.id == top }, "It is still in the edition, in another lane")
         assertEqual(pictured.entries(for: .theLead).count, 1, "The pictured story leads")
         context.imagelessEntryIDs = Set(entries.map(\.id))
-        assertEqual(
-            TodayEditionAssigner.assign(entries: entries, context: context).entries(for: .theLead).first?.id, top,
-            "With no photo anywhere, the top story still leads")
+        let noPhotos = TodayEditionAssigner.assign(entries: entries, context: context).entries(for: .theLead)
+        assertEqual(noPhotos.first?.id, top, "With no photo anywhere, the top story still leads")
+        assertTrue(open.entries(for: .theLead).count > 1, "With photos both stories are slides")
+        assertEqual(noPhotos.count, 1, "With no photo anywhere, only the top story leads, not placeholder slides")
 
         // Subscriptions: a story of a feed the reader left, one of a kept feed and one whose feed is not known.
         let left = makeArticle(
@@ -1546,6 +1636,43 @@ extension NewsTests {
                 title: "Central bank revises long-term inflation target", score: 0.7, publishers: 2),
             "Notification priority does not trigger while story still leads Today"
         )
+    }
+
+    /// #937: a reload cancelled by a newer revision returns an empty edition its caller discards, instead of laying a
+    /// fallback edition out on the main actor; an uncancelled one lays the page out.
+    @MainActor
+    static func testTodayCancelledReload() async throws {
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        defer { Task { await db.close() } }
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        let entries: [FeedEntry] = [.article(makeArticle(id: "c1", title: "Port reopens", pubDate: referenceNow))]
+        let reader = TodayReader(subscribedFeedURLs: ["https://global.example/rss"], starredFeedURLs: [])
+        let cancelled = Task { @MainActor in
+            await store.todayEdition(entries: entries, reader: reader, keeping: nil, generation: 3)
+        }
+        cancelled.cancel()
+        let discarded = await cancelled.value
+        assertTrue(discarded.lanes.isEmpty && discarded.generation == 3, "A cancelled reload lays nothing out")
+        let laidOut = await store.todayEdition(entries: entries, reader: reader, keeping: nil, generation: 4)
+        assertEqual(laidOut.storyIDs, ["c1"], "An uncancelled reload lays the page out")
+
+        // Stores run in order (F7): an older edition whose store is slow does not land after a newer one.
+        func edition(_ id: String) -> TodayEdition {
+            var made = TodayEdition.make(
+                entries: [.article(makeArticle(id: id, title: id, pubDate: referenceNow))],
+                plan: TodayEditionPlan(lanes: []))
+            made.isAssigned = true
+            return made
+        }
+        let slowOlder = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(60))
+            await store.storeTodayEdition(edition("older"), reader: reader)
+        }
+        await store.storeTodayEdition(edition("newer"), reader: reader, after: slowOlder).value
+        let kept = try await db.storedTodayEdition().map { try JSONDecoder().decode(TodayStoredEdition.self, from: $0) }
+        assertEqual(
+            kept?.lanes.flatMap { $0.stories.map(\.id) }, ["newer"], "The newer edition is the one kept")
     }
 
     static func testTodayDeterminismAndDatabaseLoader() async throws {
@@ -1705,5 +1832,269 @@ extension NewsTests {
             signals["m-ev-timeline"]?.hasSectorImpact, false,
             "Evidence sections without an Industry Impact item are not a sector impact")
         assertEqual(signals["m-ev-impact"]?.hasSectorImpact, true, "A stored Industry Impact item is a sector impact")
+    }
+
+    // MARK: - #934 acceptance: the whole edition
+
+    /// A page that fills every lane: one Lead story, three In Motion events, three long reads, three stories on the
+    /// reader's subject, three outside it and two that clear no bar.
+    private static func fullEdition() -> (entries: [FeedEntry], context: TodayAssignmentContext) {
+        var entries: [FeedEntry] = [
+            .article(makeArticle(id: "lead", title: "Crisis emergency talks begin", pubDate: referenceNow))
+        ]
+        var signals: [String: TodayStorySignals] = [
+            "lead": TodayStorySignals(nlImportanceOverride: 0.90, resolvedImportanceOverride: .major)
+        ]
+        for index in 1...3 {
+            entries.append(
+                inMotionEvent("m\(index)", reports: [(0.25, rulingHeadline), (30, inquiryHeadline)]))
+            signals["m\(index)-0"] = TodayStorySignals(nlImportanceOverride: 0.30, resolvedImportanceOverride: .minor)
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: "deep-\(index)", title: "Investigation: harbor dredging contract number \(index)",
+                        source: "Harbor Review \(index)", category: "Local",
+                        pubDate: referenceNow.addingTimeInterval(-Double(1000 + index)))))
+            signals["deep-\(index)"] = TodayStorySignals(
+                nlImportanceOverride: 0.25, resolvedImportanceOverride: .minor)
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: "beat-\(index)", title: "CERN fusion experiment milestone \(index)",
+                        description: "Research team reports fusion containment gain.",
+                        source: "Science Daily \(index)", category: "Science",
+                        pubDate: referenceNow.addingTimeInterval(-Double(2000 + index)),
+                        entities: [EntityResult(name: "CERN", type: .organization)])))
+            signals["beat-\(index)"] = TodayStorySignals(
+                nlImportanceOverride: 0.25, resolvedImportanceOverride: .minor)
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: "out-\(index)", title: "Central bank governor testifies on inflation framework \(index)",
+                        description: "Detailed macroeconomic briefing with named institutions.",
+                        source: "Finance Press \(index)", category: "Business",
+                        pubDate: referenceNow.addingTimeInterval(-Double(3000 + index)))))
+            signals["out-\(index)"] = TodayStorySignals(
+                originalReportCount: 2, nlImportanceOverride: 0.65, resolvedImportanceOverride: .notable)
+        }
+        for index in 1...2 {
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: "rest-\(index)", title: "Brief notice", description: "", source: "Misc",
+                        category: "Lifestyle", pubDate: referenceNow.addingTimeInterval(-Double(4000 + index)))))
+            signals["rest-\(index)"] = TodayStorySignals(
+                nlImportanceOverride: 0.15, resolvedImportanceOverride: .minor)
+        }
+        let profile = TodayUserProfile(
+            entityWeights: ["organization:cern": 12.0], keywordWeights: ["fusion": 10.0], interactionCount: 25)
+        return (entries, TodayAssignmentContext(now: referenceNow, profile: profile, signalsByEntryID: signals))
+    }
+
+    /// #934 acceptance, in one edition with all six lanes filled: the same inputs give the same plan in every
+    /// lane, in whatever order the stories arrive; each story is in exactly one lane and no event twice; every
+    /// story is placed, and the ones no lane takes are in The Latest; each entry carries the output contract.
+    static func testTodayFullEditionContract() {
+        let (entries, context) = fullEdition()
+        let plan = TodayEditionAssigner.assign(entries: entries, context: context)
+
+        for lane in TodayLane.assignmentOrder {
+            assertTrue(plan.result(for: lane)?.qualifies == true, "\(lane.rawValue) shows in the full edition")
+            let again = TodayEditionAssigner.assign(entries: entries, context: context)
+            assertEqual(
+                again.entries(for: lane), plan.entries(for: lane), "\(lane.rawValue) repeats for the same inputs")
+            let reversed = TodayEditionAssigner.assign(entries: entries.reversed(), context: context)
+            assertEqual(
+                reversed.entries(for: lane).map(\.id), plan.entries(for: lane).map(\.id),
+                "\(lane.rawValue) does not depend on the order the stories arrive in")
+        }
+
+        // One story, one lane; story entries only, so no event twice.
+        let placed = plan.allAssignments
+        assertEqual(placed.count, Set(placed.map(\.id)).count, "No story is in two lanes")
+        let events = placed.compactMap { item -> String? in
+            if case .event(let summary, _, _) = item.entry { return summary.eventID }
+            return nil
+        }
+        assertEqual(events.count, Set(events).count, "No event is in two lanes")
+        for lane in TodayLane.assignmentOrder {
+            assertTrue(
+                plan.entries(for: lane).allSatisfy { $0.lane == lane }, "\(lane.rawValue) entries name their lane")
+        }
+
+        // The Latest is the safety net: every story is placed, and what no lane took is there.
+        assertEqual(Set(placed.map(\.id)), Set(entries.map(\.id)), "Every story of the pool is placed")
+        assertEqual(
+            Set(plan.entries(for: .theLatest).map(\.id)), ["rest-1", "rest-2"],
+            "Stories that clear no bar are in The Latest")
+        assertTrue(
+            plan.entries(for: .theLatest).allSatisfy { $0.reason == "the_latest_safety_net" },
+            "The Latest gives the safety net as its reason")
+
+        // Output contract: lane, score, confidence, reason, sortKey.
+        for item in placed {
+            assertTrue((0.0...1.0).contains(item.score), "\(item.id): score is on the 0–1 scale")
+            assertTrue((0.0...1.0).contains(item.confidence), "\(item.id): confidence is on the 0–1 scale")
+            assertFalse(item.reason.isEmpty, "\(item.id): a reason is given")
+            assertTrue(
+                item.reason.allSatisfy { $0 == "_" || $0.isNumber || ($0.isLetter && $0.isLowercase) },
+                "\(item.id): the reason is a code, not reader copy")
+            assertEqual(item.sortKey, item.entry.representative.orderDate, "\(item.id): sortKey is the story's date")
+        }
+        for lane in TodayLane.assignmentOrder where lane != .theLead {
+            let keys = plan.entries(for: lane).map(\.sortKey)
+            assertEqual(keys, keys.sorted(by: >), "\(lane.rawValue) is newest first")
+        }
+        assertEqual(plan.entries(for: .theLead).first?.reason, "lead_top_story", "The Lead follows rank")
+    }
+
+    /// #934 acceptance: the output has the six fixed lanes and no topic lane, and an entry carries the contract's
+    /// fields and no Briefing analysis (assessment, gauge, strategic impact, weak signal).
+    static func testTodayOutputHasNoTopicLaneOrAnalysis() {
+        assertEqual(
+            TodayLane.allCases.map(\.rawValue),
+            ["The Lead", "In Motion", "The Deep Read", "Your Beat", "Outside Your Usual", "The Latest"],
+            "Today has the six lanes of the spec and no other")
+        let sections = Set(NewsCategory.allCases.map { $0.rawValue.lowercased() })
+        assertTrue(
+            TodayLane.allCases.allSatisfy { !sections.contains($0.rawValue.lowercased()) }, "No lane is a section")
+
+        let (entries, context) = fullEdition()
+        let plan = TodayEditionAssigner.assign(entries: entries, context: context)
+        assertEqual(plan.lanes.map(\.lane), TodayLane.assignmentOrder, "A plan holds exactly the six lanes")
+        guard let item = plan.allAssignments.first else { return assertTrue(false, "The full edition places stories") }
+        let fields = Mirror(reflecting: item).children.compactMap(\.label)
+        assertEqual(
+            fields,
+            [
+                "id", "entry", "lane", "score", "confidence", "reason", "sortKey", "contentTypeLabel",
+                "isCoverageConfident", "isDeveloping", "originalReportCount", "publisherCount", "groupingConfidence",
+                "readingTimeMinutes", "interestMatch", "novelty",
+            ],
+            "An entry carries the output contract, card flags and evaluation numbers: a new field is a decision")
+        let analysis = ["assessment", "gauge", "impact", "signal", "sitrep", "tension", "summary", "overview"]
+        assertTrue(
+            fields.allSatisfy { field in !analysis.contains { field.lowercased().contains($0) } },
+            "No entry field carries Briefing analysis")
+        assertTrue(
+            Mirror(reflecting: plan).children.compactMap(\.label) == ["lanes"],
+            "A plan carries its lanes and nothing else")
+    }
+
+    /// #934 acceptance, the reverse of `testTodayNotificationThresholdsIndependent`: a story that passes the
+    /// notification bar does not lead Today on that account. Wire copy gives it four publishers and one original
+    /// report; Today's bar for a one-report slide is its own score.
+    static func testTodayNotifyingStoryNeedNotLead() {
+        let title = "Breaking: ferry service suspended"
+        assertTrue(
+            NotificationService.isPriority(
+                title: title, score: NotificationService.priorityScore,
+                publishers: NotificationService.priorityPublishers),
+            "The story passes the notification bar")
+        let wire = makeEventEntry(
+            eventID: "ev-wire",
+            members: (1...4).map {
+                (
+                    "w\($0)", "Wire Client \($0)", title, "Agency copy.",
+                    referenceNow.addingTimeInterval(-Double($0 * 60)), "https://w\($0).example/rss"
+                )
+            })
+        let top = FeedEntry.article(
+            makeArticle(id: "top", title: "Crisis emergency talks begin", pubDate: referenceNow))
+        let plan = TodayEditionAssigner.assign(
+            entries: [top, wire],
+            context: TodayAssignmentContext(
+                now: referenceNow,
+                signalsByEntryID: [
+                    "top": TodayStorySignals(nlImportanceOverride: 0.90, resolvedImportanceOverride: .major),
+                    "w1": TodayStorySignals(
+                        originalReportCount: 1, nlImportanceOverride: 0.40, resolvedImportanceOverride: .minor),
+                ]))
+        assertEqual(plan.entries(for: .theLead).map(\.id), ["top"], "The notifying wire story takes no slide")
+        assertTrue(plan.entries(for: .theLatest).contains { $0.id == "w1" }, "It is still on the page")
+        let today = TodayEditionThresholds.standard
+        assertTrue(
+            Mirror(reflecting: today).children.compactMap(\.label).allSatisfy {
+                !$0.lowercased().contains("notif") && !$0.lowercased().contains("priority")
+                    && !$0.lowercased().contains("breaking")
+            }, "Today's thresholds hold no notification threshold")
+    }
+
+    /// The default-off option of #934 (12 November 2026): affinity per story published with a floor of read or
+    /// saved stories. Off, the profile and the plan are the shipped ones; on, a publisher read often but
+    /// publishing much gives way to one read at a higher rate, and a publisher under the floor is no affinity
+    /// publisher at all.
+    static func testTodayYourBeatPerStoryAffinity() async throws {
+        assertTrue(TodayEditionThresholds.standard.yourBeatAffinityPerStoryFloor == nil, "The option ships off")
+        // Four engaged publishers, so the quartile is one. "busy" has the most reads; "quiet" the highest rate.
+        let weights = ["busy": 8.0, "quiet": 6.0, "small": 2.0, "other": 2.0]
+        let window = weights
+        let read = ["busy": 8, "quiet": 6, "small": 2, "other": 2]
+        let published = ["busy": 400, "quiet": 20, "small": 2, "other": 50]
+        assertEqual(TodayUserProfile.computeTopQuartilePublishers(from: weights), ["busy"], "Shipped: most engagement")
+        assertEqual(
+            TodayUserProfile.perStoryAffinityPublishers(
+                weights: weights, windowWeights: window, storiesRead: read, published: published, floor: 5),
+            [], "The highest rate belongs to a publisher under the floor: no affinity publisher")
+        assertEqual(
+            TodayUserProfile.perStoryAffinityPublishers(
+                weights: weights, windowWeights: window, storiesRead: read,
+                published: published.merging(["small": 40]) { $1 }, floor: 5),
+            ["quiet"], "Per story published, the quieter publisher is the affinity publisher")
+        assertEqual(
+            TodayUserProfile.perStoryAffinityPublishers(
+                weights: [:], windowWeights: [:], storiesRead: [:], published: published, floor: 5),
+            [], "No history, no affinity publisher")
+
+        // Through the loader: "Busy Wire" is read six times of 30 stories, "Quiet Review" five times of six.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        defer { Task { await db.close() } }
+        let now = Date()
+        let feed = "https://global.example/rss"
+        var stories: [FeedArticle] = []
+        for index in 0..<30 {
+            stories.append(
+                makeArticle(
+                    id: "busy-\(index)", title: "Harbor ledger entry \(index)", source: "Busy Wire", feedURL: feed,
+                    pubDate: now.addingTimeInterval(-Double(3600 + index * 60))))
+        }
+        for index in 0..<6 {
+            stories.append(
+                makeArticle(
+                    id: "quiet-\(index)", title: "Orchard almanac note \(index)", source: "Quiet Review",
+                    feedURL: feed, pubDate: now.addingTimeInterval(-Double(7200 + index * 60))))
+        }
+        try await db.upsertArticles(stories)
+        for id in (0..<6).map({ "busy-\($0)" }) + (0..<5).map({ "quiet-\($0)" }) {
+            try await db.markRead(articleId: id, isRead: true)
+        }
+        let shipped = try await db.todayUserProfile(now: now)
+        let option = try await db.todayUserProfile(now: now, affinityStoryFloor: 5)
+        let highFloor = try await db.todayUserProfile(now: now, affinityStoryFloor: 6)
+        assertEqual(shipped.topQuartilePublishers, ["busy wire"], "Shipped rule: the publisher read most")
+        assertEqual(option.topQuartilePublishers, ["quiet review"], "Option: the publisher read at the higher rate")
+        assertEqual(highFloor.topQuartilePublishers, [], "A floor above its read stories switches affinity off")
+        var same = option
+        same.topQuartilePublishers = shipped.topQuartilePublishers
+        assertEqual(same, shipped, "The option changes the affinity publishers and nothing else in the profile")
+
+        let entries = stories.map(FeedEntry.article)
+        let standard = try await db.loadTodayAssignmentContext(entries: entries, now: now, subscribedFeedURLs: [feed])
+        let explicit = try await db.loadTodayAssignmentContext(
+            entries: entries, now: now, subscribedFeedURLs: [feed], thresholds: .standard)
+        assertEqual(standard, explicit, "Without the option the loaded context is the shipped one")
+        assertEqual(standard.profile, shipped, "The shipped context holds the shipped profile")
+        var thresholds = TodayEditionThresholds.standard
+        thresholds.yourBeatAffinityPerStoryFloor = 5
+        let optional = try await db.loadTodayAssignmentContext(
+            entries: entries, now: now, subscribedFeedURLs: [feed], thresholds: thresholds)
+        func affinityStories(_ context: TodayAssignmentContext) -> Set<String> {
+            Set(
+                TodayEditionAssigner.evaluateStories(entries, context: context)
+                    .filter(\.isTopQuartilePublisher).map { String($0.id.prefix(while: { $0 != "-" })) })
+        }
+        assertEqual(affinityStories(standard), ["busy"], "Shipped: the busy publisher's stories carry affinity")
+        assertEqual(affinityStories(optional), ["quiet"], "Option on: the quiet publisher's stories carry it")
     }
 }

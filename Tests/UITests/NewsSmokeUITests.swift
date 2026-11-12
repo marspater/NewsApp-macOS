@@ -202,4 +202,33 @@ final class NewsSmokeUITests: XCTestCase {
             "The loading placeholder did not appear")
         XCTAssertTrue(walkAccessibilityTree().contains("Loading story image"))
     }
+    /// The native sheet toolbar adds height beyond the view's content bounds; check the actual Done button (#1265).
+    func test09SettingsSheetsKeepDoneInsideWindow() {
+        openSettings()
+        let settings = settingsWindow
+        settings.toolbars.buttons["Subscriptions"].click()
+
+        for (openerTitle, sheetTitle) in [
+            ("Publisher Health…", "Publisher Health"),
+            ("Browse Catalog…", "Feed Catalog"),
+        ] {
+            let opener = settings.buttons[openerTitle]
+            XCTAssertTrue(opener.waitForExistence(timeout: 10), "Missing \(sheetTitle) opener")
+            opener.click()
+
+            let sheet = settings.sheets.firstMatch
+            XCTAssertTrue(sheet.waitForExistence(timeout: 10), "\(sheetTitle) did not open")
+            let done = sheet.buttons["Done"]
+            XCTAssertTrue(done.waitForExistence(timeout: 10), "\(sheetTitle) Done is missing")
+            XCTAssertTrue(settings.frame.contains(done.frame), "\(sheetTitle) Done extends outside Settings")
+            XCTAssertTrue(done.isHittable, "\(sheetTitle) Done cannot be clicked")
+            done.click()
+
+            let dismissed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"), object: sheet)
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [dismissed], timeout: 5), .completed, "\(sheetTitle) did not dismiss")
+        }
+    }
+
 }
