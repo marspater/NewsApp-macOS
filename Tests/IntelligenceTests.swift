@@ -3006,6 +3006,18 @@ extension NewsTests {
         assertFalse(
             PassageFactExtractor.isSelfAttribution("The report first appeared in Le Monde, which cited two ministers."),
             "Another report's first appearance is a fact")
+        for sentence in [
+            "The Post reported that the video first appeared on Telegram on Tuesday.",
+            "The story first appeared on X before the ministry confirmed it.",
+            "The article was published on 3 November in Nature.",
+            "This story was first published on Monday by the regional broadcaster.",
+        ] {
+            assertFalse(
+                PassageFactExtractor.isSelfAttribution(sentence), "A report about a publication is a fact: \(sentence)")
+        }
+        assertTrue(
+            PassageFactExtractor.isSelfAttribution("This post was originally published on Harbour Daily"),
+            "The originally-published footer without a final period is self-attribution")
         let feed = EvidencePassage(
             id: "feed-p", articleID: "feed-a",
             text: "Apple released the second beta to developers today. "

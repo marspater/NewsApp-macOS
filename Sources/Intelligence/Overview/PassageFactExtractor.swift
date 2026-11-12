@@ -234,14 +234,19 @@ public struct PassageFactExtractor: Sendable {
         return merged
     }
 
-    /// A feed's line about the article itself appearing on a site ("This article, "…" first appeared on …", "The post
-    /// … appeared first on …"). It says nothing about the event, so it is no fact (#1251). A sentence crediting another
-    /// outlet's report ("first published by …") does not refer to this article or post and stays a fact.
+    /// A feed's footer about the article itself appearing on a site: the sentence opens with the self-reference
+    /// ("This article, "…" first appeared on …", "This post was originally published on …", "The post … appeared first on
+    /// …") and ends with the site's name, with no date, weekday or further clause after it. It says nothing about the
+    /// event, so it is no fact (#1251). A report about another publication ("The Post reported that the video first
+    /// appeared on Telegram on Tuesday.", "The article was published on 3 November in Nature.") stays a fact.
     private static let selfAttribution: NSRegularExpression = {
-        let pattern =
-            #"\b(?:this|the)\s+(?:article|post|story|entry)\b.*?\b(?:(?:first|originally)\s+(?:appeared|published)"#
-            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)\s+(?:on|at)\b"#
-        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+        let opening =
+            #"^\s*(?:this\s+(?:article|post|story|entry)\b.*?\b(?:(?:first|originally)\s+(?:appeared|published)"#
+            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+post\b.*?\bappeared\s+first)"#
+        let months = "january|february|march|april|may|june|july|august|september|october|november|december"
+        let days = "monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday"
+        let site = #"\s+(?:on|at)\s+(?!.*\b(?:"# + months + "|" + days + #")\b)[^,;:]{1,60}?[.!]?\s*$"#
+        guard let expression = try? NSRegularExpression(pattern: opening + site, options: [.caseInsensitive]) else {
             preconditionFailure("The self-attribution pattern is valid")
         }
         return expression
