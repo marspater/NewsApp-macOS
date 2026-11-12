@@ -3181,6 +3181,34 @@ extension NewsTests {
         assertTrue(
             chosen.contains { $0.contains("Union leaders said the port strike would continue") },
             "A title followed by a real sentence in one passage still yields that sentence: \(chosen)")
+
+        // The title glued to the next sentence without its own full stop: the Highlight is that sentence alone, and
+        // its quote stays verbatim in the passage.
+        let glued = PassageAnchoredFact(
+            id: "glued", statement: "\(title) Union leaders said the strike would continue.", passageID: "t1-glued",
+            quote: "\(title) Union leaders said the strike would continue.", articleID: "t1")
+        let kept = OverviewComposer.withoutLeadingTitle(glued, title: title)
+        assertEqual(
+            kept.statement, "Union leaders said the strike would continue.", "Only the sentence is the statement")
+        assertEqual(kept.quote, "Union leaders said the strike would continue.", "Only the sentence is the quote")
+        assertTrue(glued.quote.contains(kept.quote), "The trimmed quote stays verbatim in the source text")
+        let block = PassageAnchoredFact(
+            id: "block", statement: "\(title) \(dateline)", passageID: "t1-b", quote: "\(title) \(dateline)",
+            articleID: "t1")
+        assertEqual(
+            OverviewComposer.withoutLeadingTitle(block, title: title).statement, block.statement,
+            "A title block is not trimmed to its bare dateline")
+        let continuing = PassageAnchoredFact(
+            id: "continuing", statement: "\(title) for a third day on Friday.", passageID: "t1-c",
+            quote: "\(title) for a third day on Friday.", articleID: "t1")
+        assertEqual(
+            OverviewComposer.withoutLeadingTitle(continuing, title: title).statement, continuing.statement,
+            "A sentence that begins with the title's words stays whole")
+        let restated = PassageAnchoredFact(
+            id: "restated", statement: "\(title).", passageID: "t1-r", quote: "\(title).", articleID: "t1")
+        assertEqual(
+            OverviewComposer.highlights(from: [restated], articles: [article]).map(\.statement), ["\(title)."],
+            "A headline restated as a complete sentence stays a Highlight")
     }
 
     static func testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: String = "example.com") throws {

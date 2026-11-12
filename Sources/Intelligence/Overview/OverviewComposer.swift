@@ -56,6 +56,7 @@ public struct OverviewComposer: Sendable {
             uniquingKeysWith: { first, _ in first })
         func publisher(_ fact: PassageAnchoredFact) -> String { publishers[fact.articleID] ?? fact.articleID }
         let titles = Dictionary(articles.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
+        let facts = facts.map { withoutLeadingTitle($0, title: titles[$0.articleID] ?? "") }
         let substantive = facts.enumerated().filter {
             let statement = $0.element.statement
             return statement.split(whereSeparator: \.isWhitespace).count >= 5
@@ -196,6 +197,32 @@ public struct OverviewComposer: Sendable {
             return !statement.trimmingCharacters(in: .whitespaces).hasSuffix(".")
         }
         return datelineRemainder.firstMatch(in: rest, range: NSRange(rest.startIndex..., in: rest)) != nil
+    }
+
+    /// A page's title glued to the sentence after it ("Port strike shuts terminals Union leaders said …", the title
+    /// having no full stop of its own) keeps only that sentence, in its statement and its quote, which stays verbatim
+    /// in the passage. The rest must open a new sentence (a capital letter after whitespace) of five or more words; a
+    /// sentence that merely begins with the title's words ("Fed raises rates by half a point.") is left whole (#1266).
+    static func withoutLeadingTitle(_ fact: PassageAnchoredFact, title: String) -> PassageAnchoredFact {
+        func remainder(_ text: String) -> String? {
+            let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty,
+                let found = text.range(
+                    of: title, options: [.anchored, .caseInsensitive, .diacriticInsensitive]),
+                let next = text[found.upperBound...].first, next.isWhitespace
+            else { return nil }
+            let rest = text[found.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let first = rest.first, first.isUppercase,
+                rest.split(whereSeparator: \.isWhitespace).count >= 5
+            else { return nil }
+            return rest
+        }
+        // A title block (title and dateline) is no title plus sentence: `isTitleBlock` keeps it out instead.
+        guard !isTitleBlock(fact.statement, title: title), let statement = remainder(fact.statement),
+            let quote = remainder(fact.quote)
+        else { return fact }
+        return PassageAnchoredFact(
+            id: fact.id, statement: statement, passageID: fact.passageID, quote: quote, articleID: fact.articleID)
     }
 
     /// A heading or label rather than a statement ("iPad mini (eighth generation, 2026)", "Related Roundups: …"): no
