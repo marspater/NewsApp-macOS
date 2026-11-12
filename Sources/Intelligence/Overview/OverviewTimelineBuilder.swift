@@ -392,71 +392,99 @@ enum OverviewTimelineBuilder {
     /// states none, several unrelated dates (separate clauses, a range or list plus another date), a reversed
     /// range, an expression whose parts cannot share a precision or year, or an impossible date.
     static func statedExpression(in sentence: String) -> StatedExpression? {
-        struct Atom {
-            let range: NSRange
-            let date: StatedDate?
-            let span: StatedSpan?
-        }
         let range = NSRange(sentence.startIndex..., in: sentence)
         // "March to 5 April": a bare month and a day share no precision.
-        guard bareMonthRange.firstMatch(in: sentence, range: range) == nil else { return nil }
-        var atoms: [Atom] = []
+        guard bareMonthRange.firstMatch(in: sentence, range: range) == nil,
+            let atoms = dateAtoms(in: sentence, range: range), let first = atoms.first
+        else { return nil }
+        if atoms.count == 1 { return first.span.map { .span($0) } ?? first.date.map { .date($0) } }
+        return combined(atoms, in: sentence)
+    }
+
+    /// One date, or one shared-month range or list ("19–28 November"), found in a sentence.
+    private struct DateAtom {
+        let range: NSRange
+        let date: StatedDate?
+        let span: StatedSpan?
+    }
+
+    private enum SharedMonthMatch {
+        case span(StatedSpan)
+        case skip
+        case invalid
+    }
+
+    /// Every date and shared-month span of a sentence in reading order; nil when one of them is impossible or
+    /// reversed, which rejects the whole sentence.
+    private static func dateAtoms(in sentence: String, range: NSRange) -> [DateAtom]? {
+        var atoms: [DateAtom] = []
         func isTaken(_ candidate: NSRange) -> Bool {
             atoms.contains { NSIntersectionRange($0.range, candidate).length > 0 }
         }
-        func precededByBetween(_ range: NSRange) -> Bool {
-            guard let found = Range(range, in: sentence) else { return false }
-            return sentence[..<found.lowerBound].trimmingCharacters(in: .whitespaces).lowercased().hasSuffix("between")
-        }
         for (regex, monthFirst) in sharedMonthPatterns {
             for match in regex.matches(in: sentence, range: range) where !isTaken(match.range) {
-                func group(_ name: String) -> String? {
-                    Range(match.range(withName: name), in: sentence).map { String(sentence[$0]) }
+                switch sharedMonthSpan(match, monthFirst: monthFirst, in: sentence) {
+                case .span(let span): atoms.append(DateAtom(range: match.range, date: nil, span: span))
+                case .skip: continue
+                case .invalid: return nil
                 }
-                guard let monthText = group("month"), let month = englishMonths[monthText], let text = group("days")
-                else { return nil }
-                let isList = text.contains("and")
-                let isRange = !isList || precededByBetween(match.range)
-                if monthFirst, isList, !isRange { continue }
-                let year = group("year").flatMap { Int($0) }
-                let days = text.split { !$0.isNumber }.compactMap { Int($0) }
-                var dates: [StatedDate] = []
-                for day in days {
-                    let date = StatedDate(year: year, month: month, day: day)
-                    guard isPossible(date) else { return nil }
-                    if !dates.contains(date) { dates.append(date) }
-                }
-                guard dates.count >= 2, !isRange || (dates.count == 2 && days[0] < days[1]) else { return nil }
-                atoms.append(Atom(range: match.range, date: nil, span: StatedSpan(dates: dates, isRange: isRange)))
             }
         }
         for regex in patterns {
             for match in regex.matches(in: sentence, range: range) where !isTaken(match.range) {
                 guard let date = statedDate(from: match, in: sentence) else { return nil }
-                atoms.append(Atom(range: match.range, date: date, span: nil))
+                atoms.append(DateAtom(range: match.range, date: date, span: nil))
             }
         }
-        atoms.sort { $0.range.location < $1.range.location }
-        guard let first = atoms.first else { return nil }
-        if atoms.count == 1 { return first.span.map { .span($0) } ?? first.date.map { .date($0) } }
+        return atoms.sorted { $0.range.location < $1.range.location }
+    }
+
+    /// A shared-month match as a span. The month-first form takes "and" only after "between", where "November 3 and
+    /// 5 people" is no list, so another month-first "and" is skipped.
+    private static func sharedMonthSpan(_ match: NSTextCheckingResult, monthFirst: Bool, in sentence: String)
+        -> SharedMonthMatch
+    {
+        func group(_ name: String) -> String? {
+            Range(match.range(withName: name), in: sentence).map { String(sentence[$0]) }
+        }
+        guard let monthText = group("month"), let month = englishMonths[monthText], let text = group("days")
+        else { return .invalid }
+        let isList = text.contains("and")
+        let isRange = !isList || precededByBetween(match.range, in: sentence)
+        if monthFirst, isList, !isRange { return .skip }
+        let year = group("year").flatMap { Int($0) }
+        let days = text.split { !$0.isNumber }.compactMap { Int($0) }
+        var dates: [StatedDate] = []
+        for date in days.map({ StatedDate(year: year, month: month, day: $0) }) {
+            guard isPossible(date) else { return .invalid }
+            if !dates.contains(date) { dates.append(date) }
+        }
+        guard dates.count >= 2, !isRange || (dates.count == 2 && days[0] < days[1]) else { return .invalid }
+        return .span(StatedSpan(dates: dates, isRange: isRange))
+    }
+
+    private static func precededByBetween(_ range: NSRange, in sentence: String) -> Bool {
+        guard let found = Range(range, in: sentence) else { return false }
+        return sentence[..<found.lowerBound].trimmingCharacters(in: .whitespaces).lowercased().hasSuffix("between")
+    }
+
+    /// Several full dates of one sentence as one range or list, when only range or list words join them; nil for a
+    /// range or list plus another date, unrelated dates, mixed precision, or a list whose dates differ in stating a
+    /// year.
+    private static func combined(_ atoms: [DateAtom], in sentence: String) -> StatedExpression? {
         let dates = atoms.compactMap(\.date)
-        // A range or list plus another date, or two unrelated dates, is no single expression.
-        guard dates.count == atoms.count else { return nil }
+        guard dates.count == atoms.count, let first = atoms.first else { return nil }
         if Set(dates).count == 1 { return .date(dates[0]) }
         guard Set(dates.map { $0.day == nil }).count == 1 else { return nil }
         let joins = zip(atoms, atoms.dropFirst()).compactMap { pair -> String? in
-            guard
-                let gap = Range(
-                    NSRange(
-                        location: NSMaxRange(pair.0.range), length: pair.1.range.location - NSMaxRange(pair.0.range)),
-                    in: sentence)
-            else { return nil }
-            return sentence[gap].trimmingCharacters(in: .whitespaces)
+            let gap = NSRange(
+                location: NSMaxRange(pair.0.range), length: pair.1.range.location - NSMaxRange(pair.0.range))
+            return Range(gap, in: sentence).map { sentence[$0].trimmingCharacters(in: .whitespaces) }
         }
         func all(_ pattern: String) -> Bool {
             joins.allSatisfy { $0.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil }
         }
-        let between = precededByBetween(first.range)
+        let between = precededByBetween(first.range, in: sentence)
         if dates.count == 2, all(rangeBetweenDates) || (between && all(listBetweenDates)) {
             return .span(StatedSpan(dates: dates, isRange: true))
         }
