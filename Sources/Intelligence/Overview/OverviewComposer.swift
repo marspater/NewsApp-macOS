@@ -116,6 +116,19 @@ public struct OverviewComposer: Sendable {
         selfAttribution.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
     }
 
+    /// What a stored overview was built from: its passages' fingerprints and, when any member's description sits at its
+    /// feed's cap, those members (#1253). A cap found later changes the hash, so the overview is regenerated. The
+    /// coordinator and the composer use this one definition, so a stored overview matches its request.
+    static func inputTextHash(
+        passages: [EvidencePassage], eventTitle: String, cappedDescriptionArticleIDs: Set<String> = []
+    ) -> String {
+        let fingerprints = passages.map(\.fingerprint).sorted().joined(separator: ":")
+        let capped =
+            cappedDescriptionArticleIDs.isEmpty
+            ? "" : "|capped:" + cappedDescriptionArticleIDs.sorted().joined(separator: ",")
+        return ArticleIdentity.sha256Hex((fingerprints.isEmpty ? eventTitle : fingerprints) + capped)
+    }
+
     /// The last sentence of a feed description that the feed cut off (#1253). It applies only when the article has no
     /// stored text of its own, so the description is all the evidence, and the sentence ends that description. It is
     /// cut when the description ends with an ellipsis marker ("…", "...", "[…]"), when it has no closing punctuation and
@@ -131,7 +144,10 @@ public struct OverviewComposer: Sendable {
         if atFeedCap && !closed { return true }
         let opens = sentence.filter { $0 == "“" }.count
         let closes = sentence.filter { $0 == "”" }.count
-        let straight = sentence.filter { $0 == "\"" }.count
+        // A straight quote after a digit is an inch mark (13" tablet), not a quotation.
+        let straight =
+            (try? NSRegularExpression(pattern: #"(?<!\d)""#))?
+            .numberOfMatches(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) ?? 0
         return opens > closes || straight % 2 == 1
     }
 
@@ -283,8 +299,8 @@ public struct OverviewComposer: Sendable {
         }
 
         // Compute deterministic input text hash from passage fingerprints
-        let sortedFingerprints = passages.map { $0.fingerprint }.sorted().joined(separator: ":")
-        let inputTextHash = ArticleIdentity.sha256Hex(sortedFingerprints.isEmpty ? eventTitle : sortedFingerprints)
+        let inputTextHash = Self.inputTextHash(
+            passages: passages, eventTitle: eventTitle, cappedDescriptionArticleIDs: cappedDescriptionArticleIDs)
 
         let versionContext = OverviewVersionContext(
             membershipVersion: membershipVersion,

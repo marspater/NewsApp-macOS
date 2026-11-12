@@ -3069,6 +3069,18 @@ extension NewsTests {
                 tail("The suspect was held without bond, court records showed", of: complete), of: complete,
                 atFeedCap: false),
             "A complete description without a final full stop stays")
+        let inches = article(
+            "inches", "Tech Wire",
+            "Apple shipped it today. Apple introduced a new 13\" tablet with an improved display.")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Apple introduced a new 13\" tablet with an improved display.", of: inches), of: inches,
+                atFeedCap: false),
+            "An inch mark is no open quotation")
+        assertTrue(
+            OverviewComposer.inputTextHash(passages: [], eventTitle: "e", cappedDescriptionArticleIDs: ["a"])
+                != OverviewComposer.inputTextHash(passages: [], eventTitle: "e"),
+            "A newly found cap changes the stored overview's inputs, so it is regenerated")
         let full = article(
             "full", "Gulf Daily", "Other homes were demolis", full: "Other homes were demolished on the coast road.")
         assertFalse(

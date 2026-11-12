@@ -580,8 +580,8 @@ extension DatabaseEngine {
 
     /// Of `articleIDs`, those whose description is exactly its feed's fixed cap: the feed's longest description length,
     /// shared by at least five of its descriptions in the library. Such a feed cuts its descriptions there (#1253).
-    // ponytail: scans every description per call; keep a per-source cap table if libraries grow past ~100k stories.
     func cappedDescriptionArticleIDs(_ articleIDs: [String]) throws -> Set<String> {
+        // ponytail: scans every description per call; keep a per-source cap table if libraries grow past ~100k stories.
         guard !articleIDs.isEmpty else { return [] }
         let placeholders = Array(repeating: "?", count: articleIDs.count).joined(separator: ",")
         let sql = """
