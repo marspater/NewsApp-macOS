@@ -1362,12 +1362,7 @@ struct ArticleListView: View {
         guard !Task.isCancelled else { return }
         // A complete edition is kept for the next launch, unless its stories are still being grouped.
         if edition.isAssigned, !feedManager.holdsUngroupedStories {
-            // One store after another, so an older edition never lands after a newer one.
-            let earlierStore = todayStoreTask
-            todayStoreTask = Task {
-                await earlierStore?.value
-                await articleStore.storeTodayEdition(edition, reader: reader)
-            }
+            todayStoreTask = articleStore.storeTodayEdition(edition, reader: reader, after: todayStoreTask)
         }
         if showsRestored, let previous {
             // A failed assignment lays every story out in The Latest; the restored page stays until one succeeds.

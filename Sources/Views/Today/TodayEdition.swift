@@ -234,6 +234,17 @@ extension ArticleStore {
         }.value
     }
 
+    /// Keeps a complete edition for the next launch after the store before it, so an older edition never lands after a
+    /// newer one. Returns the store, which the next one waits for.
+    func storeTodayEdition(_ edition: TodayEdition, reader: TodayReader, after earlier: Task<Void, Never>?)
+        -> Task<Void, Never>
+    {
+        Task {
+            await earlier?.value
+            await storeTodayEdition(edition, reader: reader)
+        }
+    }
+
     /// Keeps a complete edition for the next launch. A failure only costs that launch its head start.
     func storeTodayEdition(_ edition: TodayEdition, reader: TodayReader) async {
         let identity = TodayStoredEdition.identity(
@@ -267,13 +278,10 @@ extension ArticleStore {
             var details = TodayCardDetails()
             // ponytail: one read per event, for at most the 60 newest events without a listed photo, so a page of
             // them cannot hold up the edition; read them in one query if a library needs more.
-            // Off the main actor, as every per-story pass here (#937).
-            let unpictured = await Task.detached(priority: .userInitiated) {
-                entries.filter { entry in
-                    if case .event = entry { return entry.cardImageURL == nil }
-                    return false
-                }
-            }.value
+            let unpictured = entries.filter { entry in
+                if case .event = entry { return entry.cardImageURL == nil }
+                return false
+            }
             for entry in unpictured.prefix(60) {
                 try Task.checkCancellation()
                 guard case .event(let summary, _, _) = entry,
@@ -318,7 +326,7 @@ extension ArticleStore {
             assigned.isAssigned = previous == nil
             assigned.analysisGeneration = analysisGeneration
             return assigned
-        } catch is CancellationError {
+        } catch let error where error is CancellationError && Task.isCancelled {
             // The caller discards a cancelled reload's edition; laying a fallback out on the main actor is waste.
             return TodayEdition(generation: generation)
         } catch {

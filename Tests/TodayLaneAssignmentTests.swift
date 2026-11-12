@@ -1553,6 +1553,23 @@ extension NewsTests {
         assertTrue(discarded.lanes.isEmpty && discarded.generation == 3, "A cancelled reload lays nothing out")
         let laidOut = await store.todayEdition(entries: entries, reader: reader, keeping: nil, generation: 4)
         assertEqual(laidOut.storyIDs, ["c1"], "An uncancelled reload lays the page out")
+
+        // Stores run in order (F7): an older edition whose store is slow does not land after a newer one.
+        func edition(_ id: String) -> TodayEdition {
+            var made = TodayEdition.make(
+                entries: [.article(makeArticle(id: id, title: id, pubDate: referenceNow))],
+                plan: TodayEditionPlan(lanes: []))
+            made.isAssigned = true
+            return made
+        }
+        let slowOlder = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(60))
+            await store.storeTodayEdition(edition("older"), reader: reader)
+        }
+        await store.storeTodayEdition(edition("newer"), reader: reader, after: slowOlder).value
+        let kept = try await db.storedTodayEdition().map { try JSONDecoder().decode(TodayStoredEdition.self, from: $0) }
+        assertEqual(
+            kept?.lanes.flatMap { $0.stories.map(\.id) }, ["newer"], "The newer edition is the one kept")
     }
 
     static func testTodayDeterminismAndDatabaseLoader() async throws {
