@@ -299,21 +299,13 @@ enum BriefingWarRoomTests {
         check(regFill != incFill, "Increased contrast strengthens chip fill")
         check(regText != incText, "Increased contrast strengthens chip text")
 
-        // 4. Notification curated delivery attaches recorded page lookup photo:
+        // 4. The banner's recorded photo is tested through a real pass: LifecycleTests.testBannerTakesRecordedPhoto.
         let baseStory = FeedArticle(
             storedID: "al-jazeera-1", title: "AJ Story", link: "https://example.com/aj", guid: "aj-1",
             description: "", pubDate: Date(), source: "Al Jazeera", imageUrl: nil)
-        var curatedStory = baseStory
-        curatedStory.imageUrl = "https://example.com/aj-page-lookup.jpg"
-        var delivery = NotificationDelivery(mode: .full)
-        let withPhoto = curatedStory
-        delivery.curated = { _ in withPhoto }
-        let delivered = await delivery.curated(baseStory)
-        check(
-            delivered.imageUrl == "https://example.com/aj-page-lookup.jpg",
-            "Banner gains recorded photo from page lookup")
 
-        // 5. Briefing priority module opens story on whole card click:
+        // 5. The action a Priority developments card's tap calls opens an event's overview. The tap gesture itself
+        // needs a window: it is on the live-check list of #1201.
         var openedEventID: String?
         let actions = BriefingActions(
             onOpenArticle: { _ in },
@@ -330,7 +322,7 @@ enum BriefingWarRoomTests {
             ]
         )
         actions.open(.event(summary, representative: baseStory, visibleMembers: [baseStory]))
-        check(openedEventID == "event-1", "Clicking Priority developments card opens its story (#1201)")
+        check(openedEventID == "event-1", "An event entry opens its overview (#1201)")
     }
 
     @MainActor
