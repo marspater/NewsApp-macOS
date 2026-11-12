@@ -162,13 +162,16 @@ struct OverviewCaptures {
             let appearance = NSAppearance(named: variant.appearance) ?? NSAppearance.currentDrawing()
             let view = NSHostingView(
                 rootView: PublisherHealthContent(phase: .loaded(rows))
-                    .frame(width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetMinHeight)
+                    .frame(
+                        width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetIdealHeight
+                    )
                     .background(AppColor.background)
                     .environment(\.colorScheme, variant.scheme)
                     .environment(\.overrideContrast, variant.contrast))
             view.appearance = appearance
             view.frame = NSRect(
-                x: 0, y: 0, width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetMinHeight)
+                x: 0, y: 0, width: AppLayout.publisherHealthSheetWidth,
+                height: AppLayout.publisherHealthSheetIdealHeight)
             // A table only draws its rows in a window; this one is never ordered on screen.
             let window = NSWindow(contentRect: view.frame, styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false

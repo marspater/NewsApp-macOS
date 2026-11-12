@@ -999,7 +999,17 @@ struct SettingsView: View {
     private var appearanceTab: some View {
         Form {
             Section(header: sectionHeader("App Appearance")) {
-                Picker("Interface Style", selection: themeManager.binding(\.appearance)) {
+                // A segmented control sets its selection inside SwiftUI's view update, and a theme published there is
+                // logged as "Publishing changes from within view updates" by every view that observes it (#1169).
+                // The new appearance is written on the main actor's next turn instead.
+                Picker(
+                    "Interface Style",
+                    selection: Binding(
+                        get: { themeManager.appearance },
+                        set: { appearance in
+                            Task { @MainActor in themeManager.binding(\.appearance).wrappedValue = appearance }
+                        })
+                ) {
                     ForEach(AppAppearance.allCases) { app in
                         Text(app.rawValue).tag(app)
                     }
