@@ -129,6 +129,22 @@ A rescored run keeps its replay and changes only the labels; its `dataset` names
 - Any reading from a sealed holdout.
 - A number that was not measured.
 
+## The Lead comparison: blind, several readers, several days
+
+The Z2 gate for The Lead (#934) compares the top 20 of three rankings (publisher count alone, the Briefing signals, the Z2 score) as readers judge them, without the readers knowing which ranking put a story there. It needs library snapshots of several days and more than one reader. Nothing in it is scheduled; each step is run by hand.
+
+1. **Once a day, after the development app has refreshed:** `script/today_lead.sh snapshot`. It copies the development library (`com.marspater.news.dev`) through a read-only connection into `~/news-eval/today-lead-snapshots/<day>/` with the subscription list (`feeds.txt`) and `manifest.json` (snapshot time, story counts, schema version). A day's folder is never overwritten. `--real-library` reads the installed app's library instead; only I pass it.
+2. **Any time later:** `script/today_lead.sh pack --day <day>`. It runs `--today-shadow` on a copy under `/private/tmp`, with the clock at the newest story of the snapshot and the pool the app assigns from (`NEWS_TODAY_POOL=page`; set `NEWS_TODAY_POOL=window` for every story of 72 hours), and leaves three files in the day's folder:
+   - `lead-rankings-private.json`, the key: every story in the top 20 of at least one ranking, with its place in each. Readers do not open it.
+   - `lead-review-private.csv`, the blind sheet: the same stories in a shuffled order with headline, summary and publisher, and no place, score or lane.
+   - `shadow-report.json`, the run's aggregate report.
+3. **Each reader** fills a copy of the sheet named `lead-review-private-<reader>.csv`: `lead` when the story belongs among the day's most important, else `not`. Readers do not see each other's copies.
+4. **Scoring:** `python3 script/evaluation/lead_review.py report ~/news-eval/today-lead-snapshots/<day> [<day> …]` writes `lead-evaluation.json` into the first folder: precision at 5, 10 and 20 per ranking for each reader and day and pooled, how many stories the rankings' top 20s share, and Cohen's kappa between readers. It refuses a sheet whose story text was changed. `decisionInputs.multiReaderMultiDay` is true from two days with two readers each.
+
+The snapshot folders hold a library and headlines: they stay under `~/news-eval/`, readable by me only, and only the aggregate figures of `lead-evaluation.json` go on the issue and into the ledger.
+
+To take the daily snapshot without thinking of it, I would add a `launchd` agent that runs `script/today_lead.sh snapshot` once a day (a `StartCalendarInterval` in a plist under `~/Library/LaunchAgents`), a few minutes after the hour the development app usually refreshes. That is not set up.
+
 ## Reading the ledger
 
 - `news-ledger ui`, then the experiment. Add the columns you need and filter with `tags.dataset = '<set>'`.
@@ -167,3 +183,4 @@ echo '[ -f "$HOME/news-eval/mlflow/env.sh" ] && . "$HOME/news-eval/mlflow/env.sh
 | --- | --- |
 | 10 November 2026 | MLflow, marimo and Datasette installed. Ledger created with the 19 runs on record before that day; the #737 session added its own. Deepnote's cloud was considered and not adopted: the models and the data stay on this Mac |
 | 10 November 2026 | `news-ledger` command, fixed ports, daily backups, required fields and the verdict list. MLflow's usage reports turned off (they were on for the first hours). `multi_publisher` split into `multi_publisher_story` and `multi_publisher_event` and the affected runs renamed |
+| 12 November 2026 | `script/today_lead.sh` (dated read-only snapshots under `~/news-eval/today-lead-snapshots/`, reader packs) and `script/evaluation/lead_review.py` (blind sheet, scorer) for the Lead comparison of #934. First snapshot taken the same day. |
