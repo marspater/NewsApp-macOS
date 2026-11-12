@@ -311,6 +311,14 @@ extension TodayShadowEvaluation {
                     "per-story-among-minimum-5",
                     perStory(engaged.filter { storiesRead[$0.key, default: 0] >= 5 }), 0
                 ),
+                // The same rule as the module computes it under its default-off option; it must equal the row
+                // "per-story-then-minimum-5".
+                (
+                    "module-per-story-floor-5",
+                    try await inputs.database.todayUserProfile(
+                        now: now, interactionLimit: history.limit, affinityStoryFloor: 5
+                    ).topQuartilePublishers, 0
+                ),
                 ("minimum-3-stories", withMinimum(3), 0),
                 ("minimum-5-stories", withMinimum(5), 0),
                 ("minimum-10-stories", withMinimum(10), 0),
