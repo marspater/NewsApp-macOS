@@ -143,6 +143,20 @@ extension NativeSuites.PublisherExcerptSuite {
         let chosen = OverviewComposer.highlights(from: facts, articles: [article]).map(\.statement)
         expectTrue(!chosen.contains { $0.hasPrefix(title) }, "The title block takes no slot: \(chosen)")
         expectTrue(chosen.contains { $0.contains("Negotiators for the port authority") }, "The next statement does")
+        let restated = PassageAnchoredFact(
+            id: "restated", statement: "\(title).", passageID: "t1-r", quote: "\(title).", articleID: "t1")
+        expectTrue(
+            OverviewComposer.highlights(from: [restated], articles: [article]).map(\.statement) == ["\(title)."],
+            "A headline restated as a complete sentence stays a Highlight")
+        let broken = PassageFactExtractor.deterministicExtract(passages: [
+            EvidencePassage(
+                id: "t1-break", articleID: "t1",
+                text: "\(title)\nUnion leaders said the port strike would continue through the weekend.", ordinal: 0)
+        ])
+        expectTrue(
+            OverviewComposer.highlights(from: broken, articles: [article]).map(\.statement)
+                == ["Union leaders said the port strike would continue through the weekend."],
+            "A headline above a factual sentence yields the sentence alone")
     }
 
     // MARK: - 1. Version Bump

@@ -3181,6 +3181,23 @@ extension NewsTests {
         assertTrue(
             chosen.contains { $0.contains("Union leaders said the port strike would continue") },
             "A title followed by a real sentence in one passage still yields that sentence: \(chosen)")
+
+        // My ruling of 12 November: a headline restated as a complete sentence is a fact and stays a Highlight, and a
+        // headline followed by a factual sentence keeps that sentence, here across a line break.
+        let restated = PassageAnchoredFact(
+            id: "restated", statement: "\(title).", passageID: "t1-r", quote: "\(title).", articleID: "t1")
+        assertEqual(
+            OverviewComposer.highlights(from: [restated], articles: [article]).map(\.statement), ["\(title)."],
+            "A headline restated as a complete sentence stays a Highlight")
+        let broken = PassageFactExtractor.deterministicExtract(passages: [
+            EvidencePassage(
+                id: "t1-break", articleID: "t1",
+                text: "\(title)\nUnion leaders said the port strike would continue through the weekend.", ordinal: 0)
+        ])
+        assertEqual(
+            OverviewComposer.highlights(from: broken, articles: [article]).map(\.statement),
+            ["Union leaders said the port strike would continue through the weekend."],
+            "A headline above a factual sentence yields the sentence alone")
     }
 
     static func testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: String = "example.com") throws {
