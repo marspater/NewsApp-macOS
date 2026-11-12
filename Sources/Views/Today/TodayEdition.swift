@@ -54,11 +54,20 @@ struct TodayEdition: Equatable, Sendable {
         for entry in listed {
             if case .event(let summary, _, _) = entry { listedByEvent[summary.eventID] = entry }
         }
+        let listedIDs = Set(listed.map(\.id))
+        let listedReports = Set(listed.flatMap { $0.visibleArticles.map(\.id) })
         var seen = Set<String>()
         var pool: [FeedEntry] = []
         for entry in window {
             var chosen = entry
-            if case .event(let summary, _, _) = entry, let page = listedByEvent[summary.eventID] { chosen = page }
+            if case .event(let summary, _, _) = entry, let page = listedByEvent[summary.eventID] {
+                chosen = page
+            } else if !listedIDs.contains(entry.id),
+                entry.visibleArticles.contains(where: { listedReports.contains($0.id) })
+            {
+                // Grouped differently on the page (read before a regrouping): the page's entry stands for it.
+                continue
+            }
             if seen.insert(chosen.id).inserted { pool.append(chosen) }
         }
         for entry in listed where seen.insert(entry.id).inserted { pool.append(entry) }

@@ -1279,6 +1279,15 @@ extension NewsTests {
         let pool = TodayEdition.windowPool(entries(["w1", "p1", "w2", "p2"]), listed: listed)
         assertEqual(
             pool.map(\.id), ["w1", "p1", "w2", "p2", "p3"], "Window order, then listed stories outside it, once")
+        let regrouped = makeEventEntry(
+            eventID: "ev-regrouped",
+            members: [
+                ("w5", "Outlet 1", "w5", "Detail", referenceNow, "https://o1.example/rss"),
+                ("p3", "Outlet 2", "p3", "Detail", referenceNow, "https://o2.example/rss"),
+            ])
+        assertEqual(
+            TodayEdition.windowPool([regrouped], listed: listed).map(\.id), ["p1", "p2", "p3"],
+            "A window story holding a report the page lists under another id is left to the page's entry")
         let plan = TodayEditionPlan(lanes: [
             TodayLaneResult(lane: .theLead, qualifies: true, entries: [story("w1", .theLead)]),
             TodayLaneResult(
