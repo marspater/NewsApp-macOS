@@ -50,6 +50,9 @@ extension NewsTests {
             ("testDeterminismAndDatabaseLoaderIntegration", { try await testTodayDeterminismAndDatabaseLoader() }),
             ("testLoaderGroupingConfidenceCoversStory", { try await testTodayLoaderGroupingConfidenceCoversStory() }),
             ("testLoaderSectorImpactNeedsStoredSection", { try await testTodayLoaderSectorImpactNeedsStoredSection() }),
+            ("testFullEditionIsDeterministicPerLaneWithOneLanePerStory", { testTodayFullEditionContract() }),
+            ("testOutputHoldsNoTopicLaneAndNoBriefingAnalysis", { testTodayOutputHasNoTopicLaneOrAnalysis() }),
+            ("testNotifyingStoryNeedNotLeadToday", { testTodayNotifyingStoryNeedNotLead() }),
         ]
         try await runSuite(tests)
     }
@@ -1691,5 +1694,191 @@ extension NewsTests {
             signals["m-ev-timeline"]?.hasSectorImpact, false,
             "Evidence sections without an Industry Impact item are not a sector impact")
         assertEqual(signals["m-ev-impact"]?.hasSectorImpact, true, "A stored Industry Impact item is a sector impact")
+    }
+
+    // MARK: - #934 acceptance: the whole edition
+
+    /// A page that fills every lane: one Lead story, three In Motion events, three long reads, three stories on the
+    /// reader's subject, three outside it and two that clear no bar.
+    private static func fullEdition() -> (entries: [FeedEntry], context: TodayAssignmentContext) {
+        var entries: [FeedEntry] = [
+            .article(makeArticle(id: "lead", title: "Crisis emergency talks begin", pubDate: referenceNow))
+        ]
+        var signals: [String: TodayStorySignals] = [
+            "lead": TodayStorySignals(nlImportanceOverride: 0.90, resolvedImportanceOverride: .major)
+        ]
+        for index in 1...3 {
+            entries.append(
+                inMotionEvent("m\(index)", reports: [(0.25, rulingHeadline), (30, inquiryHeadline)]))
+            signals["m\(index)-0"] = TodayStorySignals(nlImportanceOverride: 0.30, resolvedImportanceOverride: .minor)
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: "deep-\(index)", title: "Investigation: harbor dredging contract number \(index)",
+                        source: "Harbor Review \(index)", category: "Local",
+                        pubDate: referenceNow.addingTimeInterval(-Double(1000 + index)))))
+            signals["deep-\(index)"] = TodayStorySignals(
+                nlImportanceOverride: 0.25, resolvedImportanceOverride: .minor)
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: "beat-\(index)", title: "CERN fusion experiment milestone \(index)",
+                        description: "Research team reports fusion containment gain.",
+                        source: "Science Daily \(index)", category: "Science",
+                        pubDate: referenceNow.addingTimeInterval(-Double(2000 + index)),
+                        entities: [EntityResult(name: "CERN", type: .organization)])))
+            signals["beat-\(index)"] = TodayStorySignals(
+                nlImportanceOverride: 0.25, resolvedImportanceOverride: .minor)
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: "out-\(index)", title: "Central bank governor testifies on inflation framework \(index)",
+                        description: "Detailed macroeconomic briefing with named institutions.",
+                        source: "Finance Press \(index)", category: "Business",
+                        pubDate: referenceNow.addingTimeInterval(-Double(3000 + index)))))
+            signals["out-\(index)"] = TodayStorySignals(
+                originalReportCount: 2, nlImportanceOverride: 0.65, resolvedImportanceOverride: .notable)
+        }
+        for index in 1...2 {
+            entries.append(
+                .article(
+                    makeArticle(
+                        id: "rest-\(index)", title: "Brief notice", description: "", source: "Misc",
+                        category: "Lifestyle", pubDate: referenceNow.addingTimeInterval(-Double(4000 + index)))))
+            signals["rest-\(index)"] = TodayStorySignals(
+                nlImportanceOverride: 0.15, resolvedImportanceOverride: .minor)
+        }
+        let profile = TodayUserProfile(
+            entityWeights: ["organization:cern": 12.0], keywordWeights: ["fusion": 10.0], interactionCount: 25)
+        return (entries, TodayAssignmentContext(now: referenceNow, profile: profile, signalsByEntryID: signals))
+    }
+
+    /// #934 acceptance, in one edition with all six lanes filled: the same inputs give the same plan in every
+    /// lane, in whatever order the stories arrive; each story is in exactly one lane and no event twice; every
+    /// story is placed, and the ones no lane takes are in The Latest; each entry carries the output contract.
+    static func testTodayFullEditionContract() {
+        let (entries, context) = fullEdition()
+        let plan = TodayEditionAssigner.assign(entries: entries, context: context)
+
+        for lane in TodayLane.assignmentOrder {
+            assertTrue(plan.result(for: lane)?.qualifies == true, "\(lane.rawValue) shows in the full edition")
+            let again = TodayEditionAssigner.assign(entries: entries, context: context)
+            assertEqual(
+                again.entries(for: lane), plan.entries(for: lane), "\(lane.rawValue) repeats for the same inputs")
+            let reversed = TodayEditionAssigner.assign(entries: entries.reversed(), context: context)
+            assertEqual(
+                reversed.entries(for: lane).map(\.id), plan.entries(for: lane).map(\.id),
+                "\(lane.rawValue) does not depend on the order the stories arrive in")
+        }
+
+        // One story, one lane; story entries only, so no event twice.
+        let placed = plan.allAssignments
+        assertEqual(placed.count, Set(placed.map(\.id)).count, "No story is in two lanes")
+        let events = placed.compactMap { item -> String? in
+            if case .event(let summary, _, _) = item.entry { return summary.eventID }
+            return nil
+        }
+        assertEqual(events.count, Set(events).count, "No event is in two lanes")
+        for lane in TodayLane.assignmentOrder {
+            assertTrue(
+                plan.entries(for: lane).allSatisfy { $0.lane == lane }, "\(lane.rawValue) entries name their lane")
+        }
+
+        // The Latest is the safety net: every story is placed, and what no lane took is there.
+        assertEqual(Set(placed.map(\.id)), Set(entries.map(\.id)), "Every story of the pool is placed")
+        assertEqual(
+            Set(plan.entries(for: .theLatest).map(\.id)), ["rest-1", "rest-2"],
+            "Stories that clear no bar are in The Latest")
+        assertTrue(
+            plan.entries(for: .theLatest).allSatisfy { $0.reason == "the_latest_safety_net" },
+            "The Latest gives the safety net as its reason")
+
+        // Output contract: lane, score, confidence, reason, sortKey.
+        for item in placed {
+            assertTrue((0.0...1.0).contains(item.score), "\(item.id): score is on the 0–1 scale")
+            assertTrue((0.0...1.0).contains(item.confidence), "\(item.id): confidence is on the 0–1 scale")
+            assertFalse(item.reason.isEmpty, "\(item.id): a reason is given")
+            assertTrue(
+                item.reason.allSatisfy { $0 == "_" || $0.isNumber || ($0.isLetter && $0.isLowercase) },
+                "\(item.id): the reason is a code, not reader copy")
+            assertEqual(item.sortKey, item.entry.representative.orderDate, "\(item.id): sortKey is the story's date")
+        }
+        for lane in TodayLane.assignmentOrder where lane != .theLead {
+            let keys = plan.entries(for: lane).map(\.sortKey)
+            assertEqual(keys, keys.sorted(by: >), "\(lane.rawValue) is newest first")
+        }
+        assertEqual(plan.entries(for: .theLead).first?.reason, "lead_top_story", "The Lead follows rank")
+    }
+
+    /// #934 acceptance: the output has the six fixed lanes and no topic lane, and an entry carries the contract's
+    /// fields and no Briefing analysis (assessment, gauge, strategic impact, weak signal).
+    static func testTodayOutputHasNoTopicLaneOrAnalysis() {
+        assertEqual(
+            TodayLane.allCases.map(\.rawValue),
+            ["The Lead", "In Motion", "The Deep Read", "Your Beat", "Outside Your Usual", "The Latest"],
+            "Today has the six lanes of the spec and no other")
+        let sections = Set(NewsCategory.allCases.map { $0.rawValue.lowercased() })
+        assertTrue(
+            TodayLane.allCases.allSatisfy { !sections.contains($0.rawValue.lowercased()) }, "No lane is a section")
+
+        let (entries, context) = fullEdition()
+        let plan = TodayEditionAssigner.assign(entries: entries, context: context)
+        assertEqual(plan.lanes.map(\.lane), TodayLane.assignmentOrder, "A plan holds exactly the six lanes")
+        guard let item = plan.allAssignments.first else { return assertTrue(false, "The full edition places stories") }
+        let fields = Mirror(reflecting: item).children.compactMap(\.label)
+        assertEqual(
+            fields,
+            [
+                "id", "entry", "lane", "score", "confidence", "reason", "sortKey", "contentTypeLabel",
+                "isCoverageConfident", "isDeveloping", "originalReportCount", "publisherCount", "groupingConfidence",
+                "readingTimeMinutes", "interestMatch", "novelty",
+            ],
+            "An entry carries the output contract, card flags and evaluation numbers: a new field is a decision")
+        let analysis = ["assessment", "gauge", "impact", "signal", "sitrep", "tension", "summary", "overview"]
+        assertTrue(
+            fields.allSatisfy { field in !analysis.contains { field.lowercased().contains($0) } },
+            "No entry field carries Briefing analysis")
+        assertTrue(
+            Mirror(reflecting: plan).children.compactMap(\.label) == ["lanes"],
+            "A plan carries its lanes and nothing else")
+    }
+
+    /// #934 acceptance, the reverse of `testTodayNotificationThresholdsIndependent`: a story that passes the
+    /// notification bar does not lead Today on that account. Wire copy gives it four publishers and one original
+    /// report; Today's bar for a one-report slide is its own score.
+    static func testTodayNotifyingStoryNeedNotLead() {
+        let title = "Breaking: ferry service suspended"
+        assertTrue(
+            NotificationService.isPriority(
+                title: title, score: NotificationService.priorityScore,
+                publishers: NotificationService.priorityPublishers),
+            "The story passes the notification bar")
+        let wire = makeEventEntry(
+            eventID: "ev-wire",
+            members: (1...4).map {
+                (
+                    "w\($0)", "Wire Client \($0)", title, "Agency copy.",
+                    referenceNow.addingTimeInterval(-Double($0 * 60)), "https://w\($0).example/rss"
+                )
+            })
+        let top = FeedEntry.article(
+            makeArticle(id: "top", title: "Crisis emergency talks begin", pubDate: referenceNow))
+        let plan = TodayEditionAssigner.assign(
+            entries: [top, wire],
+            context: TodayAssignmentContext(
+                now: referenceNow,
+                signalsByEntryID: [
+                    "top": TodayStorySignals(nlImportanceOverride: 0.90, resolvedImportanceOverride: .major),
+                    "w1": TodayStorySignals(
+                        originalReportCount: 1, nlImportanceOverride: 0.40, resolvedImportanceOverride: .minor),
+                ]))
+        assertEqual(plan.entries(for: .theLead).map(\.id), ["top"], "The notifying wire story takes no slide")
+        assertTrue(plan.entries(for: .theLatest).contains { $0.id == "w1" }, "It is still on the page")
+        let today = TodayEditionThresholds.standard
+        assertTrue(
+            Mirror(reflecting: today).children.compactMap(\.label).allSatisfy {
+                !$0.lowercased().contains("notif") && !$0.lowercased().contains("priority")
+                    && !$0.lowercased().contains("breaking")
+            }, "Today's thresholds hold no notification threshold")
     }
 }
