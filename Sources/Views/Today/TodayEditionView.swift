@@ -84,11 +84,7 @@ struct TodayEditionView<LatestListCard: View>: View {
         let stories = edition.lead
         return BriefingHeroCarouselView(
             entries: stories.map(\.entry),
-            // The photo each slide shows is the one the photo rule, the prefetch and the lane cards use: the story's
-            // listed reports first, then its event's (a restored edition's stored event photo would otherwise win).
-            images: Dictionary(
-                stories.compactMap { story in edition.imageURL(of: story).map { (story.id, $0) } },
-                uniquingKeysWith: { first, _ in first }),
+            images: edition.leadImages,
             readIDs: readIDs,
             clock: clock,
             isReaderOpen: isMotionPaused,

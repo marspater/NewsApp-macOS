@@ -1317,8 +1317,11 @@ extension NewsTests {
             now: referenceNow.addingTimeInterval(60)
         ).get()
         assertEqual(
-            withOwn.lead.first.flatMap(withOwn.imageURL)?.absoluteString, "https://images.example/a-own.jpg",
-            "A report's own photo comes before the stored event photo")
+            withOwn.leadImages["a"]?.absoluteString, "https://images.example/a-own.jpg",
+            "The Lead's slide shows the report's own photo, as its card and the prefetch do")
+        assertEqual(
+            withOwn.metadata["a"]?.imageURL, photo,
+            "The card metadata still holds the stored event photo, which the slide no longer takes first")
         assertEqual(same.metadata["c"]?.contentType, "Explainer", "A Deep Read card keeps its tag")
 
         let changed = try restore(["a", "b", "d", "e", "new"]).get()
