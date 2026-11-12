@@ -115,6 +115,9 @@ One name means one thing. Before adding a name, check this table and the names a
 | `your_beat_shown_top_share`, `your_beat_shown_top3_share` | A Today shadow run: the same two shares inside Your Beat as the 72 h edition shows it |
 | `your_beat_qualifying_24h_newest50`, `your_beat_qualifying_24h_newest25`, `your_beat_qualifying_24h_newest15`, `your_beat_qualifying_24h_newest5` | A Today shadow run: `your_beat_qualifying_24h` with the reading history cut to its newest 50, 25, 15 and 5 stories |
 | `outside_clearing` | A Today shadow run: stories that clear Outside Your Usual's bar, before its cap |
+| `pool_articles`, `pool_entries`, `pool_span_hours` | A Today shadow run: the stories the run assigns over, the story entries they group into, and the hours from the newest to the oldest. The pool is in the `dataset` name: `+page-1` is the app's first listed page of 200 stories (`NEWS_TODAY_POOL=page`), no suffix the whole 72 h window |
+| `lead_slides`, `lead_slides_labelled`, `lead_slides_labelled_important` | A Today shadow run: slides The Lead shows, those with a story label, and those the label calls Lead-worthy |
+| `imageless_entries`, `lead_slides_replaced_by_photo_rule` | A Today shadow run: stories with no photo in any report of their event, and Lead slides the photo rule replaces |
 
 A rescored run keeps its replay and changes only the labels; its `dataset` names the label set, for example `validation-2026-10-29+reviewed-labels-pegged-as-same`.
 
