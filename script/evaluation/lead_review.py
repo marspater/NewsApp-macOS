@@ -21,8 +21,15 @@ import pathlib
 import shutil
 import tempfile
 
-from overview_review import (expect_rejected, label_sheet, private_run, rate, read_sheet_labels, require,
-                             write_new_sheet)
+from overview_review import (
+    expect_rejected,
+    label_sheet,
+    private_run,
+    rate,
+    read_sheet_labels,
+    require,
+    write_new_sheet,
+)
 
 LABELS = ('lead', 'not')
 RANKINGS = ('publisherCount', 'briefing', 'z2')
@@ -153,8 +160,8 @@ def fill(directory, reader, lead):
 
 
 def self_check():
-    with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
-        first, second = pathlib.Path(first), pathlib.Path(second)
+    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
+        first, second = pathlib.Path(one), pathlib.Path(two)
         fixture(first)
         fixture(second)
         require(sheet(first) == 24 and sheet(second) == 24, 'The sheet lists the union of the three top 20s')
