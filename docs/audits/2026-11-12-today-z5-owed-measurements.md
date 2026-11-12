@@ -153,7 +153,7 @@ xcrun xctrace record --template 'Allocations' --time-limit 30s --no-prompt \
 find "$DEV" -name 'z5-alloc.sqlite3*' -delete
 ```
 
-- Repeat with `$RUN/baseline/News.app` as `baseline.trace`, and for WARM as `main-warm.trace` after `cp "$RUN/first-card/seed.today-edition.json" "$DEV/z5-alloc.sqlite3.today-edition.json"` (between the `cp` and the recording).
+- Repeat with `$RUN/baseline/News.app` as `baseline.trace`, and for WARM as `main-warm.trace` after `cp "$RUN/first-card/seed-warm.today-edition.json" "$DEV/z5-alloc.sqlite3.today-edition.json"` (between the `cp` and the recording).
 - **Not verified:** that the Profile build carries `get-task-allow`. The project switches Xcode's base entitlements off for Release only, which fits Release refusing the attach and suggests Profile allows it; `build.sh` signs again with `News.entitlements` alone when Sentry is linked, hence `NEWS_SENTRY_DISABLED=1` in the setup. The first line settles it without recording anything.
 - The numbers to record: the largest contributors, in MB by responsible library and call tree, to the memory alive at the peak and gone by 20 seconds, for `main` against the baseline. This is read in Instruments. Times from these traces are not launch times: Allocations slows the app.
 

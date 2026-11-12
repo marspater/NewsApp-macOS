@@ -111,7 +111,8 @@ def mismatch(launch):
     """Why the launch does not count for its arm, or None when it does."""
     if launch["first_card_ms"] is None:
         return "no first card"
-    expected = ARMS.get(launch["arm"])
+    # A labelled arm (cold_integration) is gated as its kind.
+    expected = ARMS.get(launch["arm"].split("_")[0])
     if expected is None:
         return None
     seen = (launch["restored"], launch["restore_outcome"], launch["fresh_outcome"])

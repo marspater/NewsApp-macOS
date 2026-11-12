@@ -90,6 +90,9 @@ class SummaryTests(unittest.TestCase):
             self.write(directory, "r3-swap.log", WARM.format(card="960.000", outcome="swapped"))
             self.write(directory, "r3-swap.settled.footprint", FOOTPRINT.format(layers="  80 MB"))
             self.write(directory, "r3-swap.scrolled.footprint", FOOTPRINT.format(layers=" 350 MB"))
+            # A labelled arm is gated as its kind: a restored first card does not count for a cold arm.
+            self.write(directory, "r2-cold_integration.log", WARM.format(card="900.000", outcome="confirmed"))
+            self.write(directory, "r3-cold_integration.log", COLD.format(card="1300.000"))
             summarize_launches.main(["x", directory, "--meta", "revision=abc"])
             with open(os.path.join(directory, "summary.json")) as handle:
                 result = json.load(handle)
@@ -97,6 +100,9 @@ class SummaryTests(unittest.TestCase):
                 report = handle.read()
         arms = result["arms"]
         self.assertEqual(result["meta"], {"revision": "abc"})
+        self.assertEqual(arms["cold_integration"]["launches"], 1)
+        self.assertEqual(len(arms["cold_integration"]["excluded"]), 1)
+        self.assertEqual(arms["cold_integration"]["first_card_ms"]["median"], 1300.0)
         self.assertEqual(arms["baseline"]["first_card_ms"]["median"], 900.5)
         self.assertEqual(arms["cold"]["launches"], 2)
         self.assertEqual(arms["cold"]["first_card_ms"], {"n": 2, "median": 1150.0, "p95": 1200.0, "min": 1100.0,
