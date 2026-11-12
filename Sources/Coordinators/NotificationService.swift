@@ -305,9 +305,10 @@ final class NotificationService: Sendable {
             current.withLock { $0 = true }
             current = superseded
         }
+        @Sendable func isSuperseded() -> Bool { superseded.withLock { $0 } }
         Task.detached(priority: .userInitiated) {
             DispatchQueue.concurrentPerform(iterations: texts.count) { index in
-                guard !superseded.withLock({ $0 }) else { return }
+                guard !isSuperseded() else { return }
                 _ = self.computeImportance(title: texts[index].title, description: texts[index].description)
             }
         }
