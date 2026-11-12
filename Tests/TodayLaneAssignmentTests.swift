@@ -1390,6 +1390,18 @@ extension NewsTests {
             shape(restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e", "page2"]), fresh: leftFeed)),
             ["The Lead: a,b", "The Deep Read: c", "The Latest: e,page2"],
             "Held, a story of a feed left since leaves Today and a further page joins The Latest")
+        let page2Photo = URL(string: "https://images.example/page2.jpg")!
+        var page2Details = TodayCardDetails()
+        page2Details.eventImages = ["page2": page2Photo]
+        let freshWithPage2 = TodayEdition.make(
+            entries: entries(["a", "b", "c", "d", "e", "page2"]), plan: freshPlan, details: page2Details)
+        assertEqual(
+            restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e", "page2"]), fresh: freshWithPage2)
+                .metadata["page2"]?.imageURL, page2Photo,
+            "A story the list gained takes its event photo from the fresh edition")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: false, awaitsNewDay: true, isApplied: true),
+            .swapped, "The new day's page, which only replaces an untouched list, takes the page")
         assertEqual(
             TodayRestoreOutcome.decide(sameArrangement: false, isTouched: true, awaitsNewDay: false, isApplied: true),
             .swapped, "An update the reader applied over the restored edition takes the page, touched or not")
