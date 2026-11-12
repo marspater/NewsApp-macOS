@@ -253,13 +253,20 @@ enum OverviewTimelineBuilder {
                     ))
                 citationIDs.append(citationID)
             }
+            let precision: OverviewTimelineItem.DatePrecision?
+            if entry.kind != .stated {
+                precision = nil
+            } else if entry.end != nil {
+                precision = .range
+            } else {
+                precision = entry.precision == 0 ? .month : .day
+            }
             timeline.items.append(
                 OverviewTimelineItem(
                     id: "timeline_\(index + 1)",
                     dateText: entry.dateText,
                     dateKind: entry.kind,
-                    datePrecision: entry.kind == .stated
-                        ? (entry.end != nil ? .range : entry.precision == 0 ? .month : .day) : nil,
+                    datePrecision: precision,
                     summary: entry.quote,
                     citationIDs: citationIDs,
                     isFuturePlan: entry.isPlan,
@@ -369,9 +376,11 @@ enum OverviewTimelineBuilder {
                 true
             ),
         ]
-        return sources.compactMap { source in
-            (try? NSRegularExpression(pattern: source.0)).map { ($0, source.1) }
+        var compiled: [(regex: NSRegularExpression, monthFirst: Bool)] = []
+        for (pattern, monthFirst) in sources {
+            if let regex = try? NSRegularExpression(pattern: pattern) { compiled.append((regex, monthFirst)) }
         }
+        return compiled
     }()
 
     private static let bareMonthRange: NSRegularExpression = {
