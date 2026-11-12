@@ -425,6 +425,12 @@ enum AppLayout {
     static func gridColumnCount(width: CGFloat, minimum: CGFloat = gridColumnMinimum) -> Int {
         max(1, Int((width + cardGap) / (minimum + cardGap)))
     }
+    /// The items of one grid column: every `count`th item, starting at `column`. Columns are independent, so reading
+    /// order runs across and an expanded card grows only its own column (#1227).
+    static func gridColumn<Item>(_ column: Int, of count: Int, in items: [Item]) -> [Item] {
+        guard count > 1 else { return items }
+        return stride(from: column, to: items.count, by: count).map { items[$0] }
+    }
     /// Briefing hero carousel: arrow circle, page dots and the pointer target around a small control.
     static let carouselControlSize: CGFloat = 32
     static let carouselDotSize: CGFloat = 8

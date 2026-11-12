@@ -38,15 +38,57 @@ enum NewsSignposts {
     /// Records, once per process, when the first story card appears: an Instruments event plus a log line
     /// with the time since the process started, so launch can be measured on the shipping app.
     @MainActor
-    static func firstCardAppeared() {
+    static func firstCardAppeared(restored: Bool = false) {
         guard !firstCardReported else { return }
         firstCardReported = true
         launch.emitEvent("FirstCard")
         guard let start = processStart() else { return }
         let elapsed = Date().timeIntervalSince(start)
+        // A card of a restored edition is on screen sooner than its fresh edition is ready: the two are told apart.
         launchLog.notice(
-            "First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public)"
+            "First card visible ms_since_process_start=\(elapsed * 1000, format: .fixed(precision: 3), privacy: .public) restored=\(restored, privacy: .public)"
         )
+    }
+
+    /// Logs an event of the launch with the time since the process started, also after the first card: when the
+    /// fresh Today edition is ready behind a restored one, and what became of it (#937).
+    @MainActor
+    static func launchEvent(_ name: String, detail: String) {
+        guard let start = processStart() else { return }
+        let elapsed = Date().timeIntervalSince(start) * 1000
+        launchLog.notice(
+            "Launch event \(name, privacy: .public) \(detail, privacy: .public) ms_since_process_start=\(elapsed, format: .fixed(precision: 3), privacy: .public)"
+        )
+    }
+
+    /// Logs a launch milestone with the time since the process started, until the first card is on screen, so the
+    /// stages before it can be read from the shipping app's log.
+    @MainActor
+    static func launchMilestone(_ name: String) {
+        guard !firstCardReported, let start = processStart() else { return }
+        let elapsed = Date().timeIntervalSince(start) * 1000
+        launchLog.notice(
+            "Launch milestone \(name, privacy: .public) ms_since_process_start=\(elapsed, format: .fixed(precision: 3), privacy: .public)"
+        )
+    }
+
+    /// Times the consecutive stages of one piece of launch work and logs each stage's duration.
+    struct StageTimer {
+        let work: String
+        private var mark = ContinuousClock.now
+
+        init(_ work: String) { self.work = work }
+
+        mutating func lap(_ stage: String, count: Int? = nil) {
+            let now = ContinuousClock.now
+            let duration = now - mark
+            mark = now
+            let ms = Double(duration.components.seconds) * 1000 + Double(duration.components.attoseconds) / 1e15
+            let work = work
+            NewsSignposts.launchLog.notice(
+                "\(work, privacy: .public) stage=\(stage, privacy: .public) ms=\(ms, format: .fixed(precision: 3), privacy: .public) count=\(count ?? -1, privacy: .public)"
+            )
+        }
     }
 
     /// When this process started, from the kernel.

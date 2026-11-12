@@ -31,14 +31,12 @@ extension FocusedValues {
 struct SidebarView: View {
     @Binding var selectedTopic: String?
     @Binding var mastheadNotice: MastheadNotice?
-    /// Panel collection is on, so the sidebar foot shows the news tension reading.
-    var showsTensionReading = false
     var openTension: () -> Void = {
         // Default no-op action
     }
 
-    /// Whether the tension indicator in the sidebar is visible (#1209).
-    /// Follows `appSettings.isWorldTensionEnabled` reactively so toggling immediately shows/hides it.
+    /// Whether the sidebar foot shows the World Tension reading: panel collection is on (#1209). Read from the shared
+    /// settings object, not passed in, so turning collection off hides the reading at once.
     var isTensionReadingVisible: Bool {
         appSettings.isWorldTensionEnabled
     }

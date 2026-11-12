@@ -26,6 +26,12 @@ These instructions govern agent workflow, not the project specification.
 
 - Follow the user's current scope and preserve real settings, saved stories, read history and logs during verification.
 - v2.0.0 shipped on 31 October 2026; v3 stays English-only while #264 is parked. Issues labelled `parked` are ones I deprioritized: do not work on them or add them to release gates unless I reopen them, and keep their parked code intact.
+- VoiceOver checks run once, in the cumulative gate #1244:
+  - Build accessibility into each change as usual: labels, traits, actions, rotors, announcements and their automated tests.
+  - Do not run or request a check that needs VoiceOver switched on for a single change.
+  - Add one line for the owed check to #1244 and link it from the PR or issue. No PR or sub-issue waits on it.
+  - #1244 runs after all other v3 work and blocks the v3 release.
+  - Other accessibility checks stay with their own issues: Reduce Motion, Increase Contrast, Reduce Transparency, Show Borders and keyboard.
 - Development verification stays arm64 and ad-hoc signed. Push a `v*` tag only when I explicitly ask: the push publishes a GitHub release through `release.yml`. Run the notarization helpers in `script/distribution/` only on my request.
 - A fix that touches files owned by another open epic (its "Does not touch" lines) gets no PR for that part: post the diff and progress on the issue instead. When a fix substantially relates to an open issue linked to an epic, document it in that issue and explain how the two relate.
 - After a PR merges, delete its local worktree and branch; the remote branch can stay.
@@ -33,4 +39,11 @@ These instructions govern agent workflow, not the project specification.
 - Do not merge stale PRs wholesale. Review against current code, incorporate useful changes selectively and explain duplicate or superseded proposals.
 - Research runs (a model candidate, a matcher knob, a holdout or tune replay) follow [docs/TOOLING.md](docs/TOOLING.md): read the run ledger before a run (`news-ledger ui`), and after each run log one line with its real numbers, unless the session has no access to my Mac: `news-ledger log <experiment> "<what was tried>" dataset=<set> verdict=<baseline|reference|passed|failed|shipped|superseded> source=<audit or receipt> commit=<sha> <measure>=<number>…`. A run counts as done once its line is there. Use the measure names in that document; `dataset` is required because numbers from different sets are not comparable. Measures and settings only: no article text and no reading from a sealed holdout. A session without access gets the runs on record from the coordinating session's brief and reports the same fields in its PR, or on the issue when there is no PR (experiment, what was tried, dataset, commit, verdict, source and each measure), under the same exclusions, for the coordinating session to log. Conclusions still go on the issue.
 - A Swift file that a domain owns names its owner in a `// Angelia · <owner>` comment after the license header. Keep that comment and the file's row in [docs/ANGELIA.md](docs/ANGELIA.md) in step.
+- Refer to work by its Angelia sub-system, beside the file, type and function names. The register is [docs/ANGELIA.md](docs/ANGELIA.md).
+  - Issues, progress notes, commit bodies and reports name the domain, with its job on first use ("Clio · sourced overviews").
+  - A PR that touches Angelia code lists each sub-system it changes under "Angelia sub-systems" in its description.
+  - The same PR lists separately the sub-systems affected without a change to their code.
+  - A change to a view that shows a domain's output names that domain and says that the change is in a view.
+  - Shared view code that shows no domain's output (design tokens, settings, window chrome) names none.
+  - Swift names stay descriptive.
 - Keep output concise and evidence-led. Ask only for missing decisions that block safe progress; complete independent authorized work while waiting.

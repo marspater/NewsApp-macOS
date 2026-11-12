@@ -82,6 +82,7 @@ extension NewsTests {
                 { try await testNotificationLanesAcrossRefreshes(fixtureRoot: fixtureRoot) }
             ),
             ("testNotifyBeforeClustering", { try await testNotifyBeforeClustering() }),
+            ("testBannerTakesRecordedPhoto", { try await testBannerTakesRecordedPhoto() }),
             ("testArticleStoreErrorResilience", { await testArticleStoreErrorResilience() }),
             ("testSystemErrorHardeningAndResilience", { await testSystemErrorHardeningAndResilience() }),
             ("testAppContainerWiring", { await testAppContainerWiring() }),
@@ -2288,6 +2289,15 @@ extension NewsTests {
         let score = service.computeImportance(
             title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
+        // The score is remembered per text (#937): a second service works it out afresh and must agree.
+        assertEqual(
+            service.computeImportance(
+                title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response."),
+            score, "A remembered score is the score")
+        assertEqual(
+            NotificationService().computeImportance(
+                title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response."),
+            score, "A remembered score equals a fresh one")
 
         // One banner per event (#523): the strongest report represents its event; singles stand alone.
         func report(_ id: Int, _ title: String) -> FeedArticle {
@@ -2776,6 +2786,50 @@ extension NewsTests {
         assertTrue(
             status(.posted, style: .alert).contains("until you close it"), "The Alerts style is named after a banner")
         assertEqual(status(.posted), "Shown.", "A plain success says so")
+    }
+
+    /// #1201: a pass plans its banners from the stories as triage saw them and posts minutes later. A story from a feed
+    /// without images, or whose feed image is a logo, posts with the photo the page lookup recorded in the library,
+    /// the way FeedManager wires `curated`; a story with a photo of its own keeps it.
+    @MainActor
+    static func testBannerTakesRecordedPhoto() async throws {
+        print("  - Testing a banner posts the photo the page lookup recorded (#1201)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        func story(_ id: String, image: String?) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Explosion at a refinery in Houston, dozens killed; urgent evacuation",
+                link: "https://photo.invalid/\(id)", guid: id, description: "", pubDate: Date(),
+                source: "Publisher \(id)", imageUrl: image)
+        }
+        let bare = story("bare", image: nil)
+        let logo = story("branded", image: "https://photo.invalid/static/logo.png")
+        let own = story("own", image: "https://photo.invalid/own/lead.jpg")
+        _ = try await db.upsertArticles([bare, logo, own])
+        for item in [bare, logo, own] {
+            _ = try await db.recordStoryImage(item.id, imageURL: "https://cdn.invalid/\(item.id)/found.jpg")
+        }
+        actor Recorder {
+            var images: [String: [URL]] = [:]
+            func record(_ banner: StoryBanner) { images[banner.articleID ?? ""] = banner.imageURLs }
+        }
+        let recorder = Recorder()
+        let service = NotificationService(post: { await recorder.record($0) }, spacing: .zero)
+        for item in [bare, logo, own] {
+            var delivery = NotificationDelivery(mode: .full)
+            delivery.curated = { story in (try? await db.curateImages(in: [story]))?.first ?? story }
+            await service.triageAndNotify(newArticles: [item], delivery: delivery)
+        }
+        let images = await recorder.images
+        assertEqual(
+            images[bare.id]?.first?.absoluteString, "https://cdn.invalid/bare/found.jpg",
+            "A story its feed gave no image posts with the recorded photo")
+        assertEqual(
+            images[logo.id]?.first?.absoluteString, "https://cdn.invalid/branded/found.jpg",
+            "A story whose feed image is a logo posts with the recorded photo")
+        assertEqual(
+            images[own.id]?.first?.absoluteString, own.imageUrl, "A story with a photo of its own keeps it")
+        await db.close()
     }
 
     /// #790: a banner for a report outside any event records the report itself. When another outlet's report later

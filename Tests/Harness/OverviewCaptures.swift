@@ -859,7 +859,7 @@ enum GridRowCaptures {
             for variant in variants {
                 let heights = CardHeights()
                 let view = NSHostingView(
-                    rootView: GridRowFixture(entries: entries, expanded: expanded, heights: heights)
+                    rootView: GridRowFixture(entries: entries, expanded: expanded, heights: heights, store: store)
                         .environmentObject(settings)
                         .environmentObject(store)
                         .environmentObject(ReadManager(articleStore: store))
@@ -944,6 +944,7 @@ private struct GridRowFixture: View {
     let entries: [FeedEntry]
     let expanded: Bool
     let heights: CardHeights
+    let store: ArticleStore
 
     var body: some View {
         LazyVGrid(
@@ -979,7 +980,7 @@ private struct GridRowFixture: View {
                 representative: representative, summary: summary, visibleMembers: members, compact: false,
                 isExpanded: expanded, setExpanded: { _ in }, openRepresentative: {}, openMember: { _, _ in },
                 separate: { _ in },
-                combine: { _ in })
+                combine: { _ in }, store: store)
         }
     }
 }

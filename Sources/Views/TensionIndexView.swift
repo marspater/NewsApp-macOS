@@ -306,7 +306,7 @@ struct TensionIndexView: View {
     private func drivers(_ reading: WorldTensionReading) -> some View {
         let headlines = reading.drivingHeadlines
         if !headlines.isEmpty {
-            group("What's Driving It") {
+            group("Headlines informing this reading") {
                 Grid(
                     alignment: .leadingFirstTextBaseline, horizontalSpacing: AppSpacing.sm,
                     verticalSpacing: AppSpacing.sm

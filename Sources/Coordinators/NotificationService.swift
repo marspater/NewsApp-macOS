@@ -252,6 +252,10 @@ extension NotificationService {
 final class NotificationService: Sendable {
     static let shared = NotificationService()
     private let logger = Logger(subsystem: "com.marspater.news", category: "NotificationService")
+    /// The importance of a text is a pure function of it and costs two language-model passes; Today scores a whole
+    /// page on every layout, so the scores are remembered for the life of the process.
+    private let importanceScores = OSAllocatedUnfairLock(initialState: [String: Double]())
+    private let importancePreparation = OSAllocatedUnfairLock(initialState: OSAllocatedUnfairLock(initialState: false))
     /// Draws one banner; the default is the app's own panel and skips unbundled test processes.
     private let post: @Sendable (StoryBanner) async throws -> Void
     /// Pause between two banners of one refresh, so a refresh reads as a trickle of stories, not one burst.
@@ -281,6 +285,36 @@ final class NotificationService: Sendable {
     /// Returns a 0.0–1.0 score.
     func computeImportance(title: String, description: String) -> Double {
         let fullText = "\(title). \(description)"
+        if let known = importanceScores.withLock({ $0[fullText] }) { return known }
+        let score = Self.scoreImportance(of: fullText)
+        importanceScores.withLock { scores in
+            // ponytail: emptied when full rather than evicting by age; a library's listed stories are far fewer.
+            if scores.count >= 10_000 { scores.removeAll(keepingCapacity: true) }
+            scores[fullText] = score
+        }
+        return score
+    }
+
+    /// Scores a page's stories ahead of the Today layout, across cores and off the caller's thread, so the lane
+    /// assignment finds them known (#937). A story scored twice in a race gets the same score both times.
+    /// A newer page stops the one before it from scoring its remaining stories.
+    func prepareImportance(of articles: [FeedArticle]) {
+        let texts = articles.map { (title: $0.title, description: $0.description) }
+        let superseded = OSAllocatedUnfairLock(initialState: false)
+        importancePreparation.withLock { current in
+            current.withLock { $0 = true }
+            current = superseded
+        }
+        @Sendable func isSuperseded() -> Bool { superseded.withLock { $0 } }
+        Task.detached(priority: .userInitiated) {
+            DispatchQueue.concurrentPerform(iterations: texts.count) { index in
+                guard !isSuperseded() else { return }
+                _ = self.computeImportance(title: texts[index].title, description: texts[index].description)
+            }
+        }
+    }
+
+    private static func scoreImportance(of fullText: String) -> Double {
         var score: Double = 0.0
 
         // 1. Sentiment intensity

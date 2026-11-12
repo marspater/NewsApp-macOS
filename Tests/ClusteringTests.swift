@@ -2400,6 +2400,37 @@ extension NewsTests {
             cached.showsOnlyEarlierDays(now: morning, calendar: calendar), "A story from today keeps the list held")
         assertFalse(
             FeedUpdateBuffer().showsOnlyEarlierDays(now: morning, calendar: calendar), "An empty list is not stale")
+        // The new day's page waits for its grouping, then takes an untouched page (#937).
+        var handoff = FeedUpdateBuffer.NewDayHandoff()
+        assertEqual(
+            handoff.holds(showsOnlyEarlierDays: false, isGrouping: true, isTouched: false), nil,
+            "A list with today's stories follows the ordinary rule")
+        var nextMorning = FeedUpdateBuffer()
+        let yesterday = dated("y", morning.addingTimeInterval(-10 * 3600))
+        nextMorning.replace(with: FeedSnapshot(articles: [yesterday]))
+        let ungrouped = FeedSnapshot(articles: [dated("t1", morning), dated("t2", morning), yesterday])
+        handoff.noteRefreshedPage(showsOnlyEarlierDays: true, isGrouping: true)
+        let whileGrouping = handoff.holds(showsOnlyEarlierDays: true, isGrouping: true, isTouched: false)
+        assertEqual(whileGrouping, true, "Ungrouped stories of the new day do not take the page")
+        assertEqual(
+            nextMorning.receive(ungrouped, holding: whileGrouping ?? false, mode: .events), .waiting,
+            "The earlier edition stays while the new stories are grouped")
+        assertEqual(nextMorning.displayed.articles.map(\.id), ["y"], "Nothing ungrouped is shown")
+        assertEqual(
+            handoff.holds(showsOnlyEarlierDays: false, isGrouping: true, isTouched: false), true,
+            "A story updated today in place does not end the wait")
+        assertEqual(
+            handoff.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: true), true,
+            "A page the reader scrolled or focused keeps its stories; the new ones wait behind the button")
+        let afterGrouping = handoff.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: false)
+        assertEqual(afterGrouping, false, "Once grouped, the new day takes an untouched page")
+        assertEqual(
+            nextMorning.receive(ungrouped, holding: afterGrouping ?? true, mode: .events), .replaced,
+            "The grouped page replaces the earlier edition")
+        handoff.reset()
+        assertEqual(
+            handoff.holds(showsOnlyEarlierDays: false, isGrouping: true, isTouched: false), nil,
+            "A replaced list starts over")
         let fresh = article("n", source: "Wire One", minutesAgo: 0)
         assertEqual(
             buffer.receive(FeedSnapshot(articles: [fresh, a, b]), holding: true, mode: .events), .waiting,

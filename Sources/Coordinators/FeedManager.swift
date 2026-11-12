@@ -90,6 +90,15 @@ class FeedManager: NSObject, ObservableObject {
     private var requestedImageIDs: Set<String> = []
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
     private var clusteringTask: Task<Void, Never>?
+    /// Set between a refresh's end and the start of its grouping pass, which a database prune separates.
+    private var handsOverToGrouping = false
+    /// A refresh is collecting stories or its stories are still being grouped into events. A page laid out now
+    /// would show them one report each (#937).
+    var isGroupingNewStories: Bool { refreshTask != nil || handsOverToGrouping || clusteringTask != nil }
+    /// A refresh has published stories that its grouping pass has not finished with. Narrower than
+    /// `isGroupingNewStories`: while a refresh is still collecting, the library holds only grouped stories, and an
+    /// edition laid out from it is complete.
+    private(set) var holdsUngroupedStories = false
     private var clusteringRunID: UUID?
     private var needsClusteringPass = false
     private var backgroundTimer: Timer?
@@ -181,8 +190,9 @@ class FeedManager: NSObject, ObservableObject {
                 subscriptionTask?.cancel()
                 subscriptionTask = Task { [articleStore] in
                     guard !Task.isCancelled else { return }
-                    await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden))
-                    guard !Task.isCancelled else { return }
+                    // The first value repeats what the store set while opening: nothing to reload (#937).
+                    // A committed change refreshes even if superseded meanwhile: the next write reports no change.
+                    guard await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden)) else { return }
                     await articleStore.refreshState()
                 }
             }
@@ -699,6 +709,7 @@ class FeedManager: NSObject, ObservableObject {
             cancelledRefreshCount += 1
             return
         }
+        handsOverToGrouping = true
         refreshTask = nil
         refreshRunID = nil
         isAnyFeedLoading = false
@@ -708,9 +719,13 @@ class FeedManager: NSObject, ObservableObject {
         // Keep this run's waiters cancellable during its follow-up; never resume another run's callers.
         defer { resumeManualRefreshWaiters(for: runID) }
 
-        guard !isStopped else { return }
+        guard !isStopped else {
+            handsOverToGrouping = false
+            return
+        }
         await pruneIfDue()
         clusterEventsInBackground()
+        handsOverToGrouping = false
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
         if !Task.isCancelled, !isStopped { await notifyAndEnrich(newArticles) }
@@ -950,6 +965,7 @@ class FeedManager: NSObject, ObservableObject {
         }
 
         // Publish one coherent snapshot per collection, including any committed prefix if it was cancelled.
+        holdsUngroupedStories = true
         await articleStore.refreshState()
         // A future date (#981) must not put a story first in the notification order.
         let sortClock = Date()
@@ -1003,6 +1019,7 @@ class FeedManager: NSObject, ObservableObject {
         let runID = UUID()
         clusteringRunID = runID
         clusteringTask = Task { [weak self] in
+            var lastPassFailed = false
             repeat {
                 self?.needsClusteringPass = false
                 let allowsEnergy = self?.allowsBackgroundWork() ?? true
@@ -1021,18 +1038,24 @@ class FeedManager: NSObject, ObservableObject {
                 switch result {
                 case .success(let pass):
                     self.lastClusteringPass = pass
+                    lastPassFailed = false
                     if !pass.report.changedEvents.isEmpty { self.articleStore.noteEventsChanged() }
                 case .failure(let error):
                     if !(error is CancellationError) {
                         self.logger.error("Event clustering failed: \(error.localizedDescription)")
                     }
                     // Memberships commit per article: a pass that stopped early may still have changed events.
+                    lastPassFailed = true
                     self.articleStore.noteEventsChanged()
                 }
             } while self?.needsClusteringPass == true && !Task.isCancelled
             guard let self, self.clusteringRunID == runID else { return }
             self.clusteringTask = nil
             self.clusteringRunID = nil
+            // A failed last pass can leave published stories ungrouped: the flag stays until a pass finishes.
+            if !lastPassFailed { self.holdsUngroupedStories = false }
+            // A list that waited for the grouping (`isGroupingNewStories`) loads again now that it has ended.
+            self.articleStore.noteEventsChanged()
             self.overviewWarmupTask?.cancel()
             if self.allowsBackgroundWork() {
                 let store = self.articleStore

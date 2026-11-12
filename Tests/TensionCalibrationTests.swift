@@ -37,7 +37,6 @@ final class TensionCalibrationTests {
         testAppSettingsOptInDefaultsAndToggle()
         testEffectiveFeedURLsComputation()
         testNotificationIsolationForOptInFeeds()
-        testWorldTensionNearYouLens()
         testWorldTensionReactiveToggle()
         print("=== All Tension Calibration & Opt-In Collection Tests Passed! ===")
     }
@@ -623,103 +622,7 @@ final class TensionCalibrationTests {
             "Articles from panel feeds that user didn't subscribe to must NEVER notify")
     }
 
-    // MARK: - 5. World Tension Near You Lens & Reactive Toggle (#1172, #1209)
-
-    static func testWorldTensionNearYouLens() {
-        print(
-            "  - Testing World Tension Near you lens (stepped degrees, cap, deduplication, 7-day cutoff, whole-word matching, 100 clamp)..."
-        )
-        let now = Date(timeIntervalSince1970: 1_793_000_000)
-        let poland = WorldTensionNearYou.Region.all.first { $0.code == "PL" }!
-
-        func story(_ title: String, _ publisher: String, daysAgo: Double = 0) -> TensionLocalStory {
-            TensionLocalStory(title: title, publisher: publisher, date: now.addingTimeInterval(-daysAgo * 86400))
-        }
-
-        func war(_ count: Int, daysAgo: Double = 1) -> [TensionLocalStory] {
-            (0..<count).map { story("Russian drone attack hits Kharkiv \($0)", "Wire \($0)", daysAgo: daysAgo) }
-        }
-
-        func home(_ count: Int, daysAgo: Double = 1) -> [TensionLocalStory] {
-            (0..<count).map {
-                story("Warsaw protests against government coalition \($0)", "Domestic \($0)", daysAgo: daysAgo)
-            }
-        }
-
-        func degrees(_ stories: [TensionLocalStory]) -> Int? {
-            WorldTensionNearYou.evidence(stories, region: poland, endingAt: now, worldScore: 30)?.degrees
-        }
-
-        // Stepped degrees: neighbour (1->3, 3->6, 5->9, 8->12)
-        assert(degrees([]) == nil, "No stories add nothing")
-        assert(
-            [1, 3, 5, 8].map { degrees(war($0)) } == [3, 6, 9, 12], "Neighbour war stepped degrees must be 3, 6, 9, 12")
-
-        // Stepped degrees: domestic (1->1, 3->2, 6->3)
-        assert([1, 3, 6].map { degrees(home($0)) } == [1, 2, 3], "Domestic crisis stepped degrees must be 1, 2, 3")
-
-        // 15° cap
-        assert(degrees(war(8) + home(6)) == 15, "War (12) + domestic (3) reaches exactly the 15° cap")
-        let capped = WorldTensionNearYou(
-            region: "Poland", worldScore: 30, neighbourDegrees: 12, neighbourStories: 10, neighbourPublishers: 10,
-            domesticDegrees: 12, domesticStories: 10, domesticPublishers: 10
-        )
-        assert(capped.degrees == WorldTensionNearYou.cap, "Degrees must never exceed cap (15)")
-
-        // Publisher deduplication: one publisher repeating 5 times only counts once
-        let repeatedPublisher = (0..<5).map { story("Russian missile strike hits Kyiv \($0)", "Single Publisher") }
-        assert(degrees(repeatedPublisher) == 3, "Single publisher only counts once (3 degrees)")
-
-        // 7-day cutoff: stories 8 days ago ignored, stories in future ignored
-        assert(degrees(war(8, daysAgo: 8)) == nil, "Stories older than 7 days must be ignored")
-        assert(degrees(war(8, daysAgo: -1)) == nil, "Stories after the ending date must be ignored")
-
-        // Whole-word matching & cues:
-        // "Prussian" must NOT match "russia"
-        assert(
-            degrees([story("Prussian blue exhibition attacks critics", "Art Wire")]) == nil,
-            "Prussian must not match whole-word russia")
-        // "Russia" without fighting cue ignored
-        assert(
-            degrees([story("Norway bumped to let Russia compete at world juniors", "Sport")]) == nil,
-            "Russia without fighting cue ignored")
-        // Poland without crisis cue ignored
-        assert(
-            degrees([story("Warsaw hosts international fashion week", "Lifestyle")]) == nil,
-            "Poland without crisis cue ignored")
-
-        // Tension detail sheet names parts and what was counted
-        let evidence = WorldTensionNearYou.evidence(war(5) + home(3), region: poland, endingAt: now, worldScore: 40)!
-        assert(
-            evidence.neighbourReason != nil && evidence.neighbourReason!.contains("5 publishers")
-                && evidence.neighbourReason!.contains("War next door +9°"))
-        assert(
-            evidence.domesticReason != nil && evidence.domesticReason!.contains("3 publishers")
-                && evidence.domesticReason!.contains("Poland at home +2°"))
-        assert(evidence.reasons.count == 2)
-
-        // Shown reading of last 30 days carries it and clamps at 100
-        let reasons = WorldTensionFactor.allCases.map {
-            WorldTensionAssessment.Reason(factor: $0, explanation: "Test reason.")
-        }
-        func reading(_ day: Int, _ score: Int) -> WorldTensionReading {
-            WorldTensionReading(
-                evaluatedAt: now.addingTimeInterval(Double(day) * 86400), inputHash: "near-\(day)",
-                modelGeneration: "generation",
-                headlines: [WorldTensionHeadline(id: "H1", title: "Headline", publisher: "Panel")],
-                assessment: WorldTensionAssessment(score: score, summary: "Test summary.", reasons: reasons))
-        }
-        let history = [reading(-40, 20), reading(-1, 30), reading(0, 95)]
-        let shown = WorldTensionNearYou.apply(to: history, stories: war(8), region: poland, now: now)
-        assert(shown[0].assessment.score == 20, "Readings older than 30 days are unmodified")
-        assert(shown[1].assessment.score == 42, "Recent reading increases by 12 degrees")
-        assert(shown[2].assessment.score == 100, "Score clamps at 100 (95 + 12 -> 100)")
-        assert(shown[2].assessment.nearYou?.worldScore == 95, "World score preserved beside total")
-
-        // WorldTensionCalculator typealias resolves
-        let calc: WorldTensionCalculator.Type = WorldTensionNearYou.self
-        assert(calc.cap == 15)
-    }
+    // MARK: - 5. World Tension Reactive Toggle (#1209). The Near you lens is tested in IntelligenceTests.
 
     @MainActor
     static func testWorldTensionReactiveToggle() {

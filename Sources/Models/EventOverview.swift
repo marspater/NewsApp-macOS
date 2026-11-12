@@ -539,9 +539,10 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// with stored publisher headlines, complete publisher sentences, and empty summaries. 9: Highlights ranked by
     /// word overlap with coverage headlines; fragments under five words excluded. 10: sentences closed by their
     /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
-    /// 11: conditional Industry Impact section (#670). 13: timeline items carry their date kind and come from the
-    /// stated-date builder only (#1241).
-    public static let currentAnalysisVersion = 13
+    /// 11: conditional Industry Impact section (#670). 13: no feed footer or heading Highlights, one first-pass Highlight
+    /// per publisher (#1251). 14: no cut-off feed description tail as a Highlight (#1253). 15: timeline items carry
+    /// their date kind and come from the stated-date builder only (#1241).
+    public static let currentAnalysisVersion = 15
 
     public let id: String
     public let eventID: String

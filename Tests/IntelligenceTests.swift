@@ -57,6 +57,11 @@ extension NewsTests {
             ),
             ("testPromptInjectionDefenses", { try await testPromptInjectionDefenses(fixtureHost: fixtureHost) }),
             ("testPassageAnchoredFactExtraction", { try await testPassageAnchoredFactExtraction() }),
+            ("testCutDescriptionTails", { try await testCutDescriptionTails(fixtureHost: fixtureHost) }),
+            (
+                "testHighlightsSkipFeedBoilerplateAndHeadings",
+                { try testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: fixtureHost) }
+            ),
             (
                 "testOverviewCompositionFromVerifiedFacts",
                 { try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost) }
@@ -364,8 +369,14 @@ extension NewsTests {
         assertEqual(
             degrees(Array(repeating: story("Russian drone attack hits Kharkiv", "One Wire"), count: 5)), 3,
             "One publisher is one step however often it repeats")
+        assertEqual(
+            degrees((0..<5).map { story("Russian missile strike hits Kyiv \($0)", "Single Publisher") }), 3,
+            "Five different headlines from one publisher are still one publisher")
         assertEqual(degrees(war(8, daysAgo: 8)), nil, "A story older than seven days does not count")
         assertEqual(degrees(war(8, daysAgo: -1)), nil, "Nor does one after the reading's end")
+        assertEqual(degrees(war(1, daysAgo: 7)), nil, "A story exactly seven days before the reading is outside it")
+        assertEqual(degrees(war(1, daysAgo: 7 - 1 / 86400)), 3, "A story a second inside the seven days counts")
+        assertEqual(degrees(war(1, daysAgo: 0)), 3, "A story at the reading's end counts")
         assertEqual(
             degrees([story("Norway bumped to let Russia compete at world juniors", "Sport")]), nil,
             "A story that names Russia without fighting adds nothing")
@@ -376,6 +387,15 @@ extension NewsTests {
         assertTrue(
             both?.reasons.count == 2 && both?.reasons.first?.contains("10 publishers") == true,
             "The sheet says what was counted")
+        let parts = WorldTensionNearYou.evidence(war(5) + home(3), region: poland, endingAt: now, worldScore: 40)
+        assertTrue(
+            parts?.neighbourReason?.contains("War next door +9°") == true
+                && parts?.neighbourReason?.contains("5 publishers") == true,
+            "The sheet names the war next door with its degrees and publishers")
+        assertTrue(
+            parts?.domesticReason?.contains("Poland at home +2°") == true
+                && parts?.domesticReason?.contains("3 publishers") == true,
+            "The sheet names the crisis at home with its degrees and publishers")
 
         let reasons = WorldTensionFactor.allCases.map {
             WorldTensionAssessment.Reason(factor: $0, explanation: "A fictional reason for the test.")
@@ -392,6 +412,29 @@ extension NewsTests {
         let shown = WorldTensionNearYou.apply(to: history, stories: war(10), region: poland, now: now)
         assertEqual(shown.map(\.assessment.score), [20, 42, 100], "Recent readings rise; an old one and a clamp stand")
         assertEqual(shown[2].assessment.nearYou?.worldScore, 95, "The world reading stays beside the total")
+        // The 30-day edge: the reading on the 30th day back carries the lens, the one on the day before does not. A
+        // reading's id is its day, so the stories sit an hour before that day: inside both readings' seven days, so only
+        // the 30-day guard keeps the earlier reading as assessed.
+        let earliest = TensionMethodology.day(containing: now).start.addingTimeInterval(
+            -Double(WorldTensionNearYou.shownDays - 1) * 86400)
+        let edgeWar = (0..<3).map {
+            TensionLocalStory(
+                title: "Russian drone attack hits Kharkiv", publisher: "Edge \($0)",
+                date: earliest.addingTimeInterval(-3600))
+        }
+        func edgeReading(_ date: Date) -> WorldTensionReading {
+            WorldTensionReading(
+                evaluatedAt: date, inputHash: "edge-\(date.timeIntervalSince1970)", modelGeneration: "generation",
+                headlines: [WorldTensionHeadline(id: "C1", title: "Headline", publisher: "Panel")],
+                assessment: WorldTensionAssessment(
+                    score: 30, summary: "A fictional summary for the test.", reasons: reasons))
+        }
+        assertEqual(
+            WorldTensionNearYou.apply(
+                to: [edgeReading(earliest.addingTimeInterval(-1)), edgeReading(earliest)], stories: edgeWar,
+                region: poland, now: now
+            ).map(\.assessment.score), [30, 36],
+            "The reading on the 30th day back carries the lens; the one a second earlier stays as assessed")
         assertEqual(
             WorldTensionNearYou.apply(to: history, stories: war(10), region: nil, now: now), history,
             "Without a region nothing changes")
@@ -2984,6 +3027,285 @@ extension NewsTests {
             "Prompt enforces separation of fact extraction before summarizing")
     }
 
+    /// #1251: feed self-attribution never becomes a fact, headings never take a Highlights slot, and the first pass gives
+    /// each publisher (not each article) its best statement, so a material statement is not displaced.
+    /// #1253: the cut-off last sentence of a feed description never takes a Highlights slot; a complete description
+    /// without a final full stop stays, and every other consumer keeps its inputs.
+    static func testCutDescriptionTails(fixtureHost: String = "example.com") async throws {
+        print("  - Testing that a feed description's cut-off last sentence is no Highlight (#1253)...")
+        func article(_ id: String, _ source: String, _ description: String, full: String? = nil) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Homes demolished as the port strike spreads (\(id))",
+                link: "https://\(fixtureHost)/\(id)",
+                guid: id, description: description, pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: source,
+                fullContent: full)
+        }
+        func tail(_ text: String, of article: FeedArticle) -> PassageAnchoredFact {
+            PassageAnchoredFact(statement: text, passageID: "\(article.id)_p0", quote: text, articleID: article.id)
+        }
+        let capped = article("cap", "Gulf Daily", "Officials met on Sunday. Other homes were demolis")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Other homes were demolis", of: capped), of: capped, atFeedCap: true),
+            "A description cut mid-word at its feed's cap ends in a cut tail")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Other homes were demolis", of: capped), of: capped, atFeedCap: false),
+            "Without a cap or a marker a missing full stop alone cuts nothing")
+        let quoted = article(
+            "quote", "Gulf Daily", "The minister spoke to reporters. “There is no plan to withdraw the")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("“There is no plan to withdraw the", of: quoted), of: quoted, atFeedCap: false),
+            "A description cut inside a quotation ends in a cut tail")
+        let marked = article(
+            "marked", "Tech Wire", "Apple shipped the update today. It adds a way to send live video […]")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("It adds a way to send live video […]", of: marked), of: marked, atFeedCap: false),
+            "A description the feed marks as cut ends in a cut tail")
+        let complete = article("complete", "City Times", "The suspect was held without bond, court records showed")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("The suspect was held without bond, court records showed", of: complete), of: complete,
+                atFeedCap: false),
+            "A complete description without a final full stop stays")
+        let inches = article(
+            "inches", "Tech Wire",
+            "Apple shipped it today. Apple introduced a new 13\" tablet with an improved display.")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Apple introduced a new 13\" tablet with an improved display.", of: inches), of: inches,
+                atFeedCap: false),
+            "An inch mark is no open quotation")
+        let named = article(
+            "named", "Tech Wire", "Apple held an event. Apple introduced a new device called \"iPhone 17\".")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Apple introduced a new device called \"iPhone 17\".", of: named), of: named, atFeedCap: false),
+            "A quoted name ending in a number is a closed quotation")
+        let open = article("open", "Tech Wire", "Apple held an event. The chief executive said \"the device ships in 2")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("The chief executive said \"the device ships in 2", of: open), of: open, atFeedCap: false),
+            "A straight quotation left open is still a cut tail")
+        assertTrue(
+            OverviewComposer.inputTextHash(passages: [], eventTitle: "e", cappedDescriptionArticleIDs: ["a"])
+                != OverviewComposer.inputTextHash(passages: [], eventTitle: "e"),
+            "A newly found cap changes the stored overview's inputs, so it is regenerated")
+        let full = article(
+            "full", "Gulf Daily", "Other homes were demolis", full: "Other homes were demolished on the coast road.")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Other homes were demolis", of: full), of: full, atFeedCap: true),
+            "An article with its own stored text is not judged by its description")
+
+        // Only Highlights change: the timeline, the thematic angle and the fact pool read the cut tail as before.
+        let members = [
+            article(
+                "m1", "Gulf Daily",
+                "The port strike spread to the coast on 3 November. Homes were demolished as the port strike spread on 4 November"
+            ),
+            article("m2", "City Times", "Dock workers joined the port strike on 2 November as homes were demolished."),
+        ]
+        let passages = members.map {
+            EvidencePassage(id: "\($0.id)_p0", articleID: $0.id, text: $0.description, ordinal: 0)
+        }
+        let facts = PassageFactExtractor.deterministicExtract(passages: passages)
+        let plain = OverviewComposer.composeOverview(
+            eventID: "e-1253", eventTitle: "Port strike", verifiedFacts: facts, passages: passages, articles: members)
+        let cut = OverviewComposer.composeOverview(
+            eventID: "e-1253", eventTitle: "Port strike", verifiedFacts: facts, passages: passages, articles: members,
+            cappedDescriptionArticleIDs: ["m1"])
+        let tailText = "Homes were demolished as the port strike spread on 4 November"
+        assertTrue(
+            plain.facts.contains { $0.text.contains(tailText) }, "Control: the tail is a Highlight without a cap")
+        assertFalse(cut.facts.contains { $0.text.contains(tailText) }, "The tail at its feed's cap is no Highlight")
+        assertEqual(cut.timeline, plain.timeline, "The timeline keeps its inputs")
+        assertEqual(cut.thematicAngle?.title, plain.thematicAngle?.title, "The thematic angle keeps its inputs")
+
+        // The library knows a feed's fixed cap: its longest description length, shared by at least five descriptions.
+        let database = DatabaseEngine(path: ":memory:")
+        try await database.open()
+        let capText = String(repeating: "a", count: 40)
+        let stored =
+            (0..<5).map { article("cap-\($0)", "Gulf Daily", capText) } + [article("short", "Gulf Daily", "Short one.")]
+            + (0..<4).map { article("other-\($0)", "City Times", capText) }
+        _ = try await database.upsertArticles(stored)
+        let flagged = try await database.cappedDescriptionArticleIDs(stored.map(\.id))
+        assertEqual(
+            flagged, Set((0..<5).map { "cap-\($0)" }), "Only a feed whose longest length is shared five times has a cap"
+        )
+        await database.close()
+    }
+
+    static func testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: String = "example.com") throws {
+        print("  - Testing Highlights without feed boilerplate or headings, one first pick per publisher (#1251)...")
+        // Boilerplate: the self-referential forms go, whatever the site; crediting another outlet's report stays.
+        assertTrue(
+            OverviewComposer.isSelfAttribution(
+                "This article, \" iOS 27.3 Beta 2 Is Out: What's New in v27.3.1 \" first appeared on Example.com."),
+            "The article form with periods in its title is self-attribution")
+        assertTrue(
+            OverviewComposer.isSelfAttribution(
+                "The post Port strike enters day three appeared first on Harbour Daily."),
+            "The post form is self-attribution")
+        assertTrue(
+            OverviewComposer.isSelfAttribution(
+                "The post The Case for a Bubble at Life’s Start first appeared on Quanta Magazine"),
+            "The post form with first appeared and no final period is self-attribution")
+        assertFalse(
+            OverviewComposer.isSelfAttribution("The leak was first published by The Information on Monday."),
+            "Crediting another outlet's report is a fact")
+        assertFalse(
+            OverviewComposer.isSelfAttribution("The report first appeared in Le Monde, which cited two ministers."),
+            "Another report's first appearance is a fact")
+        for sentence in [
+            "The Post reported that the video first appeared on Telegram on Tuesday.",
+            "The story first appeared on X before the ministry confirmed it.",
+            "The article was published on 3 November in Nature.",
+            "This story was first published on Monday by the regional broadcaster.",
+            "The Post reported that the video appeared first on Telegram.",
+            "The post was published on Tuesday and drew criticism from opposition leaders.",
+            "This post was originally published on Harbour Daily but officials denied the claim.",
+        ] {
+            assertFalse(
+                OverviewComposer.isSelfAttribution(sentence), "A report about a publication is a fact: \(sentence)")
+        }
+        assertTrue(
+            OverviewComposer.isSelfAttribution("This post was originally published on Harbour Daily"),
+            "The originally-published footer without a final period is self-attribution")
+        let feed = EvidencePassage(
+            id: "feed-p", articleID: "feed-a",
+            text: "Apple released the second beta to developers today. "
+                + "This article, \"iOS 27.3 Beta 2 Now Available\" first appeared on Example.com. "
+                + "The leak was first published by The Information on Monday.",
+            ordinal: 0)
+        let feedFacts = PassageFactExtractor.deterministicExtract(passages: [feed]).map(\.statement)
+        assertTrue(feedFacts.contains { $0.contains("first appeared on") }, "The fact pool keeps the footer")
+        assertTrue(feedFacts.contains { $0.contains("first published by") }, "Another outlet's credit is extracted")
+
+        // Headings: a verbless label without a full stop goes; a verbless sentence with one and a feed line with a verb
+        // but no final period stay.
+        assertTrue(OverviewComposer.isHeading("iPad mini (eighth generation, 2026)"), "A product label is a heading")
+        assertTrue(OverviewComposer.isHeading("Related Roundups: iOS 27, iPadOS 27"), "A roundup label is a heading")
+        assertFalse(
+            OverviewComposer.isHeading("Three people dead and dozens injured in the overnight blast."),
+            "A verbless sentence with a full stop is a statement")
+        assertFalse(
+            OverviewComposer.isHeading("The minister announced new sanctions against the shipping firms on Tuesday"),
+            "A feed description with a verb and no final period is a statement")
+        assertFalse(
+            OverviewComposer.isHeading("Three people dead and dozens injured in overnight blast near the port"),
+            "A sentence-case headline line without a verb or full stop is a statement")
+        assertTrue(
+            OverviewComposer.isHeading("Pre-order 14-inch MacBook Pro with PROLED XDR Display"),
+            "A title-case call to action is a heading")
+
+        // First pass per publisher: two articles of one publisher and a second publisher.
+        func article(_ id: String, _ source: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Port strike shuts container terminals", link: "https://\(fixtureHost)/\(id)",
+                guid: id, description: "", pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: source)
+        }
+        let articles = [article("d1", "Harbour Daily"), article("d2", "Harbour Daily"), article("w1", "Coast Wire")]
+        func fact(_ statement: String, _ articleID: String) -> PassageAnchoredFact {
+            PassageAnchoredFact(
+                statement: statement, passageID: "p-\(statement.prefix(8))", quote: statement, articleID: articleID)
+        }
+        let pool = [
+            fact("The port strike shuts every container terminal on the coast.", "d1"),
+            fact("The port strike entered its third day with container ships waiting.", "d1"),
+            fact("Union leaders said the port strike would continue through the weekend.", "d1"),
+            fact("Negotiators for the port authority met union leaders on Thursday evening.", "d1"),
+            fact("Here is everything you need to know about the port situation now.", "d2"),
+            fact("Shipping lines diverted vessels to other harbours across the region.", "w1"),
+        ]
+        let chosen = OverviewComposer.highlights(from: pool, articles: articles).map(\.articleID)
+        assertTrue(chosen.contains("w1"), "The second publisher's best statement gets in")
+        assertFalse(chosen.contains("d2"), "A second article of the same publisher is not a second source")
+        assertEqual(chosen.filter { $0 == "d1" }.count, 4, "The first publisher's next-best statements get in first")
+
+        // A material statement displaced by boilerplate and a teaser surfaces, and every Highlight cites verbatim text.
+        let members = [article("m1", "Example Rumors"), article("m2", "Example Rumors"), article("n1", "Nine Daily")]
+        let passages = [
+            EvidencePassage(
+                id: "m1-p", articleID: "m1",
+                text: "Apple today announced that the first port strike beta will be released next week. "
+                    + "Apple said the beta will be released on Wednesday, November 4, in every region. "
+                    + "This article, \"Port Strike Beta Coming Next Week\" first appeared on Example Rumors.",
+                ordinal: 0),
+            EvidencePassage(
+                id: "m2-p", articleID: "m2",
+                text: "But work on the strike beta is already well underway, here is when to expect the next update. "
+                    + "This article, \"Port Strike Features in v2.1\" first appeared on Example Rumors.",
+                ordinal: 1),
+            EvidencePassage(
+                id: "n1-p", articleID: "n1",
+                text:
+                    "Apple took the unusual step of confirming when its next beta will arrive at container terminals.",
+                ordinal: 2),
+        ]
+        let document = OverviewComposer.composeOverview(
+            eventID: "e-1251", eventTitle: "Port strike",
+            verifiedFacts: PassageFactExtractor.deterministicExtract(passages: passages),
+            passages: passages, articles: members)
+        assertTrue(
+            document.facts.contains { $0.text.contains("Wednesday, November 4") },
+            "The material statement is a Highlight")
+        assertFalse(document.facts.contains { $0.text.contains("first appeared") }, "No boilerplate Highlight")
+
+        // Only Highlights change: the timeline and the thematic angle read the whole fact pool, footers and headings
+        // included, and perspectives differ from their extraction only by the Highlights dedupe.
+        let factPool = PassageFactExtractor.deterministicExtract(passages: passages)
+        assertTrue(factPool.contains { OverviewComposer.isSelfAttribution($0.statement) }, "The pool holds the footers")
+        let valid = factPool.filter { OverviewComposer.validateFactForOverview($0, against: passages).isValid }
+        assertEqual(
+            document.timeline,
+            OverviewTimelineBuilder.build(facts: valid, passages: passages, articles: members).items,
+            "The timeline is built from the unchanged fact pool")
+        var citations: [String: OverviewCitation] = [:]
+        for passage in passages {
+            citations["cite_\(passage.id)"] = OverviewCitation(
+                id: "cite_\(passage.id)", articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: passage.text)
+        }
+        // The angle reuses Highlight citation ids where it can, so only its content is compared.
+        let angle = OverviewThematicAngleExtractor.extractThematicAngle(
+            facts: valid, passages: passages, existingCitations: citations)
+        assertEqual(document.thematicAngle?.title, angle?.title, "The thematic angle reads the same pool")
+        assertEqual(document.thematicAngle?.summary, angle?.summary, "The thematic angle's summary is unchanged")
+        let extracted = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: passages, articles: members, existingCitations: citations)
+        let picked = OverviewComposer.highlights(from: valid, articles: members)
+        assertEqual(
+            document.perspectives.map(\.position),
+            OverviewComposer.deduplicatePerspectives(extracted, against: picked.map(\.statement) + picked.map(\.quote))
+                .map(\.position),
+            "Perspectives differ from their extraction only by the Highlights dedupe")
+
+        // Overviews stored under analysis version 12 are regenerated with these Highlights.
+        let stored = EventOverviewDocument(
+            id: document.id, eventID: document.eventID,
+            version: OverviewVersionContext(
+                membershipVersion: document.membershipVersion, inputTextHash: document.inputTextHash,
+                analysisVersion: 12),
+            content: document.content, provenance: document.provenance)
+        assertTrue(
+            stored.isStale(currentMembershipVersion: document.membershipVersion),
+            "A version-12 overview is stale under version \(EventOverviewDocument.currentAnalysisVersion)")
+        let byID = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0) })
+        for highlight in document.facts {
+            for id in highlight.citationIDs {
+                guard let citation = document.citations[id], let passage = byID[citation.passageID] else {
+                    return assertTrue(false, "Highlight citation \(id) resolves to a passage")
+                }
+                assertTrue(passage.text.contains(citation.quote), "The cited quote is verbatim in its passage")
+                assertEqual(citation.articleID, passage.articleID, "The citation names its passage's article")
+            }
+        }
+    }
+
     static func testOverviewCompositionFromVerifiedFacts(fixtureHost: String = "example.com") async throws {
         print("  - Testing Overview composition from verified facts, intro paragraphs and quote invariants...")
 
@@ -4824,7 +5146,7 @@ extension NewsTests {
         }
         sections["timeline"] = legacyItems
         json["evidenceSections"] = sections
-        json["analysisVersion"] = 12
+        json["analysisVersion"] = 14
         let stored = try JSONDecoder().decode(
             EventOverviewDocument.self, from: JSONSerialization.data(withJSONObject: json))
         assertEqual(stored.timeline.map(\.dateText), composed.timeline.map(\.dateText), "Legacy timeline decodes")
@@ -4833,7 +5155,7 @@ extension NewsTests {
             stored.timeline.contains { label($0).contains("Reported") }, "A legacy stated date does not read Reported")
         assertTrue(
             stored.isStale(currentMembershipVersion: 3),
-            "A document from analysis version 12 is stale and is regenerated with date kinds")
+            "A document from analysis version 14, the one before date kinds, is stale and is regenerated")
     }
 
     static func testEventOverviewReaderMode(fixtureHost: String) async throws {

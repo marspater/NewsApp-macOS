@@ -63,3 +63,75 @@ options:
     - test-atom: Tests/NetworkingTests.swift
       include:
         - Tests/NetworkingTests.swift
+    - test-atom: Tests/AnalysisGenerationTests.swift
+      include:
+        - Tests/AnalysisGenerationTests.swift
+    - test-atom: Tests/BriefingE2ETests.swift
+      include:
+        - Tests/BriefingE2ETests.swift
+    - test-atom: Tests/BriefingImpactTests.swift
+      include:
+        - Tests/BriefingImpactTests.swift
+    - test-atom: Tests/BriefingIntelligenceTests.swift
+      include:
+        - Tests/BriefingIntelligenceTests.swift
+    - test-atom: Tests/BriefingSignalsTests.swift
+      include:
+        - Tests/BriefingSignalsTests.swift
+    - test-atom: Tests/BriefingWarRoomTests.swift
+      include:
+        - Tests/BriefingWarRoomTests.swift
+    - test-atom: Tests/DNSAnswerCacheTests.swift
+      include:
+        - Tests/DNSAnswerCacheTests.swift
+    - test-atom: Tests/EditorialIntelligenceTests.swift
+      include:
+        - Tests/EditorialIntelligenceTests.swift
+    - test-atom: Tests/EditorialMomentumTests.swift
+      include:
+        - Tests/EditorialMomentumTests.swift
+    - test-atom: Tests/EditorialNoveltyTests.swift
+      include:
+        - Tests/EditorialNoveltyTests.swift
+    - test-atom: Tests/EditorialPersonalizationTests.swift
+      include:
+        - Tests/EditorialPersonalizationTests.swift
+    - test-atom: Tests/EditorialRankingTests.swift
+      include:
+        - Tests/EditorialRankingTests.swift
+    - test-atom: Tests/EditorialWireIdentityTests.swift
+      include:
+        - Tests/EditorialWireIdentityTests.swift
+    - test-atom: Tests/EventOverviewAccessibilityTests.swift
+      include:
+        - Tests/EventOverviewAccessibilityTests.swift
+    - test-atom: Tests/FeedHealthMetricsTests.swift
+      include:
+        - Tests/FeedHealthMetricsTests.swift
+    - test-atom: Tests/FeedKitSwiftSoupTests.swift
+      include:
+        - Tests/FeedKitSwiftSoupTests.swift
+    - test-atom: Tests/GatewayTimingsTests.swift
+      include:
+        - Tests/GatewayTimingsTests.swift
+    - test-atom: Tests/KnowledgeEPUBTests.swift
+      include:
+        - Tests/KnowledgeEPUBTests.swift
+    - test-atom: Tests/KnowledgeExportTests.swift
+      include:
+        - Tests/KnowledgeExportTests.swift
+    - test-atom: Tests/NetworkTimelineTests.swift
+      include:
+        - Tests/NetworkTimelineTests.swift
+    - test-atom: Tests/NotificationAttachmentTests.swift
+      include:
+        - Tests/NotificationAttachmentTests.swift
+    - test-atom: Tests/ReaderAccessibilityTests.swift
+      include:
+        - Tests/ReaderAccessibilityTests.swift
+    - test-atom: Tests/TensionCalibrationTests.swift
+      include:
+        - Tests/TensionCalibrationTests.swift
+    - test-atom: Tests/TodayLaneAssignmentTests.swift
+      include:
+        - Tests/TodayLaneAssignmentTests.swift
