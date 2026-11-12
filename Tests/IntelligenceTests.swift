@@ -87,8 +87,8 @@ extension NewsTests {
             ),
             ("testOverviewTimeline", { try await testOverviewTimeline(fixtureHost: fixtureHost) }),
             (
-                "testEventTimelineWithSourcedItems",
-                { try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost) }
+                "testOverviewTimelineDateProvenance",
+                { try testOverviewTimelineDateProvenance(fixtureHost: fixtureHost) }
             ),
             (
                 "testAttributedPerspectivesOfParticipantsAndPublishers",
@@ -4539,6 +4539,120 @@ extension NewsTests {
         assertTrue(undatedOverview.timeline.isEmpty, "Without dated publisher sentences the timeline is absent")
     }
 
+    /// #1241: a date the source states is shown as an event date, never as "Reported"; only a publication date is.
+    static func testOverviewTimelineDateProvenance(fixtureHost: String) throws {
+        print("  - Testing timeline date provenance: stated dates are not shown as Reported (#1241)...")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let published = calendar.date(from: DateComponents(year: 2026, month: 11, day: 5, hour: 12))!
+        let article = FeedArticle(
+            storedID: "prov-a", title: "Ceasefire report", link: "https://\(fixtureHost)/prov-a", guid: "prov-a",
+            description: "", pubDate: published, source: "Wire")
+        let sentences = [
+            "The programme began in March 2019 after earlier floods.",
+            "On 15 September 2026, the ministry announced the plan.",
+            "The ceasefire took effect on 3 November.",
+            "The storm hit the coast on Monday, flooding 300 homes.",
+            "Parliament is scheduled to vote on the plan on 20 November.",
+        ]
+        let passages = sentences.enumerated().map {
+            EvidencePassage(id: "prov-p\($0.offset)", articleID: article.id, text: $0.element, ordinal: $0.offset)
+        }
+        let facts = passages.map {
+            PassageAnchoredFact(
+                id: "f-\($0.id)", statement: $0.text, passageID: $0.id, quote: $0.text, articleID: article.id)
+        }
+        let english = Locale(identifier: "en_US")
+        let items = OverviewTimelineBuilder.build(
+            facts: facts, passages: passages, articles: [article], locale: english
+        ).items
+        func label(_ item: OverviewTimelineItem) -> String {
+            EventOverviewReaderView.timelineItemAccessibilityLabel(item: item)
+        }
+        assertEqual(
+            items.map(\.summary), [sentences[0], sentences[1], sentences[2], sentences[4]],
+            "Stated dates make items; a weekday is not a stated date")
+        guard items.count == 4 else { return }
+        for item in items {
+            let display = EventOverviewReaderView.timelineDateDisplay(for: item)
+            assertEqual(item.dateKind, .stated, "Builder items carry a stated date: \(item.summary)")
+            assertTrue(
+                item.eventDate == nil && item.publicationDate == nil,
+                "No resolved timestamp, so no placed year, reaches the item: \(item.summary)")
+            assertEqual(display.primary, item.dateText, "The stated date is shown as stated: \(item.summary)")
+            assertTrue(display.isStated, "A stated date draws the solid marker: \(item.summary)")
+            assertFalse(label(item).contains("Reported"), "A stated date is never read as Reported: \(label(item))")
+        }
+        let (month, full, partial, plan) = (items[0], items[1], items[2], items[3])
+        assertTrue(
+            full.dateText.contains("15") && full.dateText.contains("2026"),
+            "Full date keeps day and year: \(full.dateText)")
+        assertTrue(
+            month.dateText.contains("2019") && month.dateText.contains("Mar"),
+            "Month and year stay month and year: \(month.dateText)")
+        assertTrue(
+            partial.dateText.contains("3") && !partial.dateText.contains("2026"),
+            "A missing year stays missing: \(partial.dateText)")
+        assertEqual(
+            label(partial), "\(partial.dateText). The ceasefire took effect on 3 November", "Partial date label")
+        assertTrue(plan.isFuturePlan, "A date after publication stays a plan")
+        assertEqual(
+            label(plan), "\(plan.dateText). Planned. Parliament is scheduled to vote on the plan on 20 November",
+            "A plan keeps its stated date and Planned")
+
+        // No known date: no date line and nothing Reported.
+        let undated = OverviewTimelineItem(id: "none", dateText: "", summary: "Talks continued.")
+        assertEqual(EventOverviewReaderView.timelineDateDisplay(for: undated).primary, nil, "No date shows none")
+        assertEqual(label(undated), "Talks continued", "No date reads no date")
+
+        // A publication date is the only date that reads Reported.
+        let reportedText = published.formatted(date: .abbreviated, time: .omitted)
+        let publicationOnly = OverviewTimelineItem(
+            id: "pub", dateText: "", summary: "Report filed.", publicationDate: published)
+        assertEqual(
+            EventOverviewReaderView.timelineDateDisplay(for: publicationOnly).primary, "Reported \(reportedText)",
+            "Publication date without a stated date reads Reported")
+        assertFalse(
+            EventOverviewReaderView.timelineDateDisplay(for: publicationOnly).isStated,
+            "A publication date draws the outlined marker")
+        let publicationText = OverviewTimelineItem(
+            id: "pub-text", dateText: "5 Nov", dateKind: .publication, summary: "Report filed.")
+        assertEqual(label(publicationText), "Reported 5 Nov. Report filed", "Publication date text reads Reported")
+        let both = OverviewTimelineItem(
+            id: "both", dateText: "3 Nov", summary: "Ceasefire began.", publicationDate: published)
+        assertEqual(
+            EventOverviewReaderView.timelineDateDisplay(for: both),
+            .init(primary: "3 Nov", reported: "Reported \(reportedText)", isStated: true),
+            "A stated date stays primary; the publication date is the separate Reported line")
+
+        // A stored overview from before #1241 has no date kind: it decodes, reads its stated date without
+        // Reported, and is stale, so it is regenerated under the current analysis version.
+        let composed = OverviewComposer.composeOverview(
+            eventID: "prov-event", eventTitle: "Ceasefire", verifiedFacts: facts, passages: passages,
+            articles: [article], membershipVersion: 3)
+        assertEqual(composed.timeline.count, 4, "Control: the composed overview carries the builder timeline")
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(composed)) as! [String: Any]
+        var sections = json["evidenceSections"] as! [String: Any]
+        let legacyItems = (sections["timeline"] as! [[String: Any]]).map { item -> [String: Any] in
+            assertEqual(item["dateKind"] as? String, "stated", "Current documents store the date kind")
+            var legacy = item
+            legacy.removeValue(forKey: "dateKind")
+            return legacy
+        }
+        sections["timeline"] = legacyItems
+        json["evidenceSections"] = sections
+        json["analysisVersion"] = 12
+        let stored = try JSONDecoder().decode(
+            EventOverviewDocument.self, from: JSONSerialization.data(withJSONObject: json))
+        assertEqual(stored.timeline.map(\.dateText), composed.timeline.map(\.dateText), "Legacy timeline decodes")
+        assertTrue(stored.timeline.allSatisfy { $0.dateKind == .stated }, "A legacy date text is a stated date")
+        assertFalse(
+            stored.timeline.contains { label($0).contains("Reported") }, "A legacy stated date does not read Reported")
+        assertTrue(
+            stored.isStale(currentMembershipVersion: 3),
+            "A document from analysis version 12 is stale and is regenerated with date kinds")
+    }
+
     static func testEventOverviewReaderMode(fixtureHost: String) async throws {
         print(
             "  - Testing Event overview reader mode, layout order, absent sections, fact link passage navigation and mode switching..."
@@ -4869,178 +4983,6 @@ extension NewsTests {
             resolvedUpdated?.membershipVersion, 2, "Newly added member article 3 resolves to version 2 overview")
 
         await db.close()
-    }
-
-    static func testEventTimelineWithSourcedItems(fixtureHost: String = "example.com") async throws {
-        print("  - Testing Event timeline with sourced items (#143)...")
-
-        let pubDate1 = Date(timeIntervalSince1970: 1_792_051_200)  // 15 October 2026 08:00 UTC
-        let pubDate2 = Date(timeIntervalSince1970: 1_792_137_600)  // 16 October 2026 08:00 UTC
-
-        let passage1 = EvidencePassage(
-            id: "pass_quake_1",
-            articleID: "art_seismic_1",
-            text: "Seismic sensors detected a magnitude 5.2 earthquake at 06:14 UTC along the subduction zone.",
-            ordinal: 1
-        )
-        let passage2 = EvidencePassage(
-            id: "pass_quake_2",
-            articleID: "art_seismic_2",
-            text: "On 15 October 2026, civil protection teams established three emergency shelters in coastal towns.",
-            ordinal: 2
-        )
-        let passage3 = EvidencePassage(
-            id: "pass_quake_3",
-            articleID: "art_seismic_1",
-            text:
-                "Emergency officials reported zero casualties and stated that structural damage assessments remain underway.",
-            ordinal: 3
-        )
-        let passageFuturePlan = EvidencePassage(
-            id: "pass_plan_4",
-            articleID: "art_seismic_2",
-            text:
-                "Infrastructure ministry announced that regional seismic retrofitting is scheduled to begin in the second quarter of 2027.",
-            ordinal: 4
-        )
-
-        let article1 = FeedArticle(
-            storedID: "art_seismic_1",
-            title: "Magnitude 5.2 Earthquake Detected",
-            link: "https://\(fixtureHost)/seismic-1",
-            guid: "guid-s1",
-            description: passage1.text,
-            pubDate: pubDate1,
-            source: "Geological Service",
-            fullContent: "\(passage1.text) \(passage3.text)"
-        )
-        let article2 = FeedArticle(
-            storedID: "art_seismic_2",
-            title: "Emergency Shelters Deployed",
-            link: "https://\(fixtureHost)/seismic-2",
-            guid: "guid-s2",
-            description: passage2.text,
-            pubDate: pubDate2,
-            source: "Civil Protection",
-            fullContent: "\(passage2.text) \(passageFuturePlan.text)"
-        )
-
-        let citations: [String: OverviewCitation] = [
-            "c_1": OverviewCitation(
-                id: "c_1", articleID: "art_seismic_1", passageID: "pass_quake_1",
-                passageFingerprint: passage1.fingerprint, quote: "at 06:14 UTC along the subduction zone"),
-            "c_2": OverviewCitation(
-                id: "c_2", articleID: "art_seismic_2", passageID: "pass_quake_2",
-                passageFingerprint: passage2.fingerprint, quote: "On 15 October 2026, civil protection teams"),
-            "c_3": OverviewCitation(
-                id: "c_3", articleID: "art_seismic_1", passageID: "pass_quake_3",
-                passageFingerprint: passage3.fingerprint, quote: "structural damage assessments remain underway"),
-            "c_4": OverviewCitation(
-                id: "c_4", articleID: "art_seismic_2", passageID: "pass_plan_4",
-                passageFingerprint: passageFuturePlan.fingerprint,
-                quote: "scheduled to begin in the second quarter of 2027"),
-        ]
-
-        // 1. Extraction: extractTimeline correctly identifies temporal items and sources
-        let timelineItems = OverviewTimelineExtractor.extractTimeline(
-            passages: [passage1, passage2, passageFuturePlan],
-            articles: [article1, article2],
-            existingCitations: citations
-        )
-        assertTrue(timelineItems.count >= 2, "Timeline extractor produces at least two chronological items")
-
-        // 2. Rule 1: Event date kept separate from publication date
-        for item in timelineItems {
-            assertTrue(!item.citationIDs.isEmpty, "Rule 4: Every timeline item has at least one source citation")
-            if item.eventDate != nil, let pubDate = item.publicationDate {
-                assertEqual(pubDate, item.publicationDate, "Publication date preserved independently")
-            }
-        }
-
-        // 3. Rule 2: An unknown date stays unknown
-        let itemWithoutDate = OverviewTimelineItem(
-            id: "tl_nodate",
-            dateText: "Date unspecified",
-            summary: "Damage assessments remain underway.",
-            citationIDs: ["c_3"],
-            isFuturePlan: false,
-            eventDate: nil,
-            publicationDate: pubDate1
-        )
-        let validationNoDate = OverviewTimelineValidator.validateItem(itemWithoutDate, against: citations)
-        assertTrue(validationNoDate.isValid, "Item with unknown event date is valid when eventDate is nil")
-        assertEqual(
-            itemWithoutDate.eventDate, nil, "Unknown event date is strictly nil, never defaulted to publication date")
-
-        // Validator rejects synthesized timestamp for unknown date
-        let invalidSynthesizedDate = OverviewTimelineItem(
-            id: "tl_invalid",
-            dateText: "Date unspecified",
-            summary: "Damage assessments remain underway.",
-            citationIDs: ["c_3"],
-            isFuturePlan: false,
-            eventDate: pubDate1,
-            publicationDate: pubDate1
-        )
-        let validationSynthesized = OverviewTimelineValidator.validateItem(invalidSynthesizedDate, against: citations)
-        assertFalse(validationSynthesized.isValid, "Fabricated event timestamp for unspecified date rejected")
-
-        // 4. Rule 3: Future plans are labeled as plans
-        let futurePlanItem = timelineItems.first(where: { $0.isFuturePlan })
-        assertTrue(futurePlanItem != nil, "Future plan detected from plan markers in text")
-        assertTrue(futurePlanItem!.isFuturePlan, "Future plan is explicitly labeled as plan (isFuturePlan == true)")
-        assertTrue(
-            futurePlanItem!.dateText.lowercased().contains("quarter")
-                || futurePlanItem!.dateText.lowercased().contains("scheduled"),
-            "Future plan date text preserves plan anchor")
-
-        // Validator rejects future plan marked as normal past event
-        let unlabelledPlan = OverviewTimelineItem(
-            id: "tl_unlabelled",
-            dateText: "Second Quarter 2027",
-            summary: "Retrofitting is scheduled to begin in the second quarter of 2027.",
-            citationIDs: ["c_4"],
-            isFuturePlan: false,
-            eventDate: Date(timeIntervalSince1970: 1_814_400_000),
-            publicationDate: pubDate2
-        )
-        let validationUnlabelled = OverviewTimelineValidator.validateItem(unlabelledPlan, against: citations)
-        assertFalse(validationUnlabelled.isValid, "Future plan without isFuturePlan=true is rejected")
-
-        // 5. Rule 4: Every item has a source citation
-        let sourcelessItem = OverviewTimelineItem(
-            id: "tl_no_source",
-            dateText: "15 October 2026",
-            summary: "Shelters deployed.",
-            citationIDs: [],
-            isFuturePlan: false
-        )
-        let validationSourceless = OverviewTimelineValidator.validateItem(sourcelessItem, against: citations)
-        assertFalse(validationSourceless.isValid, "Item without source citations rejected")
-
-        let nonExistentCitationItem = OverviewTimelineItem(
-            id: "tl_bad_source",
-            dateText: "15 October 2026",
-            summary: "Shelters deployed.",
-            citationIDs: ["c_nonexistent_99"],
-            isFuturePlan: false
-        )
-        let validationBadSource = OverviewTimelineValidator.validateItem(nonExistentCitationItem, against: citations)
-        assertFalse(validationBadSource.isValid, "Item with non-existent citation ID rejected")
-
-        // 6. Rule of Absent Sections: Fewer than 2 items results in empty timeline
-        let singleItemTimeline = OverviewTimelineExtractor.extractTimeline(
-            passages: [passage1],
-            articles: [article1],
-            existingCitations: ["c_1": citations["c_1"]!]
-        )
-        assertTrue(singleItemTimeline.isEmpty, "Timeline section is absent when fewer than two valid items exist")
-
-        // 7. Chronological Ordering: Past events precede future plans
-        if timelineItems.count >= 2 {
-            let lastItem = timelineItems.last!
-            assertTrue(lastItem.isFuturePlan, "Future plans are positioned at the end of the timeline")
-        }
     }
 
     /// #993: the sources of a highlight or perspective follow its sentence as linked runs inside one text.

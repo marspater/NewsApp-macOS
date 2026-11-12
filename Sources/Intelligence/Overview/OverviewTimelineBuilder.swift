@@ -24,6 +24,9 @@ import Foundation
 /// precision it states: a missing year stays missing. Publication dates are never shown as event
 /// dates; they only order a date whose year is missing and tell whether an item was still a plan
 /// when it was reported. Sentences from articles without a known publication date are left out.
+///
+/// This builder is the only source of an overview's timeline (#1241). Items carry `dateKind == .stated` and no
+/// `eventDate`: a resolved date may hold a placed year, so it orders items here and never reaches the reader.
 enum OverviewTimelineBuilder {
     struct Timeline: Sendable, Equatable {
         var items: [OverviewTimelineItem] = []
@@ -174,6 +177,7 @@ enum OverviewTimelineBuilder {
                 OverviewTimelineItem(
                     id: "timeline_\(index + 1)",
                     dateText: dateText(entry.date, locale: locale),
+                    dateKind: .stated,
                     summary: entry.quote,
                     citationIDs: citationIDs,
                     isFuturePlan: entry.isPlan

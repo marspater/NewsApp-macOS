@@ -163,9 +163,22 @@ public enum ReaderExperienceMode: String, CaseIterable, Sendable, Identifiable {
 }
 
 /// An entry in an event overview's chronological timeline.
+///
+/// `dateKind` says what `dateText` is, so the reader never infers it from which `Date` happens to be set (#1241).
+/// `eventDate` and `publicationDate` are optional full timestamps for ordering; a partial stated date (no year)
+/// stays text only and never gets an invented year.
 public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
+    /// Where `dateText` comes from.
+    public enum DateKind: String, Codable, Hashable, Sendable {
+        /// A date the source text states for the event, at the precision it states.
+        case stated
+        /// The date an article was published; the only date shown as "Reported".
+        case publication
+    }
+
     public let id: String
     public let dateText: String
+    public let dateKind: DateKind
     public let summary: String
     public let citationIDs: [String]
     public let isFuturePlan: Bool
@@ -175,6 +188,7 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     public init(
         id: String = UUID().uuidString,
         dateText: String,
+        dateKind: DateKind = .stated,
         summary: String,
         citationIDs: [String] = [],
         isFuturePlan: Bool = false,
@@ -183,11 +197,30 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     ) {
         self.id = id
         self.dateText = dateText
+        self.dateKind = dateKind
         self.summary = summary
         self.citationIDs = citationIDs
         self.isFuturePlan = isFuturePlan
         self.eventDate = eventDate
         self.publicationDate = publicationDate
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, dateText, dateKind, summary, citationIDs, isFuturePlan, eventDate, publicationDate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        dateText = try container.decode(String.self, forKey: .dateText)
+        // Items stored before #1241 have no kind. Every producer of those wrote text taken from the source
+        // sentence into `dateText` (the builder's stated date, the former extractor's anchor), so it is stated.
+        dateKind = try container.decodeIfPresent(DateKind.self, forKey: .dateKind) ?? .stated
+        summary = try container.decode(String.self, forKey: .summary)
+        citationIDs = try container.decode([String].self, forKey: .citationIDs)
+        isFuturePlan = try container.decode(Bool.self, forKey: .isFuturePlan)
+        eventDate = try container.decodeIfPresent(Date.self, forKey: .eventDate)
+        publicationDate = try container.decodeIfPresent(Date.self, forKey: .publicationDate)
     }
 }
 
@@ -426,8 +459,9 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// with stored publisher headlines, complete publisher sentences, and empty summaries. 9: Highlights ranked by
     /// word overlap with coverage headlines; fragments under five words excluded. 10: sentences closed by their
     /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
-    /// 11: conditional Industry Impact section (#670).
-    public static let currentAnalysisVersion = 12
+    /// 11: conditional Industry Impact section (#670). 13: timeline items carry their date kind and come from the
+    /// stated-date builder only (#1241).
+    public static let currentAnalysisVersion = 13
 
     public let id: String
     public let eventID: String

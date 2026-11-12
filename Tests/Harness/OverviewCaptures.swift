@@ -198,8 +198,9 @@ struct OverviewCaptures {
         return failures
     }
 
-    /// One overview with every Epic T section: highlights (one from an unknown publisher), a timeline with a dated, a
-    /// publication-only and a planned item, two perspectives and one Industry Impact entry.
+    /// One overview with every Epic T section: highlights (one from an unknown publisher), a timeline shaped like the
+    /// builder's (stated dates, one without a year, and a planned item; no timestamps, #1241), two perspectives and
+    /// one Industry Impact entry.
     static func fixture() -> (EventOverviewDocument, [FeedArticle]) {
         let published = Date(timeIntervalSince1970: 1_793_088_000)
         let members = [
@@ -231,14 +232,13 @@ struct OverviewCaptures {
         let sections = OverviewEvidenceSections(
             timeline: [
                 OverviewTimelineItem(
-                    id: "t1", dateText: "Oct 1", summary: "The previous contract expired.", citationIDs: ["c2"],
-                    eventDate: published.addingTimeInterval(-26 * 86_400)),
+                    id: "t1", dateText: "Oct 1, 2026", summary: "The previous contract expired.", citationIDs: ["c2"]),
                 OverviewTimelineItem(
-                    id: "t2", dateText: "", summary: "Dockworkers walked off the job at 14 ports.",
-                    citationIDs: ["c1"], publicationDate: published),
+                    id: "t2", dateText: "Oct 27", summary: "Dockworkers walked off the job at 14 ports.",
+                    citationIDs: ["c1"]),
                 OverviewTimelineItem(
-                    id: "t3", dateText: "Next week", summary: "Mediated talks are scheduled to resume.",
-                    citationIDs: ["c2"], isFuturePlan: true, eventDate: published.addingTimeInterval(7 * 86_400)),
+                    id: "t3", dateText: "Nov 3", summary: "Mediated talks are scheduled to resume.",
+                    citationIDs: ["c2"], isFuturePlan: true),
             ],
             perspectives: [
                 OverviewPerspective(

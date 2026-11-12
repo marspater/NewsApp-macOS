@@ -431,7 +431,7 @@ struct NewsTests {
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
-            try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
+            try testOverviewTimelineDateProvenance(fixtureHost: fixtureHost)
             try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
             try await testThematicAngleFromExistingFacts(fixtureHost: fixtureHost)
             try await testCoverageSentimentEvaluation(fixtureHost: fixtureHost)

@@ -635,7 +635,7 @@ struct EventOverviewAccessibilityTests {
         let item2 = OverviewTimelineItem(
             id: "t2", dateText: "Oct 5", summary: "Followup event", isFuturePlan: false, eventDate: pastDate2)
         let item3 = OverviewTimelineItem(
-            id: "t3", dateText: "Oct 3", summary: "Reported discovery", isFuturePlan: false,
+            id: "t3", dateText: "Oct 3", dateKind: .publication, summary: "Reported discovery", isFuturePlan: false,
             publicationDate: pubDateOnly)
         let item4 = OverviewTimelineItem(
             id: "t4", dateText: "Next Week", summary: "Scheduled vote", isFuturePlan: true, eventDate: futureDate)
@@ -688,7 +688,8 @@ struct EventOverviewAccessibilityTests {
 
         // Item with dateText already prefixed does not duplicate prefix
         let itemAlreadyReported = OverviewTimelineItem(
-            id: "t_already_rep", dateText: "Reported Nov 15", summary: "Filing announced", isFuturePlan: false)
+            id: "t_already_rep", dateText: "Reported Nov 15", dateKind: .publication, summary: "Filing announced",
+            isFuturePlan: false)
         let voAlreadyRep = EventOverviewReaderView.timelineItemAccessibilityLabel(
             item: itemAlreadyReported, citations: [cit])
         assertFalse(
@@ -1587,9 +1588,11 @@ extension EventOverviewAccessibilityTests {
         let sameEvent = OverviewTimelineItem(
             id: "event-tie", dateText: "Oct 1", summary: "Additional event.", eventDate: early)
         let reported = OverviewTimelineItem(
-            id: "reported", dateText: "Oct 1", summary: "Report published.", publicationDate: early)
+            id: "reported", dateText: "Oct 1", dateKind: .publication, summary: "Report published.",
+            publicationDate: early)
         let publicationTie = OverviewTimelineItem(
-            id: "reported-tie", dateText: "Oct 1", summary: "Second report published.", publicationDate: early)
+            id: "reported-tie", dateText: "Oct 1", dateKind: .publication, summary: "Second report published.",
+            publicationDate: early)
         let undated = OverviewTimelineItem(id: "undated", dateText: "", summary: "  Undated update. \n")
         let undatedTie = OverviewTimelineItem(id: "undated-tie", dateText: "", summary: "Another update.")
         let plan = OverviewTimelineItem(
