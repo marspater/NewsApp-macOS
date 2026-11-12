@@ -111,6 +111,18 @@ Build: `main` at `33199b7` with the Lead control fix of this change (`PhotoContr
 
 - **The one-slide Lead reproduced on current `main`, by another path than the new-day page.** The first launch's refresh was cut short by quitting the app before its stories were grouped. At the next launch the stored edition was rejected (`storiesGone`), and the fresh edition was assigned over a page of 200 stories with no event among them, so The Lead had one slide and no controls. Grouping then ran (366 to 436 events), the list held, and "Show Updates" gave five slides and an In Motion lane. Nothing in the update rules lets an ungrouped launch page give way once grouping has run, except for a page of earlier days.
 
+## Integration pass, night of 12 November 2026
+
+Build: `mars/epic-z-integration` at `7eedcd4` (`main` with the 18 open epic Z PRs merged), Release, ad-hoc signed, bundle id `com.marspater.news.zview` ("News Z view", `script/run_isolated.sh --background`), macOS 27.2.1. A fresh read-only copy of the development library (about 4,030 stories) was used and deleted afterwards. The Mac was under heavy load (load average 12 to 17, other apps encoding), so the times below are not budget figures. Counts and ids only; captures stay private.
+
+| Check | Result |
+| --- | --- |
+| Today with the window pool off | The Lead with five slides, In Motion, The Deep Read, Outside Your Usual and The Latest; the launch refresh waited behind "Show Updates" |
+| One slide after a large launch refresh | **Found on the first integration head (`2f48b1c`), fixed in #1285 (`77bf49d`), passed on `7eedcd4`.** Three stories the matcher had not reached marked the launch page as awaiting grouping. After the refresh (691 new stories) was grouped, the untouched page gave way to the newest 200 stories, which held one event: one Lead slide. The mark now needs most of the page unprocessed |
+| Window pool on (`-today_window_pool YES`), at launch | The restored edition showed first (first card 2.09 s). The pool edition swapped in about 2.4 s later, untouched: context 948 ms over 1,798 entries, assignment 1,382 ms over 299 events, layout 26 ms |
+| Window pool on: the lanes | The Lead 5, In Motion 8, Your Beat 12, The Deep Read 8, Outside Your Usual 6, The Latest 156; 195 stories, each once. The lanes reached past the listed page (The Deep Read: 7 of 8 older than the newest 260 reports; Your Beat: 8 of 12); all 156 of The Latest were within it |
+| Window pool on: "Show 1 New Story" | Applied: the page laid out afresh (context 318 ms, assignment 425 ms), the same lane sizes, each story once, and the button left |
+
 ## Measurements
 
 First card after process start, from the app's own `First card visible` log line, same library, warm launches. Memory from `footprint` 25 seconds after the last launch.
