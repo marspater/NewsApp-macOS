@@ -1,7 +1,7 @@
 version: 2.1
 
 commands:
-  # Stops a macOS job early when the change cannot alter the app or its tests: documentation, changelog fragments,
+  # Stops the macOS job early when the change cannot alter the app or its tests: documentation, changelog fragments,
   # GitHub and Codemagic configuration, review-bot and linter configuration. Anything else runs, so an unknown
   # path never skips a test. `.circleci/` is not on the list: a change to this pipeline must exercise it.
   halt-unless-app-changed:
@@ -54,40 +54,34 @@ jobs:
       - prepare-macos
       - run:
           name: "Run unit tests and regressions via Smarter Testing"
-          # Impact analysis runs in its own job on main (impact-analysis), off this job's path.
+          # On the default branch Smarter Testing selects every atom; no pull request reads impact data any more.
           command: circleci testsuite run "unit tests" --analyze-tests=none
-      # Pull requests stop here: GitHub Actions runs the native tests, the UI tests and the package build on every
-      # pull request, and its two jobs are required checks. Main still runs them here on macOS 27 with Xcode 27.
-      - when:
-          condition:
-            equal: [ main, << pipeline.git.branch >> ]
-          steps:
-            # Native Swift Testing target (#1070), as on GitHub Actions; it holds the publisher-excerpt checks (#577).
-            - run:
-                name: "Run native tests"
-                command: |
-                  set -o pipefail
-                  xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-                    -derivedDataPath build/DerivedData -testPlan Release \
-                    -resultBundlePath build/ci/NewsTests.xcresult -quiet
-            - store_artifacts:
-                path: build/ci/NewsTests.xcresult
-                destination: native-tests-xcresult
-            # NewsUITests (#1070), as on GitHub Actions.
-            - run:
-                name: "Run UI tests"
-                command: |
-                  set -o pipefail
-                  xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
-                    -derivedDataPath build/DerivedData -testPlan UITests -only-testing:NewsUITests \
-                    -resultBundlePath build/ci/NewsUITests.xcresult -quiet
-            - store_artifacts:
-                path: build/ci/NewsUITests.xcresult
-                destination: ui-tests-xcresult
-                when: always
-            - run:
-                name: "Verify Swift Package Manager build"
-                command: swift build --force-resolved-versions --target News
+      # Native Swift Testing target (#1070), as on GitHub Actions; it holds the publisher-excerpt checks (#577).
+      - run:
+          name: "Run native tests"
+          command: |
+            set -o pipefail
+            xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+              -derivedDataPath build/DerivedData -testPlan Release \
+              -resultBundlePath build/ci/NewsTests.xcresult -quiet
+      - store_artifacts:
+          path: build/ci/NewsTests.xcresult
+          destination: native-tests-xcresult
+      # NewsUITests (#1070), as on GitHub Actions.
+      - run:
+          name: "Run UI tests"
+          command: |
+            set -o pipefail
+            xcodebuild test -project News.xcodeproj -scheme News -destination 'platform=macOS' \
+              -derivedDataPath build/DerivedData -testPlan UITests -only-testing:NewsUITests \
+              -resultBundlePath build/ci/NewsUITests.xcresult -quiet
+      - store_artifacts:
+          path: build/ci/NewsUITests.xcresult
+          destination: ui-tests-xcresult
+          when: always
+      - run:
+          name: "Verify Swift Package Manager build"
+          command: swift build --force-resolved-versions --target News
       - save_cache:
           key: swiftpm-macos-xcode27-{{ checksum "Package.resolved" }}
           paths:
@@ -95,26 +89,14 @@ jobs:
             - build/DerivedData/SourcePackages
             - ~/Library/Caches/org.swift.swiftpm
 
-  # Refreshes Smarter Testing's impact data from coverage. It compiles the runner with coverage and reruns the
-  # impacted atoms, so it runs beside test-macos on main and nothing waits for it.
-  impact-analysis:
-    macos:
-      xcode: "27.0"
-    steps:
-      - checkout
-      - halt-unless-app-changed
-      - prepare-macos
-      - run:
-          name: "Analyze test impact"
-          command: circleci testsuite run "unit tests" --run-tests=none --analyze-tests=impacted
-
   # Records a deployment of main in CircleCI's release tracking once test-macos passed. It builds nothing: the
   # arm64 verification build already runs on Codemagic and in GitHub's build job (audit item A5, 6 November 2026).
+  # It only calls the CircleCI CLI, so it runs on the small Docker executor instead of a macOS machine.
   deploy-marker:
-    macos:
-      xcode: "27.0"
+    docker:
+      - image: cimg/base:current
+    resource_class: small
     steps:
-      - checkout
       - run:
           name: "Record deployment start"
           command: |
@@ -136,10 +118,9 @@ workflows:
   build-and-test:
     jobs:
       - checks
+      # macOS credits: GitHub Actions runs the unit atoms, native tests, UI tests and package build on every pull
+      # request, so CircleCI's macOS job runs on main only. A pull request runs `checks` alone here.
       - test-macos:
-          requires:
-            - checks
-      - impact-analysis:
           requires:
             - checks
           filters:
