@@ -2439,6 +2439,13 @@ extension NewsTests {
             "The page read after the grouping takes an untouched page")
         // A launch page of stories the grouping has not processed (a refresh cut short by quitting) gives way to the
         // grouped page like an earlier day's page: once, while untouched; a touched page holds as before (#937).
+        assertTrue(
+            FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(unprocessed: 638, of: 649),
+            "A page of a refresh cut short waits for its grouping")
+        assertFalse(
+            FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(unprocessed: 3, of: 200),
+            "A few leftovers do not make an ordinary launch page give way to a refresh")
+        assertFalse(FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(unprocessed: 0, of: 0), "An empty page does not")
         var launchPage = FeedUpdateBuffer.NewDayHandoff()
         assertEqual(
             launchPage.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: false), nil,

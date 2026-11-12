@@ -289,6 +289,12 @@ struct FeedUpdateBuffer: Equatable, Sendable {
         /// reader has not touched it (#937).
         mutating func notePageAwaitsGrouping() { isWaiting = true }
 
+        /// A page waits for its grouping only when most of its stories are unprocessed (a refresh cut short), not for a
+        /// few leftovers the matcher has not reached.
+        static func isMostlyUngrouped(unprocessed: Int, of total: Int) -> Bool {
+            total > 0 && unprocessed * 2 > total
+        }
+
         /// The list was replaced or loaded anew.
         mutating func reset() { isWaiting = false }
 
