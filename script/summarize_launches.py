@@ -39,7 +39,7 @@ def completed_today_stages(text):
     so reject their stage timings rather than combining unrelated operations.
     """
     stages = re.findall(
-        r"Today edition stage=(context|event_images|assignment|differing_accounts|layout) ms=([\\d.]+)", text)
+        r"Today edition stage=(context|event_images|assignment|differing_accounts|layout) ms=([\d.]+)", text)
     if [stage for stage, _ in stages] != [
         "context", "event_images", "assignment", "differing_accounts", "layout"
     ]:
