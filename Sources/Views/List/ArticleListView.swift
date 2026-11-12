@@ -1446,7 +1446,9 @@ struct ArticleListView: View {
                 + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) new_day=\(awaitsNewDay)")
         switch outcome {
         case .held:
-            todayEdition = previous.heldBehindUpdates(for: listed, fresh: edition, pool: pool)
+            let held = previous.heldBehindUpdates(for: listed, fresh: edition, pool: pool)
+            _ = restoreTodayFocus(in: held, from: previous)
+            todayEdition = held
             todayAwaitsFreshEdition = true
             return false
         case .confirmed, .swapped:
