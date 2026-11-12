@@ -5187,6 +5187,15 @@ extension NewsTests {
         assertEqual(
             crossStated?.orderingDateMayHoldInferredYear, day(2026, 12, 28), "The start's year is placed, never shown")
 
+        assertEqual(
+            shown(range("The window runs from 3 November 2026 to 5 December.")), "Nov 3, 2026 – Dec 5",
+            "The end's inferred year is never displayed"
+        )
+        assertEqual(
+            shown(range("The window runs from 3 November to 5 December 2026.")), "Nov 3 – Dec 5, 2026",
+            "The start's inferred year is never displayed"
+        )
+
         let compressed = range("Voting runs 19–28 November.")
         assertEqual(shown(compressed), "Nov 19 – 28", "A compressed range is one row")
         assertEqual(compressed?.isFuturePlan, true, "A planned range keeps its text and the Plan flag")
@@ -5241,9 +5250,14 @@ extension NewsTests {
             "Returns run from 3 November to 8 November and may continue through 8 January.",
             "Voting runs from 28 to 19 November.",
             "The review runs March to May 2027.",
+            "The review runs between March and May 2027.",
+            "The review runs from March 2027 to May.",
+            "The hearings run from 3 March to April.",
             "Hearings were held on 3 and 5–7 November.",
             "Hearings were held on 3–5 and 7 November.",
             "Hearings were held November 3–5 and 7.",
+            "Hearings ran from 3 to 5 November and 7.",
+            "Hearings ran from 3 to November 5–7.",
             "Voting runs from March to 5 April 2027.",
             "Talks were held on 3 November, after talks in March 2025.",
             "Talks run from 3 November 2025 to 8 November 2024.",

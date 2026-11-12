@@ -356,41 +356,33 @@ enum OverviewTimelineBuilder {
         return nil
     }
 
-    private static let dayNumber = #"\d{1,2}(?:st|nd|rd|th)?(?!\d)"#
+    private static let dayNumber = #"\d{1,2}(?:st|nd|rd|th|er)?(?!\d)"#
     private static let rangeJoin = #"(?:\s*[–—-]\s*|\s+(?:to|through|until)\s+)"#
+    private static let dayListJoin = #"(?:,\s+|,?\s+and\s+)"#
+    private static let dayFirstMonth = alternation(englishMonths.merging(dayFirstMonths) { english, _ in english }.keys)
+    private static let englishMonth = alternation(englishMonths.keys)
 
-    /// A day range or list that shares its month ("19–28 November", "from 19 to 28 November", "3, 5 and 7 November",
-    /// "November 19–28"). The month-first form takes "and" only after "between", where "November 3 and 5 people" is
-    /// no list. Matched before the single-date patterns, which would read the last day alone.
+    /// Shared-month ranges and lists are matched before single dates, which can otherwise take only one day.
     private static let sharedMonthPatterns: [(regex: NSRegularExpression, monthFirst: Bool)] = {
-        let month = Self.alternation(Self.englishMonths.keys)
         let year = #"(?<year>(?:19|20)\d{2})(?!\d)"#
-        let day = Self.dayNumber
+        func days(_ day: String) -> String {
+            #"(?<days>\#(day)\#(rangeJoin)\#(day)|\#(day)(?:\#(dayListJoin)\#(day))+)"#
+        }
+        let dayFirst = days(#"\#(dayNumber)\.?"#)
+        let monthFirst = days(dayNumber)
         let sources: [(String, Bool)] = [
             (
-                #"(?<![\d.,])(?<days>\#(day)\#(rangeJoin)\#(day)|\#(day)(?:,\s+\#(day))*,?\s+and\s+\#(day))\s+(?:of\s+)?(?<month>\#(month))(?!\p{L})\.?(?:,?\s+\#(year))?"#,
+                #"(?<![\d.,])\#(dayFirst)\s+(?:of\s+)?(?<month>\#(dayFirstMonth))(?!\p{L})\.?(?:,?\s+\#(year))?"#,
                 false
             ),
             (
-                #"(?<!\p{L})(?<month>\#(month))(?!\p{L})\.?\s+(?<days>\#(day)(?:\#(rangeJoin)|\s+and\s+)\#(day))(?:,?\s+\#(year))?"#,
+                #"(?<!\p{L})(?<month>\#(englishMonth))(?!\p{L})\.?\s+\#(monthFirst)(?:,?\s+\#(year))?"#,
                 true
             ),
         ]
-        var compiled: [(regex: NSRegularExpression, monthFirst: Bool)] = []
-        for (pattern, monthFirst) in sources {
-            if let regex = try? NSRegularExpression(pattern: pattern) { compiled.append((regex, monthFirst)) }
+        return sources.compactMap { pattern, monthFirst in
+            (try? NSRegularExpression(pattern: pattern)).map { ($0, monthFirst) }
         }
-        return compiled
-    }()
-
-    private static let bareMonthRange: NSRegularExpression = {
-        let month = Self.alternation(Self.englishMonths.keys)
-        let pattern =
-            #"\b(?:from|between)\s+(?:\#(month))(?!\p{L})\.?\s*(?:[–—-]|to|through|until)\s*(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?(?:\#(month))|(?:\#(month))\s+\d)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            preconditionFailure("The bare month range pattern is valid")
-        }
-        return regex
     }()
 
     private static let rangeBetweenDates =
@@ -402,12 +394,30 @@ enum OverviewTimelineBuilder {
     /// range, an expression whose parts cannot share a precision or year, or an impossible date.
     static func statedExpression(in sentence: String) -> StatedExpression? {
         let range = NSRange(sentence.startIndex..., in: sentence)
-        // "March to 5 April": a bare month and a day share no precision.
-        guard bareMonthRange.firstMatch(in: sentence, range: range) == nil,
-            let atoms = dateAtoms(in: sentence, range: range), let first = atoms.first
+        guard let atoms = dateAtoms(in: sentence, range: range), let first = atoms.first, let last = atoms.last,
+            !hasBareMonthEndpoint(before: first.range, after: last.range, in: sentence)
         else { return nil }
         if atoms.count == 1 { return first.span.map { .span($0) } ?? first.date.map { .date($0) } }
         return combined(atoms, in: sentence)
+    }
+
+    /// A bare month beside a parsed date cannot supply the precision or year needed for a range.
+    private static func hasBareMonthEndpoint(before first: NSRange, after last: NSRange, in sentence: String) -> Bool {
+        guard let first = Range(first, in: sentence), let lastRange = Range(last, in: sentence) else { return false }
+        let before = sentence[..<first.lowerBound]
+        let after = sentence[lastRange.upperBound...]
+        let month = #"(?<!\p{L})(?:\#(englishMonth))(?!\p{L})\.?"#
+        let between = #"\bbetween\s+"#
+        let and = #"\s+and\s+"#
+        if before.range(of: #"(?:\#(month)\#(rangeJoin)|\#(between)\#(month)\#(and))$"#, options: .regularExpression)
+            != nil
+        {
+            return true
+        }
+        let join =
+            before.range(of: #"\#(between)$"#, options: .regularExpression) == nil
+            ? rangeJoin : #"(?:\#(rangeJoin)|\#(and))"#
+        return after.range(of: #"^\#(join)\#(month)"#, options: .regularExpression) != nil
     }
 
     /// One date, or one shared-month range or list ("19–28 November"), found in a sentence.
@@ -448,20 +458,47 @@ enum OverviewTimelineBuilder {
         return atoms.sorted { $0.range.location < $1.range.location }
     }
 
-    /// A shared-month match as a span. The month-first form takes "and" only after "between", where "November 3 and
-    /// 5 people" is no list, so another month-first "and" is skipped.
+    /// Distinguish a shared month from a full date on each side and reject mixed ranges and lists.
     private static func sharedMonthSpan(_ match: NSTextCheckingResult, monthFirst: Bool, in sentence: String)
         -> SharedMonthMatch
     {
         func group(_ name: String) -> String? {
             Range(match.range(withName: name), in: sentence).map { String(sentence[$0]) }
         }
-        guard let monthText = group("month"), let month = englishMonths[monthText], let text = group("days")
+        guard let monthText = group("month"), let month = englishMonths[monthText] ?? dayFirstMonths[monthText],
+            let text = group("days"), let found = Range(match.range, in: sentence)
         else { return .invalid }
-        let isList = text.contains("and")
-        let isRange = !isList || precededByBetween(match.range, in: sentence)
-        if monthFirst, isList, !isRange { return .skip }
-        let year = group("year").flatMap { Int($0) }
+        let prefix = sentence[..<found.lowerBound]
+        let suffix = sentence[found.upperBound...]
+        let year = group("year").flatMap(Int.init)
+
+        // In "November 29 to 3 December" neither month is shared. Let the full-date matcher read both.
+        if monthFirst, year == nil,
+            suffix.range(of: #"^\s+(?:of\s+)?(?:\#(dayFirstMonth))(?!\p{L})"#, options: .regularExpression) != nil
+        {
+            return .skip
+        }
+        if !monthFirst,
+            prefix.range(of: #"(?<!\p{L})(?:\#(englishMonth))\.?\s+$"#, options: .regularExpression) != nil
+        {
+            return .skip
+        }
+
+        let hasRangeJoin = text.range(of: rangeJoin, options: .regularExpression) != nil
+        let isRange = hasRangeJoin || precededByBetween(match.range, in: sentence)
+        if prefix.range(
+            of: #"(?<![\d.,])\#(dayNumber)\.?(?:\#(rangeJoin)|\#(dayListJoin))$"#, options: .regularExpression
+        ) != nil {
+            return .invalid
+        }
+        let endsPhrase = suffix.range(of: #"^\s*(?:[.!?;)]|$)"#, options: .regularExpression) != nil
+        if monthFirst, year == nil, !isRange, !endsPhrase { return .skip }
+        if suffix.range(
+            of: #"^(?:\#(rangeJoin)|\#(dayListJoin))\#(dayNumber)(?=\s*(?:[,;.!?)]|$))"#,
+            options: .regularExpression
+        ) != nil {
+            return .invalid
+        }
         let days = text.split { !$0.isNumber }.compactMap { Int($0) }
         var dates: [StatedDate] = []
         for date in days.map({ StatedDate(year: year, month: month, day: $0) }) {
@@ -631,7 +668,8 @@ enum OverviewTimelineBuilder {
         }
         let (start, end) = (span.dates[0], span.dates[1])
         let wraps = wrapsYear(start, end)
-        if wraps, start.year == nil || end.year == nil {
+        // The interval formatter otherwise moves a year stated only at the start to the end.
+        if (start.year != nil && end.year == nil) || (wraps && start.year == nil) {
             return "\(dateText(start, locale: locale)) – \(dateText(end, locale: locale))"
         }
         let startYear = start.year ?? end.year ?? 2000
