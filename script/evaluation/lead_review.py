@@ -160,8 +160,8 @@ def fill(directory, reader, lead):
 
 
 def self_check():
-    with tempfile.TemporaryDirectory() as first, tempfile.TemporaryDirectory() as second:
-        first, second = pathlib.Path(first), pathlib.Path(second)
+    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
+        first, second = pathlib.Path(one), pathlib.Path(two)
         fixture(first)
         fixture(second)
         require(sheet(first) == 24 and sheet(second) == 24, 'The sheet lists the union of the three top 20s')
