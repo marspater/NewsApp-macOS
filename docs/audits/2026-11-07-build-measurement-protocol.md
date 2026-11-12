@@ -1,6 +1,6 @@
 # Build measurement protocol (#577)
 
-Date: 7 November 2026. Applies to every build-time claim from now on, starting with the native integration plan (`docs/plans/2026-11-07-native-integration.md`).
+Date: 7 November 2026. Applies to every build-time claim from now on, starting with the native integration plan.
 
 ## Local measurements
 

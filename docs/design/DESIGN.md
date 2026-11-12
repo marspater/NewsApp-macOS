@@ -1,6 +1,6 @@
 # Design language
 
-The design language for News on macOS: principles, native UI, tokens, glass, accessibility, interaction and the review rules. It applies to every change that adds or modifies UI, by any contributor or agent. Where it is silent, follow Apple's [Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines) (HIG); where it conflicts with the HIG, this document wins until it is changed. Technology constraints stay in [ARCHITECTURE.md](../ARCHITECTURE.md); the evidence behind these rules is in the [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md), and the migration of existing code is in the [adoption plan](../plans/2026-10-09-design-language-adoption.md).
+The design language for News on macOS: principles, native UI, tokens, glass, accessibility, interaction and the review rules. It applies to every change that adds or modifies UI, by any contributor or agent. Where it is silent, follow Apple's [Human Interface Guidelines](https://developer.apple.com/design/human-interface-guidelines) (HIG); where it conflicts with the HIG, this document wins until it is changed. Technology constraints stay in [ARCHITECTURE.md](../ARCHITECTURE.md); the evidence behind these rules is in the [Apple News and Liquid Glass study](../audits/2026-10-09-apple-news-liquid-glass-study.md).
 
 Feature rules live beside this file. This file owns whatever applies to more than one surface; a feature document owns what applies only to its surface.
 

@@ -1,6 +1,6 @@
 # Story experience: first implementation slice — 1 October 2026
 
-Branch: `codex/kite-practices`, working tree based on `0c849c6`. Fetched `origin/main`: `b3cb44d`, the merge of PR #86. This is an initial slice of the [story experience plan](../plans/2026-09-30-story-experience.md), not completion of its phases A–I. Changes remain uncommitted and unpublished.
+Branch: `codex/kite-practices`, working tree based on `0c849c6`. Fetched `origin/main`: `b3cb44d`, the merge of PR #86. This is an initial slice of the story experience plan, not completion of its phases A–I. Changes remain uncommitted and unpublished.
 
 ## Implemented
 

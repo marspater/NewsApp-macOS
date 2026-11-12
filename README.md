@@ -58,7 +58,7 @@ The semantic system that groups, explains and selects stories is named Angelia; 
 - **World Tension** (methodology v3): on-device reasoned international headline assessment with four-factor cited explanations (`Novelty`, `Proximity to worst case`, `Reversibility`, `Scope of impact`), backed by a balanced 12-feed global panel.
 - **Scope.** Keep protected networking, local SQLite state and arm64 ad-hoc verification builds. English is the current release scope; non-English matching and spoken VoiceOver verification remain parked.
 
-See the [acceptance audit](docs/audits/2026-10-18-post-wave2-release-acceptance.md), [notification attachments audit](docs/audits/2026-10-18-notification-attachments-and-overlap.md), [current plan status](docs/plans/2026-09-30-story-experience.md), [changelog](CHANGELOG.md) and [privacy policy](PRIVACY.md).
+See the [acceptance audit](docs/audits/2026-10-18-post-wave2-release-acceptance.md), [notification attachments audit](docs/audits/2026-10-18-notification-attachments-and-overlap.md), [Angelia semantic architecture](docs/plans/2026-11-11-angelia-semantic-architecture.pdf), [changelog](CHANGELOG.md) and [privacy policy](PRIVACY.md).
 
 ## Reading
 

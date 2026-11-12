@@ -1,13 +1,12 @@
 # Release checklist
 
 Run this before every tag, on the merged `main` (a clean checkout, or a worktree at the commit to be tagged), and
-record the result of each item in the release PR or the release plan under `docs/plans/`. Stacked PRs only get light
+record the result of each item in the release PR. Stacked PRs only get light
 CI, so this list is the gate: a release is not cut until every item below passed or has a written reason it does not
 apply. Never report an item as passed unless the command finished successfully.
 
 Commands run from the repository root. "Library copy" means a copy of a real library, never the live file; take it
-with SQLite's online backup API, which includes pages still in the write-ahead log (the exact commands are in
-[the v2 completion plan](plans/2026-10-30-v2-completion.md), step 0):
+with SQLite's online backup API, which includes pages still in the write-ahead log:
 
 ```sh
 (umask 077 && sqlite3 "file:$HOME/Library/Containers/com.marspater.news/Data/Library/Application Support/com.marspater.news/news.sqlite3?mode=ro" ".backup $HOME/news-eval/library-copy.sqlite3")

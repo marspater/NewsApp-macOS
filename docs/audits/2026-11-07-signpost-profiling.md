@@ -1,6 +1,6 @@
 # Scheduled signpost profiling (7 November 2026)
 
-Part of #577, item G of [the native integration plan](../plans/2026-11-07-native-integration.md).
+Part of #577, item G of the native integration plan.
 
 ## What is recorded
 
