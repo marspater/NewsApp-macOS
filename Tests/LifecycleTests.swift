@@ -2288,6 +2288,15 @@ extension NewsTests {
         let score = service.computeImportance(
             title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response.")
         assertTrue(score >= 0.0 && score <= 1.0, "Score must be bounded between 0.0 and 1.0")
+        // The score is remembered per text (#937): a second service works it out afresh and must agree.
+        assertEqual(
+            service.computeImportance(
+                title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response."),
+            score, "A remembered score is the score")
+        assertEqual(
+            NotificationService().computeImportance(
+                title: "Breaking News: Major Crisis Declared", description: "Officials announce emergency response."),
+            score, "A remembered score equals a fresh one")
 
         // One banner per event (#523): the strongest report represents its event; singles stand alone.
         func report(_ id: Int, _ title: String) -> FeedArticle {

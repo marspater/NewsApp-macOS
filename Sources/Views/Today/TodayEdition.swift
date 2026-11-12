@@ -213,11 +213,14 @@ extension ArticleStore {
     ) async -> TodayEdition {
         let database = self.database
         let now = Date()
+        // An edition laid out afresh logs how long each stage took (#937).
+        var timer = previous == nil ? NewsSignposts.StageTimer("Today edition") : nil
         do {
             var context = try await database.loadTodayAssignmentContext(
                 entries: entries, now: now, starredFeedURLs: reader.starredFeedURLs,
                 subscribedFeedURLs: reader.subscribedFeedURLs, resetAt: reader.interestsResetAt)
             try Task.checkCancellation()
+            timer?.lap("context", count: entries.count)
             // A story's photo may sit on a report of its event that this page does not list.
             var details = TodayCardDetails()
             // ponytail: one read per event, for at most the 60 newest events without a listed photo, so a page of
@@ -234,6 +237,7 @@ extension ArticleStore {
                 else { continue }
                 details.eventImages[entry.id] = image
             }
+            timer?.lap("event_images", count: min(60, unpictured.count))
             details.unsubscribedIDs = TodayEditionAssigner.unsubscribedEntryIDs(entries, context: context)
             context.imagelessEntryIDs = Set(
                 entries.filter { entry in
@@ -244,9 +248,16 @@ extension ArticleStore {
                 TodayEditionAssigner.assign(entries: entries, context: context)
             }.value
             try Task.checkCancellation()
+            timer?.lap("assignment", count: entries.count { if case .event = $0 { true } else { false } })
             details.differingAccounts = (try? await database.todayDifferingAccounts(for: plan)) ?? [:]
-            return TodayEdition.make(
-                entries: entries, plan: plan, details: details, keeping: previous, generation: generation)
+            timer?.lap("differing_accounts", count: details.differingAccounts.count)
+            // Off the main actor: the cards' reading times are counted from their stored text here.
+            let edition = await Task.detached(priority: .userInitiated) { [details] in
+                TodayEdition.make(
+                    entries: entries, plan: plan, details: details, keeping: previous, generation: generation)
+            }.value
+            timer?.lap("layout", count: edition.lead.count)
+            return edition
         } catch {
             return TodayEdition.make(
                 entries: entries, plan: TodayEditionPlan(lanes: []), keeping: previous, generation: generation)

@@ -94,7 +94,7 @@ One buffer and one "Show N New Stories" button in the leading toolbar (U; "Show 
 
 - Until the click, nothing moves: no lane appears, hides or reorders, and The Lead keeps its slides. A further page of stories joins The Latest and never a lane above it. A card whose content refreshed in place (read state, a new image, more coverage) updates in place.
 - On the click, every lane updates at once, and the page returns to the masthead and each row to its leading edge, with `AppMotion.hover` (`nil` under Reduce Motion). When a card keeps keyboard focus through the click, keeping it visible takes priority: the page and that card's row scroll only as far as needed to show it, and every other row returns to its leading edge.
-- When every listed story is from an earlier day, the refresh replaces the edition at once.
+- When every listed story is from an earlier day, the refresh replaces the edition once its new stories are grouped into events, and only while the page has not been scrolled or focused. Until then the earlier edition stays, and a page the reader has touched gets the stories through the updates button. A page of ungrouped stories is never laid out for them.
 - Closing a story applies an update that a subscription's first refresh produced while the reader was open (#782).
 
 ## Keyboard focus

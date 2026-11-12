@@ -158,6 +158,11 @@ struct ArticleListView: View {
     @State private var expandedEvents: Set<String> = []
     /// Set by the reader's own regrouping actions, which apply at once.
     @State private var appliesNextUpdate = false
+    /// The reader has scrolled this list since it was loaded.
+    @State private var hasScrolledList = false
+    /// Today showed only earlier days' stories when a refresh began, and the new day's page waits for its grouping.
+    /// A held list takes fresh values in place, so a story updated today would otherwise end the wait early.
+    @State private var awaitsGroupedDay = false
     /// Reloads the list once a refresh the reader asked for has finished.
     @State private var refreshReloads = 0
     /// A refresh the reader started: its results replace the list as they arrive instead of queueing behind
@@ -235,7 +240,12 @@ struct ArticleListView: View {
     private var isHoldingList: Bool {
         guard !appliesNextUpdate else { return false }
         if !articlePath.isEmpty { return true }
-        if !isSearching, (selectedTopic ?? "Today") == "Today", buffer.showsOnlyEarlierDays() { return false }
+        if !isSearching, (selectedTopic ?? "Today") == "Today", buffer.showsOnlyEarlierDays() || awaitsGroupedDay {
+            // The new day's stories take the page once they are grouped, and only while the reader has not
+            // scrolled or focused a card: before that the page would be one report a story, and after it the
+            // stories wait behind the updates button like any other (#937).
+            return feedManager.isGroupingNewStories || hasScrolledList || focusedArticleID != nil
+        }
         return !isReaderRefreshing
     }
 
@@ -269,7 +279,8 @@ struct ArticleListView: View {
     /// Loading, failure, no results and empty sections, centered in the visible list area under the masthead.
     @ViewBuilder
     private var emptyListContent: some View {
-        if isLoadingPage {
+        // The first query waits for the library to open (#937); until then the list is loading, not empty.
+        if isLoadingPage || (!articleStore.isReady && !articleStore.startupFailed) {
             ProgressView("Loading stories…")
         } else if queryError != nil {
             queryFailureView
@@ -411,6 +422,9 @@ struct ArticleListView: View {
             } action: {
                 columnSize = $0
             }
+            .onScrollPhaseChange { _, phase in
+                if phase == .interacting, !hasScrolledList { hasScrolledList = true }
+            }
             // The Today edition's rows pass under the floating sidebar, so the page must not cut them at the
             // column's edge.
             .scrollClipDisabled(isTodayEdition && Self.rowsPassUnderSidebar)
@@ -545,6 +559,12 @@ struct ArticleListView: View {
     }
 
     private func performQueryReload() async {
+        // While the library opens, a query would wait behind the store's first snapshot and then be cancelled by
+        // the revision that snapshot publishes, twice over at launch (#937). The list waits for it and loads once.
+        if !articleStore.isReady {
+            await articleStore.waitForStartup()
+            guard !Task.isCancelled else { return }
+        }
         let identity = queryIdentity
         let runID = UUID()
         if isBriefing {
@@ -643,6 +663,8 @@ struct ArticleListView: View {
             groupedEntries.resetPrefetch()
             todayPrefetch.reset()
             todayEdition = nil
+            hasScrolledList = false
+            awaitsGroupedDay = false
             cursor = nil
             hasMoreResults = false
             expandedEvents = []
@@ -660,6 +682,10 @@ struct ArticleListView: View {
             let fetched = try await fetchPage(
                 after: isPaging ? cursor : nil, muting: showsMuted ? MuteRules() : muting, queryVector: queryVector)
             try Task.checkCancellation()
+            NewsSignposts.launchMilestone("list_page_fetched")
+            // Today's lanes need every listed story's language score; it is worked out while the counts and the
+            // grouping below are read, not after them (#937).
+            if isTodayEdition { NotificationService.shared.prepareImportance(of: Array(fetched.prefix(200))) }
             if !isPaging {
                 var hidden = 0
                 if !muting.isEmpty { hidden = try await countMuted(muting, queryVector: queryVector) }
@@ -690,11 +716,13 @@ struct ArticleListView: View {
                 hasMoreResults = morePages
             } else {
                 let snapshot = FeedSnapshot(articles: page, events: events)
+                if buffer.showsOnlyEarlierDays(), feedManager.isGroupingNewStories { awaitsGroupedDay = true }
                 let holding = isHoldingList
                 appliesNextUpdate = false
                 let result = buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
                 switch result {
                 case .replaced:
+                    awaitsGroupedDay = false
                     // The list was replaced, not held: Today lays its edition out afresh for it.
                     todayGeneration += 1
                     cursor = page.last.map(ArticleQueryCursor.init)
@@ -1286,6 +1314,7 @@ struct ArticleListView: View {
         // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
         // for or another day's stories lay the edition out afresh.
         let keeps = isHoldingList && previous?.generation == todayGeneration
+        NewsSignposts.launchMilestone("today_edition_requested")
         let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
         let edition = await articleStore.todayEdition(
             entries: listed,
@@ -1299,6 +1328,7 @@ struct ArticleListView: View {
         let isApplied = previous.map { $0.generation != edition.generation } ?? false
         let restored = restoreTodayFocus(in: edition, from: previous)
         todayEdition = edition
+        NewsSignposts.launchMilestone("today_edition_installed")
         // Photos the top of the page still lacks are looked up first.
         feedManager.requestStoryImages(for: edition.imagelessShownIDs)
         // An applied update returns the page to the masthead; a card that kept focus is brought back into view.
@@ -1732,6 +1762,8 @@ struct ArticleListView: View {
         withAnimation(reduceMotion ? nil : AppMotion.state) {
             buffer.applyPending()
         }
+        // The installed snapshot is no longer the earlier day the hold was waiting to replace.
+        awaitsGroupedDay = false
         // The reader asked for the update: the Today edition is laid out afresh.
         todayGeneration += 1
         cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)

@@ -102,8 +102,13 @@ actor DatabaseEngine {
         healthNotice
     }
 
-    func setCollectionOnlyFeedURLs(_ urls: [String]) {
-        collectionOnlyFeedURLs = Array(Set(urls)).sorted()
+    /// Returns whether the set changed, so a caller reloads only when the lists would differ.
+    @discardableResult
+    func setCollectionOnlyFeedURLs(_ urls: [String]) -> Bool {
+        let sorted = Array(Set(urls)).sorted()
+        guard sorted != collectionOnlyFeedURLs else { return false }
+        collectionOnlyFeedURLs = sorted
+        return true
     }
 
     /// Analysis-only panel reports stay outside the reading feed; read/saved reports remain accessible.
