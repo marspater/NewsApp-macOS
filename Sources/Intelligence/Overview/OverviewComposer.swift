@@ -144,11 +144,21 @@ public struct OverviewComposer: Sendable {
         if atFeedCap && !closed { return true }
         let opens = sentence.filter { $0 == "“" }.count
         let closes = sentence.filter { $0 == "”" }.count
-        // A straight quote after a digit is an inch mark (13" tablet), not a quotation.
-        let straight =
-            (try? NSRegularExpression(pattern: #"(?<!\d)""#))?
-            .numberOfMatches(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) ?? 0
-        return opens > closes || straight % 2 == 1
+        // Straight quotes by state: inside an open quotation one closes it ("iPhone 17"); outside, one right after a
+        // digit is an inch mark (13" tablet); otherwise it opens a quotation.
+        var openStraight = false
+        var previous: Character?
+        for character in sentence {
+            if character == "\"" {
+                if openStraight {
+                    openStraight = false
+                } else if previous?.isNumber != true {
+                    openStraight = true
+                }
+            }
+            previous = character
+        }
+        return opens > closes || openStraight
     }
 
     /// A heading or label rather than a statement ("iPad mini (eighth generation, 2026)", "Related Roundups: …"): no

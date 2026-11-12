@@ -3077,6 +3077,17 @@ extension NewsTests {
                 tail("Apple introduced a new 13\" tablet with an improved display.", of: inches), of: inches,
                 atFeedCap: false),
             "An inch mark is no open quotation")
+        let named = article(
+            "named", "Tech Wire", "Apple held an event. Apple introduced a new device called \"iPhone 17\".")
+        assertFalse(
+            OverviewComposer.isCutDescriptionTail(
+                tail("Apple introduced a new device called \"iPhone 17\".", of: named), of: named, atFeedCap: false),
+            "A quoted name ending in a number is a closed quotation")
+        let open = article("open", "Tech Wire", "Apple held an event. The chief executive said \"the device ships in 2")
+        assertTrue(
+            OverviewComposer.isCutDescriptionTail(
+                tail("The chief executive said \"the device ships in 2", of: open), of: open, atFeedCap: false),
+            "A straight quotation left open is still a cut tail")
         assertTrue(
             OverviewComposer.inputTextHash(passages: [], eventTitle: "e", cappedDescriptionArticleIDs: ["a"])
                 != OverviewComposer.inputTextHash(passages: [], eventTitle: "e"),
