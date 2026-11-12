@@ -53,6 +53,32 @@
 | Launch and refresh watched as motion | Captures are stills | A screen recording |
 | Scroll frame time | Needs Instruments on the Profile build with real scrolling | An Instruments run by Mars, or his go-ahead to record one |
 
+## Recheck on `main`, 12 November 2026
+
+Build `f742e0b` (Release, ad-hoc signed, bundle id `com.marspater.news.isolatedqa`), macOS 27.2.1 (26B131), dark appearance, a window of about 1,300 by 820 points left in the background, driven by background accessibility input. The library copy was restored before launch and deleted from the isolated container afterwards. A launch refresh ran, so the page showed stories of 12 November.
+
+| Check | Result |
+| --- | --- |
+| The edition is what Today shows by default | Passed |
+| A lane's previous and next buttons move its row | Passed (Your Beat) |
+| Lane cards pass under the sidebar | Passed |
+| Sidebar closed: The Lead and the lanes use the full width | Passed |
+| Opening a story from a lane and going back | Passed: the page returns to the same place and the opened card holds focus |
+| Down and Right arrows and J move focus between lanes and cards, and the row follows | Passed |
+| The Lead's dots and arrows in an inactive window, after the backing fix | Not run: after the launch refresh The Lead held one slide, which shows no controls. Before the refresh five slides and their controls were present |
+| K, Up and Left; hover; trackpad gestures; a narrow window | Not run: K, Up and Left were not sent; background input has no pointer hover, no trackpad and cannot resize the window |
+| VoiceOver and the Lanes rotor; Reduce Transparency; Show Borders; tinted glass | Not run: they need system settings switched, which were left alone |
+| The article transition from my recording | Not run: stills cannot show it; it needs a screen recording on this build |
+| Light appearance on this build | Not run in this recheck |
+| macOS 26 and the macOS 15 fallback | Not run: no such system or virtual machine on this Mac |
+| Scroll frame time | Not run: needs Instruments on the Profile build with the Mac idle |
+
+### Seen during the recheck, not judged
+
+- **The Lead fell to one slide after the morning refresh.** The edition is laid out from the listed page, the 200 newest stories. After a refresh that brought some 400 stories, every story on that page was a few hours old and only the top one cleared The Lead's bar; the stories that led fifteen hours earlier were no longer on the page. The shadow evaluations of #934 assign over all candidates of 72 hours (612 on the real subscription list), so their Lead and lane figures describe a larger pool than the page the app assigns from.
+- **A card's photo changed after its story was opened and closed** (a Your Beat card). Which photo a card settles on is not stable across a visit to the reader.
+- **The one Lead slide paired a headline about a Senate result with a photo of the Pentagon.** The stored event behind it had 15 reports from 12 publishers, and a second, single-report event held another report of the same result. Whether the photo is the representative report's own was not established. Grouping is #737.
+
 ## Measurements
 
 First card after process start, from the app's own `First card visible` log line, same library, warm launches. Memory from `footprint` 25 seconds after the last launch.
