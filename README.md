@@ -1,31 +1,74 @@
-# News for macOS
+<!-- markdownlint-disable MD033 -->
+<h1 align="center">News for macOS</h1>
 
-[![CI](https://github.com/marspater/NewsApp-macOS/actions/workflows/ci.yml/badge.svg)](https://github.com/marspater/NewsApp-macOS/actions/workflows/ci.yml)
-[![Security](https://github.com/marspater/NewsApp-macOS/actions/workflows/security.yml/badge.svg)](https://github.com/marspater/NewsApp-macOS/actions/workflows/security.yml)
+<p align="center">
+  <strong>A native, local-first news reader that groups the day's reporting into events, on your Mac.</strong><br>
+  RSS, Atom and JSON Feed. SwiftUI, WebKit, SQLite and Apple's on-device intelligence. No cloud AI services or telemetry.
+</p>
 
-A native, local-first RSS, Atom and JSON Feed reader built with SwiftUI, WebKit, SQLite and Apple's on-device intelligence frameworks. No cloud AI services or telemetry. The semantic system that groups, explains and selects stories is named Angelia; [docs/ANGELIA.md](docs/ANGELIA.md) maps its twelve domains to the code.
+<p align="center">
+  <img alt="macOS 15 or later" src="https://img.shields.io/badge/macOS-15%2B-000000?logo=apple&logoColor=white">
+  <img alt="Swift 6" src="https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white">
+  <img alt="Apple silicon" src="https://img.shields.io/badge/Apple%20silicon-arm64-555555">
+  <a href="LICENSE"><img alt="License: Apache 2.0" src="https://img.shields.io/badge/License-Apache%202.0-blue"></a>
+</p>
+
+<p align="center">
+  <a href="#highlights">Highlights</a> ·
+  <a href="#story-experience">Story experience</a> ·
+  <a href="#reading">Reading</a> ·
+  <a href="#shortcuts--app-intents">Shortcuts</a> ·
+  <a href="#build-and-test">Build</a> ·
+  <a href="#install-and-versions">Install</a> ·
+  <a href="PRIVACY.md">Privacy</a>
+</p>
+
+<p align="center">
+  <img src="docs/images/today-dark.webp" width="900" alt="The Today edition in dark appearance: The Lead with a full-width photo, publisher count and original reports, above the Your Beat lane of story cards">
+</p>
+
+<p align="center"><em>Today opens as an edition: The Lead first, then lanes such as Your Beat.</em></p>
+
+<p align="center">
+  <img src="docs/images/briefing-light.webp" width="900" alt="Briefing in light appearance: regional story cards for LATAM and APAC with publisher counts and Developing labels, above Forward watch and an escalation timeline assessed on this Mac">
+</p>
+
+<p align="center"><em>Briefing balances publishers and categories, with publisher counts on grouped stories.</em></p>
+
+<!-- markdownlint-enable MD033 -->
+
+## Highlights
+
+- 🗞️ **Events, not duplicates.** Reports of one event are grouped into a card with its coverage and an overview, matched on device.
+- 📰 **Today as an edition.** The Lead, then In Motion, Your Beat, The Deep Read and Outside Your Usual when enough stories qualify, and The Latest with everything else.
+- 🧭 **Briefing.** A balanced selection across publishers and categories that prefers broader coverage.
+- 🌡️ **World Tension.** A reasoned, cited assessment of international headlines, made on this Mac.
+- 📖 **A real reader.** Selectable, paragraph-based publisher content, with generated summaries labelled and collapsed.
+- 🔒 **Local first.** SQLite on disk, a protected network gateway, App Sandbox and Hardened Runtime.
+
+The semantic system that groups, explains and selects stories is named Angelia; [docs/ANGELIA.md](docs/ANGELIA.md) maps its twelve domains to the code.
 
 ## Story experience
 
-- Group reports of one event into a card with its coverage and an overview using hybrid EventMatcher v15 (deterministic entity/lexical features and on-device CoreML `all-MiniLM-L6-v2` embeddings with a pair model for borderline pairs). Read and saved state stay with each publication.
-- Parsing powered by SwiftSoup (CSS metadata selection and bounded DOM repair) and FeedKit (typed RSS/Atom/JSON feed parsing with streaming XML security boundaries).
-- Keep stories visible regardless of importance. Today opens as an edition: The Lead, then In Motion, Your Beat, The Deep Read and Outside Your Usual when enough stories qualify, and The Latest with everything else. Unread, Saved Stories, History and search keep the list and grid. Briefing balances publishers/categories, then prefers broader coverage and existing importance ratings. Refresh never runs importance scoring or deletes stories for being minor.
-- Story banners the app draws itself, with the story photo, Save, Mark as Read and Open, honouring your notification settings and Focus, and background delivery triage.
-- Read multi-source overviews as publisher excerpts with source badges and passage citations, plus validated deterministic timelines and attributed perspectives. No model-written introduction or factual prose is generated for event overviews.
-- World Tension (methodology v3): on-device reasoned international headline assessment with four-factor cited explanations (`Novelty`, `Proximity to worst case`, `Reversibility`, `Scope of impact`), backed by a balanced 12-feed global panel.
-- Keep protected networking, local SQLite state and arm64 ad-hoc verification builds. English is the current release scope; non-English matching and spoken VoiceOver verification remain parked.
+- **Event grouping.** Group reports of one event into a card with its coverage and an overview using hybrid EventMatcher v15 (deterministic entity/lexical features and on-device CoreML `all-MiniLM-L6-v2` embeddings with a pair model for borderline pairs). Read and saved state stay with each publication.
+- **Parsing.** Powered by SwiftSoup (CSS metadata selection and bounded DOM repair) and FeedKit (typed RSS/Atom/JSON feed parsing with streaming XML security boundaries).
+- **Today and Briefing.** Keep stories visible regardless of importance. Today opens as an edition: The Lead, then In Motion, Your Beat, The Deep Read and Outside Your Usual when enough stories qualify, and The Latest with everything else. Unread, Saved Stories, History and search keep the list and grid. Briefing balances publishers/categories, then prefers broader coverage and existing importance ratings. Refresh never runs importance scoring or deletes stories for being minor.
+- **Story banners.** The app draws them itself, with the story photo, Save, Mark as Read and Open, honouring your notification settings and Focus, and background delivery triage.
+- **Overviews.** Read multi-source overviews as publisher excerpts with source badges and passage citations, plus validated deterministic timelines and attributed perspectives. No model-written introduction or factual prose is generated for event overviews.
+- **World Tension** (methodology v3): on-device reasoned international headline assessment with four-factor cited explanations (`Novelty`, `Proximity to worst case`, `Reversibility`, `Scope of impact`), backed by a balanced 12-feed global panel.
+- **Scope.** Keep protected networking, local SQLite state and arm64 ad-hoc verification builds. English is the current release scope; non-English matching and spoken VoiceOver verification remain parked.
 
 See the [acceptance audit](docs/audits/2026-10-18-post-wave2-release-acceptance.md), [notification attachments audit](docs/audits/2026-10-18-notification-attachments-and-overlap.md), [current plan status](docs/plans/2026-09-30-story-experience.md), [changelog](CHANGELOG.md) and [privacy policy](PRIVACY.md).
 
 ## Reading
 
-- An editorial list with an optional grid, system light/dark appearance, keyboard navigation and native glass controls.
-- Publisher content appears in a selectable, paragraph-based reader. Generated summaries are labelled and stay collapsed until opened.
-- Full feed content is used immediately. For summary-only feeds, the app fetches the article when opened, and an event overview may first fetch up to four of its articles when energy policy allows, each limited to four seconds; failed extraction leaves the feed preview and an explicit reason, with an in-app Web view and external browser option. Use **More Actions → Reload Reader Content** to refresh older cached extractions without clearing the library.
-- Atom namespaces, XHTML paragraphs, alternate links, relative URLs and distinct publication/update dates are supported. JSON `content_text` remains plain text.
-- Local SQLite persistence preserves saved stories, read history and extracted content. OPML imports and exports subscriptions. An opt-in starter catalog of 52 English-language feeds, verified on 31 October 2026, groups feeds into sets you can subscribe to; custom RSS keeps working. Feeds in other languages are parked until event matching supports them (#264).
-- Mute publisher hosts and topic words in Settings → Muting or from a story's context menu. Lists say how many stories muting hid and can show them again; Saved Stories and History are never filtered.
-- Ingestion uses cheap deterministic topic classification. Generative summaries run when the summary is expanded and AI is enabled, with deterministic fallbacks when Foundation Models is unavailable.
+- **Layout.** An editorial list with an optional grid, system light/dark appearance, keyboard navigation and native glass controls.
+- **Reader.** Publisher content appears in a selectable, paragraph-based reader. Generated summaries are labelled and stay collapsed until opened.
+- **Content.** Full feed content is used immediately. For summary-only feeds, the app fetches the article when opened, and an event overview may first fetch up to four of its articles when energy policy allows, each limited to four seconds; failed extraction leaves the feed preview and an explicit reason, with an in-app Web view and external browser option. Use **More Actions → Reload Reader Content** to refresh older cached extractions without clearing the library.
+- **Formats.** Atom namespaces, XHTML paragraphs, alternate links, relative URLs and distinct publication/update dates are supported. JSON `content_text` remains plain text.
+- **Library.** Local SQLite persistence preserves saved stories, read history and extracted content. OPML imports and exports subscriptions. An opt-in starter catalog of 52 English-language feeds, verified on 31 October 2026, groups feeds into sets you can subscribe to; custom RSS keeps working. Feeds in other languages are parked until event matching supports them (#264).
+- **Muting.** Mute publisher hosts and topic words in Settings → Muting or from a story's context menu. Lists say how many stories muting hid and can show them again; Saved Stories and History are never filtered.
+- **Summaries.** Ingestion uses cheap deterministic topic classification. Generative summaries run when the summary is expanded and AI is enabled, with deterministic fallbacks when Foundation Models is unavailable.
 
 Feed, image, extraction, update and protected Web preview requests use an on-device, loopback-only gateway that validates DNS answers and connects to approved numeric public addresses. The Web preview disables scripts and blocks local/IP-only resources before loading. Interactive publisher pages remain available in your browser.
 
