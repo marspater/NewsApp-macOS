@@ -43,6 +43,7 @@ extension NewsTests {
             ("testFocusIsRestoredWhenTheEditionChanges", { testTodayFocusRestore() }),
             ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
             ("testHeldEditionKeepsTagsEntriesAndNewEditionSortsLatest", { testTodayHeldEditionDetails() }),
+            ("testStoredEditionRestoresValidatesAndFallsBack", { try await testTodayStoredEdition() }),
             ("testConcurrentEvaluationMatchesSerial", { testTodayConcurrentEvaluationMatchesSerial() }),
             ("testLeadNeedsAPhotoAndLeftFeedsLeaveToday", { testTodayLeadPhotoAndLeftFeeds() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
@@ -1256,6 +1257,114 @@ extension NewsTests {
             "An applied update lays the edition out afresh")
         assertEqual(
             first.focusMap(latestColumns: 3).lanes.last?.columns, 3, "The Latest's grid columns reach the keyboard map")
+    }
+
+    /// #937: the last complete edition is laid out again at launch for the stories still listed, and anything that
+    /// makes it another page falls back to the fresh path.
+    static func testTodayStoredEdition() async throws {
+        func entries(_ ids: [String]) -> [FeedEntry] {
+            ids.map { .article(makeArticle(id: $0, title: $0, pubDate: referenceNow)) }
+        }
+        func story(_ id: String, _ lane: TodayLane) -> TodayStoryAssignment {
+            TodayStoryAssignment.unplaced(.article(makeArticle(id: id, title: id, pubDate: referenceNow))).placed(
+                in: lane, contentType: lane == .theDeepRead ? .explainer : nil)
+        }
+        func shape(_ edition: TodayEdition?) -> [String] {
+            (edition?.lanes ?? []).map { "\($0.lane.rawValue): \($0.stories.map(\.id).joined(separator: ","))" }
+        }
+        let plan = TodayEditionPlan(
+            lanes: [
+                TodayLaneResult(
+                    lane: .theLead, qualifies: true, entries: [story("a", .theLead), story("b", .theLead)]),
+                TodayLaneResult(lane: .theDeepRead, qualifies: true, entries: [story("c", .theDeepRead)]),
+                TodayLaneResult(lane: .yourBeat, qualifies: true, entries: [story("d", .yourBeat)]),
+                TodayLaneResult(lane: .theLatest, qualifies: true, entries: [story("e", .theLatest)]),
+            ])
+        let photo = URL(string: "https://images.example/a.jpg")!
+        var details = TodayCardDetails()
+        details.eventImages = ["a": photo, "b": URL(string: "https://images.example/b.jpg")!]
+        let fresh = TodayEdition.make(entries: entries(["a", "b", "c", "d", "e"]), plan: plan, details: details)
+        let identity = TodayStoredEdition.identity(
+            feedURLs: ["https://b.example/rss", "https://a.example/rss"], starredFeedURLs: [], interestsResetAt: nil)
+        assertEqual(
+            identity,
+            TodayStoredEdition.identity(
+                feedURLs: ["https://a.example/rss", "https://b.example/rss"], starredFeedURLs: [],
+                interestsResetAt: nil), "The same subscriptions in another order are the same reader")
+        let stored = try JSONDecoder().decode(
+            TodayStoredEdition.self,
+            from: JSONEncoder().encode(TodayStoredEdition(fresh, identity: identity, builtAt: referenceNow)))
+        func restore(
+            _ ids: [String], identity current: String? = nil, failed: Set<URL> = [], after seconds: TimeInterval = 60,
+            from edition: TodayStoredEdition? = nil
+        ) -> Result<TodayEdition, TodayStoredEdition.Rejection> {
+            (edition ?? stored).restored(
+                entries: entries(ids), identity: current ?? identity, failedImageURLs: failed,
+                now: referenceNow.addingTimeInterval(seconds))
+        }
+
+        let same = try restore(["a", "b", "c", "d", "e"]).get()
+        assertEqual(shape(same), shape(fresh), "The stored edition comes back with every story in its lane and order")
+        assertTrue(same.isRestored && !same.isAssigned, "A restored edition is marked, and is not one to store again")
+        assertTrue(same.hasSameArrangement(as: fresh), "A fresh edition of the same arrangement confirms it")
+        assertEqual(same.metadata["a"]?.imageURL, photo, "A Lead slide keeps the event photo its card showed")
+        assertEqual(same.metadata["c"]?.contentType, "Explainer", "A Deep Read card keeps its tag")
+
+        let changed = try restore(["a", "b", "d", "e", "new"]).get()
+        assertEqual(
+            shape(changed), ["The Lead: a,b", "Your Beat: d", "The Latest: e,new"],
+            "A story that left the list leaves its lane, and a story the edition never held joins The Latest")
+        assertFalse(changed.hasSameArrangement(as: fresh), "Another arrangement is not a confirmation")
+
+        let onePhoto = try restore(["a", "b", "c", "d", "e"], failed: [photo]).get()
+        assertEqual(onePhoto.lead.map(\.id), ["b"], "A slide whose photo failed to load leaves The Lead")
+        assertTrue(onePhoto.latest.map(\.id).contains("a"), "It stays on the page, in The Latest")
+
+        func rejection(_ result: Result<TodayEdition, TodayStoredEdition.Rejection>) -> String? {
+            if case .failure(let reason) = result { return reason.rawValue }
+            return nil
+        }
+        assertEqual(
+            rejection(restore(["a", "b", "c", "d", "e"], identity: "other")), "otherReader",
+            "Other subscriptions, stars or interests: the edition is not this reader's")
+        assertEqual(
+            rejection(restore(["a", "b", "c", "d", "e"], after: TodayStoredEdition.maximumAge + 1)), "tooOld",
+            "An edition older than Today's window is not shown")
+        var otherFormat = stored
+        otherFormat.version += 1
+        assertEqual(
+            rejection(restore(["a", "b", "c", "d", "e"], from: otherFormat)), "otherFormat",
+            "An edition another build wrote is not shown")
+        assertEqual(
+            rejection(restore(["d", "e", "x", "y"])), "storiesGone",
+            "An edition most of whose lane stories left the list describes another page")
+        assertEqual(
+            rejection(restore(["a", "b", "c", "d", "e"], failed: Set(details.eventImages.values))), "noLead",
+            "With no slide left, the fresh path lays the page out")
+
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: true, isTouched: true, awaitsNewDay: true), .confirmed,
+            "The same arrangement replaces the restored edition unseen")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: false, awaitsNewDay: false), .swapped,
+            "Another arrangement takes an untouched page")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: true, awaitsNewDay: false), .held,
+            "A page in use keeps its cards; the fresh edition waits behind the updates button")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: false, awaitsNewDay: true), .held,
+            "No swap while another day's page is on its way")
+
+        // The side file: nothing stored reads as nothing, a stored edition comes back, nil removes it.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        assertTrue(await db.storedTodayEdition() == nil, "A library without a stored edition takes the fresh path")
+        let data = try JSONEncoder().encode(stored)
+        try await db.storeTodayEdition(data)
+        assertEqual(await db.storedTodayEdition(), data, "The stored edition is read back")
+        try await db.storeTodayEdition(nil)
+        assertTrue(await db.storedTodayEdition() == nil, "Removing it leaves none")
+        await db.close()
     }
 
     /// A held edition keeps each card's tag, shows current entries, and a new edition's Latest stays newest first.

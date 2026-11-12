@@ -95,6 +95,10 @@ class FeedManager: NSObject, ObservableObject {
     /// A refresh is collecting stories or its stories are still being grouped into events. A page laid out now
     /// would show them one report each (#937).
     var isGroupingNewStories: Bool { refreshTask != nil || handsOverToGrouping || clusteringTask != nil }
+    /// A refresh has published stories that its grouping pass has not finished with. Narrower than
+    /// `isGroupingNewStories`: while a refresh is still collecting, the library holds only grouped stories, and an
+    /// edition laid out from it is complete.
+    private(set) var holdsUngroupedStories = false
     private var clusteringRunID: UUID?
     private var needsClusteringPass = false
     private var backgroundTimer: Timer?
@@ -961,6 +965,7 @@ class FeedManager: NSObject, ObservableObject {
         }
 
         // Publish one coherent snapshot per collection, including any committed prefix if it was cancelled.
+        holdsUngroupedStories = true
         await articleStore.refreshState()
         // A future date (#981) must not put a story first in the notification order.
         let sortClock = Date()
@@ -1044,6 +1049,7 @@ class FeedManager: NSObject, ObservableObject {
             guard let self, self.clusteringRunID == runID else { return }
             self.clusteringTask = nil
             self.clusteringRunID = nil
+            self.holdsUngroupedStories = false
             // A list that waited for the grouping (`isGroupingNewStories`) loads again now that it has ended.
             self.articleStore.noteEventsChanged()
             self.overviewWarmupTask?.cancel()

@@ -28,6 +28,10 @@ struct TodayEdition: Equatable, Sendable {
     var metadata: [String: StoryCardMetadata] = [:]
     /// The list generation this edition was built for (`ArticleListView.todayGeneration`).
     var generation = 0
+    /// Laid out afresh from a lane assignment that succeeded: the only kind kept for the next launch.
+    var isAssigned = false
+    /// Laid out from the edition kept at the last launch, while the fresh one is worked out (#937).
+    var isRestored = false
 
     func stories(in lane: TodayLane) -> [TodayStoryAssignment] {
         lanes.first { $0.lane == lane }?.stories ?? []
@@ -206,6 +210,38 @@ struct TodayReader: Sendable {
 }
 
 extension ArticleStore {
+    /// The last complete edition laid out for the stories listed now, or why it is not shown (#937). Off the main
+    /// actor; nil when nothing is stored.
+    func restoredTodayEdition(
+        entries: [FeedEntry], reader: TodayReader, generation: Int
+    ) async -> Result<TodayEdition, TodayStoredEdition.Rejection>? {
+        guard let data = await database.storedTodayEdition() else { return nil }
+        let identity = TodayStoredEdition.identity(
+            feedURLs: Array(reader.subscribedFeedURLs), starredFeedURLs: reader.starredFeedURLs,
+            interestsResetAt: reader.interestsResetAt)
+        let failed = reader.failedImageURLs
+        return await Task.detached(priority: .userInitiated) {
+            guard let stored = try? JSONDecoder().decode(TodayStoredEdition.self, from: data) else {
+                return .failure(.otherFormat)
+            }
+            return stored.restored(
+                entries: entries, identity: identity, failedImageURLs: failed, generation: generation)
+        }.value
+    }
+
+    /// Keeps a complete edition for the next launch. A failure only costs that launch its head start.
+    func storeTodayEdition(_ edition: TodayEdition, reader: TodayReader) async {
+        let identity = TodayStoredEdition.identity(
+            feedURLs: Array(reader.subscribedFeedURLs), starredFeedURLs: reader.starredFeedURLs,
+            interestsResetAt: reader.interestsResetAt)
+        let database = self.database
+        await Task.detached(priority: .utility) {
+            guard let data = try? JSONEncoder().encode(TodayStoredEdition(edition, identity: identity, builtAt: Date()))
+            else { return }
+            try? await database.storeTodayEdition(data)
+        }.value
+    }
+
     /// Assigns the listed stories to lanes and reads what their cards show, off the main actor. A failed read
     /// leaves every story in The Latest rather than an empty page.
     func todayEdition(
@@ -257,7 +293,9 @@ extension ArticleStore {
                     entries: entries, plan: plan, details: details, keeping: previous, generation: generation)
             }.value
             timer?.lap("layout", count: edition.lead.count)
-            return edition
+            var assigned = edition
+            assigned.isAssigned = previous == nil
+            return assigned
         } catch {
             return TodayEdition.make(
                 entries: entries, plan: TodayEditionPlan(lanes: []), keeping: previous, generation: generation)
