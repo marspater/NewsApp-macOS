@@ -43,15 +43,21 @@ public struct OverviewComposer: Sendable {
     /// Validates whether a fact candidate satisfies the quote grounding and passage invariants.
     /// Up to five Highlights, after a Kagi News story card: whole statements of five or more words, those sharing the
     /// most words with the coverage's headlines first, publisher order otherwise. Fragments such as "Earlier this
-    /// month." stay out; the timeline still sees every valid fact. A statement sharing most of its words with one
-    /// already chosen (wire copies) is skipped, and each publisher's best statement is chosen before any second one.
+    /// month.", feed footers and bare headings stay out; the timeline and the other sections still see every valid fact. A statement sharing most of its
+    /// words with one already chosen (wire copies) is skipped, and each publisher's best statement is chosen before any
+    /// second one: a publisher is its display name, so two articles of one site are one source (#1251).
     static func highlights(from facts: [PassageAnchoredFact], articles: [FeedArticle]) -> [PassageAnchoredFact] {
         func words(_ text: String) -> Set<String> {
             Set(TensionEventClassifier.words(text).filter { $0.count >= 4 })
         }
         let headline = words(articles.map(\.title).joined(separator: " "))
+        let publishers = Dictionary(
+            articles.map { ($0.id, EventFeedSummary.displaySource($0.source).lowercased()) },
+            uniquingKeysWith: { first, _ in first })
+        func publisher(_ fact: PassageAnchoredFact) -> String { publishers[fact.articleID] ?? fact.articleID }
         let substantive = facts.enumerated().filter {
             $0.element.statement.split(whereSeparator: \.isWhitespace).count >= 5
+                && !isSelfAttribution($0.element.statement) && !isHeading($0.element.statement)
         }
         let ranked = substantive.map { (offset: $0.offset, fact: $0.element, words: words($0.element.statement)) }
             .sorted { left, right in
@@ -75,13 +81,63 @@ public struct OverviewComposer: Sendable {
         var sources = Set<String>()
         for firstPerSource in [true, false] {
             for (index, entry) in ranked.enumerated() where chosen.count < 5 && !chosen.contains(index) {
-                if firstPerSource && sources.contains(entry.fact.articleID) { continue }
+                if firstPerSource && sources.contains(publisher(entry.fact)) { continue }
                 guard !isRepeat(entry.words) else { continue }
                 chosen.append(index)
-                sources.insert(entry.fact.articleID)
+                sources.insert(publisher(entry.fact))
             }
         }
         return chosen.sorted().map { ranked[$0].fact }
+    }
+
+    /// A feed's footer about the article itself appearing on a site: the sentence opens with the self-reference
+    /// ("This article, "…" first appeared on …", "This post was originally published on …", "The post … appeared first on
+    /// …", with "post" in lower case, so a newspaper called the Post is no footer) and ends with the site's name, with no date, weekday or further clause after it. It says nothing about the
+    /// event, so it never takes a Highlights slot; it stays in the fact pool, so the timeline, perspectives and
+    /// thematic angle keep their inputs (#1251). A report about another publication ("The Post reported that the video first
+    /// appeared on Telegram on Tuesday.", "The article was published on 3 November in Nature.") stays a fact.
+    private static let selfAttribution: NSRegularExpression = {
+        let opening =
+            #"^\s*(?:this\s+(?:article|post|story|entry)\b.*?\b(?:(?:first|originally)\s+(?:appeared|published)"#
+            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+(?-i:post)\b.*?\b(?:appeared\s+first|(?:first|originally)\s+appeared))"#
+        let months = "january|february|march|april|may|june|july|august|september|october|november|december"
+        let days = "monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday"
+        // A site name ends the sentence: no date, weekday or clause ("… on Harbour Daily but officials denied it.").
+        let clauses = "but|which|while|because|although|though|after|before|when|whereas|who|that|so|yet"
+        let site =
+            #"\s+(?:on|at)\s+(?!.*\b(?:"# + months + "|" + days + "|" + clauses + #")\b)[^,;:]{1,60}?[.!]?\s*$"#
+        guard let expression = try? NSRegularExpression(pattern: opening + site, options: [.caseInsensitive]) else {
+            preconditionFailure("The self-attribution pattern is valid")
+        }
+        return expression
+    }()
+
+    static func isSelfAttribution(_ sentence: String) -> Bool {
+        selfAttribution.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
+    }
+
+    /// A heading or label rather than a statement ("iPad mini (eighth generation, 2026)", "Related Roundups: …"): no
+    /// closing ".", "!", "?" or "…" (also inside a closing quote or bracket), a label's shape (a colon, a bracket, or
+    /// mostly capitalised words) and no verb. No one condition is enough: feed descriptions often lack a final full
+    /// stop, and the tagger reads some headline verbs as nouns ("Sri Lanka arrests former director …") (#1251).
+    static func isHeading(_ statement: String) -> Bool {
+        let text = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.range(of: #"[.!?…]["'”’)\]]*$"#, options: .regularExpression) == nil else { return false }
+        let words = text.split(whereSeparator: \.isWhitespace).filter { $0.count >= 4 && $0.first?.isLetter == true }
+        let capitalised = words.filter { $0.first?.isUppercase == true }.count
+        let labelShape = text.contains(":") || text.contains("(") || (!words.isEmpty && capitalised * 2 >= words.count)
+        guard labelShape else { return false }
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+        var hasVerb = false
+        tagger.enumerateTags(
+            in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
+            options: [.omitPunctuation, .omitWhitespace]
+        ) { tag, _ in
+            hasVerb = tag == .verb
+            return !hasVerb
+        }
+        return !hasVerb
     }
 
     /// Ensures a highlight or overview sentence ends with terminal punctuation.

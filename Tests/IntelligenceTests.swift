@@ -58,6 +58,10 @@ extension NewsTests {
             ("testPromptInjectionDefenses", { try await testPromptInjectionDefenses(fixtureHost: fixtureHost) }),
             ("testPassageAnchoredFactExtraction", { try await testPassageAnchoredFactExtraction() }),
             (
+                "testHighlightsSkipFeedBoilerplateAndHeadings",
+                { try testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: fixtureHost) }
+            ),
+            (
                 "testOverviewCompositionFromVerifiedFacts",
                 { try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost) }
             ),
@@ -3019,6 +3023,175 @@ extension NewsTests {
         assertTrue(
             prompt.contains("Do not synthesize or summarize into an overview yet"),
             "Prompt enforces separation of fact extraction before summarizing")
+    }
+
+    /// #1251: feed self-attribution never becomes a fact, headings never take a Highlights slot, and the first pass gives
+    /// each publisher (not each article) its best statement, so a material statement is not displaced.
+    static func testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: String = "example.com") throws {
+        print("  - Testing Highlights without feed boilerplate or headings, one first pick per publisher (#1251)...")
+        // Boilerplate: the self-referential forms go, whatever the site; crediting another outlet's report stays.
+        assertTrue(
+            OverviewComposer.isSelfAttribution(
+                "This article, \" iOS 27.3 Beta 2 Is Out: What's New in v27.3.1 \" first appeared on Example.com."),
+            "The article form with periods in its title is self-attribution")
+        assertTrue(
+            OverviewComposer.isSelfAttribution(
+                "The post Port strike enters day three appeared first on Harbour Daily."),
+            "The post form is self-attribution")
+        assertTrue(
+            OverviewComposer.isSelfAttribution(
+                "The post The Case for a Bubble at Life’s Start first appeared on Quanta Magazine"),
+            "The post form with first appeared and no final period is self-attribution")
+        assertFalse(
+            OverviewComposer.isSelfAttribution("The leak was first published by The Information on Monday."),
+            "Crediting another outlet's report is a fact")
+        assertFalse(
+            OverviewComposer.isSelfAttribution("The report first appeared in Le Monde, which cited two ministers."),
+            "Another report's first appearance is a fact")
+        for sentence in [
+            "The Post reported that the video first appeared on Telegram on Tuesday.",
+            "The story first appeared on X before the ministry confirmed it.",
+            "The article was published on 3 November in Nature.",
+            "This story was first published on Monday by the regional broadcaster.",
+            "The Post reported that the video appeared first on Telegram.",
+            "The post was published on Tuesday and drew criticism from opposition leaders.",
+            "This post was originally published on Harbour Daily but officials denied the claim.",
+        ] {
+            assertFalse(
+                OverviewComposer.isSelfAttribution(sentence), "A report about a publication is a fact: \(sentence)")
+        }
+        assertTrue(
+            OverviewComposer.isSelfAttribution("This post was originally published on Harbour Daily"),
+            "The originally-published footer without a final period is self-attribution")
+        let feed = EvidencePassage(
+            id: "feed-p", articleID: "feed-a",
+            text: "Apple released the second beta to developers today. "
+                + "This article, \"iOS 27.3 Beta 2 Now Available\" first appeared on Example.com. "
+                + "The leak was first published by The Information on Monday.",
+            ordinal: 0)
+        let feedFacts = PassageFactExtractor.deterministicExtract(passages: [feed]).map(\.statement)
+        assertTrue(feedFacts.contains { $0.contains("first appeared on") }, "The fact pool keeps the footer")
+        assertTrue(feedFacts.contains { $0.contains("first published by") }, "Another outlet's credit is extracted")
+
+        // Headings: a verbless label without a full stop goes; a verbless sentence with one and a feed line with a verb
+        // but no final period stay.
+        assertTrue(OverviewComposer.isHeading("iPad mini (eighth generation, 2026)"), "A product label is a heading")
+        assertTrue(OverviewComposer.isHeading("Related Roundups: iOS 27, iPadOS 27"), "A roundup label is a heading")
+        assertFalse(
+            OverviewComposer.isHeading("Three people dead and dozens injured in the overnight blast."),
+            "A verbless sentence with a full stop is a statement")
+        assertFalse(
+            OverviewComposer.isHeading("The minister announced new sanctions against the shipping firms on Tuesday"),
+            "A feed description with a verb and no final period is a statement")
+        assertFalse(
+            OverviewComposer.isHeading("Three people dead and dozens injured in overnight blast near the port"),
+            "A sentence-case headline line without a verb or full stop is a statement")
+        assertTrue(
+            OverviewComposer.isHeading("Pre-order 14-inch MacBook Pro with PROLED XDR Display"),
+            "A title-case call to action is a heading")
+
+        // First pass per publisher: two articles of one publisher and a second publisher.
+        func article(_ id: String, _ source: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Port strike shuts container terminals", link: "https://\(fixtureHost)/\(id)",
+                guid: id, description: "", pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: source)
+        }
+        let articles = [article("d1", "Harbour Daily"), article("d2", "Harbour Daily"), article("w1", "Coast Wire")]
+        func fact(_ statement: String, _ articleID: String) -> PassageAnchoredFact {
+            PassageAnchoredFact(
+                statement: statement, passageID: "p-\(statement.prefix(8))", quote: statement, articleID: articleID)
+        }
+        let pool = [
+            fact("The port strike shuts every container terminal on the coast.", "d1"),
+            fact("The port strike entered its third day with container ships waiting.", "d1"),
+            fact("Union leaders said the port strike would continue through the weekend.", "d1"),
+            fact("Negotiators for the port authority met union leaders on Thursday evening.", "d1"),
+            fact("Here is everything you need to know about the port situation now.", "d2"),
+            fact("Shipping lines diverted vessels to other harbours across the region.", "w1"),
+        ]
+        let chosen = OverviewComposer.highlights(from: pool, articles: articles).map(\.articleID)
+        assertTrue(chosen.contains("w1"), "The second publisher's best statement gets in")
+        assertFalse(chosen.contains("d2"), "A second article of the same publisher is not a second source")
+        assertEqual(chosen.filter { $0 == "d1" }.count, 4, "The first publisher's next-best statements get in first")
+
+        // A material statement displaced by boilerplate and a teaser surfaces, and every Highlight cites verbatim text.
+        let members = [article("m1", "Example Rumors"), article("m2", "Example Rumors"), article("n1", "Nine Daily")]
+        let passages = [
+            EvidencePassage(
+                id: "m1-p", articleID: "m1",
+                text: "Apple today announced that the first port strike beta will be released next week. "
+                    + "Apple said the beta will be released on Wednesday, November 4, in every region. "
+                    + "This article, \"Port Strike Beta Coming Next Week\" first appeared on Example Rumors.",
+                ordinal: 0),
+            EvidencePassage(
+                id: "m2-p", articleID: "m2",
+                text: "But work on the strike beta is already well underway, here is when to expect the next update. "
+                    + "This article, \"Port Strike Features in v2.1\" first appeared on Example Rumors.",
+                ordinal: 1),
+            EvidencePassage(
+                id: "n1-p", articleID: "n1",
+                text:
+                    "Apple took the unusual step of confirming when its next beta will arrive at container terminals.",
+                ordinal: 2),
+        ]
+        let document = OverviewComposer.composeOverview(
+            eventID: "e-1251", eventTitle: "Port strike",
+            verifiedFacts: PassageFactExtractor.deterministicExtract(passages: passages),
+            passages: passages, articles: members)
+        assertTrue(
+            document.facts.contains { $0.text.contains("Wednesday, November 4") },
+            "The material statement is a Highlight")
+        assertFalse(document.facts.contains { $0.text.contains("first appeared") }, "No boilerplate Highlight")
+
+        // Only Highlights change: the timeline and the thematic angle read the whole fact pool, footers and headings
+        // included, and perspectives differ from their extraction only by the Highlights dedupe.
+        let factPool = PassageFactExtractor.deterministicExtract(passages: passages)
+        assertTrue(factPool.contains { OverviewComposer.isSelfAttribution($0.statement) }, "The pool holds the footers")
+        let valid = factPool.filter { OverviewComposer.validateFactForOverview($0, against: passages).isValid }
+        assertEqual(
+            document.timeline,
+            OverviewTimelineBuilder.build(facts: valid, passages: passages, articles: members).items,
+            "The timeline is built from the unchanged fact pool")
+        var citations: [String: OverviewCitation] = [:]
+        for passage in passages {
+            citations["cite_\(passage.id)"] = OverviewCitation(
+                id: "cite_\(passage.id)", articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: passage.text)
+        }
+        // The angle reuses Highlight citation ids where it can, so only its content is compared.
+        let angle = OverviewThematicAngleExtractor.extractThematicAngle(
+            facts: valid, passages: passages, existingCitations: citations)
+        assertEqual(document.thematicAngle?.title, angle?.title, "The thematic angle reads the same pool")
+        assertEqual(document.thematicAngle?.summary, angle?.summary, "The thematic angle's summary is unchanged")
+        let extracted = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: passages, articles: members, existingCitations: citations)
+        let picked = OverviewComposer.highlights(from: valid, articles: members)
+        assertEqual(
+            document.perspectives.map(\.position),
+            OverviewComposer.deduplicatePerspectives(extracted, against: picked.map(\.statement) + picked.map(\.quote))
+                .map(\.position),
+            "Perspectives differ from their extraction only by the Highlights dedupe")
+
+        // Overviews stored under analysis version 12 are regenerated with these Highlights.
+        let stored = EventOverviewDocument(
+            id: document.id, eventID: document.eventID,
+            version: OverviewVersionContext(
+                membershipVersion: document.membershipVersion, inputTextHash: document.inputTextHash,
+                analysisVersion: 12),
+            content: document.content, provenance: document.provenance)
+        assertTrue(
+            stored.isStale(currentMembershipVersion: document.membershipVersion),
+            "A version-12 overview is stale under version \(EventOverviewDocument.currentAnalysisVersion)")
+        let byID = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0) })
+        for highlight in document.facts {
+            for id in highlight.citationIDs {
+                guard let citation = document.citations[id], let passage = byID[citation.passageID] else {
+                    return assertTrue(false, "Highlight citation \(id) resolves to a passage")
+                }
+                assertTrue(passage.text.contains(citation.quote), "The cited quote is verbatim in its passage")
+                assertEqual(citation.articleID, passage.articleID, "The citation names its passage's article")
+            }
+        }
     }
 
     static func testOverviewCompositionFromVerifiedFacts(fixtureHost: String = "example.com") async throws {

@@ -32,17 +32,100 @@ extension NativeSuites {
         @Test func aIDisabledBehavior() async { await Self.testAIDisabledBehavior() }
         @Test func cancellationAndSupersession() async { await Self.testCancellationAndSupersession() }
         @Test func retainedDeterministicSections() { Self.testRetainedDeterministicSections() }
+        @Test func highlightSelection() { Self.testHighlightSelection() }
+    }
+}
+
+extension NativeSuites.PublisherExcerptSuite {
+    /// #1251: feed footers and headings never take a Highlights slot, the first pass takes one pick per publisher, and
+    /// the fact pool the other sections read is unchanged.
+    static func testHighlightSelection() {
+        print("  - Testing Highlight selection without feed footers or headings, one first pick per publisher...")
+        expectTrue(
+            OverviewComposer.isSelfAttribution(
+                "This article, \" iOS 27.3 Beta 2 Is Out: What's New in v27.3.1 \" first appeared on Example.com."),
+            "The article footer with periods in its title")
+        expectTrue(
+            OverviewComposer.isSelfAttribution(
+                "The post Port strike enters day three appeared first on Harbour Daily."),
+            "The post footer")
+        for sentence in [
+            "The leak was first published by The Information on Monday.",
+            "The Post reported that the video appeared first on Telegram.",
+            "The article was published on 3 November in Nature.",
+            "The post was published on Tuesday and drew criticism from opposition leaders.",
+            "This post was originally published on Harbour Daily but officials denied the claim.",
+        ] {
+            expectTrue(!OverviewComposer.isSelfAttribution(sentence), "A report about a publication: \(sentence)")
+        }
+        expectTrue(OverviewComposer.isHeading("iPad mini (eighth generation, 2026)"), "A product label is a heading")
+        expectTrue(
+            !OverviewComposer.isHeading("Sri Lanka arrests former director Varma in corruption inquiry"),
+            "A sentence-case headline line is a statement")
+        expectTrue(
+            !OverviewComposer.isHeading("The minister announced new sanctions against the shipping firms on Tuesday"),
+            "A feed line with a verb and no final period is a statement")
+
+        func article(_ id: String, _ source: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Port strike shuts container terminals", link: "https://example.com/\(id)",
+                guid: id, description: "", pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: source)
+        }
+        let articles = [article("d1", "Harbour Daily"), article("d2", "Harbour Daily"), article("w1", "Coast Wire")]
+        func fact(_ statement: String, _ articleID: String) -> PassageAnchoredFact {
+            PassageAnchoredFact(
+                statement: statement, passageID: "p-\(statement.prefix(8))", quote: statement, articleID: articleID)
+        }
+        let pool = [
+            fact("The port strike shuts every container terminal on the coast.", "d1"),
+            fact("The port strike entered its third day with container ships waiting.", "d1"),
+            fact("Union leaders said the port strike would continue through the weekend.", "d1"),
+            fact("Negotiators for the port authority met union leaders on Thursday evening.", "d1"),
+            fact("Here is everything you need to know about the port situation now.", "d2"),
+            fact("Shipping lines diverted vessels to other harbours across the region.", "w1"),
+            fact("This article, \"Port Strike Day Three\" first appeared on Harbour Daily.", "d1"),
+        ]
+        let chosen = OverviewComposer.highlights(from: pool, articles: articles).map(\.articleID)
+        expectTrue(chosen.contains("w1"), "The second publisher's best statement gets in")
+        expectTrue(!chosen.contains("d2"), "A second article of one publisher is not a second source")
+
+        let passages = [
+            EvidencePassage(
+                id: "m1-p", articleID: "d1",
+                text: "The port strike shuts every container terminal on the coast. "
+                    + "This article, \"Port Strike Day Three\" first appeared on Harbour Daily.",
+                ordinal: 0),
+            EvidencePassage(
+                id: "w1-p", articleID: "w1",
+                text: "Shipping lines diverted vessels to other harbours across the region.", ordinal: 1),
+        ]
+        let facts = PassageFactExtractor.deterministicExtract(passages: passages)
+        expectTrue(
+            facts.contains { OverviewComposer.isSelfAttribution($0.statement) }, "The fact pool keeps the footer")
+        let document = OverviewComposer.composeOverview(
+            eventID: "e-1251", eventTitle: "Port strike", verifiedFacts: facts, passages: passages,
+            articles: [articles[0], articles[2]])
+        expectTrue(!document.facts.contains { $0.text.contains("first appeared") }, "No footer Highlight")
+        for highlight in document.facts {
+            for id in highlight.citationIDs {
+                let citation = document.citations[id]
+                let passage = passages.first { $0.id == citation?.passageID }
+                expectTrue(
+                    citation.map { passage?.text.contains($0.quote) == true } == true,
+                    "Every Highlight cites verbatim passage text")
+            }
+        }
     }
 }
 
 extension NativeSuites.PublisherExcerptSuite {
     // MARK: - 1. Version Bump
     static func testCurrentAnalysisVersionBumped() {
-        print("  - Testing current analysis version is 12...")
+        print("  - Testing current analysis version is 13...")
         expectTrue(
-            EventOverviewDocument.currentAnalysisVersion == 12,
-            "EventOverviewDocument.currentAnalysisVersion is 12: overviews cached before publisher excerpts (11) and the"
-                + " Industry Impact story check (12) recompute")
+            EventOverviewDocument.currentAnalysisVersion == 13,
+            "EventOverviewDocument.currentAnalysisVersion is 13: overviews cached before publisher excerpts (11), the"
+                + " Industry Impact story check (12) and the Highlight cleanup (13) recompute")
     }
 
     // MARK: - 2. Exact Excerpt / Citation Correspondence
