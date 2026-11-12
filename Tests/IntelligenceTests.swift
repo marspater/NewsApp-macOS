@@ -4617,6 +4617,8 @@ extension NewsTests {
         assertTrue(yearless?.isPlan == true, "A plan's quarter without a year is a plan")
         assertEqual(anchorText("Sales fell in the second quarter."), nil, "A quarter without a year needs a plan")
         assertEqual(anchorText("The plant is expected to open in 2028."), "2028", "A plan's later year")
+        assertEqual(anchorText("The company plans to cut 2040 jobs."), nil, "A count in a plan sentence is no year")
+        assertEqual(anchorText("The utility plans to close the plant by 2035."), "2035", "A plan year after by")
         assertEqual(anchorText("The 2024 decision still stands."), nil, "A bare year outside a plan is no anchor")
         assertEqual(anchorText("The vote at 09:00 UTC followed talks last night."), nil, "Two anchors are ambiguous")
 
@@ -4642,6 +4644,45 @@ extension NewsTests {
             OverviewTimelineBuilder.build(facts: twoTimes, passages: passages, articles: [article]).items.map(
                 \.dateText),
             ["06:14 UTC", "09:30 UTC"], "Two times of one day are two items, in the order the source gives them")
+
+        // Anchor reprints merge, and one wording from two publications is one distinct date, not two.
+        let later = FeedArticle(
+            storedID: "anchor-b", title: "Quake follow-up", link: "https://\(fixtureHost)/anchor-b", guid: "anchor-b",
+            description: "", pubDate: published.addingTimeInterval(5 * 3600), source: "Daily")
+        let reprint = "The quake struck at 06:14 UTC along the coast."
+        let morning = ["Rescuers arrived this morning.", "Aid convoys left this morning."]
+        func fact(_ id: String, _ text: String, _ source: FeedArticle) -> PassageAnchoredFact {
+            PassageAnchoredFact(id: id, statement: text, passageID: "p-\(id)", quote: text, articleID: source.id)
+        }
+        let merged = OverviewTimelineBuilder.build(
+            facts: [fact("r1", reprint, article), fact("r2", reprint, later), fact("d1", sentences[3], article)],
+            passages: [], articles: [article, later])
+        assertEqual(merged.items.count, 2, "A reprinted anchor sentence is one item")
+        assertEqual(merged.items.last?.citationIDs.count, 2, "The reprinted anchor keeps both sources")
+        assertTrue(
+            OverviewTimelineBuilder.build(
+                facts: [fact("m1", morning[0], article), fact("m2", morning[1], later)], passages: [],
+                articles: [article, later]
+            ).items.isEmpty, "The same anchor wording from two publications is one date, not a timeline")
+
+        // A stored extractor row whose yearless date was parsed with the day as year (0002) neither orders nor counts.
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let misparsed = utc.date(from: DateComponents(year: 2, month: 11, day: 1))!.timeIntervalSinceReferenceDate
+        let storedRow = """
+            {"id":"tl_x","dateText":"November 2","summary":"Talks resumed.","citationIDs":["c"],"isFuturePlan":false,
+             "eventDate":\(misparsed),"publicationDate":\(published.timeIntervalSinceReferenceDate)}
+            """
+        let misparsedItem = try JSONDecoder().decode(OverviewTimelineItem.self, from: Data(storedRow.utf8))
+        assertEqual(misparsedItem.eventDate, nil, "A legacy event date in year 2 is dropped at decode")
+        assertEqual(misparsedItem.dateText, "November 2", "The stated text stays")
+        assertEqual(
+            BriefingTimelineData.orderingDate(of: misparsedItem), published,
+            "Briefing orders it by its publication date, never by year 2")
+        let current = OverviewTimelineItem(
+            id: "c", dateText: "Nov 2", summary: "x", eventDate: Date(timeIntervalSinceReferenceDate: misparsed))
+        let reencoded = try JSONDecoder().decode(OverviewTimelineItem.self, from: JSONEncoder().encode(current))
+        assertTrue(reencoded.eventDate != nil, "An item with a kind keeps its event date as stored")
 
         // Legacy classification lives with the model (no builder dependency) and is the builder's definition.
         for text in [

@@ -149,8 +149,10 @@ enum OverviewTimelineBuilder {
             } else {
                 continue
             }
-            // Reprints of one sentence become one item with several sources.
-            let key = "\(entry.resolved.timeIntervalSince1970)|\(entry.precision)|\(normalized(fact.quote))"
+            // Reprints of one sentence become one item with several sources. An anchor's placement is its article's
+            // publication time, so its reprints are matched by wording instead.
+            let when = entry.kind == .anchor ? entry.dateText.lowercased() : "\(entry.resolved.timeIntervalSince1970)"
+            let key = "\(when)|\(entry.precision)|\(normalized(fact.quote))"
             if let index = entryByKey[key] {
                 entries[index].facts.append(fact)
                 continue
@@ -158,11 +160,14 @@ enum OverviewTimelineBuilder {
             entryByKey[key] = entries.count
             entries.append(entry)
         }
-        // Two different anchors placed on one day ("06:14 UTC", "09:00 UTC") are two times, not one date.
+        // An anchor counts by its wording: two times ("06:14 UTC", "09:30 UTC") are two, and the same words from two
+        // publications ("this morning") are one, whatever the publication times.
         let distinct = Set(
             entries.map {
-                "\($0.resolved.timeIntervalSince1970)|\($0.precision)|\($0.kind == .anchor ? $0.dateText.lowercased() : "")"
+                $0.kind == .anchor
+                    ? "anchor|\($0.dateText.lowercased())" : "\($0.resolved.timeIntervalSince1970)|\($0.precision)"
             })
+
         guard distinct.count >= minimumDistinctDates
         else {
             return Timeline()

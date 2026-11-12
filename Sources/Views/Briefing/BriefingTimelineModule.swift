@@ -46,9 +46,21 @@ struct BriefingTimelineData: Equatable, Sendable {
 
     /// Every timeline of the story's live events as one, keeping the first item of each identical summary.
     /// Plans, undated and future items are dropped first, so they never hide a dated past copy of the same summary.
-    static func merged(_ timelines: [[OverviewTimelineItem]], now: Date) -> [OverviewTimelineItem] {
+    /// Item ids are only unique within one overview (`timeline_1`…), so each is prefixed with its event id: the rows
+    /// are identified by it (#1241).
+    static func merged(
+        _ timelines: [(eventID: String, items: [OverviewTimelineItem])], now: Date
+    ) -> [OverviewTimelineItem] {
         var seen = Set<String>()
-        return timelines.joined().filter { item in
+        return timelines.flatMap { timeline in
+            timeline.items.map { item in
+                OverviewTimelineItem(
+                    id: "\(timeline.eventID)/\(item.id)", dateText: item.dateText, dateKind: item.dateKind,
+                    summary: item.summary, citationIDs: item.citationIDs, isFuturePlan: item.isFuturePlan,
+                    eventDate: item.eventDate, publicationDate: item.publicationDate,
+                    orderingDateMayHoldInferredYear: item.orderingDateMayHoldInferredYear)
+            }
+        }.filter { item in
             guard !item.isFuturePlan, let date = orderingDate(of: item), date <= now else {
                 return false
             }
@@ -92,13 +104,13 @@ struct BriefingTimelineData: Equatable, Sendable {
         let overviews = await BriefingOverviews.load(context.entries, store: store)
         var threads: [(Int, Thread)] = []
         for (index, pair) in overviews.enumerated() where !Task.isCancelled {
-            var timelines = [pair.1.timeline]
+            var timelines = [(eventID: pair.1.eventID, items: pair.1.timeline)]
             if case .event(let summary, _, _) = pair.0,
                 let storyEvents = try? await store.database.storyEventIDs(summary.eventID)
             {
                 for eventID in storyEvents where eventID != summary.eventID {
                     if let overview = try? await store.fetchEventOverview(eventID: eventID) {
-                        timelines.append(overview.timeline)
+                        timelines.append((eventID: overview.eventID, items: overview.timeline))
                     }
                 }
             }

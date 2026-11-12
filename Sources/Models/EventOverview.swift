@@ -223,7 +223,9 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         let storedText = try container.decode(String.self, forKey: .dateText)
-        if let kind = try container.decodeIfPresent(DateKind.self, forKey: .dateKind) {
+        let storedKind = try container.decodeIfPresent(DateKind.self, forKey: .dateKind)
+        let hasKind = storedKind != nil
+        if let kind = storedKind {
             dateKind = kind
             dateText = storedText
         } else {
@@ -234,10 +236,15 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
             dateText = isPlaceholder ? "" : storedText
             dateKind = Self.isAnchorText(storedText) ? .anchor : .stated
         }
+        let storedEventDate = try container.decodeIfPresent(Date.self, forKey: .eventDate)
+        // The former extractor parsed a yearless "November 2" with `MMMM yyyy`, which stored the day as the year
+        // (0002-11-01). Such a date neither orders nor counts anything, so a stored item without a kind drops a year
+        // before 100.
+        let misparsed = storedEventDate.map { Self.legacyCalendar.component(.year, from: $0) < 100 } ?? false
+        eventDate = !hasKind && misparsed ? nil : storedEventDate
         summary = try container.decode(String.self, forKey: .summary)
         citationIDs = try container.decode([String].self, forKey: .citationIDs)
         isFuturePlan = try container.decode(Bool.self, forKey: .isFuturePlan)
-        eventDate = try container.decodeIfPresent(Date.self, forKey: .eventDate)
         publicationDate = try container.decodeIfPresent(Date.self, forKey: .publicationDate)
         orderingDateMayHoldInferredYear = try container.decodeIfPresent(
             Date.self, forKey: .orderingDateMayHoldInferredYear)
@@ -254,19 +261,33 @@ extension OverviewTimelineItem {
         #"\b(?<ordinal>first|second|third|fourth)\s+quarter(?:\s+of\s+(?<oyear>(?:19|20)\d{2}))?\b"#,
     ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
 
-    /// A bare year a plan states ("in 2027"); an anchor only in a sentence that states a plan.
+    /// A year a plan states after a preposition ("in 2027", "by 2030"); an anchor only in a sentence that states a
+    /// plan. A bare number ("plans to cut 2040 jobs") is no year.
     static let planYearExpression: NSRegularExpression = {
-        guard let expression = try? NSRegularExpression(pattern: #"\b(?:in\s+)?(?<year>(?:19|20)\d{2})\b"#) else {
+        guard
+            let expression = try? NSRegularExpression(
+                pattern: #"\b(?:in|by|until)\s+(?<year>(?:19|20)\d{2})\b"#, options: [.caseInsensitive])
+        else {
             preconditionFailure("The plan year expression is a valid pattern")
         }
         return expression
+    }()
+
+    static let legacyCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? calendar.timeZone
+        return calendar
     }()
 
     /// Whether `text` is, in full, an anchor rather than a calendar date.
     static func isAnchorText(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let range = NSRange(trimmed.startIndex..., in: trimmed)
-        return (anchorExpressions + [planYearExpression]).contains {
+        // The former extractor also stored a plan's bare year ("2028", "in 2028").
+        if trimmed.range(of: #"^(?:in\s+)?(?:19|20)\d{2}$"#, options: [.regularExpression, .caseInsensitive]) != nil {
+            return true
+        }
+        return anchorExpressions.contains {
             $0.firstMatch(in: trimmed, options: .anchored, range: range)?.range == range
         }
     }

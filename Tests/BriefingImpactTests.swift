@@ -247,18 +247,45 @@ enum BriefingImpactTests {
             OverviewTimelineItem(id: "x", dateText: "Mon", summary: "First report", eventDate: now - 3 * day),
             OverviewTimelineItem(id: "4", dateText: "Thu", summary: "Talks begin", eventDate: now - day / 2),
         ]
-        let merged = BriefingTimelineData.merged([timeline, other], now: now)
-        check(merged.filter { $0.summary == "First report" }.map(\.id) == ["1"], "identical summaries merge once")
+        let merged = BriefingTimelineData.merged([("a", timeline), ("b", other)], now: now)
+        check(merged.filter { $0.summary == "First report" }.map(\.id) == ["a/1"], "identical summaries merge once")
         check(
-            BriefingTimelineData.items(merged, now: now)?.map(\.id) == ["1", "2", "3", "4"],
+            BriefingTimelineData.items(merged, now: now)?.map(\.id) == ["a/1", "a/2", "a/3", "b/4"],
             "both events' timelines in date order")
+        // #1241: every overview numbers its items from timeline_1, so ids are prefixed with the event once merged.
+        let twin = BriefingTimelineData.merged(
+            [
+                (
+                    "e1",
+                    [
+                        OverviewTimelineItem(
+                            id: "timeline_1", dateText: "Mon", summary: "Port closed", eventDate: now - 2 * day)
+                    ]
+                ),
+                (
+                    "e2",
+                    [
+                        OverviewTimelineItem(
+                            id: "timeline_1", dateText: "Tue", summary: "Port reopened", eventDate: now - day)
+                    ]
+                ),
+            ], now: now)
+        check(
+            Set(twin.map(\.id)).count == 2 && twin.map(\.id) == ["e1/timeline_1", "e2/timeline_1"],
+            "merged rows of several events have unique, stable ids")
         let shadowed = BriefingTimelineData.merged(
             [
-                [OverviewTimelineItem(id: "plan", dateText: "Soon", summary: "Escorts begin", isFuturePlan: true)],
-                [OverviewTimelineItem(id: "undated", dateText: "", summary: "Escorts begin")],
-                [OverviewTimelineItem(id: "real", dateText: "Thu", summary: "Escorts begin", eventDate: now - day)],
+                (
+                    "p",
+                    [OverviewTimelineItem(id: "plan", dateText: "Soon", summary: "Escorts begin", isFuturePlan: true)]
+                ),
+                ("u", [OverviewTimelineItem(id: "undated", dateText: "", summary: "Escorts begin")]),
+                (
+                    "r",
+                    [OverviewTimelineItem(id: "real", dateText: "Thu", summary: "Escorts begin", eventDate: now - day)]
+                ),
             ], now: now)
-        check(shadowed.map(\.id) == ["real"], "a plan or undated copy never hides the dated past one")
+        check(shadowed.map(\.id) == ["r/real"], "a plan or undated copy never hides the dated past one")
         check(BriefingDriversData.captureFixture?.hasRows(under: BriefingBoardFilter()) == true, "drivers have rows")
         check(
             BriefingTimelineData.captureFixture?.hasRows(under: BriefingBoardFilter(region: .oceania)) == false,
