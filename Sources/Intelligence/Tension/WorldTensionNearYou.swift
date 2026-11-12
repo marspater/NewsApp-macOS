@@ -16,9 +16,6 @@
 
 import Foundation
 
-/// Typealias for tension calculations under the near-you methodology (#1172).
-typealias WorldTensionCalculator = WorldTensionNearYou
-
 /// One stored story as the Near you lens reads it: its title, its publisher and when it was published.
 struct TensionLocalStory: Equatable, Sendable {
     let title: String

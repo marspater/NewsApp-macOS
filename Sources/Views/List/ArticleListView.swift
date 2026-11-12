@@ -1242,12 +1242,6 @@ struct ArticleListView: View {
         .allowsWindowActivationEvents(true)
     }
 
-    /// The stories of one grid column: every `count`th story, starting at `column`.
-    static func column(_ column: Int, of count: Int, in entries: [FeedEntry]) -> [FeedEntry] {
-        guard count > 1 else { return entries }
-        return stride(from: column, to: entries.count, by: count).map { entries[$0] }
-    }
-
     /// What the grouping toggle does here. In Today it also switches between the edition and the plain list.
     private var groupingHelp: String {
         let isToday = !isSearching && (selectedTopic ?? "Today") == "Today"
@@ -1458,7 +1452,7 @@ struct ArticleListView: View {
             HStack(alignment: .top, spacing: AppLayout.cardGap) {
                 ForEach(0..<count, id: \.self) { column in
                     LazyVStack(spacing: AppLayout.cardGap) {
-                        ForEach(Self.column(column, of: count, in: listed)) { entry in entryCard(entry) }
+                        ForEach(AppLayout.gridColumn(column, of: count, in: listed)) { entry in entryCard(entry) }
                     }
                     .frame(maxWidth: AppLayout.gridColumnMaximum, alignment: .top)
                 }
