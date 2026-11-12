@@ -239,7 +239,10 @@ struct ArticleListView: View {
     /// updates button instead of reshuffling the list. A refresh the reader started is the exception while the list
     /// is showing: they asked for the new stories. So is Today showing only earlier days' stories, such as the cache
     /// at launch the next morning.
-    private var isHoldingList: Bool {
+    private var isHoldingList: Bool { isHoldingList(groupingAtFetch: false) }
+
+    /// `groupingAtFetch`: the new stories were still being grouped when the page about to be received was read.
+    private func isHoldingList(groupingAtFetch: Bool) -> Bool {
         guard !appliesNextUpdate else { return false }
         if !articlePath.isEmpty { return true }
         // The new day's stories take the page once they are grouped, and only while the reader has not scrolled or
@@ -248,7 +251,7 @@ struct ArticleListView: View {
         if !isSearching, (selectedTopic ?? "Today") == "Today",
             let holds = newDay.holds(
                 showsOnlyEarlierDays: buffer.showsOnlyEarlierDays(), isGrouping: feedManager.isGroupingNewStories,
-                isTouched: hasScrolledList || focusedArticleID != nil)
+                wasGroupingAtFetch: groupingAtFetch, isTouched: hasScrolledList || focusedArticleID != nil)
         {
             return holds
         }
@@ -681,6 +684,9 @@ struct ArticleListView: View {
         queryError = nil
         isLoadingPage = true
         defer { if queryRunID == runID { isLoadingPage = false } }
+        // Read before the page: a page read while the new stories were being grouped is one report a story, also when
+        // the grouping has ended by the time it is received (#937).
+        let groupingAtFetch = feedManager.isGroupingNewStories
         do {
             let muting = listMuting
             // One vector for the page and its counts: another window's search must not change what they count (#985).
@@ -724,8 +730,9 @@ struct ArticleListView: View {
             } else {
                 let snapshot = FeedSnapshot(articles: page, events: events)
                 newDay.noteRefreshedPage(
-                    showsOnlyEarlierDays: buffer.showsOnlyEarlierDays(), isGrouping: feedManager.isGroupingNewStories)
-                let holding = isHoldingList
+                    showsOnlyEarlierDays: buffer.showsOnlyEarlierDays(), isGrouping: feedManager.isGroupingNewStories,
+                    wasGroupingAtFetch: groupingAtFetch)
+                let holding = isHoldingList(groupingAtFetch: groupingAtFetch)
                 appliesNextUpdate = false
                 let result = buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
                 switch result {
