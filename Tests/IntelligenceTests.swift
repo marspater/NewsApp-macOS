@@ -4605,6 +4605,54 @@ extension NewsTests {
             OverviewTimelineBuilder.anchor(in: "Talks are scheduled to resume.", publishedAt: published), nil,
             "A bare scheduled is not a date")
 
+        // Parity with the former extractor (#1241 review): its relative, quarter and plan-year anchors.
+        func anchorText(_ sentence: String) -> String? {
+            OverviewTimelineBuilder.anchor(in: sentence, publishedAt: published)?.text
+        }
+        assertEqual(
+            anchorText("Officials met earlier this week to agree terms."), "Earlier this week", "Earlier this week")
+        let yearless = OverviewTimelineBuilder.anchor(
+            in: "Retrofitting is scheduled for the second quarter.", publishedAt: published)
+        assertEqual(yearless?.text, "Second quarter", "A plan's quarter without a year keeps its wording, no year")
+        assertTrue(yearless?.isPlan == true, "A plan's quarter without a year is a plan")
+        assertEqual(anchorText("Sales fell in the second quarter."), nil, "A quarter without a year needs a plan")
+        assertEqual(anchorText("The plant is expected to open in 2028."), "2028", "A plan's later year")
+        assertEqual(anchorText("The 2024 decision still stands."), nil, "A bare year outside a plan is no anchor")
+        assertEqual(anchorText("The vote at 09:00 UTC followed talks last night."), nil, "Two anchors are ambiguous")
+
+        // Time of day: the ordering value is a provisional placement at publication, never the time it happened,
+        // and nothing shows it; the source's wording is what reads.
+        let ordering = time.orderingDateMayHoldInferredYear
+        assertEqual(ordering, published, "A time of day is placed at publication, not at 06:14")
+        let orderingClock = published.formatted(date: .omitted, time: .shortened)
+        let display = EventOverviewReaderView.timelineDateDisplay(for: time)
+        assertEqual(display.primary, "06:14 UTC", "The row shows the source's time")
+        assertFalse(label(time).contains(orderingClock), "VoiceOver never reads the placement time \(orderingClock)")
+        assertEqual(BriefingTimelineData.orderingDate(of: time), nil, "Briefing never places a time of day")
+        assertEqual(
+            BriefingTimelineData.items(items, now: published)?.contains { $0.id == time.id } ?? false, false,
+            "Briefing rows leave it out")
+        let twoTimes = ["The first quake struck at 06:14 UTC.", "A second quake struck at 09:30 UTC."].enumerated().map
+        {
+            PassageAnchoredFact(
+                id: "t\($0.offset)", statement: $0.element, passageID: "anchor-p\($0.offset)", quote: $0.element,
+                articleID: article.id)
+        }
+        assertEqual(
+            OverviewTimelineBuilder.build(facts: twoTimes, passages: passages, articles: [article]).items.map(
+                \.dateText),
+            ["06:14 UTC", "09:30 UTC"], "Two times of one day are two items, in the order the source gives them")
+
+        // Legacy classification lives with the model (no builder dependency) and is the builder's definition.
+        for text in [
+            "Yesterday Morning", "06:14 UTC", "Second Quarter Of 2027", "Q2 2027", "in 2027", "Earlier This Week",
+        ] {
+            assertTrue(OverviewTimelineItem.isAnchorText(text), "Legacy anchor text: \(text)")
+        }
+        for text in ["15 October 2026", "Oct 3", "Scheduled", "October 2026", ""] {
+            assertFalse(OverviewTimelineItem.isAnchorText(text), "Not an anchor: \(text)")
+        }
+
         // Items the former extractor stored before #1241: no kind, its capitalized anchors and its placeholder.
         let reference = published.timeIntervalSinceReferenceDate
         let legacyJSON = """

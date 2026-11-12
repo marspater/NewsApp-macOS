@@ -158,7 +158,12 @@ enum OverviewTimelineBuilder {
             entryByKey[key] = entries.count
             entries.append(entry)
         }
-        guard Set(entries.map { "\($0.resolved.timeIntervalSince1970)|\($0.precision)" }).count >= minimumDistinctDates
+        // Two different anchors placed on one day ("06:14 UTC", "09:00 UTC") are two times, not one date.
+        let distinct = Set(
+            entries.map {
+                "\($0.resolved.timeIntervalSince1970)|\($0.precision)|\($0.kind == .anchor ? $0.dateText.lowercased() : "")"
+            })
+        guard distinct.count >= minimumDistinctDates
         else {
             return Timeline()
         }
@@ -207,62 +212,72 @@ enum OverviewTimelineBuilder {
         return timeline
     }
 
-    /// A time reference a source states that is not a calendar date: a time of day ("06:14 UTC"), a relative
-    /// anchor ("yesterday morning") or a quarter with its year ("Q3 2027"). Shown in the source's words; `resolved`
-    /// places it for ordering only. A bare "scheduled" is no anchor.
+    /// A time reference a source states that is not a calendar date (see `OverviewTimelineItem.anchorExpressions`).
+    /// Shown in the source's words. `resolved` is a provisional placement for ordering only, never the time the
+    /// event happened: a time of day or relative anchor is placed at the article's publication time (a day earlier
+    /// for "yesterday" and "last night"). A bare "scheduled" is no anchor.
     struct Anchor: Equatable, Sendable {
         let text: String
         let resolved: Date
         let isPlan: Bool
     }
 
+    // ponytail: "earlier this week" is placed one day before publication; its real day is unknown, so it only
+    // orders after earlier stated dates and before same-day anchors.
     private static let relativeAnchors: [(phrase: String, days: Int)] = [
         ("earlier today", 0), ("this morning", 0), ("yesterday morning", -1), ("yesterday afternoon", -1),
-        ("yesterday evening", -1), ("last night", -1),
+        ("yesterday evening", -1), ("last night", -1), ("earlier this week", -1),
     ]
-    private static let anchorPatterns: [NSRegularExpression] = [
-        #"\b\d{1,2}:\d{2}\s*(?:UTC|GMT|EST|PST|EDT|PDT|CET|CEST)\b"#,
-        #"\b(?:earlier today|this morning|yesterday (?:morning|afternoon|evening)|last night)\b"#,
-        #"\bQ(?<q>[1-4])\s+(?<qyear>(?:19|20)\d{2})\b"#,
-        #"\b(?<ordinal>first|second|third|fourth)\s+quarter\s+of\s+(?<oyear>(?:19|20)\d{2})\b"#,
-    ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+    /// The former extractor's plan indicators (#143), plus "planned for" and "will resume".
     private static let planPhrases = [
-        "plans to", "planned for", "planning to", "scheduled to", "scheduled for", "will begin", "will resume",
-        "will open", "expected to", "slated to", "set to begin",
+        "plans to", "planned to", "planned for", "planning to", "scheduled to", "scheduled for", "will launch",
+        "will begin", "will open", "will resume", "aims to", "aiming to", "expected in", "expected to", "proposed",
+        "target date", "slated to", "set to begin", "projected to",
     ]
 
-    /// Whether `text` is, in full, an anchor rather than a calendar date (for items stored before #1241).
-    static func isAnchorText(_ text: String) -> Bool {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let range = NSRange(trimmed.startIndex..., in: trimmed)
-        return anchorPatterns.contains { $0.firstMatch(in: trimmed, options: .anchored, range: range)?.range == range }
-    }
-
-    /// The one anchor a sentence states, when it states no calendar date at all; nil otherwise.
+    /// The one anchor a sentence states, when it states no calendar date at all; nil otherwise. A quarter without
+    /// a year and a bare later year ("in 2027") count only in a sentence that states a plan, as before #1241.
     static func anchor(in sentence: String, publishedAt: Date) -> Anchor? {
         let range = NSRange(sentence.startIndex..., in: sentence)
         guard !patterns.contains(where: { $0.firstMatch(in: sentence, range: range) != nil }) else { return nil }
-        let matches = anchorPatterns.flatMap { $0.matches(in: sentence, range: range) }
+        let lower = sentence.lowercased()
+        let saysPlan = planPhrases.contains { lower.contains($0) }
+        var matches = OverviewTimelineItem.anchorExpressions.flatMap { $0.matches(in: sentence, range: range) }
+        if matches.isEmpty, saysPlan {
+            matches = OverviewTimelineItem.planYearExpression.matches(in: sentence, range: range)
+        }
         guard matches.count == 1, let match = matches.first, let found = Range(match.range, in: sentence) else {
             return nil
         }
-        let wording = String(sentence[found])
-        let text = wording.prefix(1).uppercased() + wording.dropFirst()
-        let lower = sentence.lowercased()
-        let saysPlan = planPhrases.contains { lower.contains($0) }
         func group(_ name: String) -> String? {
-            Range(match.range(withName: name), in: sentence).map { String(sentence[$0]).lowercased() }
+            Range(match.range(withName: name), in: sentence).map { String(sentence[$0]) }
+        }
+        let wording = group("year") ?? String(sentence[found])
+        let text = wording.prefix(1).uppercased() + wording.dropFirst()
+        let published = calendar.component(.year, from: publishedAt)
+        func starting(_ year: Int, month: Int) -> Date? {
+            calendar.date(from: DateComponents(year: year, month: month, day: 1))
+        }
+        if let year = group("year").flatMap({ Int($0) }) {
+            guard year > published, let start = starting(year, month: 1) else { return nil }
+            return Anchor(text: text, resolved: start, isPlan: true)
         }
         let quarter =
             group("q").flatMap { Int($0) }
-            ?? group("ordinal").flatMap { ["first", "second", "third", "fourth"].firstIndex(of: $0).map { $0 + 1 } }
-        if let quarter, let year = (group("qyear") ?? group("oyear")).flatMap({ Int($0) }) {
-            guard let start = calendar.date(from: DateComponents(year: year, month: quarter * 3 - 2, day: 1)) else {
-                return nil
+            ?? group("ordinal").flatMap {
+                ["first", "second", "third", "fourth"].firstIndex(of: $0.lowercased()).map { $0 + 1 }
             }
-            return Anchor(text: text, resolved: start, isPlan: start > publishedAt)
+        if let quarter {
+            if let year = (group("qyear") ?? group("oyear")).flatMap({ Int($0) }) {
+                guard let start = starting(year, month: quarter * 3 - 2) else { return nil }
+                return Anchor(text: text, resolved: start, isPlan: start > publishedAt)
+            }
+            // A quarter without a year is a plan's next such quarter; the year only orders it and is never shown.
+            guard saysPlan, let thisYear = starting(published, month: quarter * 3 - 2),
+                let start = thisYear > publishedAt ? thisYear : starting(published + 1, month: quarter * 3 - 2)
+            else { return nil }
+            return Anchor(text: text, resolved: start, isPlan: true)
         }
-        // A time of day or a relative anchor happened on, or the day before, the day the article was published.
         let days = relativeAnchors.first { wording.lowercased() == $0.phrase }?.days ?? 0
         guard let resolved = calendar.date(byAdding: .day, value: days, to: publishedAt) else { return nil }
         return Anchor(text: text, resolved: resolved, isPlan: saysPlan)

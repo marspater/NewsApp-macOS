@@ -232,7 +232,7 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
             // "Scheduled" placeholder, which is no date and is dropped.
             let isPlaceholder = storedText.caseInsensitiveCompare("Scheduled") == .orderedSame
             dateText = isPlaceholder ? "" : storedText
-            dateKind = OverviewTimelineBuilder.isAnchorText(storedText) ? .anchor : .stated
+            dateKind = Self.isAnchorText(storedText) ? .anchor : .stated
         }
         summary = try container.decode(String.self, forKey: .summary)
         citationIDs = try container.decode([String].self, forKey: .citationIDs)
@@ -241,6 +241,34 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         publicationDate = try container.decodeIfPresent(Date.self, forKey: .publicationDate)
         orderingDateMayHoldInferredYear = try container.decodeIfPresent(
             Date.self, forKey: .orderingDateMayHoldInferredYear)
+    }
+}
+
+extension OverviewTimelineItem {
+    /// What counts as an anchor: a time of day, a relative day, or a quarter (with or without its year). The one
+    /// definition, used to read items stored before #1241 and by `OverviewTimelineBuilder`'s anchor parser.
+    static let anchorExpressions: [NSRegularExpression] = [
+        #"\b\d{1,2}:\d{2}\s*(?:UTC|GMT|EST|PST|EDT|PDT|CET|CEST)\b"#,
+        #"\b(?:earlier today|this morning|yesterday (?:morning|afternoon|evening)|last night|earlier this week)\b"#,
+        #"\bQ(?<q>[1-4])\s+(?<qyear>(?:19|20)\d{2})\b"#,
+        #"\b(?<ordinal>first|second|third|fourth)\s+quarter(?:\s+of\s+(?<oyear>(?:19|20)\d{2}))?\b"#,
+    ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+
+    /// A bare year a plan states ("in 2027"); an anchor only in a sentence that states a plan.
+    static let planYearExpression: NSRegularExpression = {
+        guard let expression = try? NSRegularExpression(pattern: #"\b(?:in\s+)?(?<year>(?:19|20)\d{2})\b"#) else {
+            preconditionFailure("The plan year expression is a valid pattern")
+        }
+        return expression
+    }()
+
+    /// Whether `text` is, in full, an anchor rather than a calendar date.
+    static func isAnchorText(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        return (anchorExpressions + [planYearExpression]).contains {
+            $0.firstMatch(in: trimmed, options: .anchored, range: range)?.range == range
+        }
     }
 }
 
