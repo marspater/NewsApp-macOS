@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Mnemosyne (storage and search) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// A person, organization or place the library's stories name (W2 #716). Every figure derives from the stored

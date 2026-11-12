@@ -131,7 +131,7 @@ This section maps News directly against Apple's **App Store Review Guidelines**.
   - All empty states provide native `ContentUnavailableView` controls with actionable refresh or subscription buttons.
   - Graceful handling of network timeouts, offline states, and HTTP 429/503 backoff headers.
 * **2.3 Accurate Metadata**:
-  - Description clearly states that article summarization and event clustering run on-device using Apple Foundation Models and Natural Language, with no cloud transmission.
+  - Description clearly states that all analysis runs on-device with no cloud transmission: keyword-based classification, event clustering with Natural Language and the two bundled Core ML models, and reader summaries, World Tension assessments and Briefing sitrep lines with Apple Foundation Models where available.
 * **2.4 Hardware & Software Compatibility**:
   - Native Apple Silicon (`arm64`) execution.
   - Responsive window geometry supporting minimum width (720pt) up to ultra-wide displays (1600pt+).
@@ -214,7 +214,7 @@ Paste the following message into the **Review Notes** field in App Store Connect
 > 4. **Network Architecture & Entitlement Note**:
 >    - The app declares `com.apple.security.network.server`. This is used exclusively for an ephemeral **on-device loopback proxy** bound to `127.0.0.1`.
 >    - It performs address resolution and pins connections to numeric public endpoints, preventing Server-Side Request Forgery (SSRF) and DNS rebinding attacks when parsing user-submitted RSS links. No external server or LAN listener is opened.
-> 5. **On-Device Intelligence**: All topic categorization, event clustering, and summarization run 100% locally on-device using Apple's `NaturalLanguage` and `FoundationModels` APIs. Zero user data or article text is transmitted to remote AI endpoints.
+> 5. **On-Device Intelligence**: All topic categorization, event clustering, and summarization run 100% locally on-device: categorization uses the publisher's own category, then keyword scoring, then a World default; event clustering uses Apple's `NaturalLanguage` and the app's two bundled Core ML models; and `FoundationModels` writes only the reader summary, the World Tension assessment and the Briefing sitrep line. Zero user data or article text is transmitted to remote AI endpoints.
 
 ### 4.3 Screenshot Specifications
 
@@ -273,7 +273,8 @@ spctl -a -vv -t install News-arm64.dmg
 To export and upload directly to TestFlight / App Store Connect:
 
 ```bash
-# Export using App Store distribution profile
+# Export using App Store distribution profile. ExportOptions-AppStore.plist is not in the repository:
+# create it for your team and signing identity before running this.
 xcodebuild -exportArchive \
   -archivePath "build/News.xcarchive" \
   -exportOptionsPlist "script/distribution/ExportOptions-AppStore.plist" \

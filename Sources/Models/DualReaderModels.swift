@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Angelia · Clio (sourced overviews) owns this file. Register: docs/ANGELIA.md.
+
 import Foundation
 
 /// Categorization of perspective contrast across paired passages (#717).

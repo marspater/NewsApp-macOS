@@ -1,6 +1,6 @@
-# Contributing to NewsApp
+# Contributing to News
 
-Start with [README.md](README.md), [architecture and technology constraints](docs/ARCHITECTURE.md), [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md); for UI work, also the [design language](docs/design/DESIGN.md). These documents apply to every contributor. `AGENTS.md` contains instructions for coding agents only.
+Start with [README.md](README.md), [architecture and technology constraints](docs/ARCHITECTURE.md), [the Angelia name register](docs/ANGELIA.md), [PRIVACY.md](PRIVACY.md) and [SECURITY.md](SECURITY.md); for UI work, also the [design language](docs/design/DESIGN.md). These documents apply to every contributor. `AGENTS.md` contains instructions for coding agents only.
 
 ## Development
 
@@ -28,7 +28,7 @@ script/measure_build.sh           # Build-time medians (cold, incremental, NewsT
 PROFILE_DRY_RUN=1 script/profile_signposts.sh # Builds the optimized Profile app (com.marspater.news.dev) into a fresh temporary directory and prints the xctrace command the weekly profile.yml run uses; pass a directory only if it is empty, since the build replaces its News.app; the recording itself runs only in CI
 ./test.sh --parsing-regressions   # Focused offline HTML/feed compatibility and safety checks
 script/format.sh                  # swift-format; automatically formats staged Swift files in pre-commit hook
-script/format.sh --check          # Strict repository-wide Swift formatting lint
+script/format.sh --check          # Strict repository-wide Swift formatting lint; also the license header and, under Sources/Intelligence, the Angelia owner comment
 script/design_lint.sh              # DESIGN.md ratchet (first step of ./test.sh); --update only after lowering counts
 ./test.sh --story-regressions     # Focused offline identity, reader and persistence checks
 ./test.sh --matcher-regressions   # Authored matcher corpus (#506) and story regressions (#581): pairwise lines and failing pair ids, nothing else
@@ -71,6 +71,8 @@ bash script/test_editorial_evaluation.sh --output "$(mktemp -d)/editorial-matrix
 bash script/test_editorial_novelty.sh Tests/Fixtures/editorial/novelty-smoke.json /private/tmp/new-novelty-results # Opt-in shipped-model novelty smoke experiment through the Xcode Release runner; fictional authored labels, no production consumer.
 bash script/test_editorial_momentum.sh /private/tmp/new-momentum-results # Opt-in retrospective MACD sweep on the synthetic Phase 0 fixture through the Xcode Release runner; no production consumer.
 bash script/test_editorial_wire_identity.sh /private/tmp/wire-identity/news.sqlite3 /private/tmp/wire-identity/results # #998: opt-in wire identity coverage, momentum replay and schema upgrade review on a copied library; aggregates only, refuses a path inside an app container; NEWS_WIRE_IDENTITY_FETCH_FEEDS=1 also fetches its subscribed feeds once to measure their author fields and estimate counting named reporters as own reports; no production consumer.
+bash script/test_editorial_ranking.sh /private/tmp/new-ranking-results # Opt-in 500-vector MMR ranking controls through the Xcode Release runner; no model loading, no production consumer.
+bash script/test_editorial_personalization.sh /private/tmp/new-personalization-results # Opt-in synthetic storage and profile-informed ranking controls; no real library access, no production consumer.
 ./test.sh --transport-cancellation # Optimized refresh shutdown over controlled HTTP/SOCKS sockets
 ./test.sh --publisher-cancellation # Opt-in, live: refresh and stop the twelve panel feeds over real HTTPS
 NEWS_EVENT_CORPUS=corpus.json ./test.sh --event-corpus # Event clustering precision/recall on a local labeled corpus (#102)
@@ -141,7 +143,7 @@ The native performance script requires an active Mac desktop. It compiles the pr
 
 Before publication, fetch `origin/main`, review the diff and run checks affected by the change. Never report a check as passing unless it completed successfully. Record noteworthy behavior changes as a changelog fragment, `changelog/pending/<issue>.md` with bullet lines (a hyphen and a space) (see [changelog/pending/README.md](changelog/pending/README.md)); never edit `CHANGELOG.md` in a feature PR, so parallel and stacked PRs do not conflict there. `python3 script/changelog_fold.py` folds the fragments into [CHANGELOG.md](CHANGELOG.md) before a tag. Dated evidence belongs in `docs/audits/`.
 
-Every Swift file starts with the Apache-2.0 license header: copy it from any Swift file (in `Package.swift` it follows the `swift-tools-version` line). [NOTICE](NOTICE) holds the attribution. `script/format.sh --check` in CI and the pre-commit hook refuse a Swift file without the header.
+Every Swift file starts with the Apache-2.0 license header: copy it from any Swift file (in `Package.swift` it follows the `swift-tools-version` line). [NOTICE](NOTICE) holds the attribution. `script/format.sh --check` in CI and the pre-commit hook refuse a Swift file without the header. A Swift file that an Angelia domain owns names that domain in a `// Angelia · <owner>` comment one blank line after the header ([docs/ANGELIA.md](docs/ANGELIA.md), rule 6); the same check refuses a file under `Sources/Intelligence/` without it.
 
 The VoiceOver harness is parked (#268) and is not part of release verification; the notes below apply when it is resumed. It builds a separate `com.marspater.news.voiceoverqa` bundle and uses temporary SQLite and preferences. Its view environment supplies an in-memory image; the installed app and its protected image loader remain unchanged. Output goes to the printed temporary directory or `NEWS_VOICEOVER_OUTPUT`. Compilation has a 300-second deadline and automated runs a 120-second process-group deadline; commands and AX inspection have shorter internal deadlines. Missing Accessibility access or unsupported announcement observation is a reported prerequisite failure, not a crash or passing check.
 

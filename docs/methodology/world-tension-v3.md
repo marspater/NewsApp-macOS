@@ -2,7 +2,8 @@
 
 Issue #585 (epic L), 24 October 2026. Version 3 changes only what the sheet shows for a day; it does not change how a
 day is assessed (v2, [world-tension-v2.md](world-tension-v2.md)) or how the v1 index is calibrated
-([tension-calibration-v1.md](tension-calibration-v1.md)).
+([tension-calibration-v1.md](tension-calibration-v1.md)). In the [Angelia register](../ANGELIA.md), World Tension is
+Eris.
 
 ## Reading
 

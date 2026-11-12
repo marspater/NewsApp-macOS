@@ -1,6 +1,6 @@
 # Briefing
 
-How the Briefing looks and behaves: the five pillars, module composition, editorial structure, the carousel's content and generated-content labels. [DESIGN.md](DESIGN.md) holds the design language this extends, and its section 8.4 points here.
+How the Briefing looks and behaves: the five pillars, module composition, editorial structure, the carousel's content and generated-content labels. [DESIGN.md](DESIGN.md) holds the design language this extends, and its section 8.4 points here. Which stories appear is Athena's decision in the [Angelia register](../ANGELIA.md); this document covers how they look.
 
 Briefing is a war room presenting the day's essential intelligence, selected once daily at the configured edition hour (default 7:00 AM) and frozen across all windows until the next edition or explicit New Briefing. The approved look is [`docs/mocks/briefing/war-room-dark.jpg`](../mocks/briefing/war-room-dark.jpg), exported on 9 November 2026 from the design canvas approved on 31 October. It illustrates these rules; where it and this document disagree, this document wins.
 

@@ -12,11 +12,13 @@ The source tree is divided by responsibility, and `News.xcodeproj` compiles it t
 | `Sources/Coordinators` | ``FeedManager`` orchestration and lifecycle, ``NotificationService`` triage |
 | `Sources/Services` | ``FeedFetcher``, ``SecureHTTPClient``, parsers, the ``NetworkBoundaryProxy`` gateway |
 | `Sources/Storage` | ``DatabaseEngine`` schema and SQL, ``ArticleStore``, ``MigrationCoordinator``, ``CacheManager`` |
-| `Sources/Intelligence` | ``ContentExtractionPipeline``, ``EnrichmentQueue``, ``EventClusterer``, ``EventMatcher``, overviews, World Tension |
+| `Sources/Intelligence` | ``ContentExtractionPipeline``, ``EnrichmentQueue``, ``EventClusterer``, ``EventMatcher``, overviews, ``TodayEditionAssigner``, World Tension |
 | `Sources/Models` | ``FeedArticle``, ``FeedCatalog``, ``MuteRules``, ``FiniteBriefing``, overview documents |
 | `Sources/Views` | ``MainView`` and every other SwiftUI surface |
 
 Views hold no database or networking logic, and database work stays off the main actor.
+
+The analysis code across Services, Intelligence and Storage is named Angelia. The register in `docs/ANGELIA.md` maps its twelve domains to these folders, and each owned source file names its owner in a comment after the license header.
 
 ### One refresh
 

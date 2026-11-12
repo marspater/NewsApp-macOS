@@ -11,7 +11,7 @@ Angelia (Greek Ἀγγελία, "message"; say *ang-geh-LEE-ah*, hard g, stress 
 3. A name never raises maturity. The Status column is the only statement of what is live.
 4. Each type or function has one owner. A file that holds two owners' code is listed under [Shared files](#shared-files).
 5. Angelia spans three source layers (`Sources/Services`, `Sources/Intelligence`, `Sources/Storage`). It is wider than the "Intelligence" layer of the ARCHITECTURE.md system map.
-6. Every Swift file a name owns says so in a comment after the license header: `// Angelia · Themis (pair rules) owns this file. Register: docs/ANGELIA.md.` A shared file names each owner and its types. `script/format.sh --check` and the pre-commit hook refuse a file under `Sources/Intelligence/` without the comment; owned files elsewhere carry it by this register. A new or moved file gets its comment and its register row in the same change.
+6. Every Swift file a name owns says so in a comment after the license header: `// Angelia · Themis (pair rules) owns this file. Register: docs/ANGELIA.md.` A shared file names each owner and its types. The comment sits one blank line after the header. `script/format.sh --check` and the pre-commit hook refuse a file under `Sources/Intelligence/` without it; owned files elsewhere carry it by this register. A new or moved file gets its comment and its register row in the same change. Scope: files in Services, Intelligence, Storage, Models and Coordinators that one domain owns or two share. Views, tests, app lifecycle and models that no single domain produces (`FeedArticle`, `ArticleIdentity`) carry none.
 
 ## Register
 
@@ -26,13 +26,13 @@ Paths are relative to `Sources/`.
 | **Themis** | Rule on a pair of reports | `EventMatcher`, `EventMatchPolicy`, `EventConflict`, `EventPairAssessment`, `PairCalibration` | Live |
 | **Harmonia** | Assemble one occurrence | `EventClusterer` admission and `mergeFragments` · `event_inclusions`, `event_exclusions` | Live |
 | **Ariadne** | Link the events of a developing story | `EventClusterer.linkStories` · `EventStoryRelation` | Live |
-| **Mnemosyne** | Retain evidence and find it again | `Storage/DatabaseEngine*`, `ArticleStore*` · `EventCandidateFinder`, `EventMatchKey` · hybrid search (`DatabaseEngine+Search`) · `Intelligence/Editorial/EntityGraph` | Live |
-| **Clio** | Compose sourced overviews | `Intelligence/Overview/OverviewComposer`, `OverviewGenerationCoordinator`, `OverviewPassageSelector`, `OverviewPerspectivesExtractor`, `OverviewTimeline*`, `OverviewIndustryImpactExtractor`, `OverviewThematicAngleExtractor`, `PassageFactExtractor` · `Intelligence/Editorial/DualReaderAlignmentService`, `PerspectiveReports` (Compare Perspectives) | Live |
+| **Mnemosyne** | Retain evidence and find it again | `Storage/DatabaseEngine*`, `ArticleStore*` · `EventCandidateFinder`, `EventMatchKey` · hybrid search (`DatabaseEngine+Search`) · `Storage/MigrationCoordinator` · `Intelligence/Editorial/EntityGraph` · `Models/EntityModels` | Live |
+| **Clio** | Compose sourced overviews | `Intelligence/Overview/OverviewComposer`, `OverviewGenerationCoordinator`, `OverviewPassageSelector`, `OverviewPerspectivesExtractor`, `OverviewTimeline*`, `OverviewIndustryImpactExtractor`, `OverviewThematicAngleExtractor`, `PassageFactExtractor` · `Intelligence/Editorial/DualReaderAlignmentService`, `PerspectiveReports` (Compare Perspectives) · `Models/EventOverview`, `Models/DualReaderModels` | Live |
 | **Aletheia** | Check fidelity to the cited text | `OverviewClaimVerifier`, `GeneratedTextFidelity`, `OverviewQualityAuditor`, `CoverageSentimentEvaluator`, `GenerationPromptDefense` | Live. Checks agreement with the source, never external truth. |
 | **Athena** | Decide what deserves attention | `Intelligence/Today/*` (the six lanes of the Today edition) · `FiniteBriefing`, `BriefingPriority` · `Intelligence/Briefing/*` · `Intelligence/Events/StoryImportance` (`StoryImportance`, `StoryCurator`, `StoryImage*`) · `Coordinators/NotificationService` triage | Live |
 | | | `Intelligence/Events/EventJudge` (`EventJudgeReport`, the importance audit's input) | Evaluation only, no production caller |
 | | | `Intelligence/Editorial/EditorialRanking`, `EditorialPersonalization` | Experimental, no production consumer |
-| **Eris** | Assess World Tension | `Intelligence/Tension/*` (`WorldTensionService`, `TensionMethodology`, `Hotspot*`, `WorldTensionNearYou`) | Live |
+| **Eris** | Assess World Tension | `Intelligence/Tension/*` (`WorldTensionService`, `TensionMethodology`, `Hotspot*`, `WorldTensionNearYou`) · `Models/HotspotModels` | Live |
 | **Kairos** | Detect what is new and accelerating | `Intelligence/Editorial/EditorialNovelty`, `EditorialMomentum` | Experimental, no production consumer |
 | **Angelia Core** | Shared model access and gates | `NewsTextModel`, `AppleIntelligenceAvailability`, `IntelligencePolicy` | Live |
 
@@ -53,6 +53,8 @@ Paths are relative to `Sources/`.
 | Clio | Aletheia | Draft passages, perspectives, timeline and generated text |
 | Aletheia | Mnemosyne | Accepted overviews with citations (`event_overviews`, `event_overview_citations`) |
 | Mnemosyne | Athena | Up to 500 candidate stories with importance, coverage and reading history; cited highlights for Briefing |
+| Mnemosyne | Athena | For Today: the assignment context of the listed stories, read by the bounded `TodayEditionLoader` queries |
+| Athena | Today page | The lane plan (`TodayEditionAssigner.assign`), which `TodayEdition` turns into the page off the main actor |
 | Mnemosyne | Eris | The day's panel headlines (`tensionCorpus`) |
 | Eris | Athena | The reading and its drivers, shown in Briefing's World Tension module. No input to Today or to Briefing selection. |
 | Angelia Core | Metis, Eris, Athena | `NewsTextModel` prose on three surfaces: reader summary, World Tension assessment, Briefing sitrep. Event overviews carry no model prose. |
@@ -71,10 +73,28 @@ These files hold more than one owner's code. Name the owner of the type or funct
 | `Intelligence/Events/EventCandidates.swift` | Mnemosyne (`EventCandidateFinder`, `EventMatchKey`) and Ariadne (`EventStoryRelation`) |
 | `Intelligence/ArticleIntelligence.swift` | Metis (classification, entities) and Angelia Core (`NewsTextModel`) |
 
+## Tests and tools by domain
+
+Tests and scripts carry no owner comment. This table says where each domain's checks live; suites that span domains (`IntelligenceTests`, `NewsTests`, `LifecycleTests`) are left out.
+
+| Domain | Tests | Scripts and fixtures |
+|---|---|---|
+| Iris | `FeedKitSwiftSoupTests`, `Native/FeedParsingSuite`, `EditorialWireIdentityTests` | `script/test_editorial_wire_identity.sh`, `script/evaluation/wire_identity_inputs.py` |
+| Metis, Themis, Harmonia, Ariadne | `ClusteringTests` | `Tests/Fixtures/story-corpus/matcher-regressions-v1.json`, `story-regressions-v1.json` |
+| Proteus | `EventEmbeddingTests` | `script/training/*` (convert, train and compress the two Core ML models) |
+| Mnemosyne | `StorageTests`, `Native/StorageSuite`, `Native/MigrationSuite`, `Native/EntityDossierSuite` | |
+| Clio | `EventOverviewAccessibilityTests`, `Native/PublisherExcerptSuite`, `Native/DualReaderSuite`, `Native/PerspectiveReportsSuite` | `script/evaluation/overview_review.py` |
+| Aletheia | `OverviewQualityAudit` (with Clio) | `Tests/Fixtures/generated-text/fidelity-corpus-v1.json` |
+| Athena | `TodayLaneAssignmentTests`, `TodayShadowEvaluation`, `TodayShadowComparisons`, `BriefingE2ETests`, `BriefingIntelligenceTests`, `EditorialRankingTests`, `EditorialPersonalizationTests`, `ImportanceAudit` | `script/test_editorial_ranking.sh`, `script/test_editorial_personalization.sh`, `script/evaluation/importance_review.py` |
+| Eris | `TensionCalibrationTests`, `Native/HotspotGazetteerSuite`, `Native/HotspotMapSuite` | `script/test_tension_calibration.sh`, `script/evaluation/calibrate_tension.py` |
+| Kairos | `EditorialNoveltyTests`, `EditorialMomentumTests` | `script/test_editorial_novelty.sh`, `script/test_editorial_momentum.sh`, `script/evaluation/momentum_inputs.py` |
+
 ## No single owner
 
 `Coordinators/FeedManager` drives Angelia without belonging to one domain: it starts the refresh (Iris), background classification (Metis) and the clustering pass (Harmonia and Ariadne), and it also owns sleep, wake and lifecycle. Its comment names the domains it drives.
 
 ## Outside Angelia
+
+Views (`Sources/Views/`) show what the domains produce and belong to none: the story list and the Today edition, the reader and the event overview, the Briefing board and the World Tension sheet.
 
 The protected network gateway (`NetworkBoundaryProxy`, `SecureHTTPClient`, `IPAddressValidator`) is outside Angelia: it is a security boundary, described in [SECURITY.md](../SECURITY.md).
