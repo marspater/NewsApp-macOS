@@ -255,6 +255,7 @@ final class NotificationService: Sendable {
     /// The importance of a text is a pure function of it and costs two language-model passes; Today scores a whole
     /// page on every layout, so the scores are remembered for the life of the process.
     private let importanceScores = OSAllocatedUnfairLock(initialState: [String: Double]())
+    private let importancePreparation = OSAllocatedUnfairLock(initialState: OSAllocatedUnfairLock(initialState: false))
     /// Draws one banner; the default is the app's own panel and skips unbundled test processes.
     private let post: @Sendable (StoryBanner) async throws -> Void
     /// Pause between two banners of one refresh, so a refresh reads as a trickle of stories, not one burst.
@@ -296,10 +297,18 @@ final class NotificationService: Sendable {
 
     /// Scores a page's stories ahead of the Today layout, across cores and off the caller's thread, so the lane
     /// assignment finds them known (#937). A story scored twice in a race gets the same score both times.
+    /// A newer page stops the one before it from scoring its remaining stories.
     func prepareImportance(of articles: [FeedArticle]) {
         let texts = articles.map { (title: $0.title, description: $0.description) }
+        let superseded = OSAllocatedUnfairLock(initialState: false)
+        importancePreparation.withLock { current in
+            current.withLock { $0 = true }
+            current = superseded
+        }
+        @Sendable func isSuperseded() -> Bool { superseded.withLock { $0 } }
         Task.detached(priority: .userInitiated) {
             DispatchQueue.concurrentPerform(iterations: texts.count) { index in
+                guard !isSuperseded() else { return }
                 _ = self.computeImportance(title: texts[index].title, description: texts[index].description)
             }
         }
