@@ -160,9 +160,7 @@ struct ArticleListView: View {
     @State private var appliesNextUpdate = false
     /// The reader has scrolled this list since it was loaded.
     @State private var hasScrolledList = false
-    /// Today showed only earlier days' stories when a refresh began, and the new day's page waits for its grouping.
-    /// A held list takes fresh values in place, so a story updated today would otherwise end the wait early.
-    @State private var awaitsGroupedDay = false
+    @State private var newDay = FeedUpdateBuffer.NewDayHandoff()
     /// Reloads the list once a refresh the reader asked for has finished.
     @State private var refreshReloads = 0
     /// A refresh the reader started: its results replace the list as they arrive instead of queueing behind
@@ -219,16 +217,16 @@ struct ArticleListView: View {
     @State private var todayGeneration = 0
     /// Each lane's last focused card, for the session.
     @State private var todayLaneMemory: [TodayLane: String] = [:]
-    /// The card at each lane row's leading edge, where an arrow key enters a lane the reader has not focused.
-    @State private var todayLaneLeading: [TodayLane: String] = [:]
-    @State private var todayLatestColumns = 1
+    /// What the page's layout reports back and only key handling reads: kept in a reference so that a report does
+    /// not evaluate the whole list again right after it is drawn (#937).
+    @State private var todayLayout = TodayLayoutReport()
     /// The detail column's size, which sizes The Lead.
     @State private var columnSize = CGSize(
         width: AppLayout.mainWindowMinimumWidth, height: AppLayout.mainWindowMinimumHeight)
     @State private var todayPrefetch = TodayLanePrefetch()
 
     private var todayFocusMap: TodayFocusMap? {
-        isTodayEdition ? todayEdition?.focusMap(latestColumns: gridLayout ? todayLatestColumns : 1) : nil
+        isTodayEdition ? todayEdition?.focusMap(latestColumns: gridLayout ? todayLayout.latestColumns : 1) : nil
     }
 
     private var entries: [FeedEntry] { groupedEntries.entries(of: buffer.displayed, mode: groupingMode) }
@@ -240,11 +238,15 @@ struct ArticleListView: View {
     private var isHoldingList: Bool {
         guard !appliesNextUpdate else { return false }
         if !articlePath.isEmpty { return true }
-        if !isSearching, (selectedTopic ?? "Today") == "Today", buffer.showsOnlyEarlierDays() || awaitsGroupedDay {
-            // The new day's stories take the page once they are grouped, and only while the reader has not
-            // scrolled or focused a card: before that the page would be one report a story, and after it the
-            // stories wait behind the updates button like any other (#937).
-            return feedManager.isGroupingNewStories || hasScrolledList || focusedArticleID != nil
+        // The new day's stories take the page once they are grouped, and only while the reader has not scrolled or
+        // focused a card: before that the page would be one report a story, and after it the stories wait behind
+        // the updates button like any other (#937).
+        if !isSearching, (selectedTopic ?? "Today") == "Today",
+            let holds = newDay.holds(
+                showsOnlyEarlierDays: buffer.showsOnlyEarlierDays(), isGrouping: feedManager.isGroupingNewStories,
+                isTouched: hasScrolledList || focusedArticleID != nil)
+        {
+            return holds
         }
         return !isReaderRefreshing
     }
@@ -664,7 +666,7 @@ struct ArticleListView: View {
             todayPrefetch.reset()
             todayEdition = nil
             hasScrolledList = false
-            awaitsGroupedDay = false
+            newDay.reset()
             cursor = nil
             hasMoreResults = false
             expandedEvents = []
@@ -716,13 +718,14 @@ struct ArticleListView: View {
                 hasMoreResults = morePages
             } else {
                 let snapshot = FeedSnapshot(articles: page, events: events)
-                if buffer.showsOnlyEarlierDays(), feedManager.isGroupingNewStories { awaitsGroupedDay = true }
+                newDay.noteRefreshedPage(
+                    showsOnlyEarlierDays: buffer.showsOnlyEarlierDays(), isGrouping: feedManager.isGroupingNewStories)
                 let holding = isHoldingList
                 appliesNextUpdate = false
                 let result = buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
                 switch result {
                 case .replaced:
-                    awaitsGroupedDay = false
+                    newDay.reset()
                     // The list was replaced, not held: Today lays its edition out afresh for it.
                     todayGeneration += 1
                     cursor = page.last.map(ArticleQueryCursor.init)
@@ -1279,8 +1282,8 @@ struct ArticleListView: View {
                             NewsSignposts.firstCardAppeared()
                             todayPrefetch.cardAppeared(id, in: todayEdition, using: imageLoader)
                         },
-                        latestColumnsChanged: { todayLatestColumns = $0 },
-                        leadingCardChanged: { lane, id in todayLaneLeading[lane] = id },
+                        latestColumnsChanged: { todayLayout.latestColumns = $0 },
+                        leadingCardChanged: { lane, id in todayLayout.laneLeading[lane] = id },
                         // A slide held keyboard focus and the reader clicked to another: focus follows what shows.
                         leadSlideShown: { entry in
                             if todayEdition.lead.contains(where: { $0.id == focusedArticleID }) {
@@ -1334,7 +1337,7 @@ struct ArticleListView: View {
         // An applied update returns the page to the masthead; a card that kept focus is brought back into view.
         if isApplied, let restored {
             await Task.yield()
-            let lane = edition.focusMap(latestColumns: todayLatestColumns).lane(of: restored)
+            let lane = edition.focusMap(latestColumns: todayLayout.latestColumns).lane(of: restored)
             withAnimation(reduceMotion ? nil : AppMotion.hover) {
                 proxy.scrollTo(lane == .theLead ? TodayEditionView<EmptyView>.leadScrollID : restored)
             }
@@ -1345,8 +1348,8 @@ struct ArticleListView: View {
     /// focus is also its lane's remembered card. Returns the focused card when the list has focus.
     private func restoreTodayFocus(in edition: TodayEdition, from previous: TodayEdition?) -> String? {
         guard let previous, let focused = focusedArticleID else { return nil }
-        let map = edition.focusMap(latestColumns: todayLatestColumns)
-        let restored = map.restoredFocus(focused, from: previous.focusMap(latestColumns: todayLatestColumns))
+        let map = edition.focusMap(latestColumns: todayLayout.latestColumns)
+        let restored = map.restoredFocus(focused, from: previous.focusMap(latestColumns: todayLayout.latestColumns))
         focusedArticleID = restored
         guard let restored else { return nil }
         if let lane = map.lane(of: restored) { todayLaneMemory[lane] = restored }
@@ -1540,7 +1543,7 @@ struct ArticleListView: View {
             let direction = Self.todayDirection(press.key)
         {
             focusToday(
-                map.move(direction, from: focusedArticleID, memory: todayLaneMemory, visible: todayLaneLeading),
+                map.move(direction, from: focusedArticleID, memory: todayLaneMemory, visible: todayLayout.laneLeading),
                 in: map, proxy: proxy)
             return .handled
         }
@@ -1763,7 +1766,7 @@ struct ArticleListView: View {
             buffer.applyPending()
         }
         // The installed snapshot is no longer the earlier day the hold was waiting to replace.
-        awaitsGroupedDay = false
+        newDay.reset()
         // The reader asked for the update: the Today edition is laid out afresh.
         todayGeneration += 1
         cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
@@ -1903,6 +1906,13 @@ struct KeyboardShortcutsView: View {
         .frame(width: AppLayout.keyboardShortcutsPopoverWidth)
         .fixedSize(horizontal: false, vertical: true)
     }
+}
+
+/// The Latest's column count and the card at each lane row's leading edge, where an arrow key enters a lane the
+/// reader has not focused. Not observed: nothing drawn depends on them.
+@MainActor final class TodayLayoutReport {
+    var latestColumns = 1
+    var laneLeading: [TodayLane: String] = [:]
 }
 
 /// Decodes the next cards of a lane before they scroll into view (#591, #936): a card appearing asks for the
