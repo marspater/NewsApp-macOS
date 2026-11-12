@@ -9,7 +9,8 @@
 #   warm      the edition stored by a seeding launch on the same copy: the page shows it at once
 #   swap      that edition with one lane row reversed, so the fresh edition differs and takes the untouched page
 # Every app is a Profile build (always com.marspater.news.dev); the library is a copy named by NEWS_LIBRARY_NAME in
-# the development container, so neither the development library nor the real one is opened.
+# the development container, so neither the development library nor the real one is opened. The container's
+# settings and caches are the development build's own and are shared by every arm.
 #   NEWS_PAIRED_LIBRARY    the copy every launch starts from (required): a SQLite backup, never a library in use
 #   NEWS_PAIRED_SETTLE     seconds from launch to the memory sample (default 20)
 #   NEWS_PAIRED_HOLD=1     after the sample, wait for Return and sample again as "scrolled": for scrolling by hand
@@ -39,7 +40,11 @@ for spec in "$@"; do
     ARMS+=("$arm") APPS+=("$app")
 done
 [[ -f "$PRISTINE" && -d "$LIB" ]] || { echo "❌ Missing $PRISTINE or the development container's library folder" >&2; exit 1; }
-if pgrep -f 'xcodebuild|swift-build|swiftc' >/dev/null; then echo "❌ A build is running; not measuring." >&2; exit 1; fi
+# Anchored, so the shell of a session that waits for a free Mac with these words in its command does not match.
+if pgrep -f '[x]codebuild -project|^/bin/bash \./test\.sh' >/dev/null; then
+    echo "❌ A build or test run is active; not measuring." >&2
+    exit 1
+fi
 if pgrep -x News >/dev/null; then echo "❌ A News app is running; quit it first." >&2; exit 1; fi
 LOAD=$(sysctl -n vm.loadavg | awk '{print $2}')
 if awk -v load="$LOAD" -v limit="${NEWS_PAIRED_MAX_LOAD:-2.5}" 'BEGIN { exit !(load > limit) }'; then
@@ -95,6 +100,8 @@ if [[ -n "$seeder" ]]; then
     quit
     cp "$LIB/$NAME.sqlite3.today-edition.json" "$SEED" \
         || { echo "❌ The seeding launch stored no edition; the warm and swap arms cannot run." >&2; exit 1; }
+fi
+if [[ -n "$(index_of swap)" ]]; then
     python3 - "$SEED" "$SWAP_SEED" <<'PY'
 import json, sys
 edition = json.load(open(sys.argv[1]))
