@@ -971,6 +971,24 @@ extension NewsTests {
         assertEqual(
             FeedArticle.bestCardImage(in: [small, large])?.absoluteString, "https://news.example/large.jpg",
             "Cards select the largest usable member lead")
+        // Why a Today card's photo can change after its story was read (#936): before the visit the representative
+        // has only its feed image, which has no known size and ranks below a measured sibling; the reader then stores
+        // its own chosen lead with a size, which ranks above it. The card shows the photo the reader showed.
+        var feedOnly = FeedArticle(
+            title: "Report", link: page, guid: "feed-only", description: "", pubDate: Date(), source: "Three")
+        feedOnly.imageUrl = "https://news.example/feed.jpg"
+        assertEqual(
+            FeedArticle.bestCardImage(in: [feedOnly, small])?.absoluteString, "https://news.example/small.jpg",
+            "A feed image of unknown size ranks below a measured member lead")
+        var visited = feedOnly
+        visited.readerDocument = ReaderDocument(
+            blocks: [],
+            images: [
+                ReaderImageCandidate(url: "https://news.example/visited.jpg", origin: .body, width: 1000, height: 600)
+            ], leadImageURL: "https://news.example/visited.jpg")
+        assertEqual(
+            FeedArticle.bestCardImage(in: [visited, small])?.absoluteString, "https://news.example/visited.jpg",
+            "After a visit the reader's measured lead takes the card")
 
         var captioned = FeedArticle(
             title: "Report", link: page, guid: "captioned", description: "", pubDate: Date(), source: "Two")

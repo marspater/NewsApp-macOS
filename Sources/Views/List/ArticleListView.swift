@@ -228,6 +228,8 @@ struct ArticleListView: View {
     @State private var columnSize = CGSize(
         width: AppLayout.mainWindowMinimumWidth, height: AppLayout.mainWindowMinimumHeight)
     @State private var todayPrefetch = TodayLanePrefetch()
+    /// The latest store of the edition for the next launch (#937).
+    @State private var todayStoreTask: Task<Void, Never>?
 
     private var todayFocusMap: TodayFocusMap? {
         isTodayEdition ? todayEdition?.focusMap(latestColumns: gridLayout ? todayLayout.latestColumns : 1) : nil
@@ -743,7 +745,8 @@ struct ArticleListView: View {
                     cursor = page.last.map(ArticleQueryCursor.init)
                     hasMoreResults = morePages
                 case .refreshedInPlace:
-                    break
+                    // The grouping has ended and moved nothing on the page: there is no grouped page to wait for.
+                    if !groupingAtFetch, !feedManager.isGroupingNewStories { newDay.reset() }
                 case .waiting:
                     pendingHasMore = morePages
                 }
@@ -1367,13 +1370,27 @@ struct ArticleListView: View {
         guard !Task.isCancelled else { return }
         // A complete edition is kept for the next launch, unless its stories are still being grouped.
         if edition.isAssigned, !feedManager.holdsUngroupedStories {
-            Task { await articleStore.storeTodayEdition(edition, reader: reader) }
+            todayStoreTask = articleStore.storeTodayEdition(edition, reader: reader, after: todayStoreTask)
         }
         if showsRestored, let previous {
             // A failed assignment lays every story out in The Latest; the restored page stays until one succeeds.
             guard edition.isAssigned, settleFreshEdition(edition, behind: previous, listed: listed) else { return }
         }
         await installTodayEdition(edition, replacing: previous, keeps: keeps, proxy: proxy)
+        if !keeps, await pageAwaitsGrouping(listed) { newDay.notePageAwaitsGrouping() }
+    }
+
+    /// The page is mostly stories the grouping has not processed, while a grouping is running or still to come at
+    /// launch, such as the stories of a refresh cut short by quitting. Only asked then, and only a majority counts: a
+    /// few stories the matcher left unprocessed must not make an ordinary launch page give way to a refresh (a window
+    /// pass of 12 November: 3 leftovers marked the page, and the newest 200 stories of a large refresh replaced it).
+    private func pageAwaitsGrouping(_ listed: [FeedEntry]) async -> Bool {
+        guard feedManager.isGroupingNewStories || feedManager.lastClusteringPass == nil else { return false }
+        guard let rows = try? await articleStore.database.eventMatchRows(articleIDs: listed.map(\.id)) else {
+            return false
+        }
+        return FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(
+            unprocessed: rows.count { !$0.previouslyMatched }, of: rows.count)
     }
 
     /// Puts a laid-out edition on the page and moves keyboard focus with it.
