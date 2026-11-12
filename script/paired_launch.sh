@@ -8,6 +8,9 @@
 #   cold      nothing stored: the page waits for the lane assignment
 #   warm      the edition stored by a seeding launch on the same copy: the page shows it at once
 #   swap      that edition with one lane row reversed, so the fresh edition differs and takes the untouched page
+# An arm may carry a label after an underscore (cold_integration=/path/News.app) to run one kind on several builds;
+# NEWS_PAIRED_ARGS_<arm> holds further launch arguments for that arm ("-today_window_pool YES"). A warm or swap arm
+# is seeded by a launch of its own app.
 # Every app is a Profile build (always com.marspater.news.dev); the library is a copy named by NEWS_LIBRARY_NAME in
 # the development container, so neither the development library nor the real one is opened. The container's
 # settings and caches are the development build's own and are shared by every arm.
@@ -30,7 +33,7 @@ LOCK=/tmp/news-measure.lock # shared with script/measure_build.sh: one measureme
 ARMS=() APPS=()
 for spec in "$@"; do
     arm=${spec%%=*} app=${spec#*=}
-    [[ "$arm" =~ ^(baseline|cold|warm|swap)$ ]] || { echo "❌ Unknown arm $arm" >&2; exit 2; }
+    [[ "$arm" =~ ^(baseline|cold|warm|swap)(_[a-z0-9]+)?$ ]] || { echo "❌ Unknown arm $arm" >&2; exit 2; }
     # ${ARMS[*]-}: macOS bash 3.2 treats an empty array as unbound under `set -u`.
     [[ " ${ARMS[*]-} " != *" $arm "* ]] || { echo "❌ Arm $arm is named twice" >&2; exit 2; }
     app=$(cd "$app" && pwd -P)
@@ -73,14 +76,18 @@ cleanup() {
 }
 
 # Starts the app on a fresh copy of the library, with the given stored edition beside it or none.
-launch() { # <app> <stored edition or "">
+launch() { # <app> <stored edition or ""> <arm>
+    local extra="NEWS_PAIRED_ARGS_$3"
     rm -f "$LIB/$NAME.sqlite3"*
     cp "$PRISTINE" "$LIB/$NAME.sqlite3"
     [[ -z "$2" ]] || cp "$2" "$LIB/$NAME.sqlite3.today-edition.json"
-    # The executable directly, as xctrace launches it: the environment is certain to reach it.
+    # The executable directly, as xctrace launches it: the environment is certain to reach it. The arm's further
+    # arguments are split on spaces on purpose.
+    # shellcheck disable=SC2086
     NEWS_LIBRARY_NAME="$NAME" "$1/Contents/MacOS/News" -first_launch_completed YES -notifications_enabled NO \
-        >/dev/null 2>&1 &
+        ${!extra-} >/dev/null 2>&1 &
     PID=$!
+    disown "$PID" # no "Terminated" line from the shell when the launch is ended
     sleep "$SETTLE"
     # lsof can exit non-zero beside a complete listing, so its output is read, not its status.
     [[ "$(lsof -p "$PID" 2>/dev/null || true)" == *"/$NAME.sqlite3"* ]] \
@@ -91,18 +98,16 @@ index_of() { # <arm>; prints its position or nothing
     for i in "${!ARMS[@]}"; do [[ "${ARMS[$i]}" != "$1" ]] || { echo "$i"; return; }; done
 }
 
-SEED="$OUT/seed.today-edition.json"
-SWAP_SEED="$OUT/seed-swap.today-edition.json"
-seeder=$(index_of warm)
-seeder=${seeder:-$(index_of swap)}
-if [[ -n "$seeder" ]]; then
-    launch "${APPS[$seeder]}" ""
+# Each warm or swap arm starts from the edition a seeding launch of its own app stored on the same copy.
+for i in "${!ARMS[@]}"; do
+    arm=${ARMS[$i]}
+    [[ "${arm%%_*}" == warm || "${arm%%_*}" == swap ]] || continue
+    launch "${APPS[$i]}" "" "$arm"
     quit
-    cp "$LIB/$NAME.sqlite3.today-edition.json" "$SEED" \
-        || { echo "❌ The seeding launch stored no edition; the warm and swap arms cannot run." >&2; exit 1; }
-fi
-if [[ -n "$(index_of swap)" ]]; then
-    python3 - "$SEED" "$SWAP_SEED" <<'PY'
+    cp "$LIB/$NAME.sqlite3.today-edition.json" "$OUT/seed-$arm.today-edition.json" \
+        || { echo "❌ The seeding launch of $arm stored no edition; that arm cannot run." >&2; exit 1; }
+    [[ "${arm%%_*}" == swap ]] || continue
+    python3 - "$OUT/seed-$arm.today-edition.json" <<'PY'
 import json, sys
 edition = json.load(open(sys.argv[1]))
 row = next((lane for lane in edition["lanes"]
@@ -110,17 +115,17 @@ row = next((lane for lane in edition["lanes"]
 if row is None:
     sys.exit("No lane row with two stories to reverse for the swap arm")
 row["stories"].reverse()
-json.dump(edition, open(sys.argv[2], "w"))
+json.dump(edition, open(sys.argv[1], "w"))
 PY
-fi
+done
 
 one() { # <round> <arm> <app>
     local stem="$OUT/r$1-$2" stored="" start
-    case "$2" in warm) stored=$SEED ;; swap) stored=$SWAP_SEED ;; esac
+    case "${2%%_*}" in warm | swap) stored="$OUT/seed-$2.today-edition.json" ;; esac
     sleep 2
     sysctl -n vm.loadavg | awk '{print $2}' > "$stem.load"
     start=$(date -v-2S '+%Y-%m-%d %H:%M:%S')
-    launch "$3" "$stored"
+    launch "$3" "$stored" "$2"
     footprint -p "$PID" > "$stem.settled.footprint" 2>&1 || true
     if [[ "${NEWS_PAIRED_HOLD:-0}" == 1 ]]; then
         read -r -p "Round $1 $2: scroll as planned, then press Return " _
