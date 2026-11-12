@@ -1381,8 +1381,21 @@ extension NewsTests {
             TodayRestoreOutcome.decide(
                 sameArrangement: freshBehind.hasSameArrangement(as: restoredPage), isTouched: true,
                 awaitsNewDay: false), .held, "A touched page holds its restored cards")
-        let heldPage = restoredPage.heldBehindUpdates
+        let heldPage = restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e"]), fresh: freshBehind)
         assertTrue(!heldPage.isRestored && shape(heldPage) == shape(restoredPage), "The cards stay as they were")
+        assertEqual(heldPage.metadata["a"]?.imageURL, photo, "A held Lead slide keeps the photo it showed")
+        var leftFeed = freshBehind
+        leftFeed.excludedIDs = ["d"]
+        assertEqual(
+            shape(restoredPage.heldBehindUpdates(for: entries(["a", "b", "c", "d", "e", "page2"]), fresh: leftFeed)),
+            ["The Lead: a,b", "The Deep Read: c", "The Latest: e,page2"],
+            "Held, a story of a feed left since leaves Today and a further page joins The Latest")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: false, isTouched: true, awaitsNewDay: false, isApplied: true),
+            .swapped, "An update the reader applied over the restored edition takes the page, touched or not")
+        assertEqual(
+            TodayRestoreOutcome.decide(sameArrangement: true, isTouched: false, awaitsNewDay: false, isApplied: true),
+            .swapped, "Applied, the fresh edition keeps its new generation instead of confirming the old one")
         assertTrue(
             TodayEdition.keepsLanes(of: heldPage, isHolding: true, generation: 0),
             "Later store revisions keep the held cards in their lanes")

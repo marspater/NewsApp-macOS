@@ -175,11 +175,19 @@ extension TodayEdition {
         return isHolding && previous.generation == generation
     }
 
-    /// A restored edition the reader has started using: it stays as an ordinary held edition, and the fresh one
-    /// waits behind the updates button.
-    var heldBehindUpdates: TodayEdition {
-        var held = self
-        held.isRestored = false
+    /// A restored edition the reader has started using, as an ordinary held edition for the stories listed now: its
+    /// cards stay in their lanes with the photos and accounts they showed, a story that left the list leaves its
+    /// lane, a story the list gained joins The Latest, and stories of feeds the reader has left (`fresh`'s
+    /// exclusions) leave Today. The fresh edition waits behind the updates button.
+    func heldBehindUpdates(for entries: [FeedEntry], fresh: TodayEdition) -> TodayEdition {
+        var details = TodayCardDetails()
+        details.eventImages = metadata.compactMapValues(\.imageURL)
+        details.differingAccounts = metadata.compactMapValues(\.differingAccount)
+        details.unsubscribedIDs = fresh.excludedIDs
+        var held = TodayEdition.make(
+            entries: entries, plan: TodayEditionPlan(lanes: []), details: details, keeping: self,
+            generation: generation)
+        held.analysisGeneration = analysisGeneration
         return held
     }
 
@@ -199,7 +207,12 @@ enum TodayRestoreOutcome: String, Equatable {
     /// It differs and the page is in use, or another day's page is on its way: it waits behind the updates button.
     case held
 
-    static func decide(sameArrangement: Bool, isTouched: Bool, awaitsNewDay: Bool) -> TodayRestoreOutcome {
+    /// `isApplied`: the reader applied an update (Show Updates, or a refresh they asked for) while the restored
+    /// edition was on screen, so the fresh edition is the one they asked for and takes the page, touched or not.
+    static func decide(sameArrangement: Bool, isTouched: Bool, awaitsNewDay: Bool, isApplied: Bool = false)
+        -> TodayRestoreOutcome
+    {
+        if isApplied { return .swapped }
         if sameArrangement { return .confirmed }
         return isTouched || awaitsNewDay ? .held : .swapped
     }

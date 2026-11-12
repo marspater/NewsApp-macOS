@@ -1364,7 +1364,7 @@ struct ArticleListView: View {
         }
         if showsRestored, let previous {
             // A failed assignment lays every story out in The Latest; the restored page stays until one succeeds.
-            guard edition.isAssigned, settleFreshEdition(&edition, behind: previous) else { return }
+            guard edition.isAssigned, settleFreshEdition(&edition, behind: previous, listed: listed) else { return }
         }
         await installTodayEdition(edition, replacing: previous, keeps: keeps, proxy: proxy)
     }
@@ -1395,13 +1395,15 @@ struct ArticleListView: View {
 
     /// The fresh edition is ready behind the restored one on screen. False when the page in use keeps its cards as
     /// an ordinary held edition and the fresh one is offered behind the updates button.
-    private func settleFreshEdition(_ edition: inout TodayEdition, behind previous: TodayEdition) -> Bool {
+    private func settleFreshEdition(
+        _ edition: inout TodayEdition, behind previous: TodayEdition, listed: [FeedEntry]
+    ) -> Bool {
         let awaitsNewDay = buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories
         let outcome = TodayRestoreOutcome.decide(
             sameArrangement: edition.hasSameArrangement(as: previous),
             isTouched: hasScrolledList || focusedArticleID != nil || !articlePath.isEmpty
                 || todayLayout.hasMovedLane || NSWorkspace.shared.isVoiceOverEnabled,
-            awaitsNewDay: awaitsNewDay)
+            awaitsNewDay: awaitsNewDay, isApplied: edition.generation != previous.generation)
         NewsSignposts.launchEvent(
             "today_fresh_edition_ready",
             detail: "outcome=\(outcome.rawValue) scrolled=\(hasScrolledList) focused=\(focusedArticleID != nil) "
@@ -1409,7 +1411,7 @@ struct ArticleListView: View {
                 + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) new_day=\(awaitsNewDay)")
         switch outcome {
         case .held:
-            todayEdition = previous.heldBehindUpdates
+            todayEdition = previous.heldBehindUpdates(for: listed, fresh: edition)
             todayAwaitsFreshEdition = true
             return false
         case .confirmed:
