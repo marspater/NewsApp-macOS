@@ -421,6 +421,7 @@ struct NewsTests {
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()
             try await testOverviewCompositionFromVerifiedFacts(fixtureHost: fixtureHost)
+            try testHighlightsSkipTitleBlock()
             try testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: fixtureHost)
             try await testCutDescriptionTails(fixtureHost: fixtureHost)
             try await testPlainTextGeneration(fixtureHost: fixtureHost)
