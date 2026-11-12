@@ -2422,6 +2422,21 @@ extension NewsTests {
         assertEqual(
             handoff.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: true), true,
             "A page the reader scrolled or focused keeps its stories; the new ones wait behind the button")
+        // A page read while the grouping ran and received after it ended is still one report a story: the reload
+        // that the grouping's end starts reads the grouped page (#937).
+        var raced = FeedUpdateBuffer.NewDayHandoff()
+        raced.noteRefreshedPage(showsOnlyEarlierDays: true, isGrouping: false, wasGroupingAtFetch: true)
+        let readMidGrouping = raced.holds(
+            showsOnlyEarlierDays: true, isGrouping: false, wasGroupingAtFetch: true, isTouched: false)
+        assertEqual(readMidGrouping, true, "A page read mid-grouping does not take the page once grouping ends")
+        var racedMorning = FeedUpdateBuffer()
+        racedMorning.replace(with: FeedSnapshot(articles: [yesterday]))
+        assertEqual(
+            racedMorning.receive(ungrouped, holding: readMidGrouping ?? false, mode: .events), .waiting,
+            "The earlier edition stays for the grouped page")
+        assertEqual(
+            raced.holds(showsOnlyEarlierDays: true, isGrouping: false, isTouched: false), false,
+            "The page read after the grouping takes an untouched page")
         let afterGrouping = handoff.holds(showsOnlyEarlierDays: false, isGrouping: false, isTouched: false)
         assertEqual(afterGrouping, false, "Once grouped, the new day takes an untouched page")
         assertEqual(
