@@ -1355,7 +1355,7 @@ struct ArticleListView: View {
         let keeps = TodayEdition.keepsLanes(
             of: previous, isHolding: isHoldingList || newDay.isWaiting, generation: todayGeneration)
         NewsSignposts.launchMilestone("today_edition_requested")
-        var edition = await articleStore.todayEdition(
+        let edition = await articleStore.todayEdition(
             entries: listed, reader: reader, keeping: keeps ? previous : nil, generation: todayGeneration)
         guard !Task.isCancelled else { return }
         // A complete edition is kept for the next launch, unless its stories are still being grouped.
