@@ -251,8 +251,11 @@ extension ArticleStore {
             timer?.lap("assignment", count: entries.count { if case .event = $0 { true } else { false } })
             details.differingAccounts = (try? await database.todayDifferingAccounts(for: plan)) ?? [:]
             timer?.lap("differing_accounts", count: details.differingAccounts.count)
-            let edition = TodayEdition.make(
-                entries: entries, plan: plan, details: details, keeping: previous, generation: generation)
+            // Off the main actor: the cards' reading times are counted from their stored text here.
+            let edition = await Task.detached(priority: .userInitiated) { [details] in
+                TodayEdition.make(
+                    entries: entries, plan: plan, details: details, keeping: previous, generation: generation)
+            }.value
             timer?.lap("layout", count: edition.lead.count)
             return edition
         } catch {

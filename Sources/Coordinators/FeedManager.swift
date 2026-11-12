@@ -90,6 +90,11 @@ class FeedManager: NSObject, ObservableObject {
     private var requestedImageIDs: Set<String> = []
     /// Event clustering after collection; one pass at a time, never part of the refresh itself.
     private var clusteringTask: Task<Void, Never>?
+    /// Set between a refresh's end and the start of its grouping pass, which a database prune separates.
+    private var handsOverToGrouping = false
+    /// A refresh is collecting stories or its stories are still being grouped into events. A page laid out now
+    /// would show them one report each (#937).
+    var isGroupingNewStories: Bool { refreshTask != nil || handsOverToGrouping || clusteringTask != nil }
     private var clusteringRunID: UUID?
     private var needsClusteringPass = false
     private var backgroundTimer: Timer?
@@ -700,6 +705,7 @@ class FeedManager: NSObject, ObservableObject {
             cancelledRefreshCount += 1
             return
         }
+        handsOverToGrouping = true
         refreshTask = nil
         refreshRunID = nil
         isAnyFeedLoading = false
@@ -709,9 +715,13 @@ class FeedManager: NSObject, ObservableObject {
         // Keep this run's waiters cancellable during its follow-up; never resume another run's callers.
         defer { resumeManualRefreshWaiters(for: runID) }
 
-        guard !isStopped else { return }
+        guard !isStopped else {
+            handsOverToGrouping = false
+            return
+        }
         await pruneIfDue()
         clusterEventsInBackground()
+        handsOverToGrouping = false
         // Rate before triage. Collection and its spinner have ended; another refresh can proceed.
         await waitForEventClustering()
         if !Task.isCancelled, !isStopped { await notifyAndEnrich(newArticles) }
@@ -1034,6 +1044,8 @@ class FeedManager: NSObject, ObservableObject {
             guard let self, self.clusteringRunID == runID else { return }
             self.clusteringTask = nil
             self.clusteringRunID = nil
+            // A list that waited for the grouping (`isGroupingNewStories`) loads again now that it has ended.
+            self.articleStore.noteEventsChanged()
             self.overviewWarmupTask?.cancel()
             if self.allowsBackgroundWork() {
                 let store = self.articleStore

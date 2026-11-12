@@ -158,6 +158,11 @@ struct ArticleListView: View {
     @State private var expandedEvents: Set<String> = []
     /// Set by the reader's own regrouping actions, which apply at once.
     @State private var appliesNextUpdate = false
+    /// The reader has scrolled this list since it was loaded.
+    @State private var hasScrolledList = false
+    /// Today showed only earlier days' stories when a refresh began, and the new day's page waits for its grouping.
+    /// A held list takes fresh values in place, so a story updated today would otherwise end the wait early.
+    @State private var awaitsGroupedDay = false
     /// Reloads the list once a refresh the reader asked for has finished.
     @State private var refreshReloads = 0
     /// A refresh the reader started: its results replace the list as they arrive instead of queueing behind
@@ -235,7 +240,12 @@ struct ArticleListView: View {
     private var isHoldingList: Bool {
         guard !appliesNextUpdate else { return false }
         if !articlePath.isEmpty { return true }
-        if !isSearching, (selectedTopic ?? "Today") == "Today", buffer.showsOnlyEarlierDays() { return false }
+        if !isSearching, (selectedTopic ?? "Today") == "Today", buffer.showsOnlyEarlierDays() || awaitsGroupedDay {
+            // The new day's stories take the page once they are grouped, and only while the reader has not
+            // scrolled or focused a card: before that the page would be one report a story, and after it the
+            // stories wait behind the updates button like any other (#937).
+            return feedManager.isGroupingNewStories || hasScrolledList || focusedArticleID != nil
+        }
         return !isReaderRefreshing
     }
 
@@ -410,6 +420,9 @@ struct ArticleListView: View {
                 $0.size
             } action: {
                 columnSize = $0
+            }
+            .onScrollPhaseChange { _, phase in
+                if phase == .interacting, !hasScrolledList { hasScrolledList = true }
             }
             // The Today edition's rows pass under the floating sidebar, so the page must not cut them at the
             // column's edge.
@@ -649,6 +662,8 @@ struct ArticleListView: View {
             groupedEntries.resetPrefetch()
             todayPrefetch.reset()
             todayEdition = nil
+            hasScrolledList = false
+            awaitsGroupedDay = false
             cursor = nil
             hasMoreResults = false
             expandedEvents = []
@@ -700,11 +715,13 @@ struct ArticleListView: View {
                 hasMoreResults = morePages
             } else {
                 let snapshot = FeedSnapshot(articles: page, events: events)
+                if buffer.showsOnlyEarlierDays(), feedManager.isGroupingNewStories { awaitsGroupedDay = true }
                 let holding = isHoldingList
                 appliesNextUpdate = false
                 let result = buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
                 switch result {
                 case .replaced:
+                    awaitsGroupedDay = false
                     // The list was replaced, not held: Today lays its edition out afresh for it.
                     todayGeneration += 1
                     cursor = page.last.map(ArticleQueryCursor.init)
