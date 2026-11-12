@@ -123,6 +123,11 @@ struct TodayEditionThresholds: Equatable, Sendable {
     /// story for Your Beat only together with an interest match of at least this value. Starred feeds and an
     /// interest match of ``yourBeatInterestMatchMinimum`` still qualify on their own.
     var yourBeatAffinityInterestMinimum = 0.0
+    /// Evaluation option, off by default (#934, 12 November 2026). When set, Your Beat's affinity publishers are
+    /// the top quartile of engaged publishers by engagement per story published in the profile window, less those
+    /// with fewer than this many read or saved stories (``TodayUserProfile/perStoryAffinityPublishers``). The
+    /// loader counts the stories each publisher published only while this is set.
+    var yourBeatAffinityPerStoryFloor: Int?
 
     var outsideNoveltyMinimum = 0.60
     var outsideScoreMinimum = 0.35
