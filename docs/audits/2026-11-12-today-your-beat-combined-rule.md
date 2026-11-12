@@ -87,5 +87,5 @@ Under the combined rule no publisher holds more than a third of the lane at any 
 
 1. The combined rule is safe to take as defined in its first reading: per story published, then the floor. It is identical to per story published for an established reader and switches affinity off below about 25 to 50 read stories.
 2. The second reading is not better: it selects fewer and quieter publishers and equals no affinity on this day.
-3. What the rule buys over no affinity is small: 22 stories a day here, none in the lane's shares. Whether that is worth the stored count of stories published per publisher that the module would need is the open question for integration.
+3. What the rule buys over no affinity is small: 22 stories a day here; in the lane, the busiest publisher's share is unchanged (25 %) and the top three's falls from 58 % to 50 %. Whether that is worth the stored count of stories published per publisher that the module would need is the open question for integration.
 4. The cold-start width of Your Beat comes from the interest match and needs its own measurement before it is called resolved.
