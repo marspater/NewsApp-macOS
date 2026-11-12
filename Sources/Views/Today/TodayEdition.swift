@@ -34,6 +34,8 @@ struct TodayEdition: Equatable, Sendable {
     var isRestored = false
     /// Listed stories left out because the reader has left all their feeds (`TodayCardDetails.unsubscribedIDs`).
     var excludedIDs: Set<String> = []
+    /// The library's analysis generation when the edition's details were read; a clear since then removed them.
+    var analysisGeneration: Int?
 
     func stories(in lane: TodayLane) -> [TodayStoryAssignment] {
         lanes.first { $0.lane == lane }?.stories ?? []
@@ -241,7 +243,7 @@ extension ArticleStore {
         await Task.detached(priority: .utility) {
             guard let data = try? JSONEncoder().encode(TodayStoredEdition(edition, identity: identity, builtAt: Date()))
             else { return }
-            try? await database.storeTodayEdition(data)
+            try? await database.storeTodayEdition(data, expectedGeneration: edition.analysisGeneration)
         }.value
     }
 
@@ -254,6 +256,7 @@ extension ArticleStore {
         let now = Date()
         // An edition laid out afresh logs how long each stage took (#937).
         var timer = previous == nil ? NewsSignposts.StageTimer("Today edition") : nil
+        let analysisGeneration = await database.analysisGeneration
         do {
             var context = try await database.loadTodayAssignmentContext(
                 entries: entries, now: now, starredFeedURLs: reader.starredFeedURLs,
@@ -298,6 +301,7 @@ extension ArticleStore {
             timer?.lap("layout", count: edition.lead.count)
             var assigned = edition
             assigned.isAssigned = previous == nil
+            assigned.analysisGeneration = analysisGeneration
             return assigned
         } catch {
             return TodayEdition.make(

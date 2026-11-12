@@ -4402,9 +4402,11 @@ actor DatabaseEngine {
     /// moves first, so a failed rewrite cannot leave stale work writable; the clear is repeatable.
     private func finishAnalysisClear() throws {
         analysisGeneration &+= 1
-        // The stored Today edition holds differing accounts read from the cleared analysis.
-        try storeTodayEdition(nil)
+        // The stored Today edition holds differing accounts read from the cleared analysis. Both side files are
+        // cleared even when one fails; the first failure is reported.
+        let editionRemoval = Result { try storeTodayEdition(nil) }
         try clearWorldTensionHistory()
+        try editionRemoval.get()
     }
 
     /// Clears persisted article body text from local storage.
@@ -5410,9 +5412,12 @@ actor DatabaseEngine {
         return data
     }
 
-    /// Replaces the stored edition; nil removes it. A read-only library keeps what it has.
-    func storeTodayEdition(_ data: Data?) throws {
+    /// Replaces the stored edition; nil removes it. A read-only or closed library keeps what it has, and an edition
+    /// read under another analysis generation (`expectedGeneration`) is not stored: a clear has removed its data.
+    func storeTodayEdition(_ data: Data?, expectedGeneration: Int? = nil) throws {
+        guard db != nil else { throw CocoaError(.fileNoSuchFile) }
         try requireWritable()
+        if let expectedGeneration, expectedGeneration != analysisGeneration { return }
         if dbPath == ":memory:" {
             inMemoryTodayEdition = data
             return

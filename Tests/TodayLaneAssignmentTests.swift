@@ -1373,8 +1373,12 @@ extension NewsTests {
         assertEqual(await db.storedTodayEdition(), data, "The stored edition is read back")
         try await db.storeTodayEdition(nil)
         assertTrue(await db.storedTodayEdition() == nil, "Removing it leaves none")
+        let generation = await db.analysisGeneration
         try await db.storeTodayEdition(data)
         try await db.clearArticleEnrichment()
+        try await db.storeTodayEdition(data, expectedGeneration: generation)
+        assertTrue(
+            await db.storedTodayEdition() == nil, "An edition read before Clear Analysis is not stored after it")
         assertTrue(
             await db.storedTodayEdition() == nil, "Clear Analysis removes the stored edition and its differing accounts"
         )
