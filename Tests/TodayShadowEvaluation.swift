@@ -384,21 +384,8 @@ enum TodayShadowEvaluation {
         let comparisonPool =
             labels?.stories.map { stories in newestFirst.filter { stories[$0.id] != nil } }
             ?? Array(newestFirst.prefix(200))
-        let comparisonRawEntries = comparisonPool.map(\.entry)
-
-        let briefingRanking = await BriefingRanking.load(entries: comparisonRawEntries, database: db)
-        let byPublisherCount = comparisonPool.sorted {
-            if $0.publisherCount != $1.publisherCount { return $0.publisherCount > $1.publisherCount }
-            return $0.sortKey > $1.sortKey
-        }
-        let briefingOrderIDs = briefingRanking.order(comparisonRawEntries).map(\.id)
-        let assignmentByID = Dictionary(uniqueKeysWithValues: comparisonPool.map { ($0.id, $0) })
-        let byBriefingSignals = briefingOrderIDs.compactMap { assignmentByID[$0] }
-        let byZ2Combined = comparisonPool.sorted { a, b in
-            if abs(a.score - b.score) > 1e-9 { return a.score > b.score }
-            if a.originalReportCount != b.originalReportCount { return a.originalReportCount > b.originalReportCount }
-            return a.sortKey > b.sortKey
-        }
+        let ranked = await leadRankings(of: comparisonPool, database: db)
+        let (byPublisherCount, byBriefingSignals, byZ2Combined) = (ranked.publisherCount, ranked.briefing, ranked.z2)
 
         func top5Metrics(_ ranked: [TodayStoryAssignment]) -> (ids: [String], meanOriginals: Double, wireOnly: Int) {
             let top5 = Array(ranked.prefix(5))
@@ -599,6 +586,9 @@ enum TodayShadowEvaluation {
         try StoryCorpus.writePrivate(
             try encoder.encode(Array(eventItems.prefix(50))),
             to: outputDirectory.appendingPathComponent("in-motion-candidates-private.json"), replacing: true)
+
+        try await writeLeadRankings(
+            of: assignedList, pool: pool.name, now: now, database: db, privateOutput: outputDirectory)
 
         print("TODAY_SHADOW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
