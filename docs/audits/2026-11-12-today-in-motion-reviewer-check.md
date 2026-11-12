@@ -9,9 +9,9 @@ Counts and event-id prefixes only. Headlines, sheets and label files stay under 
 | | Rule | Where it exists |
 | --- | --- | --- |
 | **Shipped** | A report dated in the last 24 hours whose headline is not among the event's headlines from before those 24 hours, **and rising momentum** | On `main`, in the module (`TodayEditionThresholds.standard`). This is what the app shows |
-| **Alternative** | The same headline test, **any momentum** | In the module as an evaluation option that ships off (`inMotionRequiresRisingMomentum`), switched on only by the harness and by tests. The app never sets it |
+| **Alternative** | Event has a report older than 24 hours, a report from the last 24 hours has a headline not seen in *any* earlier report (`date < candidate.date`), **and any momentum** (`24h-any-momentum`) | In the module as evaluation options (`inMotionUpdateWindowSeconds = 24 * 3600` and `inMotionRequiresRisingMomentum = false`), switched on only by the harness and by tests. The app never sets either |
 
-So the rule is fully implemented; nothing has to be built before a read of the events. The read chooses between the two rows. A 36-hour update window is a third harness option, already set aside on 11 November, and is reported below only for the events it adds.
+So both options are already implemented; note that this alternative (`24h-any-momentum`) changes both the rising-momentum requirement and the headline comparison set (comparing against all earlier reports rather than only those older than 24 hours). The read chooses between the two rows. A 36-hour update window (`inMotionUpdateWindowSeconds = 36 * 3600`) is a third harness option, already set aside on 11 November, and is reported below only for the events it adds.
 
 ## How it was checked
 
