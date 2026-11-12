@@ -38,13 +38,15 @@ case "$COMMAND" in
         PREFERENCES="$DATA/Preferences/$BUNDLE.plist"
         [[ -f "$LIBRARY" && -f "$PREFERENCES" ]] || { echo "No library or settings for $BUNDLE" >&2; exit 1; }
         [[ ! -e "$DIR" ]] || { echo "$DIR exists; a day's snapshot is never overwritten" >&2; exit 1; }
-        mkdir -p "$DIR"
+        mkdir -p "$ROOT"
+        STAGE="$(mktemp -d "$ROOT/.snapshot-$DAY.XXXXXX")"
+        trap 'rm -rf "$STAGE"' EXIT
         CLOCK="$(date +%s)"
         # A consistent copy, the write-ahead log included, through a connection that cannot write the source.
-        sqlite3 "file:${LIBRARY// /%20}?mode=ro" "VACUUM INTO '$DIR/library.sqlite3';"
+        sqlite3 "file:${LIBRARY// /%20}?mode=ro" "VACUUM INTO '$STAGE/library.sqlite3';"
         plutil -extract saved_feed_urls json -o - "$PREFERENCES" \
-            | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > "$DIR/feeds.txt"
-        python3 - "$DIR" "$DAY" "$BUNDLE" "$CLOCK" <<'PY'
+            | python3 -c 'import json, sys; print("\n".join(json.load(sys.stdin)))' > "$STAGE/feeds.txt"
+        python3 - "$STAGE" "$DAY" "$BUNDLE" "$CLOCK" <<'PY'
 import json, sqlite3, sys
 directory, day, bundle, clock = sys.argv[1:]
 db = sqlite3.connect(f'file:{directory}/library.sqlite3?mode=ro', uri=True)
@@ -56,14 +58,19 @@ manifest = {'day': day, 'bundle': bundle, 'clock': int(clock), 'stories': storie
 json.dump(manifest, open(f'{directory}/manifest.json', 'w'), indent=2, sort_keys=True)
 print(json.dumps(manifest, sort_keys=True))
 PY
-        chmod 400 "$DIR/library.sqlite3" "$DIR/feeds.txt" "$DIR/manifest.json"
+        chmod 400 "$STAGE/library.sqlite3" "$STAGE/feeds.txt" "$STAGE/manifest.json"
+        [[ ! -e "$DIR" ]] || { echo "$DIR exists; a day's snapshot is never overwritten" >&2; exit 1; }
+        mv "$STAGE" "$DIR"
+        trap - EXIT
         echo "Snapshot in $DIR. Next: script/today_lead.sh pack --day $DAY"
         ;;
     pack)
         [[ -f "$DIR/library.sqlite3" && -f "$DIR/manifest.json" ]] || { echo "No snapshot in $DIR" >&2; exit 1; }
-        [[ ! -e "$DIR/lead-rankings-private.json" ]] || { echo "$DIR already holds a pack" >&2; exit 1; }
+        [[ ! -e "$DIR/lead-rankings-private.json" && ! -e "$DIR/lead-review-private.csv" ]] \
+            || { echo "$DIR already holds a pack" >&2; exit 1; }
         WORK="$(mktemp -d "/private/tmp/today-lead-$DAY.XXXXXX")"
-        trap 'rm -rf "$WORK"' EXIT
+        STAGE="$(mktemp -d "$DIR/.pack.XXXXXX")"
+        trap 'rm -rf "$WORK" "$STAGE"' EXIT
         cp "$DIR/library.sqlite3" "$WORK/library.sqlite3"
         chmod 600 "$WORK/library.sqlite3"
         # The clock is the newest story's date, as in the Z2 audits: a library last refreshed hours before the
@@ -72,8 +79,10 @@ PY
         NEWS_TODAY_FEEDS="$DIR/feeds.txt" NEWS_TODAY_POOL="${NEWS_TODAY_POOL:-page}" \
             ./test.sh --today-shadow "$WORK/library.sqlite3" "$WORK/out" > "$WORK/run.log" 2>&1 \
             || { tail -20 "$WORK/run.log" >&2; exit 1; }
-        cp "$WORK/out/lead-rankings-private.json" "$WORK/out/shadow-report.json" "$DIR/"
-        python3 script/evaluation/lead_review.py sheet "$DIR"
+        cp "$WORK/out/lead-rankings-private.json" "$WORK/out/shadow-report.json" "$STAGE/"
+        python3 script/evaluation/lead_review.py sheet "$STAGE"
+        mv "$STAGE/lead-rankings-private.json" "$STAGE/shadow-report.json" "$STAGE/lead-review-private.csv" "$DIR/"
+        rmdir "$STAGE"
         echo "Each reader fills a copy of $DIR/lead-review-private.csv named lead-review-private-<reader>.csv"
         ;;
     *)

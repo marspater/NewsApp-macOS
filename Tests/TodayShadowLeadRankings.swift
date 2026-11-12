@@ -45,16 +45,21 @@ extension TodayShadowEvaluation {
 
     /// `stories` ordered by publisher count alone, by today's Briefing signals and by the Z2 score.
     static func leadRankings(of stories: [TodayStoryAssignment], database: DatabaseEngine) async -> LeadRankings {
-        let entries = stories.map(\.entry)
+        let ordered = stories.sorted {
+            let lhsDate = $0.entry.representative.orderDate
+            let rhsDate = $1.entry.representative.orderDate
+            return lhsDate == rhsDate ? $0.id < $1.id : lhsDate > rhsDate
+        }
+        let entries = ordered.map(\.entry)
         let briefingRanking = await BriefingRanking.load(entries: entries, database: database)
-        let byID = Dictionary(stories.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let byID = Dictionary(ordered.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return LeadRankings(
-            publisherCount: stories.sorted {
+            publisherCount: ordered.sorted {
                 if $0.publisherCount != $1.publisherCount { return $0.publisherCount > $1.publisherCount }
                 return $0.sortKey > $1.sortKey
             },
             briefing: briefingRanking.order(entries).compactMap { byID[$0.id] },
-            z2: stories.sorted { a, b in
+            z2: ordered.sorted { a, b in
                 if abs(a.score - b.score) > 1e-9 { return a.score > b.score }
                 if a.originalReportCount != b.originalReportCount {
                     return a.originalReportCount > b.originalReportCount

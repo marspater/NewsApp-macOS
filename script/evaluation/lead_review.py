@@ -115,14 +115,36 @@ def pooled(days):
     return result
 
 
+def snapshot_identity(directory, data):
+    """Identity key for one snapshot day so the same run cannot count twice even when copied."""
+    manifest_path = directory / 'manifest.json'
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    return (
+        manifest.get('day'),
+        manifest.get('clock'),
+        data['nowTimestamp'],
+        data['pool'],
+        tuple(row['id'] for row in data['stories']),
+    )
+
+
 def report(directories):
-    days = [day(directory) for directory in directories]
+    resolved = [private_run(pathlib.Path(directory)) for directory in directories]
+    require(len(set(resolved)) == len(resolved), 'Each run directory may be passed at most once')
+    identities = set()
+    days = []
+    for directory in resolved:
+        identities.add(snapshot_identity(directory, key(directory)))
+        days.append(day(directory))
+    require(len(identities) == len(resolved), 'Each snapshot may be counted at most once')
     readers = sorted({name for entry in days for name in entry['perReader']})
     result = {
         'days': days, 'pooled': pooled(days),
         'decisionInputs': {
             'days': len(days), 'readers': len(readers),
-            'labellingComplete': bool(readers) and all(not any(entry['unlabelled'].values()) for entry in days),
+            'labellingComplete': bool(readers) and all(
+                bool(entry['perReader']) and not any(entry['unlabelled'].values()) for entry in days
+            ),
             'multiReaderMultiDay': len(days) >= 2 and all(len(entry['perReader']) >= 2 for entry in days),
             'rankingsDiffer': any(count < DEPTHS[-1] for entry in days for count in entry['top20Overlap'].values()),
         },
@@ -131,11 +153,11 @@ def report(directories):
                        'whose top 20s hold the same stories cannot be told apart at 20, only by their order at 5 and '
                        '10. Readers see one shuffled list a day, so a story two rankings share is judged once.',
     }
-    (private_run(directories[0]) / REPORT).write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
+    (resolved[0] / REPORT).write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
     return result
 
 
-def fixture(directory, pool='page'):
+def fixture(directory, pool='page', now_timestamp=0):
     """24 stories: Z2 and Briefing share a top 20, publisher count swaps four of them; s1 to s6 are Lead-worthy."""
     stories = []
     for index in range(1, 25):
@@ -148,7 +170,7 @@ def fixture(directory, pool='page'):
         stories.append({'id': f's{index}', 'publisher': 'Publisher A', 'title': f'Headline {index}',
                         'summary': f'Private summary {index}', 'ranks': ranks})
     (directory / SOURCE).write_text(json.dumps(
-        {'pool': pool, 'nowTimestamp': 0, 'candidates': 150, 'depth': 20, 'stories': stories}))
+        {'pool': pool, 'nowTimestamp': now_timestamp, 'candidates': 150, 'depth': 20, 'stories': stories}))
 
 
 def fill(directory, reader, lead):
@@ -160,10 +182,11 @@ def fill(directory, reader, lead):
 
 
 def self_check():
-    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two:
+    with tempfile.TemporaryDirectory() as one, tempfile.TemporaryDirectory() as two, \
+            tempfile.TemporaryDirectory() as clone_root:
         first, second = pathlib.Path(one), pathlib.Path(two)
         fixture(first)
-        fixture(second)
+        fixture(second, now_timestamp=86400)
         require(sheet(first) == 24 and sheet(second) == 24, 'The sheet lists the union of the three top 20s')
         expect_rejected(lambda: sheet(first), FileExistsError, 'A sheet that may hold labels was replaced')
         text = (first / SHEET).read_text()
@@ -175,6 +198,12 @@ def self_check():
         strong = {f's{index}' for index in range(1, 7)}
         fill(first, 'a', strong)
         fill(first, 'b', strong | {'s7'})
+        require(not report([first, second])['decisionInputs']['labellingComplete'],
+                'Unlabelled second day prevents complete labelling')
+        expect_rejected(lambda: report([first, first]), ValueError, 'Same run directory rejected')
+        clone = pathlib.Path(clone_root) / 'copy'
+        shutil.copytree(first, clone)
+        expect_rejected(lambda: report([first, clone]), ValueError, 'Copied snapshot rejected')
         fill(second, 'a', strong)
         fill(second, 'b', strong)
         result = report([first, second])
