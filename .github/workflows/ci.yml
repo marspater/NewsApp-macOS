@@ -150,6 +150,43 @@ jobs:
       - name: Verify Swift Package Manager Build
         run: swift build --force-resolved-versions --target News
 
+  # Today edition captures on macOS 26 (#937): Tests/Harness/TodayCaptures.swift renders the card variants and the
+  # page without a window, from fictional stories and drawn photos; the unsandboxed harness opens no library but an
+  # empty one in the temporary directory. Pushes to main and manual runs only, so pull requests wait for nothing
+  # more. Not a required check.
+  today-captures:
+    name: Today Captures (macOS 26, Apple Silicon)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0  # tags and commit count stamp the bundle version
+
+      - name: System Environment Info
+        run: |
+          echo "Host OS: $(sw_vers -productName) $(sw_vers -productVersion) ($(sw_vers -buildVersion))"
+          echo "Xcode: $(xcodebuild -version | tr '\n' ' ')"
+          [[ "$(sw_vers -productVersion)" == 26.* ]]
+
+      - name: Render Today Captures
+        run: |
+          NEWS_CONFIGURATION=Debug NEWS_NATIVE_HARNESS=Tests/Harness/TodayCaptures.swift \
+            script/native_performance_baseline.sh "$RUNNER_TEMP/today-captures"
+
+      - name: Upload Today Captures
+        uses: actions/upload-artifact@v7
+        with:
+          name: today-captures-macos26
+          path: ${{ runner.temp }}/today-captures/*.png
+          if-no-files-found: error
+          retention-days: 14
+
   build-arm64:
     name: Build Verification (Apple Silicon)
     needs: changes
