@@ -89,3 +89,26 @@ Under the combined rule no publisher holds more than a third of the lane at any 
 2. The second reading is not better: it selects fewer and quieter publishers and equals no affinity on this day.
 3. What the rule buys over no affinity is small: 22 stories a day here; in the lane, the busiest publisher's share is unchanged (25 %) and the top three's falls from 58 % to 50 %. Whether that is worth the stored count of stories published per publisher that the module would need is the open question for integration.
 4. The cold-start width of Your Beat comes from the interest match and needs its own measurement before it is called resolved.
+
+## Integration as a default-off option (12 November 2026, later the same day)
+
+The rule in its first reading (per story published, then the floor) is now in the module behind an option that ships off: `TodayEditionThresholds.yourBeatAffinityPerStoryFloor`, `nil` in `TodayEditionThresholds.standard`. Athena · attention (lane assignment) is the sub-system; no view changes.
+
+- **Off (shipped):** nothing changes. The thresholds, the profile and the plan are the ones on `main`, and the loader runs no further query. A test holds the loaded context equal with and without the parameter.
+- **On:** `DatabaseEngine.todayUserProfile` reads the id, source and link of every visible story dated in the 30-day profile window (about 7,400 rows on the evaluation copy) and takes the affinity publishers as the top quartile of engaged publishers by engagement per story published, less those with fewer read or saved stories than the floor. No schema change and no stored count: the count is taken from the stories when the context is loaded.
+- **It is the rule this audit measured.** In the shadow run of 12 November (`eddd2ae`) the module's publishers give the harness row's figures at every history size, on both pools:
+
+| History | Harness, per story then floor of 5 | Module option, floor 5 |
+| --- | --- | --- |
+| Whole | 96 (4 publishers) | 96 (4) |
+| Newest 50 | 120 (3) | 120 (3) |
+| Newest 25 | 98 (0) | 98 (0) |
+| Newest 15 | 118 (0) | 118 (0) |
+| Newest 5 | 97 (0) | 97 (0) |
+| None | 0 | 0 |
+
+Stories qualifying per day of 406, 72-hour pool. On the first listed page (144 candidates, [the pool audit](2026-11-12-today-evaluated-pool.md)): shipped 69, option 26, no affinity 18, harness and module again equal.
+
+**What turning it on would take:** one line, the default of `yourBeatAffinityPerStoryFloor` set to 5, and one measurement that is still owed: the time of the 30-day read on the launch path, which runs before the first card (#937). It was not timed here. If it costs too much there, the count per publisher can be kept in the library and updated as stories arrive; that is the stored count this audit named, and it is not built.
+
+**The choice, on or off:** on narrows Your Beat from 229 to 96 qualifying stories a day and takes the busiest publisher from 58 % of the shown lane to 25 %, and switches affinity off for a reader with fewer than about 25 to 50 read stories. Against no affinity at all it adds 22 stories a day and leaves the lane's shares about where they are. Off keeps the shipped lane, in which one publisher holds 7 of 12 places.
