@@ -43,15 +43,20 @@ public struct OverviewComposer: Sendable {
     /// Validates whether a fact candidate satisfies the quote grounding and passage invariants.
     /// Up to five Highlights, after a Kagi News story card: whole statements of five or more words, those sharing the
     /// most words with the coverage's headlines first, publisher order otherwise. Fragments such as "Earlier this
-    /// month." stay out; the timeline still sees every valid fact. A statement sharing most of its words with one
-    /// already chosen (wire copies) is skipped, and each publisher's best statement is chosen before any second one.
+    /// month." and bare headings stay out; the timeline still sees every valid fact. A statement sharing most of its
+    /// words with one already chosen (wire copies) is skipped, and each publisher's best statement is chosen before any
+    /// second one: a publisher is its display name, so two articles of one site are one source (#1251).
     static func highlights(from facts: [PassageAnchoredFact], articles: [FeedArticle]) -> [PassageAnchoredFact] {
         func words(_ text: String) -> Set<String> {
             Set(TensionEventClassifier.words(text).filter { $0.count >= 4 })
         }
         let headline = words(articles.map(\.title).joined(separator: " "))
+        let publishers = Dictionary(
+            articles.map { ($0.id, EventFeedSummary.displaySource($0.source).lowercased()) },
+            uniquingKeysWith: { first, _ in first })
+        func publisher(_ fact: PassageAnchoredFact) -> String { publishers[fact.articleID] ?? fact.articleID }
         let substantive = facts.enumerated().filter {
-            $0.element.statement.split(whereSeparator: \.isWhitespace).count >= 5
+            $0.element.statement.split(whereSeparator: \.isWhitespace).count >= 5 && !isHeading($0.element.statement)
         }
         let ranked = substantive.map { (offset: $0.offset, fact: $0.element, words: words($0.element.statement)) }
             .sorted { left, right in
@@ -75,13 +80,37 @@ public struct OverviewComposer: Sendable {
         var sources = Set<String>()
         for firstPerSource in [true, false] {
             for (index, entry) in ranked.enumerated() where chosen.count < 5 && !chosen.contains(index) {
-                if firstPerSource && sources.contains(entry.fact.articleID) { continue }
+                if firstPerSource && sources.contains(publisher(entry.fact)) { continue }
                 guard !isRepeat(entry.words) else { continue }
                 chosen.append(index)
-                sources.insert(entry.fact.articleID)
+                sources.insert(publisher(entry.fact))
             }
         }
         return chosen.sorted().map { ranked[$0].fact }
+    }
+
+    /// A heading or label rather than a statement ("iPad mini (eighth generation, 2026)", "Related Roundups: …"): no
+    /// closing ".", "!", "?" or "…" (also inside a closing quote or bracket), a label's shape (a colon, a bracket, or
+    /// mostly capitalised words) and no verb. No one condition is enough: feed descriptions often lack a final full
+    /// stop, and the tagger reads some headline verbs as nouns ("Sri Lanka arrests former director …") (#1251).
+    static func isHeading(_ statement: String) -> Bool {
+        let text = statement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.range(of: #"[.!?…]["'”’)\]]*$"#, options: .regularExpression) == nil else { return false }
+        let words = text.split(whereSeparator: \.isWhitespace).filter { $0.count >= 4 && $0.first?.isLetter == true }
+        let capitalised = words.filter { $0.first?.isUppercase == true }.count
+        let labelShape = text.contains(":") || text.contains("(") || (!words.isEmpty && capitalised * 2 >= words.count)
+        guard labelShape else { return false }
+        let tagger = NLTagger(tagSchemes: [.lexicalClass])
+        tagger.string = text
+        var hasVerb = false
+        tagger.enumerateTags(
+            in: text.startIndex..<text.endIndex, unit: .word, scheme: .lexicalClass,
+            options: [.omitPunctuation, .omitWhitespace]
+        ) { tag, _ in
+            hasVerb = tag == .verb
+            return !hasVerb
+        }
+        return !hasVerb
     }
 
     /// Ensures a highlight or overview sentence ends with terminal punctuation.

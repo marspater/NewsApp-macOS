@@ -234,6 +234,23 @@ public struct PassageFactExtractor: Sendable {
         return merged
     }
 
+    /// A feed's line about the article itself appearing on a site ("This article, "…" first appeared on …", "The post
+    /// … appeared first on …"). It says nothing about the event, so it is no fact (#1251). A sentence crediting another
+    /// outlet's report ("first published by …") does not refer to this article or post and stays a fact.
+    private static let selfAttribution: NSRegularExpression = {
+        let pattern =
+            #"\b(?:this|the)\s+(?:article|post|story|entry)\b.*?\b(?:(?:first|originally)\s+(?:appeared|published)"#
+            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)\s+(?:on|at)\b"#
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            preconditionFailure("The self-attribution pattern is valid")
+        }
+        return expression
+    }()
+
+    static func isSelfAttribution(_ sentence: String) -> Bool {
+        selfAttribution.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
+    }
+
     /// Extracts passage-anchored facts using deterministic sentence segmentation for non-AI / macOS 15 execution.
     public static func deterministicExtract(passages: [EvidencePassage]) -> [PassageAnchoredFact] {
         var candidates: [RawFactCandidate] = []
@@ -241,7 +258,7 @@ public struct PassageFactExtractor: Sendable {
             let sentenceRanges = segmentedSentences(in: passage.text)
             for sentenceRange in sentenceRanges {
                 let sentence = String(passage.text[sentenceRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if sentence.count >= 15 {
+                if sentence.count >= 15, !isSelfAttribution(sentence) {
                     candidates.append(
                         RawFactCandidate(
                             statement: sentence,
