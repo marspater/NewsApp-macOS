@@ -269,7 +269,8 @@ struct ArticleListView: View {
     /// Loading, failure, no results and empty sections, centered in the visible list area under the masthead.
     @ViewBuilder
     private var emptyListContent: some View {
-        if isLoadingPage {
+        // The first query waits for the library to open (#937); until then the list is loading, not empty.
+        if isLoadingPage || (!articleStore.isReady && !articleStore.startupFailed) {
             ProgressView("Loading stories…")
         } else if queryError != nil {
             queryFailureView
