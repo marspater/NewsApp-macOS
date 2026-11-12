@@ -269,6 +269,28 @@ struct FeedUpdateBuffer: Equatable, Sendable {
         !isPaging && !isNewQuery && hasStories
     }
 
+    /// When Today shows only earlier days and a refresh brings the new day, the new day's page waits for its stories
+    /// to be grouped into events and then takes the page, unless the reader has touched it (#937). A held list takes
+    /// fresh values in place, so a story updated today can end "only earlier days" while the wait is still on:
+    /// the wait is remembered here until the list is replaced.
+    struct NewDayHandoff: Equatable, Sendable {
+        private(set) var isWaiting = false
+
+        /// Call before each refreshed page is received.
+        mutating func noteRefreshedPage(showsOnlyEarlierDays: Bool, isGrouping: Bool) {
+            if showsOnlyEarlierDays, isGrouping { isWaiting = true }
+        }
+
+        /// The list was replaced or loaded anew.
+        mutating func reset() { isWaiting = false }
+
+        /// Whether the list holds its stories, or nil when the handoff does not apply and the ordinary rule decides.
+        func holds(showsOnlyEarlierDays: Bool, isGrouping: Bool, isTouched: Bool) -> Bool? {
+            guard showsOnlyEarlierDays || isWaiting else { return nil }
+            return isGrouping || isTouched
+        }
+    }
+
     /// Every listed story is from an earlier day, such as a cache shown at launch the next morning. Nothing listed is
     /// today's reading, so a refresh replaces it instead of waiting behind the updates button.
     func showsOnlyEarlierDays(now: Date = Date(), calendar: Calendar = .current) -> Bool {
