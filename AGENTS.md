@@ -42,7 +42,7 @@ These instructions govern agent workflow, not the project specification.
 - Refer to work by its Angelia sub-system, beside the file, type and function names. The register is [docs/ANGELIA.md](docs/ANGELIA.md).
   - Issues, progress notes, commit bodies and reports name the domain, with its job on first use ("Clio · sourced overviews").
   - A PR that touches Angelia code lists each sub-system it changes under "Angelia sub-systems" in its description.
-  - It lists separately the sub-systems it affects without changing their code.
+  - The same PR lists separately the sub-systems affected without a change to their code.
   - A change in `Sources/Views/` names the domain whose output the view shows and says that the change is in a view.
   - Swift names stay descriptive.
 - Keep output concise and evidence-led. Ask only for missing decisions that block safe progress; complete independent authorized work while waiting.
