@@ -167,8 +167,8 @@ public struct OverviewComposer: Sendable {
     /// A page's title block: the article's own title, bare or followed only by a dateline ("Nov 10, 2026 6:40 PM
     /// EST."). The dateline's closing full stop hides it from `isHeading`, so the title is matched directly. A title
     /// followed by a real sentence is a statement (#1266).
-    // Requiring a separator before every token prevents an untrusted digit run from being split in exponentially
-    // many ways. Explicit month and weekday names avoid mistaking "monthly" for "Monday" (#1266).
+    /// Requiring a separator before every token prevents an untrusted digit run from being split in exponentially
+    /// many ways. Explicit month and weekday names avoid mistaking "monthly" for "Monday" (#1266).
     private static let datelineRemainder: NSRegularExpression = {
         let months =
             "jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|sept|"

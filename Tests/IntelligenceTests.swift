@@ -3161,7 +3161,7 @@ extension NewsTests {
         assertFalse(OverviewComposer.isTitleBlock("\(dateline)", title: ""), "No title, no title block")
 
         assertTrue(
-            OverviewComposer.isTitleBlock("\(title) Monday, November 10, 2026 6:40 PM EST.", title: title),
+            OverviewComposer.isTitleBlock("\(title) Tuesday, November 10, 2026 6:40 PM EST.", title: title),
             "Full weekday and month names are valid dateline tokens")
         assertFalse(
             OverviewComposer.isTitleBlock("\(title) \(String(repeating: "1234567890", count: 4))x.", title: title),
