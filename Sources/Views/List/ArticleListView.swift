@@ -1305,17 +1305,46 @@ struct ArticleListView: View {
         .task(
             id: "\(groupedEntries.revision):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
                 + "\(todayGeneration):\(queryIdentity):\(appSettings.feedURLs.hashValue)"
+                // With the window pool the lanes follow the window's stories too.
+                + (Self.usesTodayWindowPool ? ":\(articleStore.revision)" : "")
         ) {
             await reloadTodayEdition(listed, proxy: proxy)
         }
         .allowsWindowActivationEvents(true)
     }
 
+    /// The window pool (#934, gate 6 of #932): the lanes are assigned over the stories of the last 72 hours, as the
+    /// specification and the evaluation assume, while The Latest stays the paged list. A stored setting without
+    /// Settings UI (`defaults write <bundle id> today_window_pool -bool YES`, or `-today_window_pool YES` at launch),
+    /// off by default: turning it on is my decision after the Z5 first-card work.
+    static var usesTodayWindowPool: Bool { UserDefaults.standard.bool(forKey: "today_window_pool") }
+
+    /// With the window pool on: the window's stories, grouped, with the listed page's entry for every event the page
+    /// lists (so one story never has two ids), then the listed stories outside the window. Nil when it is off or the
+    /// window cannot be read, so the lanes keep to the listed page.
+    private func todayWindowPool(_ listed: [FeedEntry]) async -> [FeedEntry]? {
+        guard Self.usesTodayWindowPool else { return nil }
+        let filters = listFilters
+        let now = Date()
+        guard
+            let articles = try? await articleStore.database.fetchArticles(
+                section: "Today", isRead: filters.read, isSaved: filters.saved, limit: nil,
+                options: ArticleFetchOptions(
+                    publicationWindow: now.addingTimeInterval(-72 * 3600)...now, muting: listMuting)),
+            let events = try? await articleStore.eventFeedSummaries(for: articles.map(\.id))
+        else { return nil }
+        NotificationService.shared.prepareImportance(of: articles)
+        return TodayEdition.windowPool(
+            FeedSnapshot(articles: articles, events: events).entries(.events), listed: listed)
+    }
+
     /// Shows the edition kept at the last launch, when it still describes these stories. False when the task was
     /// cancelled: the attempt is not counted, so the task that replaces it tries again.
-    private func restoreStoredTodayEdition(_ listed: [FeedEntry], reader: TodayReader) async -> Bool {
+    private func restoreStoredTodayEdition(_ listed: [FeedEntry], pool: [FeedEntry]?, reader: TodayReader) async
+        -> Bool
+    {
         let result = await articleStore.restoredTodayEdition(
-            entries: listed, reader: reader, generation: todayGeneration)
+            entries: listed, pool: pool, reader: reader, generation: todayGeneration)
         guard !Task.isCancelled else { return false }
         hasTriedStoredEdition = true
         switch result {
@@ -1336,10 +1365,12 @@ struct ArticleListView: View {
         let reader = TodayReader(
             failedImageURLs: DecodedImageCache.failedURLs, subscribedFeedURLs: Set(appSettings.feedURLs),
             starredFeedURLs: appSettings.starredFeedURLs, interestsResetAt: resetAt)
+        let pool = await todayWindowPool(listed)
+        guard !Task.isCancelled else { return }
         // The first page of a launch is laid out at once from the edition kept at the last one, when it still
         // describes these stories; the fresh edition is worked out behind it (#937).
         if todayEdition == nil, !hasTriedStoredEdition, !listed.isEmpty {
-            guard await restoreStoredTodayEdition(listed, reader: reader) else { return }
+            guard await restoreStoredTodayEdition(listed, pool: pool, reader: reader) else { return }
         }
         let previous = todayEdition
         let showsRestored = previous?.isRestored == true
@@ -1355,8 +1386,8 @@ struct ArticleListView: View {
         let keeps = TodayEdition.keepsLanes(
             of: previous, isHolding: isHoldingList || newDay.isWaiting, generation: todayGeneration)
         NewsSignposts.launchMilestone("today_edition_requested")
-        var edition = await articleStore.todayEdition(
-            entries: listed, reader: reader, keeping: keeps ? previous : nil, generation: todayGeneration)
+        let edition = await articleStore.todayEdition(
+            entries: listed, pool: pool, reader: reader, keeping: keeps ? previous : nil, generation: todayGeneration)
         guard !Task.isCancelled else { return }
         // A complete edition is kept for the next launch, unless its stories are still being grouped.
         if edition.isAssigned, !feedManager.holdsUngroupedStories {
@@ -1364,7 +1395,9 @@ struct ArticleListView: View {
         }
         if showsRestored, let previous {
             // A failed assignment lays every story out in The Latest; the restored page stays until one succeeds.
-            guard edition.isAssigned, settleFreshEdition(edition, behind: previous, listed: listed) else { return }
+            guard edition.isAssigned, settleFreshEdition(edition, behind: previous, listed: listed, pool: pool) else {
+                return
+            }
         }
         await installTodayEdition(edition, replacing: previous, keeps: keeps, proxy: proxy)
     }
@@ -1396,7 +1429,7 @@ struct ArticleListView: View {
     /// The fresh edition is ready behind the restored one on screen. False when the page in use keeps its cards as
     /// an ordinary held edition and the fresh one is offered behind the updates button.
     private func settleFreshEdition(
-        _ edition: TodayEdition, behind previous: TodayEdition, listed: [FeedEntry]
+        _ edition: TodayEdition, behind previous: TodayEdition, listed: [FeedEntry], pool: [FeedEntry]?
     ) -> Bool {
         let awaitsNewDay = buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories
         let outcome = TodayRestoreOutcome.decide(
@@ -1411,7 +1444,7 @@ struct ArticleListView: View {
                 + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) new_day=\(awaitsNewDay)")
         switch outcome {
         case .held:
-            todayEdition = previous.heldBehindUpdates(for: listed, fresh: edition)
+            todayEdition = previous.heldBehindUpdates(for: listed, fresh: edition, pool: pool)
             todayAwaitsFreshEdition = true
             return false
         case .confirmed, .swapped:
