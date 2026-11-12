@@ -88,10 +88,37 @@ extension NativeSuites {
         @Test @MainActor func movedFeedSubscriptionMigration() async throws {
             try await Self.testMovedFeedSubscriptionMigration()
         }
+        @Test func seededLaunchLibraryIsClassified() async throws {
+            try await Self.testSeededLaunchLibraryIsClassified()
+        }
     }
 }
 
 extension NativeSuites.StorageSuite {
+    static func testSeededLaunchLibraryIsClassified() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("launch.sqlite3").path
+        try await NewsTests.seedLaunchLibrary(path: path, stories: 50)
+        // Opening with DatabaseEngine would run the backfill this test checks for.
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(handle)
+            throw StoryCorpus.Failure.invalid("Cannot open \(path)")
+        }
+        defer { sqlite3_close(handle) }
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+        guard
+            sqlite3_prepare_v2(
+                handle, "SELECT count(*), sum(category IS NULL) FROM article_enrichment;", -1, &statement, nil)
+                == SQLITE_OK, sqlite3_step(statement) == SQLITE_ROW
+        else { throw StoryCorpus.Failure.invalid("Cannot count enrichment rows") }
+        expectEqual(sqlite3_column_int64(statement, 0), 50, "Every seeded story has an enrichment row")
+        expectEqual(sqlite3_column_int64(statement, 1), 0, "No seeded story waits for the open-time topic backfill")
+    }
+
     @MainActor
     static func testCancelledBulkMarkDoesNotWrite() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
