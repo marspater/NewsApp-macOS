@@ -196,6 +196,85 @@ enum TimelineAudit {
             }
         }
 
+        // The edition as the app selects it at the clock: unread stories of the last 24 hours, the Briefing
+        // priorities and reading interests from the library, grouped into event cards. The reader's mute rules live in
+        // the app's preferences, not the library, so none are applied here.
+        let candidates = try await db.fetchArticles(
+            isRead: false, limit: FiniteBriefing.candidateLimit,
+            options: ArticleFetchOptions(publicationWindow: now.addingTimeInterval(-FiniteBriefing.duration)...now))
+        let edition = FiniteBriefing(
+            candidates: candidates, readIDs: [], now: now,
+            priorities: try await db.briefingPriorities(articleIDs: candidates.map(\.id)),
+            interests: try await db.briefingInterests(now: now, resetAt: nil))
+        let entries = EventFeedGrouping.entries(
+            for: edition.articles, events: try await db.eventFeedSummaries(forArticles: edition.articles.map(\.id)),
+            mode: .events)
+        counts["edition_entries"] = entries.count
+        var editionThreads: [String: [(Int, String, Thread)]] = [:]
+        for (index, entry) in entries.enumerated() {
+            let overview: EventOverviewDocument?
+            var story: [String] = []
+            switch entry {
+            case .event(let summary, _, _):
+                overview = try? await db.fetchEventOverview(eventID: summary.eventID)
+                story = (try? await db.storyEventIDs(summary.eventID)) ?? [summary.eventID]
+                if !story.contains(summary.eventID) { story.insert(summary.eventID, at: 0) }
+            case .article(let article):
+                overview = try? await db.fetchEventOverview(forArticleID: article.id)
+                story = overview.map { [$0.eventID] } ?? []
+            }
+            if overview != nil { counts["edition_entries_with_stored_overview", default: 0] += 1 }
+            for eventID in story { try await compose(eventID, version: 1) }
+            var stored: [(eventID: String, items: [OverviewTimelineItem])] = []
+            for eventID in story {
+                if let document = try? await db.fetchEventOverview(eventID: eventID) {
+                    stored.append((eventID: eventID, items: document.timeline))
+                }
+            }
+            let regenerated = story.map { (eventID: $0, items: composedBranch[$0] ?? []) }
+            // The app's own thread for the branch arms, so "day N" follows its precision rule.
+            func appThread(_ timelines: [(eventID: String, items: [OverviewTimelineItem])]) -> Thread? {
+                let merged = BriefingTimelineData.merged(timelines, now: now)
+                return BriefingTimelineData.thread(entry: entry, timeline: merged, now: now).map {
+                    Thread(rows: $0.items.map { Thread.Row(text: $0.dayText, date: $0.date) }, day: $0.day)
+                }
+            }
+            // Stored arms skip an entry without a stored overview, as BriefingOverviews.load does.
+            let arms: [(String, Thread?)] = [
+                ("stored_main", overview == nil ? nil : mainThread(story.flatMap { raw[$0]?.items ?? [] }, now: now)),
+                ("stored_branch", overview == nil ? nil : appThread(stored)),
+                ("regenerated_main", mainThread(story.flatMap { composedMain[$0] ?? [] }, now: now)),
+                ("regenerated_branch", appThread(regenerated)),
+            ]
+            for (arm, thread) in arms {
+                guard let thread else { continue }
+                editionThreads[arm, default: []].append(
+                    (index, String(story.first?.prefix(8) ?? entry.id.prefix(8)), thread))
+            }
+        }
+        for arm in ["stored_main", "stored_branch", "regenerated_main", "regenerated_branch"] {
+            // BriefingTimelineData.load orders threads by publisher count, then edition order; the card shows the first.
+            let threads = (editionThreads[arm] ?? []).sorted {
+                entries[$0.0].publisherCount != entries[$1.0].publisherCount
+                    ? entries[$0.0].publisherCount > entries[$1.0].publisherCount : $0.0 < $1.0
+            }
+            counts["edition_threads_\(arm)"] = threads.count
+            if let (_, story, thread) = threads.first {
+                let line = ThreadLine(
+                    story: story, arm: "edition_visible_\(arm)", rows: thread.rows.map(\.text), day: thread.day,
+                    beforeFirstReport: 0, monthPrecision: thread.rows.filter { isMonthPrecision($0.text) }.count,
+                    misparsedYear: thread.rows.filter { isMisparsed($0.date) }.count)
+                threadLines.append(String(decoding: try encoder.encode(line), as: UTF8.self))
+            }
+            for (_, story, thread) in threads.dropFirst() {
+                let line = ThreadLine(
+                    story: story, arm: "edition_hidden_\(arm)", rows: thread.rows.map(\.text), day: thread.day,
+                    beforeFirstReport: 0, monthPrecision: 0,
+                    misparsedYear: thread.rows.filter { isMisparsed($0.date) }.count)
+                threadLines.append(String(decoding: try encoder.encode(line), as: UTF8.self))
+            }
+        }
+
         var summary = counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }
         summary.insert("now=\(Int(now.timeIntervalSince1970)) hours=\(Int(hours)) stored_overviews=\(raw.count)", at: 0)
         try lines.joined(separator: "\n").write(
