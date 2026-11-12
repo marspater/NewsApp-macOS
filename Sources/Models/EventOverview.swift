@@ -426,8 +426,8 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// with stored publisher headlines, complete publisher sentences, and empty summaries. 9: Highlights ranked by
     /// word overlap with coverage headlines; fragments under five words excluded. 10: sentences closed by their
     /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
-    /// 11: conditional Industry Impact section (#670). 13: no feed self-attribution facts, no heading Highlights, one
-    /// first-pass Highlight per publisher (#1251).
+    /// 11: conditional Industry Impact section (#670). 13: no feed footer or heading Highlights, one first-pass Highlight
+    /// per publisher (#1251).
     public static let currentAnalysisVersion = 13
 
     public let id: String

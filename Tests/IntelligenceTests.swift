@@ -2993,18 +2993,18 @@ extension NewsTests {
         print("  - Testing Highlights without feed boilerplate or headings, one first pick per publisher (#1251)...")
         // Boilerplate: the self-referential forms go, whatever the site; crediting another outlet's report stays.
         assertTrue(
-            PassageFactExtractor.isSelfAttribution(
+            OverviewComposer.isSelfAttribution(
                 "This article, \" iOS 27.3 Beta 2 Is Out: What's New in v27.3.1 \" first appeared on Example.com."),
             "The article form with periods in its title is self-attribution")
         assertTrue(
-            PassageFactExtractor.isSelfAttribution(
+            OverviewComposer.isSelfAttribution(
                 "The post Port strike enters day three appeared first on Harbour Daily."),
             "The post form is self-attribution")
         assertFalse(
-            PassageFactExtractor.isSelfAttribution("The leak was first published by The Information on Monday."),
+            OverviewComposer.isSelfAttribution("The leak was first published by The Information on Monday."),
             "Crediting another outlet's report is a fact")
         assertFalse(
-            PassageFactExtractor.isSelfAttribution("The report first appeared in Le Monde, which cited two ministers."),
+            OverviewComposer.isSelfAttribution("The report first appeared in Le Monde, which cited two ministers."),
             "Another report's first appearance is a fact")
         for sentence in [
             "The Post reported that the video first appeared on Telegram on Tuesday.",
@@ -3014,10 +3014,10 @@ extension NewsTests {
             "The Post reported that the video appeared first on Telegram.",
         ] {
             assertFalse(
-                PassageFactExtractor.isSelfAttribution(sentence), "A report about a publication is a fact: \(sentence)")
+                OverviewComposer.isSelfAttribution(sentence), "A report about a publication is a fact: \(sentence)")
         }
         assertTrue(
-            PassageFactExtractor.isSelfAttribution("This post was originally published on Harbour Daily"),
+            OverviewComposer.isSelfAttribution("This post was originally published on Harbour Daily"),
             "The originally-published footer without a final period is self-attribution")
         let feed = EvidencePassage(
             id: "feed-p", articleID: "feed-a",
@@ -3026,7 +3026,7 @@ extension NewsTests {
                 + "The leak was first published by The Information on Monday.",
             ordinal: 0)
         let feedFacts = PassageFactExtractor.deterministicExtract(passages: [feed]).map(\.statement)
-        assertFalse(feedFacts.contains { $0.contains("first appeared on") }, "Self-attribution is not extracted")
+        assertTrue(feedFacts.contains { $0.contains("first appeared on") }, "The fact pool keeps the footer")
         assertTrue(feedFacts.contains { $0.contains("first published by") }, "Another outlet's credit is extracted")
 
         // Headings: a verbless label without a full stop goes; a verbless sentence with one and a feed line with a verb
@@ -3098,6 +3098,46 @@ extension NewsTests {
             document.facts.contains { $0.text.contains("Wednesday, November 4") },
             "The material statement is a Highlight")
         assertFalse(document.facts.contains { $0.text.contains("first appeared") }, "No boilerplate Highlight")
+
+        // Only Highlights change: the timeline and the thematic angle read the whole fact pool, footers and headings
+        // included, and perspectives differ from their extraction only by the Highlights dedupe.
+        let factPool = PassageFactExtractor.deterministicExtract(passages: passages)
+        assertTrue(factPool.contains { OverviewComposer.isSelfAttribution($0.statement) }, "The pool holds the footers")
+        let valid = factPool.filter { OverviewComposer.validateFactForOverview($0, against: passages).isValid }
+        assertEqual(
+            document.timeline,
+            OverviewTimelineBuilder.build(facts: valid, passages: passages, articles: members).items,
+            "The timeline is built from the unchanged fact pool")
+        var citations: [String: OverviewCitation] = [:]
+        for passage in passages {
+            citations["cite_\(passage.id)"] = OverviewCitation(
+                id: "cite_\(passage.id)", articleID: passage.articleID, passageID: passage.id,
+                passageFingerprint: passage.fingerprint, quote: passage.text)
+        }
+        // The angle reuses Highlight citation ids where it can, so only its content is compared.
+        let angle = OverviewThematicAngleExtractor.extractThematicAngle(
+            facts: valid, passages: passages, existingCitations: citations)
+        assertEqual(document.thematicAngle?.title, angle?.title, "The thematic angle reads the same pool")
+        assertEqual(document.thematicAngle?.summary, angle?.summary, "The thematic angle's summary is unchanged")
+        let extracted = OverviewPerspectivesExtractor.extractPerspectives(
+            passages: passages, articles: members, existingCitations: citations)
+        let picked = OverviewComposer.highlights(from: valid, articles: members)
+        assertEqual(
+            document.perspectives.map(\.position),
+            OverviewComposer.deduplicatePerspectives(extracted, against: picked.map(\.statement) + picked.map(\.quote))
+                .map(\.position),
+            "Perspectives differ from their extraction only by the Highlights dedupe")
+
+        // Overviews stored under analysis version 12 are regenerated with these Highlights.
+        let stored = EventOverviewDocument(
+            id: document.id, eventID: document.eventID,
+            version: OverviewVersionContext(
+                membershipVersion: document.membershipVersion, inputTextHash: document.inputTextHash,
+                analysisVersion: 12),
+            content: document.content, provenance: document.provenance)
+        assertTrue(
+            stored.isStale(currentMembershipVersion: document.membershipVersion),
+            "A version-12 overview is stale under version \(EventOverviewDocument.currentAnalysisVersion)")
         let byID = Dictionary(uniqueKeysWithValues: passages.map { ($0.id, $0) })
         for highlight in document.facts {
             for id in highlight.citationIDs {

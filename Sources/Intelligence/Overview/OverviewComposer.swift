@@ -43,7 +43,7 @@ public struct OverviewComposer: Sendable {
     /// Validates whether a fact candidate satisfies the quote grounding and passage invariants.
     /// Up to five Highlights, after a Kagi News story card: whole statements of five or more words, those sharing the
     /// most words with the coverage's headlines first, publisher order otherwise. Fragments such as "Earlier this
-    /// month." and bare headings stay out; the timeline still sees every valid fact. A statement sharing most of its
+    /// month.", feed footers and bare headings stay out; the timeline and the other sections still see every valid fact. A statement sharing most of its
     /// words with one already chosen (wire copies) is skipped, and each publisher's best statement is chosen before any
     /// second one: a publisher is its display name, so two articles of one site are one source (#1251).
     static func highlights(from facts: [PassageAnchoredFact], articles: [FeedArticle]) -> [PassageAnchoredFact] {
@@ -56,7 +56,8 @@ public struct OverviewComposer: Sendable {
             uniquingKeysWith: { first, _ in first })
         func publisher(_ fact: PassageAnchoredFact) -> String { publishers[fact.articleID] ?? fact.articleID }
         let substantive = facts.enumerated().filter {
-            $0.element.statement.split(whereSeparator: \.isWhitespace).count >= 5 && !isHeading($0.element.statement)
+            $0.element.statement.split(whereSeparator: \.isWhitespace).count >= 5
+                && !isSelfAttribution($0.element.statement) && !isHeading($0.element.statement)
         }
         let ranked = substantive.map { (offset: $0.offset, fact: $0.element, words: words($0.element.statement)) }
             .sorted { left, right in
@@ -87,6 +88,29 @@ public struct OverviewComposer: Sendable {
             }
         }
         return chosen.sorted().map { ranked[$0].fact }
+    }
+
+    /// A feed's footer about the article itself appearing on a site: the sentence opens with the self-reference
+    /// ("This article, "…" first appeared on …", "This post was originally published on …", "The post … appeared first on
+    /// …", with "post" in lower case, so a newspaper called the Post is no footer) and ends with the site's name, with no date, weekday or further clause after it. It says nothing about the
+    /// event, so it never takes a Highlights slot; it stays in the fact pool, so the timeline, perspectives and
+    /// thematic angle keep their inputs (#1251). A report about another publication ("The Post reported that the video first
+    /// appeared on Telegram on Tuesday.", "The article was published on 3 November in Nature.") stays a fact.
+    private static let selfAttribution: NSRegularExpression = {
+        let opening =
+            #"^\s*(?:this\s+(?:article|post|story|entry)\b.*?\b(?:(?:first|originally)\s+(?:appeared|published)"#
+            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+(?-i:post)\b.*?\bappeared\s+first)"#
+        let months = "january|february|march|april|may|june|july|august|september|october|november|december"
+        let days = "monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday"
+        let site = #"\s+(?:on|at)\s+(?!.*\b(?:"# + months + "|" + days + #")\b)[^,;:]{1,60}?[.!]?\s*$"#
+        guard let expression = try? NSRegularExpression(pattern: opening + site, options: [.caseInsensitive]) else {
+            preconditionFailure("The self-attribution pattern is valid")
+        }
+        return expression
+    }()
+
+    static func isSelfAttribution(_ sentence: String) -> Bool {
+        selfAttribution.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
     }
 
     /// A heading or label rather than a statement ("iPad mini (eighth generation, 2026)", "Related Roundups: …"): no

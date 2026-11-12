@@ -234,28 +234,6 @@ public struct PassageFactExtractor: Sendable {
         return merged
     }
 
-    /// A feed's footer about the article itself appearing on a site: the sentence opens with the self-reference
-    /// ("This article, "…" first appeared on …", "This post was originally published on …", "The post … appeared first on
-    /// …", with "post" in lower case, so a newspaper called the Post is no footer) and ends with the site's name, with no date, weekday or further clause after it. It says nothing about the
-    /// event, so it is no fact (#1251). A report about another publication ("The Post reported that the video first
-    /// appeared on Telegram on Tuesday.", "The article was published on 3 November in Nature.") stays a fact.
-    private static let selfAttribution: NSRegularExpression = {
-        let opening =
-            #"^\s*(?:this\s+(?:article|post|story|entry)\b.*?\b(?:(?:first|originally)\s+(?:appeared|published)"#
-            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+(?-i:post)\b.*?\bappeared\s+first)"#
-        let months = "january|february|march|april|may|june|july|august|september|october|november|december"
-        let days = "monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday"
-        let site = #"\s+(?:on|at)\s+(?!.*\b(?:"# + months + "|" + days + #")\b)[^,;:]{1,60}?[.!]?\s*$"#
-        guard let expression = try? NSRegularExpression(pattern: opening + site, options: [.caseInsensitive]) else {
-            preconditionFailure("The self-attribution pattern is valid")
-        }
-        return expression
-    }()
-
-    static func isSelfAttribution(_ sentence: String) -> Bool {
-        selfAttribution.firstMatch(in: sentence, range: NSRange(sentence.startIndex..., in: sentence)) != nil
-    }
-
     /// Extracts passage-anchored facts using deterministic sentence segmentation for non-AI / macOS 15 execution.
     public static func deterministicExtract(passages: [EvidencePassage]) -> [PassageAnchoredFact] {
         var candidates: [RawFactCandidate] = []
@@ -263,7 +241,7 @@ public struct PassageFactExtractor: Sendable {
             let sentenceRanges = segmentedSentences(in: passage.text)
             for sentenceRange in sentenceRanges {
                 let sentence = String(passage.text[sentenceRange]).trimmingCharacters(in: .whitespacesAndNewlines)
-                if sentence.count >= 15, !isSelfAttribution(sentence) {
+                if sentence.count >= 15 {
                     candidates.append(
                         RawFactCandidate(
                             statement: sentence,
