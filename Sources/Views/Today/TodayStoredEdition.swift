@@ -167,6 +167,22 @@ struct TodayStoredEdition: Codable, Equatable, Sendable {
 }
 
 extension TodayEdition {
+    /// Whether the next layout keeps the lanes of the edition on screen (`make(…keeping:)`): while the list is held,
+    /// for the generation it was built for. A restored edition is never kept; an applied update (a new generation)
+    /// lays the page out afresh.
+    static func keepsLanes(of previous: TodayEdition?, isHolding: Bool, generation: Int) -> Bool {
+        guard let previous, !previous.isRestored else { return false }
+        return isHolding && previous.generation == generation
+    }
+
+    /// A restored edition the reader has started using: it stays as an ordinary held edition, and the fresh one
+    /// waits behind the updates button.
+    var heldBehindUpdates: TodayEdition {
+        var held = self
+        held.isRestored = false
+        return held
+    }
+
     /// The same stories in the same lanes and order: a fresh edition that only confirms the one on screen.
     func hasSameArrangement(as other: TodayEdition) -> Bool {
         lanes.map(\.lane) == other.lanes.map(\.lane)
