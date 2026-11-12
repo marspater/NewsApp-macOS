@@ -144,7 +144,7 @@ ARCHITECTURE: move #481 rows into invariants, fix selectedImage row, drop "In re
 - Lint: scan `Sources/App/NewsApp.swift` too; new ratchet rules `literal-spacing`, `literal-frame`, `literal-opacity`, `literal-stroke`, `system-font-design`, `raw-environment` (`colorSchemeContrast`, `accessibilityReduceMotion`), `foregroundColor`, `legacy-alias`, `article-copy` (`"[^"]*\b[Aa]rticle\b` in Text/Label/Button). Baselines set after slices 3–8; counts only go down.
 
 ### Slice 10 — Appearance acceptance (I run the harnesses)
-I run `script/appearance_matrix.sh` and `script/run_isolated.sh` (Reduce Motion, Reduce Transparency) over list, grid, reader (Casper/Edition/Alto; scale 0.9/1.0/1.3/1.5; a fixture story with headings, nested list, quote, pull quote, code, table, embed, portrait/landscape/small figures), overview, Briefing, Settings tabs, catalog, tension sheet — 900 pt and wide, light/dark/Increase Contrast. I review captures, fix token-level defects, write `docs/audits/2026-10-xx-finish-pass.md`, tick the outstanding checklists.
+I run `script/appearance_matrix.sh` and `script/run_isolated.sh` (Reduce Motion, Reduce Transparency) over list, grid, reader (Casper/Edition/Alto; scale 0.9/1.0/1.3/1.5; a fixture story with headings, nested list, quote, pull quote, code, table, embed, portrait/landscape/small figures), overview, Briefing, Settings tabs, catalog, tension sheet — 900 pt and wide, light/dark/Increase Contrast. The captures are then reviewed, token-level defects fixed, `docs/audits/2026-10-xx-finish-pass.md` written and the outstanding checklists ticked.
 
 ## Order
 0 and 1 first (small, independent). 2 → 4. 3 → 4 → 5. 6 after 3 and 4. 7 and 8 after 3 (tokens), independent of each other. 9 after 3–8. 10 last.

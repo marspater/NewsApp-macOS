@@ -2,7 +2,7 @@
 
 ## Scope and branch reconciliation
 
-Task #109 extends the merged identity and alias work (#167/#171). A fresh `codex/feed-scoped-guids` branch was started in the existing isolated worktree from main `4835e66`, preserving the original checkout and the PR branches I manage. While implementation was running, I merged reader PR #168 and UI PR #89. The unpublished commit was rebased onto main `aa7d915`; both reader v3 and identity invariants were retained in the sole documentation conflict. No GitHub merges or force pushes were performed.
+Task #109 extends the merged identity and alias work (#167/#171). A fresh `codex/feed-scoped-guids` branch was started in the existing isolated worktree from main `4835e66`, preserving the original checkout and the PR branches I manage. While implementation was running, I merged reader PR #168 and UI PR #89. The unpublished commit was rebased onto main `aa7d915`; both reader v3 and identity invariants were retained in the sole documentation conflict. The implementation work itself performed no GitHub merges or force pushes.
 
 ## Implementation
 
