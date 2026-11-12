@@ -1316,6 +1316,15 @@ extension NewsTests {
             "A story that left the list leaves its lane, and a story the edition never held joins The Latest")
         assertFalse(changed.hasSameArrangement(as: fresh), "Another arrangement is not a confirmation")
 
+        var leftDetails = details
+        leftDetails.unsubscribedIDs = ["gone"]
+        let withLeft = TodayStoredEdition(
+            TodayEdition.make(entries: entries(["a", "b", "c", "d", "e", "gone"]), plan: plan, details: leftDetails),
+            identity: identity, builtAt: referenceNow)
+        assertEqual(
+            shape(try restore(["a", "b", "c", "d", "e", "gone"], from: withLeft).get()), shape(fresh),
+            "A story of a feed the reader has left stays out of a restored edition, also out of The Latest")
+
         let onePhoto = try restore(["a", "b", "c", "d", "e"], failed: [photo]).get()
         assertEqual(onePhoto.lead.map(\.id), ["b"], "A slide whose photo failed to load leaves The Lead")
         assertTrue(onePhoto.latest.map(\.id).contains("a"), "It stays on the page, in The Latest")
@@ -1364,6 +1373,11 @@ extension NewsTests {
         assertEqual(await db.storedTodayEdition(), data, "The stored edition is read back")
         try await db.storeTodayEdition(nil)
         assertTrue(await db.storedTodayEdition() == nil, "Removing it leaves none")
+        try await db.storeTodayEdition(data)
+        try await db.clearArticleEnrichment()
+        assertTrue(
+            await db.storedTodayEdition() == nil, "Clear Analysis removes the stored edition and its differing accounts"
+        )
         await db.close()
     }
 

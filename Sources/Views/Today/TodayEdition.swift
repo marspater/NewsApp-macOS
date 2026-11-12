@@ -32,6 +32,8 @@ struct TodayEdition: Equatable, Sendable {
     var isAssigned = false
     /// Laid out from the edition kept at the last launch, while the fresh one is worked out (#937).
     var isRestored = false
+    /// Listed stories left out because the reader has left all their feeds (`TodayCardDetails.unsubscribedIDs`).
+    var excludedIDs: Set<String> = []
 
     func stories(in lane: TodayLane) -> [TodayStoryAssignment] {
         lanes.first { $0.lane == lane }?.stories ?? []
@@ -139,6 +141,7 @@ struct TodayEdition: Equatable, Sendable {
             return Lane(lane: lane, stories: stories)
         }
         edition.metadata = cardMetadata(of: edition.lanes, details: details)
+        edition.excludedIDs = details.unsubscribedIDs
         return edition
     }
 

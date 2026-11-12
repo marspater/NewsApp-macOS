@@ -1019,6 +1019,7 @@ class FeedManager: NSObject, ObservableObject {
         let runID = UUID()
         clusteringRunID = runID
         clusteringTask = Task { [weak self] in
+            var lastPassFailed = false
             repeat {
                 self?.needsClusteringPass = false
                 let allowsEnergy = self?.allowsBackgroundWork() ?? true
@@ -1037,19 +1038,22 @@ class FeedManager: NSObject, ObservableObject {
                 switch result {
                 case .success(let pass):
                     self.lastClusteringPass = pass
+                    lastPassFailed = false
                     if !pass.report.changedEvents.isEmpty { self.articleStore.noteEventsChanged() }
                 case .failure(let error):
                     if !(error is CancellationError) {
                         self.logger.error("Event clustering failed: \(error.localizedDescription)")
                     }
                     // Memberships commit per article: a pass that stopped early may still have changed events.
+                    lastPassFailed = true
                     self.articleStore.noteEventsChanged()
                 }
             } while self?.needsClusteringPass == true && !Task.isCancelled
             guard let self, self.clusteringRunID == runID else { return }
             self.clusteringTask = nil
             self.clusteringRunID = nil
-            self.holdsUngroupedStories = false
+            // A failed last pass can leave published stories ungrouped: the flag stays until a pass finishes.
+            if !lastPassFailed { self.holdsUngroupedStories = false }
             // A list that waited for the grouping (`isGroupingNewStories`) loads again now that it has ended.
             self.articleStore.noteEventsChanged()
             self.overviewWarmupTask?.cancel()

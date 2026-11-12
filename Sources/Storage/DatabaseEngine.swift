@@ -4397,10 +4397,12 @@ actor DatabaseEngine {
     }
 
     /// After a committed clear: bump the generation, so every clear of derived data refuses the writes still in
-    /// flight (#844), then rewrite the World Tension history. The generation moves first, so a failed rewrite
-    /// cannot leave stale work writable; the clear is repeatable.
+    /// flight (#844), then remove the stored Today edition and rewrite the World Tension history. The generation
+    /// moves first, so a failed rewrite cannot leave stale work writable; the clear is repeatable.
     private func finishAnalysisClear() throws {
         analysisGeneration &+= 1
+        // The stored Today edition holds differing accounts read from the cleared analysis.
+        try storeTodayEdition(nil)
         try clearWorldTensionHistory()
     }
 

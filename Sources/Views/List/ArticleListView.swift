@@ -1293,8 +1293,10 @@ struct ArticleListView: View {
                         latestColumnsChanged: { todayLayout.latestColumns = $0 },
                         laneMovedByReader: { todayLayout.hasMovedLane = true },
                         leadingCardChanged: { lane, id in todayLayout.laneLeading[lane] = id },
-                        // A slide held keyboard focus and the reader clicked to another: focus follows what shows.
+                        // The reader chose a slide: the page is in use. When a slide held keyboard focus,
+                        // focus follows what shows.
                         leadSlideShown: { entry in
+                            todayLayout.hasMovedLane = true
                             if todayEdition.lead.contains(where: { $0.id == focusedArticleID }) {
                                 focusedArticleID = entry.id
                                 todayLaneMemory[.theLead] = entry.id
@@ -1315,6 +1317,25 @@ struct ArticleListView: View {
         .allowsWindowActivationEvents(true)
     }
 
+    /// Shows the edition kept at the last launch, when it still describes these stories. False when the task was
+    /// cancelled: the attempt is not counted, so the task that replaces it tries again.
+    private func restoreStoredTodayEdition(_ listed: [FeedEntry], reader: TodayReader) async -> Bool {
+        let result = await articleStore.restoredTodayEdition(
+            entries: listed, reader: reader, generation: todayGeneration)
+        guard !Task.isCancelled else { return false }
+        hasTriedStoredEdition = true
+        switch result {
+        case .success(let restored):
+            todayEdition = restored
+            NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=shown")
+        case .failure(let rejection):
+            NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=\(rejection.rawValue)")
+        case nil:
+            NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=none")
+        }
+        return true
+    }
+
     /// Lays the listed stories out as the Today edition and moves keyboard focus with it.
     private func reloadTodayEdition(_ listed: [FeedEntry], proxy: ScrollViewProxy) async {
         let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
@@ -1324,19 +1345,7 @@ struct ArticleListView: View {
         // The first page of a launch is laid out at once from the edition kept at the last one, when it still
         // describes these stories; the fresh edition is worked out behind it (#937).
         if todayEdition == nil, !hasTriedStoredEdition, !listed.isEmpty {
-            hasTriedStoredEdition = true
-            switch await articleStore.restoredTodayEdition(
-                entries: listed, reader: reader, generation: todayGeneration)
-            {
-            case .success(let restored):
-                guard !Task.isCancelled else { return }
-                todayEdition = restored
-                NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=shown")
-            case .failure(let rejection):
-                NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=\(rejection.rawValue)")
-            case nil:
-                NewsSignposts.launchEvent("today_edition_restored", detail: "outcome=none")
-            }
+            guard await restoreStoredTodayEdition(listed, reader: reader) else { return }
         }
         let previous = todayEdition
         let showsRestored = previous?.isRestored == true
@@ -1359,28 +1368,14 @@ struct ArticleListView: View {
         if edition.isAssigned, !feedManager.holdsUngroupedStories {
             Task { await articleStore.storeTodayEdition(edition, reader: reader) }
         }
-        if showsRestored, let previous {
-            let outcome = TodayRestoreOutcome.decide(
-                sameArrangement: edition.hasSameArrangement(as: previous),
-                isTouched: hasScrolledList || focusedArticleID != nil || !articlePath.isEmpty
-                    || todayLayout.hasMovedLane || NSWorkspace.shared.isVoiceOverEnabled,
-                awaitsNewDay: buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories)
-            NewsSignposts.launchEvent(
-                "today_fresh_edition_ready",
-                detail: "outcome=\(outcome.rawValue) scrolled=\(hasScrolledList) focused=\(focusedArticleID != nil) "
-                    + "reading=\(!articlePath.isEmpty) lane_moved=\(todayLayout.hasMovedLane) "
-                    + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) "
-                    + "new_day=\(buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories)")
-            if outcome == .held {
-                // The page in use keeps its cards as an ordinary held edition; the fresh one is offered.
-                var kept = previous
-                kept.isRestored = false
-                todayEdition = kept
-                todayAwaitsFreshEdition = true
-                return
-            }
-            if outcome == .confirmed { edition.generation = previous.generation }
-        }
+        if showsRestored, let previous, !settleFreshEdition(&edition, behind: previous) { return }
+        await installTodayEdition(edition, replacing: previous, keeps: keeps, proxy: proxy)
+    }
+
+    /// Puts a laid-out edition on the page and moves keyboard focus with it.
+    private func installTodayEdition(
+        _ edition: TodayEdition, replacing previous: TodayEdition?, keeps: Bool, proxy: ScrollViewProxy
+    ) async {
         // An edition laid out afresh is the one that was waiting, if any was.
         if !keeps { todayAwaitsFreshEdition = false }
         // A rebuilt edition has other cards at the same positions, so the lanes' image prefetch starts over.
@@ -1399,6 +1394,35 @@ struct ArticleListView: View {
                 proxy.scrollTo(lane == .theLead ? TodayEditionView<EmptyView>.leadScrollID : restored)
             }
         }
+    }
+
+    /// The fresh edition is ready behind the restored one on screen. False when the page in use keeps its cards as
+    /// an ordinary held edition and the fresh one is offered behind the updates button.
+    private func settleFreshEdition(_ edition: inout TodayEdition, behind previous: TodayEdition) -> Bool {
+        let awaitsNewDay = buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories
+        let outcome = TodayRestoreOutcome.decide(
+            sameArrangement: edition.hasSameArrangement(as: previous),
+            isTouched: hasScrolledList || focusedArticleID != nil || !articlePath.isEmpty
+                || todayLayout.hasMovedLane || NSWorkspace.shared.isVoiceOverEnabled,
+            awaitsNewDay: awaitsNewDay)
+        NewsSignposts.launchEvent(
+            "today_fresh_edition_ready",
+            detail: "outcome=\(outcome.rawValue) scrolled=\(hasScrolledList) focused=\(focusedArticleID != nil) "
+                + "reading=\(!articlePath.isEmpty) lane_moved=\(todayLayout.hasMovedLane) "
+                + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) new_day=\(awaitsNewDay)")
+        switch outcome {
+        case .held:
+            var kept = previous
+            kept.isRestored = false
+            todayEdition = kept
+            todayAwaitsFreshEdition = true
+            return false
+        case .confirmed:
+            edition.generation = previous.generation
+        case .swapped:
+            break
+        }
+        return true
     }
 
     /// Focus follows its card, or the rules of today.md when the card or its lane is gone. The card that takes
@@ -1968,7 +1992,8 @@ struct KeyboardShortcutsView: View {
 @MainActor final class TodayLayoutReport {
     var latestColumns = 1
     var laneLeading: [TodayLane: String] = [:]
-    /// The reader scrolled or paged a lane row sideways: the page is in use. A row's own layout reports are not that.
+    /// The reader scrolled or paged a lane row sideways, or chose a Lead slide: the page is in use. A row's own
+    /// layout reports are not that.
     var hasMovedLane = false
 }
 

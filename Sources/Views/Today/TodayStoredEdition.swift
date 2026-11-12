@@ -16,11 +16,12 @@ import CryptoKit
 import Foundation
 
 /// The last complete Today edition as it is kept beside the library (#937): which story sits in which lane, in page
-/// order, with what its card showed. No headline or text. At the next launch the page is laid out from it at once,
+/// order, with what its card showed. No headline or report text; a Coverage card keeps its one differing account,
+/// which Clear Analysis removes with the file. At the next launch the page is laid out from it at once,
 /// while the fresh edition is worked out behind it.
 struct TodayStoredEdition: Codable, Equatable, Sendable {
     /// Raised when the stored fields or the lane rules change, so an edition of another build is not restored.
-    static let formatVersion = 1
+    static let formatVersion = 2
     /// An edition older than this is not restored: the 72 h window of Today's candidates.
     static let maximumAge: TimeInterval = 72 * 3600
 
@@ -48,6 +49,8 @@ struct TodayStoredEdition: Codable, Equatable, Sendable {
     /// The reader settings the edition was assigned under (`identity(feedURLs:starredFeedURLs:interestsResetAt:)`).
     var identity: String
     var lanes: [Lane]
+    /// Listed stories the edition left out because the reader had left all their feeds (`TodayEdition.excludedIDs`).
+    var excludedIDs: [String]
 
     /// Why a stored edition was not restored; the launch log names it.
     enum Rejection: String, Error, Equatable {
@@ -66,6 +69,7 @@ struct TodayStoredEdition: Codable, Equatable, Sendable {
     init(_ edition: TodayEdition, identity: String, builtAt: Date) {
         self.builtAt = builtAt
         self.identity = identity
+        excludedIDs = edition.excludedIDs.sorted()
         lanes = edition.lanes.map { lane in
             Lane(
                 lane: lane.lane.rawValue,
@@ -85,43 +89,33 @@ struct TodayStoredEdition: Codable, Equatable, Sendable {
     ///
     /// Stories that left the list leave their lanes, and listed stories the edition did not hold go to The Latest,
     /// both through `TodayEdition.make(…keeping:)`, which is what holds an edition on screen. A Lead slide whose
-    /// photo is missing or failed to load leaves The Lead, as in a fresh assignment.
+    /// photo is missing or failed to load leaves The Lead, as in a fresh assignment. The stories the edition left
+    /// out for feeds the reader has left stay out; the reader identity guarantees the subscriptions are unchanged.
     func restored(
         entries: [FeedEntry], identity current: String, failedImageURLs: Set<URL> = [], now: Date = Date(),
         generation: Int = 0
     ) -> Result<TodayEdition, Rejection> {
-        guard version == Self.formatVersion else { return .failure(.otherFormat) }
-        guard identity == current else { return .failure(.otherReader) }
-        let age = now.timeIntervalSince(builtAt)
-        guard age >= -300, age <= Self.maximumAge else { return .failure(.tooOld) }
-
-        let listed = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        if let rejection = rejection(identity: current, now: now) { return .failure(rejection) }
         var details = TodayCardDetails()
+        details.unsubscribedIDs = Set(excludedIDs)
+        let listed = Dictionary(
+            entries.filter { !details.unsubscribedIDs.contains($0.id) }.map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
         var held = TodayEdition(generation: generation)
         var storedInLanes = 0
         var listedInLanes = 0
         for stored in lanes {
             guard let lane = TodayLane(rawValue: stored.lane) else { return .failure(.otherFormat) }
-            var stories: [TodayStoryAssignment] = []
-            for story in stored.stories {
-                if lane != .theLatest { storedInLanes += 1 }
-                guard let entry = listed[story.id] else { continue }
-                if lane != .theLatest { listedInLanes += 1 }
-                if lane == .theLead {
-                    guard let photo = entry.cardImageURL ?? story.eventImage, !failedImageURLs.contains(photo)
-                    else { continue }
-                }
+            if lane != .theLatest {
+                storedInLanes += stored.stories.count
+                listedInLanes += stored.stories.count { listed[$0.id] != nil }
+            }
+            let stories = stored.stories.compactMap { story in
+                listed[story.id].flatMap { assignment(story, entry: $0, lane: lane, failedImageURLs: failedImageURLs) }
+            }
+            for story in stored.stories where stories.contains(where: { $0.id == story.id }) {
                 details.eventImages[story.id] = story.eventImage
                 details.differingAccounts[story.id] = story.differingAccount
-                stories.append(
-                    TodayStoryAssignment(
-                        id: story.id, entry: entry, lane: lane, score: story.score, confidence: 0,
-                        reason: "restored", sortKey: entry.representative.orderDate,
-                        contentTypeLabel: story.contentType.flatMap(TodayContentType.init(rawValue:)),
-                        isCoverageConfident: story.isCoverageConfident, isDeveloping: story.isDeveloping,
-                        originalReportCount: story.originalReportCount, publisherCount: story.publisherCount,
-                        groupingConfidence: 0, readingTimeMinutes: story.readingTimeMinutes, interestMatch: 0,
-                        novelty: 0))
             }
             if !stories.isEmpty { held.lanes.append(TodayEdition.Lane(lane: lane, stories: stories)) }
         }
@@ -133,6 +127,34 @@ struct TodayStoredEdition: Codable, Equatable, Sendable {
             generation: generation)
         edition.isRestored = true
         return .success(edition)
+    }
+
+    /// Why this edition is not one to restore for the reader now, or nil when it is.
+    private func rejection(identity current: String, now: Date) -> Rejection? {
+        guard version == Self.formatVersion else { return .otherFormat }
+        guard identity == current else { return .otherReader }
+        let age = now.timeIntervalSince(builtAt)
+        guard age >= -300, age <= Self.maximumAge else { return .tooOld }
+        return nil
+    }
+
+    /// The stored story placed in its lane again, or nil for a Lead slide with no photo left to show.
+    private func assignment(
+        _ story: Story, entry: FeedEntry, lane: TodayLane, failedImageURLs: Set<URL>
+    ) -> TodayStoryAssignment? {
+        if lane == .theLead {
+            guard let photo = entry.cardImageURL ?? story.eventImage, !failedImageURLs.contains(photo) else {
+                return nil
+            }
+        }
+        return TodayStoryAssignment(
+            id: story.id, entry: entry, lane: lane, score: story.score, confidence: 0,
+            reason: "restored", sortKey: entry.representative.orderDate,
+            contentTypeLabel: story.contentType.flatMap(TodayContentType.init(rawValue:)),
+            isCoverageConfident: story.isCoverageConfident, isDeveloping: story.isDeveloping,
+            originalReportCount: story.originalReportCount, publisherCount: story.publisherCount,
+            groupingConfidence: 0, readingTimeMinutes: story.readingTimeMinutes, interestMatch: 0,
+            novelty: 0)
     }
 }
 
