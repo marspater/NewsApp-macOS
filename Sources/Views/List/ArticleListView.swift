@@ -1762,6 +1762,8 @@ struct ArticleListView: View {
         withAnimation(reduceMotion ? nil : AppMotion.state) {
             buffer.applyPending()
         }
+        // The installed snapshot is no longer the earlier day the hold was waiting to replace.
+        awaitsGroupedDay = false
         // The reader asked for the update: the Today edition is laid out afresh.
         todayGeneration += 1
         cursor = buffer.displayed.articles.last.map(ArticleQueryCursor.init)
