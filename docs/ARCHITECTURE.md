@@ -318,7 +318,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 - v14 `event_exclusions` ("Not the Same Event") and `event_state` (seen version, only grows). Opening an event never marks articles read.
 - v25 `event_inclusions` ("Same Event" on an "Earlier in This Story" row, "Same Event as…" on a story row of an expanded event card, #524): the related event merges into this one and every pair across them is recorded; the clusterer treats a recorded pair as a match whatever its signals say (`EventMatcher.forced`), so revalidation and re-matching keep it, and the inclusion is transitive: a report that matches one side counts as the same event as the other side, so later reports still join. A combine never exceeds the 100-member cap. Separating a member drops its inclusions and excludes it only from the side it was combined with; including it again drops those exclusions: the newer correction wins.
 
-- Regression comparisons follow the 17 October decision in [the release simplification plan](plans/2026-10-17-release-simplification.md). Earlier measurements stay in dated audits.
+- Regression comparisons follow the release simplification decision of 17 October 2026. Earlier measurements stay in dated audits.
 
 </details>
 
