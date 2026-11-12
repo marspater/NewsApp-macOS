@@ -65,8 +65,12 @@ Build `f742e0b` (Release, ad-hoc signed, bundle id `com.marspater.news.isolatedq
 | Sidebar closed: The Lead and the lanes use the full width | Passed |
 | Opening a story from a lane and going back | Passed: the page returns to the same place and the opened card holds focus |
 | Down and Right arrows and J move focus between lanes and cards, and the row follows | Passed |
-| The Lead's dots and arrows in an inactive window, after the backing fix | Not run: after the launch refresh The Lead held one slide, which shows no controls. Before the refresh five slides and their controls were present |
+| The Lead's dots and arrows in an inactive window, after the backing fix | Not passed: the dark backing shows, but the dots and arrow marks on it are barely visible while the window is inactive |
+| The Latest is newest first after updates are applied | Passed: 17 minutes to 1 hour over fifteen cards, in order |
+| Unread and Today keep separate layouts | Passed: Unread in the list while Today's Latest is a grid, and back |
+| Unread grid: expanding one card's sources moves only its column | Passed |
 | K, Up and Left; hover; trackpad gestures; a narrow window | Not run: K, Up and Left were not sent; background input has no pointer hover, no trackpad and cannot resize the window |
+| A story without a photo takes no Lead slide; the "on-device model is active" text; the Factor breakdown row | Not run in a window in this recheck (the photo rule has its unit test) |
 | VoiceOver and the Lanes rotor; Reduce Transparency; Show Borders; tinted glass | Not run: they need system settings switched, which were left alone |
 | The article transition from my recording | Not run: stills cannot show it; it needs a screen recording on this build |
 | Light appearance on this build | Not run in this recheck |
@@ -75,7 +79,8 @@ Build `f742e0b` (Release, ad-hoc signed, bundle id `com.marspater.news.isolatedq
 
 ### Seen during the recheck, not judged
 
-- **The Lead fell to one slide after the morning refresh.** The edition is laid out from the listed page, the 200 newest stories. After a refresh that brought some 400 stories, every story on that page was a few hours old and only the top one cleared The Lead's bar; the stories that led fifteen hours earlier were no longer on the page. The shadow evaluations of #934 assign over all candidates of 72 hours (612 on the real subscription list), so their Lead and lane figures describe a larger pool than the page the app assigns from.
+- **The Lead held one slide from the launch refresh until the updates were applied.** At launch on yesterday's stories the page showed five slides. The launch refresh then replaced the page, which is the documented exception for a list showing only earlier days, and The Lead showed one slide without controls, on two launches and after grouping had settled. "Show Updates" was offered; pressing it gave five slides and an In Motion lane. The cause is not established. One candidate is an edition built while the new stories were still ungrouped and then held.
+- **The evaluated pool and the app's pool differ, by the code.** The shadow runs assign over every story of 72 hours (`Tests/TodayShadowEvaluation.swift`: all articles, then the window; 612 candidates on the real subscription list). The app assigns over the listed page (`ArticleListView.fetchPage`, 200 articles at a time, before grouping). Whether this contributed to the one-slide Lead is not established.
 - **A card's photo changed after its story was opened and closed** (a Your Beat card). Which photo a card settles on is not stable across a visit to the reader.
 - **The one Lead slide paired a headline about a Senate result with a photo of the Pentagon.** The stored event behind it had 15 reports from 12 publishers, and a second, single-report event held another report of the same result. Whether the photo is the representative report's own was not established. Grouping is #737.
 
