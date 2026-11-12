@@ -21,8 +21,15 @@ import pathlib
 import shutil
 import tempfile
 
-from overview_review import (expect_rejected, label_sheet, private_run, rate, read_sheet_labels, require,
-                             write_new_sheet)
+from overview_review import (
+    expect_rejected,
+    label_sheet,
+    private_run,
+    rate,
+    read_sheet_labels,
+    require,
+    write_new_sheet,
+)
 
 LABELS = ('lead', 'not')
 RANKINGS = ('publisherCount', 'briefing', 'z2')
