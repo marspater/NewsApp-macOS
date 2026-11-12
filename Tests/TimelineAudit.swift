@@ -67,7 +67,8 @@ enum TimelineAudit {
 
     static func run(path: String, output: String) async throws {
         let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
-        guard url.path.hasPrefix("/private/tmp/"), output.hasPrefix("/private/tmp/") else {
+        guard url.path.hasPrefix("/private/tmp/") || url.path.hasPrefix("/tmp/"), output.hasPrefix("/private/tmp/")
+        else {
             throw NSError(
                 domain: "TimelineAudit", code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "The copy and the output belong under /private/tmp"])
@@ -151,7 +152,10 @@ enum TimelineAudit {
             for eventID in story where eventID != event.eventID {
                 try await compose(eventID, version: 1)
             }
-            let first = story.compactMap { firstReport[$0] }.min()
+            // A stated date is a day, so a row counts as before the first report only on an earlier day (UTC).
+            let first = story.compactMap { firstReport[$0] }.min().map {
+                OverviewTimelineItem.legacyCalendar.startOfDay(for: $0)
+            }
 
             // Stored rows as they are: main read the raw stored dates; the branch decodes them with its decoder.
             var storedBranch: [(eventID: String, items: [OverviewTimelineItem])] = []
