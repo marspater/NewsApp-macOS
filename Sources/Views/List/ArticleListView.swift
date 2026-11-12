@@ -1291,12 +1291,8 @@ struct ArticleListView: View {
                             todayPrefetch.cardAppeared(id, in: todayEdition, using: imageLoader)
                         },
                         latestColumnsChanged: { todayLayout.latestColumns = $0 },
-                        leadingCardChanged: { lane, id in
-                            if let known = todayLayout.laneLeading[lane], known != id {
-                                todayLayout.hasMovedLane = true
-                            }
-                            todayLayout.laneLeading[lane] = id
-                        },
+                        laneMovedByReader: { todayLayout.hasMovedLane = true },
+                        leadingCardChanged: { lane, id in todayLayout.laneLeading[lane] = id },
                         // A slide held keyboard focus and the reader clicked to another: focus follows what shows.
                         leadSlideShown: { entry in
                             if todayEdition.lead.contains(where: { $0.id == focusedArticleID }) {
@@ -1351,7 +1347,10 @@ struct ArticleListView: View {
         }
         // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
         // for or another day's stories lay the edition out afresh. A restored edition is never the one kept.
-        let keeps = !showsRestored && isHoldingList && previous?.generation == todayGeneration
+        // While another day's page waits for its grouping, the edition on screen is not laid out again from the
+        // earlier day's stories: the next edition is the new day's.
+        let keeps =
+            !showsRestored && (isHoldingList || newDay.isWaiting) && previous?.generation == todayGeneration
         NewsSignposts.launchMilestone("today_edition_requested")
         var edition = await articleStore.todayEdition(
             entries: listed, reader: reader, keeping: keeps ? previous : nil, generation: todayGeneration)
@@ -1366,7 +1365,12 @@ struct ArticleListView: View {
                 isTouched: hasScrolledList || focusedArticleID != nil || !articlePath.isEmpty
                     || todayLayout.hasMovedLane || NSWorkspace.shared.isVoiceOverEnabled,
                 awaitsNewDay: buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories)
-            NewsSignposts.launchEvent("today_fresh_edition_ready", detail: "outcome=\(outcome.rawValue)")
+            NewsSignposts.launchEvent(
+                "today_fresh_edition_ready",
+                detail: "outcome=\(outcome.rawValue) scrolled=\(hasScrolledList) focused=\(focusedArticleID != nil) "
+                    + "reading=\(!articlePath.isEmpty) lane_moved=\(todayLayout.hasMovedLane) "
+                    + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) "
+                    + "new_day=\(buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories)")
             if outcome == .held {
                 // The page in use keeps its cards as an ordinary held edition; the fresh one is offered.
                 var kept = previous
@@ -1377,6 +1381,8 @@ struct ArticleListView: View {
             }
             if outcome == .confirmed { edition.generation = previous.generation }
         }
+        // An edition laid out afresh is the one that was waiting, if any was.
+        if !keeps { todayAwaitsFreshEdition = false }
         // A rebuilt edition has other cards at the same positions, so the lanes' image prefetch starts over.
         if !keeps { todayPrefetch.reset() }
         let isApplied = previous.map { $0.generation != edition.generation } ?? false
@@ -1962,7 +1968,7 @@ struct KeyboardShortcutsView: View {
 @MainActor final class TodayLayoutReport {
     var latestColumns = 1
     var laneLeading: [TodayLane: String] = [:]
-    /// A lane row was scrolled or paged sideways: the page is in use.
+    /// The reader scrolled or paged a lane row sideways: the page is in use. A row's own layout reports are not that.
     var hasMovedLane = false
 }
 
