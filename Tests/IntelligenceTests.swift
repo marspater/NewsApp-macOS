@@ -363,6 +363,9 @@ extension NewsTests {
         assertEqual(
             degrees(Array(repeating: story("Russian drone attack hits Kharkiv", "One Wire"), count: 5)), 3,
             "One publisher is one step however often it repeats")
+        assertEqual(
+            degrees((0..<5).map { story("Russian missile strike hits Kyiv \($0)", "Single Publisher") }), 3,
+            "Five different headlines from one publisher are still one publisher")
         assertEqual(degrees(war(8, daysAgo: 8)), nil, "A story older than seven days does not count")
         assertEqual(degrees(war(8, daysAgo: -1)), nil, "Nor does one after the reading's end")
         assertEqual(degrees(war(1, daysAgo: 7)), nil, "A story exactly seven days before the reading is outside it")
@@ -403,13 +406,15 @@ extension NewsTests {
         let shown = WorldTensionNearYou.apply(to: history, stories: war(10), region: poland, now: now)
         assertEqual(shown.map(\.assessment.score), [20, 42, 100], "Recent readings rise; an old one and a clamp stand")
         assertEqual(shown[2].assessment.nearYou?.worldScore, 95, "The world reading stays beside the total")
-        // The 30-day edge: the first second of the 30th day back carries the lens, the second before it does not.
+        // The 30-day edge: the reading on the 30th day back carries the lens, the one on the day before does not. A
+        // reading's id is its day, so the stories sit an hour before that day: inside both readings' seven days, so only
+        // the 30-day guard keeps the earlier reading as assessed.
         let earliest = TensionMethodology.day(containing: now).start.addingTimeInterval(
             -Double(WorldTensionNearYou.shownDays - 1) * 86400)
         let edgeWar = (0..<3).map {
             TensionLocalStory(
                 title: "Russian drone attack hits Kharkiv", publisher: "Edge \($0)",
-                date: earliest.addingTimeInterval(3600))
+                date: earliest.addingTimeInterval(-3600))
         }
         func edgeReading(_ date: Date) -> WorldTensionReading {
             WorldTensionReading(
