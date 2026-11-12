@@ -27,6 +27,7 @@ jobs:
   # The two macOS jobs are required checks on main, so the workflow starts for every pull request and this job
   # decides whether they have anything to test. A skipped job satisfies a required check; a workflow that never
   # starts leaves it waiting. Same rule as the push filter above: Markdown, docs/ and LICENSE change nothing.
+  # This job is a required check too: if it fails, the macOS jobs are skipped, and only its own failure blocks the merge.
   changes:
     name: Changed paths
     if: github.event.action != 'closed'
