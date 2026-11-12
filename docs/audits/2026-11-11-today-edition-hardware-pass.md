@@ -53,6 +53,37 @@
 | Launch and refresh watched as motion | Captures are stills | A screen recording |
 | Scroll frame time | Needs Instruments on the Profile build with real scrolling | An Instruments run by Mars, or his go-ahead to record one |
 
+## Recheck on `main`, 12 November 2026
+
+Build `f742e0b` (Release, ad-hoc signed, bundle id `com.marspater.news.isolatedqa`), macOS 27.2.1 (26B131), dark appearance, a window of about 1,300 by 820 points left in the background, driven by background accessibility input. The library copy was restored before launch and deleted from the isolated container afterwards. A launch refresh ran, so the page showed stories of 12 November.
+
+| Check | Result |
+| --- | --- |
+| The edition is what Today shows by default | Passed |
+| A lane's previous and next buttons move its row | Passed (Your Beat) |
+| Lane cards pass under the sidebar | Passed |
+| Sidebar closed: The Lead and the lanes use the full width | Passed |
+| Opening a story from a lane and going back | Passed: the page returns to the same place and the opened card holds focus |
+| Down and Right arrows and J move focus between lanes and cards, and the row follows | Passed |
+| The Lead's dots and arrows in an inactive window, after the backing fix | Not passed: the dark backing shows, but the dots and arrow marks on it are barely visible while the window is inactive |
+| The Latest is newest first after updates are applied | Passed: 17 minutes to 1 hour over fifteen cards, in order |
+| Unread and Today keep separate layouts | Passed: Unread in the list while Today's Latest is a grid, and back |
+| Unread grid: expanding one card's sources moves only its column | Passed |
+| K, Up and Left; hover; trackpad gestures; a narrow window | Not run: K, Up and Left were not sent; background input has no pointer hover, no trackpad and cannot resize the window |
+| A story without a photo takes no Lead slide; the "on-device model is active" text; the Factor breakdown row | Not run in a window in this recheck (the photo rule has its unit test) |
+| VoiceOver and the Lanes rotor; Reduce Transparency; Show Borders; tinted glass | Not run: they need system settings switched, which were left alone |
+| The article transition from my recording | Not run: stills cannot show it; it needs a screen recording on this build |
+| Light appearance on this build | Not run in this recheck |
+| macOS 26 and the macOS 15 fallback | Not run: no such system or virtual machine on this Mac |
+| Scroll frame time | Not run: needs Instruments on the Profile build with the Mac idle |
+
+### Seen during the recheck, not judged
+
+- **The Lead held one slide from the launch refresh until the updates were applied.** At launch on yesterday's stories the page showed five slides. The launch refresh then replaced the page, which is the documented exception for a list showing only earlier days, and The Lead showed one slide without controls, on two launches and after grouping had settled. "Show Updates" was offered; pressing it gave five slides and an In Motion lane. The cause is not established. One candidate is an edition built while the new stories were still ungrouped and then held.
+- **The evaluated pool and the app's pool differ, by the code.** The shadow runs assign over every story of 72 hours (`Tests/TodayShadowEvaluation.swift`: all articles, then the window; 612 candidates on the real subscription list). The app assigns over the listed page (`ArticleListView.fetchPage`, 200 articles at a time, before grouping). Whether this contributed to the one-slide Lead is not established.
+- **A card's photo changed after its story was opened and closed** (a Your Beat card). Which photo a card settles on is not stable across a visit to the reader.
+- **The one Lead slide paired a headline about a Senate result with a photo of the Pentagon.** The stored event behind it had 15 reports from 12 publishers, and a second, single-report event held another report of the same result. Whether the photo is the representative report's own was not established. Grouping is #737.
+
 ## Measurements
 
 First card after process start, from the app's own `First card visible` log line, same library, warm launches. Memory from `footprint` 25 seconds after the last launch.
@@ -68,5 +99,18 @@ First card after process start, from the app's own `First card visible` log line
 - Scroll frame time was not measured.
 
 None of the three budgets Z5 (#937) names is recorded as met.
+
+### Paired launch comparison, 12 November 2026
+
+I asked for a paired Release comparison against the build before Today. Baseline `ba1853e` and current `main` `f742e0b`, both Release, ad-hoc signed, bundle id `com.marspater.news.isolatedqa`, macOS 27.2.1, dark appearance. Seven alternating rounds, the first discarded; the same library copy (3,056 articles) was restored before every launch, and each window opened in the background and ran 25 seconds. The criterion was fixed before the run: confirmed if the median on `main` exceeds the baseline's by more than 10 % and `main` is slower in at least 5 of 6 rounds.
+
+| Build | First card, ms: median (range) | Footprint after 25 s, median | Peak, median |
+| --- | --- | --- | --- |
+| Baseline `ba1853e` | 906 (844 to 967) | 426 MB | 456 MB |
+| `main` `f742e0b` | 1,200 (1,136 to 1,232) | 557 MB | 599 MB |
+
+- **The slower first card is confirmed:** 294 ms at the median (32 %), slower in 6 of 6 rounds by 178 to 357 ms, and the two ranges do not overlap.
+- **This was not a quiet Mac.** The load average was 3.8 to 7.1 during the run (the Mac was in use), and both builds are slower than in the rows above. The difference between the builds stands; the absolute figures are not budget figures. A run on an idle Mac is still owed before a budget is set.
+- **Memory:** `main` holds about 130 MB more after 25 seconds and about 140 MB more at its peak. The footprints here are higher than above for both builds. The cause was not looked into; the rows above relaunched a library left in place, and here it was restored before every launch.
 
 **Options for the first card, for Mars:** keep the wait and set Today's budget from a clean measurement; or remember the last edition's lanes and lay the page out from them at launch, refreshing the assignment in place afterwards, which removes the wait at the price of a new stored value.
