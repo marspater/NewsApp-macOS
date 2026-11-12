@@ -205,8 +205,8 @@ struct EventOverviewReaderView: View {
         }
     }
 
-    /// Orders non-planned items before plans, then sorts each group by event date or publication date,
-    /// earliest first. Undated items follow dated ones; ties favor an event date over a publication-only
+    /// Orders non-planned items before plans, then sorts each group by event date, ordering date or publication
+    /// date, earliest first. Undated items follow dated ones; ties favor an event date over a publication-only
     /// date, then preserve input order. Display date text does not affect ordering.
     nonisolated static func sortTimelineItems(_ items: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
         items.enumerated().sorted { left, right in
@@ -215,8 +215,8 @@ struct EventOverviewReaderView: View {
             if a.isFuturePlan != b.isFuturePlan {
                 return !a.isFuturePlan && b.isFuturePlan
             }
-            let dateA = a.eventDate ?? a.publicationDate
-            let dateB = b.eventDate ?? b.publicationDate
+            let dateA = a.eventDate ?? a.orderingDateMayHoldInferredYear ?? a.publicationDate
+            let dateB = b.eventDate ?? b.orderingDateMayHoldInferredYear ?? b.publicationDate
             if let dateA, let dateB, dateA != dateB {
                 return dateA < dateB
             }
@@ -443,11 +443,13 @@ struct EventOverviewReaderView: View {
     /// What a timeline row shows as its date (#1241): a stated date as the source gives it, and "Reported" only for
     /// a publication date. The meaning comes from `dateKind`, never from which `Date` happens to be set.
     struct TimelineDateDisplay: Equatable {
-        /// The stated event date, or "Reported <date>" for a publication date; nil when no date is known.
+        /// The stated date or anchor in the source's words, or "Reported <date>" for a publication date; nil when no
+        /// date is known.
         let primary: String?
-        /// "Reported <date>" beside a stated date when the item also carries its publication date.
+        /// "Reported <date>" beside a stated date or anchor when the item also carries its publication date.
         let reported: String?
-        /// True when `primary` is a date the source states, which draws the solid marker.
+        /// True when `primary` is a calendar date the source states, which draws the solid marker; an anchor or a
+        /// publication date draws the outlined one.
         let isStated: Bool
     }
 
@@ -455,8 +457,10 @@ struct EventOverviewReaderView: View {
         let text = item.dateText.trimmingCharacters(in: .whitespacesAndNewlines)
         let publicationText = item.publicationDate?.formatted(date: .abbreviated, time: .omitted)
         func reported(_ date: String) -> String { date.hasPrefix("Reported ") ? date : "Reported \(date)" }
-        if !text.isEmpty, item.dateKind == .stated {
-            return TimelineDateDisplay(primary: text, reported: publicationText.map(reported), isStated: true)
+        if !text.isEmpty, item.dateKind != .publication {
+            // An anchor ("Yesterday morning") is the source's wording, relative to the day it was reported.
+            return TimelineDateDisplay(
+                primary: text, reported: publicationText.map(reported), isStated: item.dateKind == .stated)
         }
         let shown = text.isEmpty ? publicationText : text
         return TimelineDateDisplay(primary: shown.map(reported), reported: nil, isStated: false)

@@ -174,6 +174,9 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         case stated
         /// The date an article was published; the only date shown as "Reported".
         case publication
+        /// A time reference the source states that is not a calendar date: a time of day, a relative anchor
+        /// ("yesterday morning") or a quarter. Shown in the source's words, never as a calendar date.
+        case anchor
     }
 
     public let id: String
@@ -219,10 +222,18 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
-        dateText = try container.decode(String.self, forKey: .dateText)
-        // Items stored before #1241 have no kind. Every producer of those wrote text taken from the source
-        // sentence into `dateText` (the builder's stated date, the former extractor's anchor), so it is stated.
-        dateKind = try container.decodeIfPresent(DateKind.self, forKey: .dateKind) ?? .stated
+        let storedText = try container.decode(String.self, forKey: .dateText)
+        if let kind = try container.decodeIfPresent(DateKind.self, forKey: .dateKind) {
+            dateKind = kind
+            dateText = storedText
+        } else {
+            // Items stored before #1241 have no kind. Their producers wrote source text into `dateText`: the
+            // builder's stated date, or the former extractor's anchor ("Yesterday Morning", "06:14 UTC") or its
+            // "Scheduled" placeholder, which is no date and is dropped.
+            let isPlaceholder = storedText.caseInsensitiveCompare("Scheduled") == .orderedSame
+            dateText = isPlaceholder ? "" : storedText
+            dateKind = OverviewTimelineBuilder.isAnchorText(storedText) ? .anchor : .stated
+        }
         summary = try container.decode(String.self, forKey: .summary)
         citationIDs = try container.decode([String].self, forKey: .citationIDs)
         isFuturePlan = try container.decode(Bool.self, forKey: .isFuturePlan)

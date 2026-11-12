@@ -57,9 +57,11 @@ struct BriefingTimelineData: Equatable, Sendable {
     }
 
     /// Where an item falls in time, for filtering and order only; the row shows the item's `dateText`, so an inferred
-    /// year in the builder's ordering date never appears (#1241).
+    /// year in the builder's ordering date never appears (#1241). Anchors are left out: their wording ("Yesterday
+    /// morning") is relative to the day the source was published, not to the edition.
     static func orderingDate(of item: OverviewTimelineItem) -> Date? {
-        item.eventDate ?? item.orderingDateMayHoldInferredYear ?? item.publicationDate
+        guard item.dateKind != .anchor else { return nil }
+        return item.eventDate ?? item.orderingDateMayHoldInferredYear ?? item.publicationDate
     }
 
     /// Past, dated items in date order, the latest five; nil with fewer than two.

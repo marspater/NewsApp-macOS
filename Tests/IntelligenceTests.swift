@@ -90,6 +90,7 @@ extension NewsTests {
                 "testOverviewTimelineDateProvenance",
                 { try testOverviewTimelineDateProvenance(fixtureHost: fixtureHost) }
             ),
+            ("testOverviewTimelineAnchors", { try testOverviewTimelineAnchors(fixtureHost: fixtureHost) }),
             (
                 "testAttributedPerspectivesOfParticipantsAndPublishers",
                 { try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost) }
@@ -4537,6 +4538,97 @@ extension NewsTests {
             eventID: "event-undated", eventTitle: "Storm",
             verifiedFacts: [facts[3]], passages: [passages[3]], articles: articles)
         assertTrue(undatedOverview.timeline.isEmpty, "Without dated publisher sentences the timeline is absent")
+    }
+
+    /// #1241: the builder keeps sourced anchors (time of day, relative day, quarter) with their own kind, in source
+    /// order of time, never as a calendar date; a bare "scheduled" is no date; extractor-shaped stored items still read.
+    static func testOverviewTimelineAnchors(fixtureHost: String) throws {
+        print(
+            "  - Testing timeline anchors: time of day, relative days, quarters and legacy extractor items (#1241)...")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let published = calendar.date(from: DateComponents(year: 2026, month: 11, day: 5, hour: 12))!
+        let article = FeedArticle(
+            storedID: "anchor-a", title: "Quake report", link: "https://\(fixtureHost)/anchor-a", guid: "anchor-a",
+            description: "", pubDate: published, source: "Wire")
+        let sentences = [
+            "Retrofitting is scheduled to begin in the second quarter of 2027.",
+            "The quake struck at 06:14 UTC along the coast.",
+            "Rescuers reached the town yesterday morning.",
+            "The ceasefire took effect on 3 November.",
+            "Work is scheduled to resume soon.",
+            "On 4 November at 09:00 UTC the port closed.",
+            "Aid arrived last night and again this morning.",
+        ]
+        let passages = sentences.enumerated().map {
+            EvidencePassage(id: "anchor-p\($0.offset)", articleID: article.id, text: $0.element, ordinal: $0.offset)
+        }
+        let facts = passages.map {
+            PassageAnchoredFact(
+                id: "f-\($0.id)", statement: $0.text, passageID: $0.id, quote: $0.text, articleID: article.id)
+        }
+        let built = OverviewTimelineBuilder.build(
+            facts: facts, passages: passages, articles: [article], locale: Locale(identifier: "en_US")
+        ).items
+        let items = EventOverviewReaderView.sortTimelineItems(built)
+        func label(_ item: OverviewTimelineItem) -> String {
+            EventOverviewReaderView.timelineItemAccessibilityLabel(item: item)
+        }
+        assertEqual(
+            items.map(\.summary), [sentences[3], sentences[5], sentences[2], sentences[1], sentences[0]],
+            "Anchors keep their place in time beside stated dates; a placeholder and two anchors in one sentence stay out"
+        )
+        assertEqual(
+            items.map(\.dateKind), [.stated, .stated, .anchor, .anchor, .anchor],
+            "A sentence with a calendar date is stated even when it also names a time")
+        assertEqual(
+            items.map(\.dateText).suffix(3), ["Yesterday morning", "06:14 UTC", "Second quarter of 2027"],
+            "Anchors are shown in the source's words")
+        guard items.count == 5 else { return }
+        let reportedText = published.formatted(date: .abbreviated, time: .omitted)
+        let time = items[3]
+        assertEqual(time.publicationDate, published, "An anchor carries the day it is relative to")
+        assertEqual(time.eventDate, nil, "An anchor is never an event date")
+        assertEqual(
+            label(time), "06:14 UTC. Reported \(reportedText). The quake struck at 06:14 UTC along the coast",
+            "A time of day reads as stated, with the day it was reported")
+        assertFalse(
+            EventOverviewReaderView.timelineDateDisplay(for: time).isStated, "An anchor draws the outlined marker")
+        assertEqual(
+            items[2].orderingDateMayHoldInferredYear, calendar.date(byAdding: .day, value: -1, to: published),
+            "Yesterday is ordered on the day before publication")
+        assertTrue(items[4].isFuturePlan, "A later quarter in a plan sentence is a plan")
+        assertTrue(
+            label(items[4]).hasPrefix("Second quarter of 2027. Planned."), "A plan anchor keeps its wording and Planned"
+        )
+        assertEqual(
+            OverviewTimelineBuilder.anchor(in: "Talks are scheduled to resume.", publishedAt: published), nil,
+            "A bare scheduled is not a date")
+
+        // Items the former extractor stored before #1241: no kind, its capitalized anchors and its placeholder.
+        let reference = published.timeIntervalSinceReferenceDate
+        let legacyJSON = """
+            [{"id":"tl_1","dateText":"Yesterday Morning","summary":"Rescuers reached the town.","citationIDs":["c"],
+              "isFuturePlan":false,"publicationDate":\(reference)},
+             {"id":"tl_2","dateText":"Scheduled","summary":"Work will resume.","citationIDs":["c"],
+              "isFuturePlan":true,"publicationDate":\(reference)},
+             {"id":"tl_3","dateText":"15 October 2026","summary":"Teams deployed.","citationIDs":["c"],
+              "isFuturePlan":false,"eventDate":\(reference),"publicationDate":\(reference)}]
+            """
+        let legacy = try JSONDecoder().decode([OverviewTimelineItem].self, from: Data(legacyJSON.utf8))
+        assertEqual(
+            legacy.map(\.dateKind), [.anchor, .stated, .stated], "Legacy anchors are anchors, dates are stated")
+        assertEqual(
+            legacy.map(label),
+            [
+                "Yesterday Morning. Reported \(reportedText). Rescuers reached the town",
+                "Reported \(reportedText). Planned. Work will resume",
+                "15 October 2026. Reported \(reportedText). Teams deployed",
+            ],
+            "Legacy anchors and dates read as stated; the placeholder is dropped and only the publication date reads Reported"
+        )
+        assertEqual(
+            BriefingTimelineData.orderingDate(of: legacy[0]), nil, "Briefing leaves a relative anchor out")
     }
 
     /// #1241: a date the source states is shown as an event date, never as "Reported"; only a publication date is.

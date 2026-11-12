@@ -195,6 +195,7 @@ enum BriefingImpactTests {
             "The ports reopened on 28 October.",
             "Contract talks collapsed on 1 October 2026.",
             "The strike began on 26 October.",
+            "Pickets gathered yesterday morning.",
         ]
         let passages = sentences.enumerated().map {
             EvidencePassage(id: "brief-p\($0.offset)", articleID: article.id, text: $0.element, ordinal: $0.offset)
@@ -216,6 +217,9 @@ enum BriefingImpactTests {
             partial?.dayText == "Oct 26",
             "a date stated without a year is shown without one: \(partial?.dayText ?? "-")")
         check(items?.first?.dayText.contains("2026") == true, "a stated year is shown")
+        check(
+            timeline.contains { $0.dateKind == .anchor } && items?.contains { $0.summary == sentences[3] } == false,
+            "a relative anchor stays in the overview but out of the Briefing thread")
     }
 
     static func timelineOrdering() {
