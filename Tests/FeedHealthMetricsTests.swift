@@ -279,6 +279,10 @@ enum FeedHealthMetricsTests {
                 && AppLayout.publisherHealthSheetMinHeight <= AppLayout.publisherHealthSheetIdealHeight
                 && AppLayout.publisherHealthSheetIdealHeight <= AppLayout.publisherHealthSheetMaxHeight,
             "the Publisher Health sheet fits inside the Settings window (#1265)")
+        check(
+            AppLayout.catalogSheetMinHeight <= AppLayout.catalogSheetHeight
+                && AppLayout.catalogSheetHeight <= AppLayout.publisherHealthSheetMaxHeight,
+            "the Feed Catalog sheet takes the same bounds inside the Settings window (#1265)")
         let bad = row(FeedHealthObservations(attempts: 4, successes: 1))
         let good = row(FeedHealthObservations(attempts: 4, successes: 4))
         check(

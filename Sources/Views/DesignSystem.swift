@@ -325,7 +325,9 @@ enum AppLayout {
     static let readerFigureMaxHeight: CGFloat = 560
     static let progressBarHeight: CGFloat = 2
     static let catalogSheetWidth: CGFloat = 720
-    static let catalogSheetMinHeight: CGFloat = 560
+    /// Opens from Settings like Publisher Health, so it takes the same bounds (#1265).
+    static let catalogSheetMinHeight: CGFloat = publisherHealthSheetMinHeight
+    static let catalogSheetHeight: CGFloat = publisherHealthSheetIdealHeight
     static let publisherHealthSheetWidth: CGFloat = 720
     /// The sheet opens below the Settings window's toolbar, where the 560 pt pane leaves room for its content plus the
     /// sheet's own bottom bar with Done; a 560 pt content height put Done below the window edge (#1265). The table
