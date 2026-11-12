@@ -84,6 +84,33 @@ Build `f742e0b` (Release, ad-hoc signed, bundle id `com.marspater.news.isolatedq
 - **A card's photo changed after its story was opened and closed** (a Your Beat card). Which photo a card settles on is not stable across a visit to the reader.
 - **The one Lead slide paired a headline about a Senate result with a photo of the Pentagon.** The stored event behind it had 15 reports from 12 publishers, and a second, single-report event held another report of the same result. Whether the photo is the representative report's own was not established. Grouping is #737.
 
+## Scope, from 12 November 2026
+
+My rulings of 12 November 2026: macOS 26 and macOS 15 windows are out of epic Z's scope, and macOS 26 is verified only through the CI target's captures. Every VoiceOver check belongs to #1244 only. The rows above that list them as not run are kept as the record of those passes; neither is owed for epic Z.
+
+## Second recheck, evening of 12 November 2026
+
+Build: `main` at `33199b7` with the Lead control fix of this change (`PhotoControlSurface`), Release, ad-hoc signed, bundle id `com.marspater.news.isolatedqa`, macOS 27.2.1 (26B131). A read-only copy of the development library (about 4,030 stories) was put in the isolated container under its own name (`NEWS_LIBRARY_NAME`), so the library another session had left there was not touched; the copy and its side files were deleted afterwards. The window stayed in the background and inactive throughout, driven by background accessibility input; no system setting was changed. Appearances and accessibility settings came from the app's launch arguments.
+
+| Check | Result |
+| --- | --- |
+| The Lead's dots and arrows in an inactive window | **Failed on `main`, fixed, passed.** On `main` the capsule and circles read as flat gray and the dots and chevrons were barely visible, as in the morning recheck. The glass was a background of the marks, and the shared glass container drew it over them. With the marks as the glass's own content (`glassEffect` on the control, the dark backing under the marks) the dots and chevrons are crisp white in an inactive window, dark and light. The active window was not captured: background control cannot make the window key |
+| Reduce Motion never rotates The Lead | Passed: launched with `--reduce-motion`, "1 of 5" from launch through 66 seconds (six rotation periods), with the card times ticking between captures. The arrows still change the slide |
+| The carousel pauses while the reader is open | Passed: a story was opened from In Motion on slide 2 of 5, the reader stayed open for about 30 seconds (three periods), and The Lead was still on slide 2 when the page came back |
+| The carousel pauses while The Lead holds keyboard focus | Passed: with focus on slide 5, the slide did not change for 25 seconds |
+| Hover pause | Not run: background input has no pointer hover |
+| Right, Left, Up, Down, K | Passed: after returning from the reader the opened card held focus; Right and Left moved the lift along In Motion, Up left the row for The Lead, Down came back to the lane's remembered card, K from the lane's first card went to The Lead's last slide (5 of 5), and Left on The Lead showed slide 4 |
+| Focus when a lane disappears | Not run: no update that removes a lane could be produced on demand; the rule is unit-tested (`TodayFocusMap`) |
+| Narrow window, about 900 pt | Passed at 908 by 822 pt (resized by dragging the corner in the background; a window frame passed as a launch argument was ignored because the window restores its saved state). Sidebar open: The Lead scales and a lane shows two cards. Sidebar closed: The Lead and the rows span the full window |
+| Light appearance on current `main` | Passed: masthead, The Lead, In Motion and the toolbar's updates button as in dark |
+| Increase Contrast in light | Passed: card hairlines and secondary text strengthen; status pills keep their contrast |
+| A story without a photo takes no Lead slide | Partly: all five slides of each edition seen carried a photo. Whether a photoless story that would otherwise lead was held out could not be seen; the rule has its unit test |
+| Restored edition at launch | Seen: restored and confirmed unseen once, restored and swapped twice (`today_fresh_edition_ready` in the launch log), never held, because the page was untouched each time |
+
+### Seen during the recheck
+
+- **The one-slide Lead reproduced on current `main`, by another path than the new-day page.** The first launch's refresh was cut short by quitting the app before its stories were grouped. At the next launch the stored edition was rejected (`storiesGone`), and the fresh edition was assigned over a page of 200 stories with no event among them, so The Lead had one slide and no controls. Grouping then ran (366 to 436 events), the list held, and "Show Updates" gave five slides and an In Motion lane. Nothing in the update rules lets an ungrouped launch page give way once grouping has run, except for a page of earlier days.
+
 ## Measurements
 
 First card after process start, from the app's own `First card visible` log line, same library, warm launches. Memory from `footprint` 25 seconds after the last launch.
