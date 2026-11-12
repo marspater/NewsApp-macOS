@@ -1368,7 +1368,10 @@ struct ArticleListView: View {
         if edition.isAssigned, !feedManager.holdsUngroupedStories {
             Task { await articleStore.storeTodayEdition(edition, reader: reader) }
         }
-        if showsRestored, let previous, !settleFreshEdition(&edition, behind: previous) { return }
+        if showsRestored, let previous {
+            // A failed assignment lays every story out in The Latest; the restored page stays until one succeeds.
+            guard edition.isAssigned, settleFreshEdition(&edition, behind: previous) else { return }
+        }
         await installTodayEdition(edition, replacing: previous, keeps: keeps, proxy: proxy)
     }
 

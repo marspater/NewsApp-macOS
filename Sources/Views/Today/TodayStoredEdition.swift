@@ -111,7 +111,9 @@ struct TodayStoredEdition: Codable, Equatable, Sendable {
                 listedInLanes += stored.stories.count { listed[$0.id] != nil }
             }
             let stories = stored.stories.compactMap { story in
-                listed[story.id].flatMap { assignment(story, entry: $0, lane: lane, failedImageURLs: failedImageURLs) }
+                listed[story.id].flatMap {
+                    assignment(story, entry: $0, lane: lane, failedImageURLs: failedImageURLs, now: now)
+                }
             }
             for story in stored.stories where stories.contains(where: { $0.id == story.id }) {
                 details.eventImages[story.id] = story.eventImage
@@ -138,20 +140,26 @@ struct TodayStoredEdition: Codable, Equatable, Sendable {
         return nil
     }
 
-    /// The stored story placed in its lane again, or nil for a Lead slide with no photo left to show.
+    /// The stored story placed in its lane again, or nil for a Lead slide with no photo left to show. The Developing
+    /// pill depends on the time, so it shows only while the event is still developing now.
     private func assignment(
-        _ story: Story, entry: FeedEntry, lane: TodayLane, failedImageURLs: Set<URL>
+        _ story: Story, entry: FeedEntry, lane: TodayLane, failedImageURLs: Set<URL>, now: Date
     ) -> TodayStoryAssignment? {
         if lane == .theLead {
             guard let photo = entry.cardImageURL ?? story.eventImage, !failedImageURLs.contains(photo) else {
                 return nil
             }
         }
+        var isDeveloping = false
+        if story.isDeveloping, case .event(let summary, _, _) = entry {
+            isDeveloping = summary.isDeveloping(
+                now: now, window: TodayEditionThresholds.standard.developingWindowSeconds)
+        }
         return TodayStoryAssignment(
             id: story.id, entry: entry, lane: lane, score: story.score, confidence: 0,
             reason: "restored", sortKey: entry.representative.orderDate,
             contentTypeLabel: story.contentType.flatMap(TodayContentType.init(rawValue:)),
-            isCoverageConfident: story.isCoverageConfident, isDeveloping: story.isDeveloping,
+            isCoverageConfident: story.isCoverageConfident, isDeveloping: isDeveloping,
             originalReportCount: story.originalReportCount, publisherCount: story.publisherCount,
             groupingConfidence: 0, readingTimeMinutes: story.readingTimeMinutes, interestMatch: 0,
             novelty: 0)
