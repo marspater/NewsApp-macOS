@@ -35,10 +35,10 @@ Checked by reading the scripts and their call sites, by their unit tests and by 
 **Missing, added:** the paired runs of 12 November were driven by scripts outside the repository, and their library copy, feed list and builds no longer exist. `script/paired_launch.sh` and `script/summarize_launches.py` replace them:
 
 - Arms `baseline`, `cold`, `warm` and `swap`, in an order that rotates by round; the library copy is restored before every launch.
-- Profile builds only (`com.marspater.news.dev`), on a copy named `paired-launch` through `NEWS_LIBRARY_NAME`. The development library `news.sqlite3` and the real app's container are not opened; the run stops if the app did not open the named copy. The development container's settings and caches are used and written as by any launch of the development build.
+- Profile builds only (`com.marspater.news.dev`), on a uniquely named `paired-launch-XXXXXX` copy through `NEWS_LIBRARY_NAME`. The development library `news.sqlite3` and the real app's container are not opened; the run stops if the app did not open the named copy. The development container's settings and caches are used and written as by any launch of the development build.
 - It takes the measurement lock of the build protocol (`/tmp/news-measure.lock`) and refuses to start while a build or test run is active, a News app is open or the load average is above 2.5.
-- A launch counts for its arm only when its log shows the arm's state; the others are listed as excluded. The first round is discarded. p95 is the nearest rank: with 20 launches, the 19th.
-- **The launcher has never been executed.** Its parsing is covered by `script/test_summarize_launches.py`; the launch loop is checked for syntax only. The first scheduled run is its test: run it with 2 rounds first.
+- A launch counts for its arm only when its log shows that state. The baseline rejects Today markers; swap memory is sampled only after a logged swap; stage timings require one complete, unambiguous edition attempt. Invalid samples are excluded. The first round is discarded. p95 is the nearest rank: with 20 launches, the 19th.
+- **The launcher has never been executed.** Its parsing is covered by `script/test_summarize_launches.py`; the launch loop is checked for syntax only. It refuses nonempty output directories to prevent old rounds or checkpoints from entering new reports. The first scheduled run is its test: run it with 2 rounds first.
 
 ## Before every run
 
@@ -47,6 +47,7 @@ One measurement at a time, per the [build measurement protocol](2026-11-07-build
 ```sh
 RUN="$HOME/news-eval/z5-937-2026-11-13"
 DEV="$HOME/Library/Containers/com.marspater.news.dev/Data/Library/Application Support/com.marspater.news"
+export NEWS_PAIRED_LIBRARY="$RUN/pristine.sqlite3"
 ```
 
 `RUN` carries the day of the run (replace the date above), written out so that it does not change at midnight. Then the idle check:
@@ -75,7 +76,7 @@ sqlite3 -readonly "$DEV/news.sqlite3" ".backup '$RUN/pristine.sqlite3'"
 ```
 
 - The development build must have refreshed the same day and be closed (`pgrep -lx News` prints nothing) before the copy is taken; otherwise Today has no stories of the last 72 hours.
-- The copy is read from the development container. The library files written there are the working copies `paired-launch.sqlite3*` and `z5-*.sqlite3*`, which each command removes; `news.sqlite3` is not opened. The Profile builds are the development build, so they read and write that container's settings, image cache and other caches. These are shared by every arm and are not restored between launches: the first launches fill the image cache and later ones find it filled, which is one reason the first round is discarded and a caveat for the image-memory figures.
+- The copy is read from the development container. The library files written there are uniquely named `paired-launch-XXXXXX.sqlite3*`, `z5-scroll-XXXXXX.sqlite3*` and `z5-alloc-XXXXXX.sqlite3*` working copies, which each command removes by its own exact run-specific prefix; `news.sqlite3` is not opened. The Profile builds are the development build, so they read and write that container's settings, image cache and other caches. These are shared by every arm and are not restored between launches: the first launches fill the image cache and later ones find it filled, which is one reason the first round is discarded and a caveat for the image-memory figures.
 - Earlier runs used Release builds under `com.marspater.news.isolatedqa`. Profile is whole-module, Release per file, so figures from the two are not compared with each other; both arms of a run use the same configuration.
 - Each launch refreshes the development build's subscriptions from the network, as on 12 November.
 - Afterwards: `git worktree remove "$RUN/src-main"` and `git worktree remove "$RUN/src-baseline"`.
@@ -127,33 +128,40 @@ One recording per row: `in-motion`, `deep-read`, `your-beat`, `outside-your-usua
 ROW=in-motion
 APP="$RUN/main/News.app"
 mkdir -p "$RUN/scroll"
-find "$DEV" -name 'z5-scroll.sqlite3*' -delete
-cp "$RUN/pristine.sqlite3" "$DEV/z5-scroll.sqlite3"
+# New per-recording name. Never delete another session's files.
+SCROLL_DIR=$(mktemp -d "$RUN/z5-scroll-XXXXXX")
+SCROLL_NAME=${SCROLL_DIR##*/}
+cp "$RUN/pristine.sqlite3" "$DEV/$SCROLL_NAME.sqlite3"
 xcrun xctrace record --template 'Animation Hitches' --time-limit 40s --no-prompt \
-    --output "$RUN/scroll/$ROW.trace" --env NEWS_LIBRARY_NAME=z5-scroll \
+    --output "$RUN/scroll/$ROW.trace" --env NEWS_LIBRARY_NAME="$SCROLL_NAME" \
     --launch -- "$APP/Contents/MacOS/News" -first_launch_completed YES -notifications_enabled NO
 xcrun xctrace export --input "$RUN/scroll/$ROW.trace" --toc --output "$RUN/scroll/$ROW.toc.xml"
-find "$DEV" -name 'z5-scroll.sqlite3*' -delete
+rm -f "$DEV/$SCROLL_NAME.sqlite3"*
+rmdir "$SCROLL_DIR"
 ```
 
-- In each recording: wait 10 seconds after the window appears, then scroll that row end to end and back with the trackpad until the recording stops. Trackpad scrolling cannot be synthesized, so this needs a person at the Mac.
+- Each recording, including `baseline-page`, must create its own `SCROLL_NAME` and remove only that name's files after exiting. In each recording: wait 10 seconds after the window appears, then scroll that row end to end and back with the trackpad until the recording stops. Trackpad scrolling cannot be synthesized, so this needs a person at the Mac.
 - `xctrace` exits non-zero when the time limit ends the app; the trace is complete.
 - The numbers to record per row: frames, hitches and the longest frame, read in Instruments or from the table the `toc.xml` names. **Not verified:** that the Animation Hitches template records hitches for a Mac app on this system, and the name of its table. If the trace holds no hitch data, the SwiftUI template (used on 12 November) gives update durations instead, and I decide whether that stands in for frame time.
 
 ### D. Launch peak attribution (number 8)
 
 ```sh
-codesign -d --entitlements - "$RUN/main/News.app" 2>/dev/null | grep -q get-task-allow && echo "can attach" || echo "STOP: Allocations cannot attach to this build"
+codesign -d --entitlements - "$RUN/main/News.app" 2>/dev/null | grep -q get-task-allow \
+    || { echo "STOP: Allocations cannot attach to this build" >&2; exit 1; }
 mkdir -p "$RUN/allocations"
-find "$DEV" -name 'z5-alloc.sqlite3*' -delete
-cp "$RUN/pristine.sqlite3" "$DEV/z5-alloc.sqlite3"
+# New library name and pristine copy for EACH trace, including the baseline and warm repeats.
+ALLOC_DIR=$(mktemp -d "$RUN/z5-alloc-XXXXXX")
+ALLOC_NAME=${ALLOC_DIR##*/}
+cp "$RUN/pristine.sqlite3" "$DEV/$ALLOC_NAME.sqlite3"
 xcrun xctrace record --template 'Allocations' --time-limit 30s --no-prompt \
-    --output "$RUN/allocations/main-cold.trace" --env NEWS_LIBRARY_NAME=z5-alloc \
+    --output "$RUN/allocations/main-cold.trace" --env NEWS_LIBRARY_NAME="$ALLOC_NAME" \
     --launch -- "$RUN/main/News.app/Contents/MacOS/News" -first_launch_completed YES -notifications_enabled NO
-find "$DEV" -name 'z5-alloc.sqlite3*' -delete
+rm -f "$DEV/$ALLOC_NAME.sqlite3"*
+rmdir "$ALLOC_DIR"
 ```
 
-- Repeat with `$RUN/baseline/News.app` as `baseline.trace`, and for WARM as `main-warm.trace` after `cp "$RUN/first-card/seed-warm.today-edition.json" "$DEV/z5-alloc.sqlite3.today-edition.json"` (between the `cp` and the recording).
+- Repeat with `$RUN/baseline/News.app` as `baseline.trace`, and for WARM as `main-warm.trace` after `cp "$RUN/first-card/seed-warm.today-edition.json" "$DEV/$ALLOC_NAME.sqlite3.today-edition.json"` (between that recording's copy and the recording). Use fresh `ALLOC_DIR`/`ALLOC_NAME` for each repeat, and remove only its files.
 - **Not verified:** that the Profile build carries `get-task-allow`. The project switches Xcode's base entitlements off for Release only, which fits Release refusing the attach and suggests Profile allows it; `build.sh` signs again with `News.entitlements` alone when Sentry is linked, hence `NEWS_SENTRY_DISABLED=1` in the setup. The first line settles it without recording anything.
 - The numbers to record: the largest contributors, in MB by responsible library and call tree, to the memory alive at the peak and gone by 20 seconds, for `main` against the baseline. This is read in Instruments. Times from these traces are not launch times: Allocations slows the app.
 
