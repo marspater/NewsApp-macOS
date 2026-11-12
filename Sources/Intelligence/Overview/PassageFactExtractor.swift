@@ -236,13 +236,13 @@ public struct PassageFactExtractor: Sendable {
 
     /// A feed's footer about the article itself appearing on a site: the sentence opens with the self-reference
     /// ("This article, "…" first appeared on …", "This post was originally published on …", "The post … appeared first on
-    /// …") and ends with the site's name, with no date, weekday or further clause after it. It says nothing about the
+    /// …", with "post" in lower case, so a newspaper called the Post is no footer) and ends with the site's name, with no date, weekday or further clause after it. It says nothing about the
     /// event, so it is no fact (#1251). A report about another publication ("The Post reported that the video first
     /// appeared on Telegram on Tuesday.", "The article was published on 3 November in Nature.") stays a fact.
     private static let selfAttribution: NSRegularExpression = {
         let opening =
             #"^\s*(?:this\s+(?:article|post|story|entry)\b.*?\b(?:(?:first|originally)\s+(?:appeared|published)"#
-            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+post\b.*?\bappeared\s+first)"#
+            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+(?-i:post)\b.*?\bappeared\s+first)"#
         let months = "january|february|march|april|may|june|july|august|september|october|november|december"
         let days = "monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday"
         let site = #"\s+(?:on|at)\s+(?!.*\b(?:"# + months + "|" + days + #")\b)[^,;:]{1,60}?[.!]?\s*$"#

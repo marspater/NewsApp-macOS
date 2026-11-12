@@ -3011,6 +3011,7 @@ extension NewsTests {
             "The story first appeared on X before the ministry confirmed it.",
             "The article was published on 3 November in Nature.",
             "This story was first published on Monday by the regional broadcaster.",
+            "The Post reported that the video appeared first on Telegram.",
         ] {
             assertFalse(
                 PassageFactExtractor.isSelfAttribution(sentence), "A report about a publication is a fact: \(sentence)")
