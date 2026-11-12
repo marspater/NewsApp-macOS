@@ -39,4 +39,11 @@ These instructions govern agent workflow, not the project specification.
 - Do not merge stale PRs wholesale. Review against current code, incorporate useful changes selectively and explain duplicate or superseded proposals.
 - Research runs (a model candidate, a matcher knob, a holdout or tune replay) follow [docs/TOOLING.md](docs/TOOLING.md): read the run ledger before a run (`news-ledger ui`), and after each run log one line with its real numbers, unless the session has no access to my Mac: `news-ledger log <experiment> "<what was tried>" dataset=<set> verdict=<baseline|reference|passed|failed|shipped|superseded> source=<audit or receipt> commit=<sha> <measure>=<number>…`. A run counts as done once its line is there. Use the measure names in that document; `dataset` is required because numbers from different sets are not comparable. Measures and settings only: no article text and no reading from a sealed holdout. A session without access gets the runs on record from the coordinating session's brief and reports the same fields in its PR, or on the issue when there is no PR (experiment, what was tried, dataset, commit, verdict, source and each measure), under the same exclusions, for the coordinating session to log. Conclusions still go on the issue.
 - A Swift file that a domain owns names its owner in a `// Angelia · <owner>` comment after the license header. Keep that comment and the file's row in [docs/ANGELIA.md](docs/ANGELIA.md) in step.
+- Refer to work by its Angelia sub-system, beside the file, type and function names. The register is [docs/ANGELIA.md](docs/ANGELIA.md).
+  - Issues, progress notes, commit bodies and reports name the domain, with its job on first use ("Clio · sourced overviews").
+  - A PR that touches Angelia code lists each sub-system it changes under "Angelia sub-systems" in its description.
+  - The same PR lists separately the sub-systems affected without a change to their code.
+  - A change to a view that shows a domain's output names that domain and says that the change is in a view.
+  - Shared view code that shows no domain's output (design tokens, settings, window chrome) names none.
+  - Swift names stay descriptive.
 - Keep output concise and evidence-led. Ask only for missing decisions that block safe progress; complete independent authorized work while waiting.
