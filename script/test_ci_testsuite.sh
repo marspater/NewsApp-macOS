@@ -51,4 +51,15 @@ NEWS_TEST_RUNNER="$WORK/unbuilt" script/ci_testsuite.sh "$WORK/junit.xml" > /dev
 [[ ! -e "$WORK/unbuilt" ]] || fail "no selected atom must not compile the runner"
 grep -q 'tests="0" failures="0"' "$WORK/junit.xml" || fail "no selected atom must report an empty suite"
 
+# Every atom needs its own selection rule in the suite, or a change to an atom file may not run that atom.
+for atom in $(script/test_atoms.sh); do
+    # The rule's block runs from its test-atom line to the next rule; its include list must name the atom itself.
+    awk -v atom="$atom" '
+        $0 == "    - test-atom: " atom { inside = 1; next }
+        inside && /^    - test-atom: / { exit }
+        inside && $0 == "        - " atom { found = 1; exit }
+        END { exit !found }
+    ' .circleci/test-suites.yml || fail "$atom has no test-selection rule that includes its own file in .circleci/test-suites.yml"
+done
+
 echo "✅ ci_testsuite.sh checks passed"
