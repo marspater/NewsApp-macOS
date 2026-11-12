@@ -1413,13 +1413,17 @@ struct ArticleListView: View {
         if !keeps, await pageAwaitsGrouping(listed) { newDay.notePageAwaitsGrouping() }
     }
 
-    /// The page holds stories the grouping has not processed while a grouping is running or still to come at launch,
-    /// such as the stories of a refresh cut short by quitting. Only asked then: later, a story the matcher leaves
-    /// unprocessed must not keep the page waiting.
+    /// The page is mostly stories the grouping has not processed, while a grouping is running or still to come at
+    /// launch, such as the stories of a refresh cut short by quitting. Only asked then, and only a majority counts: a
+    /// few stories the matcher left unprocessed must not make an ordinary launch page give way to a refresh (a window
+    /// pass of 12 November: 3 leftovers marked the page, and the newest 200 stories of a large refresh replaced it).
     private func pageAwaitsGrouping(_ listed: [FeedEntry]) async -> Bool {
         guard feedManager.isGroupingNewStories || feedManager.lastClusteringPass == nil else { return false }
-        let rows = try? await articleStore.database.eventMatchRows(articleIDs: listed.map(\.id))
-        return rows?.contains { !$0.previouslyMatched } ?? false
+        guard let rows = try? await articleStore.database.eventMatchRows(articleIDs: listed.map(\.id)) else {
+            return false
+        }
+        return FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(
+            unprocessed: rows.count { !$0.previouslyMatched }, of: rows.count)
     }
 
     /// Puts a laid-out edition on the page and moves keyboard focus with it.
