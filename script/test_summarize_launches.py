@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(__file__))
-import summarize_launches  # noqa: E402
+import summarize_launches
 
 PREFIX = "2026-11-12 10:00:00.000000+0100 0x1 Default 0x0 100 0 News: [com.marspater.news:Launch] "
 # A build before #1243: no restore line and no restored= field.

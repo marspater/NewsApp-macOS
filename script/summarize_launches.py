@@ -63,11 +63,11 @@ def parse_footprint(text):
     """Physical footprint, its peak and the dirty size of each region of interest, in MB, from `footprint -p`."""
     result = {}
     for key, label in (("footprint_mb", "phys_footprint"), ("peak_mb", "phys_footprint_peak")):
-        match = re.search(rf"^\s*{label}: ([\d.]+) (B|KB|MB|GB)\s*$", text, re.M)
+        match = re.search(rf"^\s*{label}: ([\d.]+) (B|KB|MB|GB)\s*$", text, re.MULTILINE)
         result[key] = megabytes(match[1], match[2]) if match else None
     for category in CATEGORIES:
         match = re.search(
-            rf"^\s*([\d.]+) (B|KB|MB|GB)\s+[\d.]+ \w+\s+[\d.]+ \w+\s+\d+\s+{re.escape(category)}\s*$", text, re.M)
+            rf"^\s*([\d.]+) (B|KB|MB|GB)\s+[\d.]+ \w+\s+[\d.]+ \w+\s+\d+\s+{re.escape(category)}\s*$", text, re.MULTILINE)
         result[category] = megabytes(match[1], match[2]) if match else None
     return result
 
@@ -166,8 +166,9 @@ def cell(value, key="median"):
 
 def markdown(summary, meta):
     lines = [f"- {key}: {value}" for key, value in meta.items()]
-    lines += ["", "| Arm | Launches | Excluded | First card median ms | p95 | Range | Fresh edition median ms "
-              "| Context median ms | Assignment median ms | Load |", "|---|---:|---:|---:|---:|---|---:|---:|---:|---|"]
+    header = ("| Arm | Launches | Excluded | First card median ms | p95 | Range | Fresh edition median ms "
+              "| Context median ms | Assignment median ms | Load |")
+    lines += ["", header, "|---|---:|---:|---:|---:|---|---:|---:|---:|---|"]
     for name, arm in summary.items():
         card, load = arm["first_card_ms"], arm["load1"]
         span = "–" if card is None else f"{card['min']:.0f} to {card['max']:.0f}"
