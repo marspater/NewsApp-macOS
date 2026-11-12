@@ -55,9 +55,12 @@ public struct OverviewComposer: Sendable {
             articles.map { ($0.id, EventFeedSummary.displaySource($0.source).lowercased()) },
             uniquingKeysWith: { first, _ in first })
         func publisher(_ fact: PassageAnchoredFact) -> String { publishers[fact.articleID] ?? fact.articleID }
+        let titles = Dictionary(articles.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
         let substantive = facts.enumerated().filter {
-            $0.element.statement.split(whereSeparator: \.isWhitespace).count >= 5
-                && !isSelfAttribution($0.element.statement) && !isHeading($0.element.statement)
+            let statement = $0.element.statement
+            return statement.split(whereSeparator: \.isWhitespace).count >= 5
+                && !isSelfAttribution(statement) && !isHeading(statement)
+                && !isTitleBlock(statement, title: titles[$0.element.articleID] ?? "")
         }
         let ranked = substantive.map { (offset: $0.offset, fact: $0.element, words: words($0.element.statement)) }
             .sorted { left, right in
@@ -159,6 +162,40 @@ public struct OverviewComposer: Sendable {
             previous = character
         }
         return opens > closes || openStraight
+    }
+
+    /// A page's title block: the article's own title, bare or followed only by a dateline ("Nov 10, 2026 6:40 PM
+    /// EST."). The dateline's closing full stop hides it from `isHeading`, so the title is matched directly. A title
+    /// followed by a real sentence is a statement (#1266).
+    private static let datelineRemainder: NSRegularExpression = {
+        let words =
+            "published|updated|posted|on|at|am|pm|a\\.m|p\\.m|utc|gmt|[ecmpa][sd]?t|e?e[sd]?t|ce[sd]?t|bst|ist|jst|aest|aedt|"
+            + "(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*|"
+            + "(?:mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)[a-z]*"
+        let token = #"(?:\d{1,4}(?::\d{2}){0,2}(?:st|nd|rd|th)?|"# + words + #")"#
+        guard
+            let expression = try? NSRegularExpression(
+                pattern: #"^(?:[\s,.|·•–—-]*"# + token + #")*[\s,.|·•–—-]*$"#, options: [.caseInsensitive])
+        else { preconditionFailure("The dateline pattern is valid") }
+        return expression
+    }()
+
+    static func isTitleBlock(_ statement: String, title: String) -> Bool {
+        func folded(_ text: String) -> String {
+            text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+                .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
+        let title = folded(title)
+        let text = folded(statement)
+        guard !title.isEmpty, text.hasPrefix(title) else { return false }
+        let rest = String(text.dropFirst(title.count))
+        // The title repeated as a full sentence ("Energy costs rose today.") is a statement, as in a feed description
+        // that restates its headline; only a bare title, without closing punctuation, is a heading.
+        let tail = rest.trimmingCharacters(in: .whitespaces)
+        if tail.isEmpty || tail == "." {
+            return !statement.trimmingCharacters(in: .whitespaces).hasSuffix(".")
+        }
+        return datelineRemainder.firstMatch(in: rest, range: NSRange(rest.startIndex..., in: rest)) != nil
     }
 
     /// A heading or label rather than a statement ("iPad mini (eighth generation, 2026)", "Related Roundups: …"): no

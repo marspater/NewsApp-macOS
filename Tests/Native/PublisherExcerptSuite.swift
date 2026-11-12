@@ -33,6 +33,7 @@ extension NativeSuites {
         @Test func cancellationAndSupersession() async { await Self.testCancellationAndSupersession() }
         @Test func retainedDeterministicSections() { Self.testRetainedDeterministicSections() }
         @Test func highlightSelection() { Self.testHighlightSelection() }
+        @Test func titleBlockHighlights() { Self.testTitleBlockHighlights() }
         @Test func cutDescriptionTails() { Self.testCutDescriptionTails() }
     }
 }
@@ -120,13 +121,37 @@ extension NativeSuites.PublisherExcerptSuite {
 }
 
 extension NativeSuites.PublisherExcerptSuite {
+    /// #1266: a page's title block never takes a Highlights slot; a title followed by a real sentence stays a statement.
+    static func testTitleBlockHighlights() {
+        print("  - Testing Highlights without a page title block...")
+        let title = "Port strike shuts container terminals along the coast"
+        let article = FeedArticle(
+            storedID: "t1", title: title, link: "https://example.com/t1", guid: "t1", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Harbour Daily")
+        let dateline = "Nov 10, 2026 6:40 PM EST."
+        expectTrue(OverviewComposer.isTitleBlock("\(title) \(dateline)", title: title), "Title and dateline")
+        expectTrue(
+            !OverviewComposer.isTitleBlock("\(title) Union leaders said the strike would continue.", title: title),
+            "A title followed by a sentence is a statement")
+        let passages = [
+            EvidencePassage(id: "t1-lead", articleID: "t1", text: "\(title) \(dateline)", ordinal: 0),
+            EvidencePassage(
+                id: "t1-body", articleID: "t1",
+                text: "Negotiators for the port authority met union leaders on Thursday evening.", ordinal: 1),
+        ]
+        let facts = PassageFactExtractor.deterministicExtract(passages: passages)
+        let chosen = OverviewComposer.highlights(from: facts, articles: [article]).map(\.statement)
+        expectTrue(!chosen.contains { $0.hasPrefix(title) }, "The title block takes no slot: \(chosen)")
+        expectTrue(chosen.contains { $0.contains("Negotiators for the port authority") }, "The next statement does")
+    }
+
     // MARK: - 1. Version Bump
     static func testCurrentAnalysisVersionBumped() {
-        print("  - Testing current analysis version is 14...")
+        print("  - Testing current analysis version is 15...")
         expectTrue(
-            EventOverviewDocument.currentAnalysisVersion == 14,
-            "EventOverviewDocument.currentAnalysisVersion is 14: overviews cached before publisher excerpts (11), the"
-                + " Industry Impact story check (12), the Highlight cleanup (13) and cut description tails (14) recompute"
+            EventOverviewDocument.currentAnalysisVersion == 15,
+            "EventOverviewDocument.currentAnalysisVersion is 15: overviews cached before publisher excerpts (11), the"
+                + " Industry Impact story check (12), the Highlight cleanup (13) and cut description tails (14) and page title blocks (15) recompute"
         )
     }
 

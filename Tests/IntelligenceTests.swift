@@ -58,6 +58,7 @@ extension NewsTests {
             ("testPromptInjectionDefenses", { try await testPromptInjectionDefenses(fixtureHost: fixtureHost) }),
             ("testPassageAnchoredFactExtraction", { try await testPassageAnchoredFactExtraction() }),
             ("testCutDescriptionTails", { try await testCutDescriptionTails(fixtureHost: fixtureHost) }),
+            ("testHighlightsSkipTitleBlock", { try testHighlightsSkipTitleBlock() }),
             (
                 "testHighlightsSkipFeedBoilerplateAndHeadings",
                 { try testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: fixtureHost) }
@@ -3136,6 +3137,50 @@ extension NewsTests {
             flagged, Set((0..<5).map { "cap-\($0)" }), "Only a feed whose longest length is shared five times has a cap"
         )
         await database.close()
+    }
+
+    /// #1266: a page's title block (the article's title, alone or with its dateline) never takes a Highlights slot; a
+    /// title followed by a real sentence still yields that sentence.
+    static func testHighlightsSkipTitleBlock() throws {
+        print("  - Testing Highlights without a page title block (#1266)...")
+        let title = "Port strike shuts container terminals along the coast"
+        let article = FeedArticle(
+            storedID: "t1", title: title, link: "https://example.com/t1", guid: "t1", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Harbour Daily")
+        let dateline = "Nov 10, 2026 6:40 PM EST."
+        assertTrue(OverviewComposer.isTitleBlock("\(title) \(dateline)", title: title), "Title and dateline")
+        assertTrue(
+            OverviewComposer.isTitleBlock("\(title)  Updated Nov. 10, 2026 at 6:40 p.m. ET", title: title), "Label")
+        assertTrue(OverviewComposer.isTitleBlock(title.uppercased(), title: title), "The bare title")
+        assertFalse(
+            OverviewComposer.isTitleBlock(title + ".", title: title),
+            "The title repeated as a full sentence, as a feed description may, is a statement")
+        assertFalse(
+            OverviewComposer.isTitleBlock("\(title) Union leaders said the strike would continue.", title: title),
+            "A title followed by a sentence is a statement")
+        assertFalse(OverviewComposer.isTitleBlock("\(dateline)", title: ""), "No title, no title block")
+
+        let passages = [
+            EvidencePassage(
+                id: "t1-head", articleID: "t1",
+                text: "\(title) \(dateline) Union leaders said the port strike would continue through the weekend.",
+                ordinal: 0),
+            EvidencePassage(
+                id: "t1-lead", articleID: "t1",
+                text: "\(title) \(dateline)", ordinal: 1),
+            EvidencePassage(
+                id: "t1-body", articleID: "t1",
+                text: "Negotiators for the port authority met union leaders on Thursday evening.", ordinal: 2),
+        ]
+        let facts = PassageFactExtractor.deterministicExtract(passages: passages)
+        let chosen = OverviewComposer.highlights(from: facts, articles: [article]).map(\.statement)
+        assertTrue(!chosen.contains { $0 == "\(title) \(dateline)" }, "The title block takes no slot: \(chosen)")
+        assertTrue(
+            chosen.contains { $0.contains("Negotiators for the port authority") },
+            "The next statement takes the slot: \(chosen)")
+        assertTrue(
+            chosen.contains { $0.contains("Union leaders said the port strike would continue") },
+            "A title followed by a real sentence in one passage still yields that sentence: \(chosen)")
     }
 
     static func testHighlightsSkipFeedBoilerplateAndHeadings(fixtureHost: String = "example.com") throws {
