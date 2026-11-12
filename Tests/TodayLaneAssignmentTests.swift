@@ -44,6 +44,7 @@ extension NewsTests {
             ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
             ("testHeldEditionKeepsTagsEntriesAndNewEditionSortsLatest", { testTodayHeldEditionDetails() }),
             ("testStoredEditionRestoresValidatesAndFallsBack", { try await testTodayStoredEdition() }),
+            ("testWindowPoolWidensLanesAndKeepsTheLatestListed", { try testTodayWindowPool() }),
             ("testConcurrentEvaluationMatchesSerial", { testTodayConcurrentEvaluationMatchesSerial() }),
             ("testLeadNeedsAPhotoAndLeftFeedsLeaveToday", { testTodayLeadPhotoAndLeftFeeds() }),
             ("testNotificationThresholdsRemainIndependent", { testTodayNotificationThresholdsIndependent() }),
@@ -1258,6 +1259,82 @@ extension NewsTests {
             "An applied update lays the edition out afresh")
         assertEqual(
             first.focusMap(latestColumns: 3).lanes.last?.columns, 3, "The Latest's grid columns reach the keyboard map")
+    }
+
+    /// #934, gate 6 of #932: with the window pool the lanes may hold stories beyond the listed page, The Latest holds
+    /// only listed stories, and no story appears twice; without it (the default) the lanes keep to the listed page.
+    static func testTodayWindowPool() throws {
+        func entries(_ ids: [String]) -> [FeedEntry] {
+            ids.map { .article(makeArticle(id: $0, title: $0, pubDate: referenceNow)) }
+        }
+        func story(_ id: String, _ lane: TodayLane) -> TodayStoryAssignment {
+            TodayStoryAssignment.unplaced(.article(makeArticle(id: id, title: id, pubDate: referenceNow))).placed(
+                in: lane)
+        }
+        func shape(_ edition: TodayEdition) -> [String] {
+            edition.lanes.map { "\($0.lane.rawValue): \($0.stories.map(\.id).joined(separator: ","))" }
+        }
+        // The page lists p1 to p3; the window adds w1 and w2. The plan, made over the window, leads with w1, puts
+        // p1 and w2 in Your Beat and leaves p2, p3 for The Latest (with w2 also there, as a window story would be).
+        let listed = entries(["p1", "p2", "p3"])
+        let pool = TodayEdition.windowPool(entries(["w1", "p1", "w2", "p2"]), listed: listed)
+        assertEqual(
+            pool.map(\.id), ["w1", "p1", "w2", "p2", "p3"], "Window order, then listed stories outside it, once")
+        let regrouped = makeEventEntry(
+            eventID: "ev-regrouped",
+            members: [
+                ("w5", "Outlet 1", "w5", "Detail", referenceNow, "https://o1.example/rss"),
+                ("p3", "Outlet 2", "p3", "Detail", referenceNow, "https://o2.example/rss"),
+            ])
+        assertEqual(
+            TodayEdition.windowPool([regrouped], listed: listed).map(\.id), ["p1", "p2", "p3"],
+            "A window story holding a report the page lists under another id is left to the page's entry")
+        let plan = TodayEditionPlan(lanes: [
+            TodayLaneResult(lane: .theLead, qualifies: true, entries: [story("w1", .theLead)]),
+            TodayLaneResult(
+                lane: .yourBeat, qualifies: true, entries: [story("p1", .yourBeat), story("w2", .yourBeat)]),
+            TodayLaneResult(
+                lane: .theLatest, qualifies: true,
+                entries: [story("p2", .theLatest), story("p3", .theLatest), story("w9", .theLatest)]),
+        ])
+        let wide = TodayEdition.make(entries: listed, plan: plan, pool: pool)
+        assertEqual(
+            shape(wide), ["The Lead: w1", "Your Beat: p1,w2", "The Latest: p2,p3"],
+            "Lanes take window stories; The Latest keeps to the listed page")
+        let ids = wide.lanes.flatMap { $0.stories.map(\.id) }
+        assertEqual(ids.count, Set(ids).count, "No story twice")
+        assertEqual(
+            shape(TodayEdition.make(entries: listed, plan: plan)),
+            ["The Lead: w1", "Your Beat: p1,w2", "The Latest: p2,p3,w9"],
+            "Without the pool the plan is laid out as before (it is made over the listed page in the app)")
+
+        // Held: a lane story beyond the listed page stays with the pool; without it, it leaves its lane.
+        let held = TodayEdition.make(entries: listed + entries(["p4"]), plan: plan, keeping: wide, pool: pool)
+        assertEqual(
+            shape(held), ["The Lead: w1", "Your Beat: p1,w2", "The Latest: p2,p3,p4"],
+            "Held with the pool, window stories keep their lanes and a further page joins The Latest")
+        assertEqual(
+            shape(TodayEdition.make(entries: listed, plan: plan, keeping: wide)),
+            ["Your Beat: p1", "The Latest: p2,p3"], "Held without the pool, stories off the page leave their lanes")
+
+        // Restored: the stored edition's lane stories are counted against the pool.
+        var details = TodayCardDetails()
+        details.eventImages = ["w1": URL(string: "https://images.example/w1.jpg")!]
+        let identity = TodayStoredEdition.identity(feedURLs: [], starredFeedURLs: [], interestsResetAt: nil)
+        let stored = TodayStoredEdition(
+            TodayEdition.make(entries: listed, plan: plan, details: details, pool: pool), identity: identity,
+            builtAt: referenceNow)
+        let restoredWide = try stored.restored(
+            entries: listed, identity: identity, now: referenceNow.addingTimeInterval(60), pool: pool
+        ).get()
+        assertEqual(shape(restoredWide), shape(wide), "With the pool the stored edition comes back whole")
+        if case .failure(let reason) = stored.restored(
+            entries: listed, identity: identity, now: referenceNow.addingTimeInterval(60))
+        {
+            assertEqual(reason, .storiesGone, "Without the pool most of its lane stories are off the page")
+        } else {
+            assertTrue(false, "Without the pool the window-wide edition is not restored")
+        }
     }
 
     /// #937: the last complete edition is laid out again at launch for the stories still listed, and anything that
