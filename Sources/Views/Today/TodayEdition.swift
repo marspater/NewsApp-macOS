@@ -46,6 +46,10 @@ struct TodayEdition: Equatable, Sendable {
     var conditionalLanes: [Lane] { lanes.filter { $0.lane.isConditional } }
     var storyIDs: Set<String> { Set(lanes.flatMap { $0.stories.map(\.id) }) }
 
+    func entry(id: String) -> FeedEntry? {
+        lanes.lazy.flatMap(\.stories).first { $0.id == id }?.entry
+    }
+
     /// The window pool (#934) from the window's grouped stories and the listed page: an event the page lists keeps
     /// the page's entry (its id is the page's representative), the window's other stories follow in their order, and
     /// listed stories outside the window come last. Each story once.
@@ -62,8 +66,8 @@ struct TodayEdition: Equatable, Sendable {
             var chosen = entry
             if case .event(let summary, _, _) = entry, let page = listedByEvent[summary.eventID] {
                 chosen = page
-            } else if !listedIDs.contains(entry.id),
-                entry.visibleArticles.contains(where: { listedReports.contains($0.id) })
+            } else if entry.visibleArticles.contains(where: { listedReports.contains($0.id) }),
+                !listedIDs.contains(entry.id) || entry.visibleArticles.count > 1
             {
                 // Grouped differently on the page (read before a regrouping): the page's entry stands for it.
                 continue

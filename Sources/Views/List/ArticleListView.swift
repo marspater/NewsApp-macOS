@@ -326,7 +326,12 @@ struct ArticleListView: View {
 
     private var selectedStory: FeedArticle? {
         guard articlePath.isEmpty, let focusedArticleID else { return nil }
-        return filteredArticles.first { $0.id == focusedArticleID }
+        return displayedEntry(id: focusedArticleID)?.representative
+    }
+
+    private func displayedEntry(id: String) -> FeedEntry? {
+        if isTodayEdition { return todayEdition?.entry(id: id) }
+        return entries.first { $0.id == id } ?? filteredArticles.first { $0.id == id }.map(FeedEntry.article)
     }
 
     private var knowledgeExportActions: KnowledgeExportActions? {
@@ -545,7 +550,7 @@ struct ArticleListView: View {
 
     private func handleToggleSave() {
         guard articlePath.isEmpty, let id = focusedArticleID,
-            let art = filteredArticles.first(where: { $0.id == id })
+            let art = displayedEntry(id: id)?.representative
         else { return }
         if savedStories.isSaved(art) {
             savedStories.remove(art)
@@ -556,7 +561,7 @@ struct ArticleListView: View {
 
     private func handleOpenInBrowser() {
         guard articlePath.isEmpty, let id = focusedArticleID,
-            let art = filteredArticles.first(where: { $0.id == id }),
+            let art = displayedEntry(id: id)?.representative,
             let url = WebLink.url(art.link)
         else { return }
         NSWorkspace.shared.open(url)
@@ -1363,6 +1368,10 @@ struct ArticleListView: View {
 
     /// Lays the listed stories out as the Today edition and moves keyboard focus with it.
     private func reloadTodayEdition(_ listed: [FeedEntry], proxy: ScrollViewProxy) async {
+        // Debounce before reading the window so revision bursts do not each fetch and score it.
+        if let current = todayEdition, !current.isRestored {
+            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+        }
         let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
         let reader = TodayReader(
             failedImageURLs: DecodedImageCache.failedURLs, subscribedFeedURLs: Set(appSettings.feedURLs),
@@ -1378,9 +1387,6 @@ struct ArticleListView: View {
         let showsRestored = previous?.isRestored == true
         // Bursts of store revisions (clustering, overviews) would lay the page out once each; they are debounced
         // as in the list. The first edition loads at once, and so does the fresh one behind a restored edition.
-        if previous != nil, !showsRestored {
-            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
-        }
         // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
         // for or another day's stories lay the edition out afresh. A restored edition is never the one kept.
         // While another day's page waits for its grouping, the edition on screen is not laid out again from the
@@ -1697,13 +1703,7 @@ struct ArticleListView: View {
                 if let id = focusedArticleID { readManager.toggleRead(id) }
                 return .handled
             } else if press.characters == "s" {
-                if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }) {
-                    if savedStories.isSaved(art) {
-                        savedStories.remove(art)
-                    } else {
-                        savedStories.save(art)
-                    }
-                }
+                handleToggleSave()
                 return .handled
             } else if press.characters == "r" {
                 refreshFeeds()
@@ -1718,11 +1718,7 @@ struct ArticleListView: View {
                 applyPendingUpdates(proxy: proxy)
                 return .handled
             } else if press.characters == "o" {
-                if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }),
-                    let url = WebLink.url(art.link)
-                {
-                    NSWorkspace.shared.open(url)
-                }
+                handleOpenInBrowser()
                 return .handled
             }
             return .ignored
@@ -1750,7 +1746,7 @@ struct ArticleListView: View {
             proxy.scrollTo(lane == .theLead ? TodayEditionView<EmptyView>.leadScrollID : id)
         }
         if StoryQuickLookCoordinator.shared.isOpen,
-            let entry = entries.first(where: { $0.id == id })
+            let entry = displayedEntry(id: id)
         {
             StoryQuickLookCoordinator.shared.present(article: entry.representative, isDark: colorScheme == .dark)
         }
@@ -1784,8 +1780,8 @@ struct ArticleListView: View {
     /// is the ranked Lead and not the first listed story.
     private func keyboardEntry() -> FeedEntry? {
         let listed = entries
-        if let focused = listed.first(where: { $0.id == focusedArticleID }) { return focused }
-        if let first = todayFocusMap?.readingOrder.first { return listed.first { $0.id == first } }
+        if let id = focusedArticleID, let focused = displayedEntry(id: id) { return focused }
+        if let first = todayFocusMap?.readingOrder.first { return displayedEntry(id: first) }
         return listed.first
     }
 

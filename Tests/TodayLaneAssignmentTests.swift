@@ -1289,6 +1289,17 @@ extension NewsTests {
         assertEqual(
             TodayEdition.windowPool([regrouped], listed: listed).map(\.id), ["p1", "p2", "p3"],
             "A window story holding a report the page lists under another id is left to the page's entry")
+        let regroupedListed = makeEventEntry(
+            eventID: "ev-listed",
+            members: [
+                ("p1", "Outlet 1", "p1", "Detail", referenceNow, "https://o1.example/rss"),
+                ("p2", "Outlet 2", "p2", "Detail", referenceNow, "https://o2.example/rss"),
+            ])
+        let collision = TodayEdition.windowPool([regroupedListed], listed: listed)
+        assertEqual(collision.map(\.id), ["p1", "p2", "p3"], "The listed reports stay separate")
+        assertEqual(
+            collision.flatMap { $0.visibleArticles.map(\.id) }, ["p1", "p2", "p3"],
+            "A regrouped event whose representative is listed cannot duplicate another listed report")
         let plan = TodayEditionPlan(lanes: [
             TodayLaneResult(lane: .theLead, qualifies: true, entries: [story("w1", .theLead)]),
             TodayLaneResult(
@@ -1298,6 +1309,8 @@ extension NewsTests {
                 entries: [story("p2", .theLatest), story("p3", .theLatest), story("w9", .theLatest)]),
         ])
         let wide = TodayEdition.make(entries: listed, plan: plan, pool: pool)
+        assertEqual(wide.entry(id: "w1")?.id, "w1", "A displayed window card is available to keyboard actions")
+        assertTrue(wide.entry(id: "w9") == nil, "A window story outside the displayed lanes is not actionable")
         assertEqual(
             shape(wide), ["The Lead: w1", "Your Beat: p1,w2", "The Latest: p2,p3"],
             "Lanes take window stories; The Latest keeps to the listed page")
