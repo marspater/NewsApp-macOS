@@ -20,15 +20,19 @@ set -euo pipefail
 #                             and library (default com.marspater.news.isolatedqa; NEWS_ISOLATED_BUNDLE_ID)
 #   --name-suffix <text>      Append the text to the app's name in the menu bar, Dock and app switcher, so
 #                             parallel builds are easy to tell apart (e.g. "Z view"; NEWS_ISOLATED_NAME_SUFFIX)
+#   --background              Launch without bringing the app to the front (open -g), for checks driven in the
+#                             background while the Mac is in use
 
 cd "$(dirname "$0")/.."
 BUNDLE_ID="${NEWS_ISOLATED_BUNDLE_ID:-com.marspater.news.isolatedqa}"
 NAME_SUFFIX="${NEWS_ISOLATED_NAME_SUFFIX:-}"
 SEED=0
+OPEN_FLAGS=(-n)
 EXTRA_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed) SEED=1 ;;
+        --background) OPEN_FLAGS+=(-g) ;;
         --bundle-id) BUNDLE_ID="${2:?--bundle-id needs a value}"; shift ;;
         --name-suffix) NAME_SUFFIX="${2:?--name-suffix needs a value}"; shift ;;
         *) EXTRA_ARGS+=("$1") ;;
@@ -79,7 +83,7 @@ fi
 
 echo "Launching isolated News.app with arguments: ${EXTRA_ARGS[*]:-(default)}..."
 # macOS bash 3.2 treats an empty array as unbound under `set -u`.
-open -n -a "$APP" --args ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+open "${OPEN_FLAGS[@]}" -a "$APP" --args ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
 
 echo "Isolated News.app launched successfully (PID: $(pgrep -f "^$APP/Contents/MacOS/News" | tail -1 || echo 'unknown'))."
 echo "Staged app: ${APP}"
