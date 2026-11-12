@@ -179,9 +179,17 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         case anchor
     }
 
+    /// How precise a stated calendar date is; nil for anchors, publication dates and items stored before it existed.
+    public enum DatePrecision: String, Codable, Hashable, Sendable {
+        case day
+        case month
+    }
+
     public let id: String
     public let dateText: String
     public let dateKind: DateKind
+    /// The precision of a stated date (#1241): a month-only date is never counted as its first day.
+    public let datePrecision: DatePrecision?
     public let summary: String
     public let citationIDs: [String]
     public let isFuturePlan: Bool
@@ -196,6 +204,7 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         id: String = UUID().uuidString,
         dateText: String,
         dateKind: DateKind = .stated,
+        datePrecision: DatePrecision? = nil,
         summary: String,
         citationIDs: [String] = [],
         isFuturePlan: Bool = false,
@@ -206,6 +215,7 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         self.id = id
         self.dateText = dateText
         self.dateKind = dateKind
+        self.datePrecision = datePrecision
         self.summary = summary
         self.citationIDs = citationIDs
         self.isFuturePlan = isFuturePlan
@@ -215,7 +225,7 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, dateText, dateKind, summary, citationIDs, isFuturePlan, eventDate, publicationDate
+        case id, dateText, dateKind, datePrecision, summary, citationIDs, isFuturePlan, eventDate, publicationDate
         case orderingDateMayHoldInferredYear
     }
 
@@ -231,11 +241,12 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         } else {
             // Items stored before #1241 have no kind. Their producers wrote source text into `dateText`: the
             // builder's stated date, or the former extractor's anchor ("Yesterday Morning", "06:14 UTC") or its
-            // "Scheduled" placeholder, which is no date and is dropped.
+            // "Scheduled" placeholder, which is no date and is dropped here, so no consumer ever receives it (#1241).
             let isPlaceholder = storedText.caseInsensitiveCompare("Scheduled") == .orderedSame
             dateText = isPlaceholder ? "" : storedText
             dateKind = Self.isAnchorText(storedText) ? .anchor : .stated
         }
+        datePrecision = try container.decodeIfPresent(DatePrecision.self, forKey: .datePrecision)
         let storedEventDate = try container.decodeIfPresent(Date.self, forKey: .eventDate)
         // The former extractor parsed a yearless "November 2" with `MMMM yyyy`, which stored the day as the year
         // (0002-11-01). Such a date neither orders nor counts anything, so a stored item without a kind drops a year

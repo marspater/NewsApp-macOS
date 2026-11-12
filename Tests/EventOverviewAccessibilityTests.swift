@@ -677,7 +677,8 @@ struct EventOverviewAccessibilityTests {
 
         // Item with empty dateText but publicationDate gets formatted Reported prefix
         let itemPubDateOnlyNoText = OverviewTimelineItem(
-            id: "t_pub_only", dateText: "", summary: "Regulatory filing published", isFuturePlan: false,
+            id: "t_pub_only", dateText: "", dateKind: .publication, summary: "Regulatory filing published",
+            isFuturePlan: false,
             publicationDate: Date(timeIntervalSince1970: 1_700_000_000))
         let voPubFallback = EventOverviewReaderView.timelineItemAccessibilityLabel(
             item: itemPubDateOnlyNoText, citations: [cit])
@@ -940,7 +941,8 @@ struct EventOverviewAccessibilityTests {
         // 10. Background concurrency for accessibility label functions
         let bgLabelsSuccess = await Task.detached { () -> Bool in
             let item = OverviewTimelineItem(
-                id: "t_bg", dateText: "", summary: "Background timeline event", isFuturePlan: false,
+                id: "t_bg", dateText: "", dateKind: .publication, summary: "Background timeline event",
+                isFuturePlan: false,
                 publicationDate: Date(timeIntervalSince1970: 1_700_000_000)
             )
             let tlLabel = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item)

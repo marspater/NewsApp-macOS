@@ -462,8 +462,12 @@ struct EventOverviewReaderView: View {
             return TimelineDateDisplay(
                 primary: text, reported: publicationText.map(reported), isStated: item.dateKind == .stated)
         }
-        let shown = text.isEmpty ? publicationText : text
-        return TimelineDateDisplay(primary: shown.map(reported), reported: nil, isStated: false)
+        // Only a publication date reads "Reported". Any other item without date text shows no date, even when it
+        // carries a publication date (a stored "Scheduled" plan, for one), so nothing reads as a dated plan.
+        guard item.dateKind == .publication, let shown = text.isEmpty ? publicationText : text else {
+            return TimelineDateDisplay(primary: nil, reported: nil, isStated: false)
+        }
+        return TimelineDateDisplay(primary: reported(shown), reported: nil, isStated: false)
     }
 
     /// Mirrors `timelineDateRow` through `timelineDateDisplay`: the date, planned status, a separate "Reported"

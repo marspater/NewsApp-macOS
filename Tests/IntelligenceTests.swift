@@ -4677,8 +4677,8 @@ extension NewsTests {
         assertEqual(misparsedItem.eventDate, nil, "A legacy event date in year 2 is dropped at decode")
         assertEqual(misparsedItem.dateText, "November 2", "The stated text stays")
         assertEqual(
-            BriefingTimelineData.orderingDate(of: misparsedItem), published,
-            "Briefing orders it by its publication date, never by year 2")
+            BriefingTimelineData.orderingDate(of: misparsedItem), nil,
+            "Briefing neither orders it by year 2 nor by its publication date")
         let current = OverviewTimelineItem(
             id: "c", dateText: "Nov 2", summary: "x", eventDate: Date(timeIntervalSinceReferenceDate: misparsed))
         let reencoded = try JSONDecoder().decode(OverviewTimelineItem.self, from: JSONEncoder().encode(current))
@@ -4711,7 +4711,7 @@ extension NewsTests {
             legacy.map(label),
             [
                 "Yesterday Morning. Reported \(reportedText). Rescuers reached the town",
-                "Reported \(reportedText). Planned. Work will resume",
+                "Planned. Work will resume",
                 "15 October 2026. Reported \(reportedText). Teams deployed",
             ],
             "Legacy anchors and dates read as stated; the placeholder is dropped and only the publication date reads Reported"
@@ -4765,6 +4765,8 @@ extension NewsTests {
             assertFalse(label(item).contains("Reported"), "A stated date is never read as Reported: \(label(item))")
         }
         let (month, full, partial, plan) = (items[0], items[1], items[2], items[3])
+        assertEqual(
+            items.map(\.datePrecision), [.month, .day, .day, .day], "Stated dates carry their precision (#1241)")
         assertTrue(
             full.dateText.contains("15") && full.dateText.contains("2026"),
             "Full date keeps day and year: \(full.dateText)")
@@ -4789,7 +4791,7 @@ extension NewsTests {
         // A publication date is the only date that reads Reported.
         let reportedText = published.formatted(date: .abbreviated, time: .omitted)
         let publicationOnly = OverviewTimelineItem(
-            id: "pub", dateText: "", summary: "Report filed.", publicationDate: published)
+            id: "pub", dateText: "", dateKind: .publication, summary: "Report filed.", publicationDate: published)
         assertEqual(
             EventOverviewReaderView.timelineDateDisplay(for: publicationOnly).primary, "Reported \(reportedText)",
             "Publication date without a stated date reads Reported")

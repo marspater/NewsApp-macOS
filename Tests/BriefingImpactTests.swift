@@ -37,6 +37,7 @@ enum BriefingImpactTests {
         driversCoverage()
         timelineOrdering()
         timelineBuilderPartialDates()
+        timelineDistinctDates()
         await dynamicIndicatorsAndOverviewQuality()
         await comprehensiveCoverageVerification()
         print("Finished \(checks) Briefing strategic impact checks with \(failures) failures.")
@@ -222,35 +223,95 @@ enum BriefingImpactTests {
             "a relative anchor stays in the overview but out of the Briefing thread")
     }
 
+    /// #1241 decisions 4 and 6: a thread needs two distinct occurrence dates among the rows it shows, distinct only when
+    /// their spans do not overlap; "day N" needs a day-precision first row.
+    static func timelineDistinctDates() {
+        let day: TimeInterval = 86_400
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let today = utc.startOfDay(for: now)
+        func row(_ id: String, _ text: String, _ date: Date, _ precision: OverviewTimelineItem.DatePrecision = .day)
+            -> OverviewTimelineItem
+        {
+            OverviewTimelineItem(
+                id: id, dateText: text, datePrecision: precision, summary: "Step \(id)",
+                orderingDateMayHoldInferredYear: date)
+        }
+        let entry = BriefingRegionsData.sampleEntry(id: "distinct", title: "Thread", publishers: 4, date: now)
+        check(
+            BriefingTimelineData.items(
+                [row("a", "Nov 4", today - 3 * day), row("b", "Nov 4", today - 3 * day)], now: now)
+                == nil, "two rows with one date are no thread (71756C1C)")
+        check(
+            BriefingTimelineData.items(
+                [row("a", "Nov 4", today - 3 * day), row("b", "2026 Nov 4", today - 3 * day)], now: now)
+                == nil, "one day written two ways is one date")
+        let monthStart = utc.dateInterval(of: .month, for: today - 40 * day)!.start
+        check(
+            BriefingTimelineData.items(
+                [row("m", "October 2026", monthStart, .month), row("d", "Oct 9", monthStart + 8 * day)], now: now)
+                == nil,
+            "a month and a day inside it are one date")
+        check(
+            BriefingTimelineData.items(
+                [row("a", "Nov 3", today - 4 * day), row("b", "Nov 4", today - 3 * day)], now: now)?
+                .count == 2, "two real days are a thread")
+        check(
+            BriefingTimelineData.thread(
+                entry: entry, timeline: [row("a", "Nov 3", today - 4 * day), row("b", "Nov 4", today - 3 * day)],
+                now: now)?
+                .day != nil, "a day-precision start counts days")
+        let monthLed = BriefingTimelineData.thread(
+            entry: entry,
+            timeline: [
+                row("m", "September 2026", utc.dateInterval(of: .month, for: today - 70 * day)!.start, .month),
+                row("d", "Nov 4", today - 3 * day),
+            ], now: now)
+        check(monthLed != nil && monthLed?.day == nil, "a month-only start shows no day count")
+        check(monthLed?.caption == "Thread", "the caption drops the count")
+        let publication = OverviewTimelineItem(
+            id: "p", dateText: "Nov 2", dateKind: .publication, summary: "Filed", publicationDate: today - 5 * day)
+        check(
+            BriefingTimelineData.items([publication, row("b", "Nov 4", today - 3 * day)], now: now) == nil,
+            "a publication date never makes the second date")
+    }
+
     static func timelineOrdering() {
         let day: TimeInterval = 86_400
         let timeline = [
             OverviewTimelineItem(
-                id: "3", dateText: "Wed", summary: "Fighting escalated overnight", eventDate: now - day),
-            OverviewTimelineItem(id: "1", dateText: "Mon", summary: "First report", eventDate: now - 3 * day),
+                id: "3", dateText: "Wed", datePrecision: .day, summary: "Fighting escalated overnight",
+                eventDate: now - day),
             OverviewTimelineItem(
-                id: "f", dateText: "Fri", summary: "Talks planned", isFuturePlan: true, eventDate: now - day),
-            OverviewTimelineItem(id: "n", dateText: "Later", summary: "Next week", eventDate: now + day),
+                id: "1", dateText: "Mon", datePrecision: .day, summary: "First report", eventDate: now - 3 * day),
+            OverviewTimelineItem(
+                id: "f", dateText: "Fri", datePrecision: .day, summary: "Talks planned", isFuturePlan: true,
+                eventDate: now - day),
+            OverviewTimelineItem(
+                id: "n", dateText: "Later", datePrecision: .day, summary: "Next week", eventDate: now + day),
             OverviewTimelineItem(id: "2", dateText: "Tue", summary: "Second report", publicationDate: now - 2 * day),
         ]
         let items = BriefingTimelineData.items(timeline, now: now)
-        check(items?.map(\.id) == ["1", "2", "3"], "past dated items in date order")
-        check(items?.map(\.isEscalating) == [false, false, true], "escalating item marked")
+        check(items?.map(\.id) == ["1", "3"], "past occurrence dates in date order; a publication date is none")
+        check(items?.map(\.isEscalating) == [false, true], "escalating item marked")
         check(BriefingTimelineData.items(Array(timeline.prefix(1)), now: now) == nil, "one item is not a timeline")
         let entry = BriefingRegionsData.sampleEntry(id: "impact-timeline", title: "Thread", publishers: 4, date: now)
         check(BriefingTimelineData.thread(entry: entry, timeline: timeline, now: now)?.day == 3, "day count")
         let many = (0..<8).map {
             OverviewTimelineItem(
-                id: "\($0)", dateText: "D\($0)", summary: "Step", eventDate: now - Double(8 - $0) * day)
+                id: "\($0)", dateText: "D\($0)", datePrecision: .day, summary: "Step",
+                eventDate: now - Double(8 - $0) * day)
         }
         let other = [
-            OverviewTimelineItem(id: "x", dateText: "Mon", summary: "First report", eventDate: now - 3 * day),
-            OverviewTimelineItem(id: "4", dateText: "Thu", summary: "Talks begin", eventDate: now - day / 2),
+            OverviewTimelineItem(
+                id: "x", dateText: "Mon", datePrecision: .day, summary: "First report", eventDate: now - 3 * day),
+            OverviewTimelineItem(
+                id: "4", dateText: "Thu", datePrecision: .day, summary: "Talks begin", eventDate: now - day / 2),
         ]
         let merged = BriefingTimelineData.merged([("a", timeline), ("b", other)], now: now)
         check(merged.filter { $0.summary == "First report" }.map(\.id) == ["a/1"], "identical summaries merge once")
         check(
-            BriefingTimelineData.items(merged, now: now)?.map(\.id) == ["a/1", "a/2", "a/3", "b/4"],
+            BriefingTimelineData.items(merged, now: now)?.map(\.id) == ["a/1", "a/3", "b/4"],
             "both events' timelines in date order")
         // #1241: every overview numbers its items from timeline_1, so ids are prefixed with the event once merged.
         let twin = BriefingTimelineData.merged(
@@ -259,14 +320,16 @@ enum BriefingImpactTests {
                     "e1",
                     [
                         OverviewTimelineItem(
-                            id: "timeline_1", dateText: "Mon", summary: "Port closed", eventDate: now - 2 * day)
+                            id: "timeline_1", dateText: "Mon", datePrecision: .day, summary: "Port closed",
+                            eventDate: now - 2 * day)
                     ]
                 ),
                 (
                     "e2",
                     [
                         OverviewTimelineItem(
-                            id: "timeline_1", dateText: "Tue", summary: "Port reopened", eventDate: now - day)
+                            id: "timeline_1", dateText: "Tue", datePrecision: .day, summary: "Port reopened",
+                            eventDate: now - day)
                     ]
                 ),
             ], now: now)
@@ -282,7 +345,11 @@ enum BriefingImpactTests {
                 ("u", [OverviewTimelineItem(id: "undated", dateText: "", summary: "Escorts begin")]),
                 (
                     "r",
-                    [OverviewTimelineItem(id: "real", dateText: "Thu", summary: "Escorts begin", eventDate: now - day)]
+                    [
+                        OverviewTimelineItem(
+                            id: "real", dateText: "Thu", datePrecision: .day, summary: "Escorts begin",
+                            eventDate: now - day)
+                    ]
                 ),
             ], now: now)
         check(shadowed.map(\.id) == ["r/real"], "a plan or undated copy never hides the dated past one")
