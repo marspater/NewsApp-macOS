@@ -97,6 +97,13 @@ extension NewsTests {
         assertEqual(publishes, 0, "Restating Auto-Hide Read publishes nothing")
         theme.binding(\.autoHideRead).wrappedValue = true
         assertTrue(theme.autoHideRead, "A new Auto-Hide Read is written")
+        // Reading Style, the third control of #1169 item 8.
+        publishes = 0
+        theme.binding(\.articleTheme).wrappedValue = .casper
+        assertEqual(publishes, 0, "Restating the Reading Style publishes nothing")
+        theme.binding(\.articleTheme).wrappedValue = .alto
+        assertEqual(theme.articleTheme, .alto, "A new Reading Style is written")
+        assertTrue(publishes > 0, "A new Reading Style publishes")
     }
 
     @MainActor
@@ -1148,6 +1155,9 @@ extension NewsTests {
                 }
             }
             assertEqual(completedReport.imagesFound, 1, "Completed pass continues to behave properly")
+            await eventually("A completed pass advances the store revision too") {
+                await store.revision > currentRev
+            }
             await cancelDb.close()
         }
 
@@ -2006,6 +2016,24 @@ extension NewsTests {
         assertTrue(ListLayoutPreference.isGrid("World", stored: "not json", fallback: true), "A bad value is ignored")
         assertEqual(AppLayout.gridColumnCount(width: 300), 1, "One column at the minimum width")
         assertEqual(AppLayout.gridColumnCount(width: 1163), 3, "Three columns in a wide window")
+        // The grid is independent columns (#1227): story n sits in column n mod the column count, so reading order
+        // runs across and an expanded card grows only its own column.
+        let gridEntries: [FeedEntry] = (0..<7).map {
+            .article(
+                FeedArticle(
+                    storedID: "g\($0)", title: "Story \($0)", link: "https://grid.invalid/\($0)", guid: "g\($0)",
+                    description: "", pubDate: Date(), source: "Publisher"))
+        }
+        assertEqual(
+            (0..<3).map { AppLayout.gridColumn($0, of: 3, in: gridEntries).map(\.id) },
+            [["g0", "g3", "g6"], ["g1", "g4"], ["g2", "g5"]],
+            "Three columns take stories 0, 3, 6 / 1, 4 / 2, 5")
+        assertEqual(
+            AppLayout.gridColumn(0, of: 1, in: gridEntries).map(\.id), gridEntries.map(\.id),
+            "One column holds every story in order")
+        assertEqual(
+            AppleIntelligenceState.ready.explanation, "The on-device model is active on this Mac.",
+            "Settings says the model is active, not ready (#1227)")
 
         // Today card metadata (#938): a field without data adds nothing to the card or to VoiceOver.
         let none = StoryCardMetadata()

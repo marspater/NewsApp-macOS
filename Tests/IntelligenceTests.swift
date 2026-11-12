@@ -365,6 +365,9 @@ extension NewsTests {
             "One publisher is one step however often it repeats")
         assertEqual(degrees(war(8, daysAgo: 8)), nil, "A story older than seven days does not count")
         assertEqual(degrees(war(8, daysAgo: -1)), nil, "Nor does one after the reading's end")
+        assertEqual(degrees(war(1, daysAgo: 7)), nil, "A story exactly seven days before the reading is outside it")
+        assertEqual(degrees(war(1, daysAgo: 7 - 1 / 86400)), 3, "A story a second inside the seven days counts")
+        assertEqual(degrees(war(1, daysAgo: 0)), 3, "A story at the reading's end counts")
         assertEqual(
             degrees([story("Norway bumped to let Russia compete at world juniors", "Sport")]), nil,
             "A story that names Russia without fighting adds nothing")
@@ -391,6 +394,27 @@ extension NewsTests {
         let shown = WorldTensionNearYou.apply(to: history, stories: war(10), region: poland, now: now)
         assertEqual(shown.map(\.assessment.score), [20, 42, 100], "Recent readings rise; an old one and a clamp stand")
         assertEqual(shown[2].assessment.nearYou?.worldScore, 95, "The world reading stays beside the total")
+        // The 30-day edge: the first second of the 30th day back carries the lens, the second before it does not.
+        let earliest = TensionMethodology.day(containing: now).start.addingTimeInterval(
+            -Double(WorldTensionNearYou.shownDays - 1) * 86400)
+        let edgeWar = (0..<3).map {
+            TensionLocalStory(
+                title: "Russian drone attack hits Kharkiv", publisher: "Edge \($0)",
+                date: earliest.addingTimeInterval(3600))
+        }
+        func edgeReading(_ date: Date) -> WorldTensionReading {
+            WorldTensionReading(
+                evaluatedAt: date, inputHash: "edge-\(date.timeIntervalSince1970)", modelGeneration: "generation",
+                headlines: [WorldTensionHeadline(id: "C1", title: "Headline", publisher: "Panel")],
+                assessment: WorldTensionAssessment(
+                    score: 30, summary: "A fictional summary for the test.", reasons: reasons))
+        }
+        assertEqual(
+            WorldTensionNearYou.apply(
+                to: [edgeReading(earliest.addingTimeInterval(-1)), edgeReading(earliest)], stories: edgeWar,
+                region: poland, now: now
+            ).map(\.assessment.score), [30, 36],
+            "The reading on the 30th day back carries the lens; the one a second earlier stays as assessed")
         assertEqual(
             WorldTensionNearYou.apply(to: history, stories: war(10), region: nil, now: now), history,
             "Without a region nothing changes")
