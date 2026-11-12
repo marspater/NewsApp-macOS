@@ -15,7 +15,10 @@ COLD = PREFIX + "Launch milestone list_page_fetched ms_since_process_start=850.0
     + PREFIX + "Launch event today_edition_restored outcome=none ms_since_process_start=860.000\n" \
     + PREFIX + "Launch milestone today_edition_requested ms_since_process_start=861.000\n" \
     + PREFIX + "Today edition stage=context ms=40.500 count=200\n" \
+    + PREFIX + "Today edition stage=event_images ms=10.000 count=6\n" \
     + PREFIX + "Today edition stage=assignment ms=60.250 count=150\n" \
+    + PREFIX + "Today edition stage=differing_accounts ms=5.000 count=8\n" \
+    + PREFIX + "Today edition stage=layout ms=7.000 count=3\n" \
     + PREFIX + "Launch milestone today_edition_installed ms_since_process_start=1000.000\n" \
     + PREFIX + "First card visible ms_since_process_start={card} restored=false\n"
 WARM = PREFIX + "Launch event today_edition_restored outcome=shown ms_since_process_start=870.000\n" \
@@ -56,6 +59,35 @@ class ParseTests(unittest.TestCase):
             (warm["restored"], warm["restore_outcome"], warm["fresh_outcome"], warm["fresh_ready_ms"]),
             (True, "shown", "swapped", 1040.0))
         self.assertIsNone(warm["today_edition_installed_ms"])
+
+    def test_today_markers_never_count_as_baseline(self):
+        old = summarize_launches.parse_launch(BASELINE)
+        old.update(arm="baseline", memory={})
+        self.assertIsNone(summarize_launches.mismatch(old))
+        for log in (WARM.format(card="900.000", outcome="confirmed"), COLD.format(card="1100.000")):
+            new = summarize_launches.parse_launch(log)
+            new.update(arm="baseline", memory={})
+            self.assertEqual(summarize_launches.mismatch(new), "Today state markers present in baseline")
+
+    def test_stage_times_require_one_complete_attempt(self):
+        complete = summarize_launches.parse_launch(COLD.format(card="1100.000"))
+        self.assertEqual((complete["context_ms"], complete["assignment_ms"]), (40.5, 60.25))
+        cancelled = PREFIX + "Today edition stage=context ms=999.000 count=200\n"
+        retry = summarize_launches.parse_launch(cancelled + COLD.format(card="1100.000"))
+        self.assertIsNone(retry["context_ms"])
+        self.assertIsNone(retry["assignment_ms"])
+        incomplete = summarize_launches.parse_launch(
+            PREFIX + "Today edition stage=context ms=25.000 count=200\n"
+            + PREFIX + "Today edition stage=assignment ms=30.000 count=200\n")
+        self.assertIsNone(incomplete["context_ms"])
+        self.assertIsNone(incomplete["assignment_ms"])
+
+    def test_swap_requires_post_swap_sample(self):
+        swap = summarize_launches.parse_launch(WARM.format(card="960.000", outcome="swapped"))
+        swap.update(arm="swap", memory={})
+        self.assertEqual(summarize_launches.mismatch(swap), "no post-swap settled footprint")
+        swap["memory"]["settled"] = summarize_launches.parse_footprint(FOOTPRINT.format(layers="  80 MB"))
+        self.assertIsNone(summarize_launches.mismatch(swap))
 
     def test_footprint_regions_and_units(self):
         memory = summarize_launches.parse_footprint(FOOTPRINT.format(layers="  62 MB"))
