@@ -26,6 +26,7 @@ These instructions govern agent workflow, not the project specification.
 
 - Follow the user's current scope and preserve real settings, saved stories, read history and logs during verification.
 - v2.0.0 shipped on 31 October 2026; v3 stays English-only while #264 is parked. Issues labelled `parked` are ones I deprioritized: do not work on them or add them to release gates unless I reopen them, and keep their parked code intact.
+- VoiceOver: build accessibility into each change as usual (labels, traits, actions, rotors, announcements and their automated tests), but do not run or request a check that needs VoiceOver switched on for a single change. Add one line for the owed check to #1244 and link it from the PR or issue; no PR or sub-issue waits on it. #1244 runs after all other v3 work and blocks the v3 release. Other accessibility checks (Reduce Motion, Increase Contrast, Reduce Transparency, Show Borders, keyboard) stay with their own issues.
 - Development verification stays arm64 and ad-hoc signed. Push a `v*` tag only when I explicitly ask: the push publishes a GitHub release through `release.yml`. Run the notarization helpers in `script/distribution/` only on my request.
 - A fix that touches files owned by another open epic (its "Does not touch" lines) gets no PR for that part: post the diff and progress on the issue instead. When a fix substantially relates to an open issue linked to an epic, document it in that issue and explain how the two relate.
 - After a PR merges, delete its local worktree and branch; the remote branch can stay.
