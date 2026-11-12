@@ -53,6 +53,7 @@ extension NewsTests {
             ("testFullEditionIsDeterministicPerLaneWithOneLanePerStory", { testTodayFullEditionContract() }),
             ("testOutputHoldsNoTopicLaneAndNoBriefingAnalysis", { testTodayOutputHasNoTopicLaneOrAnalysis() }),
             ("testNotifyingStoryNeedNotLeadToday", { testTodayNotifyingStoryNeedNotLead() }),
+            ("testYourBeatPerStoryAffinityIsOffByDefault", { try await testTodayYourBeatPerStoryAffinity() }),
         ]
         try await runSuite(tests)
     }
@@ -1880,5 +1881,83 @@ extension NewsTests {
                 !$0.lowercased().contains("notif") && !$0.lowercased().contains("priority")
                     && !$0.lowercased().contains("breaking")
             }, "Today's thresholds hold no notification threshold")
+    }
+
+    /// The default-off option of #934 (12 November 2026): affinity per story published with a floor of read or
+    /// saved stories. Off, the profile and the plan are the shipped ones; on, a publisher read often but
+    /// publishing much gives way to one read at a higher rate, and a publisher under the floor is no affinity
+    /// publisher at all.
+    static func testTodayYourBeatPerStoryAffinity() async throws {
+        assertTrue(TodayEditionThresholds.standard.yourBeatAffinityPerStoryFloor == nil, "The option ships off")
+        // Four engaged publishers, so the quartile is one. "busy" has the most reads; "quiet" the highest rate.
+        let weights = ["busy": 8.0, "quiet": 6.0, "small": 2.0, "other": 2.0]
+        let window = weights
+        let read = ["busy": 8, "quiet": 6, "small": 2, "other": 2]
+        let published = ["busy": 400, "quiet": 20, "small": 2, "other": 50]
+        assertEqual(TodayUserProfile.computeTopQuartilePublishers(from: weights), ["busy"], "Shipped: most engagement")
+        assertEqual(
+            TodayUserProfile.perStoryAffinityPublishers(
+                weights: weights, windowWeights: window, storiesRead: read, published: published, floor: 5),
+            [], "The highest rate belongs to a publisher under the floor: no affinity publisher")
+        assertEqual(
+            TodayUserProfile.perStoryAffinityPublishers(
+                weights: weights, windowWeights: window, storiesRead: read,
+                published: published.merging(["small": 40]) { $1 }, floor: 5),
+            ["quiet"], "Per story published, the quieter publisher is the affinity publisher")
+        assertEqual(
+            TodayUserProfile.perStoryAffinityPublishers(
+                weights: [:], windowWeights: [:], storiesRead: [:], published: published, floor: 5),
+            [], "No history, no affinity publisher")
+
+        // Through the loader: "Busy Wire" is read six times of 30 stories, "Quiet Review" five times of six.
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        defer { Task { await db.close() } }
+        let now = Date()
+        let feed = "https://global.example/rss"
+        var stories: [FeedArticle] = []
+        for index in 0..<30 {
+            stories.append(
+                makeArticle(
+                    id: "busy-\(index)", title: "Harbor ledger entry \(index)", source: "Busy Wire", feedURL: feed,
+                    pubDate: now.addingTimeInterval(-Double(3600 + index * 60))))
+        }
+        for index in 0..<6 {
+            stories.append(
+                makeArticle(
+                    id: "quiet-\(index)", title: "Orchard almanac note \(index)", source: "Quiet Review",
+                    feedURL: feed, pubDate: now.addingTimeInterval(-Double(7200 + index * 60))))
+        }
+        try await db.upsertArticles(stories)
+        for id in (0..<6).map({ "busy-\($0)" }) + (0..<5).map({ "quiet-\($0)" }) {
+            try await db.markRead(articleId: id, isRead: true)
+        }
+        let shipped = try await db.todayUserProfile(now: now)
+        let option = try await db.todayUserProfile(now: now, affinityStoryFloor: 5)
+        let highFloor = try await db.todayUserProfile(now: now, affinityStoryFloor: 6)
+        assertEqual(shipped.topQuartilePublishers, ["busy wire"], "Shipped rule: the publisher read most")
+        assertEqual(option.topQuartilePublishers, ["quiet review"], "Option: the publisher read at the higher rate")
+        assertEqual(highFloor.topQuartilePublishers, [], "A floor above its read stories switches affinity off")
+        var same = option
+        same.topQuartilePublishers = shipped.topQuartilePublishers
+        assertEqual(same, shipped, "The option changes the affinity publishers and nothing else in the profile")
+
+        let entries = stories.map(FeedEntry.article)
+        let standard = try await db.loadTodayAssignmentContext(entries: entries, now: now, subscribedFeedURLs: [feed])
+        let explicit = try await db.loadTodayAssignmentContext(
+            entries: entries, now: now, subscribedFeedURLs: [feed], thresholds: .standard)
+        assertEqual(standard, explicit, "Without the option the loaded context is the shipped one")
+        assertEqual(standard.profile, shipped, "The shipped context holds the shipped profile")
+        var thresholds = TodayEditionThresholds.standard
+        thresholds.yourBeatAffinityPerStoryFloor = 5
+        let optional = try await db.loadTodayAssignmentContext(
+            entries: entries, now: now, subscribedFeedURLs: [feed], thresholds: thresholds)
+        func affinityStories(_ context: TodayAssignmentContext) -> Set<String> {
+            Set(
+                TodayEditionAssigner.evaluateStories(entries, context: context)
+                    .filter(\.isTopQuartilePublisher).map { String($0.id.prefix(while: { $0 != "-" })) })
+        }
+        assertEqual(affinityStories(standard), ["busy"], "Shipped: the busy publisher's stories carry affinity")
+        assertEqual(affinityStories(optional), ["quiet"], "Option on: the quiet publisher's stories carry it")
     }
 }
