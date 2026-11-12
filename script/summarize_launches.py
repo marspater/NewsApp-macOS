@@ -32,6 +32,21 @@ MS = r"ms_since_process_start=([\d.]+)"
 UNITS = {"B": 1 / 1048576, "KB": 1 / 1024, "MB": 1, "GB": 1024}
 
 
+def completed_today_stages(text):
+    """Only pair stage timings from one complete, unambiguous Today assignment.
+
+    StageTimer has no task ID. Multiple attempts or interleaved tasks cannot be safely paired,
+    so reject their stage timings rather than combining unrelated operations.
+    """
+    stages = re.findall(
+        r"Today edition stage=(context|event_images|assignment|differing_accounts|layout) ms=([\\d.]+)", text)
+    if [stage for stage, _ in stages] != [
+        "context", "event_images", "assignment", "differing_accounts", "layout"
+    ]:
+        return None, None
+    return float(stages[0][1]), float(stages[2][1])
+
+
 def parse_launch(text):
     """The launch's stages from its Launch log lines; a line the build does not write leaves its field None."""
 
@@ -40,6 +55,7 @@ def parse_launch(text):
         return convert(match[1]) if match else None
 
     fresh = re.search(r"today_fresh_edition_ready outcome=(\w+).*?" + MS, text)
+    context_ms, assignment_ms = completed_today_stages(text)
     return {
         "first_card_ms": first(r"First card visible " + MS),
         "restored": first(r"First card visible .*?restored=(true|false)", lambda value: value == "true"),
@@ -50,8 +66,8 @@ def parse_launch(text):
         "today_edition_requested_ms": first(r"Launch milestone today_edition_requested " + MS),
         # Milestones stop at the first card, so a launch that shows a restored edition never logs this one.
         "today_edition_installed_ms": first(r"Launch milestone today_edition_installed " + MS),
-        "context_ms": first(r"Today edition stage=context ms=([\d.]+)"),
-        "assignment_ms": first(r"Today edition stage=assignment ms=([\d.]+)"),
+        "context_ms": context_ms,
+        "assignment_ms": assignment_ms,
     }
 
 
@@ -117,8 +133,15 @@ def mismatch(launch):
         return None
     seen = (launch["restored"], launch["restore_outcome"], launch["fresh_outcome"])
     names = ("restored", "restore_outcome", "fresh_outcome")
+    if launch["arm"].split("_")[0] == "baseline" and any(value is not None for value in seen):
+        return "Today state markers present in baseline"
     wrong = [f"{name}={got}" for name, want, got in zip(names, expected, seen) if want is not None and got != want]
-    return ", ".join(wrong) or None
+    if wrong:
+        return ", ".join(wrong)
+    if launch["arm"].split("_")[0] == "swap":
+        if launch["memory"].get("settled", {}).get("footprint_mb") is None:
+            return "no post-swap settled footprint"
+    return None
 
 
 def summarize(launches, discard=1):
