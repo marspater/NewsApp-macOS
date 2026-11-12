@@ -327,7 +327,12 @@ enum AppLayout {
     static let catalogSheetWidth: CGFloat = 720
     static let catalogSheetMinHeight: CGFloat = 560
     static let publisherHealthSheetWidth: CGFloat = 720
-    static let publisherHealthSheetMinHeight: CGFloat = 560
+    /// The sheet opens below the Settings window's toolbar, where the 560 pt pane leaves room for its content plus the
+    /// sheet's own bottom bar with Done; a 560 pt content height put Done below the window edge (#1265). The table
+    /// scrolls, so the header, footnote and Done stay visible.
+    static let publisherHealthSheetMinHeight: CGFloat = 400
+    static let publisherHealthSheetIdealHeight: CGFloat = 480
+    static let publisherHealthSheetMaxHeight: CGFloat = publisherHealthSheetIdealHeight
     static let publisherHealthFeedColumnMinWidth: CGFloat = 150
     static let publisherHealthNumberColumnWidth: CGFloat = 68
     static let publisherHealthTextColumnWidth: CGFloat = 72
