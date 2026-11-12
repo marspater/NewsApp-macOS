@@ -540,9 +540,10 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// word overlap with coverage headlines; fragments under five words excluded. 10: sentences closed by their
     /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
     /// 11: conditional Industry Impact section (#670). 13: no feed footer or heading Highlights, one first-pass Highlight
-    /// per publisher (#1251). 14: no cut-off feed description tail as a Highlight (#1253). 15: timeline items carry
-    /// their date kind and come from the stated-date builder only (#1241).
-    public static let currentAnalysisVersion = 15
+    /// per publisher (#1251). 14: no cut-off feed description tail as a Highlight (#1253). 15: no page title block,
+    /// the title alone or with its dateline, as a Highlight (#1266). 16: timeline items carry their date kind and
+    /// come from the stated-date builder only (#1241).
+    public static let currentAnalysisVersion = 16
 
     public let id: String
     public let eventID: String

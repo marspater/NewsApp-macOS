@@ -33,6 +33,7 @@ extension NativeSuites {
         @Test func cancellationAndSupersession() async { await Self.testCancellationAndSupersession() }
         @Test func retainedDeterministicSections() { Self.testRetainedDeterministicSections() }
         @Test func highlightSelection() { Self.testHighlightSelection() }
+        @Test func titleBlockHighlights() { Self.testTitleBlockHighlights() }
         @Test func cutDescriptionTails() { Self.testCutDescriptionTails() }
     }
 }
@@ -120,14 +121,69 @@ extension NativeSuites.PublisherExcerptSuite {
 }
 
 extension NativeSuites.PublisherExcerptSuite {
+    /// #1266: a page's title block never takes a Highlights slot; a title followed by a real sentence stays a statement.
+    static func testTitleBlockHighlights() {
+        print("  - Testing Highlights without a page title block...")
+        let title = "Port strike shuts container terminals along the coast"
+        let article = FeedArticle(
+            storedID: "t1", title: title, link: "https://example.com/t1", guid: "t1", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Harbour Daily")
+        let dateline = "Nov 10, 2026 6:40 PM EST."
+        expectTrue(OverviewComposer.isTitleBlock("\(title) \(dateline)", title: title), "Title and dateline")
+
+        expectTrue(
+            OverviewComposer.isTitleBlock("\(title) Tuesday, November 10, 2026 6:40 PM EST.", title: title),
+            "Full weekday and month names remain datelines")
+        expectTrue(
+            !OverviewComposer.isTitleBlock("\(title) \(String(repeating: "1234567890", count: 4))x.", title: title),
+            "An uninterrupted digit run with trailing text must not match")
+
+        let bankTitle = "The central bank will review interest rates"
+        let monthly = "\(bankTitle) monthly."
+        let bankArticle = FeedArticle(
+            storedID: "bank", title: bankTitle, link: "https://example.com/bank", guid: "bank", description: "",
+            pubDate: Date(timeIntervalSince1970: 1_790_000_000), source: "Bank News")
+        let monthlyFact = PassageAnchoredFact(
+            id: "bank-monthly", statement: monthly, passageID: "bank-p", quote: monthly, articleID: "bank")
+        expectTrue(!OverviewComposer.isTitleBlock(monthly, title: bankTitle), "Monthly is not Monday")
+        expectTrue(
+            OverviewComposer.highlights(from: [monthlyFact], articles: [bankArticle]).map(\.statement) == [monthly],
+            "The monthly sentence is not discarded as a dateline")
+        expectTrue(
+            !OverviewComposer.isTitleBlock("\(title) Union leaders said the strike would continue.", title: title),
+            "A title followed by a sentence is a statement")
+        let passages = [
+            EvidencePassage(id: "t1-lead", articleID: "t1", text: "\(title) \(dateline)", ordinal: 0),
+            EvidencePassage(
+                id: "t1-body", articleID: "t1",
+                text: "Negotiators for the port authority met union leaders on Thursday evening.", ordinal: 1),
+        ]
+        let facts = PassageFactExtractor.deterministicExtract(passages: passages)
+        let chosen = OverviewComposer.highlights(from: facts, articles: [article]).map(\.statement)
+        expectTrue(!chosen.contains { $0.hasPrefix(title) }, "The title block takes no slot: \(chosen)")
+        expectTrue(chosen.contains { $0.contains("Negotiators for the port authority") }, "The next statement does")
+        let restated = PassageAnchoredFact(
+            id: "restated", statement: "\(title).", passageID: "t1-r", quote: "\(title).", articleID: "t1")
+        expectTrue(
+            OverviewComposer.highlights(from: [restated], articles: [article]).map(\.statement) == ["\(title)."],
+            "A headline restated as a complete sentence stays a Highlight")
+        let broken = PassageFactExtractor.deterministicExtract(passages: [
+            EvidencePassage(
+                id: "t1-break", articleID: "t1",
+                text: "\(title)\nUnion leaders said the port strike would continue through the weekend.", ordinal: 0)
+        ])
+        expectTrue(
+            OverviewComposer.highlights(from: broken, articles: [article]).map(\.statement)
+                == ["Union leaders said the port strike would continue through the weekend."],
+            "A headline above a factual sentence yields the sentence alone")
+    }
+
     // MARK: - 1. Version Bump
     static func testCurrentAnalysisVersionBumped() {
-        print("  - Testing current analysis version is 15...")
         expectTrue(
-            EventOverviewDocument.currentAnalysisVersion == 15,
-            "EventOverviewDocument.currentAnalysisVersion is 15: overviews cached before publisher excerpts (11), the"
-                + " Industry Impact story check (12), the Highlight cleanup (13), cut description tails (14) and timeline"
-                + " date kinds (15) recompute")
+            EventOverviewDocument.currentAnalysisVersion == 16,
+            "Analysis version 16 regenerates overviews cached before timeline date kinds"
+        )
     }
 
     // MARK: - 2. Exact Excerpt / Citation Correspondence
