@@ -18,7 +18,6 @@ import hashlib
 import itertools
 import json
 import pathlib
-import random
 import shutil
 import tempfile
 
@@ -45,10 +44,9 @@ def key(directory):
 def review_rows(data):
     """The key's stories in an order that depends only on their ids, so it says nothing about a ranking."""
     rows = [{'story': row['id'], 'publisher': row['publisher'], 'title': row['title'], 'summary': row['summary'],
-             'label': '', 'note': ''} for row in sorted(data['stories'], key=lambda row: row['id'])]
-    seed = hashlib.sha256('\n'.join(row['story'] for row in rows).encode()).hexdigest()
-    random.Random(seed).shuffle(rows)
-    return rows
+             'label': '', 'note': ''} for row in data['stories']]
+    salt = '\n'.join(row['story'] for row in rows)
+    return sorted(rows, key=lambda row: hashlib.sha256(f"{salt}\n{row['story']}".encode()).hexdigest())
 
 
 def sheet(directory):

@@ -119,7 +119,6 @@ One name means one thing. Before adding a name, check this table and the names a
 | `lead_slides`, `lead_slides_labelled`, `lead_slides_labelled_important` | A Today shadow run: slides The Lead shows, those with a story label, and those the label calls Lead-worthy |
 | `imageless_entries`, `lead_slides_replaced_by_photo_rule` | A Today shadow run: stories with no photo in any report of their event, and Lead slides the photo rule replaces |
 
-
 A rescored run keeps its replay and changes only the labels; its `dataset` names the label set, for example `validation-2026-10-29+reviewed-labels-pegged-as-same`.
 
 `multi_publisher` on its own is refused: until 10 November 2026 it held the story count in some runs and the event count in others (442 and 451 against 433 and 443 on the 3 November holdout).
