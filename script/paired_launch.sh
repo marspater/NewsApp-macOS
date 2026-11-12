@@ -17,6 +17,7 @@
 #   NEWS_PAIRED_LIBRARY    the copy every launch starts from (required): a SQLite backup, never a library in use
 #   NEWS_PAIRED_SETTLE     seconds from launch to the memory sample (default 20)
 #   NEWS_PAIRED_HOLD=1     after the sample, wait for Return and sample again as "scrolled": for scrolling by hand
+#   NEWS_PAIRED_SWAP_WAIT  maximum seconds to wait for a fresh edition after the scheduled sample (default 60)
 #   NEWS_PAIRED_MAX_LOAD   refuse to start above this one-minute load average (default 2.5)
 set -euo pipefail
 [[ $# -ge 3 ]] || { sed -n '2,17p' "$0" >&2; exit 2; }
@@ -134,16 +135,18 @@ PY
 done
 
 # Sample swap memory only once the actual fresh-edition swap has been logged for this process.
-wait_for_swap() { # <launch start> <pid>
-    local started="$1" pid="$2" lines
+wait_for_fresh_edition() { # <launch start> <pid> <any|swapped>
+    local started="$1" pid="$2" expected="$3" lines
     local deadline=$((SECONDS + ${NEWS_PAIRED_SWAP_WAIT:-60}))
     while ((SECONDS <= deadline)); do
         kill -0 "$pid" 2>/dev/null || return 1
         lines=$(/usr/bin/log show --start "$started" --info --predicate \
             "subsystem == \"com.marspater.news\" AND category == \"Launch\" AND processIdentifier == $pid" \
             2>/dev/null || true)
-        if [[ "$lines" == *"today_fresh_edition_ready outcome=swapped "* ]]; then return 0; fi
-        if [[ "$lines" == *"today_fresh_edition_ready outcome="* ]]; then return 1; fi
+        if [[ "$lines" == *"today_fresh_edition_ready outcome="* ]]; then
+            [[ "$expected" == any || "$lines" == *"today_fresh_edition_ready outcome=swapped "* ]]
+            return $?
+        fi
         sleep 1
     done
     return 1
@@ -157,7 +160,7 @@ one() { # <round> <arm> <app>
     start=$(date -v-2S '+%Y-%m-%d %H:%M:%S')
     launch "$3" "$stored" "$2"
     local can_sample=1
-    if [[ "${2%%_*}" == swap ]] && ! wait_for_swap "$start" "$PID"; then
+    if [[ "${2%%_*}" == swap ]] && ! wait_for_fresh_edition "$start" "$PID" swapped; then
         echo "⚠️ Round $1 $2: no observed swap; skipping post-swap memory." >&2
         can_sample=0
     fi
@@ -167,6 +170,9 @@ one() { # <round> <arm> <app>
             read -r -p "Round $1 $2: scroll as planned, then press Return " _
             footprint -p "$PID" > "$stem.scrolled.footprint" 2>&1 || true
         fi
+    fi
+    if [[ "${2%%_*}" == warm ]] && ! wait_for_fresh_edition "$start" "$PID" any; then
+        echo "⚠️ Round $1 $2: no fresh-edition result observed before timeout or app exit." >&2
     fi
     /usr/bin/log show --start "$start" --info --predicate \
         "subsystem == \"com.marspater.news\" AND category == \"Launch\" AND processIdentifier == $PID" \

@@ -138,9 +138,9 @@ def mismatch(launch):
     wrong = [f"{name}={got}" for name, want, got in zip(names, expected, seen) if want is not None and got != want]
     if wrong:
         return ", ".join(wrong)
-    if launch["arm"].split("_")[0] == "swap":
-        if launch["memory"].get("settled", {}).get("footprint_mb") is None:
-            return "no post-swap settled footprint"
+    if (launch["arm"].split("_")[0] == "swap"
+            and launch["memory"].get("settled", {}).get("footprint_mb") is None):
+        return "no post-swap settled footprint"
     return None
 
 
