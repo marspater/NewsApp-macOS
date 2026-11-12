@@ -655,6 +655,13 @@ struct EventOverviewAccessibilityTests {
             source: OverviewSourceMetadata(title: nil, name: "AP", url: nil, publishedAt: nil))
         let voPast = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item1, citations: [cit])
         assertEqual(voPast, "Oct 1. Initial event. Source: AP", "VoiceOver past event reads date, summary, source")
+        let rangeItem = OverviewTimelineItem(
+            id: "t_range", dateText: "Feb 8\u{2009}\u{2013}\u{2009}28, 2027", dateKind: .stated, datePrecision: .range,
+            summary: "Voting is open", orderingDateMayHoldInferredYear: pastDate1,
+            orderingEndDateMayHoldInferredYear: pastDate1.addingTimeInterval(86_400 * 20))
+        assertEqual(
+            EventOverviewReaderView.timelineItemAccessibilityLabel(item: rangeItem, citations: [cit]),
+            "Feb 8 to 28, 2027. Voting is open. Source: AP", "VoiceOver reads a stated range as one span (#1249)")
 
         let itemBothDates = OverviewTimelineItem(
             id: "t1_reported", dateText: "Oct 1", summary: "Initial event", isFuturePlan: false, eventDate: pastDate1,

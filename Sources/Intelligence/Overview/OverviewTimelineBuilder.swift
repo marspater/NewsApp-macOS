@@ -258,7 +258,8 @@ enum OverviewTimelineBuilder {
                     id: "timeline_\(index + 1)",
                     dateText: entry.dateText,
                     dateKind: entry.kind,
-                    datePrecision: entry.kind == .stated ? (entry.precision == 0 ? .month : .day) : nil,
+                    datePrecision: entry.kind == .stated
+                        ? (entry.end != nil ? .range : entry.precision == 0 ? .month : .day) : nil,
                     summary: entry.quote,
                     citationIDs: citationIDs,
                     isFuturePlan: entry.isPlan,

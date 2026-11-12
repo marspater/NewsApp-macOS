@@ -5083,7 +5083,7 @@ extension NewsTests {
         let withYear = range("Voting is open from February 8 to February 28, 2027.")
         assertEqual(shown(withYear), "Feb 8 – 28, 2027", "A range with a year is one row, the year written once")
         assertEqual(withYear?.isFuturePlan, true, "A range starting after publication is a plan")
-        assertEqual(withYear?.datePrecision, .day, "A day range has day precision")
+        assertEqual(withYear?.datePrecision, .range, "A range has range precision; its text keeps the stated parts")
         assertEqual(withYear?.orderingDateMayHoldInferredYear, day(2027, 2, 8), "It orders on its start")
         assertEqual(withYear?.orderingEndDateMayHoldInferredYear, day(2027, 2, 28), "Its span ends on its last day")
 

@@ -180,9 +180,12 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     }
 
     /// How precise a stated calendar date is; nil for anchors, publication dates and items stored before it existed.
+    /// A range or list of dates the source states in one phrase is one span (#1249): its `dateText` keeps each end at
+    /// the precision the source gives.
     public enum DatePrecision: String, Codable, Hashable, Sendable {
         case day
         case month
+        case range
     }
 
     public let id: String
