@@ -1,0 +1,1 @@
+- Skip the macOS CI and Swift CodeQL jobs for draft pull requests, then run them when the pull request is ready for review.

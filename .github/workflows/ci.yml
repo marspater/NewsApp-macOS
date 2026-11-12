@@ -12,7 +12,7 @@ on:
   # The group keys on the PR number: a merged PR's `closed` run has `github.ref` set to
   # main, so a ref-keyed group would cancel main's run instead of the PR's.
   pull_request:
-    types: [ opened, synchronize, reopened, closed ]
+    types: [ opened, synchronize, reopened, ready_for_review, closed ]
     branches: [ main ]
     paths-ignore:
       - 'docs/**'
@@ -32,7 +32,7 @@ jobs:
   # The runner has no Xcode 27, so code built only with the macOS 27 SDK is left out here.
   test-arm64:
     name: Test (macOS 26, Apple Silicon)
-    if: github.event.action != 'closed'
+    if: github.event.action != 'closed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
@@ -126,7 +126,7 @@ jobs:
 
   build-arm64:
     name: Build Verification (Apple Silicon)
-    if: github.event.action != 'closed'
+    if: github.event.action != 'closed' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: xcode-27
     timeout-minutes: 20
     steps:
