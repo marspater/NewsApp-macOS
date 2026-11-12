@@ -875,10 +875,11 @@ actor DatabaseEngine {
                 try fileManager.removeItem(at: worldTensionURL)
             }
         }
+        // The last Today edition describes the library being replaced. It goes before the tension history changes, so
+        // a file that cannot be removed stops the restore with nothing replaced.
+        if fileManager.fileExists(atPath: todayEditionURL.path) { try fileManager.removeItem(at: todayEditionURL) }
         // A backup carrying tension history replaces the side file; a backup without the entry keeps the existing file (#1203).
         if backupHasTension { try putTension(extras["world-tension"]) }
-        // The last Today edition describes the library being replaced; a file that cannot be removed stops the restore.
-        if fileManager.fileExists(atPath: todayEditionURL.path) { try fileManager.removeItem(at: todayEditionURL) }
 
         // The log is folded in first and must be fully folded: it is deleted below, and the reopened library would lose
         // the commits only it holds if the swap failed. A blocked checkpoint reports through its counts, not its status,
