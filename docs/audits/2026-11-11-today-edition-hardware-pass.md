@@ -84,6 +84,10 @@ Build `f742e0b` (Release, ad-hoc signed, bundle id `com.marspater.news.isolatedq
 - **A card's photo changed after its story was opened and closed** (a Your Beat card). Which photo a card settles on is not stable across a visit to the reader.
 - **The one Lead slide paired a headline about a Senate result with a photo of the Pentagon.** The stored event behind it had 15 reports from 12 publishers, and a second, single-report event held another report of the same result. Whether the photo is the representative report's own was not established. Grouping is #737.
 
+## Scope, from 12 November 2026
+
+My rulings of 12 November 2026: macOS 26 and macOS 15 windows are out of epic Z's scope, and macOS 26 is verified only through the CI target's captures. Every VoiceOver check belongs to #1244 only. The rows above that list them as not run are kept as the record of those passes; neither is owed for epic Z.
+
 ## Second recheck, evening of 12 November 2026
 
 Build: `main` at `33199b7` with the Lead control fix of this change (`PhotoControlSurface`), Release, ad-hoc signed, bundle id `com.marspater.news.isolatedqa`, macOS 27.2.1 (26B131). A read-only copy of the development library (about 4,030 stories) was put in the isolated container under its own name (`NEWS_LIBRARY_NAME`), so the library another session had left there was not touched; the copy and its side files were deleted afterwards. The window stayed in the background and inactive throughout, driven by background accessibility input; no system setting was changed. Appearances and accessibility settings came from the app's launch arguments.
