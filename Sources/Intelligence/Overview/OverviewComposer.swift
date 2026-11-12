@@ -99,7 +99,7 @@ public struct OverviewComposer: Sendable {
     private static let selfAttribution: NSRegularExpression = {
         let opening =
             #"^\s*(?:this\s+(?:article|post|story|entry)\b.*?\b(?:(?:first|originally)\s+(?:appeared|published)"#
-            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+(?-i:post)\b.*?\bappeared\s+first)"#
+            + #"|appeared\s+first|was\s+(?:first\s+|originally\s+)?published)|the\s+(?-i:post)\b.*?\b(?:appeared\s+first|(?:first|originally)\s+appeared))"#
         let months = "january|february|march|april|may|june|july|august|september|october|november|december"
         let days = "monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|yesterday"
         let site = #"\s+(?:on|at)\s+(?!.*\b(?:"# + months + "|" + days + #")\b)[^,;:]{1,60}?[.!]?\s*$"#

@@ -3000,6 +3000,10 @@ extension NewsTests {
             OverviewComposer.isSelfAttribution(
                 "The post Port strike enters day three appeared first on Harbour Daily."),
             "The post form is self-attribution")
+        assertTrue(
+            OverviewComposer.isSelfAttribution(
+                "The post The Case for a Bubble at Life’s Start first appeared on Quanta Magazine"),
+            "The post form with first appeared and no final period is self-attribution")
         assertFalse(
             OverviewComposer.isSelfAttribution("The leak was first published by The Information on Monday."),
             "Crediting another outlet's report is a fact")
