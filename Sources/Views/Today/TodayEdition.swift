@@ -75,6 +75,15 @@ struct TodayEdition: Equatable, Sendable {
         story.entry.cardImageURL ?? metadata[story.id]?.imageURL
     }
 
+    /// The photo each Lead slide shows, by story id: the one the photo rule, the prefetch and the lane cards use, so
+    /// the story's listed reports come first and its event's photo after. A restored edition's stored event photo
+    /// would otherwise win over a report's own photo, which the carousel prefers when it is handed one.
+    var leadImages: [String: URL] {
+        Dictionary(
+            lead.compactMap { story in imageURL(of: story).map { (story.id, $0) } },
+            uniquingKeysWith: { first, _ in first })
+    }
+
     /// Stories near the top of the page that have no photo yet, The Lead's lanes first: the next photo lookup
     /// starts with them.
     var imagelessShownIDs: [String] {

@@ -32,23 +32,66 @@ extension DatabaseEngine {
     ///
     /// `interactionLimit` keeps only the newest read or saved stories; the shadow evaluation lowers it to see the
     /// lanes of a reader with little history (#934).
+    ///
+    /// `affinityStoryFloor` is the evaluation option ``TodayEditionThresholds/yourBeatAffinityPerStoryFloor``. Only
+    /// when it is set are the stories published in the window read, one row each.
     func todayUserProfile(
-        now: Date = Date(), resetAt: Date? = nil, interactionLimit: Int = 200
+        now: Date = Date(), resetAt: Date? = nil, interactionLimit: Int = 200, affinityStoryFloor: Int? = nil
     ) throws -> TodayUserProfile {
         let thirtyDaysAgo = now.addingTimeInterval(-30 * 86400)
         let cutoff = max(thirtyDaysAgo, resetAt ?? .distantPast)
         var history = TodayReadingHistory()
-        for row in try todayReadingHistoryRows(since: cutoff, limit: interactionLimit) {
+        let rows = try todayReadingHistoryRows(since: cutoff, limit: interactionLimit)
+        for row in rows {
             try Task.checkCancellation()
             history.add(row)
         }
-        return TodayUserProfile(
+        var profile = TodayUserProfile(
             categoryWeights: history.categoryWeights,
             entityWeights: try todayEntityWeights(articleWeights: history.articleWeights),
             keywordWeights: history.keywordWeights,
             publisherWeights: history.publisherWeights,
             interactionCount: history.totalInteractions
         )
+        if let affinityStoryFloor {
+            profile.topQuartilePublishers = try todayPerStoryAffinityPublishers(
+                history: rows, weights: history.publisherWeights, from: thirtyDaysAgo, to: now,
+                floor: affinityStoryFloor)
+        }
+        return profile
+    }
+
+    /// Your Beat's affinity publishers under the per-story option: reads the id and publisher of every visible
+    /// story dated in the profile window, which the shipped rule never does.
+    private func todayPerStoryAffinityPublishers(
+        history rows: [[String?]], weights: [String: Double], from start: Date, to now: Date, floor: Int
+    ) throws -> Set<String> {
+        var published: [String: Int] = [:]
+        var publishedIDs = Set<String>()
+        let stories = try eventRows(
+            """
+            SELECT a.id, a.source, a.canonical_url
+            FROM articles a
+            JOIN article_state s ON s.article_id = a.id
+            WHERE \(Self.visibleArticle) AND \(Self.articleDateOrder) BETWEEN ? AND ?;
+            """,
+            [.real(start.timeIntervalSince1970), .real(now.timeIntervalSince1970 + 300)]
+        )
+        for story in stories {
+            guard let id = story[0] else { continue }
+            publishedIDs.insert(id)
+            published[TodayUserProfile.publisherKey(source: story[1], link: story[2]), default: 0] += 1
+        }
+        var windowWeights: [String: Double] = [:]
+        var storiesRead: [String: Int] = [:]
+        for row in rows {
+            let key = TodayUserProfile.publisherKey(source: row[1], link: row[2])
+            storiesRead[key, default: 0] += 1
+            if let id = row[0], publishedIDs.contains(id) { windowWeights[key, default: 0] += row[5] == "1" ? 3 : 1 }
+        }
+        return TodayUserProfile.perStoryAffinityPublishers(
+            weights: weights, windowWeights: windowWeights, storiesRead: storiesRead, published: published,
+            floor: floor)
     }
 
     /// The stories read or saved since `cutoff`, newest interaction first: `id, source, canonical_url, title,
@@ -293,16 +336,19 @@ extension DatabaseEngine {
         now: Date = Date(),
         starredFeedURLs: Set<String> = [],
         subscribedFeedURLs: Set<String>,
-        resetAt: Date? = nil
+        resetAt: Date? = nil,
+        thresholds: TodayEditionThresholds = .standard
     ) throws -> TodayAssignmentContext {
-        let profile = try todayUserProfile(now: now, resetAt: resetAt)
+        let profile = try todayUserProfile(
+            now: now, resetAt: resetAt, affinityStoryFloor: thresholds.yourBeatAffinityPerStoryFloor)
         let signals = try todayStorySignals(for: entries)
         return TodayAssignmentContext(
             now: now,
             subscribedFeedURLs: subscribedFeedURLs,
             starredFeedURLs: starredFeedURLs,
             profile: profile,
-            signalsByEntryID: signals
+            signalsByEntryID: signals,
+            thresholds: thresholds
         )
     }
 }
