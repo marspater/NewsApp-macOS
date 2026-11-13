@@ -87,10 +87,12 @@ struct BriefingSinceLastData: Equatable, Sendable {
 
     /// nil hides the module: there is no earlier edition or nothing changed. Saves this edition's snapshot either way.
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
-        guard let startedAt = context.briefing?.startedAt else { return nil }
+        guard let startedAt = context.briefing?.startedAt, !Task.isCancelled else { return nil }
         var current: [Current] = []
         for thread in BriefingThread.ranked(context.entries, ranking: context.ranking) {
+            guard !Task.isCancelled else { return nil }
             let overview = try? await store.fetchEventOverview(eventID: thread.summary.eventID)
+            guard !Task.isCancelled else { return nil }
             current.append(
                 Current(
                     snapshot: BriefingEditionSnapshotRow(
@@ -99,8 +101,9 @@ struct BriefingSinceLastData: Equatable, Sendable {
                     title: BriefingThread.shortTitle(thread.representative.title)))
         }
         let previous = try? await store.database.latestBriefingSnapshot(before: startedAt)
+        guard !Task.isCancelled else { return nil }
         try? await store.database.saveBriefingSnapshot(startedAt: startedAt, rows: current.map(\.snapshot))
-        guard let previous else { return nil }
+        guard !Task.isCancelled, let previous else { return nil }
         let rows = changes(previous: previous.rows, previousAt: previous.startedAt, current: current)
         guard !rows.isEmpty else { return nil }
         return Self(rows: rows, caption: BriefingThread.ago(previous.startedAt, now: context.now))

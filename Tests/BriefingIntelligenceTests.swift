@@ -29,6 +29,7 @@ enum BriefingIntelligenceTests {
     static func run() async {
         await testSitrepSaveRefusedWhenStale()
         await testSnapshotDiffAcrossEditions()
+        await testCancelledBriefingSnapshot()
         testMomentum()
         testOriginalReports()
         testFootprintGrouping()
@@ -139,6 +140,44 @@ enum BriefingIntelligenceTests {
             await db.close()
         } catch {
             check(false, "Snapshot test threw \(error)")
+        }
+    }
+
+    @MainActor
+    private static func testCancelledBriefingSnapshot() async {
+        let db = DatabaseEngine(path: ":memory:")
+        do {
+            try await db.open()
+            let editionStart = Date(timeIntervalSince1970: 1_790_000_000)
+            let context = BriefingLoadContext(
+                entries: [], heroIDs: [], briefing: FiniteBriefing(startedAt: editionStart, articles: []),
+                now: editionStart, tension: WorldTensionState(), readIDs: [], previousEditionStartedAt: nil)
+            let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+            let ignored = await Task { @MainActor in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return await BriefingSinceLastData.load(context, store: store)
+            }.value
+            check(ignored == nil, "A cancelled Since Last load yields no stale result")
+            check(
+                try await db.latestBriefingSnapshot(before: editionStart.addingTimeInterval(3600)) == nil,
+                "Cancelled board loads leave the edition snapshot unchanged")
+            let rejected = await Task {
+                withUnsafeCurrentTask { $0?.cancel() }
+                do {
+                    try await db.saveBriefingSnapshot(startedAt: editionStart, rows: [])
+                    return false
+                } catch is CancellationError {
+                    return true
+                } catch {
+                    return false
+                }
+            }.value
+            check(rejected, "Storage refuses a cancelled snapshot write")
+            check(
+                try await db.latestBriefingSnapshot(before: editionStart.addingTimeInterval(3600)) == nil,
+                "Cancelled snapshot transactions do not commit")
+        } catch {
+            check(false, "Cancelled snapshot regression failed: \(error)")
         }
     }
 
