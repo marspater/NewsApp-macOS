@@ -393,7 +393,7 @@ actor NoveltyMeasuredEmbeddings {
         return texts.map { vectors[$0] }
     }
 
-    func report() -> [String: Any] {
+    func report() -> sending [String: Any] {
         [
             "provider_calls": calls, "unique_texts": vectors.count, "batch_ms": milliseconds,
             "cache_scope": "shared across experimental tune candidates; engine cache stats reported separately",

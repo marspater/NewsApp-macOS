@@ -37,7 +37,7 @@ enum BriefingWarRoomTests {
         await layoutPersistence()
         hiddenModules()
         regionFilter()
-        tensionCaptions()
+        await tensionCaptions()
         situationalAwarenessSizing()
         await acceptanceTests1201()
         await appleIntelligenceAvailabilityTests()
@@ -164,7 +164,7 @@ enum BriefingWarRoomTests {
                 score: score, summary: "", reasons: [], isEstimate: estimate ? true : nil))
     }
 
-    static func tensionCaptions() {
+    @MainActor static func tensionCaptions() {
         let change = BriefingTensionStripView.changeText
         check(change([reading(0, 40), reading(3, 44)]) == "▲ 4 in 7 days", "rising")
         check(change([reading(0, 44), reading(3, 42)]) == "▼ 2 in 7 days", "falling")
@@ -280,7 +280,7 @@ enum BriefingWarRoomTests {
         check(noHero.sitrep?.minY == trailingHeight + spacing, "Sitrep follows trailing with no gap")
     }
 
-    static func acceptanceTests1201() async {
+    @MainActor static func acceptanceTests1201() async {
         print("  - Testing acceptance criteria for #1201...")
         // 1. Hero carousel up to 10 stories and rotates every 10 seconds:
         check(BriefingView.heroLimit == 10, "Hero shows up to ten stories (#1201)")

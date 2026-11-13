@@ -74,9 +74,10 @@ extension NativeSuites {
 
 extension NativeSuites.FeedParsingSuite {
     /// `NewsTests.eventually`, recording its timeout through Swift Testing instead of the runner's failure log.
-    static func eventually(_ message: String, timeout: Duration = .seconds(10), _ condition: @escaping () async -> Bool)
-        async
-    {
+    static func eventually(
+        _ message: String, timeout: Duration = .seconds(10), isolation: isolated (any Actor)? = #isolation,
+        _ condition: () async -> Bool
+    ) async {
         let deadline = ContinuousClock.now + timeout
         while !(await condition()) {
             if ContinuousClock.now > deadline {
@@ -283,7 +284,7 @@ extension NativeSuites.FeedParsingSuite {
         let modified = "Wed, 21 Oct 2026 07:28:00 GMT"
 
         // Header plumbing: validators are replayed, and only a conditional request may accept 304.
-        var seen: [URLRequest] = []
+        nonisolated(unsafe) var seen: [URLRequest] = []
         MockURLProtocol.requestHandler = { request in
             seen.append(request)
             return (HTTPURLResponse(url: request.url!, statusCode: 304, httpVersion: nil, headerFields: nil)!, Data())
@@ -361,7 +362,7 @@ extension NativeSuites.FeedParsingSuite {
             fetchBatch: { urls, allowHTTP in await fetcher.fetchAllFeeds(urls: urls, allowHTTP: allowHTTP, state: db) },
             notifyBatch: { articles, _ in notified += articles.count },
             dependencies: FeedManager.Dependencies(imageFinder: .unavailable))
-        func rss(_ names: [String]) -> Data {
+        @Sendable func rss(_ names: [String]) -> Data {
             let items = names.map {
                 "<item><title>Report \($0)</title><link>\(fixtureRoot.appendingPathComponent($0).absoluteString)</link><guid>\($0)</guid><description>Publisher report</description><pubDate>Wed, 21 Oct 2026 07:28:00 +0000</pubDate></item>"
             }
@@ -546,9 +547,9 @@ extension NativeSuites.FeedParsingSuite {
         let clock = TestClock(t0)
         let fetcher = FeedFetcher(client: mockClient, now: { clock.now })
         let busy = "https://8.8.8.8/busy.xml"
-        var requests: [String] = []
-        var status = 429
-        var headers = ["Retry-After": "3600"]
+        nonisolated(unsafe) var requests: [String] = []
+        nonisolated(unsafe) var status = 429
+        nonisolated(unsafe) var headers = ["Retry-After": "3600"]
         let body = Data(
             "<rss version='2.0'><channel><title>T</title><item><title>One</title><link>https://example.com/one</link><guid>one</guid><description>Report</description></item></channel></rss>"
                 .utf8)
@@ -847,8 +848,8 @@ extension NativeSuites.FeedParsingSuite {
         let body = Data(
             "<rss version='2.0'><channel><title>T</title><item><title>One</title><link>https://example.com/one</link><guid>one</guid></item></channel></rss>"
                 .utf8)
-        var requests: [String] = []
-        var networkIsBack = false
+        nonisolated(unsafe) var requests: [String] = []
+        nonisolated(unsafe) var networkIsBack = false
         MockURLProtocol.requestHandler = { request in
             let url = request.url!.absoluteString
             requests.append(url)
@@ -1423,7 +1424,7 @@ extension NativeSuites.FeedParsingSuite {
         let xml = Data(
             "<rss version='2.0' xmlns:content='http://purl.org/rss/1.0/modules/content/'><channel><title>Live</title><item><title>One</title><link>https://example.com/live-one</link><guid>live-one</guid><pubDate>\(rfc822)</pubDate><content:encoded>\(body)</content:encoded></item></channel></rss>"
                 .utf8)
-        var status = 200
+        nonisolated(unsafe) var status = 200
         MockURLProtocol.requestHandler = { request in
             (
                 HTTPURLResponse(
@@ -2030,7 +2031,7 @@ extension NativeSuites.FeedParsingSuite {
         config.protocolClasses = [MockURLProtocol.self]
         let client = NewsTests.mockHTTPClient(configuration: config)
         defer { MockURLProtocol.requestHandler = nil }
-        var bomPayload = Data([0xEF, 0xBB, 0xBF])
+        nonisolated(unsafe) var bomPayload = Data([0xEF, 0xBB, 0xBF])
         bomPayload.append(sampleJSON)
         MockURLProtocol.requestHandler = { request in
             (
@@ -2634,12 +2635,14 @@ extension NativeSuites.FeedParsingSuite {
         let canonical = fixtureRoot.appendingPathComponent("canonical/story")
         let prose = (1...65).map { "Verified publisher fact \($0) adds distinctive editorial evidence." }.joined(
             separator: " ")
-        func html(_ href: String = "../canonical/story", title: String = "Publisher story", body: String? = nil)
+        @Sendable func html(
+            _ href: String = "../canonical/story", title: String = "Publisher story", body: String? = nil
+        )
             -> String
         {
             "<html><head><title>\(title)</title><link rel='alternate canonical' href='\(href)'></head><body><article><p>\(body ?? prose)</p><figure><img src='../photo.jpg'><figcaption>Publisher photo</figcaption></figure><p>Additional reporting confirms the detailed evidence and provides context for this event.</p></article></body></html>"
         }
-        var requests = [URL]()
+        nonisolated(unsafe) var requests = [URL]()
         MockURLProtocol.requestHandler = { request in
             let url = request.url!
             requests.append(url)

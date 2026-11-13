@@ -2385,8 +2385,10 @@ extension NativeSuites.StorageSuite {
         var testStmt: OpaquePointer?
         expectEqual(sqlite3_open(":memory:", &handle), SQLITE_OK)
         expectEqual(sqlite3_prepare_v2(handle, "SELECT ?;", -1, &testStmt, nil), SQLITE_OK)
+        // The statement is used again only after the engine has returned.
+        nonisolated(unsafe) let statement = testStmt
         do {
-            try await db.bind([("unknownType", 123)], to: testStmt)
+            try await db.bind([("unknownType", 123)], to: statement)
         } catch {
             bindFailed = true
         }

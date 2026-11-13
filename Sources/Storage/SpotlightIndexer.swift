@@ -91,7 +91,8 @@ struct SystemSpotlightIndexer: SpotlightIndexing, Sendable {
 actor MockSpotlightIndexer: SpotlightIndexing {
     static let domainIdentifier = SystemSpotlightIndexer.domainIdentifier
 
-    private(set) var indexedItems: [String: CSSearchableItem] = [:]
+    /// The indexed stories; their Spotlight items are built on request, so none leaves this actor shared.
+    private var indexed: [String: FeedArticle] = [:]
     private(set) var indexCallCount = 0
     private(set) var removeCallCount = 0
     private(set) var removeAllCallCount = 0
@@ -100,30 +101,29 @@ actor MockSpotlightIndexer: SpotlightIndexing {
 
     func indexSavedArticle(_ article: FeedArticle) async {
         indexCallCount += 1
-        let item = SystemSpotlightIndexer.makeSearchableItem(for: article)
-        indexedItems[article.id] = item
+        indexed[article.id] = article
     }
 
     func removeSavedArticle(id: String) async {
         removeCallCount += 1
-        indexedItems.removeValue(forKey: id)
+        indexed.removeValue(forKey: id)
     }
 
     func removeAllSavedArticles() async {
         removeAllCallCount += 1
-        indexedItems.removeAll()
+        indexed.removeAll()
     }
 
     func contains(id: String) -> Bool {
-        indexedItems[id] != nil
+        indexed[id] != nil
     }
 
-    func item(for id: String) -> CSSearchableItem? {
-        indexedItems[id]
+    func item(for id: String) -> sending CSSearchableItem? {
+        indexed[id].map { SystemSpotlightIndexer.makeSearchableItem(for: $0) }
     }
 
     func getIndexedCount() -> Int {
-        indexedItems.count
+        indexed.count
     }
 
     func getIndexCallCount() -> Int {

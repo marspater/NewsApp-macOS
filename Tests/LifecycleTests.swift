@@ -28,6 +28,7 @@ import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
 import dnssd
+import os
 
 #if canImport(FoundationModels)
     import FoundationModels
@@ -879,14 +880,14 @@ extension NewsTests {
     @MainActor
     static func testUpdateCheckerObservation() async {
         let checker = UpdateChecker(currentAppVersion: "1.0.0")
-        let changed = DispatchSemaphore(value: 0)
+        let changed = OSAllocatedUnfairLock(initialState: false)
         withObservationTracking {
             _ = checker.statusMessage
         } onChange: {
-            changed.signal()
+            changed.withLock { $0 = true }
         }
         checker.statusMessage = "Checking for updates..."
-        assertTrue(changed.wait(timeout: .now()) == .success, "UpdateChecker changes invalidate Observation tracking")
+        assertTrue(changed.withLock { $0 }, "UpdateChecker changes invalidate Observation tracking")
     }
 
     static func testStrictSemVerAndReleaseSecurity() async {
@@ -966,8 +967,8 @@ extension NewsTests {
         let testClient = mockHTTPClient(configuration: config)
         defer { MockURLProtocol.requestHandler = nil }
 
-        var networkRequestCount = 0
-        let makeReleasePayload: (String) -> Data = { versionTag in
+        nonisolated(unsafe) var networkRequestCount = 0
+        let makeReleasePayload: @Sendable (String) -> Data = { versionTag in
             let payload = GitHubReleasePayload(
                 tagName: versionTag,
                 name: "Release \(versionTag)",
@@ -1089,7 +1090,7 @@ extension NewsTests {
         let defaults = UserDefaults(suiteName: suite)!
         defer { removeTestDefaults(suite) }
 
-        var requests = 0
+        nonisolated(unsafe) var requests = 0
         MockURLProtocol.requestHandler = { request in
             requests += 1
             return (
@@ -1495,8 +1496,8 @@ extension NewsTests {
         let testClient = mockHTTPClient(configuration: config)
         defer { MockURLProtocol.requestHandler = nil }
 
-        var networkRequestCount = 0
-        let makeReleasePayload: (String) -> Data = { versionTag in
+        nonisolated(unsafe) var networkRequestCount = 0
+        let makeReleasePayload: @Sendable (String) -> Data = { versionTag in
             let payload = GitHubReleasePayload(
                 tagName: versionTag,
                 name: "Release \(versionTag)",
@@ -1664,13 +1665,11 @@ extension NewsTests {
         }
 
         // Simulate 20 foreground events fired concurrently
-        await withTaskGroup(of: Void.self) { group in
-            for _ in 0..<20 {
-                group.addTask { @MainActor in
-                    await checker.checkForUpdates(userInitiated: false)
-                }
-            }
+        // Unstructured tasks: Swift 6's region checker cannot check a main-actor child task added to a group here.
+        let foregroundings = (0..<20).map { _ in
+            Task { @MainActor in await checker.checkForUpdates(userInitiated: false) }
         }
+        for foregrounding in foregroundings { await foregrounding.value }
         assertEqual(
             networkRequestCount, countBeforeLoop + 7,
             "20 concurrent foregrounding events produce exactly 1 network request")

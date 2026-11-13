@@ -843,21 +843,21 @@ enum EpicNE2ETests {
         passedCount += 1
 
         // 55. Rapid successive action responses: processed without race condition
-        await withTaskGroup(of: Void.self) { group in
-            for i in 0..<25 {
-                group.addTask { @MainActor in
-                    await EpicNContracts.NotificationActionRouter.route(
-                        actionIdentifier: (i % 2 == 0)
-                            ? EpicNContracts.NotificationActionIdentifier.save
-                            : EpicNContracts.NotificationActionIdentifier.markRead,
-                        userInfo: ["articleID": "art-\(i)", "articleLink": "https://example.com/\(i)"],
-                        articleStore: store51,
-                        readManager: readMgr51,
-                        savedStories: savedMgr51
-                    )
-                }
+        // Unstructured tasks: Swift 6's region checker cannot check a main-actor child task added to a group here.
+        let actions = (0..<25).map { i in
+            Task { @MainActor in
+                await EpicNContracts.NotificationActionRouter.route(
+                    actionIdentifier: (i % 2 == 0)
+                        ? EpicNContracts.NotificationActionIdentifier.save
+                        : EpicNContracts.NotificationActionIdentifier.markRead,
+                    userInfo: ["articleID": "art-\(i)", "articleLink": "https://example.com/\(i)"],
+                    articleStore: store51,
+                    readManager: readMgr51,
+                    savedStories: savedMgr51
+                )
             }
         }
+        for action in actions { await action.value }
         expectTrue(true, "Rapid concurrent notification actions processed cleanly without data races")
         passedCount += 1
 

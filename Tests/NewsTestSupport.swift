@@ -36,10 +36,10 @@ import dnssd
 
 // MARK: - MockURLProtocol for Testing
 class MockURLProtocol: URLProtocol, @unchecked Sendable {
-    static var mockData: Data?
-    static var mockResponse: HTTPURLResponse?
-    static var mockError: Error?
-    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    nonisolated(unsafe) static var mockData: Data?
+    nonisolated(unsafe) static var mockResponse: HTTPURLResponse?
+    nonisolated(unsafe) static var mockError: Error?
+    nonisolated(unsafe) static var requestHandler: (@Sendable (URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with _: URLRequest) -> Bool {
         return true
@@ -175,10 +175,10 @@ final class TestClock: @unchecked Sendable {
 /// Holds every request open until the test answers it, so concurrency and ordering are observable.
 final class GatedURLProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
-    private static var held: [GatedURLProtocol] = []
-    private static var startedURLs: [URL] = []
-    private static var peakTotal = 0
-    private static var peakByHost: [String: Int] = [:]
+    nonisolated(unsafe) private static var held: [GatedURLProtocol] = []
+    nonisolated(unsafe) private static var startedURLs: [URL] = []
+    nonisolated(unsafe) private static var peakTotal = 0
+    nonisolated(unsafe) private static var peakByHost: [String: Int] = [:]
 
     static func reset() {
         lock.lock()
@@ -395,9 +395,10 @@ extension NewsTests {
     static let defaultFixtureRoot = URL(string: "https://\(defaultFixtureHost)")!
 
     /// Polls observable state with a deadline so a regression fails instead of hanging.
-    static func eventually(_ message: String, timeout: Duration = .seconds(10), _ condition: @escaping () async -> Bool)
-        async
-    {
+    static func eventually(
+        _ message: String, timeout: Duration = .seconds(10), isolation: isolated (any Actor)? = #isolation,
+        _ condition: () async -> Bool
+    ) async {
         let deadline = ContinuousClock.now + timeout
         while !(await condition()) {
             if ContinuousClock.now > deadline {
