@@ -165,6 +165,25 @@ extension NativeSuites {
             await database.close()
         }
 
+        @Test func aStoryWhoseFullTextArrivedAfterABarrierIsIndexed() async throws {
+            let (database, directory, ids) = try await Self.library()
+            defer { try? FileManager.default.removeItem(at: directory) }
+
+            try await database.recordReaderBarrier(.subscriber, articleID: ids["three"]!)
+            #expect(try await !database.entityIndexCandidates(limit: 50).map(\.articleID).contains(ids["three"]!))
+
+            // The barrier stays recorded; the full text now stored outranks it (#1311, item 11).
+            try await database.upsertArticles([
+                FeedArticle(
+                    title: "Story three", link: "https://example.com/three", guid: "three",
+                    description: "Description three", pubDate: Self.now.addingTimeInterval(-3 * 86_400),
+                    source: "Metro Desk",
+                    fullContent: String(repeating: "Body of three. ", count: FeedHealth.fullTextCharacters / 15 + 1))
+            ])
+            #expect(try await database.entityIndexCandidates(limit: 50).map(\.articleID).contains(ids["three"]!))
+            await database.close()
+        }
+
         @Test func countsStayExactWhenAStoryIsReadTwice() async throws {
             let (database, directory, _) = try await Self.library()
             defer { try? FileManager.default.removeItem(at: directory) }
