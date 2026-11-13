@@ -25,10 +25,8 @@ import SwiftUI
 
 /// Action callback bundle for user interactions within the Situation Board.
 struct BriefingActions {
-    /// Callback invoked to open a story article.
-    let onOpenArticle: (FeedArticle) -> Void
-    /// Callback invoked to open an event overview.
-    let onOpenEvent: (EventFeedSummary) -> Void
+    /// The list opens the original entry, including supplemental events outside the edition (#1311).
+    let onOpenEntry: (FeedEntry) -> Void
     /// Callback invoked to request generation of a fresh daily briefing.
     let onStartNewBriefing: () -> Void
     /// Callback invoked to navigate back to the Today timeline.
@@ -50,32 +48,41 @@ struct BriefingActions {
     }
 
     init(
-        onOpenArticle: @escaping (FeedArticle) -> Void,
-        onOpenEvent: @escaping (EventFeedSummary) -> Void,
+        onOpenEntry: @escaping (FeedEntry) -> Void,
         onStartNewBriefing: @escaping () -> Void,
         onBackToToday: @escaping () -> Void,
-        onToggleRead: @escaping (FeedArticle) -> Void = { _ in
-            // Default no-op for previews and standalone usage
-        },
-        onToggleSave: @escaping (FeedArticle) -> Void = { _ in
-            // Default no-op for previews and standalone usage
-        }
+        onToggleRead: @escaping (FeedArticle) -> Void = { _ in },
+        onToggleSave: @escaping (FeedArticle) -> Void = { _ in }
     ) {
-        self.onOpenArticle = onOpenArticle
-        self.onOpenEvent = onOpenEvent
+        self.onOpenEntry = onOpenEntry
         self.onStartNewBriefing = onStartNewBriefing
         self.onBackToToday = onBackToToday
         self.onToggleRead = onToggleRead
         self.onToggleSave = onToggleSave
     }
 
-    /// An event opens its overview and a single story its reader, as their cards do (DESIGN.md 8.3).
-    func open(_ entry: FeedEntry) {
-        switch entry {
-        case .article(let article): onOpenArticle(article)
-        case .event(let summary, _, _): onOpenEvent(summary)
-        }
+    /// Keep the existing preview and standalone action wiring, all through the same entry action.
+    init(
+        onOpenArticle: @escaping (FeedArticle) -> Void,
+        onOpenEvent: @escaping (EventFeedSummary) -> Void,
+        onStartNewBriefing: @escaping () -> Void,
+        onBackToToday: @escaping () -> Void,
+        onToggleRead: @escaping (FeedArticle) -> Void = { _ in },
+        onToggleSave: @escaping (FeedArticle) -> Void = { _ in }
+    ) {
+        self.init(
+            onOpenEntry: { entry in
+                switch entry {
+                case .article(let article): onOpenArticle(article)
+                case .event(let summary, _, _): onOpenEvent(summary)
+                }
+            },
+            onStartNewBriefing: onStartNewBriefing, onBackToToday: onBackToToday,
+            onToggleRead: onToggleRead, onToggleSave: onToggleSave)
     }
+
+    /// The same route opens edition and supplemental cards, for click, Return and accessibility.
+    func open(_ entry: FeedEntry) { onOpenEntry(entry) }
 }
 
 extension FeedEntry {

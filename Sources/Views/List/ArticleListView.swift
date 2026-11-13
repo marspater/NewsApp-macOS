@@ -1147,9 +1147,17 @@ struct ArticleListView: View {
         selectedTopic = previousTopic
     }
 
-    /// The Briefing's saved stories, as a plain set for the board.
+    /// Include supplemental Regions entries, not just the ten finite-edition cards (#1311).
     private func briefingSavedIDs(_ entries: [FeedEntry]) -> Set<String> {
-        Set(entries.map(\.representative).filter { savedStories.isSaved($0) }.map(\.id))
+        Self.savedIDsForBriefing(
+            edition: entries, regions: briefingData.regions, isSaved: { savedStories.isSaved($0) })
+    }
+
+    static func savedIDsForBriefing(
+        edition: [FeedEntry], regions: BriefingRegionsData?, isSaved: (FeedArticle) -> Bool
+    ) -> Set<String> {
+        let supplemental = regions?.rows.flatMap(\.entries) ?? []
+        return Set((edition + supplemental).map(\.representative).filter(isSaved).map(\.id))
     }
 
     private func toggleSaved(_ article: FeedArticle) {
@@ -1185,19 +1193,7 @@ struct ArticleListView: View {
             isMotionPaused: !articlePath.isEmpty || isSheetPresented || showsCustomizeBriefing,
             nextEdition: FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour),
             actions: BriefingActions(
-                onOpenArticle: { article in openArticle(article) },
-                onOpenEvent: { event in
-                    if let entry = listed.first(where: {
-                        if case .event(let s, _, _) = $0 { return s.eventID == event.eventID }
-                        return false
-                    }) {
-                        openEvent(
-                            event.eventID,
-                            article: entry.representative,
-                            initialExperienceMode: .eventOverview
-                        )
-                    }
-                },
+                onOpenEntry: { open($0) },
                 onStartNewBriefing: { startNewBriefing() },
                 onBackToToday: { selectedTopic = "Today" },
                 onToggleRead: { readManager.toggleRead($0.id) },

@@ -35,6 +35,7 @@ enum BriefingImpactTests {
         regionFilter()
         await regionSupplementDeduplication()
         await regionTileState()
+        await regionSupplementNavigation()
         industryGrouping()
         driversCoverage()
         timelineOrdering()
@@ -174,6 +175,28 @@ enum BriefingImpactTests {
         let clear = BriefingRegionTilesModuleView.tileState(
             for: entry, isLead: false, now: now, readIDs: [], savedIDs: [])
         check(!clear.isRead && !clear.isSaved, "Regions tiles show unread and unsaved only when true")
+    }
+
+
+    /// #1311/4: Region events not in the edition still reach the list's entry-opening action.
+    @MainActor static func regionSupplementNavigation() async {
+        let supplemental = BriefingRegionsData.sampleEntry(
+            id: "supplement-outside-edition", title: "Talks resume in France",
+            publishers: 3, date: now)
+        var opened: FeedEntry?
+        let actions = BriefingActions(
+            onOpenEntry: { opened = $0 }, onStartNewBriefing: {}, onBackToToday: {})
+        actions.open(supplemental)
+        check(opened == supplemental, "supplemental event opens by its original entry, not an edition lookup")
+
+        let regions = BriefingRegionsData.make(
+            entries: [supplemental], regionsByEntry: [supplemental.id: [.europe]], facts: [:], now: now)
+        let savedIDs = ArticleListView.savedIDsForBriefing(edition: [], regions: regions) {
+            $0.id == supplemental.representative.id
+        }
+        check(
+            savedIDs == Set([supplemental.representative.id]),
+            "saved supplemental region articles reach the Briefing tiles (#1311/8)")
     }
 
     static func industryGrouping() {
