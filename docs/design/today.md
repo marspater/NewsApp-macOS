@@ -100,7 +100,7 @@ One buffer and one "Show N New Stories" button in the leading toolbar (U; "Show 
 
 ## Keyboard focus
 
-Focus is the card that takes keys; selection is the open story. After a story opens, both are that card.
+Focus is the card that takes keys; selection is the open story. After a story opens, both are that card. A focused card shows the accent focus ring; The Lead, which has no border of its own, draws the ring inside its edges while one of its slides holds focus.
 
 | Key | In a lane | In The Lead | In The Latest grid |
 | --- | --- | --- | --- |

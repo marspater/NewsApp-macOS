@@ -90,6 +90,9 @@ struct TodayCaptures {
                 footer: EmptyView()
             )
             .frame(width: variant.laneWidth)
+            // A lane row is as tall as its tallest card's natural height; without this the fixed-size sheet
+            // squeezed the cards and cut the Feature headline to one line.
+            .fixedSize(horizontal: false, vertical: true)
         }
 
         let sheet = VStack(alignment: .leading, spacing: AppSpacing.lg) {

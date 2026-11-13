@@ -91,7 +91,13 @@ struct BriefingHeroCarouselView: View {
             }
         }
         .overlay {
-            if lead == nil {
+            if let lead {
+                // The full-bleed Lead has no border; a slide with keyboard focus still shows the ring.
+                if lead.holdsFocus(in: entries.map(\.id)) {
+                    Rectangle().strokeBorder(AppColor.accent, lineWidth: AppLayout.focusStroke)
+                        .allowsHitTesting(false)
+                }
+            } else {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(
                         isCarouselFocused ? AppColor.accent : AppColor.border(for: contrast),

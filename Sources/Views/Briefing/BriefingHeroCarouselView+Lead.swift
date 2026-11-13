@@ -27,6 +27,12 @@ struct LeadPresentation: Equatable {
     var developingIDs: Set<String> = []
     /// The slide holding keyboard focus in the Today list; the carousel shows it and holds still.
     var focusedID: String?
+
+    /// Whether one of the slides `ids` holds keyboard focus. The Lead has no border of its own, so it draws the focus
+    /// ring only then (#936).
+    func holdsFocus(in ids: [String]) -> Bool {
+        focusedID.map(ids.contains) ?? false
+    }
 }
 
 extension BriefingHeroCarouselView {

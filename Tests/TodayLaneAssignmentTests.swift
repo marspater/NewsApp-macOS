@@ -42,6 +42,7 @@ extension NewsTests {
             ("testCardMetadataIsBuiltWithTheLayout", { await testTodayCardDetailsOffMainActor() }),
             ("testFocusMovesWithinAndBetweenLanes", { testTodayFocusMap() }),
             ("testFocusIsRestoredWhenTheEditionChanges", { testTodayFocusRestore() }),
+            ("testLeadShowsFocusOnlyForItsOwnSlides", { testTodayLeadFocusRing() }),
             ("testEditionKeepsLanesUntilAnUpdateIsApplied", { testTodayEditionPinsLanes() }),
             ("testHeldEditionKeepsTagsEntriesAndNewEditionSortsLatest", { testTodayHeldEditionDetails() }),
             ("testStoredEditionRestoresValidatesAndFallsBack", { try await testTodayStoredEdition() }),
@@ -1205,6 +1206,16 @@ extension NewsTests {
     }
 
     /// Z4 (#936): where focus lands when the reader applies an update.
+    static func testTodayLeadFocusRing() {
+        var lead = LeadPresentation(height: 300, windowWidth: 1200)
+        let slides = ["a", "b"]
+        assertTrue(!lead.holdsFocus(in: slides), "The Lead shows no focus ring while no card holds focus")
+        lead.focusedID = "b"
+        assertTrue(lead.holdsFocus(in: slides), "A focused slide shows the Lead's focus ring")
+        lead.focusedID = "lane-card"
+        assertTrue(!lead.holdsFocus(in: slides), "Focus on a lane card leaves the Lead without a ring")
+    }
+
     static func testTodayFocusRestore() {
         let old = focusMap()
         func restored(_ id: String, _ lanes: [TodayFocusMap.Lane]) -> String? {
