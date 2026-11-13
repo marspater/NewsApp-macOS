@@ -99,6 +99,25 @@ struct TodayUserProfile: Equatable, Sendable {
         let topCount = max(1, Int(ceil(Double(engaged.count) * 0.25)))
         return Set(engaged.prefix(topCount).map(\.key))
     }
+
+    /// The affinity publishers of the rule evaluated on 12 November 2026 (#934): the top quartile of engaged
+    /// publishers (weight >= 2, as above) by engagement per story published, then without those the reader read or
+    /// saved fewer than `floor` stories of. `windowWeights` is the engagement with stories published in the profile
+    /// window, so a read of an older story cannot lift a publisher that published nothing in it.
+    static func perStoryAffinityPublishers(
+        weights: [String: Double], windowWeights: [String: Double], storiesRead: [String: Int],
+        published: [String: Int], floor: Int
+    ) -> Set<String> {
+        func rate(_ key: String) -> Double {
+            windowWeights[key, default: 0] / Double(max(1, published[key, default: 0]))
+        }
+        let engaged = weights.filter { $0.value >= 2.0 }.keys.sorted {
+            rate($0) == rate($1) ? $0 < $1 : rate($0) > rate($1)
+        }
+        guard !engaged.isEmpty else { return [] }
+        let topCount = max(1, Int(ceil(Double(engaged.count) * 0.25)))
+        return Set(engaged.prefix(topCount).filter { storiesRead[$0, default: 0] >= floor })
+    }
 }
 
 /// Optional stored evidence preloaded for one story entry (#934).

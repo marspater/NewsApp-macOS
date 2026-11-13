@@ -84,7 +84,7 @@ struct TodayEditionView<LatestListCard: View>: View {
         let stories = edition.lead
         return BriefingHeroCarouselView(
             entries: stories.map(\.entry),
-            images: edition.metadata.compactMapValues(\.imageURL),
+            images: edition.leadImages,
             readIDs: readIDs,
             clock: clock,
             isReaderOpen: isMotionPaused,
