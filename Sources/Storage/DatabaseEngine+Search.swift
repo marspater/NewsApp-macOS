@@ -124,8 +124,11 @@ extension DatabaseEngine {
         var sql = scope.sql
         var params = scope.params
         if let sf = parsed.sourceFilter {
-            sql += " AND a.source LIKE ?"
-            params.append(("text", "%\(sf)%"))
+            // The stored source is the publisher shown on the card, worked out when the story is stored. A row stored
+            // before its publisher was known still holds the feed's title, so the name is also worked out here
+            // (#1311). The feed's own title ("World" for a section feed) is not stored and cannot be searched.
+            sql += " AND (a.source LIKE ? OR news_publisher_name(a.canonical_url, a.source) LIKE ?)"
+            params += [("text", "%\(sf)%"), ("text", "%\(sf)%")]
         }
         if let cf = parsed.categoryFilter {
             // Category tokens join words with hyphens (`category:health-&-wellness`). A reader category name also

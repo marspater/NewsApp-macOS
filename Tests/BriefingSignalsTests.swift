@@ -36,6 +36,8 @@ enum BriefingSignalsTests {
         forwardWatchCitations()
         forwardWatchMerge()
         forwardWatchRanges()
+        forwardWatchEditionDate()
+        do { try await forwardWatchEditionLoad() } catch { check(false, "edition load failed: \(error)") }
         print("Finished \(checks) Briefing signals checks with \(failures) failures.")
         if failures > 0 { recordFailure("BriefingSignalsTests: \(failures) check failure(s)") }
     }
@@ -289,5 +291,79 @@ enum BriefingSignalsTests {
         check(
             ForwardWatchExtractor.classify("Talks were scheduled from August 2026 to September 2026.", publishedAt: now)
                 == nil, "a month range that ended last month stays excluded")
+    }
+
+    static func forwardWatchEditionDate() {
+        let published = ISO8601DateFormatter().date(from: "2026-11-09T12:00:00Z")!
+        let edition = ISO8601DateFormatter().date(from: "2026-11-13T12:00:00Z")!
+        func items(_ sentence: String) -> [ForwardWatchItem] {
+            let citation = OverviewCitation(
+                id: "c", articleID: "a", passageID: "p", passageFingerprint: "f", quote: sentence,
+                source: OverviewSourceMetadata(name: "Wire", publishedAt: published))
+            return ForwardWatchExtractor.extract(
+                facts: [OverviewFact(id: "f", text: sentence, citationIDs: ["c"])], citations: ["c": citation],
+                publishedAt: published, now: edition)
+        }
+        check(items("The council will vote on 11 November 2026.").isEmpty, "past date is excluded from the edition")
+        check(items("The council is expected to vote on 11 November 2026.").isEmpty, "past expected date is excluded")
+        check(
+            items("If talks fail, the council will vote on 11 November 2026.").isEmpty,
+            "past conditional date is excluded")
+        check(items("The council will vote on 13 November 2026.").first?.kind == .scheduled, "today remains visible")
+        check(
+            items("The council will vote on 14 November 2026.").first?.kind == .scheduled, "future date stays visible")
+        check(
+            items("The talks are scheduled for 11–14 November 2026.").first?.kind == .scheduled,
+            "ongoing range stays visible")
+        check(items("The talks are scheduled for 10–12 November 2026.").isEmpty, "ended range is excluded")
+        check(
+            items("The summit is scheduled for November 2026.").first?.kind == .scheduled, "current month stays visible"
+        )
+        let nextYear = ISO8601DateFormatter().date(from: "2027-11-13T12:00:00Z")!
+        check(
+            ForwardWatchExtractor.classify(
+                "The council will vote on 11 November.", publishedAt: published, now: nextYear)
+                == nil, "yearless dates remain anchored to publication")
+        // An expired date in a background clause does not hide what the sentence expects next.
+        let mixed = "Following the 3 November 2026 election, ministers are expected to announce new measures next week."
+        let kept = ForwardWatchExtractor.classify(mixed, publishedAt: published, now: edition)
+        check(kept?.1 == "next week", "an expired background date keeps the upcoming action, shown by its own time")
+        let later = ISO8601DateFormatter().date(from: "2026-11-30T12:00:00Z")!
+        check(
+            ForwardWatchExtractor.classify(mixed, publishedAt: published, now: later) == nil,
+            "once next week has passed too, the sentence is dropped")
+        check(
+            ForwardWatchExtractor.classify(
+                "Ministers were expected to announce new measures on 3 November 2026.", publishedAt: published,
+                now: edition) == nil, "an expired date with no later time stays excluded")
+    }
+
+    @MainActor static func forwardWatchEditionLoad() async throws {
+        let published = ISO8601DateFormatter().date(from: "2026-11-09T12:00:00Z")!
+        let edition = ISO8601DateFormatter().date(from: "2026-11-13T12:00:00Z")!
+        let article = FeedArticle(
+            storedID: "forward-1311", title: "Council vote", link: "https://example.com/vote", guid: "forward-1311",
+            description: "Council vote", pubDate: published, source: "Wire")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        _ = try await db.upsertArticles([article])
+        let event = try await db.createEvent(memberArticleIDs: [article.id], at: published)
+        let text = "The council will vote on 11 November 2026."
+        let citation = OverviewCitation(
+            id: "c", articleID: article.id, passageID: "p", passageFingerprint: "f", quote: text,
+            source: OverviewSourceMetadata(name: "Wire", publishedAt: published))
+        let overview = EventOverviewDocument(
+            eventID: event.id,
+            version: OverviewVersionContext(membershipVersion: 1, inputTextHash: "forward-1311"),
+            content: OverviewContent(
+                title: "Council vote", summary: "", facts: [OverviewFact(id: "f", text: text, citationIDs: ["c"])],
+                citations: [citation]),
+            provenance: OverviewProvenance(memberArticleIDs: [article.id], kind: .fallbackExcerpts))
+        check(try await db.recordEventOverview(overview), "the cited overview is stored")
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        let context = BriefingLoadContext(
+            entries: [.article(article)], heroIDs: [], briefing: nil, now: edition, tension: WorldTensionState(),
+            readIDs: [], previousEditionStartedAt: nil)
+        check(await BriefingForwardWatchData.load(context, store: store) == nil, "loader uses the edition clock")
     }
 }

@@ -31,6 +31,15 @@ struct BriefingRegionsData: Equatable, Sendable {
 
     /// Regions with at least one story, most stories first.
     let rows: [Row]
+
+    /// The saved stories among the edition's entries and the supplemental entries the region rows hold (#1311): the
+    /// Briefing tiles show saved state for both.
+    static func savedIDs(
+        edition: [FeedEntry], regions: BriefingRegionsData?, isSaved: (FeedArticle) -> Bool
+    ) -> Set<String> {
+        let supplemental = regions?.rows.flatMap(\.entries) ?? []
+        return Set((edition + supplemental).map(\.representative).filter(isSaved).map(\.id))
+    }
     /// Every edition entry's regions, resolved once at load.
     let regionsByEntry: [String: Set<TensionMacroRegion>]
     /// Cited facts for the tiles, by entry ID.
@@ -111,6 +120,13 @@ struct BriefingRegionsData: Equatable, Sendable {
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
         var candidateEntries = context.entries
         var seenEntryIDs = Set(context.entries.map(\.id))
+        // FeedEntry.id is the representative article, not the event; an edition event can reappear
+        // with another representative in the supplemental pool (#1311).
+        var seenEventIDs = Set(
+            context.entries.compactMap { entry -> String? in
+                if case .event(let summary, _, _) = entry { return summary.eventID }
+                return nil
+            })
         var seenArticleIDs = Set(context.entries.flatMap { $0.visibleArticles.map(\.id) })
         let window = context.now.addingTimeInterval(-72 * 3600)...context.now
         let unreadPool =
@@ -132,8 +148,13 @@ struct BriefingRegionsData: Equatable, Sendable {
         if !extraArticles.isEmpty {
             let extraEvents = (try? await store.eventFeedSummaries(for: extraArticles.map(\.id))) ?? []
             let extraSnapshot = FeedSnapshot(articles: extraArticles, events: extraEvents)
-            for entry in extraSnapshot.entries(.events) where seenEntryIDs.insert(entry.id).inserted {
-                candidateEntries.append(entry)
+            for entry in extraSnapshot.entries(.events) {
+                if case .event(let summary, _, _) = entry,
+                    !seenEventIDs.insert(summary.eventID).inserted
+                {
+                    continue
+                }
+                if seenEntryIDs.insert(entry.id).inserted { candidateEntries.append(entry) }
             }
         }
 
@@ -380,6 +401,19 @@ struct BriefingRegionTilesModuleView: View {
     let data: BriefingRegionsData
     let filter: BriefingBoardFilter
     let actions: BriefingActions
+    var readIDs: Set<String> = []
+    var savedIDs: Set<String> = []
+
+    /// Tile accessibility actions and read/saved styling must reflect the list's current state (#1311).
+    static func tileState(
+        for entry: FeedEntry, isLead: Bool, now: Date,
+        readIDs: Set<String>, savedIDs: Set<String>
+    ) -> BriefingTileState {
+        let id = entry.representative.id
+        return BriefingTileState(
+            isRead: readIDs.contains(id), isSaved: savedIDs.contains(id),
+            isLead: isLead, isDeveloping: BriefingView.isDeveloping(entry, now: now))
+    }
 
     private var shownRows: [BriefingRegionsData.Row] {
         if let region = filter.region { return data.rows.filter { $0.region == region } }
@@ -409,7 +443,8 @@ struct BriefingRegionTilesModuleView: View {
         if case .event(let event, _, _) = entry { summary = event }
         return BriefingTileView(
             article: entry.representative, eventSummary: summary, citedFact: data.facts[entry.id],
-            state: BriefingTileState(isLead: isLead, isDeveloping: BriefingView.isDeveloping(entry, now: data.now)),
+            state: Self.tileState(
+                for: entry, isLead: isLead, now: data.now, readIDs: readIDs, savedIDs: savedIDs),
             onOpen: { actions.open(entry) },
             onToggleRead: { actions.onToggleRead(entry.representative) },
             onToggleSave: { actions.onToggleSave(entry.representative) })

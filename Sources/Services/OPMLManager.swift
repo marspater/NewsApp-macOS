@@ -215,7 +215,10 @@ public final class OPMLParser: NSObject, XMLParserDelegate, @unchecked Sendable 
 }
 
 public enum OPMLExporter: Sendable {
-    public static func generateOPML(feedURLs: [String], title: String = "News Subscriptions") -> String {
+    public static func generateOPML(
+        feedURLs: [String], title: String = "News Subscriptions",
+        folders: [String: [String]] = [:]
+    ) -> String {
         let dateStr = ISO8601DateFormatter().string(from: Date())
         var xml = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -227,18 +230,29 @@ public enum OPMLExporter: Sendable {
                 <body>
 
             """
-        for url in feedURLs {
-            let escapedURL = escapeXML(url)
-            let displayTitle: String
-            if let host = URL(string: url)?.host {
-                displayTitle = host.replacingOccurrences(of: "feeds.", with: "")
-                    .replacingOccurrences(of: "rss.", with: "")
-                    .replacingOccurrences(of: "www.", with: "")
-            } else {
-                displayTitle = url
-            }
-            xml +=
-                "        <outline text=\"\(escapeXML(displayTitle))\" title=\"\(escapeXML(displayTitle))\" type=\"rss\" xmlUrl=\"\(escapedURL)\"/>\n"
+        func outline(_ url: String, indent: String) -> String {
+            let displayTitle =
+                URL(string: url)?.host?
+                .replacingOccurrences(of: "feeds.", with: "")
+                .replacingOccurrences(of: "rss.", with: "")
+                .replacingOccurrences(of: "www.", with: "") ?? url
+            return
+                "\(indent)<outline text=\"\(escapeXML(displayTitle))\" title=\"\(escapeXML(displayTitle))\""
+                + " type=\"rss\" xmlUrl=\"\(escapeXML(url))\"/>\n"
+        }
+
+        var groupedKeys = Set<String>()
+        for folder in folders.keys.sorted() {
+            let keys = Set((folders[folder] ?? []).map(AppSettings.feedKey))
+            let members = feedURLs.filter { keys.contains(AppSettings.feedKey($0)) }
+            guard !members.isEmpty else { continue }
+            xml += "        <outline text=\"\(escapeXML(folder))\">\n"
+            for url in members { xml += outline(url, indent: "            ") }
+            xml += "        </outline>\n"
+            groupedKeys.formUnion(members.map(AppSettings.feedKey))
+        }
+        for url in feedURLs where !groupedKeys.contains(AppSettings.feedKey(url)) {
+            xml += outline(url, indent: "        ")
         }
 
         xml += """

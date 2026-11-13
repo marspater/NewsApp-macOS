@@ -24,6 +24,7 @@ final class AppSettings: ObservableObject {
     // MARK: - Persistence Keys
     static let feedURLsKey = "saved_feed_urls"
     static let userSectionsKey = "user_sections"
+    static let opmlFolderFeedsKey = "opml_folder_feed_urls"
     static let fetchIntervalKey = "feed_fetch_interval_minutes"
     static let articleRetentionDaysKey = "article_retention_days"
     static let notificationsEnabledKey = "notifications_enabled"
@@ -49,7 +50,8 @@ final class AppSettings: ObservableObject {
 
     /// Everything this class persists; a library backup carries these values (#563).
     static let backedUpKeys = [
-        feedURLsKey, userSectionsKey, fetchIntervalKey, articleRetentionDaysKey, notificationsEnabledKey,
+        feedURLsKey, userSectionsKey, opmlFolderFeedsKey, fetchIntervalKey, articleRetentionDaysKey,
+        notificationsEnabledKey,
         showsDockBadgeKey, showsMenuBarExtraKey, aiEnabledKey, privateNotificationsEnabledKey, notificationModeKey,
         allowInsecureHTTPKey, mutedSourcesKey, mutedTopicsKey, mutedTopicSetsKey, starredFeedURLsKey,
         starredFeedTimesKey, tensionCollectionOptInKey, retiredFeedsVersionKey, dismissedAdvisoriesKey,
@@ -137,6 +139,8 @@ final class AppSettings: ObservableObject {
 
     @Published var feedURLs: [String]
     @Published var userSections: [String]
+    /// Explicit OPML section membership, distinct from keyword/category sections; persisted with subscriptions.
+    @Published private(set) var opmlFolderFeeds: [String: [String]]
     @Published var smartBinders: [SmartBinder]
     @Published var fetchIntervalMinutes: Double
     /// Days a read, unsaved story stays before retention deletes it; 0 keeps every story.
@@ -205,10 +209,23 @@ final class AppSettings: ObservableObject {
         }
         defaults.set(Self.retiredFeedsVersion, forKey: Self.retiredFeedsVersionKey)
 
-        if let savedSections = defaults.stringArray(forKey: Self.userSectionsKey) {
-            self.userSections = savedSections
-        } else {
-            self.userSections = Self.defaultSections
+        let sections = defaults.stringArray(forKey: Self.userSectionsKey) ?? Self.defaultSections
+        self.userSections = sections
+        // Keep only folders still in the sidebar and feeds still subscribed after migration/retirement.
+        // Use locals during phase-one initialization; no closure may capture a partially initialized self.
+        let savedFolders = defaults.dictionary(forKey: Self.opmlFolderFeedsKey) as? [String: [String]] ?? [:]
+        let subscriptions = defaults.stringArray(forKey: Self.feedURLsKey) ?? Self.defaultFeeds
+        let subscribed = Dictionary(
+            subscriptions.map { (Self.feedKey($0), $0) }, uniquingKeysWith: { first, _ in first })
+        self.opmlFolderFeeds = savedFolders.reduce(into: [String: [String]]()) { result, pair in
+            guard sections.contains(pair.key) else { return }
+            var seen = Set<String>()
+            result[pair.key] = pair.value.compactMap { raw in
+                let migrated = Self.movedFeeds.first(where: { $0.from == raw })?.to ?? raw
+                let key = Self.feedKey(migrated)
+                guard let current = subscribed[key], seen.insert(key).inserted else { return nil }
+                return current
+            }
         }
 
         if let data = defaults.data(forKey: Self.smartBindersKey),
@@ -449,6 +466,9 @@ final class AppSettings: ObservableObject {
         let removed = feedURLs.filter { Self.feedKey($0) == key }
         feedURLs.removeAll { Self.feedKey($0) == key }
         saveFeeds()
+        let oldFolders = opmlFolderFeeds
+        opmlFolderFeeds = oldFolders.mapValues { $0.filter { Self.feedKey($0) != key } }
+        if opmlFolderFeeds != oldFolders { saveSections() }
         for stored in Set(removed + [url]) where starredFeedURLs.contains(stored) { setFeedStarred(stored, false) }
     }
 
@@ -524,6 +544,7 @@ final class AppSettings: ObservableObject {
 
     func removeSection(_ name: String) {
         userSections.removeAll { $0 == name }
+        opmlFolderFeeds.removeValue(forKey: name)
         saveSections()
     }
 
@@ -670,34 +691,60 @@ final class AppSettings: ObservableObject {
         let items = OPMLParser.parse(data: opmlData)
         var addedCount = 0
         var sectionsChanged = false
+        var folders = opmlFolderFeeds
+        var foldersChanged = false
 
-        var knownFeedKeys = Set(feedURLs.map(Self.feedKey))
+        // Each subscription's stored URL by its key, kept current as feeds are added: a folder member is looked up
+        // once instead of by a scan of every subscription.
+        var storedURLByKey = Dictionary(
+            feedURLs.map { (Self.feedKey($0), $0) }, uniquingKeysWith: { first, _ in first })
         var knownSections = Set(userSections)
+        var knownFolderKeys = folders.mapValues { Set($0.map(Self.feedKey)) }
 
         for item in items {
             guard let normalized = Self.normalizeFeedURL(item.url, allowInsecureHTTP: allowInsecureHTTP) else {
                 continue
             }
 
-            if knownFeedKeys.insert(Self.feedKey(normalized)).inserted {
+            let key = Self.feedKey(normalized)
+            if storedURLByKey[key] == nil {
+                storedURLByKey[key] = normalized
                 feedURLs.append(normalized)
                 addedCount += 1
             }
-            if let folder = item.folder, !folder.isEmpty, !knownSections.contains(folder) {
-                knownSections.insert(folder)
-                userSections.append(folder)
-                sectionsChanged = true
+            if let named = item.folder?.trimmingCharacters(in: .whitespacesAndNewlines), !named.isEmpty {
+                let folder = Self.importedFolderName(named)
+                if knownSections.insert(folder).inserted {
+                    userSections.append(folder)
+                    sectionsChanged = true
+                }
+                if knownFolderKeys[folder, default: []].insert(key).inserted {
+                    folders[folder, default: []].append(storedURLByKey[key] ?? normalized)
+                    foldersChanged = true
+                }
             }
         }
         if addedCount > 0 {
             saveFeeds()
         }
-        if sectionsChanged { saveSections() }
+        if foldersChanged { opmlFolderFeeds = folders }
+        if sectionsChanged || foldersChanged { saveSections() }
         return addedCount
     }
 
+    /// The built-in lists a folder may not share a name with: the library answers them without looking at a
+    /// folder's feeds, so a folder called "Today" would show every story instead of its own.
+    static let reservedSectionNames: Set<String> = [
+        "today", "unread", "briefing", "saved stories", "history", "notes & highlights",
+    ]
+
+    /// The section name an imported OPML folder is stored under: its own, or "<name> (Feeds)" when it is reserved.
+    static func importedFolderName(_ name: String) -> String {
+        reservedSectionNames.contains(name.lowercased()) ? "\(name) (Feeds)" : name
+    }
+
     func exportOPML() -> String {
-        return OPMLExporter.generateOPML(feedURLs: feedURLs)
+        OPMLExporter.generateOPML(feedURLs: feedURLs, folders: opmlFolderFeeds)
     }
 
     private func saveFeeds() {
@@ -706,6 +753,7 @@ final class AppSettings: ObservableObject {
 
     private func saveSections() {
         defaults.set(userSections, forKey: Self.userSectionsKey)
+        defaults.set(opmlFolderFeeds, forKey: Self.opmlFolderFeedsKey)
     }
 
     func addSmartBinder(_ binder: SmartBinder) {

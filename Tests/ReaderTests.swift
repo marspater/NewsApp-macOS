@@ -2472,29 +2472,11 @@ extension NewsTests {
             ReaderDictionaryLookup.word(at: emojiText.utf16.count, in: emojiText), nil,
             "The UTF-16 length is out of bounds")
 
-        // 3. Lookup title generation for context menu
-        assertEqual(
-            ReaderDictionaryLookup.lookupTitle(for: "quantum"), "Look Up “quantum”", "Short word quoted in title")
-        assertEqual(ReaderDictionaryLookup.lookupTitle(for: ""), "Look Up", "Empty string gives bare Look Up")
-        assertEqual(ReaderDictionaryLookup.lookupTitle(for: nil), "Look Up", "Nil string gives bare Look Up")
-        let exactly25 = String(repeating: "a", count: 25)
-        assertEqual(
-            ReaderDictionaryLookup.lookupTitle(for: exactly25),
-            "Look Up “\(exactly25)”",
-            "25 character selection shown in full without ellipsis"
-        )
-        let exactly26 = String(repeating: "a", count: 26)
-        assertEqual(
-            ReaderDictionaryLookup.lookupTitle(for: exactly26),
-            "Look Up “\(exactly26.prefix(20))…”",
-            "26 character selection is truncated to 20 characters with ellipsis"
-        )
-        let longSelection = "A very long sentence with many words that exceeds limit"
-        assertEqual(
-            ReaderDictionaryLookup.lookupTitle(for: longSelection),
-            "Look Up “\(longSelection.prefix(20))…”",
-            "Long selection is truncated with ellipsis"
-        )
+        // 3. Menu construction never queries selection or rewrites the clipboard (#1311).
+        let pasteboard = NSPasteboard.general
+        let changeCount = pasteboard.changeCount
+        assertEqual(ReaderDictionaryLookup.contextMenuTitle, "Look Up", "Look Up label is fixed")
+        assertEqual(pasteboard.changeCount, changeCount, "Reading the menu title does not touch the clipboard")
     }
 
     static func testStoryAnnotationsGroupingAndReadingOrder() {

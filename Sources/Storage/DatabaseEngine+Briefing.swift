@@ -103,6 +103,7 @@ extension DatabaseEngine {
 
     /// Writes the edition's events; saving the same edition again replaces its rows.
     func saveBriefingSnapshot(startedAt: Date, rows: [BriefingEditionSnapshotRow]) throws {
+        try Task.checkCancellation()
         try inEventTransaction {
             let started = EventValue.real(startedAt.timeIntervalSince1970)
             try eventRows("DELETE FROM briefing_edition_snapshots WHERE edition_started_at = ?;", [started])
@@ -113,6 +114,7 @@ extension DatabaseEngine {
                 VALUES (?, ?, 0, 0, NULL);
                 """, [started, .text(Self.editionMarker)])
             for row in rows where row.eventID != Self.editionMarker {
+                try Task.checkCancellation()
                 try eventRows(
                     """
                     INSERT OR REPLACE INTO briefing_edition_snapshots
@@ -124,6 +126,7 @@ extension DatabaseEngine {
                         row.escalation.map { .text($0) } ?? .null,
                     ])
             }
+            try Task.checkCancellation()
         }
     }
 }

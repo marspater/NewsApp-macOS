@@ -584,12 +584,18 @@ struct ArticleListView: View {
         let identity = queryIdentity
         let runID = UUID()
         if isBriefing {
+            let isNewQuery = loadedQuery != identity
             // Bursts of store revisions rebuilt the board once each; they are debounced as in the list. A new or
             // rolled-over edition (no briefing yet) loads at once.
             if briefing != nil, loadedQuery == identity, !buffer.displayed.articles.isEmpty {
                 do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
             }
             queryRunID = runID
+            if isNewQuery {
+                buffer = FeedUpdateBuffer()
+                groupedEntries.resetPrefetch()
+                briefingData = BriefingBoardData()
+            }
             queryError = nil
             isLoadingPage = true
             defer { if queryRunID == runID { isLoadingPage = false } }
@@ -599,6 +605,8 @@ struct ArticleListView: View {
                     !FiniteBriefing.isCurrent(selectedAt: current.startedAt, now: now, hour: briefingEditionHour)
                 {
                     briefing = nil
+                    buffer = FeedUpdateBuffer()
+                    briefingData = BriefingBoardData()
                 }
                 if briefing == nil, let stored = try await storedBriefingEdition(now: now) {
                     briefing = stored
@@ -1147,9 +1155,10 @@ struct ArticleListView: View {
         selectedTopic = previousTopic
     }
 
-    /// The Briefing's saved stories, as a plain set for the board.
+    /// Include supplemental Regions entries, not just the ten finite-edition cards (#1311).
     private func briefingSavedIDs(_ entries: [FeedEntry]) -> Set<String> {
-        Set(entries.map(\.representative).filter { savedStories.isSaved($0) }.map(\.id))
+        BriefingRegionsData.savedIDs(
+            edition: entries, regions: briefingData.regions, isSaved: { savedStories.isSaved($0) })
     }
 
     private func toggleSaved(_ article: FeedArticle) {
@@ -1185,21 +1194,18 @@ struct ArticleListView: View {
             isMotionPaused: !articlePath.isEmpty || isSheetPresented || showsCustomizeBriefing,
             nextEdition: FiniteBriefing.nextEditionStart(now: Date(), hour: briefingEditionHour),
             actions: BriefingActions(
-                onOpenArticle: { article in openArticle(article) },
-                onOpenEvent: { event in
-                    if let entry = listed.first(where: {
-                        if case .event(let s, _, _) = $0 { return s.eventID == event.eventID }
-                        return false
-                    }) {
-                        openEvent(
-                            event.eventID,
-                            article: entry.representative,
-                            initialExperienceMode: .eventOverview
-                        )
-                    }
-                },
+                onOpenEntry: { open($0) },
                 onStartNewBriefing: { startNewBriefing() },
                 onBackToToday: { selectedTopic = "Today" },
+                // Priority/Sitrep have edition-only summaries; Regions pass their full entry directly.
+                onOpenEvent: { event in
+                    if let entry = listed.first(where: {
+                        if case .event(let summary, _, _) = $0 { return summary.eventID == event.eventID }
+                        return false
+                    }) {
+                        open(entry)
+                    }
+                },
                 onToggleRead: { readManager.toggleRead($0.id) },
                 onToggleSave: { toggleSaved($0) }
             ),
@@ -1213,10 +1219,13 @@ struct ArticleListView: View {
             id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
                 + "\(briefing?.startedAt.timeIntervalSince1970 ?? 0)"
         ) {
+            // Bind the edition to the list before the first suspension (#1311).
+            let boundEdition = briefing
             let ranking = await BriefingRanking.load(entries: listed, database: articleStore.database)
+            guard !Task.isCancelled else { return }
             let context = BriefingLoadContext(
                 entries: listed, heroIDs: Set(BriefingView.heroEntries(listed, ranking: ranking).map(\.id)),
-                briefing: briefing, now: Date(), tension: tensionModel?.state ?? WorldTensionState(),
+                briefing: boundEdition, now: Date(), tension: tensionModel?.state ?? WorldTensionState(),
                 readIDs: readManager.readArticles, previousEditionStartedAt: nil, ranking: ranking)
             let loaded = await BriefingBoardData.load(context, store: articleStore)
             guard !Task.isCancelled else { return }
@@ -1224,7 +1233,7 @@ struct ArticleListView: View {
             await OverviewGenerationCoordinator.shared.regenerateStaleOverviews(
                 eventIDs: await BriefingTimelineData.overviewEventIDs(listed, store: articleStore),
                 // The edition's start is its identity; the listed stories stand in while there is none.
-                editionKey: briefing.map { "\($0.startedAt.timeIntervalSince1970)" }
+                editionKey: boundEdition.map { "\($0.startedAt.timeIntervalSince1970)" }
                     ?? listed.map(\.id).joined(separator: ","),
                 store: articleStore)
         }

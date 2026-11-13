@@ -52,6 +52,19 @@ struct SettingsView: View {
         }
     }
 
+    /// Settings import feedback distinguishes a rejected OPML document from a valid one with no new feeds (#1311).
+    @MainActor
+    static func opmlImportStatus(for data: Data, using manager: FeedManager) -> (message: String, failed: Bool) {
+        let count = manager.importFeeds(from: data)
+        if count == 0, (try? OPMLParser.parseValidated(data: data)) == nil {
+            return (manager.articleStore.operationError ?? "The OPML file could not be imported.", true)
+        }
+        return (
+            count > 0 ? "Imported \(count) \(count == 1 ? "feed" : "feeds")" : "No new feeds imported",
+            false
+        )
+    }
+
     /// A category is on while any sidebar section maps to it; turning it off removes every such section. Shared
     /// with the first-launch sheet.
     static func sectionBinding(_ category: NewsCategory, feedManager: FeedManager) -> Binding<Bool> {
@@ -252,9 +265,8 @@ struct SettingsView: View {
 
                 Button {
                     OPMLDialogs.importOPML { data in
-                        let count = feedManager.importFeeds(from: data)
-                        showActionMessage(
-                            count > 0 ? "Imported \(count) \(count == 1 ? "feed" : "feeds")" : "No new feeds imported")
+                        let status = Self.opmlImportStatus(for: data, using: feedManager)
+                        showActionMessage(status.message, failed: status.failed)
                     }
                 } label: {
                     Label("Import OPML…", systemImage: "square.and.arrow.down")

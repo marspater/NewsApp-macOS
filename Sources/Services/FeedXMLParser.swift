@@ -39,6 +39,7 @@ enum XMLInputGuard {
 final class FeedXMLParser: NSObject, XMLParserDelegate {
     private let data: Data
     private let feedURL: String
+    private let baseURL: URL?
     private var articles = [FeedArticle]()
 
     private var currentElement = ""
@@ -80,7 +81,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private let maxNestingDepth = 64
     private let maxArticlesPerFeed = 500
 
-    init(data: Data, feedURL: String = "", textEncodingName: String? = nil) {
+    init(data: Data, feedURL: String = "", baseURL: URL? = nil, textEncodingName: String? = nil) {
         if let bom = Self.detectBOMEncoding(in: data),
             bom == .utf32BigEndian || bom == .utf32LittleEndian,
             let text = String(bytes: data, encoding: bom)
@@ -97,6 +98,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             self.data = data
         }
         self.feedURL = feedURL
+        self.baseURL = baseURL ?? URL(string: feedURL)
     }
 
     func parse() -> [FeedArticle] {
@@ -209,7 +211,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         }
 
         let elementName = normalizedElement(elementName, namespaceURI: namespaceURI, qualifiedName: qualifiedName)
-        let parentBase = baseURLs.last.flatMap { $0 } ?? URL(string: feedURL)
+        let parentBase = baseURLs.last.flatMap { $0 } ?? baseURL
         baseURLs.append(
             attributeDict["xml:base"].flatMap { URL(string: $0, relativeTo: parentBase)?.absoluteURL } ?? parentBase)
         if ["rss", "feed", "RDF"].contains(elementName), currentNestingDepth == 1 {
@@ -790,7 +792,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private func resolvedURL(_ value: String, baseURL: URL? = nil) -> String {
         let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return "" }
-        return URL(string: value, relativeTo: baseURL ?? baseURLs.last.flatMap { $0 } ?? URL(string: feedURL))?
+        return URL(string: value, relativeTo: baseURL ?? baseURLs.last.flatMap { $0 } ?? self.baseURL)?
             .absoluteURL.absoluteString ?? value
     }
 
@@ -1016,8 +1018,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         return (String(bytes: repaired, encoding: .utf8) ?? "").data(using: bom) ?? data
     }
 
-    /// Repairs publisher XML defects (bare ampersands, common HTML entities, invalid control characters,
-    /// invalid UTF-8 bytes) outside CDATA sections and comments (#1148).
+    /// Repairs invalid characters throughout text, and bare ampersands and HTML entities outside CDATA and comments.
     static func repairXML(data: Data) -> Data {
         repairXML(data: data, overrideEncoding: nil)
     }
@@ -1061,7 +1062,13 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             let closeMarker = isCData ? cdataEnd : commentEnd
             let searchStart = specialRange.upperBound
             if let closeRange = data[searchStart...].range(of: closeMarker) {
-                result.append(data[specialRange.lowerBound..<closeRange.upperBound])
+                if isCData {
+                    result.append(data[specialRange])
+                    result.append(sanitizeCDATA(data[searchStart..<closeRange.lowerBound], encoding: encoding))
+                    result.append(data[closeRange])
+                } else {
+                    result.append(data[specialRange.lowerBound..<closeRange.upperBound])
+                }
                 currentIndex = closeRange.upperBound
             } else {
                 result.append(data[specialRange.lowerBound...])
@@ -1180,5 +1187,15 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let cleaned = stripInvalidXMLControlChars(text)
         let repaired = repairAmpersands(in: cleaned)
         return repaired.data(using: encoding) ?? Data(repaired.utf8)
+    }
+
+    private static func sanitizeCDATA(_ data: Data, encoding: String.Encoding) -> Data {
+        let text =
+            encoding == .utf8
+            ? decodeLossyUTF8(data) : (String(data: data, encoding: encoding) ?? decodeLossyUTF8(data))
+        // The section's own text never holds its terminator, so one found now was made by removing a control
+        // character from inside it ("]]\u{7}>"). It is split across two sections, which reads as the same text.
+        let cleaned = stripInvalidXMLControlChars(text).replacingOccurrences(of: "]]>", with: "]]]]><![CDATA[>")
+        return cleaned.data(using: encoding) ?? Data(cleaned.utf8)
     }
 }

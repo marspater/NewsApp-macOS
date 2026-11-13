@@ -241,16 +241,27 @@ struct BriefingBoardData: Equatable, Sendable {
     static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self {
         var data = Self()
         data.ranking = context.ranking
+        guard !Task.isCancelled else { return data }
         data.details = await BriefingStoryDetails.load(for: context.entries, heroIDs: context.heroIDs, store: store)
+        guard !Task.isCancelled else { return data }
         data.sitrep = await BriefingSitrepData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.sinceLast = await BriefingSinceLastData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.priority = await BriefingPriorityData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.footprint = await BriefingFootprintData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.regions = await BriefingRegionsData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.industry = await BriefingIndustryData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.drivers = await BriefingDriversData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.timeline = await BriefingTimelineData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.weakSignals = await BriefingWeakSignalsData.load(context, store: store)
+        guard !Task.isCancelled else { return data }
         data.forwardWatch = await BriefingForwardWatchData.load(context, store: store)
         return data
     }

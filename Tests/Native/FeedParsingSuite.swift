@@ -208,6 +208,24 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(settings.importFeeds(from: opml), 0, "Folder-only import adds no duplicate subscription")
         let reloaded = AppSettings(defaults: defaults)
         expectTrue(reloaded.userSections.contains("Archive Folder"), "Imported folders survive settings reload")
+        expectEqual(
+            reloaded.opmlFolderFeeds["Archive Folder"], [feed],
+            "Even an already subscribed feed is retained in an imported OPML folder")
+        // A folder named like a built-in list gets its own section name, so its feeds can be shown.
+        let reserved = Data(
+            "<opml><body><outline text=\"Today\"><outline xmlUrl=\"\(feed)\"/></outline></body></opml>".utf8)
+        _ = settings.importFeeds(from: reserved)
+        expectEqual(settings.opmlFolderFeeds["Today (Feeds)"], [feed], "A folder called Today is stored apart")
+        expectTrue(settings.opmlFolderFeeds["Today"] == nil, "No folder shares a built-in list's name")
+        expectTrue(settings.userSections.contains("Today (Feeds)"), "Its section carries the new name")
+        // Many new feeds in one folder: each member is looked up once.
+        let many = (0..<4000).map { "<outline xmlUrl=\"https://example.com/bulk/\($0).xml\"/>" }.joined()
+        let bulk = Data("<opml><body><outline text=\"Bulk\">\(many)</outline></body></opml>".utf8)
+        let importClock = ContinuousClock()
+        let began = importClock.now
+        expectEqual(settings.importFeeds(from: bulk), 4000, "A large folder imports every feed")
+        expectEqual(settings.opmlFolderFeeds["Bulk"]?.count, 4000, "and keeps every member")
+        expectTrue(importClock.now - began < .seconds(10), "without a scan of every subscription per member")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: url) }
         try opml.write(to: url)
@@ -260,6 +278,52 @@ extension NativeSuites.FeedParsingSuite {
         expectFalse(
             opmlTestSettings.userSections.contains("InvalidFolder"),
             "Invalid feed URL should not cause invalid folder addition")
+
+        // #1311/12: Imported folders are membership queries, not searches for words in headlines.
+        let folderFeed = "https://example.com/new-feed.xml"
+        let otherFeed = "https://example.com/other-feed.xml"
+        _ = opmlTestSettings.addFeed(url: otherFeed)
+        expectEqual(
+            opmlTestSettings.opmlFolderFeeds["Technology"], [folderFeed],
+            "Imported Technology folder retains precisely the feed it contained")
+        let member = FeedArticle(
+            storedID: "opml-member", title: "Notes from the newsroom",
+            link: "https://example.com/story/a", guid: "opml-member", description: "A plain story",
+            pubDate: Date(), source: "Wire", category: "World")
+        let outsider = FeedArticle(
+            storedID: "opml-outsider", title: "Technology industry research",
+            link: "https://example.com/story/b", guid: "opml-outsider", description: "Technology updates",
+            pubDate: Date(), source: "Wire", category: "Technology")
+        let folderDB = DatabaseEngine(path: ":memory:")
+        try await folderDB.open()
+        _ = try await folderDB.upsertArticles([member], feedUrl: folderFeed)
+        _ = try await folderDB.upsertArticles([outsider], feedUrl: otherFeed)
+        await folderDB.setOPMLSectionFeeds(opmlTestSettings.opmlFolderFeeds)
+        expectEqual(
+            try await folderDB.fetchArticles(section: "Technology", limit: nil).map(\.id), [member.id],
+            "Imported OPML section selects subscribed feed membership, not headline or category matches")
+        expectEqual(
+            try await folderDB.listTotals(section: "Technology").stories, 1,
+            "Imported folder counts match its visible feed stories")
+        let roundTrip = OPMLParser.parse(data: Data(opmlTestSettings.exportOPML().utf8))
+        expectEqual(
+            roundTrip.first { $0.url == folderFeed }?.folder, "Technology",
+            "Export retains the imported feed's enclosing folder")
+        expectEqual(
+            roundTrip.first { $0.url == otherFeed }?.folder, nil,
+            "Ungrouped subscriptions remain outside imported folders on export")
+        let persisted = AppSettings(defaults: defaults)
+        expectEqual(
+            persisted.opmlFolderFeeds["Technology"], [folderFeed],
+            "OPML section membership survives settings reload")
+        persisted.removeFeed(url: folderFeed)
+        expectEqual(
+            persisted.opmlFolderFeeds["Technology"], [],
+            "Unsubscribing removes a feed from imported folder membership")
+        persisted.removeSection("Technology")
+        expectEqual(
+            persisted.opmlFolderFeeds["Technology"], nil, "Removing a section forgets its membership")
+        await folderDB.close()
 
         let manySettings = AppSettings(defaults: defaults)
         var largeOPML = "<opml><body>\n"
@@ -1869,6 +1933,33 @@ extension NativeSuites.FeedParsingSuite {
             fetcherPrecedenceResult.articles?.first?.title, "Représentation",
             "FeedFetcher parses title via declared encoding (#1149)")
 
+        // The response URL is the final destination after a redirect; subscription identity stays unchanged.
+        let redirectedXML = Data(
+            """
+            <rss><channel><item><title>Redirected</title><guid>redirected</guid>
+            <link>stories/one</link><description><![CDATA[<img src="images/one.jpg">]]></description>
+            </item></channel></rss>
+            """.utf8)
+        MockURLProtocol.requestHandler = { _ in
+            (
+                HTTPURLResponse(
+                    url: URL(string: "https://destination.example/news/feed.xml")!, statusCode: 200,
+                    httpVersion: nil, headerFields: ["Content-Type": "application/rss+xml"])!,
+                redirectedXML
+            )
+        }
+        let redirected = await FeedFetcher(client: client).fetchSingleFeed(
+            urlString: "https://example.com/original/feed.xml")
+        expectEqual(redirected.error, nil, "Redirected XML feed parses (#1311)")
+        expectEqual(
+            redirected.articles?.first?.link, "https://destination.example/news/stories/one",
+            "Relative story link uses final response URL (#1311)")
+        expectEqual(
+            redirected.articles?.first?.imageUrl, "https://destination.example/news/images/one.jpg",
+            "Relative image uses final response URL (#1311)")
+        expectEqual(
+            redirected.urlString, "https://example.com/original/feed.xml", "Subscription URL is retained (#1311)")
+
         // #1149: Parameter boundary check ignores prefix such as xcharset and matches true charset
         let xcharsetResp = HTTPURLResponse(
             url: URL(string: "https://example.com")!, statusCode: 200, httpVersion: nil,
@@ -1924,6 +2015,39 @@ extension NativeSuites.FeedParsingSuite {
         expectTrue(
             defectArticles.last?.title.contains("Item with bad UTF-8") ?? false,
             "Invalid UTF-8 sequences are replaced and item is preserved (#1148)")
+        // Removing a control character must not join "]]" and ">" into the section's terminator.
+        let terminatorFeed = Data(
+            "<rss><channel><title>Test</title><item><title><![CDATA[Left a]]\u{0007}>b right]]></title><link>https://example.com/cdata-terminator</link></item></channel></rss>"
+                .utf8)
+        expectEqual(
+            FeedXMLParser(data: terminatorFeed, feedURL: "https://example.com/feed").parse().first?.title,
+            "Left a]]>b right", "A terminator made by removing a control character is kept as text")
+
+        for badBytes in [[UInt8(0x07)], [UInt8(0xFF)]] {
+            var cdataFeed = Data(
+                "<rss><channel><title>Test</title><item><title><![CDATA[Before ".utf8)
+            cdataFeed.append(contentsOf: badBytes)
+            cdataFeed.append(
+                contentsOf: " after & <tag> &amp;]]></title><guid>1</guid></item></channel></rss>".utf8)
+            let repaired = FeedXMLParser.repairXML(data: cdataFeed)
+            let expectedContent = badBytes == [0x07] ? "Before  after" : "Before � after"
+            expectTrue(
+                String(decoding: repaired, as: UTF8.self).contains("<![CDATA[\(expectedContent) & <tag> &amp;]]>"),
+                "CDATA repairs invalid bytes without changing markup or entities (#1311)")
+            let parser = FeedXMLParser(data: cdataFeed, feedURL: "https://example.com/feed")
+            let articles = parser.parse()
+            expectEqual(parser.parseError, nil, "Invalid CDATA does not reject a feed (#1311)")
+            expectEqual(articles.count, 1, "An item with invalid CDATA survives (#1311)")
+        }
+        let encodedCDATA = """
+            <?xml version="1.0" encoding="UTF-16"?>
+            <rss><channel><item><title><![CDATA[Café\u{0007} & tea]]></title><guid>1</guid></item></channel></rss>
+            """
+        var encodedCDATAData = Data([0xFF, 0xFE])
+        encodedCDATAData.append(encodedCDATA.data(using: .utf16LittleEndian)!)
+        let encodedCDATAParser = FeedXMLParser(data: encodedCDATAData, feedURL: "https://example.com/feed")
+        expectEqual(encodedCDATAParser.parse().first?.title, "Café & tea", "UTF-16 CDATA is repaired (#1311)")
+        expectEqual(encodedCDATAParser.parseError, nil, "Repaired UTF-16 CDATA remains valid XML (#1311)")
 
         // #1148: Entity and DTD declarations are still refused before repair.
         let hostileEntity = """
@@ -2048,6 +2172,24 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(
             bomResult.articles?.map(\.title), ["Swift 6 Concurrency Everywhere"],
             "UTF-8 BOM JSON Feed parses its items through FeedFetcher (#1133)")
+
+        // Byte 30 ends inside é; the complete JSON document is valid UTF-8.
+        let boundaryJSON =
+            "{\"title\":\"aaaaaaaaaaaaaaaaaaaé\","
+            + "\"version\":\"https://jsonfeed.org/version/1.1\","
+            + "\"items\":[{\"id\":\"1\",\"title\":\"Boundary\",\"url\":\"https://example.com/1\"}]}"
+        let boundaryPayload = Data(boundaryJSON.utf8)
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/feed+json"])!,
+                boundaryPayload
+            )
+        }
+        let boundaryResult = await FeedFetcher(client: client).fetchSingleFeed(urlString: bomFeedURL)
+        expectEqual(boundaryResult.error, nil, "JSON Feed with a split UTF-8 prefix parses (#1311)")
+        expectEqual(boundaryResult.articles?.map(\.title), ["Boundary"], "JSON Feed item survives sniffing (#1311)")
     }
 
     static func testEscapeXML() async {

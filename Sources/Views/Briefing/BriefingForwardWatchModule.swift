@@ -86,7 +86,8 @@ struct BriefingForwardWatchData: Equatable, Sendable {
             }
             guard let overview else { continue }
             let items = ForwardWatchExtractor.extract(
-                facts: overview.facts, citations: overview.citations, publishedAt: entry.representative.pubDate)
+                facts: overview.facts, citations: overview.citations, publishedAt: entry.representative.pubDate,
+                now: context.now)
             for item in items {
                 let url = item.citationID.flatMap { overview.citations[$0]?.sourceURL }.flatMap(WebLink.url)
                 found.append(Candidate(item: item, url: url, entry: entry))

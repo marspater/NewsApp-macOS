@@ -46,9 +46,11 @@ struct ForwardWatchItem: Equatable, Hashable, Sendable {
 enum ForwardWatchExtractor {
     static let maximumItems = 6
 
-    /// Reads the quoted passages behind cited highlight facts. `publishedAt` stands in for a citation without its own
-    /// publication date when deciding whether a stated date is still ahead.
-    static func extract(facts: [OverviewFact], citations: [String: OverviewCitation], publishedAt: Date)
+    /// Reads cited passages. Publication resolves partial dates; `now` determines whether the date has passed.
+    /// `publishedAt` also stands in for a citation without its own publication date.
+    static func extract(
+        facts: [OverviewFact], citations: [String: OverviewCitation], publishedAt: Date, now: Date? = nil
+    )
         -> [ForwardWatchItem]
     {
         var items: [ForwardWatchItem] = []
@@ -60,7 +62,9 @@ enum ForwardWatchExtractor {
                 for range in PassageFactExtractor.segmentedSentences(in: quote) {
                     let sentence = quote[range].trimmingCharacters(in: .whitespacesAndNewlines)
                     guard sentence.count >= 20,
-                        let (kind, dateText) = classify(sentence, publishedAt: citation.publishedAt ?? publishedAt)
+                        let (kind, dateText) = classify(
+                            sentence, publishedAt: citation.publishedAt ?? publishedAt,
+                            now: now ?? citation.publishedAt ?? publishedAt)
                     else { continue }
                     // One item per sentence and publisher, so the module can count every publisher that stated it.
                     guard seen.insert(key(sentence) + "\u{0}" + (citation.sourceName ?? "")).inserted else { continue }
@@ -94,16 +98,34 @@ enum ForwardWatchExtractor {
     }
 
     /// The sentence's kind and its verbatim date text, or nil when it states nothing ahead.
-    static func classify(_ sentence: String, publishedAt: Date) -> (ForwardWatchItem.Kind, String?)? {
+    static func classify(_ sentence: String, publishedAt: Date, now: Date? = nil) -> (ForwardWatchItem.Kind, String?)? {
         let lower = sentence.lowercased()
         if matches(lower, Pattern.reportedPast) || matches(lower, Pattern.counterfactual) { return nil }
-        let date = scheduleDate(in: sentence, publishedAt: publishedAt)
+        let schedule = scheduleDate(in: sentence, publishedAt: publishedAt, now: now ?? publishedAt)
+        var date = schedule.text
+        if schedule.expired {
+            // The stated date has passed, but it may only be background ("Following the 3 November election, …").
+            // The sentence stays when it also names a time still ahead, and that time is the one it shows.
+            guard let ahead = timeStillAhead(in: sentence, publishedAt: publishedAt, now: now ?? publishedAt)
+            else { return nil }
+            date = ahead
+        }
         if isConditional(lower) { return (.conditional, date ?? firstMatch(sentence, Pattern.vagueTime)) }
         if let date, matches(lower, Pattern.scheduling) { return (.scheduled, date) }
         if matches(lower, Pattern.expectation) || firstMatch(sentence, Pattern.vagueTime) != nil {
             return (.expected, firstMatch(sentence, Pattern.vagueTime) ?? date)
         }
         return nil
+    }
+
+    /// A vague or relative time in the sentence that has not passed by `now`: "in the coming weeks" as written, or
+    /// "next week", "next month" or a weekday counted from publication.
+    private static func timeStillAhead(in sentence: String, publishedAt: Date, now: Date) -> String? {
+        if let vague = firstMatch(sentence, Pattern.vagueTime) { return vague }
+        guard let relative = firstMatch(sentence, Pattern.relativeDay) else { return nil }
+        let lower = relative.lowercased()
+        let days: Double = lower.contains("month") ? 62 : lower.contains("week") ? 14 : 7
+        return now < publishedAt.addingTimeInterval(days * 86_400) ? relative : nil
     }
 
     private static func isConditional(_ lower: String) -> Bool {
@@ -114,32 +136,42 @@ enum ForwardWatchExtractor {
         return condition && matches(lower, Pattern.consequence)
     }
 
-    /// A day, date, or date range ahead of publication, exactly as written. A calendar date (or the end of a range or
-    /// list) must not be in the past; a weekday or "next week" needs a future marker so "met on Tuesday" never counts.
-    private static func scheduleDate(in sentence: String, publishedAt: Date) -> String? {
+    /// A day, date, or date range, exactly as written. Calendar dates resolve against publication and must not have
+    /// ended by the edition date; a weekday or "next week" needs a future marker so "met on Tuesday" never counts.
+    private static func scheduleDate(in sentence: String, publishedAt: Date, now: Date) -> (
+        text: String?, expired: Bool
+    ) {
         if let match = OverviewTimelineBuilder.statedExpressionMatch(in: sentence) {
-            let today = Calendar.utc.startOfDay(for: publishedAt)
+            let today = Calendar.utc.startOfDay(for: now)
             switch match.expression {
             case .date(let stated):
-                guard let resolved = OverviewTimelineBuilder.resolve(stated, publishedAt: publishedAt),
-                    resolved >= today
-                else { return nil }
-                return firstMatch(sentence, Pattern.calendarDate)
-                    ?? verbatimDateText(in: sentence, matchRange: match.range, isRange: false, isCombined: false)
+                guard let resolved = OverviewTimelineBuilder.resolve(stated, publishedAt: publishedAt) else {
+                    return (nil, false)
+                }
+                guard let end = Calendar.utc.dateInterval(of: stated.day == nil ? .month : .day, for: resolved)?.end
+                else { return (nil, false) }
+                guard end > today else { return (nil, true) }
+                return (
+                    firstMatch(sentence, Pattern.calendarDate)
+                        ?? verbatimDateText(in: sentence, matchRange: match.range, isRange: false, isCombined: false),
+                    false
+                )
             case .span(let span):
                 // A month-only end runs to the end of that month, not to its first day.
                 guard let placed = OverviewTimelineBuilder.placedDates(of: span, publishedAt: publishedAt),
                     let latest = placed.max(by: { $0.at < $1.at }),
-                    let end = Calendar.utc.dateInterval(of: latest.date.day == nil ? .month : .day, for: latest.at)?
-                        .end,
-                    end > today
-                else { return nil }
-                return verbatimDateText(
-                    in: sentence, matchRange: match.range, isRange: span.isRange, isCombined: match.isCombined)
+                    let end = Calendar.utc.dateInterval(of: latest.date.day == nil ? .month : .day, for: latest.at)?.end
+                else { return (nil, false) }
+                guard end > today else { return (nil, true) }
+                return (
+                    verbatimDateText(
+                        in: sentence, matchRange: match.range, isRange: span.isRange, isCombined: match.isCombined),
+                    false
+                )
             }
         }
-        guard matches(sentence.lowercased(), Pattern.futureMarker) else { return nil }
-        return firstMatch(sentence, Pattern.relativeDay)
+        guard matches(sentence.lowercased(), Pattern.futureMarker) else { return (nil, false) }
+        return (firstMatch(sentence, Pattern.relativeDay), false)
     }
 
     /// Slices the verbatim date expression from `sentence`, keeping the leading preposition (`from`/`between` for a

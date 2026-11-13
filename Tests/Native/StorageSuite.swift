@@ -1751,11 +1751,17 @@ extension NativeSuites.StorageSuite {
                 link: "https://www.ft.com/content/publisher-search-fixture", guid: "ft-publisher",
                 description: "Publisher name is absent from the story text", pubDate: Date(), source: "World")
             _ = try await db.upsertArticles([financialTimes])
-            for query in ["ft", "source:ft", "Financial Times"] {
+            for query in ["ft", "source:ft", "source:financial", "Financial Times"] {
                 expectEqual(
                     try await db.searchArticles(query: query).map(\.id), [financialTimes.id],
-                    "FT section feeds remain searchable by publisher: \(query)")
+                    "FT section feeds remain searchable by displayed publisher: \(query)")
             }
+            expectEqual(
+                try await db.searchArticles(query: "source:world").contains { $0.id == financialTimes.id }, false,
+                "The stored source is the displayed publisher; a section feed's own title is not searchable")
+            expectEqual(
+                try await db.listTotals(search: "source:ft").stories, 1,
+                "Search totals use the same displayed publisher filter")
             expectTrue(
                 ArticleFilterQuery.parse("ft").matches(article: financialTimes, isRead: false, isSaved: false),
                 "In-memory filters include displayed publisher names")

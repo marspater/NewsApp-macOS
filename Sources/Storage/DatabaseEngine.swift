@@ -37,6 +37,8 @@ actor DatabaseEngine {
     private var inMemoryWorldTension: [WorldTensionReading] = []
     private var inMemoryTodayEdition: Data?
     private var collectionOnlyFeedURLs: [String] = []
+    /// Imported OPML folders explicitly select subscriptions; other user sections remain keyword-based.
+    private var opmlSectionFeedKeys: [String: [String]] = [:]
     /// The last library counts, valid while no write has happened since: `sqlite3_total_changes` moves on every write,
     /// triggers included, so no write path can leave a stale count behind (#839).
     private var countsCache:
@@ -109,6 +111,16 @@ actor DatabaseEngine {
         let sorted = Array(Set(urls)).sorted()
         guard sorted != collectionOnlyFeedURLs else { return false }
         collectionOnlyFeedURLs = sorted
+        return true
+    }
+
+    /// The mapping is UI preference state, not a schema change. Refresh page/muted counts on changes.
+    @discardableResult
+    func setOPMLSectionFeeds(_ folders: [String: [String]]) -> Bool {
+        let normalized = folders.mapValues { Array(Set($0.map(AppSettings.feedKey))).sorted() }
+        guard normalized != opmlSectionFeedKeys else { return false }
+        opmlSectionFeedKeys = normalized
+        mutedCountCache = (nil, [:])
         return true
     }
 
@@ -2141,6 +2153,8 @@ actor DatabaseEngine {
         guard
             sqlite3_create_function_v2(db, "news_topic", 3, flags, nil, topicFunction, nil, nil, nil) == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_section", 4, flags, nil, sectionFunction, nil, nil, nil) == SQLITE_OK,
+            sqlite3_create_function_v2(db, "news_feed_key", 1, flags, nil, feedKeyFunction, nil, nil, nil)
+                == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_category", 1, flags, nil, categoryFunction, nil, nil, nil)
                 == SQLITE_OK,
             sqlite3_create_function_v2(db, "news_publisher_name", 2, flags, nil, publisherNameFunction, nil, nil, nil)
@@ -3284,8 +3298,25 @@ actor DatabaseEngine {
                 params += cond.parameters.map { ("text", $0) }
             }
         } else if let sec = section, !["Today", "Unread", "Saved Stories", "History"].contains(sec) {
-            sql += " AND news_section(a.title, coalesce(a.description, ''), coalesce(ae.category, a.category), ?) = 1"
-            params.append(("text", sec))
+            if let feeds = opmlSectionFeedKeys[sec] {
+                if feeds.isEmpty {
+                    sql += " AND 0 = 1"
+                } else {
+                    let markers = Array(repeating: "?", count: feeds.count).joined(separator: ",")
+                    sql += """
+                         AND EXISTS (SELECT 1 FROM article_feeds af
+                                     WHERE af.article_id = a.id AND news_feed_key(af.feed_url) IN (\(markers)))
+                        """
+                    params += feeds.map { ("text", $0) }
+                }
+            } else {
+                sql += """
+                     AND news_section(
+                        a.title, coalesce(a.description, ''),
+                        coalesce(ae.category, a.category), ?) = 1
+                    """
+                params.append(("text", sec))
+            }
         }
         return (sql, params)
     }
@@ -5675,6 +5706,17 @@ private func publisherNameFunction(
     func text(_ index: Int) -> String { sqlite3_value_text(values[index]).map { String(cString: $0) } ?? "" }
     let name = FeedCatalog.publisher(forLink: text(0)) ?? text(1)
     sqlite3_result_text(context, name, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+}
+
+/// Feed membership is matched with the same trailing-slash normalization as subscriptions.
+private func feedKeyFunction(
+    _ context: OpaquePointer?, _ count: Int32, _ values: UnsafeMutablePointer<OpaquePointer?>?
+) {
+    guard count == 1, let values, let raw = sqlite3_value_text(values[0]) else {
+        return sqlite3_result_null(context)
+    }
+    let key = AppSettings.feedKey(String(cString: raw))
+    sqlite3_result_text(context, key, -1, DatabaseEngine.sqliteTransient)
 }
 
 /// Lists and in-memory callers share category precedence and whole-word fallback.
