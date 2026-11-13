@@ -180,11 +180,9 @@ extension NativeSuites.PublisherExcerptSuite {
 
     // MARK: - 1. Version Bump
     static func testCurrentAnalysisVersionBumped() {
-        print("  - Testing current analysis version is 15...")
         expectTrue(
-            EventOverviewDocument.currentAnalysisVersion == 15,
-            "EventOverviewDocument.currentAnalysisVersion is 15: overviews cached before publisher excerpts (11), the"
-                + " Industry Impact story check (12), the Highlight cleanup (13) and cut description tails (14) and page title blocks (15) recompute"
+            EventOverviewDocument.currentAnalysisVersion == 16,
+            "Analysis version 16 regenerates overviews cached before timeline date kinds"
         )
     }
 

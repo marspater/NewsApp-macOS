@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Angelia · Clio (sourced overviews) owns this file. Register: docs/ANGELIA.md.
+// Diagnostic copy of the timeline extractor removed in #1241, kept only so `--timeline-audit` can reproduce
+// main's behaviour. It is not part of the app.
 
 import Foundation
 import NaturalLanguage
 
 /// Result of deterministically validating an overview timeline item against evidence passages and rules.
-struct OverviewTimelineValidationResult: Sendable, Equatable {
+struct TimelineAuditLegacyValidationResult: Sendable, Equatable {
     let isValid: Bool
     let rejectionReason: String?
 
@@ -33,7 +34,7 @@ struct OverviewTimelineValidationResult: Sendable, Equatable {
 /// 2. An unknown date stays unknown (never defaulted to publication date).
 /// 3. Future plans are labeled as plans.
 /// 4. Every item has a verified source citation.
-struct OverviewTimelineValidator: Sendable {
+struct TimelineAuditLegacyValidator: Sendable {
 
     /// Known future plan and intent indicators.
     private static let futurePlanKeywords: [String] = [
@@ -47,22 +48,22 @@ struct OverviewTimelineValidator: Sendable {
     static func validateItem(
         _ item: OverviewTimelineItem,
         against citations: [String: OverviewCitation]
-    ) -> OverviewTimelineValidationResult {
+    ) -> TimelineAuditLegacyValidationResult {
         // Rule 4: Every item must have a source citation
         guard !item.citationIDs.isEmpty else {
-            return OverviewTimelineValidationResult(
+            return TimelineAuditLegacyValidationResult(
                 isValid: false, rejectionReason: "Timeline item has no source citation")
         }
 
         for citID in item.citationIDs {
             guard let citation = citations[citID] else {
-                return OverviewTimelineValidationResult(
+                return TimelineAuditLegacyValidationResult(
                     isValid: false,
                     rejectionReason: "Citation ID '\(citID)' not found in overview citations"
                 )
             }
             guard !citation.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return OverviewTimelineValidationResult(
+                return TimelineAuditLegacyValidationResult(
                     isValid: false,
                     rejectionReason: "Citation '\(citID)' has empty quote"
                 )
@@ -86,7 +87,7 @@ struct OverviewTimelineValidator: Sendable {
         }
 
         if (hasPlanKeywords || isChronologicallyFuture) && !item.isFuturePlan {
-            return OverviewTimelineValidationResult(
+            return TimelineAuditLegacyValidationResult(
                 isValid: false,
                 rejectionReason: "Item describes a future plan or target date but is not labeled as a plan"
             )
@@ -95,13 +96,13 @@ struct OverviewTimelineValidator: Sendable {
         // Rule 1 & 2: Event date separate from publication date, unknown stays unknown
         // If the date text indicates unknown date, eventDate must be nil
         if (dateTextLower.contains("unknown") || dateTextLower.contains("unspecified")) && item.eventDate != nil {
-            return OverviewTimelineValidationResult(
+            return TimelineAuditLegacyValidationResult(
                 isValid: false,
                 rejectionReason: "Unknown event date must remain nil, never assigned a synthesized timestamp"
             )
         }
 
-        return OverviewTimelineValidationResult(isValid: true)
+        return TimelineAuditLegacyValidationResult(isValid: true)
     }
 
     /// Evaluates if text describes a scheduled future plan or target.
@@ -112,7 +113,7 @@ struct OverviewTimelineValidator: Sendable {
 }
 
 /// Extracts structured, evidence-backed timeline items from event passages and articles.
-struct OverviewTimelineExtractor: Sendable {
+struct TimelineAuditLegacyExtractor: Sendable {
 
     /// Extracts timeline items from evidence passages, linking citations to source articles.
     ///
@@ -167,7 +168,7 @@ struct OverviewTimelineExtractor: Sendable {
         var seenSummaries = Set<String>()
 
         for item in candidates {
-            let validation = OverviewTimelineValidator.validateItem(item, against: existingCitations)
+            let validation = TimelineAuditLegacyValidator.validateItem(item, against: existingCitations)
             guard validation.isValid else { continue }
 
             // Deduplicate near-identical summaries
@@ -209,7 +210,7 @@ struct OverviewTimelineExtractor: Sendable {
         citationID: String,
         publicationDate: Date?
     ) -> OverviewTimelineItem? {
-        let isPlan = OverviewTimelineValidator.isPlanDescribed(in: sentence)
+        let isPlan = TimelineAuditLegacyValidator.isPlanDescribed(in: sentence)
         let extractedDate = extractTemporalAnchor(from: sentence)
 
         // Rule 2: An unknown date stays unknown

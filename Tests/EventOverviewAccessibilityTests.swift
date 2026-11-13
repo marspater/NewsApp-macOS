@@ -635,7 +635,7 @@ struct EventOverviewAccessibilityTests {
         let item2 = OverviewTimelineItem(
             id: "t2", dateText: "Oct 5", summary: "Followup event", isFuturePlan: false, eventDate: pastDate2)
         let item3 = OverviewTimelineItem(
-            id: "t3", dateText: "Oct 3", summary: "Reported discovery", isFuturePlan: false,
+            id: "t3", dateText: "Oct 3", dateKind: .publication, summary: "Reported discovery", isFuturePlan: false,
             publicationDate: pubDateOnly)
         let item4 = OverviewTimelineItem(
             id: "t4", dateText: "Next Week", summary: "Scheduled vote", isFuturePlan: true, eventDate: futureDate)
@@ -677,7 +677,8 @@ struct EventOverviewAccessibilityTests {
 
         // Item with empty dateText but publicationDate gets formatted Reported prefix
         let itemPubDateOnlyNoText = OverviewTimelineItem(
-            id: "t_pub_only", dateText: "", summary: "Regulatory filing published", isFuturePlan: false,
+            id: "t_pub_only", dateText: "", dateKind: .publication, summary: "Regulatory filing published",
+            isFuturePlan: false,
             publicationDate: Date(timeIntervalSince1970: 1_700_000_000))
         let voPubFallback = EventOverviewReaderView.timelineItemAccessibilityLabel(
             item: itemPubDateOnlyNoText, citations: [cit])
@@ -688,7 +689,8 @@ struct EventOverviewAccessibilityTests {
 
         // Item with dateText already prefixed does not duplicate prefix
         let itemAlreadyReported = OverviewTimelineItem(
-            id: "t_already_rep", dateText: "Reported Nov 15", summary: "Filing announced", isFuturePlan: false)
+            id: "t_already_rep", dateText: "Reported Nov 15", dateKind: .publication, summary: "Filing announced",
+            isFuturePlan: false)
         let voAlreadyRep = EventOverviewReaderView.timelineItemAccessibilityLabel(
             item: itemAlreadyReported, citations: [cit])
         assertFalse(
@@ -939,7 +941,8 @@ struct EventOverviewAccessibilityTests {
         // 10. Background concurrency for accessibility label functions
         let bgLabelsSuccess = await Task.detached { () -> Bool in
             let item = OverviewTimelineItem(
-                id: "t_bg", dateText: "", summary: "Background timeline event", isFuturePlan: false,
+                id: "t_bg", dateText: "", dateKind: .publication, summary: "Background timeline event",
+                isFuturePlan: false,
                 publicationDate: Date(timeIntervalSince1970: 1_700_000_000)
             )
             let tlLabel = EventOverviewReaderView.timelineItemAccessibilityLabel(item: item)
@@ -1587,9 +1590,11 @@ extension EventOverviewAccessibilityTests {
         let sameEvent = OverviewTimelineItem(
             id: "event-tie", dateText: "Oct 1", summary: "Additional event.", eventDate: early)
         let reported = OverviewTimelineItem(
-            id: "reported", dateText: "Oct 1", summary: "Report published.", publicationDate: early)
+            id: "reported", dateText: "Oct 1", dateKind: .publication, summary: "Report published.",
+            publicationDate: early)
         let publicationTie = OverviewTimelineItem(
-            id: "reported-tie", dateText: "Oct 1", summary: "Second report published.", publicationDate: early)
+            id: "reported-tie", dateText: "Oct 1", dateKind: .publication, summary: "Second report published.",
+            publicationDate: early)
         let undated = OverviewTimelineItem(id: "undated", dateText: "", summary: "  Undated update. \n")
         let undatedTie = OverviewTimelineItem(id: "undated-tie", dateText: "", summary: "Another update.")
         let plan = OverviewTimelineItem(

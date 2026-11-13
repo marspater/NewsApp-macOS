@@ -19,11 +19,18 @@ import Foundation
 /// Builds an event overview's timeline (#143) from verified, passage-anchored facts, without a model.
 ///
 /// An item is a source sentence that states exactly one explicit calendar date: a day and month, with
-/// or without a year, or a month and year. Relative expressions ("on Monday", "yesterday") are not
-/// resolved, so those sentences stay out. The date shown is the one the source states, at the
+/// or without a year, or a month and year. A sentence without one may instead state one anchor (see `Anchor`):
+/// a time of day, a relative anchor such as "yesterday morning", or a quarter with its year. Weekdays ("on
+/// Monday") are not resolved, so those sentences stay out. The date shown is the one the source states, at the
 /// precision it states: a missing year stays missing. Publication dates are never shown as event
 /// dates; they only order a date whose year is missing and tell whether an item was still a plan
-/// when it was reported. Sentences from articles without a known publication date are left out.
+/// when it was reported. An anchor item also carries its article's publication date, which the reader shows
+/// as "Reported", because the anchor's wording is relative to that day. Sentences from articles without a known
+/// publication date are left out.
+///
+/// This builder is the only source of an overview's timeline (#1241). Items carry `dateKind == .stated` and no
+/// `eventDate`: a resolved date may hold a placed year, so it goes only to `orderingDateMayHoldInferredYear`, which
+/// orders and filters (Briefing) and is never displayed.
 enum OverviewTimelineBuilder {
     struct Timeline: Sendable, Equatable {
         var items: [OverviewTimelineItem] = []
@@ -103,14 +110,17 @@ enum OverviewTimelineBuilder {
         locale: Locale = .current
     ) -> Timeline {
         struct Entry {
-            let date: StatedDate
+            let dateText: String
+            let kind: OverviewTimelineItem.DateKind
             let resolved: Date
+            /// A month comes before the days inside it, and a day before a time on it.
+            let precision: Int
             let isPlan: Bool
+            /// Only for anchors, whose wording is relative to the day the article was published.
+            let publishedAt: Date?
             let quote: String
             let order: Int
             var facts: [PassageAnchoredFact]
-            /// A month comes before the days inside it.
-            var precision: Int { date.day == nil ? 0 : 1 }
         }
         let passagesByID = Dictionary(passages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let articlesByID = Dictionary(articles.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -119,34 +129,69 @@ enum OverviewTimelineBuilder {
         var entryByKey: [String: Int] = [:]
         for (order, fact) in facts.enumerated() {
             // The date and the text shown both come from the verbatim quote, never from a restatement.
-            guard let article = articlesByID[fact.articleID], article.pubDate != DateParser.unknownDate,
-                let stated = singleStatedDate(in: fact.quote),
+            guard let article = articlesByID[fact.articleID], article.pubDate != DateParser.unknownDate else {
+                continue
+            }
+            let entry: Entry
+            if let stated = singleStatedDate(in: fact.quote),
                 let resolved = resolve(stated, publishedAt: article.pubDate)
-            else { continue }
-            // Reprints of one sentence become one item with several sources.
-            let key = "\(resolved.timeIntervalSince1970)|\(stated.day == nil)|\(normalized(fact.quote))"
+            {
+                entry = Entry(
+                    dateText: dateText(stated, locale: locale), kind: .stated, resolved: resolved,
+                    precision: stated.day == nil ? 0 : 1,
+                    isPlan: isPlan(stated, resolved: resolved, publishedAt: article.pubDate), publishedAt: nil,
+                    quote: fact.quote, order: order, facts: [fact])
+            } else if let anchor = anchor(in: fact.quote, publishedAt: article.pubDate) {
+                entry = Entry(
+                    dateText: anchor.text, kind: .anchor, resolved: anchor.resolved, precision: 2,
+                    isPlan: anchor.isPlan, publishedAt: article.pubDate, quote: fact.quote, order: order,
+                    facts: [fact])
+            } else {
+                continue
+            }
+            // Reprints of one sentence become one item with several sources. An anchor's placement is its article's
+            // publication time, so its reprints are matched by wording instead.
+            let when = entry.kind == .anchor ? entry.dateText.lowercased() : "\(entry.resolved.timeIntervalSince1970)"
+            let key = "\(when)|\(entry.precision)|\(normalized(fact.quote))"
             if let index = entryByKey[key] {
                 entries[index].facts.append(fact)
                 continue
             }
             entryByKey[key] = entries.count
-            entries.append(
-                Entry(
-                    date: stated, resolved: resolved,
-                    isPlan: isPlan(stated, resolved: resolved, publishedAt: article.pubDate),
-                    quote: fact.quote, order: order, facts: [fact]))
+            entries.append(entry)
         }
-        guard Set(entries.map { "\($0.resolved.timeIntervalSince1970)|\($0.precision)" }).count >= minimumDistinctDates
-        else {
+        // An anchor counts by its wording: two times ("06:14 UTC", "09:30 UTC") are two, and the same words from two
+        // publications ("this morning") are one, whatever the publication times.
+        func establishesTimeline(_ selection: [Entry]) -> Bool {
+            Set(
+                selection.map {
+                    $0.kind == .anchor
+                        ? "anchor|\($0.dateText.lowercased())"
+                        : "\($0.resolved.timeIntervalSince1970)|\($0.precision)"
+                }
+            ).count >= minimumDistinctDates
+        }
+
+        guard establishesTimeline(entries) else {
             return Timeline()
         }
 
         // Prefer corroborated items, then the order the facts arrived in; show them in time order.
-        let kept =
-            entries
-            .sorted { ($0.facts.count, -$0.order) > ($1.facts.count, -$1.order) }
-            .prefix(maximumItems)
-            .sorted { ($0.resolved, $0.precision, $0.order) < ($1.resolved, $1.precision, $1.order) }
+        let prioritized = entries.sorted { ($0.facts.count, -$0.order) > ($1.facts.count, -$1.order) }
+        var selected = Array(prioritized.prefix(maximumItems))
+        if !establishesTimeline(selected),
+            let replacement = prioritized.dropFirst(maximumItems).first(where: { candidate in
+                var trial = selected
+                trial[trial.count - 1] = candidate
+                return establishesTimeline(trial)
+            })
+        {
+            selected[selected.count - 1] = replacement
+        }
+        guard establishesTimeline(selected) else {
+            return Timeline()
+        }
+        let kept = selected.sorted { ($0.resolved, $0.precision, $0.order) < ($1.resolved, $1.precision, $1.order) }
 
         var timeline = Timeline()
         for (index, entry) in kept.enumerated() {
@@ -170,16 +215,97 @@ enum OverviewTimelineBuilder {
                     ))
                 citationIDs.append(citationID)
             }
+            let precision: OverviewTimelineItem.DatePrecision?
+            if entry.kind != .stated {
+                precision = nil
+            } else {
+                precision = entry.precision == 0 ? .month : .day
+            }
             timeline.items.append(
                 OverviewTimelineItem(
                     id: "timeline_\(index + 1)",
-                    dateText: dateText(entry.date, locale: locale),
+                    dateText: entry.dateText,
+                    dateKind: entry.kind,
+                    datePrecision: precision,
                     summary: entry.quote,
                     citationIDs: citationIDs,
-                    isFuturePlan: entry.isPlan
+                    isFuturePlan: entry.isPlan,
+                    publicationDate: entry.publishedAt,
+                    orderingDateMayHoldInferredYear: entry.resolved
                 ))
         }
         return timeline
+    }
+
+    /// A time reference a source states that is not a calendar date (see `OverviewTimelineItem.anchorExpressions`).
+    /// Shown in the source's words. `resolved` is a provisional placement for ordering only, never the time the
+    /// event happened: a time of day or relative anchor is placed at the article's publication time (a day earlier
+    /// for "yesterday" and "last night"). A bare "scheduled" is no anchor.
+    struct Anchor: Equatable, Sendable {
+        let text: String
+        let resolved: Date
+        let isPlan: Bool
+    }
+
+    // ponytail: "earlier this week" is placed one day before publication; its real day is unknown, so it only
+    // orders after earlier stated dates and before same-day anchors.
+    private static let relativeAnchors: [(phrase: String, days: Int)] = [
+        ("earlier today", 0), ("this morning", 0), ("yesterday morning", -1), ("yesterday afternoon", -1),
+        ("yesterday evening", -1), ("last night", -1), ("earlier this week", -1),
+    ]
+    /// The former extractor's plan indicators (#143), plus "planned for" and "will resume".
+    private static let planPhrases = [
+        "plans to", "planned to", "planned for", "planning to", "scheduled to", "scheduled for", "will launch",
+        "will begin", "will open", "will resume", "aims to", "aiming to", "expected in", "expected to", "proposed",
+        "target date", "slated to", "set to begin", "projected to",
+    ]
+
+    /// The one anchor a sentence states, when it states no calendar date at all; nil otherwise. A quarter without
+    /// a year and a bare later year ("in 2027") count only in a sentence that states a plan, as before #1241.
+    static func anchor(in sentence: String, publishedAt: Date) -> Anchor? {
+        let range = NSRange(sentence.startIndex..., in: sentence)
+        guard !patterns.contains(where: { $0.firstMatch(in: sentence, range: range) != nil }) else { return nil }
+        let lower = sentence.lowercased()
+        let saysPlan = planPhrases.contains { lower.contains($0) }
+        var matches = OverviewTimelineItem.anchorExpressions.flatMap { $0.matches(in: sentence, range: range) }
+        if matches.isEmpty, saysPlan {
+            matches = OverviewTimelineItem.planYearExpression.matches(in: sentence, range: range)
+        }
+        guard matches.count == 1, let match = matches.first, let found = Range(match.range, in: sentence) else {
+            return nil
+        }
+        func group(_ name: String) -> String? {
+            Range(match.range(withName: name), in: sentence).map { String(sentence[$0]) }
+        }
+        let wording = String(sentence[found])
+        let text = wording.prefix(1).uppercased() + wording.dropFirst()
+        let published = calendar.component(.year, from: publishedAt)
+        func starting(_ year: Int, month: Int) -> Date? {
+            calendar.date(from: DateComponents(year: year, month: month, day: 1))
+        }
+        if let year = group("year").flatMap({ Int($0) }) {
+            guard year > published, let start = starting(year, month: 1) else { return nil }
+            return Anchor(text: text, resolved: start, isPlan: true)
+        }
+        let quarter =
+            group("q").flatMap { Int($0) }
+            ?? group("ordinal").flatMap {
+                ["first", "second", "third", "fourth"].firstIndex(of: $0.lowercased()).map { $0 + 1 }
+            }
+        if let quarter {
+            if let year = (group("qyear") ?? group("oyear")).flatMap({ Int($0) }) {
+                guard let start = starting(year, month: quarter * 3 - 2) else { return nil }
+                return Anchor(text: text, resolved: start, isPlan: start > publishedAt)
+            }
+            // A quarter without a year is a plan's next such quarter; the year only orders it and is never shown.
+            guard saysPlan, let thisYear = starting(published, month: quarter * 3 - 2),
+                let start = thisYear > publishedAt ? thisYear : starting(published + 1, month: quarter * 3 - 2)
+            else { return nil }
+            return Anchor(text: text, resolved: start, isPlan: true)
+        }
+        let days = relativeAnchors.first { wording.lowercased() == $0.phrase }?.days ?? 0
+        guard let resolved = calendar.date(byAdding: .day, value: days, to: publishedAt) else { return nil }
+        return Anchor(text: text, resolved: resolved, isPlan: saysPlan)
     }
 
     /// The one explicit date a sentence states; nil when it states none, several, or an impossible one.
