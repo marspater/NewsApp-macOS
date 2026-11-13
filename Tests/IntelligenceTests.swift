@@ -5300,6 +5300,21 @@ extension NewsTests {
         assertEqual(merged.map(\.dateText).count, 1, "Briefing keeps only the single date")
         assertEqual(
             BriefingTimelineData.items(rows, now: now), nil, "A single date and two ranges are no Briefing thread")
+
+        // The eight-item cut keeps a timeline that only two lower-ranked rows establish: eight ranges over one whole
+        // year overlap each other and both sessions, so no single swap among the first eight is enough.
+        let yearLong = (1...8).map { "Programme \($0) runs from 1 January 2027 to 31 December 2027." }
+        let sessions = [
+            "The first session runs from 1 to 10 February 2027.", "The second session runs from 1 to 10 July 2027.",
+        ]
+        assertEqual(items([yearLong[0]] + sessions).count, 3, "A year-long range and two sessions inside it are rows")
+        let cut = items(yearLong + sessions)
+        assertEqual(cut.count, OverviewTimelineBuilder.maximumItems, "The cut keeps eight rows")
+        assertEqual(
+            cut.filter { sessions.contains($0.summary) }.count, 2,
+            "The cut keeps the two rows that make the timeline, though each ranks below the first eight")
+        assertEqual(
+            cut.filter { yearLong.prefix(6).contains($0.summary) }.count, 6, "The other six rows are the top-ranked")
         let stored = """
             {"id":"t","dateText":"3 Nov","dateKind":"stated","datePrecision":"day","summary":"x","citationIDs":[],
              "isFuturePlan":false,"orderingDateMayHoldInferredYear":\(day(2026, 11, 3).timeIntervalSinceReferenceDate)}

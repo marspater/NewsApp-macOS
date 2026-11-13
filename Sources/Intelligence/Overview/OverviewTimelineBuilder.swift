@@ -231,17 +231,21 @@ enum OverviewTimelineBuilder {
         // Prefer corroborated items, then the order the facts arrived in; show them in time order.
         let prioritized = entries.sorted { ($0.facts.count, -$0.order) > ($1.facts.count, -$1.order) }
         var selected = Array(prioritized.prefix(maximumItems))
-        if !establishesTimeline(selected),
-            let replacement = prioritized.dropFirst(maximumItems).first(where: { candidate in
-                var trial = selected
-                trial[trial.count - 1] = candidate
-                return establishesTimeline(trial)
-            })
-        {
-            selected[selected.count - 1] = replacement
-        }
-        guard establishesTimeline(selected) else {
-            return Timeline()
+        if !establishesTimeline(selected) {
+            // Two rows always suffice to establish a timeline, and more rows never undo it. So keep the best-ranked
+            // such pair and fill the other places by rank: one swap is not enough when both rows of the pair rank
+            // below the first eight (#1249).
+            var pair: (Int, Int)?
+            search: for first in prioritized.indices {
+                for second in prioritized.indices.dropFirst(first + 1)
+                where establishesTimeline([prioritized[first], prioritized[second]]) {
+                    pair = (first, second)
+                    break search
+                }
+            }
+            guard let pair else { return Timeline() }
+            let rest = prioritized.indices.filter { $0 != pair.0 && $0 != pair.1 }.prefix(maximumItems - 2)
+            selected = ([pair.0, pair.1] + rest).map { prioritized[$0] }
         }
         let kept = selected.sorted {
             ($0.resolved, $0.end == nil ? 0 : 1, $0.precision, $0.order)
