@@ -33,6 +33,8 @@ enum BriefingImpactTests {
         print("=== Running Briefing strategic impact (#850) tests ===")
         regionMapping()
         regionFilter()
+        await regionSupplementDeduplication()
+        regionTileState()
         industryGrouping()
         driversCoverage()
         timelineOrdering()
@@ -117,6 +119,62 @@ enum BriefingImpactTests {
         check(
             BriefingRegionsData.make(entries: [tokyo], regionsByEntry: [:], facts: [:], now: now) == nil, "empty is nil"
         )
+    }
+
+
+    /// #1311/5: A grouped edition event may have one listed article, while recent articles from the
+    /// same event enter through the supplement query with a different representative.
+    @MainActor static func regionSupplementDeduplication() async {
+        let first = FeedArticle(
+            storedID: "region-1311-a", title: "France debates rail investment",
+            link: "https://example.com/france-a", guid: "region-1311-a",
+            description: "Rail investment in France", pubDate: now.addingTimeInterval(-3600), source: "Wire A")
+        let second = FeedArticle(
+            storedID: "region-1311-b", title: "France debates rail investment",
+            link: "https://example.com/france-b", guid: "region-1311-b",
+            description: "Rail investment in France", pubDate: now.addingTimeInterval(-7200), source: "Wire B")
+        let database = DatabaseEngine(path: ":memory:")
+        do {
+            try await database.open()
+            _ = try await database.upsertArticles([first, second])
+            let event = try await database.createEvent(memberArticleIDs: [first.id, second.id], at: now)
+            guard let summary = try await database.eventFeedSummaries(forArticles: [first.id]).first else {
+                check(false, "confirmed edition event must have a summary")
+                return
+            }
+            let edition: FeedEntry = .event(summary, representative: first, visibleMembers: [first])
+            let store = ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
+            let context = BriefingLoadContext(
+                entries: [edition], heroIDs: [], briefing: nil, now: now, tension: WorldTensionState(),
+                readIDs: [], previousEditionStartedAt: nil)
+            guard let loaded = await BriefingRegionsData.load(context, store: store) else {
+                check(false, "Regions loader should return the France edition event")
+                return
+            }
+            let europe = loaded.rows.first { $0.region == .europe }
+            check(europe?.entries.count == 1, "supplement does not duplicate an edition event")
+            check(europe?.countText == "Zen · 1 story", "region count and level use the unique event")
+            check(
+                europe?.entries.first?.id == first.id,
+                "edition representative survives the supplemental event with a different article")
+            check(summary.eventID == event.id, "fixture's extra article belongs to the same event")
+        } catch {
+            check(false, "Regions loader integration regression failed: \(error)")
+        }
+    }
+
+    /// #1311/8: The same read/save state as other Briefing tiles reaches Regions tiles.
+    static func regionTileState() {
+        let entry = BriefingRegionsData.sampleEntry(
+            id: "region-state", title: "France debates rail investment", publishers: 1, date: now)
+        let id = entry.representative.id
+        let active = BriefingRegionTilesModuleView.tileState(
+            for: entry, isLead: true, now: now, readIDs: [id], savedIDs: [id])
+        check(active.isRead && active.isSaved, "Regions tiles honor read and saved state")
+        check(active.isLead, "Regions tiles retain the lead accent")
+        let clear = BriefingRegionTilesModuleView.tileState(
+            for: entry, isLead: false, now: now, readIDs: [], savedIDs: [])
+        check(!clear.isRead && !clear.isSaved, "Regions tiles show unread and unsaved only when true")
     }
 
     static func industryGrouping() {

@@ -398,7 +398,8 @@ struct BriefingView: View {
             }
         case .regionTiles:
             if let value = data.regions {
-                BriefingRegionTilesModuleView(data: value, filter: boardFilter, actions: actions)
+                BriefingRegionTilesModuleView(
+                    data: value, filter: boardFilter, actions: actions, readIDs: readIDs, savedIDs: savedIDs)
             }
         default:
             EmptyView()
