@@ -220,7 +220,14 @@ final class NewsSmokeUITests: XCTestCase {
             XCTAssertTrue(sheet.waitForExistence(timeout: 10), "\(sheetTitle) did not open")
             let done = sheet.buttons["Done"]
             XCTAssertTrue(done.waitForExistence(timeout: 10), "\(sheetTitle) Done is missing")
-            XCTAssertTrue(settings.frame.contains(done.frame), "\(sheetTitle) Done extends outside Settings")
+            // A sheet taller than the pane grows the Settings window while it slides in, so the frames are read
+            // once the window has settled around it; a sheet that really overflows still fails below.
+            let settled = XCTNSPredicateExpectation(
+                predicate: NSPredicate { _, _ in settings.frame.contains(done.frame) }, object: nil)
+            _ = XCTWaiter.wait(for: [settled], timeout: 5)
+            XCTAssertTrue(
+                settings.frame.contains(done.frame),
+                "\(sheetTitle) Done extends outside Settings: settings \(settings.frame), done \(done.frame)")
             XCTAssertTrue(done.isHittable, "\(sheetTitle) Done cannot be clicked")
             done.click()
 
