@@ -256,7 +256,20 @@ Medians in MB; the peak's highest value in brackets.
 
 - All nine are COLD launches: the seeded stories carry no photo, so no edition with a Lead is stored (`noLead`) and none is restored. This run never measures WARM.
 - **807 ms is 150 ms above October's figure**, on a Mac in use; the 850 ms reference of October is not re-set or declared met here.
-- **A defect in the run, fixed in the script and not explained:** on `7eedcd4` the first launch on the freshly seeded library did not reach a first card in 30 seconds and the script stopped. A stack sample showed the library open busy in the statement that fills missing topic labels (`DatabaseEngine.open`, the `news_topic` update), for at least 56 seconds, before any window. On `f63c6f0` the same first launch took 1.9 s. The script now gives the first launch 20 minutes and still reports it apart; why the two builds differ was not established and should be looked at before the next seeded run is trusted.
+- **The first launch that stopped the script on `7eedcd4`: cause established, in the seeder and not in the app.** `./test.sh --seed-launch-library` at `7eedcd4` leaves all 10,000 `article_enrichment` rows without a category; at `f63c6f0` it leaves none (#1274, merged after the integration head was cut, fixes exactly this under #1272). The library open fills missing categories with `news_topic` before any window, so the first open on the older seed classified 10,000 stories and was ended by the script at 30 seconds every time. `news_topic` never returns NULL, so a row is classified once; nothing is reclassified on later opens. The script's longer wait for the first launch stays as a guard.
+
+### What the open-time category fill cost in these runs
+
+Found while establishing the cause above (Mnemosyne · storage and search, `DatabaseEngine.open`): the library copy every launch started from holds 27 stories without a category, of 3,359. Because the copy is restored before every launch, **every launch of every arm classified those 27 stories again while the library opened**, before the first card.
+
+| Copy the launch starts from (`7eedcd4`, two launches each, load about 3) | Library open | First card |
+| --- | --- | --- |
+| As measured: 27 stories without a category | 914 and 944 ms | 1,516 and 1,515 ms |
+| The same copy with those 27 filled | 541 and 536 ms | 1,115 and 1,089 ms |
+
+- About 0.4 s of every first card in the tables above is this fill, in all arms alike, the baseline included (it has the same statement). The differences between arms stand; the absolute level is about 0.4 s too high for a library whose stories are all classified. This explains most of the gap between these figures and the Release figures of 12 November.
+- In real use it is a cost paid once per story, at the next launch after stories were stored and not yet classified: about 14 ms a story on the launch path. It is not measured how many such stories a real library carries into a launch; this copy had 27 after a day without a launch.
+- Not changed here. Moving the fill behind the first snapshot would take it off the first card, but its comment says it must run before publisher metadata can replace the repaired labels, so the order needs a decision by whoever changes it. For the next paired run the copy should be opened once and closed before it is taken as the starting point.
 
 ### Not obtained
 
