@@ -52,11 +52,14 @@ launch_once() {
     # gets 20 minutes and is reported apart; later launches get 30 seconds.
     local wait_seconds=30
     [[ "$index" != 1 ]] || wait_seconds=1200
+    APP_PID=""
     for _ in $(seq 1 $((wait_seconds * 20))); do
+        # Known as soon as the process exists, so a run that is cancelled during the wait still ends the app.
+        [[ -n "$APP_PID" ]] || APP_PID=$(pgrep -f "^$EXECUTABLE" | head -1 || true)
         grep -q "First card visible" "$log" && break
         sleep 0.05
     done
-    APP_PID=$(pgrep -f "^$EXECUTABLE" | head -1)
+    [[ -n "$APP_PID" ]] || APP_PID=$(pgrep -f "^$EXECUTABLE" | head -1)
     grep -q "First card visible" "$log" || { echo "No first card within $wait_seconds s (launch $index)" >&2; exit 1; }
     vmmap --summary "$APP_PID" > "$OUTPUT/launch-$index.first-card.vmmap" 2>&1 || true
     sleep "${NEWS_SETTLE_SECONDS:-5}"
