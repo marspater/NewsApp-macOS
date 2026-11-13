@@ -144,6 +144,23 @@ extension NativeSuites {
             #expect(item(#""author":"Jane""#)?.author == "Jane")
         }
 
+        @Test func aBooleanJSONIDFallsBackToTheURL() {
+            let feed =
+                #"{"items":[{"id":true,"url":"https://example.com/a"},{"id":true,"url":"https://example.com/b"}]}"#
+            let articles = JSONFeedParser.parse(data: Data(feed.utf8), feedURL: "https://example.com/f") ?? []
+            #expect(articles.count == 2)
+            #expect(Set(articles.map(\.guid)).count == 2)
+            #expect(!articles.contains { $0.guid == "1" })
+        }
+
+        @Test func anEmptyJSONContentHTMLKeepsTheContentText() {
+            let body = String(repeating: "The council approved the flood defence plan on Tuesday. ", count: 20)
+            let feed =
+                #"{"items":[{"id":"1","url":"https://example.com/1","content_html":"","content_text":"\#(body)"}]}"#
+            let article = JSONFeedParser.parse(data: Data(feed.utf8), feedURL: "https://example.com/f")?.first
+            #expect(article?.fullContent?.contains("flood defence plan") == true)
+        }
+
         @Test func nestingBombsNeverReachTheParser() {
             let bomb = String(repeating: "<table><tr><td>", count: 40_000) + "x"
             let elapsed = ContinuousClock().measure {

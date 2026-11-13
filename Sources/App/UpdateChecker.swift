@@ -162,7 +162,12 @@ struct GitHubReleasePayload: Codable, Sendable {
             return
         }
 
-        guard !isChecking else { return }
+        guard !isChecking else {
+            // A manual check during a running one waits for its result, so the caller never reads the interim
+            // "Checking for updates..." state as the answer.
+            while userInitiated, isChecking, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(50)) }
+            return
+        }
         lastAttemptDate = now()
         defaults?.set(lastAttemptDate, forKey: Self.lastAttemptKey)
         isChecking = true

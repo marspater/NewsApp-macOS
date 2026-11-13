@@ -877,6 +877,7 @@ actor DatabaseEngine {
         }
         // The last Today edition describes the library being replaced. It goes before the tension history changes, so
         // a file that cannot be removed stops the restore with nothing replaced.
+        let previousEdition = try? Data(contentsOf: todayEditionURL)
         if fileManager.fileExists(atPath: todayEditionURL.path) { try fileManager.removeItem(at: todayEditionURL) }
         // A backup carrying tension history replaces the side file; a backup without the entry keeps the existing file (#1203).
         if backupHasTension { try putTension(extras["world-tension"]) }
@@ -900,6 +901,10 @@ actor DatabaseEngine {
                 // Back to shared locking; the next read releases the exclusive lock.
                 sqlite3_exec(db, "PRAGMA locking_mode = NORMAL; SELECT count(*) FROM sqlite_master;", nil, nil, nil)
                 if backupHasTension { try? putTension(previousTension) }
+                // "Nothing was restored" includes the Today edition removed above.
+                if let previousEdition, (try? previousEdition.write(to: todayEditionURL, options: .atomic)) != nil {
+                    try? fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: todayEditionURL.path)
+                }
                 throw NSError(
                     domain: "DatabaseEngine", code: Int(status),
                     userInfo: [

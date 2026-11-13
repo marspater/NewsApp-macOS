@@ -1335,12 +1335,15 @@ extension NativeSuites.StorageSuite {
         expectEqual(
             sqlite3_exec(reader, "BEGIN; SELECT count(*) FROM articles;", nil, nil, nil), SQLITE_OK,
             "Hold a read on the library")
+        let edition = Data("{\"lanes\":[]}".utf8)
+        try await db.storeTodayEdition(edition)
         do {
             _ = try await db.restoreBackup(from: archive)
             expectTrue(false, "A restore while another connection uses the library is refused")
         } catch {
             expectTrue(error.localizedDescription.contains("still in use"), "The refusal says the library is in use")
         }
+        expectEqual(await db.storedTodayEdition(), edition, "A refused restore keeps the stored Today edition")
         sqlite3_exec(reader, "ROLLBACK;", nil, nil, nil)
         sqlite3_close(reader)
         expectTrue(

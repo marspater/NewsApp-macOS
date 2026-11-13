@@ -70,7 +70,10 @@ class JSONFeedParser {
             }
             if (item["tags"] as? [String])?.isEmpty == true { item["tags"] = item["categories"] }
             // FeedKit rejects the whole feed over one mistyped member, so only well-typed values reach it.
-            if let number = item["id"] as? NSNumber { item["id"] = number.stringValue }
+            // A boolean bridges to NSNumber too: as "1" it would give every such item of a feed one identity.
+            if let number = item["id"] as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() {
+                item["id"] = number.stringValue
+            }
             item = item.filter { !stringMembers.contains($0.key) || $0.value is String }
             item["tags"] =
                 (item["tags"] as? String).map { [$0] } ?? (item["tags"] as? [Any])?.compactMap { $0 as? String }
@@ -178,10 +181,12 @@ class JSONFeedParser {
         imageUrl: String?,
         cleanTitle: String
     ) -> ExtractedBody {
-        let cleanContent = item.contentHtml.map(FeedXMLParser.stripHTMLSimple) ?? item.contentText
-        let readableContent = cleanContent.flatMap {
-            $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0
+        func readable(_ text: String?) -> String? {
+            text.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
         }
+        // An empty `content_html` must not hide the item's `content_text`.
+        let readableContent =
+            readable(item.contentHtml.map(FeedXMLParser.stripHTMLSimple)) ?? readable(item.contentText)
         let extracted = item.contentHtml.map {
             ContentExtractionPipeline.shared.extractFromHTML($0, baseUrl: link)
         }
