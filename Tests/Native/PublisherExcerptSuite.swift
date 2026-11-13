@@ -181,8 +181,8 @@ extension NativeSuites.PublisherExcerptSuite {
     // MARK: - 1. Version Bump
     static func testCurrentAnalysisVersionBumped() {
         expectTrue(
-            EventOverviewDocument.currentAnalysisVersion == 16,
-            "Analysis version 16 regenerates overviews cached before timeline date kinds"
+            EventOverviewDocument.currentAnalysisVersion == 17,
+            "Analysis version 17 regenerates overviews cached before timeline date ranges"
         )
     }
 

@@ -97,6 +97,7 @@ extension NewsTests {
                 { try testOverviewTimelineDateProvenance(fixtureHost: fixtureHost) }
             ),
             ("testOverviewTimelineAnchors", { try testOverviewTimelineAnchors(fixtureHost: fixtureHost) }),
+            ("testOverviewTimelineRanges", { try testOverviewTimelineRanges(fixtureHost: fixtureHost) }),
             (
                 "testAttributedPerspectivesOfParticipantsAndPublishers",
                 { try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost) }
@@ -5124,6 +5125,246 @@ extension NewsTests {
         )
         assertEqual(
             BriefingTimelineData.orderingDate(of: legacy[0]), nil, "Briefing leaves a relative anchor out")
+    }
+
+    /// #1249: a range or list of dates in one phrase is one row and one span; unrelated dates stay out.
+    static func testOverviewTimelineRanges(fixtureHost: String) throws {
+        print("  - Testing timeline ranges and lists: one row, one span, as stated (#1249)...")
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        func day(_ year: Int, _ month: Int, _ day: Int) -> Date {
+            calendar.date(from: DateComponents(year: year, month: month, day: day))!
+        }
+        let published = calendar.date(from: DateComponents(year: 2026, month: 11, day: 5, hour: 12))!
+        let article = FeedArticle(
+            storedID: "range-a", title: "Vote report", link: "https://\(fixtureHost)/range-a", guid: "range-a",
+            description: "", pubDate: published, source: "Wire")
+        let english = Locale(identifier: "en_US")
+        let before = "The council was formed on 15 September 2026."
+        func items(_ sentences: [String]) -> [OverviewTimelineItem] {
+            let passages = sentences.enumerated().map {
+                EvidencePassage(id: "range-p\($0.offset)", articleID: article.id, text: $0.element, ordinal: $0.offset)
+            }
+            let facts = passages.map {
+                PassageAnchoredFact(
+                    id: "f-\($0.id)", statement: $0.text, passageID: $0.id, quote: $0.text, articleID: article.id)
+            }
+            return OverviewTimelineBuilder.build(
+                facts: facts, passages: passages, articles: [article], locale: english
+            ).items
+        }
+        // Foundation separates a range with thin spaces; compare with plain ones.
+        func shown(_ item: OverviewTimelineItem?) -> String? {
+            item?.dateText.replacingOccurrences(of: "\u{2009}", with: " ").replacingOccurrences(
+                of: "\u{202F}", with: " ")
+        }
+        func range(_ sentence: String) -> OverviewTimelineItem? {
+            let built = items([before, sentence])
+            assertEqual(built.count, 2, "A range with a date outside it is a timeline: \(sentence)")
+            return built.last
+        }
+
+        let withYear = range("Voting is open from February 8 to February 28, 2027.")
+        assertEqual(shown(withYear), "Feb 8 – 28, 2027", "A range with a year is one row, the year written once")
+        assertEqual(withYear?.isFuturePlan, true, "A range starting after publication is a plan")
+        assertEqual(withYear?.datePrecision, .range, "A range has range precision; its text keeps the stated parts")
+        assertEqual(withYear?.orderingDateMayHoldInferredYear, day(2027, 2, 8), "It orders on its start")
+        assertEqual(withYear?.orderingEndDateMayHoldInferredYear, day(2027, 2, 28), "Its span ends on its last day")
+
+        let noYear = range("Voting ran from October 27 to November 1.")
+        assertEqual(shown(noYear), "Oct 27 – Nov 1", "A range without a year shows no year")
+        assertEqual(
+            noYear?.orderingDateMayHoldInferredYear, day(2026, 10, 27), "The year only orders: nearest publication")
+        assertEqual(noYear?.orderingEndDateMayHoldInferredYear, day(2026, 11, 1), "The end shares the start's year")
+        assertEqual(noYear?.isFuturePlan, false, "A range that started before publication is no plan")
+
+        let crossYear = range("The window runs from Dec 28 to Jan 3.")
+        assertEqual(shown(crossYear), "Dec 28 – Jan 3", "A range across a year shows neither year")
+        assertEqual(
+            crossYear?.orderingDateMayHoldInferredYear, day(2026, 12, 28), "It starts in the year nearest publication")
+        assertEqual(
+            crossYear?.orderingEndDateMayHoldInferredYear, day(2027, 1, 3),
+            "An earlier end month moves into the next year")
+        let crossStated = range("The window runs from 28 December to 3 January 2027.")
+        assertEqual(shown(crossStated), "Dec 28 – Jan 3, 2027", "Only the year the source states is shown")
+        assertEqual(
+            crossStated?.orderingDateMayHoldInferredYear, day(2026, 12, 28), "The start's year is placed, never shown")
+
+        assertEqual(
+            shown(range("The window runs from 3 November 2026 to 5 December.")), "Nov 3, 2026 – Dec 5",
+            "The end's inferred year is never displayed"
+        )
+        assertEqual(
+            shown(range("The window runs from 3 November to 5 December 2026.")), "Nov 3 – Dec 5, 2026",
+            "The start's inferred year is never displayed"
+        )
+
+        let compressed = range("Voting runs 19–28 November.")
+        assertEqual(shown(compressed), "Nov 19 – 28", "A compressed range is one row")
+        assertEqual(compressed?.isFuturePlan, true, "A planned range keeps its text and the Plan flag")
+        assertEqual(shown(range("Talks are set for November 19-28, 2026.")), "Nov 19 – 28, 2026", "Month-first range")
+        assertEqual(shown(range("Talks run between 3 and 5 December.")), "Dec 3 – 5", "Between A and B is a range")
+        assertEqual(
+            shown(range("Voting will begin on November 19 and run through November 28.")), "Nov 19 – 28",
+            "One coordinated phrase")
+
+        let list = range("Talks were held on 3 and 5 November.")
+        assertEqual(shown(list), "Nov 3 and 5", "A list is one row")
+        assertEqual(list?.orderingDateMayHoldInferredYear, day(2026, 11, 3), "A list orders on its earliest date")
+        assertEqual(list?.orderingEndDateMayHoldInferredYear, day(2026, 11, 5), "A list is one span to its latest date")
+        assertEqual(
+            shown(range("Hearings were held on 3, 5 and 7 October.")), "Oct 3, 5, and 7",
+            "Three dates are still one row"
+        )
+        assertEqual(range("Reports came on 3 November and 5 November.")?.dateText.isEmpty, false, "Full dates list too")
+
+        assertEqual(
+            shown(range("Voting occurs November 3 and 5, 2026.")), "Nov 3 and 5, 2026",
+            "A trailing year belongs to both month-first list dates"
+        )
+        assertEqual(
+            shown(range("Hearings are scheduled on November 19 and 21 at the courthouse.")), "Nov 19 and 21",
+            "A month-first list keeps its second day when a preposition follows")
+        assertEqual(
+            OverviewTimelineBuilder.singleStatedDate(in: "On November 3 and 5 people were detained."),
+            OverviewTimelineBuilder.StatedDate(year: nil, month: 11, day: 3), "A count after the date is no second day")
+        // Half a year from publication, the nearest year differs between the days of one list; they stay together.
+        let spring = calendar.date(from: DateComponents(year: 2026, month: 5, day: 5, hour: 12))!
+        let farList = OverviewTimelineBuilder.placedDates(
+            of: .init(
+                dates: [.init(year: nil, month: 11, day: 3), .init(year: nil, month: 11, day: 5)], isRange: false),
+            publishedAt: spring)
+        assertEqual(farList?.map(\.at), [day(2026, 11, 3), day(2026, 11, 5)], "A list's days share one placed year")
+        assertEqual(
+            shown(range("Die Sitzung war am 3.–5. März 2027.")), "Mar 3 – 5, 2027",
+            "A compressed range accepts supported day-first month names"
+        )
+        assertEqual(
+            shown(range("Hearings run November 29 to 3 December.")), "Nov 29 – Dec 3",
+            "Both explicitly stated months survive a range"
+        )
+
+        let inside = range("Talks run from 3 November to 8 November.")
+        assertEqual(inside?.isFuturePlan, false, "Publication day inside a range is not a plan")
+
+        // One span: a range alone, or with a date inside it, is no timeline.
+        assertTrue(items(["Talks run from 3 November to 8 November."]).isEmpty, "A range alone is no timeline")
+        assertTrue(
+            items(["Talks run from 3 to 8 November.", "Talks started on 5 November."]).isEmpty,
+            "Overlap is no chronology")
+        assertTrue(
+            items(["Talks were held on 3 and 5 November.", "Talks started on 4 November."]).isEmpty, "Nor a list")
+        let tie = items(["Talks run from 3 to 8 November.", "Talks began on 3 November.", before])
+        assertEqual(tie.count, 3, "A range with a single date inside it still counts the single dates")
+        assertEqual(
+            tie.map { $0.orderingEndDateMayHoldInferredYear == nil }, [true, true, false], "Single dates first on a tie"
+        )
+
+        // Rejected: unrelated dates, a range plus a date, a reversed range, parts that cannot share.
+        for sentence in [
+            "A funeral on 10 November was held for those killed on 28 October.",
+            "Returns run from 3 November to 8 November and may continue through 8 January.",
+            "Voting runs from 28 to 19 November.",
+            "The review runs March to May 2027.",
+            "The review runs between March and May 2027.",
+            "The review runs from March 2027 to May.",
+            "The hearings run from 3 March to April.",
+            "Hearings were held on 3 and 5–7 November.",
+            "Hearings were held on 3–5 and 7 November.",
+            "Hearings were held November 3–5 and 7.",
+            "Hearings ran from 3 to 5 November and 7.",
+            "Hearings ran from 3 to November 5–7.",
+            "Hearings were held April 9 to 11 and 16 to 18.",
+            "Hearings were held April 9–11 and 16–18, 2026.",
+            "Hearings were held on 9 to 11 and 16 to 18 April.",
+            "Voting runs from March to 5 April 2027.",
+            "Talks were held on 3 November, after talks in March 2025.",
+            "Talks run from 3 November 2025 to 8 November 2024.",
+        ] {
+            assertTrue(items([before, sentence]).isEmpty, "No row from: \(sentence)")
+        }
+        typealias Stated = OverviewTimelineBuilder.StatedDate
+        assertEqual(
+            OverviewTimelineBuilder.statedExpression(in: "Voting runs from 28 to 19 November."), nil, "Reversed")
+        assertEqual(
+            OverviewTimelineBuilder.statedExpression(in: "Voting runs 19–28 November 2026."),
+            .span(
+                .init(
+                    dates: [Stated(year: 2026, month: 11, day: 19), Stated(year: 2026, month: 11, day: 28)],
+                    isRange: true)), "A shared year belongs to both ends")
+        assertEqual(
+            OverviewTimelineBuilder.singleStatedDate(in: "Voting runs 19–28 November."), nil,
+            "A range's last day is not a single date")
+        assertEqual(
+            OverviewTimelineBuilder.singleStatedDate(in: "It cost 1,000 and 5 March was the day."),
+            Stated(year: nil, month: 3, day: 5), "A thousands separator is no list")
+
+        // One order of day, month and year for single dates and ranges of one timeline, whatever calendar the
+        // reader's locale names: the interval formatter ignores an ISO 8601 calendar setting, the date formatter
+        // does not.
+        func plain(_ text: String) -> String {
+            text.replacingOccurrences(of: "\u{2009}", with: " ").replacingOccurrences(of: "\u{202F}", with: " ")
+        }
+        let ninth = Stated(year: 2026, month: 11, day: 9)
+        let thirteenth = Stated(year: 2026, month: 11, day: 13)
+        for (identifier, single, span, list) in [
+            ("en_PL@calendar=iso8601", "9 Nov 2026", "9 – 13 Nov 2026", "9 and 13 Nov 2026"),
+            ("en_PL", "9 Nov 2026", "9 – 13 Nov 2026", "9 and 13 Nov 2026"),
+            ("en_US", "Nov 9, 2026", "Nov 9 – 13, 2026", "Nov 9 and 13, 2026"),
+            ("en_US@calendar=iso8601", "Nov 9, 2026", "Nov 9 – 13, 2026", "Nov 9 and 13, 2026"),
+        ] {
+            let locale = Locale(identifier: identifier)
+            assertEqual(
+                plain(OverviewTimelineBuilder.dateText(ninth, locale: locale)), single, "Single date in \(identifier)")
+            assertEqual(
+                plain(
+                    OverviewTimelineBuilder.spanText(.init(dates: [ninth, thirteenth], isRange: true), locale: locale)),
+                span, "Range in \(identifier)")
+            assertEqual(
+                plain(
+                    OverviewTimelineBuilder.spanText(.init(dates: [ninth, thirteenth], isRange: false), locale: locale)),
+                list, "List in \(identifier)")
+        }
+
+        // Briefing: a range or list is never a turning point and never starts "day N".
+        let rows = items([before, "Talks were held on 3 and 5 November.", "Voting ran from October 27 to November 1."])
+        guard rows.count == 3 else { return assertTrue(false, "Three rows") }
+        for row in rows where row.orderingEndDateMayHoldInferredYear != nil {
+            assertEqual(BriefingTimelineData.orderingDate(of: row), nil, "Briefing has no date for \(row.dateText)")
+        }
+        let rangePrecisionOnly = OverviewTimelineItem(
+            id: "range-only", dateText: "19–28 Nov", dateKind: .stated, datePrecision: .range,
+            summary: "The talks are scheduled for 19–28 November.", orderingDateMayHoldInferredYear: day(2026, 11, 19))
+        assertEqual(
+            BriefingTimelineData.orderingDate(of: rangePrecisionOnly), nil,
+            "Briefing excludes .range precision even without an end date")
+        let now = day(2026, 11, 8)
+        let merged = BriefingTimelineData.merged([("e", rows)], now: now)
+        assertEqual(merged.map(\.dateText).count, 1, "Briefing keeps only the single date")
+        assertEqual(
+            BriefingTimelineData.items(rows, now: now), nil, "A single date and two ranges are no Briefing thread")
+
+        // The eight-item cut keeps a timeline that only two lower-ranked rows establish: eight ranges over one whole
+        // year overlap each other and both sessions, so no single swap among the first eight is enough.
+        let yearLong = (1...8).map { "Programme \($0) runs from 1 January 2027 to 31 December 2027." }
+        let sessions = [
+            "The first session runs from 1 to 10 February 2027.", "The second session runs from 1 to 10 July 2027.",
+        ]
+        assertEqual(items([yearLong[0]] + sessions).count, 3, "A year-long range and two sessions inside it are rows")
+        let cut = items(yearLong + sessions)
+        assertEqual(cut.count, OverviewTimelineBuilder.maximumItems, "The cut keeps eight rows")
+        assertEqual(
+            cut.filter { sessions.contains($0.summary) }.count, 2,
+            "The cut keeps the two rows that make the timeline, though each ranks below the first eight")
+        assertEqual(
+            cut.filter { yearLong.prefix(6).contains($0.summary) }.count, 6, "The other six rows are the top-ranked")
+        let stored = """
+            {"id":"t","dateText":"3 Nov","dateKind":"stated","datePrecision":"day","summary":"x","citationIDs":[],
+             "isFuturePlan":false,"orderingDateMayHoldInferredYear":\(day(2026, 11, 3).timeIntervalSinceReferenceDate)}
+            """
+        let decoded = try JSONDecoder().decode(OverviewTimelineItem.self, from: Data(stored.utf8))
+        assertEqual(decoded.orderingEndDateMayHoldInferredYear, nil, "A stored item without the field is a single date")
+        assertEqual(EventOverviewDocument.currentAnalysisVersion, 17, "Cached overviews rebuild for ranges")
     }
 
     /// #1241: a date the source states is shown as an event date, never as "Reported"; only a publication date is.

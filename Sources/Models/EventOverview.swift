@@ -180,9 +180,12 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     }
 
     /// How precise a stated calendar date is; nil for anchors, publication dates and items stored before it existed.
+    /// A range or list of dates the source states in one phrase is one span (#1249): its `dateText` keeps each end at
+    /// the precision the source gives.
     public enum DatePrecision: String, Codable, Hashable, Sendable {
         case day
         case month
+        case range
     }
 
     public let id: String
@@ -199,6 +202,11 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
     /// states without a year holds an inferred year here, so this value must never be formatted for display;
     /// `dateText` is what is shown.
     public let orderingDateMayHoldInferredYear: Date?
+    /// Ordering only (#1249): the last ordering date of a range or list the source states in one phrase
+    /// ("19 to 28 November", "on 3 and 5 November"), whose span runs from `orderingDateMayHoldInferredYear` to this
+    /// date. nil for a single date, so items stored before it existed decode as single dates. It may hold an inferred
+    /// year and is never displayed.
+    public let orderingEndDateMayHoldInferredYear: Date?
 
     public init(
         id: String = UUID().uuidString,
@@ -210,7 +218,8 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         isFuturePlan: Bool = false,
         eventDate: Date? = nil,
         publicationDate: Date? = nil,
-        orderingDateMayHoldInferredYear: Date? = nil
+        orderingDateMayHoldInferredYear: Date? = nil,
+        orderingEndDateMayHoldInferredYear: Date? = nil
     ) {
         self.id = id
         self.dateText = dateText
@@ -222,11 +231,12 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         self.eventDate = eventDate
         self.publicationDate = publicationDate
         self.orderingDateMayHoldInferredYear = orderingDateMayHoldInferredYear
+        self.orderingEndDateMayHoldInferredYear = orderingEndDateMayHoldInferredYear
     }
 
     enum CodingKeys: String, CodingKey {
         case id, dateText, dateKind, datePrecision, summary, citationIDs, isFuturePlan, eventDate, publicationDate
-        case orderingDateMayHoldInferredYear
+        case orderingDateMayHoldInferredYear, orderingEndDateMayHoldInferredYear
     }
 
     public init(from decoder: Decoder) throws {
@@ -259,6 +269,8 @@ public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
         publicationDate = try container.decodeIfPresent(Date.self, forKey: .publicationDate)
         orderingDateMayHoldInferredYear = try container.decodeIfPresent(
             Date.self, forKey: .orderingDateMayHoldInferredYear)
+        orderingEndDateMayHoldInferredYear = try container.decodeIfPresent(
+            Date.self, forKey: .orderingEndDateMayHoldInferredYear)
     }
 }
 
@@ -544,8 +556,8 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// 11: conditional Industry Impact section (#670). 13: no feed footer or heading Highlights, one first-pass Highlight
     /// per publisher (#1251). 14: no cut-off feed description tail as a Highlight (#1253). 15: no page title block,
     /// the title alone or with its dateline, as a Highlight (#1266). 16: timeline items carry their date kind and
-    /// come from the stated-date builder only (#1241).
-    public static let currentAnalysisVersion = 16
+    /// come from the stated-date builder only (#1241). 17: one row for a stated date range or list (#1249).
+    public static let currentAnalysisVersion = 17
 
     public let id: String
     public let eventID: String

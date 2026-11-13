@@ -477,7 +477,13 @@ struct EventOverviewReaderView: View {
     ) -> String {
         var parts: [String] = []
         let date = timelineDateDisplay(for: item)
-        if let primary = date.primary { parts.append(primary) }
+        if let primary = date.primary {
+            // A range is spoken as one: "Feb 8 to 28, 2027", not a dash between two dates (#1249).
+            parts.append(
+                item.datePrecision == .range
+                    ? primary.replacingOccurrences(of: #"\s*[–—]\s*"#, with: " to ", options: .regularExpression)
+                    : primary)
+        }
         if item.isFuturePlan {
             parts.append("Planned")
         }
