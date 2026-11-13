@@ -1495,6 +1495,40 @@ extension NewsTests {
         assertEqual(chainReport.merged, 1, "New vocabulary cannot bridge a cross-pair without shared specific evidence")
         await chain.close()
 
+        // #1302: the bridge is the smallest fragment, so it merges after the middle one was skipped. The middle one
+        // is reachable only through the bridge's terms and must still be merged in the same pass.
+        let bridged = DatabaseEngine(path: ":memory:")
+        try await bridged.open()
+        let bridgeTitles = [
+            "Growers in Meridian harvest apples",
+            "Meridian orchard picking season begins",
+            "Growers in Meridian harvest apples as orchard picking season begins",
+        ]
+        var bridgeGroups: [[FeedArticle]] = []
+        for (group, count) in [6, 4, 2].enumerated() {
+            let members = (0..<count).map { index in
+                article(
+                    "bridge-\(group)-\(index)", bridgeTitles[group], bridgeTitles[group],
+                    hoursAgo: 1, source: "Publisher \(group)-\(index)")
+            }
+            bridgeGroups.append(members)
+            try await bridged.upsertArticles(members)
+            _ = try await bridged.createEvent(memberArticleIDs: members.map(\.id), at: now)
+        }
+        let largeAndMiddle = terms(bridgeGroups[0][0]).intersection(terms(bridgeGroups[1][0])).count
+        assertTrue(largeAndMiddle < 2, "The middle fragment is skipped at first: \(largeAndMiddle) shared terms")
+        assertTrue(
+            terms(bridgeGroups[0][0]).union(terms(bridgeGroups[2][0])).intersection(terms(bridgeGroups[1][0])).count
+                >= 2,
+            "With the bridge's terms the middle fragment is reachable")
+        let bridgeReport = try await EventClusterer.run(in: bridged, matchPolicy: chainPolicy, now: now, limit: 0)
+        assertEqual(
+            bridgeReport.merged, 2, "A fragment that becomes reachable through a later merge joins in the same pass")
+        assertEqual(
+            try await bridged.eventID(forArticle: "bridge-1-0"), try await bridged.eventID(forArticle: "bridge-0-0"),
+            "The middle fragment ends in the survivor's event")
+        await bridged.close()
+
         // A local exclusion between fragments always wins.
         let excluded = try await library()
         if let event = try await excluded.eventID(forArticle: "m3") {

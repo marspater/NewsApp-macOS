@@ -1036,15 +1036,23 @@ enum EventClusterer {
                             id: survivor.id, version: merged.membershipVersion,
                             members: survivor.members + candidate.members)
                         // The merged members' terms can reach a third fragment the survivor's alone did not.
+                        var reached = Set<String>()
                         for term in candidateTerms.subtracting(survivorTerms) {
                             for id in eventsByTerm[term] ?? [] where id != survivor.id {
                                 sharedCounts[id, default: 0] += 1
+                                if sharedCounts[id] == 2 { reached.insert(id) }
                             }
                         }
                         survivorTerms.formUnion(candidateTerms)
                         terms[survivor.id] = survivorTerms
                         events[index] = survivor
                         events.remove(at: other)
+                        // A fragment already passed over that these terms have just reached is looked at again
+                        // in this pass (#1302): later it would only look ahead and never meet this survivor. Each
+                        // merge removes one event, so the scan still ends.
+                        if let earlier = events[(index + 1)..<other].firstIndex(where: { reached.contains($0.id) }) {
+                            other = earlier
+                        }
                     } catch is DatabaseEngine.EventChanged {
                         // Membership changed underneath; the next pass decides again. Any other error ends the pass.
                         other += 1
