@@ -209,17 +209,16 @@ final class AppSettings: ObservableObject {
         }
         defaults.set(Self.retiredFeedsVersion, forKey: Self.retiredFeedsVersionKey)
 
-        if let savedSections = defaults.stringArray(forKey: Self.userSectionsKey) {
-            self.userSections = savedSections
-        } else {
-            self.userSections = Self.defaultSections
-        }
+        let sections = defaults.stringArray(forKey: Self.userSectionsKey) ?? Self.defaultSections
+        self.userSections = sections
         // Keep only folders still in the sidebar and feeds still subscribed after migration/retirement.
+        // Use locals during phase-one initialization; no closure may capture a partially initialized self.
         let savedFolders = defaults.dictionary(forKey: Self.opmlFolderFeedsKey) as? [String: [String]] ?? [:]
+        let subscriptions = defaults.stringArray(forKey: Self.feedURLsKey) ?? Self.defaultFeeds
         let subscribed = Dictionary(
-            self.feedURLs.map { (Self.feedKey($0), $0) }, uniquingKeysWith: { first, _ in first })
+            subscriptions.map { (Self.feedKey($0), $0) }, uniquingKeysWith: { first, _ in first })
         self.opmlFolderFeeds = savedFolders.reduce(into: [String: [String]]()) { result, pair in
-            guard self.userSections.contains(pair.key) else { return }
+            guard sections.contains(pair.key) else { return }
             var seen = Set<String>()
             result[pair.key] = pair.value.compactMap { raw in
                 let migrated = Self.movedFeeds.first(where: { $0.from == raw })?.to ?? raw
