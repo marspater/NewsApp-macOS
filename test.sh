@@ -33,6 +33,7 @@ if [[ $# -eq 0 && "$MODE" == "full" ]]; then
     python3 script/evaluation/overview_review.py
     python3 script/evaluation/importance_review.py
     python3 script/evaluation/relation_review.py
+    python3 script/evaluation/lead_review.py
     python3 script/evaluation/catalog_review.py
     python3 script/evaluation/fit_pair_head.py
     python3 script/evaluation/calibrate_tension.py

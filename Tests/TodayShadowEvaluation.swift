@@ -20,6 +20,8 @@ import SQLite3
 /// keeps any headline/title spot-check sheets strictly in private temporary files outside the repository.
 /// `NEWS_TODAY_NOW` pins the clock (epoch seconds), `NEWS_TODAY_WINDOW_HOURS` the candidate window,
 /// `NEWS_TODAY_LABELS` names the private label file and `NEWS_TODAY_FEEDS` the snapshot's subscription list.
+/// `NEWS_TODAY_POOL=page` assigns over the pool the app assigns from, the listed page, instead of the whole window;
+/// `NEWS_TODAY_PAGES` is how many pages of it the reader has loaded (default 1).
 enum TodayShadowEvaluation {
     /// Z5 (#937): what the Today page costs to lay out. The list shows 200 stories a page, so the newest 200 of the
     /// window are loaded and assigned three times and the medians printed, with no story text.
@@ -60,7 +62,34 @@ enum TodayShadowEvaluation {
         var expectedLane: String?
     }
 
+    /// The stories a run assigns over (#934, 12 November 2026).
+    struct PoolReport: Encodable {
+        /// `window` (every story of the candidate window) or `page` (the app's listed page).
+        let name: String
+        /// Pages asked for and pages the library had; zero for the window.
+        let pagesRequested: Int
+        let pagesLoaded: Int
+        let articles: Int
+        let entries: Int
+        /// From the newest to the oldest story of the pool.
+        let spanHours: Double
+        /// Stories of the pool older than the candidate window, and those dated after the clock.
+        let articlesOlderThanWindow: Int
+        let articlesAfterClock: Int
+        /// The Lead as assigned: slides, those with a story label, and those the label calls Lead-worthy.
+        let leadSlides: Int
+        let leadSlidesLabelled: Int
+        let leadSlidesLabelledImportant: Int
+        /// Labelled stories whose own id is not a candidate here while their event is, under another card id.
+        let labelledStoriesUnderAnotherCard: Int
+        /// The photo rule, which the other figures leave out: stories with no photo in any report of their event
+        /// (a photo that fails to load cannot be known offline), and how many Lead slides the rule replaces.
+        let imagelessEntries: Int
+        let leadSlidesReplacedByPhotoRule: Int
+    }
+
     struct ShadowReport: Encodable {
+        let pool: PoolReport
         let nowTimestamp: Double
         let candidateWindowHours: Double
         /// `NEWS_TODAY_FEEDS` when the run was given the subscription list, else `feeds-table`.
@@ -221,9 +250,13 @@ enum TodayShadowEvaluation {
 
         let windowHours = env["NEWS_TODAY_WINDOW_HOURS"].flatMap(Double.init) ?? 72.0
         let windowStart = now.addingTimeInterval(-windowHours * 3600)
-        let windowArticles = allArticles.filter {
+        let everyWindowArticle = allArticles.filter {
             $0.orderDate >= windowStart && $0.orderDate <= now.addingTimeInterval(300)
         }
+        let pagesRequested =
+            env["NEWS_TODAY_POOL"] == "page" ? max(1, env["NEWS_TODAY_PAGES"].flatMap(Int.init) ?? 1) : 0
+        let listed = try await listedPages(pagesRequested, database: db)
+        let windowArticles = pagesRequested > 0 ? listed.articles : everyWindowArticle
         let summaries = try await db.eventFeedSummaries(forArticles: windowArticles.map(\.id))
         let entries = EventFeedGrouping.entries(for: windowArticles, events: summaries, mode: .events)
 
@@ -351,21 +384,8 @@ enum TodayShadowEvaluation {
         let comparisonPool =
             labels?.stories.map { stories in newestFirst.filter { stories[$0.id] != nil } }
             ?? Array(newestFirst.prefix(200))
-        let comparisonRawEntries = comparisonPool.map(\.entry)
-
-        let briefingRanking = await BriefingRanking.load(entries: comparisonRawEntries, database: db)
-        let byPublisherCount = comparisonPool.sorted {
-            if $0.publisherCount != $1.publisherCount { return $0.publisherCount > $1.publisherCount }
-            return $0.sortKey > $1.sortKey
-        }
-        let briefingOrderIDs = briefingRanking.order(comparisonRawEntries).map(\.id)
-        let assignmentByID = Dictionary(uniqueKeysWithValues: comparisonPool.map { ($0.id, $0) })
-        let byBriefingSignals = briefingOrderIDs.compactMap { assignmentByID[$0] }
-        let byZ2Combined = comparisonPool.sorted { a, b in
-            if abs(a.score - b.score) > 1e-9 { return a.score > b.score }
-            if a.originalReportCount != b.originalReportCount { return a.originalReportCount > b.originalReportCount }
-            return a.sortKey > b.sortKey
-        }
+        let ranked = await leadRankings(of: comparisonPool, database: db)
+        let (byPublisherCount, byBriefingSignals, byZ2Combined) = (ranked.publisherCount, ranked.briefing, ranked.z2)
 
         func top5Metrics(_ ranked: [TodayStoryAssignment]) -> (ids: [String], meanOriginals: Double, wireOnly: Int) {
             let top5 = Array(ranked.prefix(5))
@@ -411,7 +431,44 @@ enum TodayShadowEvaluation {
                 shippedPlan: plan, labels: labels, allArticles: allArticles),
             privateOutput: outputDirectory)
 
+        let storyLabels = labels?.stories ?? [:]
+        let labelledLead = leadEntries.compactMap { storyLabels[$0.id]?.leadImportant }
+        let cardByEvent = Dictionary(
+            assignedList.compactMap { item -> (String, String)? in
+                guard case .event(let summary, _, _) = item.entry else { return nil }
+                return (summary.eventID, item.id)
+            }, uniquingKeysWith: { first, _ in first })
+        let unplacedLabels = storyLabels.keys.filter { !assignedIDs.contains($0) }.sorted()
+        var eventOfLabel: [String: String] = [:]
+        for summary in try await db.eventFeedSummaries(forArticles: unplacedLabels) {
+            for member in summary.members { eventOfLabel[member.articleID] = summary.eventID }
+        }
+        let underAnotherCard = unplacedLabels.filter { eventOfLabel[$0].map { cardByEvent[$0] != nil } == true }.count
+        let imageless = try await imagelessEntryIDs(entries, database: db)
+        var photoContext = context
+        photoContext.imagelessEntryIDs = imageless
+        let photoLead = Set(
+            TodayEditionAssigner.assign(entries: entries, context: photoContext).entries(for: .theLead).map(\.id))
+        let dates = windowArticles.map(\.orderDate).filter { $0 != DateParser.unknownDate }
+        let pool = PoolReport(
+            name: pagesRequested > 0 ? "page" : "window",
+            pagesRequested: pagesRequested,
+            pagesLoaded: listed.pages,
+            articles: windowArticles.count,
+            entries: entries.count,
+            spanHours: ((dates.max() ?? now).timeIntervalSince(dates.min() ?? now)) / 3600,
+            articlesOlderThanWindow: windowArticles.filter { $0.orderDate < windowStart }.count,
+            articlesAfterClock: windowArticles.filter { $0.orderDate > now.addingTimeInterval(300) }.count,
+            leadSlides: leadEntries.count,
+            leadSlidesLabelled: labelledLead.count,
+            leadSlidesLabelledImportant: labelledLead.filter { $0 }.count,
+            labelledStoriesUnderAnotherCard: underAnotherCard,
+            imagelessEntries: imageless.intersection(assignedIDs).count,
+            leadSlidesReplacedByPhotoRule: Set(leadEntries.map(\.id)).subtracting(photoLead).count
+        )
+
         let report = ShadowReport(
+            pool: pool,
             nowTimestamp: now.timeIntervalSince1970,
             candidateWindowHours: windowHours,
             subscriptionSource: subscriptions.source,
@@ -530,8 +587,49 @@ enum TodayShadowEvaluation {
             try encoder.encode(Array(eventItems.prefix(50))),
             to: outputDirectory.appendingPathComponent("in-motion-candidates-private.json"), replacing: true)
 
+        try await writeLeadRankings(
+            of: assignedList, pool: pool.name, now: now, database: db, privateOutput: outputDirectory)
+
         print("TODAY_SHADOW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
+    }
+
+    /// The pool the app assigns from: the pages `ArticleListView.reload` lists for Today, by the same engine query
+    /// and arguments as its `fetchPage` (section "Today", 201 rows after the cursor, the first 200 kept). That view
+    /// code is private to the view, so the calls are mirrored here and not shared. Settings a library copy does not
+    /// hold are at their defaults: read stories stay listed, nothing is muted, no feed is collection-only.
+    private static func listedPages(
+        _ pages: Int, database: DatabaseEngine
+    ) async throws -> (articles: [FeedArticle], pages: Int) {
+        var listed: [FeedArticle] = []
+        var loaded = 0
+        var cursor: ArticleQueryCursor?
+        while loaded < pages {
+            let fetched = try await database.fetchArticles(
+                section: "Today", isRead: nil, isSaved: nil, limit: 201, options: ArticleFetchOptions(after: cursor))
+            listed += fetched.prefix(200)
+            loaded += 1
+            cursor = listed.last.map(ArticleQueryCursor.init)
+            if fetched.count <= 200 { break }
+        }
+        return (listed, loaded)
+    }
+
+    /// Stories with no photo to show, as `ArticleStore.todayEdition` finds them: no usable photo on a listed
+    /// report, and none on any report of the event. That method reads the events of the 60 newest such stories;
+    /// here every one is read.
+    private static func imagelessEntryIDs(_ entries: [FeedEntry], database: DatabaseEngine) async throws -> Set<String>
+    {
+        var imageless = Set<String>()
+        for entry in entries where entry.cardImageURL == nil {
+            if case .event(let summary, _, _) = entry {
+                let members = try await database.fetchArticles(
+                    limit: nil, options: ArticleFetchOptions(eventID: summary.eventID, wholeStory: true))
+                if FeedArticle.bestCardImage(in: members) != nil { continue }
+            }
+            imageless.insert(entry.id)
+        }
+        return imageless
     }
 
     /// A consistent snapshot of the copied library, its `-wal` included, taken through a read-only connection as

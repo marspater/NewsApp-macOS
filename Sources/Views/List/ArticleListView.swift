@@ -228,6 +228,8 @@ struct ArticleListView: View {
     @State private var columnSize = CGSize(
         width: AppLayout.mainWindowMinimumWidth, height: AppLayout.mainWindowMinimumHeight)
     @State private var todayPrefetch = TodayLanePrefetch()
+    /// The latest store of the edition for the next launch (#937).
+    @State private var todayStoreTask: Task<Void, Never>?
 
     private var todayFocusMap: TodayFocusMap? {
         isTodayEdition ? todayEdition?.focusMap(latestColumns: gridLayout ? todayLayout.latestColumns : 1) : nil
@@ -239,7 +241,10 @@ struct ArticleListView: View {
     /// updates button instead of reshuffling the list. A refresh the reader started is the exception while the list
     /// is showing: they asked for the new stories. So is Today showing only earlier days' stories, such as the cache
     /// at launch the next morning.
-    private var isHoldingList: Bool {
+    private var isHoldingList: Bool { isHoldingList(groupingAtFetch: false) }
+
+    /// `groupingAtFetch`: the new stories were still being grouped when the page about to be received was read.
+    private func isHoldingList(groupingAtFetch: Bool) -> Bool {
         guard !appliesNextUpdate else { return false }
         if !articlePath.isEmpty { return true }
         // The new day's stories take the page once they are grouped, and only while the reader has not scrolled or
@@ -248,7 +253,7 @@ struct ArticleListView: View {
         if !isSearching, (selectedTopic ?? "Today") == "Today",
             let holds = newDay.holds(
                 showsOnlyEarlierDays: buffer.showsOnlyEarlierDays(), isGrouping: feedManager.isGroupingNewStories,
-                isTouched: hasScrolledList || focusedArticleID != nil)
+                wasGroupingAtFetch: groupingAtFetch, isTouched: hasScrolledList || focusedArticleID != nil)
         {
             return holds
         }
@@ -324,7 +329,12 @@ struct ArticleListView: View {
 
     private var selectedStory: FeedArticle? {
         guard articlePath.isEmpty, let focusedArticleID else { return nil }
-        return filteredArticles.first { $0.id == focusedArticleID }
+        return displayedEntry(id: focusedArticleID)?.representative
+    }
+
+    private func displayedEntry(id: String) -> FeedEntry? {
+        if isTodayEdition { return todayEdition?.entry(id: id) }
+        return entries.first { $0.id == id } ?? filteredArticles.first { $0.id == id }.map(FeedEntry.article)
     }
 
     private var knowledgeExportActions: KnowledgeExportActions? {
@@ -543,7 +553,7 @@ struct ArticleListView: View {
 
     private func handleToggleSave() {
         guard articlePath.isEmpty, let id = focusedArticleID,
-            let art = filteredArticles.first(where: { $0.id == id })
+            let art = displayedEntry(id: id)?.representative
         else { return }
         if savedStories.isSaved(art) {
             savedStories.remove(art)
@@ -554,7 +564,7 @@ struct ArticleListView: View {
 
     private func handleOpenInBrowser() {
         guard articlePath.isEmpty, let id = focusedArticleID,
-            let art = filteredArticles.first(where: { $0.id == id }),
+            let art = displayedEntry(id: id)?.representative,
             let url = WebLink.url(art.link)
         else { return }
         NSWorkspace.shared.open(url)
@@ -681,6 +691,9 @@ struct ArticleListView: View {
         queryError = nil
         isLoadingPage = true
         defer { if queryRunID == runID { isLoadingPage = false } }
+        // Read before the page: a page read while the new stories were being grouped is one report a story, also when
+        // the grouping has ended by the time it is received (#937).
+        let groupingAtFetch = feedManager.isGroupingNewStories
         do {
             let muting = listMuting
             // One vector for the page and its counts: another window's search must not change what they count (#985).
@@ -724,8 +737,9 @@ struct ArticleListView: View {
             } else {
                 let snapshot = FeedSnapshot(articles: page, events: events)
                 newDay.noteRefreshedPage(
-                    showsOnlyEarlierDays: buffer.showsOnlyEarlierDays(), isGrouping: feedManager.isGroupingNewStories)
-                let holding = isHoldingList
+                    showsOnlyEarlierDays: buffer.showsOnlyEarlierDays(), isGrouping: feedManager.isGroupingNewStories,
+                    wasGroupingAtFetch: groupingAtFetch)
+                let holding = isHoldingList(groupingAtFetch: groupingAtFetch)
                 appliesNextUpdate = false
                 let result = buffer.receive(snapshot, holding: holding, mode: groupingMode, hasMore: morePages)
                 switch result {
@@ -736,7 +750,8 @@ struct ArticleListView: View {
                     cursor = page.last.map(ArticleQueryCursor.init)
                     hasMoreResults = morePages
                 case .refreshedInPlace:
-                    break
+                    // The grouping has ended and moved nothing on the page: there is no grouped page to wait for.
+                    if !groupingAtFetch, !feedManager.isGroupingNewStories { newDay.reset() }
                 case .waiting:
                     pendingHasMore = morePages
                 }
@@ -1305,17 +1320,46 @@ struct ArticleListView: View {
         .task(
             id: "\(groupedEntries.revision):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
                 + "\(todayGeneration):\(queryIdentity):\(appSettings.feedURLs.hashValue)"
+                // With the window pool the lanes follow the window's stories too.
+                + (Self.usesTodayWindowPool ? ":\(articleStore.revision)" : "")
         ) {
             await reloadTodayEdition(listed, proxy: proxy)
         }
         .allowsWindowActivationEvents(true)
     }
 
+    /// The window pool (#934, gate 6 of #932): the lanes are assigned over the stories of the last 72 hours, as the
+    /// specification and the evaluation assume, while The Latest stays the paged list. A stored setting without
+    /// Settings UI (`defaults write <bundle id> today_window_pool -bool YES`, or `-today_window_pool YES` at launch),
+    /// off by default: turning it on is my decision after the Z5 first-card work.
+    static var usesTodayWindowPool: Bool { UserDefaults.standard.bool(forKey: "today_window_pool") }
+
+    /// With the window pool on: the window's stories, grouped, with the listed page's entry for every event the page
+    /// lists (so one story never has two ids), then the listed stories outside the window. Nil when it is off or the
+    /// window cannot be read, so the lanes keep to the listed page.
+    private func todayWindowPool(_ listed: [FeedEntry]) async -> [FeedEntry]? {
+        guard Self.usesTodayWindowPool else { return nil }
+        let filters = listFilters
+        let now = Date()
+        guard
+            let articles = try? await articleStore.database.fetchArticles(
+                section: "Today", isRead: filters.read, isSaved: filters.saved, limit: nil,
+                options: ArticleFetchOptions(
+                    publicationWindow: now.addingTimeInterval(-72 * 3600)...now, muting: listMuting)),
+            let events = try? await articleStore.eventFeedSummaries(for: articles.map(\.id))
+        else { return nil }
+        NotificationService.shared.prepareImportance(of: articles)
+        return TodayEdition.windowPool(
+            FeedSnapshot(articles: articles, events: events).entries(.events), listed: listed)
+    }
+
     /// Shows the edition kept at the last launch, when it still describes these stories. False when the task was
     /// cancelled: the attempt is not counted, so the task that replaces it tries again.
-    private func restoreStoredTodayEdition(_ listed: [FeedEntry], reader: TodayReader) async -> Bool {
+    private func restoreStoredTodayEdition(_ listed: [FeedEntry], pool: [FeedEntry]?, reader: TodayReader) async
+        -> Bool
+    {
         let result = await articleStore.restoredTodayEdition(
-            entries: listed, reader: reader, generation: todayGeneration)
+            entries: listed, pool: pool, reader: reader, generation: todayGeneration)
         guard !Task.isCancelled else { return false }
         hasTriedStoredEdition = true
         switch result {
@@ -1332,41 +1376,60 @@ struct ArticleListView: View {
 
     /// Lays the listed stories out as the Today edition and moves keyboard focus with it.
     private func reloadTodayEdition(_ listed: [FeedEntry], proxy: ScrollViewProxy) async {
+        // Debounce before reading the window so revision bursts do not each fetch and score it.
+        if let current = todayEdition, !current.isRestored {
+            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
+        }
         let resetAt = readingInterestsResetAt > 0 ? Date(timeIntervalSince1970: readingInterestsResetAt) : nil
         let reader = TodayReader(
             failedImageURLs: DecodedImageCache.failedURLs, subscribedFeedURLs: Set(appSettings.feedURLs),
             starredFeedURLs: appSettings.starredFeedURLs, interestsResetAt: resetAt)
+        let pool = await todayWindowPool(listed)
+        guard !Task.isCancelled else { return }
         // The first page of a launch is laid out at once from the edition kept at the last one, when it still
         // describes these stories; the fresh edition is worked out behind it (#937).
         if todayEdition == nil, !hasTriedStoredEdition, !listed.isEmpty {
-            guard await restoreStoredTodayEdition(listed, reader: reader) else { return }
+            guard await restoreStoredTodayEdition(listed, pool: pool, reader: reader) else { return }
         }
         let previous = todayEdition
         let showsRestored = previous?.isRestored == true
         // Bursts of store revisions (clustering, overviews) would lay the page out once each; they are debounced
         // as in the list. The first edition loads at once, and so does the fresh one behind a restored edition.
-        if previous != nil, !showsRestored {
-            do { try await Task.sleep(for: .milliseconds(180)) } catch { return }
-        }
         // Stories stay in their lanes while the list is held; an applied update, a refresh the reader asked
         // for or another day's stories lay the edition out afresh. A restored edition is never the one kept.
         // While another day's page waits for its grouping, the edition on screen is not laid out again from the
         // earlier day's stories: the next edition is the new day's.
-        let keeps =
-            !showsRestored && (isHoldingList || newDay.isWaiting) && previous?.generation == todayGeneration
+        let keeps = TodayEdition.keepsLanes(
+            of: previous, isHolding: isHoldingList || newDay.isWaiting, generation: todayGeneration)
         NewsSignposts.launchMilestone("today_edition_requested")
-        var edition = await articleStore.todayEdition(
-            entries: listed, reader: reader, keeping: keeps ? previous : nil, generation: todayGeneration)
+        let edition = await articleStore.todayEdition(
+            entries: listed, pool: pool, reader: reader, keeping: keeps ? previous : nil, generation: todayGeneration)
         guard !Task.isCancelled else { return }
         // A complete edition is kept for the next launch, unless its stories are still being grouped.
         if edition.isAssigned, !feedManager.holdsUngroupedStories {
-            Task { await articleStore.storeTodayEdition(edition, reader: reader) }
+            todayStoreTask = articleStore.storeTodayEdition(edition, reader: reader, after: todayStoreTask)
         }
         if showsRestored, let previous {
             // A failed assignment lays every story out in The Latest; the restored page stays until one succeeds.
-            guard edition.isAssigned, settleFreshEdition(&edition, behind: previous) else { return }
+            guard edition.isAssigned, settleFreshEdition(edition, behind: previous, listed: listed, pool: pool) else {
+                return
+            }
         }
         await installTodayEdition(edition, replacing: previous, keeps: keeps, proxy: proxy)
+        if !keeps, await pageAwaitsGrouping(listed) { newDay.notePageAwaitsGrouping() }
+    }
+
+    /// The page is mostly stories the grouping has not processed, while a grouping is running or still to come at
+    /// launch, such as the stories of a refresh cut short by quitting. Only asked then, and only a majority counts: a
+    /// few stories the matcher left unprocessed must not make an ordinary launch page give way to a refresh (a window
+    /// pass of 12 November: 3 leftovers marked the page, and the newest 200 stories of a large refresh replaced it).
+    private func pageAwaitsGrouping(_ listed: [FeedEntry]) async -> Bool {
+        guard feedManager.isGroupingNewStories || feedManager.lastClusteringPass == nil else { return false }
+        guard let rows = try? await articleStore.database.eventMatchRows(articleIDs: listed.map(\.id)) else {
+            return false
+        }
+        return FeedUpdateBuffer.NewDayHandoff.isMostlyUngrouped(
+            unprocessed: rows.count { !$0.previouslyMatched }, of: rows.count)
     }
 
     /// Puts a laid-out edition on the page and moves keyboard focus with it.
@@ -1395,13 +1458,15 @@ struct ArticleListView: View {
 
     /// The fresh edition is ready behind the restored one on screen. False when the page in use keeps its cards as
     /// an ordinary held edition and the fresh one is offered behind the updates button.
-    private func settleFreshEdition(_ edition: inout TodayEdition, behind previous: TodayEdition) -> Bool {
+    private func settleFreshEdition(
+        _ edition: TodayEdition, behind previous: TodayEdition, listed: [FeedEntry], pool: [FeedEntry]?
+    ) -> Bool {
         let awaitsNewDay = buffer.showsOnlyEarlierDays() && feedManager.isGroupingNewStories
         let outcome = TodayRestoreOutcome.decide(
             sameArrangement: edition.hasSameArrangement(as: previous),
             isTouched: hasScrolledList || focusedArticleID != nil || !articlePath.isEmpty
                 || todayLayout.hasMovedLane || NSWorkspace.shared.isVoiceOverEnabled,
-            awaitsNewDay: awaitsNewDay)
+            awaitsNewDay: awaitsNewDay, isApplied: edition.generation != previous.generation)
         NewsSignposts.launchEvent(
             "today_fresh_edition_ready",
             detail: "outcome=\(outcome.rawValue) scrolled=\(hasScrolledList) focused=\(focusedArticleID != nil) "
@@ -1409,14 +1474,12 @@ struct ArticleListView: View {
                 + "voiceover=\(NSWorkspace.shared.isVoiceOverEnabled) new_day=\(awaitsNewDay)")
         switch outcome {
         case .held:
-            var kept = previous
-            kept.isRestored = false
-            todayEdition = kept
+            let held = previous.heldBehindUpdates(for: listed, fresh: edition, pool: pool)
+            _ = restoreTodayFocus(in: held, from: previous)
+            todayEdition = held
             todayAwaitsFreshEdition = true
             return false
-        case .confirmed:
-            edition.generation = previous.generation
-        case .swapped:
+        case .confirmed, .swapped:
             break
         }
         return true
@@ -1662,13 +1725,7 @@ struct ArticleListView: View {
                 if let id = focusedArticleID { readManager.toggleRead(id) }
                 return .handled
             } else if press.characters == "s" {
-                if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }) {
-                    if savedStories.isSaved(art) {
-                        savedStories.remove(art)
-                    } else {
-                        savedStories.save(art)
-                    }
-                }
+                handleToggleSave()
                 return .handled
             } else if press.characters == "r" {
                 refreshFeeds()
@@ -1683,11 +1740,7 @@ struct ArticleListView: View {
                 applyPendingUpdates(proxy: proxy)
                 return .handled
             } else if press.characters == "o" {
-                if let id = focusedArticleID, let art = filteredArticles.first(where: { $0.id == id }),
-                    let url = WebLink.url(art.link)
-                {
-                    NSWorkspace.shared.open(url)
-                }
+                handleOpenInBrowser()
                 return .handled
             }
             return .ignored
@@ -1715,7 +1768,7 @@ struct ArticleListView: View {
             proxy.scrollTo(lane == .theLead ? TodayEditionView<EmptyView>.leadScrollID : id)
         }
         if StoryQuickLookCoordinator.shared.isOpen,
-            let entry = entries.first(where: { $0.id == id })
+            let entry = displayedEntry(id: id)
         {
             StoryQuickLookCoordinator.shared.present(article: entry.representative, isDark: colorScheme == .dark)
         }
@@ -1749,8 +1802,8 @@ struct ArticleListView: View {
     /// is the ranked Lead and not the first listed story.
     private func keyboardEntry() -> FeedEntry? {
         let listed = entries
-        if let focused = listed.first(where: { $0.id == focusedArticleID }) { return focused }
-        if let first = todayFocusMap?.readingOrder.first { return listed.first { $0.id == first } }
+        if let id = focusedArticleID, let focused = displayedEntry(id: id) { return focused }
+        if let first = todayFocusMap?.readingOrder.first { return displayedEntry(id: first) }
         return listed.first
     }
 
