@@ -76,6 +76,16 @@ final class AppContainer: ObservableObject {
         self.themeManager = themeManager ?? ThemeManager.shared
     }
 
+    /// What a quit waits for before the process may end: every save and read mark still queued is in the library,
+    /// then the library is checkpointed. A checkpoint alone cannot keep a change that has not reached the library.
+    static func storeBeforeTermination(
+        savedStories: SavedStoriesManager, readManager: ReadManager, database: DatabaseEngine
+    ) async {
+        await savedStories.waitForStoredChanges()
+        await readManager.waitForStoredChanges()
+        await database.checkpointAndOptimize()
+    }
+
     /// The development build (`com.marspater.news.dev`) answers every subscription with the RSS document in
     /// `NEWS_FIXTURE_FEED` instead of the network, so UI tests run on fixed stories (#1070). Any other bundle, or no
     /// variable, fetches as usual.
