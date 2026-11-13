@@ -148,6 +148,31 @@ struct BriefingTimelineData: Equatable, Sendable {
         return ordered.isEmpty ? nil : Self(threads: ordered)
     }
 
+    /// The events whose stored overviews `load` reads, each once, the story with most publishers first: what Briefing
+    /// asks to have regenerated when stale (#1299). The event a story opens comes first, then its other events, newest
+    /// first.
+    @MainActor static func overviewEventIDs(_ entries: [FeedEntry], store: ArticleStore) async -> [String] {
+        var seen = Set<String>()
+        var eventIDs: [String] = []
+        let ordered = entries.enumerated().sorted {
+            $0.element.publisherCount != $1.element.publisherCount
+                ? $0.element.publisherCount > $1.element.publisherCount : $0.offset < $1.offset
+        }
+        for (_, entry) in ordered where !Task.isCancelled {
+            let story: [String]
+            switch entry {
+            case .event(let summary, _, _):
+                // Newest first inside a story: the card shows the latest turning points.
+                story =
+                    [summary.eventID] + ((try? await store.database.storyEventIDs(summary.eventID)) ?? []).reversed()
+            case .article(let article):
+                story = [try? await store.fetchEventOverview(forArticleID: article.id)?.eventID].compactMap { $0 }
+            }
+            eventIDs += story.filter { seen.insert($0).inserted }
+        }
+        return eventIDs
+    }
+
     /// Sample data for `Tests/Harness/OverviewCaptures.swift`.
     static var captureFixture: Self? {
         let now = Date(timeIntervalSince1970: 1_793_372_400)

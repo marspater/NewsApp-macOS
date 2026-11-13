@@ -1206,9 +1206,12 @@ struct ArticleListView: View {
             isWorldTensionEnabled: appSettings.isWorldTensionEnabled
         )
         // Every module's data from the library; nothing is generated at render time. Reloads when the stories,
-        // their event membership or a stored overview change.
+        // their event membership or a stored overview change. After a load, stale stored overviews of these stories
+        // are regenerated in the background, a bounded number per edition (#1299); each result reloads the board.
         .task(
-            id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision)"
+            // The edition's start is part of the identity: a new edition with the same stories has its own bound.
+            id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
+                + "\(briefing?.startedAt.timeIntervalSince1970 ?? 0)"
         ) {
             let ranking = await BriefingRanking.load(entries: listed, database: articleStore.database)
             let context = BriefingLoadContext(
@@ -1216,7 +1219,14 @@ struct ArticleListView: View {
                 briefing: briefing, now: Date(), tension: tensionModel?.state ?? WorldTensionState(),
                 readIDs: readManager.readArticles, previousEditionStartedAt: nil, ranking: ranking)
             let loaded = await BriefingBoardData.load(context, store: articleStore)
-            if !Task.isCancelled { briefingData = loaded }
+            guard !Task.isCancelled else { return }
+            briefingData = loaded
+            await OverviewGenerationCoordinator.shared.regenerateStaleOverviews(
+                eventIDs: await BriefingTimelineData.overviewEventIDs(listed, store: articleStore),
+                // The edition's start is its identity; the listed stories stand in while there is none.
+                editionKey: briefing.map { "\($0.startedAt.timeIntervalSince1970)" }
+                    ?? listed.map(\.id).joined(separator: ","),
+                store: articleStore)
         }
         .allowsWindowActivationEvents(true)
     }

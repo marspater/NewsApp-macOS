@@ -770,9 +770,8 @@ enum AnalysisGenerationTests {
         check(
             await coordinator.inFlightInputHash(for: "e1") == visibleHash,
             "and the visible generation is still the one in flight")
-        await coordinator.cancel(eventID: "e1")
         await hold.open()
-        _ = await visible.value
+        check(await visible.value != nil, "and the refused warm-up does not make the reader's result drop")
     }
 
     /// A banner is recorded in one transaction: a failed step leaves no delivery row behind (#814).
