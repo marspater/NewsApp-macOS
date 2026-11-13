@@ -192,3 +192,25 @@ private struct PublisherHealthTable: View {
         }
     }
 }
+
+#if DEBUG
+    #Preview("Publisher Health", traits: .modifier(PreviewEnvironment())) {
+        PublisherHealthContent(phase: .loaded(PreviewFixtures.publisherRows))
+            .frame(width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetIdealHeight)
+    }
+
+    #Preview("Publisher Health loading", traits: .modifier(PreviewEnvironment())) {
+        PublisherHealthContent(phase: .loading)
+            .frame(width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetIdealHeight)
+    }
+
+    #Preview("Publisher Health empty", traits: .modifier(PreviewEnvironment())) {
+        PublisherHealthContent(phase: .loaded([]))
+            .frame(width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetIdealHeight)
+    }
+
+    #Preview("Publisher Health unavailable", traits: .modifier(PreviewEnvironment())) {
+        PublisherHealthContent(phase: .failed)
+            .frame(width: AppLayout.publisherHealthSheetWidth, height: AppLayout.publisherHealthSheetIdealHeight)
+    }
+#endif

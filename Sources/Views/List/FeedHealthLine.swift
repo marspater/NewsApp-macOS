@@ -37,3 +37,14 @@ struct FeedHealthLine: View {
         .accessibilityLabel("Feed health: \(summary)")
     }
 }
+
+#if DEBUG
+    #Preview("Feed health lines", traits: .modifier(PreviewEnvironment())) {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            ForEach(PreviewFixtures.health.keys.sorted(), id: \.self) { state in
+                FeedHealthLine(health: PreviewFixtures.health[state])
+            }
+        }
+        .padding(AppLayout.pageInset)
+    }
+#endif
