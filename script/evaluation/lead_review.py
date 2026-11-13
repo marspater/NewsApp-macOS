@@ -213,7 +213,9 @@ def report(directories):
                 bool(entry['perReader']) and not any(entry['unlabelled'].values()) for entry in days
             ),
             'multiReaderMultiDay': len(days) >= 2 and all(len(entry['perReader']) >= 2 for entry in days),
-            'rankingsDiffer': any(count < DEPTHS[-1] for entry in days for count in entry['top20Overlap'].values()),
+            # The arms of #999 need not differ, and the Lead as shown never fills a top 20: no such input for them.
+            **({} if 'redundantSlots' in days[0] else {'rankingsDiffer': any(
+                count < DEPTHS[-1] for entry in days for count in entry['top20Overlap'].values())}),
         },
         'limitations': 'A label judges the headline, summary and publisher of one report of the story. Precision is '
                        'taken over the labelled stories of a ranking\'s top; an incomplete sheet narrows it. Rankings '
@@ -336,6 +338,7 @@ def self_check():
         scored = report([arms])
         reader = scored['days'][0]['perReader']['a']
         require(scored['days'][0]['rankings'] == list(ARMS) and set(scored['pooled']) == set(ARMS), 'Arms are scored')
+        require('rankingsDiffer' not in scored['decisionInputs'], 'Arms are not asked to differ')
         require([reader[arm]['at5']['count'] for arm in ARMS] == [3, 0, 1], 'Arm precision at 5')
         ideal = 1 + 1 / math.log2(3) + 0.5
         require(reader['current']['ndcgAt10'] == 1 and reader['base']['ndcgAt10'] == 0
