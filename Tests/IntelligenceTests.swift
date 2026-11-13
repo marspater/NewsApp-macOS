@@ -51,6 +51,7 @@ extension NewsTests {
                 { try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost) }
             ),
             ("testOverviewVersionFollowsEventNotStorySum", { try await testOverviewVersionFollowsEventNotStorySum() }),
+            ("testBriefingRegeneratesStaleOverviews", { try await testBriefingRegeneratesStaleOverviews() }),
             (
                 "testOverviewPassageSelectionAndTokenBudget",
                 { try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost) }
@@ -2334,6 +2335,107 @@ extension NewsTests {
         assertEqual(
             content("DJI's vlogging camera is a good deal at under $400"), "Technology",
             "A camera deal stays Technology")
+    }
+
+    /// #1299: Briefing has the stale stored overviews of its stories regenerated, a bounded number per edition, and
+    /// the Escalation timeline thread that depends on an older event of the story returns.
+    @MainActor
+    static func testBriefingRegeneratesStaleOverviews() async throws {
+        print("  - Testing Briefing regenerates stale overviews of its stories, bounded (#1299)...")
+        let db = DatabaseEngine(path: ":memory:")
+        try await db.open()
+        let published = Date(timeIntervalSince1970: 1_791_200_000)  // 6 October 2026
+        let now = published.addingTimeInterval(30 * 86_400)
+        func report(_ id: String, _ source: String, _ text: String) -> FeedArticle {
+            FeedArticle(
+                storedID: id, title: "Flood defence plan \(id)", link: "https://example.com/\(id)", guid: id,
+                description: text, pubDate: published, source: source)
+        }
+        let cap = OverviewGenerationCoordinator.maxStaleRegenerationsPerEdition
+        let extras = (0..<(cap + 2)).map {
+            report("s1299-x\($0)", "Extra \($0)", "The council reviewed district \($0) of the flood defence plan.")
+        }
+        _ = try await db.upsertArticles(
+            [
+                report("s1299-a1", "Wire", "On 15 September 2026, the ministry announced the flood defence plan."),
+                report("s1299-a2", "Daily", "On 1 October 2026, officials met the regional council about the plan."),
+                report("s1299-b1", "Wire", "The ministry said the flood defence plan is now funded."),
+                report("s1299-b2", "Daily", "Funding for the flood defence plan was confirmed by the ministry."),
+            ] + extras)
+        let older = try await db.createEvent(memberArticleIDs: ["s1299-a1", "s1299-a2"], at: published)
+        let lead = try await db.createEvent(memberArticleIDs: ["s1299-b1", "s1299-b2"], at: published)
+        var extraEvents: [String] = []
+        for extra in extras {
+            extraEvents.append(try await db.createEvent(memberArticleIDs: [extra.id], at: published).id)
+        }
+        try await db.executeSimple("UPDATE events SET story_id = '\(lead.id)' WHERE id = '\(older.id)';")
+
+        let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
+        let coordinator = OverviewGenerationCoordinator(
+            store: store, queue: EnrichmentQueue(store: store), allowsEnergy: { true })
+        func stale(_ eventID: String, _ members: [String]) -> EventOverviewDocument {
+            EventOverviewDocument(
+                eventID: eventID,
+                version: OverviewVersionContext(
+                    membershipVersion: 1, inputTextHash: "stored-before-1245",
+                    analysisVersion: EventOverviewDocument.currentAnalysisVersion - 2),
+                content: OverviewContent(title: "Story", summary: "", facts: [], citations: []),
+                provenance: OverviewProvenance(memberArticleIDs: members, kind: .fallbackExcerpts))
+        }
+        assertTrue(try await db.recordEventOverview(stale(older.id, ["s1299-a1", "s1299-a2"])), "Stale row stored")
+        for (index, eventID) in extraEvents.enumerated() {
+            assertTrue(try await db.recordEventOverview(stale(eventID, [extras[index].id])), "Stale extra stored")
+        }
+        // The lead event's overview is current: the pass must leave it alone.
+        let leadMembers = try await store.eventMemberArticles(eventID: lead.id)
+        let current = await coordinator.requestOverview(
+            eventID: lead.id, eventTitle: leadMembers[0].title, membershipVersion: 1, articles: leadMembers,
+            priority: .background, store: store)
+        assertTrue(current != nil, "The lead event has a current overview")
+
+        let summary = try await db.eventFeedSummaries(forArticles: ["s1299-b1"]).first
+        guard let summary, let representative = leadMembers.first else {
+            return assertTrue(false, "The story has a feed summary")
+        }
+        assertEqual(summary.eventID, lead.id, "The story opens its lead event")
+        let entry = FeedEntry.event(summary, representative: representative, visibleMembers: leadMembers)
+        let context = BriefingLoadContext(
+            entries: [entry], heroIDs: [], briefing: nil, now: now, tension: WorldTensionState(), readIDs: [],
+            previousEditionStartedAt: nil)
+        assertTrue(
+            await BriefingTimelineData.load(context, store: store) == nil,
+            "No Escalation timeline while the older event's overview is stale")
+
+        let candidates = await BriefingTimelineData.overviewEventIDs([entry], store: store)
+        assertEqual(Set(candidates), [lead.id, older.id], "Briefing asks for the events of the story it shows")
+        func regenerated(_ ids: [String]) async throws -> Int {
+            var count = 0
+            for id in ids
+            where try await db.fetchEventOverview(eventID: id)?.isStale(currentMembershipVersion: 1) == false {
+                count += 1
+            }
+            return count
+        }
+        let revision = store.overviewRevision
+        await coordinator.regenerateStaleOverviews(eventIDs: candidates, editionKey: "edition-1", store: store)
+        assertEqual(try await regenerated([older.id]), 1, "The stale overview of the older event is regenerated")
+        assertEqual(store.overviewRevision, revision &+ 1, "Only the stale overview is written")
+        assertEqual(
+            try await db.fetchEventOverview(eventID: lead.id)?.id, current?.id, "A current overview is left alone")
+        let thread = await BriefingTimelineData.load(context, store: store)?.threads.first
+        assertEqual(thread?.items.count, 2, "The Escalation timeline returns after one pass")
+
+        await coordinator.regenerateStaleOverviews(eventIDs: candidates, editionKey: "edition-1", store: store)
+        assertEqual(store.overviewRevision, revision &+ 1, "A second pass finds nothing to do")
+
+        // More stale overviews than the bound: one edition regenerates at most the bound, however often it reloads.
+        await coordinator.regenerateStaleOverviews(
+            eventIDs: candidates + extraEvents, editionKey: "edition-1", store: store)
+        await coordinator.regenerateStaleOverviews(
+            eventIDs: candidates + extraEvents, editionKey: "edition-1", store: store)
+        assertEqual(try await regenerated(extraEvents), cap - 1, "One edition stays within its bound")
+        await coordinator.regenerateStaleOverviews(eventIDs: extraEvents, editionKey: "edition-2", store: store)
+        assertEqual(try await regenerated(extraEvents), extraEvents.count, "The next edition continues")
     }
 
     /// #789: an overview carries its event's own membership version, not the story's summed one, so a sum that falls

@@ -423,6 +423,7 @@ struct NewsTests {
             try await testPublisherTextFingerprints()
             try await testOverviewDocumentModelBoundToInputsAndVersions(fixtureHost: fixtureHost)
             try await testOverviewVersionFollowsEventNotStorySum()
+            try await testBriefingRegeneratesStaleOverviews()
             try await testOverviewPassageSelectionAndTokenBudget(fixtureHost: fixtureHost)
             try await testPromptInjectionDefenses(fixtureHost: fixtureHost)
             try await testPassageAnchoredFactExtraction()

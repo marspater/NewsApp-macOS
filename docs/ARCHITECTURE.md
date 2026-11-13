@@ -327,7 +327,7 @@ Open a section before changing that area. Each rule is load-bearing; tests cover
 
 - Overviews are generated on request or for the visible event, on `EnrichmentQueue`, never in the refresh path. Opening an article of an event with ≥2 sources requests one.
 
-- `OverviewGenerationCoordinator` shares a run only for the same membership version, input hash and publisher inputs; changed inputs cancel it; only the latest inputs commit. `cancel(eventID:)` stops it for all callers. An overview is versioned by its own event's `membership_version` (`EventFeedSummary.eventVersion`), never the story card's summed version, which falls when a merge folds a sibling away; storage refuses a result older than the event's current version (#789).
+- `OverviewGenerationCoordinator` shares a run only for the same membership version, input hash and publisher inputs; changed inputs cancel it; only the latest inputs commit. `cancel(eventID:)` stops it for all callers. An overview is versioned by its own event's `membership_version` (`EventFeedSummary.eventVersion`), never the story card's summed version, which falls when a merge folds a sibling away; storage refuses a result older than the event's current version (#789). Briefing asks for stale stored overviews of the events of its stories to be regenerated (`regenerateStaleOverviews`, #1299): one at a time at background priority under the energy policy, at most `maxStaleRegenerationsPerEdition` events per edition; an event without a stored overview, the reader's visible event and an event that gave no result this session are left alone.
 
 - A reader clears the visible event only if it set it (`clearVisibleEvent(owner:)`); after each storage suspension it rechecks its article and input.
 
