@@ -9,6 +9,11 @@
 #       Runs the shadow harness on a copy of that day's snapshot and leaves the private key
 #       (lead-rankings-private.json), the aggregate report and the blind sheet (lead-review-private.csv) beside it.
 #       NEWS_TODAY_POOL (default page: the pool the app assigns from) and NEWS_TODAY_PAGES pass through.
+#   script/today_lead.sh arms [--day YYYY-MM-DD]
+#       The three-arm comparison of #999 (current, base, base+mmr) on the same snapshot and pool: leaves the key,
+#       the aggregate lead-arms-report.json and the blind sheet in <day>/arms/, beside any pack of that day.
+#       NEWS_LEAD_ARMS_DEPTH, NEWS_LEAD_ARMS_RELEVANCE_WEIGHT, NEWS_LEAD_ARMS_DECAY_SECONDS and
+#       NEWS_LEAD_ARMS_MOMENTUM_CLOCK pass through (Tests/EditorialRankingEvaluation.swift).
 #
 # A day's folder is never overwritten. Nothing here schedules itself.
 set -euo pipefail
@@ -64,12 +69,16 @@ PY
         trap - EXIT
         echo "Snapshot in $DIR. Next: script/today_lead.sh pack --day $DAY"
         ;;
-    pack)
+    pack | arms)
         [[ -f "$DIR/library.sqlite3" && -f "$DIR/manifest.json" ]] || { echo "No snapshot in $DIR" >&2; exit 1; }
-        [[ ! -e "$DIR/lead-rankings-private.json" && ! -e "$DIR/lead-review-private.csv" ]] \
-            || { echo "$DIR already holds a pack" >&2; exit 1; }
+        if [[ "$COMMAND" == arms ]]; then
+            [[ ! -e "$DIR/arms" ]] || { echo "$DIR/arms already holds a three-arm pack" >&2; exit 1; }
+        else
+            [[ ! -e "$DIR/lead-rankings-private.json" && ! -e "$DIR/lead-review-private.csv" ]] \
+                || { echo "$DIR already holds a pack" >&2; exit 1; }
+        fi
         WORK="$(mktemp -d "/private/tmp/today-lead-$DAY.XXXXXX")"
-        STAGE="$(mktemp -d "$DIR/.pack.XXXXXX")"
+        STAGE="$(mktemp -d "$DIR/.$COMMAND.XXXXXX")"
         trap 'rm -rf "$WORK" "$STAGE"' EXIT
         cp "$DIR/library.sqlite3" "$WORK/library.sqlite3"
         chmod 600 "$WORK/library.sqlite3"
@@ -77,8 +86,16 @@ PY
         # snapshot is judged at its own "now". A story dated after the snapshot (#981) does not move it.
         NEWS_TODAY_NOW="$(python3 -c 'import json, sys; m = json.load(open(sys.argv[1])); print(min(m["clock"], int(m["newestStory"])))' "$DIR/manifest.json")" \
         NEWS_TODAY_FEEDS="$DIR/feeds.txt" NEWS_TODAY_POOL="${NEWS_TODAY_POOL:-page}" \
+        NEWS_LEAD_ARMS="$([[ "$COMMAND" == arms ]] && echo 1 || echo 0)" \
             ./test.sh --today-shadow "$WORK/library.sqlite3" "$WORK/out" > "$WORK/run.log" 2>&1 \
             || { tail -20 "$WORK/run.log" >&2; exit 1; }
+        if [[ "$COMMAND" == arms ]]; then
+            cp "$WORK/out/arms/lead-rankings-private.json" "$WORK/out/arms/lead-arms-report.json" "$STAGE/"
+            python3 script/evaluation/lead_review.py sheet "$STAGE"
+            mv "$STAGE" "$DIR/arms"
+            echo "Each reader fills a copy of $DIR/arms/lead-review-private.csv named lead-review-private-<reader>.csv"
+            exit 0
+        fi
         cp "$WORK/out/lead-rankings-private.json" "$WORK/out/shadow-report.json" "$STAGE/"
         python3 script/evaluation/lead_review.py sheet "$STAGE"
         mv "$STAGE/lead-rankings-private.json" "$STAGE/shadow-report.json" "$STAGE/lead-review-private.csv" "$DIR/"
@@ -86,7 +103,7 @@ PY
         echo "Each reader fills a copy of $DIR/lead-review-private.csv named lead-review-private-<reader>.csv"
         ;;
     *)
-        sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+        sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
         exit 2
         ;;
 esac

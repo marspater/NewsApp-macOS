@@ -11,12 +11,15 @@ publisher, and no place, score or lane. Each reader fills a copy named lead-revi
 `report RUN [RUN ...]` reads every reader copy of every run (one run per snapshot day) and writes
 lead-evaluation.json into the first run: precision at 5, 10 and 20 per ranking, per reader and day and pooled, how far
 the rankings' top 20s overlap, and how far the readers agree. It contains no story text.
+A key from `script/today_lead.sh arms` (#999) names the three arms `current`, `base` and `base+mmr` as its rankings
+and is scored the same way; a report takes runs of one kind. NDCG@10 counts `lead` as grade 1.
 With no arguments, the script checks itself on synthetic runs.
 """
 import argparse
 import hashlib
 import itertools
 import json
+import math
 import pathlib
 import shutil
 import tempfile
@@ -33,6 +36,7 @@ from overview_review import (
 
 LABELS = ('lead', 'not')
 RANKINGS = ('publisherCount', 'briefing', 'z2')
+ARMS = ('current', 'base', 'base+mmr')
 DEPTHS = (5, 10, 20)
 SOURCE = 'lead-rankings-private.json'
 SHEET = 'lead-review-private.csv'
@@ -44,7 +48,10 @@ def key(directory):
     path = directory / SOURCE
     require(path.exists(), f'No {SOURCE} in the run directory; run script/today_lead.sh pack first')
     data = json.loads(path.read_text())
-    require(all(set(row['ranks']) <= set(RANKINGS) and row['ranks'] for row in data['stories']), 'Unknown ranking in the key')
+    used = set().union(*(row['ranks'] for row in data['stories']))
+    kinds = [names for names in (RANKINGS, ARMS) if used <= set(names)]
+    require(kinds and all(row['ranks'] for row in data['stories']), 'Unknown ranking in the key')
+    data['rankings'] = kinds[0]
     return data
 
 
@@ -65,11 +72,20 @@ def top(data, ranking, depth):
     return [row['id'] for row in data['stories'] if row['ranks'].get(ranking, depth + 1) <= depth]
 
 
+def ndcg(data, ranking, labels, depth=10):
+    """NDCG of a ranking's top, `lead` as grade 1 and an unlabelled story as 0; the ideal list holds every story the
+    reader called `lead` on the sheet, whichever ranking put it there. None when the reader called none."""
+    gain = sum(1 / math.log2(row['ranks'][ranking] + 1) for row in data['stories']
+               if row['ranks'].get(ranking, depth + 1) <= depth and labels.get(row['id']) == 'lead')
+    leads = sum(label == 'lead' for label in labels.values())
+    return gain / sum(1 / math.log2(place + 1) for place in range(1, min(depth, leads) + 1)) if leads else None
+
+
 def precision(data, labels):
-    """Per ranking and depth: Lead-worthy stories among the labelled ones of that ranking's top."""
+    """Per ranking and depth: Lead-worthy stories among the labelled ones of that ranking's top; and NDCG@10."""
     result = {}
-    for ranking in RANKINGS:
-        result[ranking] = {}
+    for ranking in data['rankings']:
+        result[ranking] = {'ndcgAt10': ndcg(data, ranking, labels)}
         for depth in DEPTHS:
             judged = [labels[story] for story in top(data, ranking, depth) if labels.get(story)]
             result[ranking][f'at{depth}'] = rate(sum(label == 'lead' for label in judged), len(judged))
@@ -96,8 +112,8 @@ def day(directory):
     for path in sorted(directory.glob('lead-review-private-*.csv')):
         readers[path.stem.removeprefix('lead-review-private-')] = read_sheet_labels(path, 'story', LABELS, expected)
     overlap = {f'{a}/{b}': len(set(top(data, a, DEPTHS[-1])) & set(top(data, b, DEPTHS[-1])))
-               for a, b in itertools.combinations(RANKINGS, 2)}
-    return {'run': directory.name, 'pool': data['pool'], 'candidates': data['candidates'], 'sheetStories': len(expected),
+               for a, b in itertools.combinations(data['rankings'], 2)}
+    return {'run': directory.name, 'rankings': list(data['rankings']), 'pool': data['pool'], 'candidates': data['candidates'], 'sheetStories': len(expected),
             'top20Overlap': overlap,
             'unlabelled': {name: sum(not labels.get(row['story']) for row in expected) for name, labels in readers.items()},
             'perReader': {name: precision(data, labels) for name, labels in readers.items()},
@@ -105,10 +121,12 @@ def day(directory):
 
 
 def pooled(days):
-    """Every reader and day counted once per ranking and depth."""
+    """Every reader and day counted once per ranking and depth; NDCG@10 as the mean over readers and days."""
     result = {}
-    for ranking in RANKINGS:
-        result[ranking] = {}
+    for ranking in days[0]['rankings']:
+        scores = [reader[ranking]['ndcgAt10'] for entry in days for reader in entry['perReader'].values()]
+        scores = [score for score in scores if score is not None]
+        result[ranking] = {'ndcgAt10': sum(scores) / len(scores) if scores else None}
         for depth in DEPTHS:
             cells = [reader[ranking][f'at{depth}'] for entry in days for reader in entry['perReader'].values()]
             result[ranking][f'at{depth}'] = rate(sum(cell['count'] for cell in cells), sum(cell['of'] for cell in cells))
@@ -137,6 +155,7 @@ def report(directories):
         identities.add(snapshot_identity(directory, key(directory)))
         days.append(day(directory))
     require(len(identities) == len(resolved), 'Each snapshot may be counted at most once')
+    require(all(entry['rankings'] == days[0]['rankings'] for entry in days), 'A report takes runs of one kind')
     readers = sorted({name for entry in days for name in entry['perReader']})
     result = {
         'days': days, 'pooled': pooled(days),
@@ -171,6 +190,16 @@ def fixture(directory, pool='page', now_timestamp=0):
                         'summary': f'Private summary {index}', 'ranks': ranks})
     (directory / SOURCE).write_text(json.dumps(
         {'pool': pool, 'nowTimestamp': now_timestamp, 'candidates': 150, 'depth': 20, 'stories': stories}))
+
+
+def arm_fixture(directory):
+    """22 stories: `current` ranks s1 to s20, `base` the reverse, `base+mmr` s3 to s22."""
+    stories = [{'id': f's{index}', 'publisher': 'Publisher A', 'title': f'Headline {index}',
+                'summary': f'Private summary {index}',
+                'ranks': {arm: place for arm, place in (('current', index), ('base', 21 - index), ('base+mmr', index - 2))
+                          if 1 <= place <= 20}} for index in range(1, 23)]
+    (directory / SOURCE).write_text(json.dumps(
+        {'pool': 'page', 'nowTimestamp': 0, 'candidates': 150, 'depth': 20, 'stories': stories}))
 
 
 def fill(directory, reader, lead):
@@ -224,6 +253,28 @@ def self_check():
         require('Headline' not in public and 'Private summary' not in public, 'The report carries no story text')
         (second / 'lead-review-private-c.csv').write_text((second / SHEET).read_text().replace('Headline 3', 'Edited'))
         expect_rejected(lambda: report([second]), ValueError, 'A sheet with a changed headline was scored')
+        reader = result['days'][0]['perReader']['a']
+        require(reader['z2']['ndcgAt10'] == 1 and reader['briefing']['ndcgAt10'] == 0, 'NDCG@10 of first and last places')
+        require(result['pooled']['z2']['ndcgAt10'] == 1, 'Pooled NDCG@10')
+    with tempfile.TemporaryDirectory() as three, tempfile.TemporaryDirectory() as mixed:
+        arms, other = pathlib.Path(three), pathlib.Path(mixed)
+        arm_fixture(arms)
+        fixture(other, now_timestamp=1)
+        require(sheet(arms) == 22 and sheet(other) == 24, 'The arm sheet lists the union of the three top 20s')
+        require(not any(arm in (arms / SHEET).read_text() for arm in ARMS), 'The sheet names no arm')
+        fill(arms, 'a', {'s1', 's2', 's3'})
+        expect_rejected(lambda: report([arms, other]), ValueError, 'Arm and Z2 runs scored together')
+        scored = report([arms])
+        reader = scored['days'][0]['perReader']['a']
+        require(scored['days'][0]['rankings'] == list(ARMS) and set(scored['pooled']) == set(ARMS), 'Arms are scored')
+        require([reader[arm]['at5']['count'] for arm in ARMS] == [3, 0, 1], 'Arm precision at 5')
+        ideal = 1 + 1 / math.log2(3) + 0.5
+        require(reader['current']['ndcgAt10'] == 1 and reader['base']['ndcgAt10'] == 0
+                and abs(reader['base+mmr']['ndcgAt10'] - 1 / ideal) < 1e-12, 'Arm NDCG@10')
+        require(scored['days'][0]['top20Overlap'] == {'current/base': 20, 'current/base+mmr': 18, 'base/base+mmr': 18},
+                'Arm overlap')
+        fill(arms, 'b', set())
+        require(report([arms])['days'][0]['perReader']['b']['current']['ndcgAt10'] is None, 'No lead, no NDCG')
     print('lead_review self-check passed')
 
 

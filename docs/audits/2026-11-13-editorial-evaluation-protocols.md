@@ -99,7 +99,7 @@ Moving the target to the Briefing board would be a different question and is not
 
 **Decision rule.** `base+mmr` is non-inferior to `current` when its pooled precision at the display depth is not lower by more than the margin of section 6, and it is preferred when it is also more diverse by the margin given there. `base` alone is reported to separate the effect of the relevance change from the effect of MMR. A positive result recommends a Lead trial to Epic Z (#932); it changes no shipped default by itself, and Z's validation stage decides when a trial can run.
 
-The harness that produces the three rankings lives in the evaluation tests and script only (`Tests/EditorialRankingEvaluation.swift`, `script/test_editorial_ranking.sh`); nothing under `Sources/` changes for it.
+The harness that produces the three rankings lives in the evaluation tests and scripts only (`Tests/EditorialRankingEvaluation.swift`, called from the `--today-shadow` run by `script/today_lead.sh arms`; its fixture smoke check runs with the ranking atom and `script/test_editorial_ranking.sh`); nothing under `Sources/` changes for it. How to run it is in `docs/TOOLING.md`, "The three-arm run".
 
 ## 6. Numeric gates — to be agreed
 

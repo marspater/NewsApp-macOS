@@ -152,6 +152,17 @@ The Z2 gate for The Lead (#934) compares the top 20 of three rankings (publisher
 
 The snapshot folders hold a library and headlines: they stay under `~/news-eval/`, readable by me only, and only the aggregate figures of `lead-evaluation.json` go on the issue and into the ledger.
 
+### The three-arm run (#999)
+
+The W7 comparison (`current`, `base`, `base+mmr`; protocol in `docs/audits/2026-11-13-editorial-evaluation-protocols.md`, section 5) uses the same snapshots, sheet and scorer. Its harness is `Tests/EditorialRankingEvaluation.swift`; nothing under `Sources/` changes for it.
+
+- **Acceptance run, by hand:** `script/today_lead.sh arms --day <day>` runs `--today-shadow` on a copy of the snapshot with `NEWS_LEAD_ARMS=1` and leaves `<day>/arms/` beside any pack of that day: `lead-rankings-private.json` (the key, with the three arms as its rankings), `lead-review-private.csv` (the blind sheet over the union of the three top 20s) and `lead-arms-report.json` (aggregates only).
+- **The arms.** `current` is the run's own Z2 order of the candidates. `base` orders the same candidates by the momentum of each story's event (`EditorialMomentum`, replayed over the event's reports as `EditorialWireIdentity` maps them, the latest MACD floored at zero and divided by the pool's maximum), with the story id as tie-break. `base+mmr` passes that relevance through `EditorialRanking`, with the stored sentence vector of each story's representative.
+- **Settings, not frozen:** `NEWS_LEAD_ARMS_DEPTH` (display depth, default 5), `NEWS_LEAD_ARMS_RELEVANCE_WEIGHT` (0.7), `NEWS_LEAD_ARMS_DECAY_SECONDS` (21600) and `NEWS_LEAD_ARMS_MOMENTUM_CLOCK` (epoch seconds; default the run's clock, so a report stored after the newest story's date is not counted and shows in `momentumRowsStoredAfterClock`).
+- **What to read first in `lead-arms-report.json`, under `comparison`:** `currentAndBaseDistinct`, `arms.base.overlapCurrent` and `arms.base.rankCorrelationCurrent` (Spearman over the pool) say whether `current` and `base` differ in fact. `storiesWithPositiveRelevance`, `baseTiedAtCut` and `zeroRelevanceShown` say how much of `base` is momentum and how much is the tie-break. `EditorialRanking` selects at most 50 of at most 500 stories, so `base+mmr` has no rank correlation over the pool and a pool above 500 stops the run.
+- **Scoring:** `python3 script/evaluation/lead_review.py report ~/news-eval/today-lead-snapshots/<day>/arms [<day>/arms …]`, as above, with NDCG@10 beside the precisions (`lead` as grade 1, an unlabelled story as 0). A report takes arm runs or #934 runs, not both.
+- **Harness smoke check:** the ranking atom runs the three arms on a constructed fixture in every `./test.sh`; `bash script/test_editorial_ranking.sh DIR` also leaves that fixture's `lead-arms-fixture.json`. Its numbers are not measures of real news and go into the ledger, if at all, with a `fixture-` dataset.
+
 To take the daily snapshot without thinking of it, I would add a `launchd` agent that runs `script/today_lead.sh snapshot` once a day (a `StartCalendarInterval` in a plist under `~/Library/LaunchAgents`), a few minutes after the hour the development app usually refreshes. That is not set up.
 
 ## Reading the ledger
@@ -194,3 +205,4 @@ echo '[ -f "$HOME/news-eval/mlflow/env.sh" ] && . "$HOME/news-eval/mlflow/env.sh
 | 10 November 2026 | `news-ledger` command, fixed ports, daily backups, required fields and the verdict list. MLflow's usage reports turned off (they were on for the first hours). `multi_publisher` split into `multi_publisher_story` and `multi_publisher_event` and the affected runs renamed |
 | 12 November 2026 | `script/today_lead.sh` (dated read-only snapshots under `~/news-eval/today-lead-snapshots/`, reader packs) and `script/evaluation/lead_review.py` (blind sheet, scorer) for the Lead comparison of #934. First snapshot taken the same day. |
 | 13 November 2026 | Measure names for the editorial acceptance runs (`novelty_*`, `burst_*`, `lead_arm_*`), with the draft protocol `docs/audits/2026-11-13-editorial-evaluation-protocols.md` (#714). |
+| 13 November 2026 | Three-arm Lead harness for #999: `script/today_lead.sh arms`, arm keys and NDCG@10 in `script/evaluation/lead_review.py`, fixture smoke check in the ranking atom. No acceptance run made yet. |

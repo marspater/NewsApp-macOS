@@ -589,6 +589,12 @@ enum TodayShadowEvaluation {
 
         try await writeLeadRankings(
             of: assignedList, pool: pool.name, now: now, database: db, privateOutput: outputDirectory)
+        // W7 (#999): the same candidates ranked by the three arms, only when `script/today_lead.sh arms` asks.
+        if env["NEWS_LEAD_ARMS"] == "1" {
+            try await EditorialRankingEvaluation.writeLeadArms(
+                of: assignedList, pool: pool.name, now: now, database: db, currentSelectionMs: assignDurationMs,
+                privateOutput: outputDirectory)
+        }
 
         print("TODAY_SHADOW_REPORT \(String(decoding: try encoder.encode(report), as: UTF8.self))")
         await db.close()
