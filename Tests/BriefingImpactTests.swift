@@ -34,7 +34,7 @@ enum BriefingImpactTests {
         regionMapping()
         regionFilter()
         await regionSupplementDeduplication()
-        regionTileState()
+        await regionTileState()
         industryGrouping()
         driversCoverage()
         timelineOrdering()
@@ -121,7 +121,6 @@ enum BriefingImpactTests {
         )
     }
 
-
     /// #1311/5: A grouped edition event may have one listed article, while recent articles from the
     /// same event enter through the supplement query with a different representative.
     @MainActor static func regionSupplementDeduplication() async {
@@ -164,7 +163,7 @@ enum BriefingImpactTests {
     }
 
     /// #1311/8: The same read/save state as other Briefing tiles reaches Regions tiles.
-    static func regionTileState() {
+    @MainActor static func regionTileState() {
         let entry = BriefingRegionsData.sampleEntry(
             id: "region-state", title: "France debates rail investment", publishers: 1, date: now)
         let id = entry.representative.id
