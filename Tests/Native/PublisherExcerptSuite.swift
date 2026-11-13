@@ -520,6 +520,58 @@ extension NativeSuites.PublisherExcerptSuite {
         }
         let cancelledResult = await cancelledTask.value
         expectEqual(cancelledResult, nil, "Cancelled task returns nil")
+
+        // A cancelled caller leaves a shared generation at once, whether it started it or joined it, and the
+        // generation still serves the caller that stays. Every queue worker is held until the cancelled ones left.
+        let database = DatabaseEngine(path: ":memory:")
+        try? await database.open()
+        let reports = (1...2).map { index in
+            FeedArticle(
+                storedID: "shared-\(index)", title: "Bridge reopens after repairs \(index)",
+                link: "https://example.com/shared/\(index)", guid: "shared-\(index)",
+                description: "The bridge reopened to traffic after repairs, report \(index).",
+                pubDate: Date(timeIntervalSince1970: 1_729_000_000 + Double(index)), source: "Outlet \(index)")
+        }
+        _ = try? await database.upsertArticles(reports)
+        let store = ArticleStore(database: database, spotlightIndexer: MockSpotlightIndexer())
+        let queue = EnrichmentQueue(store: store)
+        let shared = OverviewGenerationCoordinator(store: store, queue: queue, allowsEnergy: { true })
+        func until(_ message: String, _ condition: () async -> Bool) async {
+            let deadline = ContinuousClock.now + .seconds(10)
+            while !(await condition()), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+            expectTrue(await condition(), message)
+        }
+        let gate = OpenGate()
+        let holders = (0..<3).map { index in
+            Task {
+                await queue.scheduleOverviewGeneration(eventID: "shared-hold-\(index)") {
+                    await gate.wait()
+                    return nil
+                }
+            }
+        }
+        await until("Held jobs fill the overview queue") { await queue.activeJobCount() == 3 }
+        func request() -> Task<EventOverviewDocument?, Never> {
+            Task {
+                await shared.requestOverview(
+                    eventID: "shared", eventTitle: reports[0].title, membershipVersion: 1, articles: reports,
+                    store: store)
+            }
+        }
+        let starter = request()
+        await until("The starter waits on its generation") { await shared.waitingCallerCount() == 1 }
+        let joiner = request()
+        let stayer = request()
+        await until("Two more callers joined the generation") { await shared.waitingCallerCount() == 3 }
+        starter.cancel()
+        joiner.cancel()
+        expectEqual(await starter.value, nil, "The cancelled starter returns nothing")
+        expectEqual(await joiner.value, nil, "The cancelled joiner returns nothing")
+        expectEqual(await queue.activeJobCount(), 3, "Both returned while the queue was still held")
+        expectEqual(await shared.waitingCallerCount(), 1, "The caller that stays still waits")
+        await gate.open()
+        expectTrue(await stayer.value != nil, "The generation still serves the caller that stays")
+        for holder in holders { _ = await holder.value }
     }
 
     // MARK: - 9. Retained Deterministic Sections

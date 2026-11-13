@@ -196,7 +196,7 @@ actor OverviewGenerationCoordinator {
             if running.membershipVersion == membershipVersion && running.inputTextHash == inputTextHash
                 && running.articleInputs == expectedArticleInputs
             {
-                return await Self.value(of: running.task)
+                return await waitForShared(running.task)
             }
             // A background warm-up never supersedes the generation the reader is waiting for (#792).
             guard Self.maySupersede(priority: priority, eventID: eventID, visibleEventID: currentVisibleEventID)
@@ -265,10 +265,24 @@ actor OverviewGenerationCoordinator {
             _ = await task.value
             await self?.generationEnded(eventID: eventID, task: task)
         }
-        let result = await Self.value(of: task)
+        let result = await waitForShared(task)
         guard !Task.isCancelled else { return nil }
         generationEnded(eventID: eventID, task: task)
         return result
+    }
+
+    /// Callers waiting on a shared generation right now.
+    private var waitingCallers = 0
+
+    func waitingCallerCount() -> Int { waitingCallers }
+
+    /// Waits for a shared generation as one of its callers. A cancelled caller gets nil, also when the generation
+    /// finished just before the cancellation reached it.
+    private func waitForShared(_ task: Task<EventOverviewDocument?, Never>) async -> EventOverviewDocument? {
+        waitingCallers += 1
+        let result = await Self.value(of: task)
+        waitingCallers -= 1
+        return Task.isCancelled ? nil : result
     }
 
     /// Clears a finished generation's entry, unless a newer request has replaced it.

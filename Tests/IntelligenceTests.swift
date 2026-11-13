@@ -1918,9 +1918,9 @@ extension NewsTests {
             await left.increment()
             return result
         }
-        await eventually("A second caller joins the same request") { await checks.value >= 3 }
-        // Past its energy check, the caller needs a moment to reach the shared generation.
-        try? await Task.sleep(for: .milliseconds(200))
+        await eventually("The starter, the reader and the second caller all wait on the shared generation") {
+            await shared.waitingCallerCount() == 3
+        }
         let starter = Task {
             let result = await warmup.value
             await left.increment()
