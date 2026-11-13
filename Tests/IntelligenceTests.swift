@@ -5209,17 +5209,17 @@ extension NewsTests {
             "One coordinated phrase")
 
         let list = range("Talks were held on 3 and 5 November.")
-        assertEqual(shown(list), "3 and 5 Nov", "A list is one row")
+        assertEqual(shown(list), "Nov 3 and 5", "A list is one row")
         assertEqual(list?.orderingDateMayHoldInferredYear, day(2026, 11, 3), "A list orders on its earliest date")
         assertEqual(list?.orderingEndDateMayHoldInferredYear, day(2026, 11, 5), "A list is one span to its latest date")
         assertEqual(
-            shown(range("Hearings were held on 3, 5 and 7 October.")), "3, 5, and 7 Oct",
+            shown(range("Hearings were held on 3, 5 and 7 October.")), "Oct 3, 5, and 7",
             "Three dates are still one row"
         )
         assertEqual(range("Reports came on 3 November and 5 November.")?.dateText.isEmpty, false, "Full dates list too")
 
         assertEqual(
-            shown(range("Voting occurs November 3 and 5, 2026.")), "3 and 5 Nov 2026",
+            shown(range("Voting occurs November 3 and 5, 2026.")), "Nov 3 and 5, 2026",
             "A trailing year belongs to both month-first list dates"
         )
         assertEqual(
@@ -5261,6 +5261,9 @@ extension NewsTests {
             "Hearings were held November 3–5 and 7.",
             "Hearings ran from 3 to 5 November and 7.",
             "Hearings ran from 3 to November 5–7.",
+            "Hearings were held April 9 to 11 and 16 to 18.",
+            "Hearings were held April 9–11 and 16–18, 2026.",
+            "Hearings were held on 9 to 11 and 16 to 18 April.",
             "Voting runs from March to 5 April 2027.",
             "Talks were held on 3 November, after talks in March 2025.",
             "Talks run from 3 November 2025 to 8 November 2024.",
@@ -5282,6 +5285,33 @@ extension NewsTests {
         assertEqual(
             OverviewTimelineBuilder.singleStatedDate(in: "It cost 1,000 and 5 March was the day."),
             Stated(year: nil, month: 3, day: 5), "A thousands separator is no list")
+
+        // One order of day, month and year for single dates and ranges of one timeline, whatever calendar the
+        // reader's locale names: the interval formatter ignores an ISO 8601 calendar setting, the date formatter
+        // does not.
+        func plain(_ text: String) -> String {
+            text.replacingOccurrences(of: "\u{2009}", with: " ").replacingOccurrences(of: "\u{202F}", with: " ")
+        }
+        let ninth = Stated(year: 2026, month: 11, day: 9)
+        let thirteenth = Stated(year: 2026, month: 11, day: 13)
+        for (identifier, single, span, list) in [
+            ("en_PL@calendar=iso8601", "9 Nov 2026", "9 – 13 Nov 2026", "9 and 13 Nov 2026"),
+            ("en_PL", "9 Nov 2026", "9 – 13 Nov 2026", "9 and 13 Nov 2026"),
+            ("en_US", "Nov 9, 2026", "Nov 9 – 13, 2026", "Nov 9 and 13, 2026"),
+            ("en_US@calendar=iso8601", "Nov 9, 2026", "Nov 9 – 13, 2026", "Nov 9 and 13, 2026"),
+        ] {
+            let locale = Locale(identifier: identifier)
+            assertEqual(
+                plain(OverviewTimelineBuilder.dateText(ninth, locale: locale)), single, "Single date in \(identifier)")
+            assertEqual(
+                plain(
+                    OverviewTimelineBuilder.spanText(.init(dates: [ninth, thirteenth], isRange: true), locale: locale)),
+                span, "Range in \(identifier)")
+            assertEqual(
+                plain(
+                    OverviewTimelineBuilder.spanText(.init(dates: [ninth, thirteenth], isRange: false), locale: locale)),
+                list, "List in \(identifier)")
+        }
 
         // Briefing: a range or list is never a turning point and never starts "day N".
         let rows = items([before, "Talks were held on 3 and 5 November.", "Voting ran from October 27 to November 1."])

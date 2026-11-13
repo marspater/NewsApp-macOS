@@ -530,7 +530,8 @@ enum OverviewTimelineBuilder {
         let endsPhrase = suffix.range(of: #"^\s*(?:[.!?;)]|$)"#, options: .regularExpression) != nil
         if monthFirst, year == nil, !isRange, !endsPhrase { return .skip }
         if suffix.range(
-            of: #"^(?:\#(rangeJoin)|\#(dayListJoin))\#(dayNumber)(?=\s*(?:[,;.!?)]|$))"#,
+            // A further day, or a further range of days ("April 9 to 11 and 16 to 18"), shares the month too.
+            of: #"^(?:\#(rangeJoin)|\#(dayListJoin))\#(dayNumber)(?:\#(rangeJoin)\#(dayNumber))?(?=\s*(?:[,;.!?)]|$))"#,
             options: .regularExpression
         ) != nil {
             return .invalid
@@ -669,9 +670,9 @@ enum OverviewTimelineBuilder {
         return resolved >= reported.end
     }
 
-    static func dateText(_ date: StatedDate, locale: Locale, monthOnly: Bool = false) -> String {
+    static func dateText(_ date: StatedDate, locale: Locale) -> String {
         let template: String
-        switch (date.day != nil && !monthOnly, date.year != nil) {
+        switch (date.day != nil, date.year != nil) {
         case (true, true): template = "dMMMy"
         case (true, false): template = "dMMM"
         case (false, false): template = "MMM"
@@ -680,7 +681,7 @@ enum OverviewTimelineBuilder {
         let formatter = DateFormatter()
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
-        formatter.locale = locale
+        formatter.locale = gregorian(locale)
         formatter.setLocalizedDateFormatFromTemplate(template)
         let components = DateComponents(year: date.year ?? 2000, month: date.month, day: date.day ?? 1)
         return calendar.date(from: components).map { formatter.string(from: $0) } ?? ""
@@ -695,10 +696,14 @@ enum OverviewTimelineBuilder {
             list.locale = locale
             let first = span.dates[0]
             if first.day != nil, span.dates.allSatisfy({ $0.month == first.month && $0.year == first.year }) {
-                // Days that share their month and year say them once: "3, 5 and 7 Nov".
+                // Days that share their month and year say them once.
+                // The month and year sit where the locale puts them in a single date: "Nov 3 and 5" or "3 and 5 Nov".
                 let days = list.string(from: span.dates.compactMap { $0.day.map(String.init) }) ?? ""
-                return
-                    "\(days) \(dateText(StatedDate(year: first.year, month: first.month, day: nil), locale: locale, monthOnly: true))"
+                let month = dateText(StatedDate(year: nil, month: first.month, day: nil), locale: locale)
+                let monthFirst = dateText(StatedDate(year: nil, month: first.month, day: first.day), locale: locale)
+                    .hasPrefix(month)
+                let year = first.year.map { monthFirst ? ", \($0)" : " \($0)" } ?? ""
+                return (monthFirst ? "\(month) \(days)" : "\(days) \(month)") + year
             }
             return list.string(from: span.dates.map { dateText($0, locale: locale) }) ?? ""
         }
@@ -713,13 +718,22 @@ enum OverviewTimelineBuilder {
         let formatter = DateIntervalFormatter()
         formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
-        formatter.locale = locale
+        formatter.locale = gregorian(locale)
         formatter.dateTemplate = (start.day == nil ? "MMM" : "dMMM") + (start.year == nil && end.year == nil ? "" : "y")
         guard
             let from = calendar.date(from: DateComponents(year: startYear, month: start.month, day: start.day ?? 1)),
             let to = calendar.date(from: DateComponents(year: endYear, month: end.month, day: end.day ?? 1))
         else { return "" }
         return formatter.string(from: from, to: to)
+    }
+
+    /// The reader's locale with the Gregorian calendar the builder works in. A locale that names another calendar
+    /// (ISO 8601 puts the year first) is honoured by the date formatter and ignored by the interval formatter, which
+    /// swapped day, month and year between the rows of one timeline.
+    private static func gregorian(_ locale: Locale) -> Locale {
+        var components = Locale.Components(locale: locale)
+        components.calendar = .gregorian
+        return Locale(components: components)
     }
 
     private static func normalized(_ text: String) -> String {
