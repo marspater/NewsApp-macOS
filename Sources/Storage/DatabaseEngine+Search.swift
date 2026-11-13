@@ -124,8 +124,10 @@ extension DatabaseEngine {
         var sql = scope.sql
         var params = scope.params
         if let sf = parsed.sourceFilter {
-            sql += " AND a.source LIKE ?"
-            params.append(("text", "%\(sf)%"))
+            // Match the publisher shown on the card as well as the raw feed title (#1311).
+            // A section feed can be called "World" while its article URL belongs to Financial Times.
+            sql += " AND (a.source LIKE ? OR news_publisher_name(a.canonical_url, a.source) LIKE ?)"
+            params += [("text", "%\(sf)%"), ("text", "%\(sf)%")]
         }
         if let cf = parsed.categoryFilter {
             // Category tokens join words with hyphens (`category:health-&-wellness`). A reader category name also
