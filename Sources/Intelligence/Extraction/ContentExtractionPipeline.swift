@@ -2347,77 +2347,43 @@ final class ContentExtractionPipeline: Sendable {
 
     // MARK: - HTML Entity Decoding
 
-    private static let decEntityRegex =
-        loggedExtraction("compileDecEntityRegex") {
-            try NSRegularExpression(pattern: "&#([0-9]{2,7});")
-        } ?? NSRegularExpression()
-    private static let hexEntityRegex =
-        loggedExtraction("compileHexEntityRegex") {
-            try NSRegularExpression(pattern: "&#x([0-9a-fA-F]{2,6});")
+    /// One reference: decimal, hexadecimal or named.
+    private static let entityRegex =
+        loggedExtraction("compileEntityRegex") {
+            try NSRegularExpression(pattern: "&(?:#([0-9]{2,7})|#x([0-9a-fA-F]{2,6})|([A-Za-z]+));")
         } ?? NSRegularExpression()
 
+    private static let namedEntities: [String: String] = [
+        "nbsp": " ", "amp": "&", "quot": "\"", "apos": "'", "lt": "<", "gt": ">",
+        "mdash": "—", "ndash": "–", "hellip": "…",
+        "ldquo": "\u{201C}", "rdquo": "\u{201D}", "lsquo": "\u{2018}", "rsquo": "\u{2019}",
+        "copy": "©", "reg": "®", "trade": "™", "bull": "•", "middot": "·",
+        "euro": "€", "pound": "£", "yen": "¥", "cent": "¢",
+    ]
+
+    /// Decodes each character reference once, in one pass over the text (#1303). Replacement text is never read
+    /// again, so `&amp;lt;` becomes `&lt;` and `&amp;#8217;` becomes `&#8217;`, the same on every launch: a
+    /// publisher's literal entity stays literal, and a doubly escaped one is not repaired. An unknown name or an
+    /// invalid code point is left as written.
     func decodeHTMLEntities(_ text: String) -> String {
-        var result = text
-
-        let namedEntities: [String: String] = [
-            "&nbsp;": " ",
-            "&amp;": "&",
-            "&quot;": "\"",
-            "&apos;": "'",
-            "&#39;": "'",
-            "&lt;": "<",
-            "&gt;": ">",
-            "&mdash;": "—",
-            "&ndash;": "–",
-            "&hellip;": "…",
-            "&ldquo;": "\u{201C}",
-            "&rdquo;": "\u{201D}",
-            "&lsquo;": "\u{2018}",
-            "&rsquo;": "\u{2019}",
-            "&copy;": "©",
-            "&reg;": "®",
-            "&trade;": "™",
-            "&bull;": "•",
-            "&middot;": "·",
-            "&euro;": "€",
-            "&pound;": "£",
-            "&yen;": "¥",
-            "&cent;": "¢",
-            "&#8211;": "–",
-            "&#8212;": "—",
-            "&#8216;": "\u{2018}",
-            "&#8217;": "\u{2019}",
-            "&#8220;": "\u{201C}",
-            "&#8221;": "\u{201D}",
-            "&#8230;": "…",
-        ]
-
-        for (entity, char) in namedEntities {
-            result = result.replacingOccurrences(of: entity, with: char)
-        }
-
-        let decMatches = Self.decEntityRegex.matches(in: result, range: NSRange(result.startIndex..., in: result))
-        for match in decMatches.reversed() {
-            if let fullRange = Range(match.range, in: result),
-                let numRange = Range(match.range(at: 1), in: result),
-                let code = UInt32(result[numRange]),
-                let scalar = UnicodeScalar(code)
-            {
-                result.replaceSubrange(fullRange, with: String(Character(scalar)))
+        guard text.contains("&") else { return text }
+        let source = text as NSString
+        var result = ""
+        var cursor = 0
+        for match in Self.entityRegex.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+            func group(_ index: Int) -> String? {
+                let range = match.range(at: index)
+                return range.location == NSNotFound ? nil : source.substring(with: range)
             }
+            let code = group(1).flatMap { UInt32($0) } ?? group(2).flatMap { UInt32($0, radix: 16) }
+            let replacement =
+                code.flatMap { UnicodeScalar($0) }.map { String(Character($0)) }
+                ?? group(3).flatMap { Self.namedEntities[$0] }
+            guard let replacement else { continue }
+            result += source.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+            result += replacement
+            cursor = match.range.location + match.range.length
         }
-
-        let hexMatches = Self.hexEntityRegex.matches(in: result, range: NSRange(result.startIndex..., in: result))
-        for match in hexMatches.reversed() {
-            if let fullRange = Range(match.range, in: result),
-                let numRange = Range(match.range(at: 1), in: result),
-                let code = UInt32(result[numRange], radix: 16),
-                let scalar = UnicodeScalar(code)
-            {
-                result.replaceSubrange(fullRange, with: String(Character(scalar)))
-            }
-        }
-
-        return result
+        return result + source.substring(from: cursor)
     }
 }

@@ -674,8 +674,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 
     private func rssArticle(_ item: FeedKit.RSSFeedItem, keeping article: FeedArticle) -> FeedArticle {
         let dc = item.dublinCore
-        let rawTitle = article.title.isEmpty ? item.title ?? dc?.title ?? "" : article.title
-        let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
+        // The parser's own title is already decoded, once (#1303); only FeedKit's fallback still needs it.
+        let title =
+            article.title.isEmpty
+            ? ContentExtractionPipeline.shared.decodeHTMLEntities(item.title ?? dc?.title ?? "") : article.title
         let desc =
             article.description.isEmpty
             ? Self.stripHTMLSimple(item.description ?? dc?.description ?? "") : article.description
@@ -688,8 +690,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     }
 
     private func atomArticle(_ item: FeedKit.AtomFeedEntry, keeping article: FeedArticle) -> FeedArticle {
-        let rawTitle = article.title.isEmpty ? item.title ?? "" : article.title
-        let title = ContentExtractionPipeline.shared.decodeHTMLEntities(rawTitle)
+        let title =
+            article.title.isEmpty
+            ? ContentExtractionPipeline.shared.decodeHTMLEntities(item.title ?? "") : article.title
         let desc = article.description.isEmpty ? Self.stripHTMLSimple(item.summary?.text ?? "") : article.description
         return FeedArticle(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines), link: article.link, guid: article.guid,
