@@ -1,6 +1,6 @@
 # Editorial evaluation protocols (W5, W6, W7) — draft, 13 November 2026
 
-Status: **draft for review. Not frozen.** The numeric gates in section 6 are blank; the protocol freezes only when I have agreed them and recorded that on #714. No label is collected and no acceptance run is made under this document before then.
+Status: **draft for review. Not frozen.** The numeric gates in section 6 are proposed values; the protocol freezes only when I have agreed them and recorded that on #714. No label is collected and no acceptance run is made under this document before then.
 
 This covers the acceptance evaluation of Angelia's three editorial experiments that are merged without a production caller: passage novelty (#997, W5), event momentum (#998, W6) and diversity-aware selection (#999, W7). Personalization (#1001, W9) is out of scope: it needs real use, an opt-in surface and a privacy text first.
 
@@ -48,7 +48,7 @@ A smoke-test number is never quoted as accuracy. The audits of 5 and 6 November 
 
 **Metrics.** Net-new precision (selected sentences that lie inside a marked `new-fact` span, over all selected sentences); false-novelty rate (items labelled `repetition` or `new-framing` that surface a sentence, over all such items); recall on `new-fact` items; route counts (repetition, novel, no anchored sentence, low-priority fallback, deferred); route mismatches by class. Hardware measures (vector-cache hit rate, first and later batch time, energy) are a separate run on an idle Mac in Release and do not enter the quality verdict.
 
-**Decision rule.** Accept for wiring when, on the holdout, precision and the false-novelty rate both meet section 6 and the system arm beats both reference arms on precision. Otherwise the issue stays open, or I retain it as an experiment and say so on #997.
+**Decision rule.** Accept for wiring when, on the holdout, precision, the false-novelty rate and the usefulness gate (recall and surfaced sentences, so that abstaining almost everywhere cannot pass) all meet section 6 and the system arm beats both reference arms on precision. Otherwise the issue stays open, or I retain it as an experiment and say so on #997.
 
 ## 4. W6 · event momentum (#998)
 
@@ -67,7 +67,7 @@ A smoke-test number is never quoted as accuracy. The audits of 5 and 6 November 
 
 The labeller sees the event's reports in publication order with publisher and origin, not the MACD series.
 
-**Named authors.** Whether a report with a named staff author counts as the publisher's own origin (wire identity audit, #1057) is a policy input to the independent-origin count. It is decided before the tune run and recorded in section 6; both settings are not tried on the holdout.
+**Named authors.** Whether a report with a named staff author counts as the publisher's own origin (wire identity audit, #1057) is a policy input to the independent-origin count. Section 6 records it; both settings are not tried on the holdout.
 
 **Arms.** The `EditorialMomentum` acceleration flag, against two references: a raw report-count threshold in the same window, and a distinct-origin count threshold. Each arm's threshold is chosen on tune by the same selection rule.
 
@@ -77,47 +77,62 @@ The labeller sees the event's reports in publication order with publisher and or
 
 ## 5. W7 · diversity-aware selection for The Lead (#999)
 
-**Question.** On the same frozen snapshot, is a Lead chosen by relevance plus MMR at least as good as the current Lead by readers' judgement, and more varied?
+**Question.** Does temporal MMR improve the editorial variety of The Lead while preserving the relevance of the existing Lead ranking?
 
-Moving the target to the Briefing board would be a different question and is not part of this protocol.
+This first evaluation tests MMR on a ranking that already means something. A new relevance formula, including Kairos · measured momentum's MACD signal, is a separate comparison after W6 is accepted: on the 12 November snapshot only 7 of 183 candidates carried positive momentum, so a momentum base would mostly have measured a tie-break. Moving the target to the Briefing board would also be a different question and is not part of this protocol.
 
-**Snapshot.** A dated Lead snapshot under `~/news-eval/today-lead-snapshots/<day>/`, with the clock at its newest story and the pool the app assigns from (`NEWS_TODAY_POOL=page`). The three arms rank the same candidate pool, with the same sentence vectors and the same event membership.
+**Snapshot.** A dated Lead snapshot under `~/news-eval/today-lead-snapshots/<day>/`, with the clock at its newest story and the pool the app assigns from (`NEWS_TODAY_POOL=page`). The arms rank the same candidate pool, with the same sentence vectors and the same event membership.
 
 **Arms.**
 
-| Arm | Ranking |
+| Arm | Definition |
 |---|---|
-| `current` | The Lead as shipped: the Z2 score, with the Lead's own rules as `--today-shadow` applies them |
-| `base` | W7's base relevance alone: equal source weights and the Phase 2 momentum signal, no diversity term, preference input neutral |
-| `base+mmr` | The same base relevance through `EditorialRanking`'s temporal MMR, at the parameters frozen on tune |
+| `current` | The shipped Lead selection as shown, including its actual eligibility, tie-breaks and display rules (slide cap, photo rule) |
+| `base` | Athena · attention's existing Z2 editorial score (reporting breadth, assessed importance, semantic salience and its bounded activity contribution), with publisher affinity and preferences neutral and no diversity penalty |
+| `base+mmr` | Exactly the same scores and eligible candidates as `base`, with `EditorialRanking`'s temporal MMR applied, at the parameters frozen on tune |
 
-`current` and `base` must be distinct arms in fact, not only in name. Each run reports their overlap at the display depth and their rank correlation over the pool; if they agree on the whole top at every snapshot, the comparison says nothing about base relevance, and that is reported instead of a verdict.
+The same display constraints apply to both experimental arms. Z2's activity component stays as it is. A report of unknown origin stays unknown; no origin is assumed.
 
-**Judgement.** The blind sheet of `script/evaluation/lead_review.py`: every story in the top 20 of at least one arm, shuffled, with headline, summary and publisher and no arm, place or score; `lead` or `not` per reader. At least two readers and at least two days (`decisionInputs.multiReaderMultiDay`).
+`current` and `base` need not differ. Each run reports their overlap at the display depth and their rank correlation over the pool. Where they coincide, that is a control: `base+mmr` against `base` isolates MMR. What cannot then be claimed is an improvement from changing base relevance.
 
-**Metrics.** Precision at 5, 10 and 20 per arm, per reader and day and pooled; NDCG@10 with `lead` as grade 1; intra-list diversity at the display depth (one minus mean pairwise cosine similarity of the shown stories' vectors) and distinct events and publishers shown; overlap between arms; kappa between readers; selection time over the pool.
+**Judgement.** The blind sheet of `script/evaluation/lead_review.py`: every story in the top 20 of at least one arm, shuffled, with headline, summary and publisher and no arm, place or score; `lead` or `not` per reader. For redundancy, each reader also marks, per day and per arm's shown list presented without its arm name, every slot that repeats a story already covered by an earlier slot of that list. Two independent human readers, on at least the number of holdout days in section 6.
 
-**Decision rule.** `base+mmr` is non-inferior to `current` when its pooled precision at the display depth is not lower by more than the margin of section 6, and it is preferred when it is also more diverse by the margin given there. `base` alone is reported to separate the effect of the relevance change from the effect of MMR. A positive result recommends a Lead trial to Epic Z (#932); it changes no shipped default by itself, and Z's validation stage decides when a trial can run.
+**Metrics.** Precision at 5, 10 and 20 per arm, per reader and day and pooled; NDCG@10 with `lead` as grade 1; intra-list diversity at the display depth (one minus mean pairwise cosine similarity of the shown stories' vectors); reader-labelled redundant slots per arm; distinct events and publishers shown; overlap between arms; kappa between readers; selection time over the pool. Differences are reported with 95% intervals over days.
 
-The harness that produces the three rankings lives in the evaluation tests and scripts only (`Tests/EditorialRankingEvaluation.swift`, called from the `--today-shadow` run by `script/today_lead.sh arms`; its fixture smoke check runs with the ranking atom and `script/test_editorial_ranking.sh`); nothing under `Sources/` changes for it. How to run it is in `docs/TOOLING.md`, "The three-arm run".
+**Decision rule.** `base+mmr` passes when all of these hold on the holdout days:
 
-## 6. Numeric gates — to be agreed
+- the lower 95% confidence bound of its precision minus `current`'s, at the display depth, is above the non-inferiority margin of section 6;
+- its mean intra-list diversity exceeds `current`'s by the margin of section 6, and it also shows a gain over `base`;
+- reader-labelled redundant slots fall by the relative share of section 6 against `current`. If `current` shows no redundancy, that improvement claim is unavailable and is reported as such.
 
-Blank until I set them. The protocol is not frozen while any cell that applies is empty.
+Insufficient evidence is inconclusive, not passed. A pass recommends a Lead trial to Epic Z (#932); it changes no shipped default by itself, and Z's validation stage decides when a trial can run.
 
-| Gate | Value |
+The harness that produces the arms lives in the evaluation tests and scripts only (`Tests/EditorialRankingEvaluation.swift`, called from the `--today-shadow` run by `script/today_lead.sh arms`; its fixture smoke check runs with the ranking atom and `script/test_editorial_ranking.sh`); nothing under `Sources/` changes for it. How to run it is in `docs/TOOLING.md`, "The three-arm run".
+
+## 6. Numeric gates — proposed 13 November 2026, not yet agreed
+
+These are acceptance targets for my approval, not accuracy established by the smoke tests. The protocol freezes when I record my agreement on #714.
+
+The priorities are deliberate: Kairos · novelty detection should rarely call repetition new; Kairos · measured momentum may miss some bursts to avoid false urgency; Athena · attention should buy variety with very little lost relevance.
+
+| Gate | Proposed value |
 |---|---|
-| W5 minimum holdout items, and minimum `new-fact` items | |
-| W5 net-new precision, at least | |
-| W5 false-novelty rate, at most | |
-| W6 window length; minimum `burst` and `quiet` windows in the holdout | |
-| W6 false-positive rate on `quiet`, at most | |
-| W6 burst recall, at least | |
-| W6 named author counts as the publisher's own origin (yes or no) | |
-| W7 display depth scored | |
-| W7 non-inferiority margin on precision | |
-| W7 diversity gain required to prefer `base+mmr` | |
-| Minimum reader agreement (kappa) for any labelled set to be scored | |
+| W5 minimum holdout | 400 scored reports, including 150 `new-fact` and 200 `repetition` or `new-framing`, across 80 events |
+| W5 net-new precision | at least 95% |
+| W5 false-novelty rate | at most 3% |
+| W5 usefulness | recall at least 50%, with at least 100 surfaced sentences; deferred eligible items stay in the recall denominator |
+| W6 window and holdout | 1-hour windows; 100 `burst` and 300 `quiet`, including 100 `syndication-only`, across 80 events |
+| W6 false-positive rate | at most 5% on `quiet` overall, and separately on `syndication-only` |
+| W6 burst recall | at least 70% |
+| W6 named author establishes an independent publisher origin | No: a name alone is insufficient (#1057: 8 of 93 named-author event members were in cross-outlet verbatim-copy groups) |
+| W7 display depth | 5 stories |
+| W7 holdout | at least 30 days, two independent human readers |
+| W7 precision non-inferiority margin | 3 percentage points below `current`, absolute: the lower 95% bound of `base+mmr − current` above −0.03 |
+| W7 diversity gain | mean intra-list diversity at least 0.05 higher, absolute, than `current`; also a gain over `base` |
+| W7 redundancy | at least 20% relative reduction in reader-labelled redundant slots against `current` |
+| Minimum reader agreement | Cohen's kappa at least 0.60, calculated before adjudication |
+| Unsure and unresolved exclusions | at most 10% per evaluation; above that, the rubric is revised before acceptance |
+| Uncertainty | 95% intervals on every gated measure, accounting for repeated items within events; a gate is met only when the interval supports it, otherwise the result is inconclusive |
 
 ## 7. Measure names
 

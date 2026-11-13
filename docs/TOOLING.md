@@ -124,9 +124,10 @@ One name means one thing. Before adding a name, check this table and the names a
 | `burst_windows`, `quiet_windows`, `syndication_only_windows` | A momentum acceptance run (#998): labelled windows scored, by label |
 | `burst_precision`, `burst_recall`, `burst_false_positive_rate` | A momentum acceptance run: flagged windows labelled `burst` over all flagged; `burst` windows flagged; `quiet` windows flagged |
 | `origin_unknown_share` | A momentum run: share of reports whose origin is unknown |
-| `lead_arm_precision_at_5`, `lead_arm_precision_at_10`, `lead_arm_precision_at_20`, `lead_arm_ndcg_at_10` | A three-arm Lead run (#999): one line per arm, the arm (`current`, `base`, `base+mmr`) given as the parameter `arm`; pooled over readers and days |
+| `lead_arm_precision_at_5`, `lead_arm_precision_at_10`, `lead_arm_precision_at_20`, `lead_arm_ndcg_at_10` | A three-arm Lead run (#999): one line per arm, the arm (`current`: the Lead as shown; `base`: the Z2 score with affinity neutral; `base+mmr`) given as the parameter `arm`; pooled over readers and days |
 | `lead_arm_diversity`, `lead_arm_events_shown`, `lead_arm_publishers_shown` | A three-arm Lead run: one minus the mean pairwise cosine similarity at the display depth, and distinct events and publishers shown |
 | `lead_arm_overlap_current`, `lead_arm_rank_correlation_current` | A three-arm Lead run: stories an arm shares with `current` at the display depth, and its rank correlation with `current` over the pool |
+| `lead_arm_redundant_slots` | A three-arm Lead run: slots at the display depth that readers marked as repeating a story an earlier slot of the same list covers |
 
 A rescored run keeps its replay and changes only the labels; its `dataset` names the label set, for example `validation-2026-10-29+reviewed-labels-pegged-as-same`.
 
