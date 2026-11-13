@@ -1869,6 +1869,33 @@ extension NativeSuites.FeedParsingSuite {
             fetcherPrecedenceResult.articles?.first?.title, "Représentation",
             "FeedFetcher parses title via declared encoding (#1149)")
 
+        // The response URL is the final destination after a redirect; subscription identity stays unchanged.
+        let redirectedXML = Data(
+            """
+            <rss><channel><item><title>Redirected</title><guid>redirected</guid>
+            <link>stories/one</link><description><![CDATA[<img src="images/one.jpg">]]></description>
+            </item></channel></rss>
+            """.utf8)
+        MockURLProtocol.requestHandler = { _ in
+            (
+                HTTPURLResponse(
+                    url: URL(string: "https://destination.example/news/feed.xml")!, statusCode: 200,
+                    httpVersion: nil, headerFields: ["Content-Type": "application/rss+xml"])!,
+                redirectedXML
+            )
+        }
+        let redirected = await FeedFetcher(client: client).fetchSingleFeed(
+            urlString: "https://example.com/original/feed.xml")
+        expectEqual(redirected.error, nil, "Redirected XML feed parses (#1311)")
+        expectEqual(
+            redirected.articles?.first?.link, "https://destination.example/news/stories/one",
+            "Relative story link uses final response URL (#1311)")
+        expectEqual(
+            redirected.articles?.first?.imageUrl, "https://destination.example/news/images/one.jpg",
+            "Relative image uses final response URL (#1311)")
+        expectEqual(
+            redirected.urlString, "https://example.com/original/feed.xml", "Subscription URL is retained (#1311)")
+
         // #1149: Parameter boundary check ignores prefix such as xcharset and matches true charset
         let xcharsetResp = HTTPURLResponse(
             url: URL(string: "https://example.com")!, statusCode: 200, httpVersion: nil,
@@ -1924,6 +1951,32 @@ extension NativeSuites.FeedParsingSuite {
         expectTrue(
             defectArticles.last?.title.contains("Item with bad UTF-8") ?? false,
             "Invalid UTF-8 sequences are replaced and item is preserved (#1148)")
+
+        for badBytes in [[UInt8(0x07)], [UInt8(0xFF)]] {
+            var cdataFeed = Data(
+                "<rss><channel><title>Test</title><item><title><![CDATA[Before ".utf8)
+            cdataFeed.append(contentsOf: badBytes)
+            cdataFeed.append(
+                contentsOf: " after & <tag> &amp;]]></title><guid>1</guid></item></channel></rss>".utf8)
+            let repaired = FeedXMLParser.repairXML(data: cdataFeed)
+            let expectedContent = badBytes == [0x07] ? "Before  after" : "Before � after"
+            expectTrue(
+                String(decoding: repaired, as: UTF8.self).contains("<![CDATA[\(expectedContent) & <tag> &amp;]]>"),
+                "CDATA repairs invalid bytes without changing markup or entities (#1311)")
+            let parser = FeedXMLParser(data: cdataFeed, feedURL: "https://example.com/feed")
+            let articles = parser.parse()
+            expectEqual(parser.parseError, nil, "Invalid CDATA does not reject a feed (#1311)")
+            expectEqual(articles.count, 1, "An item with invalid CDATA survives (#1311)")
+        }
+        let encodedCDATA = """
+            <?xml version="1.0" encoding="UTF-16"?>
+            <rss><channel><item><title><![CDATA[Café\u{0007} & tea]]></title><guid>1</guid></item></channel></rss>
+            """
+        var encodedCDATAData = Data([0xFF, 0xFE])
+        encodedCDATAData.append(encodedCDATA.data(using: .utf16LittleEndian)!)
+        let encodedCDATAParser = FeedXMLParser(data: encodedCDATAData, feedURL: "https://example.com/feed")
+        expectEqual(encodedCDATAParser.parse().first?.title, "Café & tea", "UTF-16 CDATA is repaired (#1311)")
+        expectEqual(encodedCDATAParser.parseError, nil, "Repaired UTF-16 CDATA remains valid XML (#1311)")
 
         // #1148: Entity and DTD declarations are still refused before repair.
         let hostileEntity = """
@@ -2048,6 +2101,24 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(
             bomResult.articles?.map(\.title), ["Swift 6 Concurrency Everywhere"],
             "UTF-8 BOM JSON Feed parses its items through FeedFetcher (#1133)")
+
+        // Byte 30 ends inside é; the complete JSON document is valid UTF-8.
+        let boundaryJSON =
+            "{\"title\":\"aaaaaaaaaaaaaaaaaaaé\","
+            + "\"version\":\"https://jsonfeed.org/version/1.1\","
+            + "\"items\":[{\"id\":\"1\",\"title\":\"Boundary\",\"url\":\"https://example.com/1\"}]}"
+        let boundaryPayload = Data(boundaryJSON.utf8)
+        MockURLProtocol.requestHandler = { request in
+            (
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 200, httpVersion: nil,
+                    headerFields: ["Content-Type": "application/feed+json"])!,
+                boundaryPayload
+            )
+        }
+        let boundaryResult = await FeedFetcher(client: client).fetchSingleFeed(urlString: bomFeedURL)
+        expectEqual(boundaryResult.error, nil, "JSON Feed with a split UTF-8 prefix parses (#1311)")
+        expectEqual(boundaryResult.articles?.map(\.title), ["Boundary"], "JSON Feed item survives sniffing (#1311)")
     }
 
     static func testEscapeXML() async {

@@ -61,10 +61,9 @@ actor FeedFetcher {
             if response.statusCode == 304 { return (urlString, nil, nil, nil) }
             let fresh = FeedValidators(response: response)
 
-            let sniffer =
-                String(data: data.prefix(30), encoding: .utf8)?.trimmingCharacters(
-                    in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))) ?? ""
-            if sniffer.hasPrefix("{") || sniffer.hasPrefix("[") {
+            let bytes = data.starts(with: [0xEF, 0xBB, 0xBF]) ? data.dropFirst(3) : data[...]
+            let firstByte = bytes.first { ![0x20, 0x09, 0x0A, 0x0D].contains($0) }
+            if firstByte == 0x7B || firstByte == 0x5B {
                 let parsed = JSONFeedParser.parse(
                     data: data, feedURL: urlString, baseURL: response.url?.absoluteString)
                 try Task.checkCancellation()
@@ -75,7 +74,8 @@ actor FeedFetcher {
                 }
             } else {
                 let charset = Self.extractCharset(from: response)
-                let xmlParser = FeedXMLParser(data: data, feedURL: urlString, textEncodingName: charset)
+                let xmlParser = FeedXMLParser(
+                    data: data, feedURL: urlString, baseURL: response.url, textEncodingName: charset)
                 let parsed = xmlParser.parse()
                 try Task.checkCancellation()  // an aborted parse is not a malformed feed
                 if let error = xmlParser.parseError {
