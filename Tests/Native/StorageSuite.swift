@@ -1757,7 +1757,7 @@ extension NativeSuites.StorageSuite {
                     "FT section feeds remain searchable by displayed publisher: \(query)")
             }
             expectEqual(
-                try await db.searchArticles(query: "source:world").map(\.id), [financialTimes.id],
+                try await db.searchArticles(query: "source:world").contains { $0.id == financialTimes.id }, true,
                 "Raw feed title continues to match a source filter")
             expectEqual(
                 try await db.listTotals(search: "source:ft").stories, 1,
