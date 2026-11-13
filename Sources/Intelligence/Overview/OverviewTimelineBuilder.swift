@@ -162,23 +162,36 @@ enum OverviewTimelineBuilder {
         }
         // An anchor counts by its wording: two times ("06:14 UTC", "09:30 UTC") are two, and the same words from two
         // publications ("this morning") are one, whatever the publication times.
-        let distinct = Set(
-            entries.map {
-                $0.kind == .anchor
-                    ? "anchor|\($0.dateText.lowercased())" : "\($0.resolved.timeIntervalSince1970)|\($0.precision)"
-            })
+        func establishesTimeline(_ selection: [Entry]) -> Bool {
+            Set(
+                selection.map {
+                    $0.kind == .anchor
+                        ? "anchor|\($0.dateText.lowercased())"
+                        : "\($0.resolved.timeIntervalSince1970)|\($0.precision)"
+                }
+            ).count >= minimumDistinctDates
+        }
 
-        guard distinct.count >= minimumDistinctDates
-        else {
+        guard establishesTimeline(entries) else {
             return Timeline()
         }
 
         // Prefer corroborated items, then the order the facts arrived in; show them in time order.
-        let kept =
-            entries
-            .sorted { ($0.facts.count, -$0.order) > ($1.facts.count, -$1.order) }
-            .prefix(maximumItems)
-            .sorted { ($0.resolved, $0.precision, $0.order) < ($1.resolved, $1.precision, $1.order) }
+        let prioritized = entries.sorted { ($0.facts.count, -$0.order) > ($1.facts.count, -$1.order) }
+        var selected = Array(prioritized.prefix(maximumItems))
+        if !establishesTimeline(selected),
+            let replacement = prioritized.dropFirst(maximumItems).first(where: { candidate in
+                var trial = selected
+                trial[trial.count - 1] = candidate
+                return establishesTimeline(trial)
+            })
+        {
+            selected[selected.count - 1] = replacement
+        }
+        guard establishesTimeline(selected) else {
+            return Timeline()
+        }
+        let kept = selected.sorted { ($0.resolved, $0.precision, $0.order) < ($1.resolved, $1.precision, $1.order) }
 
         var timeline = Timeline()
         for (index, entry) in kept.enumerated() {
@@ -264,7 +277,7 @@ enum OverviewTimelineBuilder {
         func group(_ name: String) -> String? {
             Range(match.range(withName: name), in: sentence).map { String(sentence[$0]) }
         }
-        let wording = group("year") ?? String(sentence[found])
+        let wording = String(sentence[found])
         let text = wording.prefix(1).uppercased() + wording.dropFirst()
         let published = calendar.component(.year, from: publishedAt)
         func starting(_ year: Int, month: Int) -> Date? {
