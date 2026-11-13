@@ -118,6 +118,16 @@ One name means one thing. Before adding a name, check this table and the names a
 | `pool_articles`, `pool_entries`, `pool_span_hours` | A Today shadow run: the stories the run assigns over, the story entries they group into, and the hours from the newest to the oldest. The pool is in the `dataset` name: `+page-1` is the app's first listed page of 200 stories (`NEWS_TODAY_POOL=page`), no suffix the whole 72 h window |
 | `lead_slides`, `lead_slides_labelled`, `lead_slides_labelled_important` | A Today shadow run: slides The Lead shows, those with a story label, and those the label calls Lead-worthy |
 | `imageless_entries`, `lead_slides_replaced_by_photo_rule` | A Today shadow run: stories with no photo in any report of their event, and Lead slides the photo rule replaces |
+| `novelty_items`, `novelty_new_fact_items`, `novelty_off_event_items`, `novelty_unsure_items` | A novelty acceptance run (#997): items scored, those labelled `new-fact`, and those left out as `off-event` or `unsure` |
+| `novelty_precision`, `novelty_false_rate`, `novelty_recall` | A novelty acceptance run: selected sentences inside a marked new-fact span over all selected; items labelled `repetition` or `new-framing` that surface a sentence over all such items; `new-fact` items that surface one |
+| `novelty_route_repetition`, `novelty_route_novel`, `novelty_route_unanchored`, `novelty_route_fallback`, `novelty_route_deferred` | A novelty run: items per route |
+| `burst_windows`, `quiet_windows`, `syndication_only_windows` | A momentum acceptance run (#998): labelled windows scored, by label |
+| `burst_precision`, `burst_recall`, `burst_false_positive_rate` | A momentum acceptance run: flagged windows labelled `burst` over all flagged; `burst` windows flagged; `quiet` windows flagged |
+| `origin_unknown_share` | A momentum run: share of reports whose origin is unknown |
+| `lead_arm_precision_at_5`, `lead_arm_precision_at_10`, `lead_arm_precision_at_20`, `lead_arm_ndcg_at_10` | A three-arm Lead run (#999): one line per arm, the arm (`current`: the Lead as shown; `base`: the Z2 score with affinity neutral; `base+mmr`) given as the parameter `arm`; pooled over readers and days |
+| `lead_arm_diversity`, `lead_arm_events_shown`, `lead_arm_publishers_shown` | A three-arm Lead run: one minus the mean pairwise cosine similarity at the display depth, and distinct events and publishers shown |
+| `lead_arm_overlap_current`, `lead_arm_rank_correlation_current` | A three-arm Lead run: stories an arm shares with `current` at the display depth, and its rank correlation with `current` over the pool |
+| `lead_arm_redundant_slots` | A three-arm Lead run: slots at the display depth that readers marked as repeating a story an earlier slot of the same list covers |
 
 A rescored run keeps its replay and changes only the labels; its `dataset` names the label set, for example `validation-2026-10-29+reviewed-labels-pegged-as-same`.
 
@@ -184,3 +194,4 @@ echo '[ -f "$HOME/news-eval/mlflow/env.sh" ] && . "$HOME/news-eval/mlflow/env.sh
 | 10 November 2026 | MLflow, marimo and Datasette installed. Ledger created with the 19 runs on record before that day; the #737 session added its own. Deepnote's cloud was considered and not adopted: the models and the data stay on this Mac |
 | 10 November 2026 | `news-ledger` command, fixed ports, daily backups, required fields and the verdict list. MLflow's usage reports turned off (they were on for the first hours). `multi_publisher` split into `multi_publisher_story` and `multi_publisher_event` and the affected runs renamed |
 | 12 November 2026 | `script/today_lead.sh` (dated read-only snapshots under `~/news-eval/today-lead-snapshots/`, reader packs) and `script/evaluation/lead_review.py` (blind sheet, scorer) for the Lead comparison of #934. First snapshot taken the same day. |
+| 13 November 2026 | Measure names for the editorial acceptance runs (`novelty_*`, `burst_*`, `lead_arm_*`), with the draft protocol `docs/audits/2026-11-13-editorial-evaluation-protocols.md` (#714). |
