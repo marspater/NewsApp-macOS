@@ -47,6 +47,46 @@ extension NativeSuites {
             #expect(Self.parse(Self.rss("<dc:creator>Jane Doe</dc:creator>\(field)"))?.author == "Jane Doe")
         }
 
+        /// #1303: the feed's XML is read once and the title's entities are decoded once, never again. The first
+        /// column is the title as written in the feed's XML.
+        @Test(arguments: [
+            ("Q&amp;amp;A with AT&amp;#038;T", "Q&A with AT&T"),
+            ("It&amp;#8217;s &amp;#x2019; here &amp;lt;now&amp;gt;", "It\u{2019}s \u{2019} here <now>"),
+            ("Use &amp;amp;lt;b&amp;amp;gt; for bold", "Use &lt;b&gt; for bold"),
+            ("How to write &amp;amp;amp; in HTML", "How to write &amp; in HTML"),
+            ("It&amp;amp;#8217;s not repaired", "It&#8217;s not repaired"),
+            ("Profit &amp;unknown; rises", "Profit &unknown; rises"),
+        ])
+        func aTitleIsEntityDecodedOnce(written: String, expected: String) {
+            func rss(_ element: String) -> Data {
+                Data(
+                    """
+                    <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/"><channel><title>T</title>\
+                    <item><\(element)>\(written)</\(element)><link>https://example.com/a</link></item></channel></rss>
+                    """.utf8)
+            }
+            let atom = Data(
+                """
+                <feed xmlns="http://www.w3.org/2005/Atom"><title>T</title><entry><title>\(written)</title>\
+                <id>urn:a</id><link href="https://example.com/a"/><updated>2026-11-01T00:00:00Z</updated></entry></feed>
+                """.utf8)
+            #expect(Self.parse(rss("title"))?.title == expected)
+            #expect(Self.parse(atom)?.title == expected)
+            // Without a title of its own the item takes the Dublin Core one, decoded the same way.
+            #expect(Self.parse(rss("dc:title"))?.title == expected)
+        }
+
+        @Test func entityDecodingNeverReadsItsOwnOutput() {
+            let pipeline = ContentExtractionPipeline.shared
+            #expect(
+                pipeline.decodeHTMLEntities(
+                    "&amp;lt; &amp;#8217; &amp;amp; &lt;&#39;&#x27;&gt; &nbsp;&bogus; &#1114112; &")
+                    == "&lt; &#8217; &amp; <''>  &bogus; &#1114112; &")
+            for _ in 0..<50 {
+                #expect(pipeline.decodeHTMLEntities("&amp;lt;b&amp;gt;") == "&lt;b&gt;")
+            }
+        }
+
         @Test func bylinesCombineAndSkipAnEntrysSource() {
             let creators = Self.rss("<dc:creator>Jane</dc:creator><dc:creator>John</dc:creator><author>Jane</author>")
             #expect(Self.parse(creators)?.author == "Jane, John", "Repeated names appear once")
