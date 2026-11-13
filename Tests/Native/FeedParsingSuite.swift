@@ -211,6 +211,21 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(
             reloaded.opmlFolderFeeds["Archive Folder"], [feed],
             "Even an already subscribed feed is retained in an imported OPML folder")
+        // A folder named like a built-in list gets its own section name, so its feeds can be shown.
+        let reserved = Data(
+            "<opml><body><outline text=\"Today\"><outline xmlUrl=\"\(feed)\"/></outline></body></opml>".utf8)
+        _ = settings.importFeeds(from: reserved)
+        expectEqual(settings.opmlFolderFeeds["Today (Feeds)"], [feed], "A folder called Today is stored apart")
+        expectTrue(settings.opmlFolderFeeds["Today"] == nil, "No folder shares a built-in list's name")
+        expectTrue(settings.userSections.contains("Today (Feeds)"), "Its section carries the new name")
+        // Many new feeds in one folder: each member is looked up once.
+        let many = (0..<4000).map { "<outline xmlUrl=\"https://example.com/bulk/\($0).xml\"/>" }.joined()
+        let bulk = Data("<opml><body><outline text=\"Bulk\">\(many)</outline></body></opml>".utf8)
+        let importClock = ContinuousClock()
+        let began = importClock.now
+        expectEqual(settings.importFeeds(from: bulk), 4000, "A large folder imports every feed")
+        expectEqual(settings.opmlFolderFeeds["Bulk"]?.count, 4000, "and keeps every member")
+        expectTrue(importClock.now - began < .seconds(10), "without a scan of every subscription per member")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: url) }
         try opml.write(to: url)
@@ -2000,6 +2015,13 @@ extension NativeSuites.FeedParsingSuite {
         expectTrue(
             defectArticles.last?.title.contains("Item with bad UTF-8") ?? false,
             "Invalid UTF-8 sequences are replaced and item is preserved (#1148)")
+        // Removing a control character must not join "]]" and ">" into the section's terminator.
+        let terminatorFeed = Data(
+            "<rss><channel><title>Test</title><item><title><![CDATA[Left a]]\u{0007}>b right]]></title><link>https://example.com/cdata-terminator</link></item></channel></rss>"
+                .utf8)
+        expectEqual(
+            FeedXMLParser(data: terminatorFeed, feedURL: "https://example.com/feed").parse().first?.title,
+            "Left a]]>b right", "A terminator made by removing a control character is kept as text")
 
         for badBytes in [[UInt8(0x07)], [UInt8(0xFF)]] {
             var cdataFeed = Data(

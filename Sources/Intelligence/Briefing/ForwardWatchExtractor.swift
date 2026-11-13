@@ -102,14 +102,30 @@ enum ForwardWatchExtractor {
         let lower = sentence.lowercased()
         if matches(lower, Pattern.reportedPast) || matches(lower, Pattern.counterfactual) { return nil }
         let schedule = scheduleDate(in: sentence, publishedAt: publishedAt, now: now ?? publishedAt)
-        guard !schedule.expired else { return nil }
-        let date = schedule.text
+        var date = schedule.text
+        if schedule.expired {
+            // The stated date has passed, but it may only be background ("Following the 3 November election, …").
+            // The sentence stays when it also names a time still ahead, and that time is the one it shows.
+            guard let ahead = timeStillAhead(in: sentence, publishedAt: publishedAt, now: now ?? publishedAt)
+            else { return nil }
+            date = ahead
+        }
         if isConditional(lower) { return (.conditional, date ?? firstMatch(sentence, Pattern.vagueTime)) }
         if let date, matches(lower, Pattern.scheduling) { return (.scheduled, date) }
         if matches(lower, Pattern.expectation) || firstMatch(sentence, Pattern.vagueTime) != nil {
             return (.expected, firstMatch(sentence, Pattern.vagueTime) ?? date)
         }
         return nil
+    }
+
+    /// A vague or relative time in the sentence that has not passed by `now`: "in the coming weeks" as written, or
+    /// "next week", "next month" or a weekday counted from publication.
+    private static func timeStillAhead(in sentence: String, publishedAt: Date, now: Date) -> String? {
+        if let vague = firstMatch(sentence, Pattern.vagueTime) { return vague }
+        guard let relative = firstMatch(sentence, Pattern.relativeDay) else { return nil }
+        let lower = relative.lowercased()
+        let days: Double = lower.contains("month") ? 62 : lower.contains("week") ? 14 : 7
+        return now < publishedAt.addingTimeInterval(days * 86_400) ? relative : nil
     }
 
     private static func isConditional(_ lower: String) -> Bool {

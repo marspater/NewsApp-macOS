@@ -694,7 +694,10 @@ final class AppSettings: ObservableObject {
         var folders = opmlFolderFeeds
         var foldersChanged = false
 
-        var knownFeedKeys = Set(feedURLs.map(Self.feedKey))
+        // Each subscription's stored URL by its key, kept current as feeds are added: a folder member is looked up
+        // once instead of by a scan of every subscription.
+        var storedURLByKey = Dictionary(
+            feedURLs.map { (Self.feedKey($0), $0) }, uniquingKeysWith: { first, _ in first })
         var knownSections = Set(userSections)
         var knownFolderKeys = folders.mapValues { Set($0.map(Self.feedKey)) }
 
@@ -703,19 +706,20 @@ final class AppSettings: ObservableObject {
                 continue
             }
 
-            if knownFeedKeys.insert(Self.feedKey(normalized)).inserted {
+            let key = Self.feedKey(normalized)
+            if storedURLByKey[key] == nil {
+                storedURLByKey[key] = normalized
                 feedURLs.append(normalized)
                 addedCount += 1
             }
-            if let folder = item.folder?.trimmingCharacters(in: .whitespacesAndNewlines), !folder.isEmpty {
+            if let named = item.folder?.trimmingCharacters(in: .whitespacesAndNewlines), !named.isEmpty {
+                let folder = Self.importedFolderName(named)
                 if knownSections.insert(folder).inserted {
                     userSections.append(folder)
                     sectionsChanged = true
                 }
-                let key = Self.feedKey(normalized)
                 if knownFolderKeys[folder, default: []].insert(key).inserted {
-                    folders[folder, default: []].append(
-                        feedURLs.first { Self.feedKey($0) == key } ?? normalized)
+                    folders[folder, default: []].append(storedURLByKey[key] ?? normalized)
                     foldersChanged = true
                 }
             }
@@ -726,6 +730,17 @@ final class AppSettings: ObservableObject {
         if foldersChanged { opmlFolderFeeds = folders }
         if sectionsChanged || foldersChanged { saveSections() }
         return addedCount
+    }
+
+    /// The built-in lists a folder may not share a name with: the library answers them without looking at a
+    /// folder's feeds, so a folder called "Today" would show every story instead of its own.
+    static let reservedSectionNames: Set<String> = [
+        "today", "unread", "briefing", "saved stories", "history", "notes & highlights",
+    ]
+
+    /// The section name an imported OPML folder is stored under: its own, or "<name> (Feeds)" when it is reserved.
+    static func importedFolderName(_ name: String) -> String {
+        reservedSectionNames.contains(name.lowercased()) ? "\(name) (Feeds)" : name
     }
 
     func exportOPML() -> String {

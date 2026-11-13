@@ -324,6 +324,18 @@ enum BriefingSignalsTests {
             ForwardWatchExtractor.classify(
                 "The council will vote on 11 November.", publishedAt: published, now: nextYear)
                 == nil, "yearless dates remain anchored to publication")
+        // An expired date in a background clause does not hide what the sentence expects next.
+        let mixed = "Following the 3 November 2026 election, ministers are expected to announce new measures next week."
+        let kept = ForwardWatchExtractor.classify(mixed, publishedAt: published, now: edition)
+        check(kept?.1 == "next week", "an expired background date keeps the upcoming action, shown by its own time")
+        let later = ISO8601DateFormatter().date(from: "2026-11-30T12:00:00Z")!
+        check(
+            ForwardWatchExtractor.classify(mixed, publishedAt: published, now: later) == nil,
+            "once next week has passed too, the sentence is dropped")
+        check(
+            ForwardWatchExtractor.classify(
+                "Ministers were expected to announce new measures on 3 November 2026.", publishedAt: published,
+                now: edition) == nil, "an expired date with no later time stays excluded")
     }
 
     @MainActor static func forwardWatchEditionLoad() async throws {

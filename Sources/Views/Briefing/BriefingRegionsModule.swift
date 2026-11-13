@@ -31,6 +31,15 @@ struct BriefingRegionsData: Equatable, Sendable {
 
     /// Regions with at least one story, most stories first.
     let rows: [Row]
+
+    /// The saved stories among the edition's entries and the supplemental entries the region rows hold (#1311): the
+    /// Briefing tiles show saved state for both.
+    static func savedIDs(
+        edition: [FeedEntry], regions: BriefingRegionsData?, isSaved: (FeedArticle) -> Bool
+    ) -> Set<String> {
+        let supplemental = regions?.rows.flatMap(\.entries) ?? []
+        return Set((edition + supplemental).map(\.representative).filter(isSaved).map(\.id))
+    }
     /// Every edition entry's regions, resolved once at load.
     let regionsByEntry: [String: Set<TensionMacroRegion>]
     /// Cited facts for the tiles, by entry ID.

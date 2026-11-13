@@ -1619,8 +1619,8 @@ extension NewsTests {
                     "FT section feeds remain searchable by displayed publisher: \(query)")
             }
             assertEqual(
-                try await db.searchArticles(query: "source:world").contains { $0.id == financialTimes.id }, true,
-                "Raw feed title continues to match a source filter")
+                try await db.searchArticles(query: "source:world").contains { $0.id == financialTimes.id }, false,
+                "The stored source is the displayed publisher; a section feed's own title is not searchable")
             assertEqual(
                 try await db.listTotals(search: "source:ft").stories, 1,
                 "Search totals use the same displayed publisher filter")

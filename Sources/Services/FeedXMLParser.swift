@@ -1193,7 +1193,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         let text =
             encoding == .utf8
             ? decodeLossyUTF8(data) : (String(data: data, encoding: encoding) ?? decodeLossyUTF8(data))
-        let cleaned = stripInvalidXMLControlChars(text)
+        // The section's own text never holds its terminator, so one found now was made by removing a control
+        // character from inside it ("]]\u{7}>"). It is split across two sections, which reads as the same text.
+        let cleaned = stripInvalidXMLControlChars(text).replacingOccurrences(of: "]]>", with: "]]]]><![CDATA[>")
         return cleaned.data(using: encoding) ?? Data(cleaned.utf8)
     }
 }

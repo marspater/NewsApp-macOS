@@ -190,7 +190,7 @@ enum BriefingImpactTests {
 
         let regions = BriefingRegionsData.make(
             entries: [supplemental], regionsByEntry: [supplemental.id: [.europe]], facts: [:], now: now)
-        let savedIDs = ArticleListView.savedIDsForBriefing(edition: [], regions: regions) {
+        let savedIDs = BriefingRegionsData.savedIDs(edition: [], regions: regions) {
             $0.id == supplemental.representative.id
         }
         check(

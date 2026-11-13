@@ -1157,15 +1157,8 @@ struct ArticleListView: View {
 
     /// Include supplemental Regions entries, not just the ten finite-edition cards (#1311).
     private func briefingSavedIDs(_ entries: [FeedEntry]) -> Set<String> {
-        Self.savedIDsForBriefing(
+        BriefingRegionsData.savedIDs(
             edition: entries, regions: briefingData.regions, isSaved: { savedStories.isSaved($0) })
-    }
-
-    static func savedIDsForBriefing(
-        edition: [FeedEntry], regions: BriefingRegionsData?, isSaved: (FeedArticle) -> Bool
-    ) -> Set<String> {
-        let supplemental = regions?.rows.flatMap(\.entries) ?? []
-        return Set((edition + supplemental).map(\.representative).filter(isSaved).map(\.id))
     }
 
     private func toggleSaved(_ article: FeedArticle) {
