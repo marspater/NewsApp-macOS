@@ -51,7 +51,8 @@ extension DatabaseEngine {
     // MARK: - Index
 
     /// Stories the index has not read, or read before the publisher changed their text, newest first. Stories behind
-    /// a reader barrier (a paywall teaser) and reconciled duplicates are left out: wire text counts once.
+    /// a reader barrier (a paywall teaser) and reconciled duplicates are left out: wire text counts once. A barrier is
+    /// never cleared, so full text that arrived later outranks it, by the rule feed health counts a full story with.
     func entityIndexCandidates(limit: Int, textLimit: Int = 8_000) throws -> [EntityIndexCandidate] {
         guard db != nil else { return [] }
         let revision = "coalesce((SELECT max(version) FROM publisher_content_revisions r WHERE r.article_id = a.id), 0)"
@@ -60,7 +61,9 @@ extension DatabaseEngine {
             SELECT a.id, a.title, coalesce(a.description, ''), substr(coalesce(a.content, ''), 1, ?1), a.source,
                    \(Self.articleDateOrder), \(revision)
             FROM articles a LEFT JOIN entity_index x ON x.article_id = a.id
-            WHERE a.reader_barrier IS NULL AND \(Self.visibleArticle)
+            WHERE (a.reader_barrier IS NULL OR length(coalesce(a.content, '')) >= \(FeedHealth.fullTextCharacters)
+                    OR (json_valid(a.reader_document) AND json_extract(a.reader_document, '$.isComplete') = 1))
+                AND \(Self.visibleArticle)
                 AND (x.article_id IS NULL OR x.revision < \(revision))
             ORDER BY \(Self.articleDateOrder) DESC
             LIMIT ?2;
