@@ -11,9 +11,9 @@
 #       NEWS_TODAY_POOL (default page: the pool the app assigns from) and NEWS_TODAY_PAGES pass through.
 #   script/today_lead.sh arms [--day YYYY-MM-DD]
 #       The three-arm comparison of #999 (current, base, base+mmr) on the same snapshot and pool: leaves the key,
-#       the aggregate lead-arms-report.json and the blind sheet in <day>/arms/, beside any pack of that day.
-#       NEWS_LEAD_ARMS_DEPTH, NEWS_LEAD_ARMS_RELEVANCE_WEIGHT, NEWS_LEAD_ARMS_DECAY_SECONDS and
-#       NEWS_LEAD_ARMS_MOMENTUM_CLOCK pass through (Tests/EditorialRankingEvaluation.swift).
+#       the aggregate lead-arms-report.json, the blind story sheet and the redundancy sheet in <day>/arms/, beside
+#       any pack of that day. NEWS_LEAD_ARMS_DEPTH, NEWS_LEAD_ARMS_RELEVANCE_WEIGHT and
+#       NEWS_LEAD_ARMS_DECAY_SECONDS pass through (Tests/EditorialRankingEvaluation.swift).
 #
 # A day's folder is never overwritten. Nothing here schedules itself.
 set -euo pipefail
@@ -93,7 +93,8 @@ PY
             cp "$WORK/out/arms/lead-rankings-private.json" "$WORK/out/arms/lead-arms-report.json" "$STAGE/"
             python3 script/evaluation/lead_review.py sheet "$STAGE"
             mv "$STAGE" "$DIR/arms"
-            echo "Each reader fills a copy of $DIR/arms/lead-review-private.csv named lead-review-private-<reader>.csv"
+            echo "Each reader fills a copy of $DIR/arms/lead-review-private.csv named lead-review-private-<reader>.csv,"
+            echo "then a copy of lead-redundancy-private.csv named lead-redundancy-private-<reader>.csv"
             exit 0
         fi
         cp "$WORK/out/lead-rankings-private.json" "$WORK/out/shadow-report.json" "$STAGE/"

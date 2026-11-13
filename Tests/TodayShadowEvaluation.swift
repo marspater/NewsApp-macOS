@@ -447,8 +447,9 @@ enum TodayShadowEvaluation {
         let imageless = try await imagelessEntryIDs(entries, database: db)
         var photoContext = context
         photoContext.imagelessEntryIDs = imageless
-        let photoLead = Set(
-            TodayEditionAssigner.assign(entries: entries, context: photoContext).entries(for: .theLead).map(\.id))
+        // The Lead as the app shows it, in shown order: the lane assigned with the photo rule.
+        let shownLead = TodayEditionAssigner.assign(entries: entries, context: photoContext).entries(for: .theLead)
+        let photoLead = Set(shownLead.map(\.id))
         let dates = windowArticles.map(\.orderDate).filter { $0 != DateParser.unknownDate }
         let pool = PoolReport(
             name: pagesRequested > 0 ? "page" : "window",
@@ -592,7 +593,8 @@ enum TodayShadowEvaluation {
         // W7 (#999): the same candidates ranked by the three arms, only when `script/today_lead.sh arms` asks.
         if env["NEWS_LEAD_ARMS"] == "1" {
             try await EditorialRankingEvaluation.writeLeadArms(
-                of: assignedList, pool: pool.name, now: now, database: db, currentSelectionMs: assignDurationMs,
+                of: assignedList, currentLead: shownLead, imageless: imageless, profile: context.profile,
+                pool: pool.name, now: now, database: db, currentSelectionMs: assignDurationMs,
                 privateOutput: outputDirectory)
         }
 

@@ -13,9 +13,14 @@ lead-evaluation.json into the first run: precision at 5, 10 and 20 per ranking, 
 the rankings' top 20s overlap, and how far the readers agree. It contains no story text.
 A key from `script/today_lead.sh arms` (#999) names the three arms `current`, `base` and `base+mmr` as its rankings
 and is scored the same way; a report takes runs of one kind. NDCG@10 counts `lead` as grade 1.
+For such a key `sheet` also writes RUN/lead-redundancy-private.csv: each arm's shown list under a code (A, B, C) whose
+arm only the key names. A reader fills a copy named lead-redundancy-private-<reader>.csv after the story sheet,
+writing `yes` in the redundant column of every slot that repeats a story an earlier slot of the same list covers;
+`report` counts those slots per arm, for the readers who have a copy.
 With no arguments, the script checks itself on synthetic runs.
 """
 import argparse
+import csv
 import hashlib
 import itertools
 import json
@@ -42,16 +47,17 @@ SOURCE = 'lead-rankings-private.json'
 SHEET = 'lead-review-private.csv'
 REPORT = 'lead-evaluation.json'
 COLUMNS = ['story', 'publisher', 'title', 'summary', 'label', 'note']
+REDUNDANCY = 'lead-redundancy-private.csv'
+REDUNDANCY_COLUMNS = ['slot', 'list', 'place', 'publisher', 'title', 'summary', 'redundant', 'note']
 
 
 def key(directory):
     path = directory / SOURCE
     require(path.exists(), f'No {SOURCE} in the run directory; run script/today_lead.sh pack first')
     data = json.loads(path.read_text())
-    used = set().union(*(row['ranks'] for row in data['stories']))
-    kinds = [names for names in (RANKINGS, ARMS) if used <= set(names)]
-    require(kinds and all(row['ranks'] for row in data['stories']), 'Unknown ranking in the key')
-    data['rankings'] = kinds[0]
+    data['rankings'] = ARMS if 'lists' in data else RANKINGS
+    require(all(row['ranks'] and set(row['ranks']) <= set(data['rankings']) for row in data['stories'])
+            and sorted(data.get('lists', {}).values()) in ([], sorted(ARMS)), 'Unknown ranking in the key')
     return data
 
 
@@ -63,9 +69,48 @@ def review_rows(data):
     return sorted(rows, key=lambda row: hashlib.sha256(f"{salt}\n{row['story']}".encode()).hexdigest())
 
 
+def redundancy_rows(data):
+    """Each arm's shown list, in shown order, under its code; empty for a key without arms."""
+    return [{'slot': f"{code}{row['ranks'][arm]}", 'list': code, 'place': str(row['ranks'][arm]),
+             'publisher': row['publisher'], 'title': row['title'], 'summary': row['summary'], 'redundant': '', 'note': ''}
+            for code, arm in sorted(data.get('lists', {}).items())
+            for row in sorted(data['stories'], key=lambda row: row['ranks'].get(arm, 0))
+            if 1 <= row['ranks'].get(arm, 0) <= data['shown']]
+
+
 def sheet(directory):
     directory = private_run(directory)
-    return write_new_sheet(directory / SHEET, COLUMNS, review_rows(key(directory)))
+    data = key(directory)
+    stories = write_new_sheet(directory / SHEET, COLUMNS, review_rows(data))
+    if 'lists' in data:
+        write_new_sheet(directory / REDUNDANCY, REDUNDANCY_COLUMNS, redundancy_rows(data))
+    return stories
+
+
+def redundancy(directory, data):
+    """Per reader with a redundancy copy and per arm: slots marked `yes`, of the slots the arm shows. A blank cell
+    says the slot repeats nothing, so a reader without a copy is left out rather than counted as zero."""
+    expected = {row['slot']: row for row in redundancy_rows(data)}
+    result = {}
+    for path in sorted(directory.glob('lead-redundancy-private-*.csv')):
+        marks = {}
+        with path.open(newline='') as handle:
+            for row in csv.DictReader(handle):
+                slot = row.get('slot')
+                require(slot in expected and slot not in marks, f'{path.name} has an unknown or repeated slot')
+                require(all(row.get(column) == value for column, value in expected[slot].items()
+                            if column not in ('redundant', 'note')),
+                        f'{path.name} has changed slot {slot}; rebuild it in a new private directory')
+                mark = (row.get('redundant') or '').strip().lower()
+                require(mark in ('', 'yes'), f'Unknown mark {mark!r} for slot {slot}')
+                require(not mark or row['place'] != '1', f'Slot {slot} opens its list and can repeat nothing')
+                marks[slot] = bool(mark)
+        require(len(marks) == len(expected), f'{path.name} lacks slots')
+        result[path.stem.removeprefix('lead-redundancy-private-')] = {
+            arm: rate(sum(marks[slot] for slot, row in expected.items() if row['list'] == code),
+                      sum(row['list'] == code for row in expected.values()))
+            for code, arm in data['lists'].items()}
+    return result
 
 
 def top(data, ranking, depth):
@@ -114,7 +159,7 @@ def day(directory):
     overlap = {f'{a}/{b}': len(set(top(data, a, DEPTHS[-1])) & set(top(data, b, DEPTHS[-1])))
                for a, b in itertools.combinations(data['rankings'], 2)}
     return {'run': directory.name, 'rankings': list(data['rankings']), 'pool': data['pool'], 'candidates': data['candidates'], 'sheetStories': len(expected),
-            'top20Overlap': overlap,
+            'top20Overlap': overlap, **({'redundantSlots': redundancy(directory, data)} if 'lists' in data else {}),
             'unlabelled': {name: sum(not labels.get(row['story']) for row in expected) for name, labels in readers.items()},
             'perReader': {name: precision(data, labels) for name, labels in readers.items()},
             'agreement': {f'{a}/{b}': kappa(readers[a], readers[b]) for a, b in itertools.combinations(sorted(readers), 2)}}
@@ -130,6 +175,9 @@ def pooled(days):
         for depth in DEPTHS:
             cells = [reader[ranking][f'at{depth}'] for entry in days for reader in entry['perReader'].values()]
             result[ranking][f'at{depth}'] = rate(sum(cell['count'] for cell in cells), sum(cell['of'] for cell in cells))
+        if 'redundantSlots' in days[0]:
+            cells = [reader[ranking] for entry in days for reader in entry['redundantSlots'].values()]
+            result[ranking]['redundantSlots'] = rate(sum(cell['count'] for cell in cells), sum(cell['of'] for cell in cells))
     return result
 
 
@@ -170,7 +218,11 @@ def report(directories):
         'limitations': 'A label judges the headline, summary and publisher of one report of the story. Precision is '
                        'taken over the labelled stories of a ranking\'s top; an incomplete sheet narrows it. Rankings '
                        'whose top 20s hold the same stories cannot be told apart at 20, only by their order at 5 and '
-                       '10. Readers see one shuffled list a day, so a story two rankings share is judged once.',
+                       '10. Readers see one shuffled list a day, so a story two rankings share is judged once.'
+                       + (' The Lead as shown holds at most five stories, so its precision at 10 and 20 and its NDCG@10 '
+                          'are taken over fewer places than the other arms\'. Redundant slots count only readers with a '
+                          'redundancy copy; an untouched copy reads as no redundancy. An arm that shows fewer stories has '
+                          'fewer slots to repeat in.' if 'redundantSlots' in days[0] else ''),
     }
     (resolved[0] / REPORT).write_text(json.dumps(result, indent=2, sort_keys=True) + '\n')
     return result
@@ -193,13 +245,25 @@ def fixture(directory, pool='page', now_timestamp=0):
 
 
 def arm_fixture(directory):
-    """22 stories: `current` ranks s1 to s20, `base` the reverse, `base+mmr` s3 to s22."""
+    """22 stories: `current` shows s1 to s4, `base` ranks s20 down to s1, `base+mmr` s3 to s22."""
     stories = [{'id': f's{index}', 'publisher': 'Publisher A', 'title': f'Headline {index}',
                 'summary': f'Private summary {index}',
-                'ranks': {arm: place for arm, place in (('current', index), ('base', 21 - index), ('base+mmr', index - 2))
-                          if 1 <= place <= 20}} for index in range(1, 23)]
+                'ranks': {arm: place for arm, place, depth in (('current', index, 4), ('base', 21 - index, 20),
+                                                              ('base+mmr', index - 2, 20)) if 1 <= place <= depth}}
+               for index in range(1, 23)]
     (directory / SOURCE).write_text(json.dumps(
-        {'pool': 'page', 'nowTimestamp': 0, 'candidates': 150, 'depth': 20, 'stories': stories}))
+        {'pool': 'page', 'nowTimestamp': 0, 'candidates': 150, 'depth': 20, 'shown': 5,
+         'lists': {'A': 'base', 'B': 'base+mmr', 'C': 'current'}, 'stories': stories}))
+
+
+def mark(directory, reader, slots):
+    """Self-check helper: a reader's redundancy copy with `yes` in the given slots."""
+    with (directory / REDUNDANCY).open(newline='') as handle:
+        rows = list(csv.DictReader(handle))
+    with (directory / f'lead-redundancy-private-{reader}.csv').open('w', newline='') as output:
+        writer = csv.DictWriter(output, REDUNDANCY_COLUMNS, lineterminator='\n')
+        writer.writeheader()
+        writer.writerows({**row, 'redundant': 'yes' if row['slot'] in slots else ''} for row in rows)
 
 
 def fill(directory, reader, lead):
@@ -261,7 +325,12 @@ def self_check():
         arm_fixture(arms)
         fixture(other, now_timestamp=1)
         require(sheet(arms) == 22 and sheet(other) == 24, 'The arm sheet lists the union of the three top 20s')
-        require(not any(arm in (arms / SHEET).read_text() for arm in ARMS), 'The sheet names no arm')
+        require(not any(arm in (arms / SHEET).read_text() + (arms / REDUNDANCY).read_text() for arm in ARMS),
+                'The sheets name no arm')
+        require(not (other / REDUNDANCY).exists(), 'A #934 pack has no redundancy sheet')
+        slots = [line.split(',')[0] for line in (arms / REDUNDANCY).read_text().splitlines()[1:]]
+        require(slots == [f'{code}{place}' for code, shown in (('A', 5), ('B', 5), ('C', 4))
+                          for place in range(1, shown + 1)], 'Each list in shown order, the Lead with its four slides')
         fill(arms, 'a', {'s1', 's2', 's3'})
         expect_rejected(lambda: report([arms, other]), ValueError, 'Arm and Z2 runs scored together')
         scored = report([arms])
@@ -271,8 +340,24 @@ def self_check():
         ideal = 1 + 1 / math.log2(3) + 0.5
         require(reader['current']['ndcgAt10'] == 1 and reader['base']['ndcgAt10'] == 0
                 and abs(reader['base+mmr']['ndcgAt10'] - 1 / ideal) < 1e-12, 'Arm NDCG@10')
-        require(scored['days'][0]['top20Overlap'] == {'current/base': 20, 'current/base+mmr': 18, 'base/base+mmr': 18},
+        require(scored['days'][0]['top20Overlap'] == {'current/base': 4, 'current/base+mmr': 2, 'base/base+mmr': 18},
                 'Arm overlap')
+        require(scored['days'][0]['redundantSlots'] == {} and scored['pooled']['base']['redundantSlots']['of'] == 0,
+                'No redundancy copy, no redundancy count')
+        mark(arms, 'a', {'A2', 'C3'})
+        scored = report([arms])
+        counted = {arm: (cell['count'], cell['of']) for arm, cell in scored['days'][0]['redundantSlots']['a'].items()}
+        require(counted == {'base': (1, 5), 'base+mmr': (0, 5), 'current': (1, 4)}, 'Redundant slots per arm')
+        require(scored['pooled']['current']['redundantSlots'] == rate(1, 4), 'Pooled redundant slots')
+        mark(arms, 'x', {'B1'})
+        expect_rejected(lambda: report([arms]), ValueError, 'A first slot was marked redundant')
+        (arms / 'lead-redundancy-private-x.csv').unlink()
+        empty = arms / 'empty'
+        empty.mkdir()
+        (empty / SOURCE).write_text(json.dumps({'pool': 'page', 'nowTimestamp': 2, 'candidates': 0, 'depth': 20,
+                                                'shown': 1, 'lists': {'A': 'current', 'B': 'base', 'C': 'base+mmr'},
+                                                'stories': []}))
+        require(sheet(empty) == 0 and report([empty])['days'][0]['rankings'] == list(ARMS), 'An empty arm key is one')
         fill(arms, 'b', set())
         require(report([arms])['days'][0]['perReader']['b']['current']['ndcgAt10'] is None, 'No lead, no NDCG')
     print('lead_review self-check passed')
