@@ -149,7 +149,8 @@ struct BriefingTimelineData: Equatable, Sendable {
     }
 
     /// The events whose stored overviews `load` reads, each once, the story with most publishers first: what Briefing
-    /// asks to have regenerated when stale (#1299).
+    /// asks to have regenerated when stale (#1299). The event a story opens comes first, then its other events, newest
+    /// first.
     @MainActor static func overviewEventIDs(_ entries: [FeedEntry], store: ArticleStore) async -> [String] {
         var seen = Set<String>()
         var eventIDs: [String] = []
@@ -161,7 +162,9 @@ struct BriefingTimelineData: Equatable, Sendable {
             let story: [String]
             switch entry {
             case .event(let summary, _, _):
-                story = [summary.eventID] + ((try? await store.database.storyEventIDs(summary.eventID)) ?? [])
+                // Newest first inside a story: the card shows the latest turning points.
+                story =
+                    [summary.eventID] + ((try? await store.database.storyEventIDs(summary.eventID)) ?? []).reversed()
             case .article(let article):
                 story = [try? await store.fetchEventOverview(forArticleID: article.id)?.eventID].compactMap { $0 }
             }

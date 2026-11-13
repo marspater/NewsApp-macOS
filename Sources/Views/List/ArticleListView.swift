@@ -1221,7 +1221,10 @@ struct ArticleListView: View {
             briefingData = loaded
             await OverviewGenerationCoordinator.shared.regenerateStaleOverviews(
                 eventIDs: await BriefingTimelineData.overviewEventIDs(listed, store: articleStore),
-                editionKey: listed.map(\.id).joined(separator: ","), store: articleStore)
+                // The edition's start is its identity; the listed stories stand in while there is none.
+                editionKey: briefing.map { "\($0.startedAt.timeIntervalSince1970)" }
+                    ?? listed.map(\.id).joined(separator: ","),
+                store: articleStore)
         }
         .allowsWindowActivationEvents(true)
     }
