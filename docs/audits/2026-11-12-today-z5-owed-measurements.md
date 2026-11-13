@@ -174,6 +174,113 @@ NEWS_LAUNCHES=10 ./script/launch_baseline.sh "$RUN/seeded"
 - It builds a Release bundle as `com.marspater.news.launchcheck`, seeds 10,000 stories and launches ten times; output `launch-baseline.json`. The first launch of a newly built bundle is reported apart, as in October, which leaves nine.
 - Read `first_card_restored` per launch: launches with `false` and with `true` are two series. The script does not take the measurement lock, so the idle check above is done by hand.
 
+## Results of 13 November 2026
+
+Run between 00:52 and 02:20 on 13 November. These are recorded figures. **No budget is set or met by them**, and none of the runs was on an idle Mac: the load was 2.7 when the first run started and between 4.5 and 30 while it ran. The launches themselves raise it (every launch refreshes 43 feeds and groups the new stories for 20 seconds before it is ended), and other work on the Mac came and went. Every figure below is therefore "Mac in use", with its load range beside it.
+
+- **Builds:** baseline `ba1853e`; `33199b7`, which was `main` before the epic Z pull requests of 12 November merged; `7eedcd4`, the integration head that stands for the code after all 18 of them. Profile configuration, `com.marspater.news.dev`, macOS 27.2.1, Mac17,3.
+- **Library:** a copy of the development library taken on 12 November (3,359 stories, newest about a day old), restored before every launch.
+- **Launcher:** `script/paired_launch.sh` at `9e3caf6`. Its first execution (a two-round trial) counted all three arms and excluded none.
+- The aggregates are in `docs/benchmarks/2026-11-13-today-launch.json`; logs and `footprint` reports stay under `~/news-eval/z5-937-2026-11-12/`.
+
+### First card, 21 rounds, 20 counted launches an arm, none excluded (numbers 1, 2, 3, 6)
+
+| Arm | Build | First card: median | p95 | Range | Slower than baseline in | Fresh edition ready | Load per launch |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Baseline | `ba1853e` | 1,641 ms | 3,494 ms | 1,332 to 3,506 | – | – | 5.2 to 29.8 |
+| COLD | `33199b7` | 1,919 ms | 3,700 ms | 1,531 to 4,149 | 17 of 20 rounds | – | 5.0 to 21.2 |
+| WARM | `33199b7` | 1,520 ms | 3,365 ms | 1,326 to 3,472 | 9 of 20 | 1,846 ms | 5.2 to 18.1 |
+| COLD | `7eedcd4` | 1,678 ms | 4,422 ms | 1,547 to 4,935 | 16 of 20 | – | 5.9 to 21.5 |
+| WARM | `7eedcd4` | 1,473 ms | 3,738 ms | 1,315 to 3,841 | 11 of 20 | 1,689 ms | 4.5 to 27.3 |
+| COLD, 72-hour pool (`-today_window_pool YES`) | `7eedcd4` | 4,389 ms | 6,338 ms | 2,318 to 6,501 | 20 of 20 | – | 4.8 to 23.1 |
+
+The medians and p95s carry the load of rounds 2, 3 and 14 to 18 (load 13 to 30). Two readings that depend less on it:
+
+| Arm | Difference to the baseline in the same round: median | Median in the 9 rounds with every launch at load 9 or less |
+| --- | --- | --- |
+| Baseline | – | 1,425 ms |
+| COLD `33199b7` | +178 ms | 1,654 ms |
+| WARM `33199b7` | −19 ms | 1,389 ms |
+| COLD `7eedcd4` | +203 ms | 1,599 ms |
+| WARM `7eedcd4` | +8 ms | 1,396 ms |
+| COLD, 72-hour pool | +2,141 ms | 3,524 ms |
+
+- **COLD is slower than the baseline by about 0.2 s** (12 to 16 % in the quieter rounds) on both builds; **WARM is level with the baseline**. That is the picture of #1243 again, now with p95s, on a Mac in use.
+- **The code after all 18 pull requests does not launch slower than `main` before them**: cold 1,599 against 1,654 ms and warm 1,396 against 1,389 ms in the quieter rounds.
+- **The absolute level is not the 850 ms reference's**: the fastest baseline launches of this run are 1.33 s. Profile builds in the development container on this library were never measured before, so these figures compare the arms with each other and not with the Release figures of 12 November.
+- **Every WARM launch showed the stored edition and confirmed it** (20 of 20 on both builds); the fresh edition was ready 0.2 to 0.3 s after the restored first card.
+- **The 72-hour pool costs the cold first card about 2 s more** (3,524 against 1,599 ms in the quieter rounds). This is the price of gate 6's option in the app as it is built on `7eedcd4`, where the cold first card waits for the wider assignment.
+
+### Assignment and context in the app (number 3)
+
+| Arm | Build | Context read: median | Lane assignment: median |
+| --- | --- | --- | --- |
+| COLD | `33199b7` | 88 ms | 110 ms |
+| COLD | `7eedcd4` | 79 ms | 91 ms |
+| WARM (behind the restored page) | `33199b7` | 245 ms | 130 ms |
+| WARM (behind the restored page) | `7eedcd4` | 230 ms | 90 ms |
+| COLD, 72-hour pool | `7eedcd4` | 704 ms | 1,169 ms |
+
+Athena · attention's part of a cold launch on the page pool is about 0.2 s on a Mac in use; the 250 ms I proposed for context plus assignment is not a budget yet. With the 72-hour pool it is about 1.9 s.
+
+### Memory 20 seconds after launch (numbers 2, 4, 6)
+
+Medians in MB; the peak's highest value in brackets.
+
+| Arm | Build | Footprint | Peak | CoreAnimation | CG Raster Data | Malloc Small |
+| --- | --- | --- | --- | --- | --- | --- |
+| Baseline | `ba1853e` | 246 | 263 (300) | 16 | 15 | 166 |
+| COLD | `33199b7` | 300 | 368 (415) | 67 | 27 | 157 |
+| WARM | `33199b7` | 298 | 376 (387) | 69 | 27 | 159 |
+| COLD | `7eedcd4` | 300 | 368 (399) | 69 | 27 | 159 |
+| WARM | `7eedcd4` | 297 | 376 (399) | 69 | 27 | 162 |
+| COLD, 72-hour pool | `7eedcd4` | 372 | 457 (493) | 66 | 25 | 218 |
+| After the swap (3 launches) | `33199b7` | 297 | 366 (381) | 69 | 27 | 159 |
+| After the swap (3 launches) | `7eedcd4` | 301 | 383 (384) | 69 | 27 | 163 |
+| Baseline of the swap run (3 launches) | `ba1853e` | 229 | 278 (281) | 20 | 19 | 154 |
+
+- **The edition stands about 55 MB above the baseline at 20 seconds and about 105 MB at the peak.** Nearly all of the standing difference is layer backing (CoreAnimation, +50 MB) and decoded images (CG Raster Data, +12 MB): the image memory of number 6.
+- **WARM and COLD are level** (298 against 300 MB). The 45 MB that the restored arm showed over the fallback on 12 November does not appear here.
+- **The swap from the restored to the fresh edition adds nothing measurable**: 297 and 301 MB after it. The swap arm worked as built: all 6 launches logged `today_fresh_edition_ready outcome=swapped`, which also settles the two points this document listed as not verified (the reversed row differs, and the window coming to the front leaves the page untouched). Three counted launches an arm is a small sample.
+- **The 72-hour pool adds about 70 MB standing and 90 MB at the peak**, in Malloc and not in layers.
+
+### Seeded 10,000-story launch baseline (number 9)
+
+`NEWS_LAUNCHES=10 ./script/launch_baseline.sh`, Release build of `main` at `f63c6f0` under `com.marspater.news.launchcheck`, load 5 to 15 (it launches straight after its own build).
+
+| | Process start to first card | Footprint settled | Peak |
+| --- | --- | --- | --- |
+| Launches 2 to 10 (9) | 807 ms median, 771 to 880 | 102 MiB | 157 MiB (highest 173) |
+| First launch of the new bundle, apart | 1,867 ms | 98 MiB | 152 MiB |
+| October, before Today | 656.8 ms median | | |
+
+- All nine are COLD launches: the seeded stories carry no photo, so no edition with a Lead is stored (`noLead`) and none is restored. This run never measures WARM.
+- **807 ms is 150 ms above October's figure**, on a Mac in use; the 850 ms reference of October is not re-set or declared met here.
+- **The first launch that stopped the script on `7eedcd4`: cause established, in the seeder and not in the app.** `./test.sh --seed-launch-library` at `7eedcd4` leaves all 10,000 `article_enrichment` rows without a category; at `f63c6f0` it leaves none (#1274, merged after the integration head was cut, fixes exactly this under #1272). The library open fills missing categories with `news_topic` before any window, so the first open on the older seed classified 10,000 stories and was ended by the script at 30 seconds every time. `news_topic` never returns NULL, so a row is classified once; nothing is reclassified on later opens. The script's longer wait for the first launch stays as a guard.
+
+### What the open-time category fill cost in these runs
+
+Found while establishing the cause above (Mnemosyne · storage and search, `DatabaseEngine.open`): the library copy every launch started from holds 27 stories without a category, of 3,359. Because the copy is restored before every launch, **every launch of every arm classified those 27 stories again while the library opened**, before the first card.
+
+| Copy the launch starts from (`7eedcd4`, two launches each, load about 3) | Library open | First card |
+| --- | --- | --- |
+| As measured: 27 stories without a category | 914 and 944 ms | 1,516 and 1,515 ms |
+| The same copy with those 27 filled | 541 and 536 ms | 1,115 and 1,089 ms |
+
+- About 0.4 s of every first card in the tables above is this fill, in all arms alike, the baseline included (it has the same statement). The differences between arms stand; the absolute level is about 0.4 s too high for a library whose stories are all classified. This explains most of the gap between these figures and the Release figures of 12 November.
+- In real use it is a cost paid once per story, at the next launch after stories were stored and not yet classified: about 14 ms a story on the launch path. It is not measured how many such stories a real library carries into a launch; this copy had 27 after a day without a launch.
+- Not changed here. Moving the fill behind the first snapshot would take it off the first card, but its comment says it must run before publisher metadata can replace the repaired labels, so the order needs a decision by whoever changes it. For the next paired run the copy should be opened once and closed before it is taken as the starting point.
+
+### Not obtained
+
+| Number | What happened | Still owed |
+| --- | --- | --- |
+| 5, memory after scrolling The Latest | Needs a person scrolling; not attempted | Me, with command B and `NEWS_PAIRED_HOLD=1` |
+| 7, scroll frame time | Attempted without a person. `xctrace record --template 'Animation Hitches' --attach <pid>` records (the `--launch` form of command C is refused, see below). Scroll-wheel events posted to the app's process were not delivered: the posting process is not trusted for event posting (`CGPreflightPostEventAccess()` is false), and the page's layer memory did not move (69 to 73 MB). The trace therefore holds no scrolling and no figure is taken from it | Me at the trackpad, with the attach form: start the app as command C does without `xctrace`, then `xcrun xctrace record --template 'Animation Hitches' --attach <pid> --time-limit 40s --no-prompt --output "$RUN/scroll/$ROW.trace"` |
+| 8, launch peak attribution | **Not an entitlement problem**: all three Profile builds carry `get-task-allow`. `xctrace record … --launch -- <path>/News.app/Contents/MacOS/News` stops with "Provided process … is ambiguous" and lists every `News.app` registered on this Mac, the installed app among them. It was not forced, because a wrong choice could start the real app. Attaching after launch would miss the launch peak | Me, in Instruments, choosing the Profile build as the target by hand; or `xctrace` on a Mac account where only one `News.app` is registered |
+
+Commands C and D above are wrong in their `--launch` form for that reason and are kept as written for the record.
+
 ## Not covered here
 
 - The captures on macOS 26 and the macOS 15 fallback, the held path of a restored edition and the hardware checks of #932 are not performance numbers; they stay on #937 and #932.
