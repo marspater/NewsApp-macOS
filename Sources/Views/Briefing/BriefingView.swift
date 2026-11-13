@@ -27,6 +27,8 @@ import SwiftUI
 struct BriefingActions {
     /// The list opens the original entry, including supplemental events outside the edition (#1311).
     let onOpenEntry: (FeedEntry) -> Void
+    /// Priority and Sitrep present event summaries without a representative article; those are edition-only.
+    let onOpenEvent: (EventFeedSummary) -> Void
     /// Callback invoked to request generation of a fresh daily briefing.
     let onStartNewBriefing: () -> Void
     /// Callback invoked to navigate back to the Today timeline.
@@ -51,10 +53,12 @@ struct BriefingActions {
         onOpenEntry: @escaping (FeedEntry) -> Void,
         onStartNewBriefing: @escaping () -> Void,
         onBackToToday: @escaping () -> Void,
+        onOpenEvent: @escaping (EventFeedSummary) -> Void = { _ in },
         onToggleRead: @escaping (FeedArticle) -> Void = { _ in },
         onToggleSave: @escaping (FeedArticle) -> Void = { _ in }
     ) {
         self.onOpenEntry = onOpenEntry
+        self.onOpenEvent = onOpenEvent
         self.onStartNewBriefing = onStartNewBriefing
         self.onBackToToday = onBackToToday
         self.onToggleRead = onToggleRead
@@ -78,7 +82,7 @@ struct BriefingActions {
                 }
             },
             onStartNewBriefing: onStartNewBriefing, onBackToToday: onBackToToday,
-            onToggleRead: onToggleRead, onToggleSave: onToggleSave)
+            onOpenEvent: onOpenEvent, onToggleRead: onToggleRead, onToggleSave: onToggleSave)
     }
 
     /// The same route opens edition and supplemental cards, for click, Return and accessibility.

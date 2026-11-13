@@ -1204,6 +1204,15 @@ struct ArticleListView: View {
                 onOpenEntry: { open($0) },
                 onStartNewBriefing: { startNewBriefing() },
                 onBackToToday: { selectedTopic = "Today" },
+                // Priority/Sitrep have edition-only summaries; Regions pass their full entry directly.
+                onOpenEvent: { event in
+                    if let entry = listed.first(where: {
+                        if case .event(let summary, _, _) = $0 { return summary.eventID == event.eventID }
+                        return false
+                    }) {
+                        open(entry)
+                    }
+                },
                 onToggleRead: { readManager.toggleRead($0.id) },
                 onToggleSave: { toggleSaved($0) }
             ),
