@@ -76,11 +76,14 @@ final class AppContainer: ObservableObject {
         self.themeManager = themeManager ?? ThemeManager.shared
     }
 
-    /// What a quit waits for before the process may end: every save and read mark still queued is in the library,
-    /// then the library is checkpointed. A checkpoint alone cannot keep a change that has not reached the library.
+    /// What a quit does before the process may end, in this order: background work stops, so no refresh, clustering
+    /// pass or maintenance starts or writes while the quit waits; every save and read mark still queued reaches the
+    /// library; then the library is checkpointed. A checkpoint alone cannot keep a change that has not reached it.
     static func storeBeforeTermination(
+        stoppingBackgroundWork stop: @MainActor @Sendable () -> Void,
         savedStories: SavedStoriesManager, readManager: ReadManager, database: DatabaseEngine
     ) async {
+        await MainActor.run { stop() }
         await savedStories.waitForStoredChanges()
         await readManager.waitForStoredChanges()
         await database.checkpointAndOptimize()
