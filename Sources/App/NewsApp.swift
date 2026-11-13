@@ -634,6 +634,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminationReplied = false
+        // No new refresh, clustering pass or maintenance starts while the quit waits for the library; until now
+        // this ran only at `willTerminate`, after the checkpoint.
+        AppContainer.shared.feedManager.stopBackgroundWork()
         Task.detached(priority: .userInitiated) {
             await AppContainer.storeBeforeTermination(
                 savedStories: AppContainer.shared.savedStories, readManager: AppContainer.shared.readManager,
