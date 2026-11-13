@@ -183,8 +183,8 @@ class FeedManager: NSObject, ObservableObject {
     }
 
     private func observeSubscriptions() {
-        subscriptionUpdates = appSettings.$feedURLs
-            .sink { [weak self] subscriptions in
+        subscriptionUpdates = Publishers.CombineLatest(appSettings.$feedURLs, appSettings.$opmlFolderFeeds)
+            .sink { [weak self] subscriptions, folders in
                 guard let self, !isStopped else { return }
                 let hidden = Set(TensionMethodology.v1.panel.map(\.url)).subtracting(subscriptions)
                 subscriptionTask?.cancel()
@@ -192,7 +192,9 @@ class FeedManager: NSObject, ObservableObject {
                     guard !Task.isCancelled else { return }
                     // The first value repeats what the store set while opening: nothing to reload (#937).
                     // A committed change refreshes even if superseded meanwhile: the next write reports no change.
-                    guard await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden)) else { return }
+                    let scopeChanged = await articleStore.database.setCollectionOnlyFeedURLs(Array(hidden))
+                    let foldersChanged = await articleStore.database.setOPMLSectionFeeds(folders)
+                    guard scopeChanged || foldersChanged else { return }
                     await articleStore.refreshState()
                 }
             }
@@ -351,6 +353,12 @@ class FeedManager: NSObject, ObservableObject {
 
     func articles(for section: String) -> [FeedArticle] {
         if section == "Today" || section == "Saved Stories" || section == "History" { return articles }
+        if let urls = appSettings.opmlFolderFeeds[section] {
+            let keys = Set(urls.map(AppSettings.feedKey))
+            return articles.filter {
+                $0.identityFeedURL.map { keys.contains(AppSettings.feedKey($0)) } ?? false
+            }
+        }
 
         return articles.filter { article in
             ArticleSection.matches(

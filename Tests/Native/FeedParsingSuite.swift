@@ -208,6 +208,9 @@ extension NativeSuites.FeedParsingSuite {
         expectEqual(settings.importFeeds(from: opml), 0, "Folder-only import adds no duplicate subscription")
         let reloaded = AppSettings(defaults: defaults)
         expectTrue(reloaded.userSections.contains("Archive Folder"), "Imported folders survive settings reload")
+        expectEqual(
+            reloaded.opmlFolderFeeds["Archive Folder"], [feed],
+            "Even an already subscribed feed is retained in an imported OPML folder")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: url) }
         try opml.write(to: url)
@@ -260,6 +263,52 @@ extension NativeSuites.FeedParsingSuite {
         expectFalse(
             opmlTestSettings.userSections.contains("InvalidFolder"),
             "Invalid feed URL should not cause invalid folder addition")
+
+        // #1311/12: Imported folders are membership queries, not searches for words in headlines.
+        let folderFeed = "https://example.com/new-feed.xml"
+        let otherFeed = "https://example.com/other-feed.xml"
+        _ = opmlTestSettings.addFeed(url: otherFeed)
+        expectEqual(
+            opmlTestSettings.opmlFolderFeeds["Technology"], [folderFeed],
+            "Imported Technology folder retains precisely the feed it contained")
+        let member = FeedArticle(
+            storedID: "opml-member", title: "Notes from the newsroom",
+            link: "https://example.com/story/a", guid: "opml-member", description: "A plain story",
+            pubDate: Date(), source: "Wire", category: "World")
+        let outsider = FeedArticle(
+            storedID: "opml-outsider", title: "Technology industry research",
+            link: "https://example.com/story/b", guid: "opml-outsider", description: "Technology updates",
+            pubDate: Date(), source: "Wire", category: "Technology")
+        let folderDB = DatabaseEngine(path: ":memory:")
+        try await folderDB.open()
+        _ = try await folderDB.upsertArticles([member], feedUrl: folderFeed)
+        _ = try await folderDB.upsertArticles([outsider], feedUrl: otherFeed)
+        await folderDB.setOPMLSectionFeeds(opmlTestSettings.opmlFolderFeeds)
+        expectEqual(
+            try await folderDB.fetchArticles(section: "Technology", limit: nil).map(\.id), [member.id],
+            "Imported OPML section selects subscribed feed membership, not headline or category matches")
+        expectEqual(
+            try await folderDB.listTotals(section: "Technology").stories, 1,
+            "Imported folder counts match its visible feed stories")
+        let roundTrip = OPMLParser.parse(data: Data(opmlTestSettings.exportOPML().utf8))
+        expectEqual(
+            roundTrip.first { $0.url == folderFeed }?.folder, "Technology",
+            "Export retains the imported feed's enclosing folder")
+        expectEqual(
+            roundTrip.first { $0.url == otherFeed }?.folder, nil,
+            "Ungrouped subscriptions remain outside imported folders on export")
+        let persisted = AppSettings(defaults: defaults)
+        expectEqual(
+            persisted.opmlFolderFeeds["Technology"], [folderFeed],
+            "OPML section membership survives settings reload")
+        persisted.removeFeed(url: folderFeed)
+        expectEqual(
+            persisted.opmlFolderFeeds["Technology"], [],
+            "Unsubscribing removes a feed from imported folder membership")
+        persisted.removeSection("Technology")
+        expectEqual(
+            persisted.opmlFolderFeeds["Technology"], nil, "Removing a section forgets its membership")
+        await folderDB.close()
 
         let manySettings = AppSettings(defaults: defaults)
         var largeOPML = "<opml><body>\n"
