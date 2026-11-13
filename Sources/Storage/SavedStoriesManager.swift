@@ -100,7 +100,7 @@ final class SavedStoriesManager: ObservableObject {
         mutationTask = Task {
             await previous?.value
             for article in articles {
-                await articleStore.setSaved(article: article, isSaved: isSaved)
+                await articleStore.setSaved(article: article, isSaved: isSaved, awaitingSpotlight: false)
             }
             pendingMutations -= 1
             if pendingMutations == 0 {
@@ -112,6 +112,13 @@ final class SavedStoriesManager: ObservableObject {
         }
     }
 
-    func waitForPendingChanges() async { await mutationTask?.value }
+    /// Every queued change is in the library and its Spotlight update has run.
+    func waitForPendingChanges() async {
+        await mutationTask?.value
+        await articleStore.spotlightTail?.value
+    }
+
+    /// Every queued change is in the library; Spotlight may still be catching up. What a quit waits for.
+    func waitForStoredChanges() async { await mutationTask?.value }
 
 }

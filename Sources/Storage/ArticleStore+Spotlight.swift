@@ -38,6 +38,14 @@ extension ArticleStore {
 
     /// Runs Spotlight updates one at a time in call order, so a rebuild and a save or unsave cannot interleave (#812).
     func serialSpotlight(_ operation: @escaping @MainActor (any SpotlightIndexing) async -> Void) async {
+        await enqueueSpotlight(operation).value
+    }
+
+    /// Queues a Spotlight update behind the earlier ones and returns at once, for a caller whose own work is
+    /// already stored and must not wait for the index.
+    @discardableResult
+    func enqueueSpotlight(_ operation: @escaping @MainActor (any SpotlightIndexing) async -> Void) -> Task<Void, Never>
+    {
         let previous = spotlightTail
         let indexer = spotlightIndexer
         let task = Task { @MainActor in
@@ -45,6 +53,6 @@ extension ArticleStore {
             await operation(indexer)
         }
         spotlightTail = task
-        await task.value
+        return task
     }
 }

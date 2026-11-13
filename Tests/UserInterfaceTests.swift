@@ -57,6 +57,7 @@ extension NewsTests {
             ("testAppIntentsExecutionAndValidation", { await testAppIntentsExecutionAndValidation() }),
             ("testAppShortcutsProviderDeclarations", { await testAppShortcutsProviderDeclarations() }),
             ("testSpotlightSavedStoriesIndexing", { try await testSpotlightSavedStoriesIndexing() }),
+            ("testStoredChangesDoNotWaitForSpotlight", { try await testStoredChangesDoNotWaitForSpotlight() }),
             ("testMenuBarExtraSettingsAndUnreadCount", { await testMenuBarExtraSettingsAndUnreadCount() }),
             ("testOnboardingAndPermissionTiming", { await testOnboardingAndPermissionTiming() }),
             ("testBannerGate", { try await testBannerGate() }),
@@ -3295,6 +3296,79 @@ extension NewsTests {
             await probe.settle()
         }
         _ = await initial.value
+    }
+
+    /// A Spotlight indexer that never finishes an update until its gate opens.
+    private struct GatedSpotlightIndexer: SpotlightIndexing {
+        let gate = OpenGate()
+        func indexSavedArticle(_ article: FeedArticle) async { await gate.wait() }
+        func removeSavedArticle(id: String) async { await gate.wait() }
+        func removeAllSavedArticles() async { await gate.wait() }
+    }
+
+    /// A quit with changes still queued: two saves and a read mark are made while Spotlight is stuck on the first
+    /// save, the app does what it does before it lets the process end, and a fresh connection to the library file
+    /// then holds all three. Before, the second save waited behind the first one's index update, the quit only
+    /// checkpointed, and the save was lost.
+    @MainActor
+    static func testStoredChangesDoNotWaitForSpotlight() async throws {
+        print("  - Testing a quit keeps queued saves and read marks while Spotlight is busy...")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("quit-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("news.sqlite3").path
+        let indexer = GatedSpotlightIndexer()
+        let db = DatabaseEngine(path: path)
+        let store = ArticleStore(database: db, spotlightIndexer: indexer)
+        await store.initialize()
+        let saved = SavedStoriesManager(articleStore: store)
+        let read = ReadManager(articleStore: store)
+        let stories = (1...3).map { index in
+            FeedArticle(
+                storedID: "quit-\(index)", title: "Story \(index)", link: "https://example.com/quit-\(index)",
+                guid: "quit-\(index)", description: "Text \(index).",
+                pubDate: Date(timeIntervalSince1970: 1_730_000_000 + Double(index)), source: "Outlet")
+        }
+        await store.batchUpsert(articles: stories, feedUrl: "https://example.com/rss")
+
+        saved.save(stories[0])
+        saved.save(stories[1])
+        read.markAsRead(stories[2].id)
+        let finished = OpenGate()
+        // The quit's first step, with what was stored when it ran: background work stops before anything is waited for.
+        let steps = OSAllocatedUnfairLock(initialState: [String]())
+        let quit = Task {
+            await AppContainer.storeBeforeTermination(
+                stoppingBackgroundWork: { steps.withLock { $0.append("stop") } },
+                savedStories: saved, readManager: read, database: db)
+            steps.withLock { $0.append("stored") }
+            await finished.open()
+        }
+        // The app replies to the quit after two seconds at the latest; the changes must be stored well inside that.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !(await finished.isOpenNow), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        assertTrue(await finished.isOpenNow, "The quit is not held up by a Spotlight update that never ends")
+        assertEqual(await indexer.gate.arrivals, 1, "Spotlight is still on the first update")
+        assertEqual(
+            steps.withLock { $0 }, ["stop", "stored"], "Background work stops first, once, then changes are stored")
+
+        let reopened = DatabaseEngine(path: path)
+        try await reopened.open()
+        assertEqual(
+            Set(try await reopened.fetchArticles(isSaved: true, limit: nil).map(\.id)), ["quit-1", "quit-2"],
+            "Both queued saves are in the reopened library")
+        assertTrue(
+            try await reopened.getReadArticleIDs().contains("quit-3"),
+            "The queued read mark is in the reopened library")
+        await reopened.close()
+
+        await indexer.gate.open()
+        await quit.value
+        await saved.waitForPendingChanges()
+        assertEqual(await indexer.gate.arrivals, 2, "Both index updates ran once the index was free")
+        await db.close()
     }
 
     @MainActor

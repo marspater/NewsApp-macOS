@@ -635,7 +635,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminationReplied = false
         Task.detached(priority: .userInitiated) {
-            await DatabaseEngine.shared.checkpointAndOptimize()
+            await AppContainer.storeBeforeTermination(
+                stoppingBackgroundWork: { AppContainer.shared.feedManager.stopBackgroundWork() },
+                savedStories: AppContainer.shared.savedStories, readManager: AppContainer.shared.readManager,
+                database: DatabaseEngine.shared)
             await MainActor.run { [weak self] in
                 self?.finishTermination(sender)
             }
