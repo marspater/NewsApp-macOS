@@ -2458,6 +2458,19 @@ extension NewsTests {
         assertEqual(try await regenerated(extraEvents), cap - 1, "One edition stays within its bound")
         await coordinator.regenerateStaleOverviews(eventIDs: extraEvents, editionKey: "edition-2", store: store)
         assertEqual(try await regenerated(extraEvents), extraEvents.count, "The next edition continues")
+
+        // A chosen event whose stale row is gone (publisher text stored for a cancelled attempt removes it) is still
+        // finished; an event the edition never chose, with no stored row, is left alone.
+        let unchosen = try await db.createEvent(memberArticleIDs: ["s1299-b1"], at: published)
+        // The last extra event was chosen by the second edition; the first was finished in the first one.
+        let chosen = extraEvents[extraEvents.count - 1]
+        try await db.executeSimple("DELETE FROM event_overviews WHERE event_id = '\(chosen)';")
+        await coordinator.regenerateStaleOverviews(
+            eventIDs: [chosen, unchosen.id], editionKey: "edition-2", store: store)
+        assertEqual(try await regenerated([chosen]), 1, "A chosen event that lost its stale row is regenerated")
+        assertTrue(
+            try await db.fetchEventOverview(eventID: unchosen.id) == nil,
+            "An event without a stored overview that the edition never chose gets none")
     }
 
     /// #789: an overview carries its event's own membership version, not the story's summed one, so a sum that falls
