@@ -162,7 +162,6 @@ actor OverviewGenerationCoordinator {
         let cappedDescriptions = (try? await targetStore.database.cappedDescriptionArticleIDs(articles.map(\.id))) ?? []
         let inputTextHash = OverviewComposer.inputTextHash(
             passages: selection.passages, eventTitle: eventTitle, cappedDescriptionArticleIDs: cappedDescriptions)
-        recordRequestedInputs(eventID: eventID, membershipVersion: membershipVersion, inputTextHash: inputTextHash)
         // The generation this request starts under; a clear of derived data before the commit refuses it (#844).
         let analysisGeneration = await targetStore.database.analysisGeneration
 
@@ -203,6 +202,9 @@ actor OverviewGenerationCoordinator {
             running.task.cancel()
             inFlightTasks.removeValue(forKey: eventID)
         }
+        // Recorded only by the request that starts a generation, with no wait before it is registered below: a
+        // warm-up refused above must not make the reader's running generation drop its result as superseded.
+        recordRequestedInputs(eventID: eventID, membershipVersion: membershipVersion, inputTextHash: inputTextHash)
 
         let passages = selection.passages
 
