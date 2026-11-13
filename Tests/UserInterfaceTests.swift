@@ -1150,6 +1150,9 @@ extension NewsTests {
                     Task { @MainActor in
                         store.noteStoryImageSaved()
                     }
+                    // The pass can reach its first saved image before the line below has stored its handle; on a
+                    // slow runner the cancellation was then skipped and the pass ran to its end.
+                    while cancelTask.withLock({ $0 }) == nil { usleep(1_000) }
                     cancelTask.withLock { $0 }?.cancel()
                 }
             }
