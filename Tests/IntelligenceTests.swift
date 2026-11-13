@@ -5223,6 +5223,19 @@ extension NewsTests {
             "A trailing year belongs to both month-first list dates"
         )
         assertEqual(
+            shown(range("Hearings are scheduled on November 19 and 21 at the courthouse.")), "Nov 19 and 21",
+            "A month-first list keeps its second day when a preposition follows")
+        assertEqual(
+            OverviewTimelineBuilder.singleStatedDate(in: "On November 3 and 5 people were detained."),
+            OverviewTimelineBuilder.StatedDate(year: nil, month: 11, day: 3), "A count after the date is no second day")
+        // Half a year from publication, the nearest year differs between the days of one list; they stay together.
+        let spring = calendar.date(from: DateComponents(year: 2026, month: 5, day: 5, hour: 12))!
+        let farList = OverviewTimelineBuilder.placedDates(
+            of: .init(
+                dates: [.init(year: nil, month: 11, day: 3), .init(year: nil, month: 11, day: 5)], isRange: false),
+            publishedAt: spring)
+        assertEqual(farList?.map(\.at), [day(2026, 11, 3), day(2026, 11, 5)], "A list's days share one placed year")
+        assertEqual(
             shown(range("Die Sitzung war am 3.–5. März 2027.")), "Mar 3 – 5, 2027",
             "A compressed range accepts supported day-first month names"
         )

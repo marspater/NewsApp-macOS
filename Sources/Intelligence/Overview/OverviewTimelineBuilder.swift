@@ -528,7 +528,13 @@ enum OverviewTimelineBuilder {
             return .invalid
         }
         let endsPhrase = suffix.range(of: #"^\s*(?:[.!?;)]|$)"#, options: .regularExpression) != nil
-        if monthFirst, year == nil, !isRange, !endsPhrase { return .skip }
+        // "November 3 and 5 people" counts people; "November 19 and 21 at the courthouse" lists two days.
+        // ponytail: a short list of words that cannot follow a count; any other word keeps the single-date reading.
+        let continuesAfterList =
+            suffix.range(
+                of: #"^,?\s+(?:at|in|on|for|by|with|before|after|when|while|as|and|but|to|from)\b"#,
+                options: .regularExpression) != nil
+        if monthFirst, year == nil, !isRange, !endsPhrase, !continuesAfterList { return .skip }
         if suffix.range(
             // A further day, or a further range of days ("April 9 to 11 and 16 to 18"), shares the month too.
             of: #"^(?:\#(rangeJoin)|\#(dayListJoin))\#(dayNumber)(?:\#(rangeJoin)\#(dayNumber))?(?=\s*(?:[,;.!?)]|$))"#,
@@ -631,7 +637,12 @@ enum OverviewTimelineBuilder {
     /// A year the source leaves out is inferred: from the range's other end, or else the one nearest publication.
     static func placedDates(of span: StatedSpan, publishedAt: Date) -> [(date: StatedDate, at: Date)]? {
         guard span.isRange else {
-            let placed = span.dates.compactMap { date in resolve(date, publishedAt: publishedAt).map { (date, $0) } }
+            // The first date's year places every date that states none, so a list never splits across years.
+            guard let first = span.dates.first, let anchor = resolve(first, publishedAt: publishedAt) else {
+                return nil
+            }
+            let year = calendar.component(.year, from: anchor)
+            let placed = span.dates.compactMap { date in place(date, year: date.year ?? year).map { (date, $0) } }
             return placed.count == span.dates.count ? placed.map { (date: $0.0, at: $0.1) } : nil
         }
         guard span.dates.count == 2 else { return nil }

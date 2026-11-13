@@ -283,5 +283,11 @@ enum BriefingSignalsTests {
         let ongoing = ForwardWatchExtractor.classify(
             "The talks are scheduled for 25–30 October.", publishedAt: now)
         check(ongoing?.0 == .scheduled && ongoing?.1 == "25–30 October", "ongoing range keeps its complete span")
+        let ongoingMonths = ForwardWatchExtractor.classify(
+            "Talks are scheduled from September 2026 to October 2026.", publishedAt: now)
+        check(ongoingMonths?.0 == .scheduled, "a month range whose end month is running is not over")
+        check(
+            ForwardWatchExtractor.classify("Talks were scheduled from August 2026 to September 2026.", publishedAt: now)
+                == nil, "a month range that ended last month stays excluded")
     }
 }

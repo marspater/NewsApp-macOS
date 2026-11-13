@@ -127,8 +127,12 @@ enum ForwardWatchExtractor {
                 return firstMatch(sentence, Pattern.calendarDate)
                     ?? verbatimDateText(in: sentence, matchRange: match.range, isRange: false, isCombined: false)
             case .span(let span):
+                // A month-only end runs to the end of that month, not to its first day.
                 guard let placed = OverviewTimelineBuilder.placedDates(of: span, publishedAt: publishedAt),
-                    let latest = placed.map(\.at).max(), latest >= today
+                    let latest = placed.max(by: { $0.at < $1.at }),
+                    let end = Calendar.utc.dateInterval(of: latest.date.day == nil ? .month : .day, for: latest.at)?
+                        .end,
+                    end > today
                 else { return nil }
                 return verbatimDateText(
                     in: sentence, matchRange: match.range, isRange: span.isRange, isCombined: match.isCombined)
