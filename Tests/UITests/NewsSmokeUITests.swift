@@ -238,4 +238,22 @@ final class NewsSmokeUITests: XCTestCase {
         }
     }
 
+    /// #1306, against the app's own binary: a story is saved and the app is quit at once with ⌘Q, the path through
+    /// `applicationShouldTerminate`. The next launch still lists it under Saved Stories, so the save reached the
+    /// library before the process ended.
+    func test10SaveSurvivesAnImmediateQuit() throws {
+        let headline = "Regional Orchestra Announces Free Summer Concert Series"
+        openHeadline(headline)
+        let save = app.buttons["Save Story"]
+        XCTAssertTrue(save.exists, "The story is already saved; this run's library is not fresh for it")
+        save.click()
+        app.typeKey("q", modifierFlags: .command)
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "The app did not quit")
+
+        app.launch()
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 30), "The main window did not appear")
+        sidebarRow("Saved Stories").click()
+        XCTAssertTrue(story(headline).waitForExistence(timeout: 20), "The save made just before quitting was lost")
+    }
+
 }
