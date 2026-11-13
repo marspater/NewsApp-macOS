@@ -644,11 +644,7 @@ struct ArticleListView: View {
                 let photos =
                     (try? await articleStore.database.storyImages(
                         for: frozen.filter { $0.imageUrl == nil }.map(\.id))) ?? [:]
-                let briefingArticles = frozen.map { story in
-                    var story = story
-                    if story.imageUrl == nil { story.imageUrl = photos[story.id] }
-                    return story
-                }
+                let briefingArticles = FiniteBriefing.withRecordedPhotos(frozen, photos: photos)
                 let events = (try? await articleStore.eventFeedSummaries(for: briefingArticles.map(\.id))) ?? []
                 try Task.checkCancellation()
                 let snapshot = FeedSnapshot(articles: briefingArticles, events: events)
