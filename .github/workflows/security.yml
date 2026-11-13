@@ -40,7 +40,9 @@ jobs:
     runs-on: macos-26
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-    timeout-minutes: 45
+    # The traced build took 19 to 31 minutes on 12 November 2026 and 41 on a busy runner the day after,
+    # which left the analysis no room inside 45.
+    timeout-minutes: 60
 
     steps:
       - name: Checkout
