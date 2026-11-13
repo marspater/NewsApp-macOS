@@ -359,11 +359,13 @@ enum TimelineAudit {
             return accepted.isEmpty ? "factRejected" : "segmentation"
         }
         let articleID = facts.first { $0.quote == sentence }?.articleID
-        if let article = articles.first(where: { $0.id == articleID }), article.pubDate == DateParser.unknownDate {
+        let published = articles.first { $0.id == articleID }?.pubDate
+        if published == DateParser.unknownDate {
             return "unknownPublicationDate"
         }
         let stated = OverviewTimelineBuilder.singleStatedDate(in: sentence)
-        let anchor = OverviewTimelineBuilder.anchor(in: sentence, publishedAt: Date())
+        // As the builder does: a plan year is read against the day its article was published, not today.
+        let anchor = OverviewTimelineBuilder.anchor(in: sentence, publishedAt: published ?? Date())
         if stated == nil && anchor == nil {
             let range = NSRange(sentence.startIndex..., in: sentence)
             let sensitive =
@@ -398,8 +400,14 @@ enum TimelineAudit {
     }
 
     private static func branchThread(_ merged: [OverviewTimelineItem], now: Date) -> Thread? {
-        guard let items = BriefingTimelineData.items(merged, now: now) else { return nil }
-        return thread(items.map { Thread.Row(text: $0.dayText, date: $0.date) }, now: now)
+        guard let items = BriefingTimelineData.items(merged, now: now), let first = items.first else { return nil }
+        // The day count the app shows (`BriefingTimelineData.thread`): UTC days, and none from a month-only start.
+        let utc = OverviewTimelineItem.legacyCalendar
+        let day =
+            first.span.duration <= 86_400
+            ? utc.dateComponents([.day], from: utc.startOfDay(for: first.date), to: utc.startOfDay(for: now)).day
+            : nil
+        return Thread(rows: items.map { Thread.Row(text: $0.dayText, date: $0.date) }, day: day.map { max(0, $0) })
     }
 
     private static func thread(_ rows: [Thread.Row], now: Date) -> Thread? {
