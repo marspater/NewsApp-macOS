@@ -18,17 +18,8 @@ import SwiftUI
 /// Controller for system dictionary Look Up popover in reader and event overview (Issue #1207).
 @MainActor
 enum ReaderDictionaryLookup {
-    /// Formats the context menu item label for a given text selection or word.
-    static func lookupTitle(for text: String?) -> String {
-        guard let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
-            return "Look Up"
-        }
-        if text.count <= 25 {
-            return "Look Up “\(text)”"
-        } else {
-            return "Look Up “\(text.prefix(20))…”"
-        }
-    }
+    /// Do not query selection in a menu label: SwiftUI rebuilds it for every reader text block (#1311).
+    static let contextMenuTitle = "Look Up"
 
     /// Extracts the word under the given point in a text container laid out with the given font.
     static func word(
@@ -210,7 +201,7 @@ struct ReaderLookUpModifier: ViewModifier {
                     triggerLookup()
                 } label: {
                     Label(
-                        ReaderDictionaryLookup.lookupTitle(for: ReaderSelection.current()),
+                        ReaderDictionaryLookup.contextMenuTitle,
                         systemImage: "character.book.closed")
                 }
                 .keyboardShortcut("d", modifiers: [.control, .command])

@@ -74,6 +74,7 @@ extension NewsTests {
             ("testUndatedStoriesInPublicationWindow", { try await testUndatedStoriesInPublicationWindow() }),
             ("testAppSettingsIsolationAndURLNormalization", { await testAppSettingsIsolationAndURLNormalization() }),
             ("testNotificationServiceErrorLogging", { await testNotificationServiceErrorLogging() }),
+            ("testSettingsOPMLImportStatus", { await testSettingsOPMLImportStatus() }),
             (
                 "testNotificationDedupeAcrossRefreshes",
                 { try await testNotificationDedupeAcrossRefreshes(fixtureRoot: fixtureRoot) }
@@ -286,6 +287,30 @@ extension NewsTests {
         assertEqual(checker.statusMessage, "Received untrusted release URL", "Untrusted release links are rejected")
         assertFalse(checker.updateAvailable, "Untrusted release links cannot offer an update")
         assertTrue(checker.verifiedReleaseURL == nil, "Untrusted release links are never retained")
+    }
+
+    @MainActor
+    static func testSettingsOPMLImportStatus() async {
+        let suiteName = testDefaultsSuite("test.settings-opml-import")
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { removeTestDefaults(suiteName) }
+
+        let store = ArticleStore(database: DatabaseEngine(path: ":memory:"), spotlightIndexer: MockSpotlightIndexer())
+        await store.initialize()
+        let manager = FeedManager(
+            settings: AppSettings(defaults: defaults), store: store, schedulesRefresh: false)
+
+        let malformed = Data("<opml><body><outline".utf8)
+        let rejected = SettingsView.opmlImportStatus(for: malformed, using: manager)
+        assertTrue(rejected.failed, "Settings rejects malformed OPML rather than reporting no additions")
+        assertTrue(rejected.message.contains("could not be imported"), "Settings shows the import error")
+        assertTrue(store.operationError != nil, "Malformed OPML retains the operation error")
+
+        store.operationError = nil
+        let empty = Data("<opml><body></body></opml>".utf8)
+        let noChanges = SettingsView.opmlImportStatus(for: empty, using: manager)
+        assertFalse(noChanges.failed, "A valid empty OPML import is not an error")
+        assertEqual(noChanges.message, "No new feeds imported", "Valid OPML with no additions reports no changes")
     }
 
     @MainActor
