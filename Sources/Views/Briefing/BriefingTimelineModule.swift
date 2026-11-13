@@ -115,9 +115,8 @@ struct BriefingTimelineData: Equatable, Sendable {
     static func thread(entry: FeedEntry, timeline: [OverviewTimelineItem], now: Date) -> Thread? {
         guard let items = items(timeline, now: now), let first = items.first else { return nil }
         guard first.span.duration <= 86_400 else { return Thread(entry: entry, items: items, day: nil) }
-        let calendar = Calendar.current
-        let day = calendar.dateComponents(
-            [.day], from: calendar.startOfDay(for: first.date), to: calendar.startOfDay(for: now)
+        let day = utc.dateComponents(
+            [.day], from: utc.startOfDay(for: first.date), to: utc.startOfDay(for: now)
         ).day
         return Thread(entry: entry, items: items, day: max(0, day ?? 0))
     }

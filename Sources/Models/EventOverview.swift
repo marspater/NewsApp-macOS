@@ -306,8 +306,10 @@ extension OverviewTimelineItem {
     static func isAnchorText(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let range = NSRange(trimmed.startIndex..., in: trimmed)
-        // The former extractor also stored a plan's bare year ("2028", "in 2028").
-        if trimmed.range(of: #"^(?:in\s+)?(?:19|20)\d{2}$"#, options: [.regularExpression, .caseInsensitive]) != nil {
+        // The former extractor also stored a plan's bare year ("2028", "in 2028", "by 2035", "until 2030").
+        if trimmed.range(
+            of: #"^(?:(?:in|by|until)\s+)?(?:19|20)\d{2}$"#, options: [.regularExpression, .caseInsensitive]
+        ) != nil {
             return true
         }
         return anchorExpressions.contains {

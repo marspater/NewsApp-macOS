@@ -5020,9 +5020,11 @@ extension NewsTests {
         assertEqual(yearless?.text, "Second quarter", "A plan's quarter without a year keeps its wording, no year")
         assertTrue(yearless?.isPlan == true, "A plan's quarter without a year is a plan")
         assertEqual(anchorText("Sales fell in the second quarter."), nil, "A quarter without a year needs a plan")
-        assertEqual(anchorText("The plant is expected to open in 2028."), "2028", "A plan's later year")
+        assertEqual(anchorText("The plant is expected to open in 2028."), "In 2028", "A plan's later year")
         assertEqual(anchorText("The company plans to cut 2040 jobs."), nil, "A count in a plan sentence is no year")
-        assertEqual(anchorText("The utility plans to close the plant by 2035."), "2035", "A plan year after by")
+        assertEqual(anchorText("The utility plans to close the plant by 2035."), "By 2035", "A plan year after by")
+        assertEqual(
+            anchorText("The ministry plans to keep the cap until 2030."), "Until 2030", "A plan year after until")
         assertEqual(anchorText("The 2024 decision still stands."), nil, "A bare year outside a plan is no anchor")
         assertEqual(anchorText("The vote at 09:00 UTC followed talks last night."), nil, "Two anchors are ambiguous")
 
@@ -5090,7 +5092,8 @@ extension NewsTests {
 
         // Legacy classification lives with the model (no builder dependency) and is the builder's definition.
         for text in [
-            "Yesterday Morning", "06:14 UTC", "Second Quarter Of 2027", "Q2 2027", "in 2027", "Earlier This Week",
+            "Yesterday Morning", "06:14 UTC", "Second Quarter Of 2027", "Q2 2027", "in 2027", "By 2035", "Until 2030",
+            "Earlier This Week",
         ] {
             assertTrue(OverviewTimelineItem.isAnchorText(text), "Legacy anchor text: \(text)")
         }
@@ -5420,6 +5423,39 @@ extension NewsTests {
         assertTrue(
             stored.isStale(currentMembershipVersion: 3),
             "A document from analysis version 14, the one before date kinds, is stale and is regenerated")
+
+        // 8-item cap preserves at least 2 distinct dates when top 8 corroborated entries share one date.
+        let secondArticle = FeedArticle(
+            storedID: "prov-b", title: "Ceasefire follow-up", link: "https://\(fixtureHost)/prov-b", guid: "prov-b",
+            description: "", pubDate: published, source: "Daily")
+        var capFacts: [PassageAnchoredFact] = []
+        var capPassages: [EvidencePassage] = []
+        for idx in 0..<8 {
+            let quote = "On 3 November 2026, delegation \(idx) arrived."
+            let pA = EvidencePassage(id: "cap-pa-\(idx)", articleID: article.id, text: quote, ordinal: idx)
+            let pB = EvidencePassage(id: "cap-pb-\(idx)", articleID: secondArticle.id, text: quote, ordinal: idx)
+            capPassages.append(contentsOf: [pA, pB])
+            capFacts.append(
+                PassageAnchoredFact(
+                    id: "cap-fa-\(idx)", statement: quote, passageID: pA.id, quote: quote, articleID: article.id))
+            capFacts.append(
+                PassageAnchoredFact(
+                    id: "cap-fb-\(idx)", statement: quote, passageID: pB.id, quote: quote, articleID: secondArticle.id))
+        }
+        let secondDateQuote = "On 4 November 2026, talks opened."
+        let secondDatePassage = EvidencePassage(id: "cap-p2", articleID: article.id, text: secondDateQuote, ordinal: 99)
+        capPassages.append(secondDatePassage)
+        capFacts.append(
+            PassageAnchoredFact(
+                id: "cap-f2", statement: secondDateQuote, passageID: secondDatePassage.id, quote: secondDateQuote,
+                articleID: article.id))
+        let cappedTimeline = OverviewTimelineBuilder.build(
+            facts: capFacts, passages: capPassages, articles: [article, secondArticle], locale: english
+        ).items
+        assertEqual(cappedTimeline.count, 8, "Capped timeline keeps 8 items")
+        assertTrue(
+            Set(cappedTimeline.map(\.dateText)).count >= 2,
+            "Capped timeline swaps in a second distinct date instead of dropping it")
     }
 
     static func testEventOverviewReaderMode(fixtureHost: String) async throws {

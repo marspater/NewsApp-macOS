@@ -274,6 +274,18 @@ enum BriefingImpactTests {
         check(
             BriefingTimelineData.items([publication, row("b", "Nov 4", today - 3 * day)], now: now) == nil,
             "a publication date never makes the second date")
+
+        let savedTimeZone = NSTimeZone.default
+        NSTimeZone.default = TimeZone(identifier: "America/Los_Angeles")!
+        defer { NSTimeZone.default = savedTimeZone }
+        let utcStart = utc.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 0))!
+        let utcSecond = utc.date(from: DateComponents(year: 2026, month: 11, day: 4, hour: 0))!
+        let utcNow = utc.date(from: DateComponents(year: 2026, month: 11, day: 5, hour: 12))!
+        let laThread = BriefingTimelineData.thread(
+            entry: entry, timeline: [row("u1", "Nov 3", utcStart), row("u2", "Nov 4", utcSecond)], now: utcNow)
+        check(
+            laThread?.day == 2,
+            "day count uses UTC calendar rather than local time zone (got \(laThread?.day.map(String.init) ?? "nil"))")
     }
 
     static func timelineOrdering() {

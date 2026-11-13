@@ -200,11 +200,6 @@ enum OverviewTimelineBuilder {
         // publications ("this morning") are one, whatever the publication times. A range or list is one unit with a
         // span: it is distinct from another date only when the spans do not overlap, as in Briefing, so a range alone
         // or a range with a date inside it is no timeline (#1249).
-        let distinct = Set(
-            entries.filter { $0.end == nil }.map {
-                $0.kind == .anchor
-                    ? "anchor|\($0.dateText.lowercased())" : "\($0.resolved.timeIntervalSince1970)|\($0.precision)"
-            })
         func span(_ entry: Entry) -> DateInterval? {
             let unit: Calendar.Component = entry.precision == 0 ? .month : .day
             guard let start = calendar.dateInterval(of: unit, for: entry.resolved),
@@ -212,30 +207,46 @@ enum OverviewTimelineBuilder {
             else { return nil }
             return DateInterval(start: start.start, end: end.end)
         }
-        let establishesTimeline =
-            distinct.count >= minimumDistinctDates
-            || entries.contains { first in
-                first.end != nil
-                    && entries.contains { other in
-                        guard let a = span(first), let b = span(other) else { return false }
-                        return a.end <= b.start || b.end <= a.start
-                    }
-            }
+        func establishesTimeline(_ selection: [Entry]) -> Bool {
+            let distinct = Set(
+                selection.filter { $0.end == nil }.map {
+                    $0.kind == .anchor
+                        ? "anchor|\($0.dateText.lowercased())"
+                        : "\($0.resolved.timeIntervalSince1970)|\($0.precision)"
+                })
+            return distinct.count >= minimumDistinctDates
+                || selection.contains { first in
+                    first.end != nil
+                        && selection.contains { other in
+                            guard let a = span(first), let b = span(other) else { return false }
+                            return a.end <= b.start || b.end <= a.start
+                        }
+                }
+        }
 
-        guard establishesTimeline
-        else {
+        guard establishesTimeline(entries) else {
             return Timeline()
         }
 
         // Prefer corroborated items, then the order the facts arrived in; show them in time order.
-        let kept =
-            entries
-            .sorted { ($0.facts.count, -$0.order) > ($1.facts.count, -$1.order) }
-            .prefix(maximumItems)
-            .sorted {
-                ($0.resolved, $0.end == nil ? 0 : 1, $0.precision, $0.order)
-                    < ($1.resolved, $1.end == nil ? 0 : 1, $1.precision, $1.order)
-            }
+        let prioritized = entries.sorted { ($0.facts.count, -$0.order) > ($1.facts.count, -$1.order) }
+        var selected = Array(prioritized.prefix(maximumItems))
+        if !establishesTimeline(selected),
+            let replacement = prioritized.dropFirst(maximumItems).first(where: { candidate in
+                var trial = selected
+                trial[trial.count - 1] = candidate
+                return establishesTimeline(trial)
+            })
+        {
+            selected[selected.count - 1] = replacement
+        }
+        guard establishesTimeline(selected) else {
+            return Timeline()
+        }
+        let kept = selected.sorted {
+            ($0.resolved, $0.end == nil ? 0 : 1, $0.precision, $0.order)
+                < ($1.resolved, $1.end == nil ? 0 : 1, $1.precision, $1.order)
+        }
 
         var timeline = Timeline()
         for (index, entry) in kept.enumerated() {
@@ -324,7 +335,7 @@ enum OverviewTimelineBuilder {
         func group(_ name: String) -> String? {
             Range(match.range(withName: name), in: sentence).map { String(sentence[$0]) }
         }
-        let wording = group("year") ?? String(sentence[found])
+        let wording = String(sentence[found])
         let text = wording.prefix(1).uppercased() + wording.dropFirst()
         let published = calendar.component(.year, from: publishedAt)
         func starting(_ year: Int, month: Int) -> Date? {
