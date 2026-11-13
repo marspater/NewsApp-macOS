@@ -381,6 +381,17 @@ struct FiniteBriefing: Equatable, Sendable {
     let startedAt: Date
     let articles: [FeedArticle]
 
+    /// The edition's frozen stories with the photos the page lookup recorded after the selection (#1201): a story
+    /// without an image of its own takes its recorded photo, so its card and hero slide show it; any other keeps its own.
+    static func withRecordedPhotos(_ articles: [FeedArticle], photos: [String: String]) -> [FeedArticle] {
+        articles.map { story in
+            guard story.imageUrl == nil, let photo = photos[story.id] else { return story }
+            var story = story
+            story.imageUrl = photo
+            return story
+        }
+    }
+
     /// A stored edition, restored in its saved order.
     init(startedAt: Date, articles: [FeedArticle]) {
         self.startedAt = startedAt

@@ -1088,6 +1088,21 @@ extension NewsTests {
             try await db.storyImages(for: ["e1", "e2", "down", "plain"]).isEmpty,
             "Site defaults stay cleared regardless of lookup order")
 
+        // #1201: a Briefing edition freezes its stories; a photo the lookup records after the selection still reaches
+        // the story's card and hero slide, which draw `bestCardImage` of the story.
+        let frozen = [story("late", "Four"), story("own", "Four", image: "https://cdn.example/own.jpg")]
+        try await db.upsertArticles(frozen)
+        assertTrue(
+            try await db.recordStoryImage("late", imageURL: "https://cdn.example/late.jpg", at: now),
+            "The page lookup records the late story's photo")
+        let shown = FiniteBriefing.withRecordedPhotos(
+            frozen, photos: try await db.storyImages(for: frozen.filter { $0.imageUrl == nil }.map(\.id)))
+        assertEqual(
+            FeedArticle.bestCardImage(in: [shown[0]])?.absoluteString, "https://cdn.example/late.jpg",
+            "A photo recorded after the selection reaches the frozen story's hero slide")
+        assertEqual(
+            shown[1].imageUrl, "https://cdn.example/own.jpg", "A story with its own image keeps it")
+
         // #595: a pictured member only on a World Tension panel feed is hidden from lists, so the listed member of
         // its event is still looked up.
         let panelURL = TensionMethodology.v1.panel[8].url
