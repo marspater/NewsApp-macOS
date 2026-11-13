@@ -2393,8 +2393,8 @@ extension NewsTests {
         try await db.executeSimple("UPDATE events SET story_id = '\(lead.id)' WHERE id = '\(older.id)';")
 
         let store = ArticleStore(database: db, spotlightIndexer: MockSpotlightIndexer())
-        let coordinator = OverviewGenerationCoordinator(
-            store: store, queue: EnrichmentQueue(store: store), allowsEnergy: { true })
+        let queue = EnrichmentQueue(store: store)
+        let coordinator = OverviewGenerationCoordinator(store: store, queue: queue, allowsEnergy: { true })
         func stale(_ eventID: String, _ members: [String]) -> EventOverviewDocument {
             EventOverviewDocument(
                 eventID: eventID,
@@ -2459,18 +2459,48 @@ extension NewsTests {
         await coordinator.regenerateStaleOverviews(eventIDs: extraEvents, editionKey: "edition-2", store: store)
         assertEqual(try await regenerated(extraEvents), extraEvents.count, "The next edition continues")
 
-        // A chosen event whose stale row is gone (publisher text stored for a cancelled attempt removes it) is still
-        // finished; an event the edition never chose, with no stored row, is left alone.
+        // An attempt a cancelled caller left stays owed: its stale row may be gone (publisher text stored for it
+        // removes the row), and the next edition still finishes it. An event without a stored overview that no
+        // attempt was started for is left alone.
+        let late = report("s1299-y", "Late", "The council reviewed the last district of the flood defence plan.")
+        _ = try await db.upsertArticles([late])
+        let owed = try await db.createEvent(memberArticleIDs: [late.id], at: published).id
+        assertTrue(try await db.recordEventOverview(stale(owed, [late.id])), "Stale row for the interrupted attempt")
         let unchosen = try await db.createEvent(memberArticleIDs: ["s1299-b1"], at: published)
-        // The last extra event was chosen by the second edition; the first was finished in the first one.
-        let chosen = extraEvents[extraEvents.count - 1]
-        try await db.executeSimple("DELETE FROM event_overviews WHERE event_id = '\(chosen)';")
+        let hold = OpenGate()
+        let holders = (0..<3).map { index in
+            Task {
+                await queue.scheduleOverviewGeneration(eventID: "s1299-hold-\(index)") {
+                    await hold.wait()
+                    return nil
+                }
+            }
+        }
+        await eventually("Held jobs fill the overview queue") { await queue.activeJobCount() == 3 }
+        let interrupted = Task {
+            await coordinator.regenerateStaleOverviews(eventIDs: [owed], editionKey: "edition-3", store: store)
+        }
+        await eventually("The attempt is in flight") { await coordinator.inFlightInputHash(for: owed) != nil }
+        interrupted.cancel()
+        await coordinator.cancel(eventID: owed)
+        await interrupted.value
+        await hold.open()
+        for holder in holders { _ = await holder.value }
+        try await db.executeSimple("DELETE FROM event_overviews WHERE event_id = '\(owed)';")
         await coordinator.regenerateStaleOverviews(
-            eventIDs: [chosen, unchosen.id], editionKey: "edition-2", store: store)
-        assertEqual(try await regenerated([chosen]), 1, "A chosen event that lost its stale row is regenerated")
+            eventIDs: [owed, unchosen.id], editionKey: "edition-4", store: store)
+        assertEqual(try await regenerated([owed]), 1, "An interrupted attempt is finished by the next edition")
         assertTrue(
             try await db.fetchEventOverview(eventID: unchosen.id) == nil,
-            "An event without a stored overview that the edition never chose gets none")
+            "An event without a stored overview that no attempt was started for gets none")
+
+        // A finished event that turns stale again in the same edition is not run a second time.
+        let finished = try await db.fetchEventOverview(eventID: owed)?.id
+        try await db.executeSimple("UPDATE event_overviews SET analysis_version = 1 WHERE event_id = '\(owed)';")
+        await coordinator.regenerateStaleOverviews(eventIDs: [owed], editionKey: "edition-4", store: store)
+        assertEqual(
+            try await db.fetchEventOverview(eventID: owed)?.id, finished,
+            "One edition runs an event once; the next edition takes it up again")
     }
 
     /// #789: an overview carries its event's own membership version, not the story's summed one, so a sum that falls

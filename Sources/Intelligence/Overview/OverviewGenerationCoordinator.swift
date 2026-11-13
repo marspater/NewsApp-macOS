@@ -86,6 +86,9 @@ actor OverviewGenerationCoordinator {
     private var staleEdition: (key: String, chosen: Set<String>) = ("", [])
     /// Event ID plus version of stale overviews whose regeneration gave no result; not retried this session.
     private var failedStaleRegenerations: Set<String> = []
+    /// Events whose regeneration started and has neither stored an overview nor failed: a cancelled caller left
+    /// them. They stay owed across editions, because their stale row may already be gone.
+    private var owedStaleRegenerations: Set<String> = []
 
     /// Work in flight and this session's failures, for the diagnostics export (#1006).
     struct Counts: Sendable, Equatable {
@@ -506,6 +509,7 @@ actor OverviewGenerationCoordinator {
     /// One background request built from the same reports, title and version as the reader's, so the two never
     /// overwrite each other's overview (#792).
     private func warm(eventID: String, version: Int, store: ArticleStore) async -> EventOverviewDocument? {
+        let clears = clearCount
         let members: [FeedArticle]
         do {
             members = try await store.eventMemberArticles(eventID: eventID)
@@ -515,7 +519,9 @@ actor OverviewGenerationCoordinator {
             }
             return nil
         }
-        guard let first = members.first else { return nil }
+        // A clear while the members were read: the request below would start under the new generation and store
+        // an overview right after the clear removed it.
+        guard let first = members.first, clearCount == clears else { return nil }
         return await requestOverview(
             eventID: eventID, eventTitle: first.title, membershipVersion: version, articles: members,
             priority: .background, store: store)
@@ -531,36 +537,48 @@ actor OverviewGenerationCoordinator {
     /// nothing to do. A cancelled caller stops the pass; the event it was waiting for stays eligible.
     func regenerateStaleOverviews(eventIDs: [String], editionKey: String, store: ArticleStore) async {
         if staleEdition.key != editionKey { staleEdition = (editionKey, []) }
+        // A clear of derived data during the pass ends it: nothing it removed is built again here (#805).
+        let clears = clearCount
         for eventID in eventIDs {
-            guard !Task.isCancelled, await allowsEnergy(), staleEdition.key == editionKey else { return }
-            guard
-                staleEdition.chosen.contains(eventID)
-                    || staleEdition.chosen.count < Self.maxStaleRegenerationsPerEdition
-            else { continue }
-            guard eventID != currentVisibleEventID,
+            guard !Task.isCancelled, await allowsEnergy(), staleEdition.key == editionKey, clearCount == clears
+            else { return }
+            guard mayAttemptStaleRegeneration(eventID), eventID != currentVisibleEventID,
                 let event = try? await store.database.fetchEvent(id: eventID), event.id == eventID
             else { continue }
-            // Publisher text stored for an earlier, cancelled attempt removes the stale row; an event this edition
-            // already chose is finished all the same, so it is not left without an overview.
+            // Publisher text stored for a cancelled attempt removes the stale row; an event still owed its overview
+            // is finished all the same, in this edition or a later one, so it is not left without one.
             let stored = try? await store.fetchEventOverview(eventID: eventID)
-            guard
-                stored?.isStale(currentMembershipVersion: event.membershipVersion)
-                    ?? staleEdition.chosen.contains(eventID)
-            else { continue }
+            if let stored, !stored.isStale(currentMembershipVersion: event.membershipVersion) {
+                owedStaleRegenerations.remove(eventID)
+                continue
+            }
+            guard stored != nil || owedStaleRegenerations.contains(eventID) else { continue }
             let attempt = "\(eventID):\(event.membershipVersion)"
-            // The awaits above suspend this actor: another edition or the reader may have taken over meanwhile.
-            guard !Task.isCancelled, staleEdition.key == editionKey, eventID != currentVisibleEventID,
-                !failedStaleRegenerations.contains(attempt),
-                staleEdition.chosen.contains(eventID)
-                    || staleEdition.chosen.count < Self.maxStaleRegenerationsPerEdition
+            // The awaits above suspend this actor: another edition, a clear or the reader may have taken over.
+            guard !Task.isCancelled, staleEdition.key == editionKey, clearCount == clears,
+                eventID != currentVisibleEventID, !failedStaleRegenerations.contains(attempt),
+                mayAttemptStaleRegeneration(eventID)
             else { continue }
             staleEdition.chosen.insert(eventID)
+            owedStaleRegenerations.insert(eventID)
             let document = await warm(eventID: eventID, version: event.membershipVersion, store: store)
-            if document == nil, !Task.isCancelled {
+            if document != nil {
+                owedStaleRegenerations.remove(eventID)
+            } else if !Task.isCancelled, clearCount == clears {
+                owedStaleRegenerations.remove(eventID)
                 if failedStaleRegenerations.count >= 1000 { failedStaleRegenerations.removeAll() }
                 failedStaleRegenerations.insert(attempt)
             }
         }
+    }
+
+    /// An event the edition has not chosen needs room under the bound. One it has chosen runs again only while its
+    /// attempt is unfinished, so an event that turns stale again in the same edition costs no second round of page
+    /// reads.
+    private func mayAttemptStaleRegeneration(_ eventID: String) -> Bool {
+        staleEdition.chosen.contains(eventID)
+            ? owedStaleRegenerations.contains(eventID)
+            : staleEdition.chosen.count < Self.maxStaleRegenerationsPerEdition
     }
 
     /// Updates the currently visible event.
@@ -698,5 +716,6 @@ actor OverviewGenerationCoordinator {
         failedExtractions.removeAll()
         failedStaleRegenerations.removeAll()
         staleEdition = ("", [])
+        owedStaleRegenerations.removeAll()
     }
 }
