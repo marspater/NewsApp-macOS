@@ -196,8 +196,7 @@ actor OverviewGenerationCoordinator {
             if running.membershipVersion == membershipVersion && running.inputTextHash == inputTextHash
                 && running.articleInputs == expectedArticleInputs
             {
-                let result = await running.task.value
-                return Task.isCancelled ? nil : result
+                return await waitForShared(running.task)
             }
             // A background warm-up never supersedes the generation the reader is waiting for (#792).
             guard Self.maySupersede(priority: priority, eventID: eventID, visibleEventID: currentVisibleEventID)
@@ -260,14 +259,58 @@ actor OverviewGenerationCoordinator {
             task: task, membershipVersion: membershipVersion, inputTextHash: inputTextHash,
             articleInputs: expectedArticleInputs)
         // Another request may join this generation, so a cancelled caller stops waiting without cancelling it;
-        // `cancel(eventID:)` stops it for every caller.
-        let result = await task.value
-        // A newer request may have replaced this entry while it ran.
-        if inFlightTasks[eventID]?.task == task {
-            inFlightTasks.removeValue(forKey: eventID)
-            latestRequestedInputs.removeValue(forKey: eventID)
+        // `cancel(eventID:)` stops it for every caller. The caller may leave first, so the entry is also cleared
+        // when the generation itself ends.
+        Task { [weak self] in
+            _ = await task.value
+            await self?.generationEnded(eventID: eventID, task: task)
         }
+        let result = await waitForShared(task)
+        guard !Task.isCancelled else { return nil }
+        generationEnded(eventID: eventID, task: task)
+        return result
+    }
+
+    /// Callers waiting on a shared generation right now.
+    private var waitingCallers = 0
+
+    func waitingCallerCount() -> Int { waitingCallers }
+
+    /// Waits for a shared generation as one of its callers. A cancelled caller gets nil, also when the generation
+    /// finished just before the cancellation reached it.
+    private func waitForShared(_ task: Task<EventOverviewDocument?, Never>) async -> EventOverviewDocument? {
+        waitingCallers += 1
+        let result = await Self.value(of: task)
+        waitingCallers -= 1
         return Task.isCancelled ? nil : result
+    }
+
+    /// Clears a finished generation's entry, unless a newer request has replaced it.
+    private func generationEnded(eventID: String, task: Task<EventOverviewDocument?, Never>) {
+        guard inFlightTasks[eventID]?.task == task else { return }
+        inFlightTasks.removeValue(forKey: eventID)
+        latestRequestedInputs.removeValue(forKey: eventID)
+    }
+
+    /// The generation's result, or nil as soon as the caller is cancelled. The generation keeps running for the
+    /// callers that still wait; awaiting `task.value` directly would hold a cancelled caller until it ends.
+    private nonisolated static func value(
+        of task: Task<EventOverviewDocument?, Never>
+    ) async -> EventOverviewDocument? {
+        let pending = OSAllocatedUnfairLock<CheckedContinuation<EventOverviewDocument?, Never>?>(initialState: nil)
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                pending.withLock { $0 = continuation }
+                Task {
+                    let value = await task.value
+                    pending.withLock { $0.take() }?.resume(returning: value)
+                }
+                // Cancelled before the continuation was stored: the handler below found nothing to resume.
+                if Task.isCancelled { pending.withLock { $0.take() }?.resume(returning: nil) }
+            }
+        } onCancel: {
+            pending.withLock { $0.take() }?.resume(returning: nil)
+        }
     }
 
     // MARK: - Publisher Text for Overview Evidence (#308)

@@ -1911,9 +1911,31 @@ extension NewsTests {
                 eventID: "joined", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
         }
         await eventually("The reader joins the same request") { await checks.value >= 2 }
+        let left = TestCounter()
+        let joiner = Task {
+            let result = await shared.requestOverview(
+                eventID: "joined", eventTitle: "Bridge", membershipVersion: 1, articles: [article1, article2])
+            await left.increment()
+            return result
+        }
+        await eventually("The starter, the reader and the second caller all wait on the shared generation") {
+            await shared.waitingCallerCount() == 3
+        }
+        let starter = Task {
+            let result = await warmup.value
+            await left.increment()
+            return result
+        }
+        // Both the caller that started the generation and one that joined it leave while the queue is still held.
         warmup.cancel()
+        joiner.cancel()
+        await eventually("Cancelled callers return while the generation still waits") { await left.value == 2 }
+        assertEqual(await queue.activeJobCount(), 3, "The queue is still held when the cancelled callers return")
+        assertTrue(
+            await shared.inFlightInputHash(for: "joined") != nil, "The generation stays in flight for the reader")
         await gate.open()
-        assertEqual(await warmup.value, nil, "The cancelled background request returns nothing")
+        assertEqual(await starter.value, nil, "The cancelled background request returns nothing")
+        assertEqual(await joiner.value, nil, "The cancelled joined request returns nothing")
         let joined = await reader.value
         assertTrue(joined != nil, "Cancelling warmup preserves the reader's shared generation")
         assertEqual(joined?.summary, "", "The joined generation returns excerpts")

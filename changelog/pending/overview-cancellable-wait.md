@@ -1,0 +1,1 @@
+- A cancelled request for a story overview returns at once; the overview keeps generating for the requests that still wait.
