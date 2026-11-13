@@ -1,0 +1,1 @@
+- Quitting waits for saves and read marks that are still queued, and a slow Spotlight update no longer holds back the next save.

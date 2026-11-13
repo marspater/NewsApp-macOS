@@ -469,25 +469,29 @@ final class ArticleStore: ObservableObject {
         }
     }
 
+    /// `awaitingSpotlight: false` returns once the change is in the library and leaves the index update queued:
+    /// the saved-stories queue uses it, so a slow index never holds back the next stored change or a quit.
     @discardableResult
-    func setSaved(article: FeedArticle, isSaved nextState: Bool) async -> Bool {
+    func setSaved(article: FeedArticle, isSaved nextState: Bool, awaitingSpotlight: Bool = true) async -> Bool {
         do {
             _ = try await database.upsertArticles([article], preservingStoredContent: true)
             let id = try await database.resolvedArticleID(for: article)
             guard let storedArticle = try await database.fetchArticles(limit: 1, id: id).first else { return false }
             try await database.setSaved(articleId: storedArticle.id, isSaved: nextState)
             stateChanges &+= 1
+            let indexing: Task<Void, Never>
             if nextState {
                 if !savedArticleIDs.contains(storedArticle.id) {
                     savedArticles.insert(storedArticle, at: 0)
                     savedArticleIDs.insert(storedArticle.id)
                 }
-                await serialSpotlight { await $0.indexSavedArticle(storedArticle) }
+                indexing = enqueueSpotlight { await $0.indexSavedArticle(storedArticle) }
             } else {
                 savedArticles.removeAll { $0.id == storedArticle.id }
                 savedArticleIDs.remove(storedArticle.id)
-                await serialSpotlight { await $0.removeSavedArticle(id: storedArticle.id) }
+                indexing = enqueueSpotlight { await $0.removeSavedArticle(id: storedArticle.id) }
             }
+            if awaitingSpotlight { await indexing.value }
             // Unsaving a panel-only story also hides it from the unread count.
             let generation = newCountRequest()
             let counts = try await database.counts(muting: muting)

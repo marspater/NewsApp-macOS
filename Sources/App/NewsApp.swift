@@ -635,6 +635,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         terminationReplied = false
         Task.detached(priority: .userInitiated) {
+            // Saves and read marks still queued are not in the library yet; a checkpoint cannot keep them.
+            await AppContainer.shared.savedStories.waitForStoredChanges()
+            await AppContainer.shared.readManager.waitForStoredChanges()
             await DatabaseEngine.shared.checkpointAndOptimize()
             await MainActor.run { [weak self] in
                 self?.finishTermination(sender)

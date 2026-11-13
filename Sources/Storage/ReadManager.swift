@@ -108,4 +108,7 @@ final class ReadManager: ObservableObject {
 
     func waitForPendingChanges() async { await mutationTask?.value }
 
+    /// Every queued change is in the library. What a quit waits for.
+    func waitForStoredChanges() async { await mutationTask?.value }
+
 }

@@ -57,6 +57,7 @@ extension NewsTests {
             ("testAppIntentsExecutionAndValidation", { await testAppIntentsExecutionAndValidation() }),
             ("testAppShortcutsProviderDeclarations", { await testAppShortcutsProviderDeclarations() }),
             ("testSpotlightSavedStoriesIndexing", { try await testSpotlightSavedStoriesIndexing() }),
+            ("testStoredChangesDoNotWaitForSpotlight", { try await testStoredChangesDoNotWaitForSpotlight() }),
             ("testMenuBarExtraSettingsAndUnreadCount", { await testMenuBarExtraSettingsAndUnreadCount() }),
             ("testOnboardingAndPermissionTiming", { await testOnboardingAndPermissionTiming() }),
             ("testBannerGate", { try await testBannerGate() }),
@@ -3295,6 +3296,57 @@ extension NewsTests {
             await probe.settle()
         }
         _ = await initial.value
+    }
+
+    /// A Spotlight indexer that never finishes an update until its gate opens.
+    private struct GatedSpotlightIndexer: SpotlightIndexing {
+        let gate = OpenGate()
+        func indexSavedArticle(_ article: FeedArticle) async { await gate.wait() }
+        func removeSavedArticle(id: String) async { await gate.wait() }
+        func removeAllSavedArticles() async { await gate.wait() }
+    }
+
+    /// What a quit waits for: every queued save and read mark is in the library while Spotlight is still busy with
+    /// the first one. Before, the second save waited behind the first one's index update and a quit lost it.
+    @MainActor
+    static func testStoredChangesDoNotWaitForSpotlight() async throws {
+        print("  - Testing queued saves and read marks reach the library while Spotlight is busy...")
+        let indexer = GatedSpotlightIndexer()
+        let db = DatabaseEngine(path: ":memory:")
+        let store = ArticleStore(database: db, spotlightIndexer: indexer)
+        await store.initialize()
+        let saved = SavedStoriesManager(articleStore: store)
+        let read = ReadManager(articleStore: store)
+        let stories = (1...3).map { index in
+            FeedArticle(
+                storedID: "quit-\(index)", title: "Story \(index)", link: "https://example.com/quit-\(index)",
+                guid: "quit-\(index)", description: "Text \(index).",
+                pubDate: Date(timeIntervalSince1970: 1_730_000_000 + Double(index)), source: "Outlet")
+        }
+        await store.batchUpsert(articles: stories, feedUrl: "https://example.com/rss")
+
+        saved.save(stories[0])
+        saved.save(stories[1])
+        read.markAsRead(stories[2].id)
+        let drained = OpenGate()
+        let drain = Task {
+            await saved.waitForStoredChanges()
+            await read.waitForStoredChanges()
+            await drained.open()
+        }
+        await eventually("Stored changes are reached while Spotlight is blocked", timeout: .seconds(5)) {
+            await drained.isOpenNow
+        }
+        assertEqual(await indexer.gate.arrivals, 1, "Spotlight is still on the first update")
+        assertEqual(
+            Set(try await db.fetchArticles(isSaved: true, limit: nil).map(\.id)), ["quit-1", "quit-2"],
+            "Both queued saves are in the library")
+        assertTrue(try await db.getReadArticleIDs().contains("quit-3"), "The queued read mark is in the library")
+
+        await indexer.gate.open()
+        await drain.value
+        await saved.waitForPendingChanges()
+        assertEqual(await indexer.gate.arrivals, 2, "Both index updates ran, in order, once the index was free")
     }
 
     @MainActor

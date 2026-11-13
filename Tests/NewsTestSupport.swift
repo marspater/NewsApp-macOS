@@ -303,6 +303,7 @@ actor OpenGate {
     private var isOpen = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
     private(set) var arrivals = 0
+    var isOpenNow: Bool { isOpen }
     func wait() async {
         arrivals += 1
         if isOpen { return }
