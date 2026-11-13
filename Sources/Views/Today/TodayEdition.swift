@@ -46,6 +46,38 @@ struct TodayEdition: Equatable, Sendable {
     var conditionalLanes: [Lane] { lanes.filter { $0.lane.isConditional } }
     var storyIDs: Set<String> { Set(lanes.flatMap { $0.stories.map(\.id) }) }
 
+    func entry(id: String) -> FeedEntry? {
+        lanes.lazy.flatMap(\.stories).first { $0.id == id }?.entry
+    }
+
+    /// The window pool (#934) from the window's grouped stories and the listed page: an event the page lists keeps
+    /// the page's entry (its id is the page's representative), the window's other stories follow in their order, and
+    /// listed stories outside the window come last. Each story once.
+    static func windowPool(_ window: [FeedEntry], listed: [FeedEntry]) -> [FeedEntry] {
+        var listedByEvent: [String: FeedEntry] = [:]
+        for entry in listed {
+            if case .event(let summary, _, _) = entry { listedByEvent[summary.eventID] = entry }
+        }
+        let listedIDs = Set(listed.map(\.id))
+        let listedReports = Set(listed.flatMap { $0.visibleArticles.map(\.id) })
+        var seen = Set<String>()
+        var pool: [FeedEntry] = []
+        for entry in window {
+            var chosen = entry
+            if case .event(let summary, _, _) = entry, let page = listedByEvent[summary.eventID] {
+                chosen = page
+            } else if entry.visibleArticles.contains(where: { listedReports.contains($0.id) }),
+                !listedIDs.contains(entry.id) || entry.visibleArticles.count > 1
+            {
+                // Grouped differently on the page (read before a regrouping): the page's entry stands for it.
+                continue
+            }
+            if seen.insert(chosen.id).inserted { pool.append(chosen) }
+        }
+        for entry in listed where seen.insert(entry.id).inserted { pool.append(entry) }
+        return pool
+    }
+
     /// The keyboard map of the page; `latestColumns` is how many cards a row of The Latest holds.
     func focusMap(latestColumns: Int) -> TodayFocusMap {
         TodayFocusMap(
@@ -102,9 +134,13 @@ struct TodayEdition: Equatable, Sendable {
     /// list gained (a further page) join The Latest. A listed story the plan did not place because its feed is not
     /// known also goes to The Latest, so a gap in the stored feed identity never hides a story; a story whose
     /// feeds the reader has all left (`details.unsubscribedIDs`) is not shown at all.
+    ///
+    /// `pool`: the stories the lanes may hold when they are wider than the listed page (the window pool, #934),
+    /// listed stories included. The Latest still holds only listed stories: every listed story no lane took, once.
+    /// Nil keeps the lanes to the listed page.
     static func make(
         entries: [FeedEntry], plan: TodayEditionPlan, details: TodayCardDetails = TodayCardDetails(),
-        keeping previous: TodayEdition? = nil, generation: Int = 0
+        keeping previous: TodayEdition? = nil, generation: Int = 0, pool: [FeedEntry]? = nil
     ) -> TodayEdition {
         var fresh: [String: TodayStoryAssignment] = [:]
         for assignment in plan.allAssignments { fresh[assignment.id] = assignment }
@@ -112,17 +148,28 @@ struct TodayEdition: Equatable, Sendable {
         let entries = entries.filter { !details.unsubscribedIDs.contains($0.id) }
         let listed = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let listedIDs = Set(listed.keys)
+        // The stories a lane may hold: the listed page, or the wider pool.
+        let laneable =
+            pool.map { pool in
+                Dictionary(
+                    pool.filter { !details.unsubscribedIDs.contains($0.id) }.map { ($0.id, $0) },
+                    uniquingKeysWith: { first, _ in first }
+                ).merging(listed) { _, listedEntry in listedEntry }
+            } ?? listed
+        func mayHold(_ id: String, in lane: TodayLane) -> Bool {
+            lane == .theLatest ? listedIDs.contains(id) : laneable[id] != nil
+        }
         var laneStories: [TodayLane: [TodayStoryAssignment]] = [:]
         var placed = Set<String>()
 
         let retaining = previous.map { !$0.lanes.isEmpty } ?? false
         if let previous, retaining {
             for lane in previous.lanes {
-                for story in lane.stories where listedIDs.contains(story.id) {
+                for story in lane.stories where mayHold(story.id, in: lane.lane) {
                     // The card keeps its content-type tag too, also when the fresh plan would retag or move the story.
                     // A story the plan no longer places still shows the current entry, not the one it was built from.
                     let current = (fresh[story.id] ?? story).held(
-                        in: lane.lane, contentType: story.contentTypeLabel, entry: listed[story.id])
+                        in: lane.lane, contentType: story.contentTypeLabel, entry: laneable[story.id])
                     laneStories[lane.lane, default: []].append(current)
                     placed.insert(story.id)
                 }
@@ -130,8 +177,10 @@ struct TodayEdition: Equatable, Sendable {
         } else {
             for result in plan.displayLanes where result.qualifies || !result.lane.isConditional {
                 // A lane the plan hid passed its stories on already; only shown lanes hold cards.
-                laneStories[result.lane] = result.entries
-                placed.formUnion(result.entries.map(\.id))
+                // With the wider pool, The Latest stays the listed page's.
+                let stories = pool == nil ? result.entries : result.entries.filter { mayHold($0.id, in: result.lane) }
+                laneStories[result.lane] = stories
+                placed.formUnion(stories.map(\.id))
             }
         }
         for entry in entries where !placed.contains(entry.id) {
@@ -227,7 +276,7 @@ extension ArticleStore {
     /// The last complete edition laid out for the stories listed now, or why it is not shown (#937). Off the main
     /// actor; nil when nothing is stored.
     func restoredTodayEdition(
-        entries: [FeedEntry], reader: TodayReader, generation: Int
+        entries: [FeedEntry], pool: [FeedEntry]? = nil, reader: TodayReader, generation: Int
     ) async -> Result<TodayEdition, TodayStoredEdition.Rejection>? {
         guard let data = await database.storedTodayEdition() else { return nil }
         let identity = TodayStoredEdition.identity(
@@ -239,7 +288,7 @@ extension ArticleStore {
                 return .failure(.otherFormat)
             }
             return stored.restored(
-                entries: entries, identity: identity, failedImageURLs: failed, generation: generation)
+                entries: entries, identity: identity, failedImageURLs: failed, generation: generation, pool: pool)
         }.value
     }
 
@@ -269,9 +318,13 @@ extension ArticleStore {
 
     /// Assigns the listed stories to lanes and reads what their cards show, off the main actor. A failed read
     /// leaves every story in The Latest rather than an empty page.
+    /// `pool`: with the window pool (#934), the stories assigned to lanes, the listed ones included; the listed
+    /// stories still fill The Latest. Nil assigns over the listed stories.
     func todayEdition(
-        entries: [FeedEntry], reader: TodayReader, keeping previous: TodayEdition?, generation: Int
+        entries: [FeedEntry], pool: [FeedEntry]? = nil, reader: TodayReader, keeping previous: TodayEdition?,
+        generation: Int
     ) async -> TodayEdition {
+        let candidates = pool ?? entries
         let database = self.database
         let now = Date()
         // An edition laid out afresh logs how long each stage took (#937).
@@ -279,15 +332,15 @@ extension ArticleStore {
         let analysisGeneration = await database.analysisGeneration
         do {
             let context = try await database.loadTodayAssignmentContext(
-                entries: entries, now: now, starredFeedURLs: reader.starredFeedURLs,
+                entries: candidates, now: now, starredFeedURLs: reader.starredFeedURLs,
                 subscribedFeedURLs: reader.subscribedFeedURLs, resetAt: reader.interestsResetAt)
             try Task.checkCancellation()
-            timer?.lap("context", count: entries.count)
+            timer?.lap("context", count: candidates.count)
             // A story's photo may sit on a report of its event that this page does not list.
             var details = TodayCardDetails()
             // ponytail: one read per event, for at most the 60 newest events without a listed photo, so a page of
             // them cannot hold up the edition; read them in one query if a library needs more.
-            let unpictured = entries.filter { entry in
+            let unpictured = candidates.filter { entry in
                 if case .event = entry { return entry.cardImageURL == nil }
                 return false
             }
@@ -307,13 +360,13 @@ extension ArticleStore {
             let assignment = Task.detached(priority: .userInitiated) { [context] in
                 var context = context
                 context.imagelessEntryIDs = Set(
-                    entries.filter { entry in
+                    candidates.filter { entry in
                         guard let image = entry.cardImageURL ?? eventImages[entry.id] else { return true }
                         return failedImages.contains(image)
                     }.map(\.id))
-                let unsubscribed = TodayEditionAssigner.unsubscribedEntryIDs(entries, context: context)
+                let unsubscribed = TodayEditionAssigner.unsubscribedEntryIDs(candidates, context: context)
                 try Task.checkCancellation()
-                return (TodayEditionAssigner.assign(entries: entries, context: context), unsubscribed)
+                return (TodayEditionAssigner.assign(entries: candidates, context: context), unsubscribed)
             }
             let (plan, unsubscribed) = try await withTaskCancellationHandler {
                 try await assignment.value
@@ -322,13 +375,14 @@ extension ArticleStore {
             }
             details.unsubscribedIDs = unsubscribed
             try Task.checkCancellation()
-            timer?.lap("assignment", count: entries.count { if case .event = $0 { true } else { false } })
+            timer?.lap("assignment", count: candidates.count { if case .event = $0 { true } else { false } })
             details.differingAccounts = (try? await database.todayDifferingAccounts(for: plan)) ?? [:]
             timer?.lap("differing_accounts", count: details.differingAccounts.count)
             // Off the main actor: the cards' reading times are counted from their stored text here.
             let edition = await Task.detached(priority: .userInitiated) { [details] in
                 TodayEdition.make(
-                    entries: entries, plan: plan, details: details, keeping: previous, generation: generation)
+                    entries: entries, plan: plan, details: details, keeping: previous, generation: generation,
+                    pool: pool)
             }.value
             timer?.lap("layout", count: edition.lead.count)
             var assigned = edition
@@ -340,7 +394,8 @@ extension ArticleStore {
             return TodayEdition(generation: generation)
         } catch {
             return TodayEdition.make(
-                entries: entries, plan: TodayEditionPlan(lanes: []), keeping: previous, generation: generation)
+                entries: entries, plan: TodayEditionPlan(lanes: []), keeping: previous, generation: generation,
+                pool: pool)
         }
     }
 }
