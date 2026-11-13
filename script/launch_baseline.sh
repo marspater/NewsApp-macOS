@@ -47,12 +47,17 @@ launch_once() {
     sleep 1
     python3 -c 'import time; print(f"{time.time():.6f}")' > "$OUTPUT/launch-$index.start"
     open -n -a "$APP" --args "${LAUNCH_ARGS[@]}"
-    for _ in $(seq 1 600); do
+    # The first launch on a newly seeded library may fill every seeded story's topic label while the library opens,
+    # before any window (seen on 13 November 2026: more than 56 seconds on one build, 2 seconds on another). It
+    # gets 20 minutes and is reported apart; later launches get 30 seconds.
+    local wait_seconds=30
+    [[ "$index" != 1 ]] || wait_seconds=1200
+    for _ in $(seq 1 $((wait_seconds * 20))); do
         grep -q "First card visible" "$log" && break
         sleep 0.05
     done
     APP_PID=$(pgrep -f "^$EXECUTABLE" | head -1)
-    grep -q "First card visible" "$log" || { echo "No first card within 30 s (launch $index)" >&2; exit 1; }
+    grep -q "First card visible" "$log" || { echo "No first card within $wait_seconds s (launch $index)" >&2; exit 1; }
     vmmap --summary "$APP_PID" > "$OUTPUT/launch-$index.first-card.vmmap" 2>&1 || true
     sleep "${NEWS_SETTLE_SECONDS:-5}"
     vmmap --summary "$APP_PID" > "$OUTPUT/launch-$index.settled.vmmap" 2>&1 || true
