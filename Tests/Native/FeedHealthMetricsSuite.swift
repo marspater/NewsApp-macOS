@@ -34,6 +34,37 @@ extension NativeSuites {
             #expect(metrics.averageLatency == 0.5)
         }
 
+        /// #715: the inspector's one query answers for a library of 150 feeds, each with its own samples and stories.
+        @Test(.tags(.integration)) func oneQueryAnswersForOneHundredAndFiftyFeeds() async throws {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "news-feed-health-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let database = DatabaseEngine(path: directory.appendingPathComponent("library.sqlite3").path)
+            try await database.open()
+            let feeds = (0..<150).map { "https://feed\($0).example/feed.xml" }
+            for (index, feed) in feeds.enumerated() {
+                let stories = (0..<4).map { story in
+                    FeedArticle(
+                        storedID: "f\(index)-\(story)", title: "Headline \(index)-\(story)",
+                        link: "https://feed\(index).example/\(story)", guid: "f\(index)-\(story)", description: "Blurb",
+                        pubDate: now.addingTimeInterval(-Double(story + 1) * 86_400), source: "Outlet \(index)",
+                        readerDocument: ReaderDocument(version: 1, blocks: [], isComplete: story < 3))
+                }
+                try await database.upsertArticles(stories, feedUrl: feed, now: now)
+                try await database.recordFeedSuccess(feed, at: now)
+                try await database.recordFeedSample(feed, latency: 0.5)
+                try await database.recordFeedSample(feed, latency: index.isMultiple(of: 2) ? 0.5 : nil)
+            }
+
+            let metrics = try await database.feedHealthMetrics(now: now)
+            #expect(Set(metrics.keys) == Set(feeds))
+            #expect(metrics.values.allSatisfy { $0.assessedStories == 4 && $0.fullReaderShare == 0.75 })
+            #expect(metrics[feeds[0]]?.successRate == 1)
+            #expect(metrics[feeds[1]]?.successRate == 0.5)
+            await database.close()
+        }
+
         /// Run the existing atom without terminating the native test process on failure.
         @Test func existingAtomPasses() async {
             await FeedHealthMetricsTests.run(exitOnFailure: false)
