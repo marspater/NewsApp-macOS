@@ -1,6 +1,6 @@
-# Editorial evaluation protocols (W5, W6, W7) — draft, 13 November 2026
+# Editorial evaluation protocols (W5, W6, W7) — frozen 13 November 2026
 
-Status: **draft for review. Not frozen.** The numeric gates in section 6 are proposed values; the protocol freezes only when I have agreed them and recorded that on #714. No label is collected and no acceptance run is made under this document before then.
+Status: **frozen on 13 November 2026.** I agreed the gates of section 6 and recorded that on #714. A change to a label class, split, arm, metric, decision rule or gate from here on is a new dated version of this document, made before the holdout it applies to is run. This freeze accepts no feature and merges nothing.
 
 This covers the acceptance evaluation of Angelia's three editorial experiments that are merged without a production caller: passage novelty (#997, W5), event momentum (#998, W6) and diversity-aware selection (#999, W7). Personalization (#1001, W9) is out of scope: it needs real use, an opt-in surface and a privacy text first.
 
@@ -109,13 +109,15 @@ Insufficient evidence is inconclusive, not passed. A pass recommends a Lead tria
 
 The harness that produces the arms lives in the evaluation tests and scripts only (`Tests/EditorialRankingEvaluation.swift`, called from the `--today-shadow` run by `script/today_lead.sh arms`; its fixture smoke check runs with the ranking atom and `script/test_editorial_ranking.sh`); nothing under `Sources/` changes for it. How to run it is in `docs/TOOLING.md`, "The three-arm run".
 
-## 6. Numeric gates — proposed 13 November 2026, not yet agreed
+## 6. Numeric gates — agreed 13 November 2026
 
-These are acceptance targets for my approval, not accuracy established by the smoke tests. The protocol freezes when I record my agreement on #714.
+These are acceptance targets, not accuracy established by the smoke tests.
+
+They are confidence-bound gates, not point-estimate targets: W5 passes its precision gate only when the lower 95% bound of its precision reaches 95%, and a measured 95% alone does not pass. The sample counts are minimums, not a guarantee of a conclusive result.
 
 The priorities are deliberate: Kairos · novelty detection should rarely call repetition new; Kairos · measured momentum may miss some bursts to avoid false urgency; Athena · attention should buy variety with very little lost relevance.
 
-| Gate | Proposed value |
+| Gate | Value |
 |---|---|
 | W5 minimum holdout | 400 scored reports, including 150 `new-fact` and 200 `repetition` or `new-framing`, across 80 events |
 | W5 net-new precision | at least 95% |
