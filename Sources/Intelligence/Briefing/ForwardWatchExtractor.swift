@@ -41,8 +41,8 @@ struct ForwardWatchItem: Equatable, Hashable, Sendable {
     let citationID: String?
 }
 
-/// Scheduled, expected and conditional items stated in cited passages, in the publisher's words (#851). Modelled on
-/// `OverviewTimelineExtractor`: sentence segmentation, regex anchors and keyword lists, no model.
+/// Scheduled, expected and conditional items stated in cited passages, in the publisher's words (#851). Sentence
+/// segmentation, regex anchors and keyword lists, no model.
 enum ForwardWatchExtractor {
     static let maximumItems = 6
 

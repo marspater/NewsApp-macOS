@@ -48,6 +48,12 @@ struct NewsTests {
                 path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--timeline-audit"), CommandLine.arguments.count > index + 2
+        {
+            try await TimelineAudit.run(
+                path: CommandLine.arguments[index + 1], output: CommandLine.arguments[index + 2])
+            return
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--overviews-live"), CommandLine.arguments.count > index + 2
         {
             try await measureLiveOverviews(
@@ -434,7 +440,8 @@ struct NewsTests {
             try await testEventOverviewReaderMode(fixtureHost: fixtureHost)
             try await testOverviewResolutionWhenOpeningMemberArticle(fixtureHost: fixtureHost)
             try await testOverviewTimeline(fixtureHost: fixtureHost)
-            try await testEventTimelineWithSourcedItems(fixtureHost: fixtureHost)
+            try testOverviewTimelineDateProvenance(fixtureHost: fixtureHost)
+            try testOverviewTimelineAnchors(fixtureHost: fixtureHost)
             try await testAttributedPerspectivesOfParticipantsAndPublishers(fixtureHost: fixtureHost)
             try await testThematicAngleFromExistingFacts(fixtureHost: fixtureHost)
             try await testCoverageSentimentEvaluation(fixtureHost: fixtureHost)

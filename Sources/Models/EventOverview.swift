@@ -163,31 +163,146 @@ public enum ReaderExperienceMode: String, CaseIterable, Sendable, Identifiable {
 }
 
 /// An entry in an event overview's chronological timeline.
+///
+/// `dateKind` says what `dateText` is, so the reader never infers it from which `Date` happens to be set (#1241).
+/// `eventDate` and `publicationDate` are optional full timestamps; a partial stated date (no year) is shown as text
+/// only and never gets an invented year. Its place in time for ordering is `orderingDateMayHoldInferredYear`.
 public struct OverviewTimelineItem: Codable, Hashable, Sendable, Identifiable {
+    /// Where `dateText` comes from.
+    public enum DateKind: String, Codable, Hashable, Sendable {
+        /// A date the source text states for the event, at the precision it states.
+        case stated
+        /// The date an article was published; the only date shown as "Reported".
+        case publication
+        /// A time reference the source states that is not a calendar date: a time of day, a relative anchor
+        /// ("yesterday morning") or a quarter. Shown in the source's words, never as a calendar date.
+        case anchor
+    }
+
+    /// How precise a stated calendar date is; nil for anchors, publication dates and items stored before it existed.
+    public enum DatePrecision: String, Codable, Hashable, Sendable {
+        case day
+        case month
+    }
+
     public let id: String
     public let dateText: String
+    public let dateKind: DateKind
+    /// The precision of a stated date (#1241): a month-only date is never counted as its first day.
+    public let datePrecision: DatePrecision?
     public let summary: String
     public let citationIDs: [String]
     public let isFuturePlan: Bool
     public let eventDate: Date?
     public let publicationDate: Date?
+    /// Ordering only: where a stated date falls in time, for filtering and sorting (Briefing). A date the source
+    /// states without a year holds an inferred year here, so this value must never be formatted for display;
+    /// `dateText` is what is shown.
+    public let orderingDateMayHoldInferredYear: Date?
 
     public init(
         id: String = UUID().uuidString,
         dateText: String,
+        dateKind: DateKind = .stated,
+        datePrecision: DatePrecision? = nil,
         summary: String,
         citationIDs: [String] = [],
         isFuturePlan: Bool = false,
         eventDate: Date? = nil,
-        publicationDate: Date? = nil
+        publicationDate: Date? = nil,
+        orderingDateMayHoldInferredYear: Date? = nil
     ) {
         self.id = id
         self.dateText = dateText
+        self.dateKind = dateKind
+        self.datePrecision = datePrecision
         self.summary = summary
         self.citationIDs = citationIDs
         self.isFuturePlan = isFuturePlan
         self.eventDate = eventDate
         self.publicationDate = publicationDate
+        self.orderingDateMayHoldInferredYear = orderingDateMayHoldInferredYear
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, dateText, dateKind, datePrecision, summary, citationIDs, isFuturePlan, eventDate, publicationDate
+        case orderingDateMayHoldInferredYear
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        let storedText = try container.decode(String.self, forKey: .dateText)
+        let storedKind = try container.decodeIfPresent(DateKind.self, forKey: .dateKind)
+        let hasKind = storedKind != nil
+        if let kind = storedKind {
+            dateKind = kind
+            dateText = storedText
+        } else {
+            // Items stored before #1241 have no kind. Their producers wrote source text into `dateText`: the
+            // builder's stated date, or the former extractor's anchor ("Yesterday Morning", "06:14 UTC") or its
+            // "Scheduled" placeholder, which is no date and is dropped here, so no consumer ever receives it (#1241).
+            let isPlaceholder = storedText.caseInsensitiveCompare("Scheduled") == .orderedSame
+            dateText = isPlaceholder ? "" : storedText
+            dateKind = Self.isAnchorText(storedText) ? .anchor : .stated
+        }
+        datePrecision = try container.decodeIfPresent(DatePrecision.self, forKey: .datePrecision)
+        let storedEventDate = try container.decodeIfPresent(Date.self, forKey: .eventDate)
+        // The former extractor parsed a yearless "November 2" with `MMMM yyyy`, which stored the day as the year
+        // (0002-11-01). Such a date neither orders nor counts anything, so a stored item without a kind drops a year
+        // before 100.
+        let misparsed = storedEventDate.map { Self.legacyCalendar.component(.year, from: $0) < 100 } ?? false
+        eventDate = !hasKind && misparsed ? nil : storedEventDate
+        summary = try container.decode(String.self, forKey: .summary)
+        citationIDs = try container.decode([String].self, forKey: .citationIDs)
+        isFuturePlan = try container.decode(Bool.self, forKey: .isFuturePlan)
+        publicationDate = try container.decodeIfPresent(Date.self, forKey: .publicationDate)
+        orderingDateMayHoldInferredYear = try container.decodeIfPresent(
+            Date.self, forKey: .orderingDateMayHoldInferredYear)
+    }
+}
+
+extension OverviewTimelineItem {
+    /// What counts as an anchor: a time of day, a relative day, or a quarter (with or without its year). The one
+    /// definition, used to read items stored before #1241 and by `OverviewTimelineBuilder`'s anchor parser.
+    static let anchorExpressions: [NSRegularExpression] = [
+        #"\b\d{1,2}:\d{2}\s*(?:UTC|GMT|EST|PST|EDT|PDT|CET|CEST)\b"#,
+        #"\b(?:earlier today|this morning|yesterday (?:morning|afternoon|evening)|last night|earlier this week)\b"#,
+        #"\bQ(?<q>[1-4])\s+(?<qyear>(?:19|20)\d{2})\b"#,
+        #"\b(?<ordinal>first|second|third|fourth)\s+quarter(?:\s+of\s+(?<oyear>(?:19|20)\d{2}))?\b"#,
+    ].compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
+
+    /// A year a plan states after a preposition ("in 2027", "by 2030"); an anchor only in a sentence that states a
+    /// plan. A bare number ("plans to cut 2040 jobs") is no year.
+    static let planYearExpression: NSRegularExpression = {
+        guard
+            let expression = try? NSRegularExpression(
+                pattern: #"\b(?:in|by|until)\s+(?<year>(?:19|20)\d{2})\b"#, options: [.caseInsensitive])
+        else {
+            preconditionFailure("The plan year expression is a valid pattern")
+        }
+        return expression
+    }()
+
+    static let legacyCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? calendar.timeZone
+        return calendar
+    }()
+
+    /// Whether `text` is, in full, an anchor rather than a calendar date.
+    static func isAnchorText(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        // The former extractor also stored a plan's bare year ("2028", "in 2028", "by 2035", "until 2030").
+        if trimmed.range(
+            of: #"^(?:(?:in|by|until)\s+)?(?:19|20)\d{2}$"#, options: [.regularExpression, .caseInsensitive]
+        ) != nil {
+            return true
+        }
+        return anchorExpressions.contains {
+            $0.firstMatch(in: trimmed, options: .anchored, range: range)?.range == range
+        }
     }
 }
 
@@ -428,8 +543,9 @@ public struct EventOverviewDocument: Codable, Hashable, Sendable, Identifiable {
     /// attribution, described and institutional speakers, and verifier speaker, quotation and action checks (#547).
     /// 11: conditional Industry Impact section (#670). 13: no feed footer or heading Highlights, one first-pass Highlight
     /// per publisher (#1251). 14: no cut-off feed description tail as a Highlight (#1253). 15: no page title block,
-    /// the title alone or with its dateline, as a Highlight (#1266).
-    public static let currentAnalysisVersion = 15
+    /// the title alone or with its dateline, as a Highlight (#1266). 16: timeline items carry their date kind and
+    /// come from the stated-date builder only (#1241).
+    public static let currentAnalysisVersion = 16
 
     public let id: String
     public let eventID: String

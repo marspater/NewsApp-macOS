@@ -22,6 +22,8 @@ struct BriefingTimelineData: Equatable, Sendable {
         let dayText: String
         let summary: String
         let date: Date
+        /// The span the stated date covers: one day, or one month for a month-only date.
+        let span: DateInterval
         /// The summary reports escalation explicitly (World Tension classifier cues).
         let isEscalating: Bool
     }
@@ -30,10 +32,11 @@ struct BriefingTimelineData: Equatable, Sendable {
     struct Thread: Equatable, Sendable {
         let entry: FeedEntry
         let items: [Item]
-        /// Whole days from the first item to the edition.
-        let day: Int
+        /// Whole days from the first item to the edition; nil when the first item is not a day-precision date, so a
+        /// month-only date is never counted from its first day (#1241).
+        let day: Int?
 
-        var caption: String { "\(entry.representative.title) · day \(day)" }
+        var caption: String { day.map { "\(entry.representative.title) · day \($0)" } ?? entry.representative.title }
     }
 
     /// Most publishers first.
@@ -46,35 +49,70 @@ struct BriefingTimelineData: Equatable, Sendable {
 
     /// Every timeline of the story's live events as one, keeping the first item of each identical summary.
     /// Plans, undated and future items are dropped first, so they never hide a dated past copy of the same summary.
-    static func merged(_ timelines: [[OverviewTimelineItem]], now: Date) -> [OverviewTimelineItem] {
+    /// Item ids are only unique within one overview (`timeline_1`…), so each is prefixed with its event id: the rows
+    /// are identified by it (#1241).
+    static func merged(
+        _ timelines: [(eventID: String, items: [OverviewTimelineItem])], now: Date
+    ) -> [OverviewTimelineItem] {
         var seen = Set<String>()
-        return timelines.joined().filter { item in
-            guard !item.isFuturePlan, let date = item.eventDate ?? item.publicationDate, date <= now else {
+        return timelines.flatMap { timeline in
+            timeline.items.map { item in
+                OverviewTimelineItem(
+                    id: "\(timeline.eventID)/\(item.id)", dateText: item.dateText, dateKind: item.dateKind,
+                    datePrecision: item.datePrecision, summary: item.summary, citationIDs: item.citationIDs,
+                    isFuturePlan: item.isFuturePlan,
+                    eventDate: item.eventDate, publicationDate: item.publicationDate,
+                    orderingDateMayHoldInferredYear: item.orderingDateMayHoldInferredYear)
+            }
+        }.filter { item in
+            guard !item.isFuturePlan, let date = orderingDate(of: item), date <= now else {
                 return false
             }
             return seen.insert(item.summary).inserted
         }
     }
 
-    /// Past, dated items in date order, the latest five; nil with fewer than two.
+    /// Where an item's occurrence date falls, for filtering and order only; the row shows the item's `dateText`, so
+    /// an inferred year in the builder's ordering date never appears (#1241). Only a stated date with a known
+    /// precision counts: anchors ("Yesterday morning") are relative to the source's day, and a publication date is
+    /// no occurrence date, so neither forms or orders a thread.
+    static func orderingDate(of item: OverviewTimelineItem) -> Date? {
+        guard item.dateKind == .stated, item.datePrecision != nil else { return nil }
+        return item.eventDate ?? item.orderingDateMayHoldInferredYear
+    }
+
+    private static let utc: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? calendar.timeZone
+        return calendar
+    }()
+
+    /// Past, dated items in date order, the latest five; nil unless those five hold at least two distinct occurrence
+    /// dates. Two dates are distinct only when their spans do not overlap: the same day written twice is one date, and
+    /// a month with a day inside it is one too (#1241).
     static func items(_ timeline: [OverviewTimelineItem], now: Date) -> [Item]? {
         let dated = timeline.compactMap { item -> Item? in
-            guard !item.isFuturePlan, let date = item.eventDate ?? item.publicationDate, date <= now else { return nil }
+            guard !item.isFuturePlan, let date = orderingDate(of: item), date <= now,
+                let span = utc.dateInterval(of: item.datePrecision == .month ? .month : .day, for: date)
+            else { return nil }
             let fact = PassageAnchoredFact(
                 id: item.id, statement: item.summary, passageID: item.id, quote: item.summary, articleID: "")
             return Item(
-                id: item.id, dayText: item.dateText, summary: item.summary, date: date,
+                id: item.id, dayText: item.dateText, summary: item.summary, date: date, span: span,
                 isEscalating: TensionEventClassifier.classify([fact], methodology: .v1).escalation == .escalating)
         }
         let latest = Array(dated.sorted { $0.date < $1.date }.suffix(Metrics.maximumItems))
-        return latest.count >= 2 ? latest : nil
+        let distinct = latest.contains { first in
+            latest.contains { first.span.end <= $0.span.start || $0.span.end <= first.span.start }
+        }
+        return distinct ? latest : nil
     }
 
     static func thread(entry: FeedEntry, timeline: [OverviewTimelineItem], now: Date) -> Thread? {
         guard let items = items(timeline, now: now), let first = items.first else { return nil }
-        let calendar = Calendar.current
-        let day = calendar.dateComponents(
-            [.day], from: calendar.startOfDay(for: first.date), to: calendar.startOfDay(for: now)
+        guard first.span.duration <= 86_400 else { return Thread(entry: entry, items: items, day: nil) }
+        let day = utc.dateComponents(
+            [.day], from: utc.startOfDay(for: first.date), to: utc.startOfDay(for: now)
         ).day
         return Thread(entry: entry, items: items, day: max(0, day ?? 0))
     }
@@ -84,13 +122,13 @@ struct BriefingTimelineData: Equatable, Sendable {
         let overviews = await BriefingOverviews.load(context.entries, store: store)
         var threads: [(Int, Thread)] = []
         for (index, pair) in overviews.enumerated() where !Task.isCancelled {
-            var timelines = [pair.1.timeline]
+            var timelines = [(eventID: pair.1.eventID, items: pair.1.timeline)]
             if case .event(let summary, _, _) = pair.0,
                 let storyEvents = try? await store.database.storyEventIDs(summary.eventID)
             {
                 for eventID in storyEvents where eventID != summary.eventID {
                     if let overview = try? await store.fetchEventOverview(eventID: eventID) {
-                        timelines.append(overview.timeline)
+                        timelines.append((eventID: overview.eventID, items: overview.timeline))
                     }
                 }
             }
@@ -120,7 +158,8 @@ struct BriefingTimelineData: Equatable, Sendable {
         ]
         let timeline = steps.map {
             OverviewTimelineItem(
-                dateText: $0.day, summary: $0.summary, eventDate: now.addingTimeInterval(-$0.daysAgo * 86_400))
+                dateText: $0.day, datePrecision: .day, summary: $0.summary,
+                eventDate: now.addingTimeInterval(-$0.daysAgo * 86_400))
         }
         return thread(entry: entry, timeline: timeline, now: now).map { Self(threads: [$0]) }
     }

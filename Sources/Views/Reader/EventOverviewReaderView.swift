@@ -205,8 +205,8 @@ struct EventOverviewReaderView: View {
         }
     }
 
-    /// Orders non-planned items before plans, then sorts each group by event date or publication date,
-    /// earliest first. Undated items follow dated ones; ties favor an event date over a publication-only
+    /// Orders non-planned items before plans, then sorts each group by event date, ordering date or publication
+    /// date, earliest first. Undated items follow dated ones; ties favor an event date over a publication-only
     /// date, then preserve input order. Display date text does not affect ordering.
     nonisolated static func sortTimelineItems(_ items: [OverviewTimelineItem]) -> [OverviewTimelineItem] {
         items.enumerated().sorted { left, right in
@@ -215,8 +215,8 @@ struct EventOverviewReaderView: View {
             if a.isFuturePlan != b.isFuturePlan {
                 return !a.isFuturePlan && b.isFuturePlan
             }
-            let dateA = a.eventDate ?? a.publicationDate
-            let dateB = b.eventDate ?? b.publicationDate
+            let dateA = a.eventDate ?? a.orderingDateMayHoldInferredYear ?? a.publicationDate
+            let dateB = b.eventDate ?? b.orderingDateMayHoldInferredYear ?? b.publicationDate
             if let dateA, let dateB, dateA != dateB {
                 return dateA < dateB
             }
@@ -440,25 +440,48 @@ struct EventOverviewReaderView: View {
         return nil
     }
 
-    /// Mirrors `timelineDateRow`: the date text plus a "Reported" publication date for dated events, otherwise
-    /// the date text or publication date with a "Reported" prefix; then planned status, summary and sources.
+    /// What a timeline row shows as its date (#1241): a stated date as the source gives it, and "Reported" only for
+    /// a publication date. The meaning comes from `dateKind`, never from which `Date` happens to be set.
+    struct TimelineDateDisplay: Equatable {
+        /// The stated date or anchor in the source's words, or "Reported <date>" for a publication date; nil when no
+        /// date is known.
+        let primary: String?
+        /// "Reported <date>" beside a stated date or anchor when the item also carries its publication date.
+        let reported: String?
+        /// True when `primary` is a calendar date the source states, which draws the solid marker; an anchor or a
+        /// publication date draws the outlined one.
+        let isStated: Bool
+    }
+
+    nonisolated static func timelineDateDisplay(for item: OverviewTimelineItem) -> TimelineDateDisplay {
+        let text = item.dateText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let publicationText = item.publicationDate?.formatted(date: .abbreviated, time: .omitted)
+        func reported(_ date: String) -> String { date.hasPrefix("Reported ") ? date : "Reported \(date)" }
+        if !text.isEmpty, item.dateKind != .publication {
+            // An anchor ("Yesterday morning") is the source's wording, relative to the day it was reported.
+            return TimelineDateDisplay(
+                primary: text, reported: publicationText.map(reported), isStated: item.dateKind == .stated)
+        }
+        // Only a publication date reads "Reported". Any other item without date text shows no date, even when it
+        // carries a publication date (a stored "Scheduled" plan, for one), so nothing reads as a dated plan.
+        guard item.dateKind == .publication, let shown = text.isEmpty ? publicationText : text else {
+            return TimelineDateDisplay(primary: nil, reported: nil, isStated: false)
+        }
+        return TimelineDateDisplay(primary: reported(shown), reported: nil, isStated: false)
+    }
+
+    /// Mirrors `timelineDateRow` through `timelineDateDisplay`: the date, planned status, a separate "Reported"
+    /// publication date for stated dates, then summary and sources.
     nonisolated static func timelineItemAccessibilityLabel(
         item: OverviewTimelineItem, citations: [OverviewCitation] = []
     ) -> String {
         var parts: [String] = []
-        let hasDateText = !item.dateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let publicationText = item.publicationDate?.formatted(date: .abbreviated, time: .omitted)
-        if item.eventDate != nil {
-            if hasDateText { parts.append(item.dateText) }
-        } else if let shown = hasDateText ? item.dateText : publicationText {
-            parts.append(shown.hasPrefix("Reported ") ? shown : "Reported \(shown)")
-        }
+        let date = timelineDateDisplay(for: item)
+        if let primary = date.primary { parts.append(primary) }
         if item.isFuturePlan {
             parts.append("Planned")
         }
-        if item.eventDate != nil, let publicationText {
-            parts.append("Reported \(publicationText)")
-        }
+        if let reported = date.reported { parts.append(reported) }
         let summaryTrimmed = item.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = summaryTrimmed.hasSuffix(".") ? String(summaryTrimmed.dropLast()) : summaryTrimmed
         parts.append(summary)
@@ -494,10 +517,6 @@ struct EventOverviewReaderView: View {
 
     private var formattedUpdateTime: String {
         overview.updatedAt.formatted(.relative(presentation: .numeric))
-    }
-
-    private func formatTimelineDate(_ date: Date) -> String {
-        date.formatted(date: .abbreviated, time: .omitted)
     }
 
     private var articleCountText: String {
@@ -1266,13 +1285,13 @@ struct EventOverviewReaderView: View {
         .frame(width: AppLayout.timelineRailWidth)
     }
 
-    /// Uses a diamond for plans, an outlined circle without an event date, and a filled circle otherwise.
+    /// Uses a diamond for plans, an outlined circle without a stated date, and a filled circle otherwise.
     @ViewBuilder
     private func timelineMarker(for item: OverviewTimelineItem) -> some View {
         if item.isFuturePlan {
             DiamondShape()
                 .fill(AppColor.accent)
-        } else if item.eventDate == nil {
+        } else if !Self.timelineDateDisplay(for: item).isStated {
             Circle()
                 .strokeBorder(AppColor.accent, lineWidth: AppLayout.timelineRailStroke)
                 .background(Circle().fill(AppColor.background))
@@ -1290,33 +1309,18 @@ struct EventOverviewReaderView: View {
         .padding(.bottom, isLast ? 0 : AppSpacing.md)
     }
 
-    /// Displays event date text when supplied, otherwise a reported date for items without an event date.
-    /// Adds the Plan badge for planned items and a separate publication date for dated events.
+    /// Displays the stated date, or "Reported" with a publication date, as `timelineDateDisplay` decides.
+    /// Adds the Plan badge for planned items and a separate publication date beside a stated date.
     @ViewBuilder
     private func timelineDateRow(_ item: OverviewTimelineItem) -> some View {
-        let hasDateText = !item.dateText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let hasEventDate = item.eventDate != nil
-        let hasPubDate = item.publicationDate != nil
-
-        if hasDateText || hasEventDate || hasPubDate || item.isFuturePlan {
+        let date = Self.timelineDateDisplay(for: item)
+        if date.primary != nil || item.isFuturePlan {
             HStack(spacing: AppSpacing.xs) {
-                if hasEventDate && hasDateText {
-                    Text(item.dateText)
+                if let primary = date.primary {
+                    Text(primary)
                         .font(AppTypography.overviewFont(.annotation, scale: textScale))
                         .foregroundStyle(AppColor.accentText)
                         .bold()
-                } else if !hasEventDate && (hasDateText || hasPubDate) {
-                    let displayDate =
-                        hasDateText
-                        ? item.dateText
-                        : (item.publicationDate.map(formatTimelineDate) ?? "")
-                    if !displayDate.isEmpty {
-                        let text = displayDate.hasPrefix("Reported ") ? displayDate : "Reported \(displayDate)"
-                        Text(text)
-                            .font(AppTypography.overviewFont(.annotation, scale: textScale))
-                            .foregroundStyle(AppColor.accentText)
-                            .bold()
-                    }
                 }
 
                 if item.isFuturePlan {
@@ -1328,8 +1332,8 @@ struct EventOverviewReaderView: View {
                     .accessibilityLabel("Planned event")
                 }
 
-                if let pubDate = item.publicationDate, hasEventDate {
-                    Text("Reported \(formatTimelineDate(pubDate))")
+                if let reported = date.reported {
+                    Text(reported)
                         .font(AppTypography.overviewFont(.annotation, scale: textScale))
                         .foregroundStyle(currentSecondaryTextColor)
                 }
