@@ -327,7 +327,10 @@ enum AppLayout {
     static let catalogSheetWidth: CGFloat = 720
     /// Opens from Settings like Publisher Health, so it takes the same bounds (#1265).
     static let catalogSheetMinHeight: CGFloat = publisherHealthSheetMinHeight
-    static let catalogSheetHeight: CGFloat = publisherHealthSheetIdealHeight
+    /// Its search field adds a toolbar row of about 44 pt above the list, so the content is that much shorter than
+    /// Publisher Health's; with the same 480 pt it grew the Settings window and, on a 768 pt screen, still put Done
+    /// 9 pt below the window edge (CI, 13 November 2026).
+    static let catalogSheetHeight: CGFloat = publisherHealthSheetIdealHeight - 44
     static let publisherHealthSheetWidth: CGFloat = 720
     /// The sheet opens below the Settings window's toolbar, where the 560 pt pane leaves room for its content plus the
     /// sheet's own bottom bar with Done; a 560 pt content height put Done below the window edge (#1265). The table
