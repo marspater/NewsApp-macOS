@@ -1209,7 +1209,9 @@ struct ArticleListView: View {
         // their event membership or a stored overview change. After a load, stale stored overviews of these stories
         // are regenerated in the background, a bounded number per edition (#1299); each result reloads the board.
         .task(
-            id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision)"
+            // The edition's start is part of the identity: a new edition with the same stories has its own bound.
+            id: "\(listed.map(\.id)):\(groupsEvents):\(articleStore.eventRevision):\(articleStore.overviewRevision):"
+                + "\(briefing?.startedAt.timeIntervalSince1970 ?? 0)"
         ) {
             let ranking = await BriefingRanking.load(entries: listed, database: articleStore.database)
             let context = BriefingLoadContext(

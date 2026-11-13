@@ -509,9 +509,14 @@ actor OverviewGenerationCoordinator {
                     || staleEdition.chosen.count < Self.maxStaleRegenerationsPerEdition
             else { continue }
             guard eventID != currentVisibleEventID,
-                let stored = try? await store.fetchEventOverview(eventID: eventID),
-                let event = try? await store.database.fetchEvent(id: eventID), event.id == eventID,
-                stored.isStale(currentMembershipVersion: event.membershipVersion)
+                let event = try? await store.database.fetchEvent(id: eventID), event.id == eventID
+            else { continue }
+            // Publisher text stored for an earlier, cancelled attempt removes the stale row; an event this edition
+            // already chose is finished all the same, so it is not left without an overview.
+            let stored = try? await store.fetchEventOverview(eventID: eventID)
+            guard
+                stored?.isStale(currentMembershipVersion: event.membershipVersion)
+                    ?? staleEdition.chosen.contains(eventID)
             else { continue }
             let attempt = "\(eventID):\(event.membershipVersion)"
             // The awaits above suspend this actor: another edition or the reader may have taken over meanwhile.
