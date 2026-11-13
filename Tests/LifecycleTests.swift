@@ -244,9 +244,16 @@ extension NewsTests {
         assertTrue(checker.updateAvailable, "Throttling preserves the last successful result")
 
         MockURLProtocol.requestHandler = { request in
-            (HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!, Data())
+            Thread.sleep(forTimeInterval: 0.3)
+            return (HTTPURLResponse(url: request.url!, statusCode: 503, httpVersion: nil, headerFields: nil)!, Data())
         }
+        let running = Task { await checker.checkForUpdates(userInitiated: true) }
+        while !checker.isChecking { await Task.yield() }
         await checker.checkForUpdates(userInitiated: true)
+        assertEqual(
+            checker.statusMessage, "Update check failed (HTTP 503)",
+            "A manual check during a running one returns with its result, not the interim state")
+        await running.value
         assertEqual(
             checker.statusMessage, "Update check failed (HTTP 503)",
             "Protected client HTTP failures retain their status")

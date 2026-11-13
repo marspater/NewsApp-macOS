@@ -1,0 +1,3 @@
+- Check for Updates… chosen while an automatic check runs now waits for its result instead of showing "Checking for updates...".
+- JSON Feed: an item with an empty `content_html` keeps its `content_text`, and a boolean `id` falls back to the item's URL.
+- A restore refused because the library is in use keeps the stored Today edition.
