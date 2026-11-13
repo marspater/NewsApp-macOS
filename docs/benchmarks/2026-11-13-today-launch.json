@@ -1,0 +1,569 @@
+{
+  "arm_builds": {
+    "baseline": "ba1853e",
+    "cold": "33199b7",
+    "cold_integration": "7eedcd4",
+    "cold_pool": "7eedcd4 with -today_window_pool YES",
+    "swap": "33199b7",
+    "swap_integration": "7eedcd4",
+    "warm": "33199b7",
+    "warm_integration": "7eedcd4"
+  },
+  "builds": {
+    "baseline": "ba1853e",
+    "integration_all_epic_z_prs": "7eedcd4",
+    "main_before_merges": "33199b7"
+  },
+  "configuration": "Profile, com.marspater.news.dev, library copy of the development library (3,359 stories) restored before every launch",
+  "date": "2026-11-13",
+  "first_card_run": {
+    "arms": {
+      "baseline": {
+        "assignment_ms": null,
+        "context_ms": null,
+        "first_card_ms": {
+          "max": 3506.4,
+          "median": 1641.3,
+          "min": 1331.8,
+          "n": 20,
+          "p95": 3493.7
+        },
+        "footprint_mb_at_20s": {
+          "max": 290.0,
+          "median": 246.5,
+          "min": 196.0,
+          "n": 20,
+          "p95": 282.0
+        },
+        "fresh_edition_ready_ms": null,
+        "fresh_outcomes": {
+          "none": 20
+        },
+        "launches": 20,
+        "load1": {
+          "max": 29.8,
+          "median": 7.9,
+          "min": 5.2,
+          "n": 20,
+          "p95": 19.0
+        },
+        "peak_mb": {
+          "max": 300.0,
+          "median": 263.0,
+          "min": 206.0,
+          "n": 20,
+          "p95": 296.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 15.0,
+          "CoreAnimation": 16.0,
+          "IOSurface": 3.5,
+          "Malloc Large": 25.0,
+          "Malloc Small": 165.5
+        }
+      },
+      "cold": {
+        "assignment_ms": {
+          "max": 235.6,
+          "median": 109.6,
+          "min": 73.9,
+          "n": 20,
+          "p95": 217.1
+        },
+        "context_ms": {
+          "max": 209.7,
+          "median": 87.6,
+          "min": 62.5,
+          "n": 20,
+          "p95": 206.5
+        },
+        "first_card_ms": {
+          "max": 4149.0,
+          "median": 1918.5,
+          "min": 1531.3,
+          "n": 20,
+          "p95": 3699.8
+        },
+        "footprint_mb_at_20s": {
+          "max": 365.0,
+          "median": 300.5,
+          "min": 280.0,
+          "n": 20,
+          "p95": 346.0
+        },
+        "fresh_edition_ready_ms": null,
+        "fresh_outcomes": {
+          "none": 20
+        },
+        "launches": 20,
+        "load1": {
+          "max": 21.2,
+          "median": 7.3,
+          "min": 5.0,
+          "n": 20,
+          "p95": 17.0
+        },
+        "peak_mb": {
+          "max": 415.0,
+          "median": 367.5,
+          "min": 326.0,
+          "n": 20,
+          "p95": 405.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 27.0,
+          "CoreAnimation": 67.0,
+          "IOSurface": 0.9,
+          "Malloc Large": 20.0,
+          "Malloc Small": 157.0
+        }
+      },
+      "cold_integration": {
+        "assignment_ms": {
+          "max": 193.1,
+          "median": 91.2,
+          "min": 68.3,
+          "n": 20,
+          "p95": 178.2
+        },
+        "context_ms": {
+          "max": 205.8,
+          "median": 79.0,
+          "min": 58.8,
+          "n": 20,
+          "p95": 191.9
+        },
+        "first_card_ms": {
+          "max": 4935.0,
+          "median": 1677.6,
+          "min": 1546.7,
+          "n": 20,
+          "p95": 4421.5
+        },
+        "footprint_mb_at_20s": {
+          "max": 396.0,
+          "median": 300.5,
+          "min": 285.0,
+          "n": 20,
+          "p95": 388.0
+        },
+        "fresh_edition_ready_ms": null,
+        "fresh_outcomes": {
+          "none": 20
+        },
+        "launches": 20,
+        "load1": {
+          "max": 21.5,
+          "median": 7.0,
+          "min": 5.9,
+          "n": 20,
+          "p95": 17.4
+        },
+        "peak_mb": {
+          "max": 399.0,
+          "median": 368.5,
+          "min": 349.0,
+          "n": 20,
+          "p95": 397.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 27.0,
+          "CoreAnimation": 69.0,
+          "IOSurface": 0.9,
+          "Malloc Large": 7.8,
+          "Malloc Small": 159.0
+        }
+      },
+      "cold_pool": {
+        "assignment_ms": {
+          "max": 2113.2,
+          "median": 1168.8,
+          "min": 545.6,
+          "n": 20,
+          "p95": 1973.0
+        },
+        "context_ms": {
+          "max": 1479.5,
+          "median": 703.9,
+          "min": 359.5,
+          "n": 20,
+          "p95": 1229.1
+        },
+        "first_card_ms": {
+          "max": 6501.4,
+          "median": 4389.4,
+          "min": 2317.6,
+          "n": 20,
+          "p95": 6338.5
+        },
+        "footprint_mb_at_20s": {
+          "max": 449.0,
+          "median": 372.0,
+          "min": 297.0,
+          "n": 20,
+          "p95": 446.0
+        },
+        "fresh_edition_ready_ms": null,
+        "fresh_outcomes": {
+          "none": 20
+        },
+        "launches": 20,
+        "load1": {
+          "max": 23.1,
+          "median": 6.9,
+          "min": 4.8,
+          "n": 20,
+          "p95": 22.5
+        },
+        "peak_mb": {
+          "max": 493.0,
+          "median": 457.0,
+          "min": 379.0,
+          "n": 20,
+          "p95": 477.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 25.0,
+          "CoreAnimation": 66.0,
+          "IOSurface": 0.9,
+          "Malloc Large": 25.5,
+          "Malloc Small": 217.5
+        }
+      },
+      "warm": {
+        "assignment_ms": {
+          "max": 317.2,
+          "median": 129.5,
+          "min": 74.6,
+          "n": 20,
+          "p95": 303.2
+        },
+        "context_ms": {
+          "max": 535.6,
+          "median": 245.4,
+          "min": 168.4,
+          "n": 20,
+          "p95": 513.4
+        },
+        "first_card_ms": {
+          "max": 3472.4,
+          "median": 1520.2,
+          "min": 1325.9,
+          "n": 20,
+          "p95": 3365.4
+        },
+        "footprint_mb_at_20s": {
+          "max": 369.0,
+          "median": 298.5,
+          "min": 280.0,
+          "n": 20,
+          "p95": 353.0
+        },
+        "fresh_edition_ready_ms": {
+          "max": 4071.8,
+          "median": 1845.9,
+          "min": 1501.2,
+          "n": 20,
+          "p95": 3870.2
+        },
+        "fresh_outcomes": {
+          "confirmed": 20
+        },
+        "launches": 20,
+        "load1": {
+          "max": 18.1,
+          "median": 8.7,
+          "min": 5.2,
+          "n": 20,
+          "p95": 14.6
+        },
+        "peak_mb": {
+          "max": 387.0,
+          "median": 376.5,
+          "min": 312.0,
+          "n": 20,
+          "p95": 384.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 27.0,
+          "CoreAnimation": 69.0,
+          "IOSurface": 3.7,
+          "Malloc Large": 5.6,
+          "Malloc Small": 159.0
+        }
+      },
+      "warm_integration": {
+        "assignment_ms": {
+          "max": 495.2,
+          "median": 89.6,
+          "min": 61.9,
+          "n": 20,
+          "p95": 451.3
+        },
+        "context_ms": {
+          "max": 689.1,
+          "median": 230.3,
+          "min": 143.5,
+          "n": 20,
+          "p95": 561.5
+        },
+        "first_card_ms": {
+          "max": 3840.6,
+          "median": 1473.5,
+          "min": 1315.1,
+          "n": 20,
+          "p95": 3738.3
+        },
+        "footprint_mb_at_20s": {
+          "max": 355.0,
+          "median": 297.0,
+          "min": 273.0,
+          "n": 20,
+          "p95": 338.0
+        },
+        "fresh_edition_ready_ms": {
+          "max": 4704.9,
+          "median": 1688.6,
+          "min": 1470.9,
+          "n": 20,
+          "p95": 4200.8
+        },
+        "fresh_outcomes": {
+          "confirmed": 20
+        },
+        "launches": 20,
+        "load1": {
+          "max": 27.3,
+          "median": 6.7,
+          "min": 4.5,
+          "n": 20,
+          "p95": 17.5
+        },
+        "peak_mb": {
+          "max": 399.0,
+          "median": 376.0,
+          "min": 311.0,
+          "n": 20,
+          "p95": 398.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 27.0,
+          "CoreAnimation": 69.0,
+          "IOSurface": 3.8,
+          "Malloc Large": 5.7,
+          "Malloc Small": 161.5
+        }
+      }
+    },
+    "discarded_rounds": 1,
+    "load_at_start": 2.68,
+    "rounds": 21
+  },
+  "hardware": "Mac17,3",
+  "issue": 937,
+  "macos": "27.2.1",
+  "note": "Recorded figures, no budget set or met. Mac in use during every run (load per launch in each arm).",
+  "seeded_launch_baseline": {
+    "build": "f63c6f0, Release, com.marspater.news.launchcheck",
+    "first_card_restored": 0,
+    "first_launch_ms": 1867.1,
+    "footprint_peak_mib": {
+      "max": 173.2,
+      "median": 157.4,
+      "min": 148.7,
+      "n": 9,
+      "p95": 173.2
+    },
+    "footprint_settled_mib": {
+      "max": 103.4,
+      "median": 101.8,
+      "min": 93.3,
+      "n": 9,
+      "p95": 103.4
+    },
+    "launches_counted": 9,
+    "library_stories": 10000,
+    "process_start_to_first_card_ms": {
+      "max": 880.0,
+      "median": 807.2,
+      "min": 770.7,
+      "n": 9,
+      "p95": 880.0
+    }
+  },
+  "swap_run": {
+    "arms": {
+      "baseline": {
+        "assignment_ms": null,
+        "context_ms": null,
+        "first_card_ms": {
+          "max": 1452.5,
+          "median": 1410.7,
+          "min": 1319.2,
+          "n": 3,
+          "p95": 1452.5
+        },
+        "footprint_mb_at_20s": {
+          "max": 266.0,
+          "median": 229.0,
+          "min": 223.0,
+          "n": 3,
+          "p95": 266.0
+        },
+        "fresh_edition_ready_ms": null,
+        "fresh_outcomes": {
+          "none": 3
+        },
+        "launches": 3,
+        "load1": {
+          "max": 5.0,
+          "median": 4.5,
+          "min": 3.0,
+          "n": 3,
+          "p95": 5.0
+        },
+        "peak_mb": {
+          "max": 281.0,
+          "median": 278.0,
+          "min": 278.0,
+          "n": 3,
+          "p95": 281.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 19.0,
+          "CoreAnimation": 20.0,
+          "IOSurface": 3.7,
+          "Malloc Large": 9.6,
+          "Malloc Small": 154.0
+        }
+      },
+      "swap": {
+        "assignment_ms": {
+          "max": 95.8,
+          "median": 80.8,
+          "min": 75.9,
+          "n": 3,
+          "p95": 95.8
+        },
+        "context_ms": {
+          "max": 203.7,
+          "median": 175.4,
+          "min": 174.4,
+          "n": 3,
+          "p95": 203.7
+        },
+        "first_card_ms": {
+          "max": 1629.9,
+          "median": 1453.3,
+          "min": 1431.2,
+          "n": 3,
+          "p95": 1629.9
+        },
+        "footprint_mb_at_20s": {
+          "max": 319.0,
+          "median": 297.0,
+          "min": 293.0,
+          "n": 3,
+          "p95": 319.0
+        },
+        "fresh_edition_ready_ms": {
+          "max": 1809.9,
+          "median": 1672.3,
+          "min": 1615.3,
+          "n": 3,
+          "p95": 1809.9
+        },
+        "fresh_outcomes": {
+          "swapped": 3
+        },
+        "launches": 3,
+        "load1": {
+          "max": 4.3,
+          "median": 4.0,
+          "min": 3.6,
+          "n": 3,
+          "p95": 4.3
+        },
+        "peak_mb": {
+          "max": 381.0,
+          "median": 366.0,
+          "min": 363.0,
+          "n": 3,
+          "p95": 381.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 27.0,
+          "CoreAnimation": 69.0,
+          "IOSurface": 11.0,
+          "Malloc Large": 4.8,
+          "Malloc Small": 159.0
+        }
+      },
+      "swap_integration": {
+        "assignment_ms": {
+          "max": 72.5,
+          "median": 66.3,
+          "min": 59.2,
+          "n": 3,
+          "p95": 72.5
+        },
+        "context_ms": {
+          "max": 178.8,
+          "median": 168.7,
+          "min": 132.7,
+          "n": 3,
+          "p95": 178.8
+        },
+        "first_card_ms": {
+          "max": 1438.1,
+          "median": 1400.6,
+          "min": 1376.2,
+          "n": 3,
+          "p95": 1438.1
+        },
+        "footprint_mb_at_20s": {
+          "max": 310.0,
+          "median": 301.0,
+          "min": 291.0,
+          "n": 3,
+          "p95": 310.0
+        },
+        "fresh_edition_ready_ms": {
+          "max": 1616.0,
+          "median": 1533.6,
+          "min": 1533.3,
+          "n": 3,
+          "p95": 1616.0
+        },
+        "fresh_outcomes": {
+          "swapped": 3
+        },
+        "launches": 3,
+        "load1": {
+          "max": 4.3,
+          "median": 3.6,
+          "min": 3.1,
+          "n": 3,
+          "p95": 4.3
+        },
+        "peak_mb": {
+          "max": 384.0,
+          "median": 383.0,
+          "min": 354.0,
+          "n": 3,
+          "p95": 384.0
+        },
+        "regions_mb_median": {
+          "CG Raster Data": 27.0,
+          "CoreAnimation": 69.0,
+          "IOSurface": 4.1,
+          "Malloc Large": 4.8,
+          "Malloc Small": 163.0
+        }
+      }
+    },
+    "discarded_rounds": 1,
+    "load_at_start": 2.74,
+    "rounds": 4
+  }
+}
