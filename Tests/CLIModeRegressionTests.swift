@@ -1113,12 +1113,14 @@ extension NewsTests {
         let canonical = fixtureRoot.appendingPathComponent("canonical/story")
         let prose = (1...65).map { "Verified publisher fact \($0) adds distinctive editorial evidence." }.joined(
             separator: " ")
-        func html(_ href: String = "../canonical/story", title: String = "Publisher story", body: String? = nil)
+        @Sendable func html(
+            _ href: String = "../canonical/story", title: String = "Publisher story", body: String? = nil
+        )
             -> String
         {
             "<html><head><title>\(title)</title><link rel='alternate canonical' href='\(href)'></head><body><article><p>\(body ?? prose)</p><figure><img src='../photo.jpg'><figcaption>Publisher photo</figcaption></figure><p>Additional reporting confirms the detailed evidence and provides context for this event.</p></article></body></html>"
         }
-        var requests = [URL]()
+        nonisolated(unsafe) var requests = [URL]()
         MockURLProtocol.requestHandler = { request in
             let url = request.url!
             requests.append(url)

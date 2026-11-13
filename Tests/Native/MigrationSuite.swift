@@ -986,7 +986,8 @@ extension NativeSuites.MigrationSuite {
         print("  - Testing MigrationCoordinator Atomic Transaction & ID Reconciliation...")
 
         let suiteName = testDefaultsSuite("com.marspater.news.test")
-        let tempDefaults = UserDefaults(suiteName: suiteName)!
+        // UserDefaults is thread-safe; the coordinator and this test both use it.
+        nonisolated(unsafe) let tempDefaults = UserDefaults(suiteName: suiteName)!
         defer { removeTestDefaults(suiteName) }
 
         let db = DatabaseEngine(path: ":memory:")
@@ -1042,7 +1043,8 @@ extension NativeSuites.MigrationSuite {
 
         // Legacy data that exists but can't be decoded is not a fresh install: the migration stays open (#946).
         let unreadableSuite = suiteName + ".unreadable"
-        let unreadableDefaults = UserDefaults(suiteName: unreadableSuite)!
+        // UserDefaults is thread-safe; the coordinator and this test both use it.
+        nonisolated(unsafe) let unreadableDefaults = UserDefaults(suiteName: unreadableSuite)!
         defer { removeTestDefaults(unreadableSuite) }
         unreadableDefaults.set(Data("not json".utf8), forKey: "com.marspater.news.savedStories")
         let unreadableCoordinator = MigrationCoordinator(
@@ -1065,7 +1067,7 @@ extension NativeSuites.MigrationSuite {
 
         // Real legacy data: a saved story, and a read list that also names a story no longer cached.
         let legacySuite = suiteName + ".legacy"
-        let legacyDefaults = UserDefaults(suiteName: legacySuite)!
+        nonisolated(unsafe) let legacyDefaults = UserDefaults(suiteName: legacySuite)!
         defer { removeTestDefaults(legacySuite) }
         let savedStory = FeedArticle(
             title: "Legacy saved story", link: "https://news.example/legacy-saved", guid: "legacy-saved",

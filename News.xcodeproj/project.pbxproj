@@ -75,18 +75,13 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				App/Main.swift,
-				App/NewsApp.swift,
-				Views/List/ArticleListView.swift,
-				Views/List/EventCardView.swift,
-				Views/MainView.swift,
-				Views/OnboardingView.swift,
-				Views/SidebarView.swift,
 			);
 			target = 0A000000000000000000008A /* NewsTests */;
 		};
 		0A0000000000000000000084 /* Exceptions for "Tests" folder in "NewsTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				ReaderCommandNames.swift,
 				Runner.swift,
 			);
 			target = 0A000000000000000000008A /* NewsTests */;
@@ -628,7 +623,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
 				PRODUCT_NAME = NewsTests;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
@@ -644,7 +639,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
 				PRODUCT_NAME = NewsTests;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -794,7 +789,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.marspater.news.nativetests;
 				PRODUCT_MODULE_NAME = NewsNativeTests;
 				PRODUCT_NAME = NewsTests;
-				SWIFT_VERSION = 5.0;
+				SWIFT_VERSION = 6.0;
 			};
 			name = Profile;
 		};

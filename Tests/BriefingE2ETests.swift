@@ -343,8 +343,8 @@ enum BriefingTestFactory {
 // MARK: - Briefing E2E Test Suite Runner
 
 struct BriefingE2ETests {
-    static var testsRun = 0
-    static var failures = 0
+    nonisolated(unsafe) static var testsRun = 0
+    nonisolated(unsafe) static var failures = 0
 
     static func assertEqual<T: Equatable>(
         _ actual: T, _ expected: T, _ message: String, file: StaticString = #file, line: UInt = #line

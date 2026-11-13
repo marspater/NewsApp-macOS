@@ -1,0 +1,1 @@
+- The native test bundle compiles in Swift 6 language mode, like the app; test helpers that the URL loader calls from its own thread are no longer main-actor closures (#1070).

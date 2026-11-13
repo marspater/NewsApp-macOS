@@ -57,9 +57,10 @@ enum AnalysisGenerationTests {
             pubDate: Date(timeIntervalSince1970: 1_793_188_800), source: "Harbor Times")
     }
 
-    static func eventually(_ message: String, timeout: Duration = .seconds(20), _ condition: () async -> Bool)
-        async
-    {
+    static func eventually(
+        _ message: String, timeout: Duration = .seconds(20), isolation: isolated (any Actor)? = #isolation,
+        _ condition: () async -> Bool
+    ) async {
         let deadline = ContinuousClock.now + timeout
         while ContinuousClock.now < deadline {
             if await condition() { return }
