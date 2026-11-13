@@ -177,7 +177,6 @@ enum BriefingImpactTests {
         check(!clear.isRead && !clear.isSaved, "Regions tiles show unread and unsaved only when true")
     }
 
-
     /// #1311/4: Region events not in the edition still reach the list's entry-opening action.
     @MainActor static func regionSupplementNavigation() async {
         let supplemental = BriefingRegionsData.sampleEntry(

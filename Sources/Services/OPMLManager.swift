@@ -231,11 +231,14 @@ public enum OPMLExporter: Sendable {
 
             """
         func outline(_ url: String, indent: String) -> String {
-            let displayTitle = URL(string: url)?.host?
+            let displayTitle =
+                URL(string: url)?.host?
                 .replacingOccurrences(of: "feeds.", with: "")
                 .replacingOccurrences(of: "rss.", with: "")
                 .replacingOccurrences(of: "www.", with: "") ?? url
-            return "\(indent)<outline text=\"\(escapeXML(displayTitle))\" title=\"\(escapeXML(displayTitle))\" type=\"rss\" xmlUrl=\"\(escapeXML(url))\"/>\n"
+            return
+                "\(indent)<outline text=\"\(escapeXML(displayTitle))\" title=\"\(escapeXML(displayTitle))\""
+                + " type=\"rss\" xmlUrl=\"\(escapeXML(url))\"/>\n"
         }
 
         var groupedKeys = Set<String>()

@@ -113,10 +113,11 @@ struct BriefingRegionsData: Equatable, Sendable {
         var seenEntryIDs = Set(context.entries.map(\.id))
         // FeedEntry.id is the representative article, not the event; an edition event can reappear
         // with another representative in the supplemental pool (#1311).
-        var seenEventIDs = Set(context.entries.compactMap { entry -> String? in
-            if case .event(let summary, _, _) = entry { return summary.eventID }
-            return nil
-        })
+        var seenEventIDs = Set(
+            context.entries.compactMap { entry -> String? in
+                if case .event(let summary, _, _) = entry { return summary.eventID }
+                return nil
+            })
         var seenArticleIDs = Set(context.entries.flatMap { $0.visibleArticles.map(\.id) })
         let window = context.now.addingTimeInterval(-72 * 3600)...context.now
         let unreadPool =

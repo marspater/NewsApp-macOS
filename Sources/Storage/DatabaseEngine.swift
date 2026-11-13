@@ -3310,7 +3310,11 @@ actor DatabaseEngine {
                     params += feeds.map { ("text", $0) }
                 }
             } else {
-                sql += " AND news_section(a.title, coalesce(a.description, ''), coalesce(ae.category, a.category), ?) = 1"
+                sql += """
+                     AND news_section(
+                        a.title, coalesce(a.description, ''),
+                        coalesce(ae.category, a.category), ?) = 1
+                    """
                 params.append(("text", sec))
             }
         }
