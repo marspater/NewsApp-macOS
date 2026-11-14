@@ -511,7 +511,7 @@ public enum OverviewKind: String, Codable, Sendable, Equatable, Hashable {
 public struct OverviewVersionContext: Codable, Hashable, Sendable {
     /// The event's membership version the overview was made for.
     public let membershipVersion: Int
-    /// `EventOverviewDocument.computeInputTextHash(passages:)` of the passages it was made from.
+    /// `OverviewComposer.inputTextHash(passages:eventTitle:cappedDescriptionArticleIDs:)` of the passages it was made /// from; the composer and the generation coordinator compare against it.
     public let inputTextHash: String
     /// The stored document layout version.
     public let schemaVersion: Int

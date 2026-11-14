@@ -108,7 +108,7 @@ enum KnowledgeExport {
         return Data(lines.joined(separator: "\n").utf8)
     }
 
-    /// Backslash-escapes every Markdown punctuation character, so stored text never renders as markup or links.
+    /// Backslash-escapes the Markdown punctuation in `punctuation`, so stored text cannot form emphasis, code or links; /// a line starting with a number and a period can still render as a list.
     static func escapeMarkdown(_ text: String) -> String {
         let punctuation = Set("\\`*_{}[]<>()#+!|~->")
         return text.map { punctuation.contains($0) ? "\\" + String($0) : String($0) }.joined()
