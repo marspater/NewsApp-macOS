@@ -19,8 +19,11 @@ import os
 
 /// Priority levels for enrichment jobs.
 enum EnrichmentPriority: Int, Comparable, Sendable {
+    /// Feed ingest backlog.
     case background = 0  // Batch feed ingest backlog
+    /// Visible unread headlines.
     case high = 1  // Visible unread headlines in active section
+    /// The story the reader opened.
     case interactive = 2  // Currently focused / opened by user
 
     static func < (lhs: EnrichmentPriority, rhs: EnrichmentPriority) -> Bool {
@@ -30,27 +33,41 @@ enum EnrichmentPriority: Int, Comparable, Sendable {
 
 /// Reasons for job cancellation.
 enum EnrichmentCancellationReason: String, Sendable, Equatable {
+    /// The reader or a caller cancelled the job.
     case user
+    /// Newer work or a cleared analysis replaced the job.
     case superseded
+    /// A job that ran out of time; nothing in the app cancels with it yet.
     case timeout
 }
 
 /// Lifecycle states for an enrichment job.
 enum EnrichmentJobState: Equatable, Sendable {
+    /// Waiting for a worker slot at this priority.
     case queued(EnrichmentPriority)
+    /// Holding one of the worker slots.
     case running
+    /// Classified this session from the article's current publisher input.
     case completed
+    /// Cancelled before it finished.
     case cancelled(EnrichmentCancellationReason)
+    /// Failed with this description.
     case failed(String)
 }
 
 /// Enriched product emitted by the pipeline to be persisted by ArticleStore.
 struct EnrichmentResult: Sendable, Equatable {
+    /// The article the result belongs to.
     let articleId: String
+    /// A summary; background ingestion leaves it nil.
     let summary: String?
+    /// The `NewsCategory` raw value the classifier chose.
     let category: String?
+    /// The classifier's confidence from 0 to 1.
     let confidence: Double?
+    /// Extracted article text; background ingestion leaves it nil.
     let content: String?
+    /// A lead image URL; background ingestion leaves it nil.
     let image: String?
 
     init(
@@ -73,6 +90,7 @@ struct EnrichmentResult: Sendable, Equatable {
 /// Actor-isolated priority enrichment queue with bounded concurrency,
 /// duplicate-job prevention, dynamic promotion, and cooperative cancellation.
 actor EnrichmentQueue {
+    /// The queue the app's refresh and reader use.
     static let shared = EnrichmentQueue()
     private let logger = Logger(subsystem: "com.marspater.news", category: "EnrichmentQueue")
 
@@ -111,6 +129,7 @@ actor EnrichmentQueue {
 
     private let store: ArticleStore?
 
+    /// Creates a queue that writes to `store`, or to `ArticleStore.shared` when nil.
     init(store: ArticleStore? = nil) {
         self.store = store
     }
@@ -311,6 +330,8 @@ actor EnrichmentQueue {
         return counts
     }
 
+    /// The job's current state, `completed` for an article classified this session, or nil when the queue knows nothing
+    /// of it.
     func state(for articleId: String) -> EnrichmentJobState? {
         if let state = jobs[articleId]?.state { return state }
         return completedInputs[articleId] == nil ? nil : .completed
@@ -325,6 +346,7 @@ actor EnrichmentQueue {
         cancelAll(reason: .superseded)
     }
 
+    /// Jobs holding a worker slot now; at most three.
     func activeJobCount() -> Int {
         activeCount
     }
@@ -334,6 +356,7 @@ actor EnrichmentQueue {
         overviewGenerations.count - overviewTasks.count
     }
 
+    /// Whether a queued or running job for the article is still held.
     func retainsJob(for articleId: String) -> Bool {
         jobs[articleId] != nil
     }
