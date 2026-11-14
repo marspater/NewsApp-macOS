@@ -27,11 +27,11 @@ permissions:
   contents: read
 
 jobs:
-  # `Changed paths` and `Build Verification (Apple Silicon)` are required checks on main (the test job is not), so the
-  # workflow starts for every pull request and this job decides whether the macOS jobs have anything to test. A
-  # skipped job satisfies a required check; a workflow that never starts leaves it waiting. script/ci_changes.sh is
-  # the rule, shared with CircleCI. If this job fails, the macOS jobs are skipped, and only its own failure blocks
-  # the merge.
+  # `Changed paths` and both macOS jobs are required checks on main; the test job is the only macOS 26 runtime the
+  # project has. So the workflow starts for every pull request and this job decides whether the macOS jobs have
+  # anything to test. A skipped job satisfies a required check; a workflow that never starts leaves it waiting.
+  # script/ci_changes.sh is the rule, shared with CircleCI. If this job fails, the macOS jobs are skipped, and only
+  # its own failure blocks the merge.
   changes:
     name: Changed paths
     if: github.event.action != 'closed'
