@@ -1,0 +1,1 @@
+- Ports the intelligence atom (IntelligenceTests: 45 tests, 1155 assertions) to the native Swift Testing target under the `.intelligence` tag.
