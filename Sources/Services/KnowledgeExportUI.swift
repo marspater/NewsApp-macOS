@@ -18,14 +18,18 @@ import UniformTypeIdentifiers
 
 /// Focused commands compare their captured context, not new closure instances on every reader render.
 struct KnowledgeExportActions: Equatable {
+    /// What an export covers; two action sets with equal contexts are equal.
     struct Context: Equatable {
         let articleIDs: [String]
         let title: String
         let storeID: ObjectIdentifier
         let digest: Bool
     }
+    /// Starts a Markdown export.
     let markdown: () -> Void
+    /// Starts an EPUB export.
     let epub: () -> Void
+    /// Shares the stories to Apple Notes.
     let notes: () -> Void
     var context: Context? = nil
 
@@ -33,12 +37,14 @@ struct KnowledgeExportActions: Equatable {
 }
 private struct KnowledgeExportActionsKey: FocusedValueKey { typealias Value = KnowledgeExportActions }
 extension FocusedValues {
+    /// The export actions of the focused story or Briefing, for the Export commands.
     var knowledgeExport: KnowledgeExportActions? {
         get { self[KnowledgeExportActionsKey.self] }
         set { self[KnowledgeExportActionsKey.self] = newValue }
     }
 }
 
+/// The Export menu: Markdown, EPUB and Apple Notes.
 struct KnowledgeExportMenu: View {
     let actions: KnowledgeExportActions
     var body: some View {
@@ -53,6 +59,7 @@ struct KnowledgeExportMenu: View {
     }
 }
 
+/// Where an export goes: a Markdown file, an EPUB file or Apple Notes.
 enum KnowledgeExportFormat: Sendable { case markdown, epub, notes }
 
 private actor KnowledgeExportEncoder {
@@ -75,6 +82,9 @@ private actor KnowledgeExportEncoder {
 /// Owns one explicit, bounded export operation. Replacing it cancels presentation of the older result.
 @MainActor enum KnowledgeExportUI {
     private static var task: Task<Void, Never>?
+    /// The export actions for the given stories. Each action reads the stories from the library when run, so the export
+    /// holds their current stored text; a newer export cancels an older one still in progress. With `digest`, each
+    /// story's description is exported instead of its stored text, as the Briefing digest does.
     static func actions(articles: [FeedArticle], title: String, store: ArticleStore, digest: Bool = false)
         -> KnowledgeExportActions
     {
@@ -116,6 +126,7 @@ private actor KnowledgeExportEncoder {
         }
     }
 
+    /// The documents as attributed text for Apple Notes, with linked attributions and notes in reading order.
     static func richText(_ documents: [KnowledgeExportDocument], title: String) -> NSAttributedString {
         let result = NSMutableAttributedString(
             string: title + "\n", attributes: [.font: NSFont.preferredFont(forTextStyle: .headline)])
@@ -153,6 +164,9 @@ private actor KnowledgeExportEncoder {
         return result
     }
 
+    /// Hands the documents to the Notes sharing extension.
+    ///
+    /// - Throws: `CocoaError(.featureUnsupported)` when the extension is missing or refuses the items.
     static func shareToNotes(_ documents: [KnowledgeExportDocument], title: String) throws {
         let service = NSSharingService(named: NSSharingService.Name("com.apple.Notes.SharingExtension"))
         let items: [Any] = [richText(documents, title: title)]

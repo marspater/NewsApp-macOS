@@ -55,6 +55,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private var itemXMLBytes = 0
     private var parsedItems: [(xml: String?, baseURL: URL?)] = []
     private var isAtom = false
+    /// Why the last `parse()` returned nothing: a guard that refused the document, an XML error or cancellation.
     private(set) var parseError: String?
     private var insideItem = false
     private var channelTitle = ""
@@ -81,6 +82,10 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
     private let maxNestingDepth = 64
     private let maxArticlesPerFeed = 500
 
+    /// Prepares a parser over a feed document, transcoding it to UTF-8 when it carries a UTF-32 byte order mark, or
+    /// when it has neither a byte order mark nor an encoding declaration and the response named a charset
+    /// (`textEncodingName`). `feedURL` is the subscription address, used for article identity and as the default base
+    /// URL; `baseURL` is the response URL after redirects, which relative links resolve against.
     init(data: Data, feedURL: String = "", baseURL: URL? = nil, textEncodingName: String? = nil) {
         if let bom = Self.detectBOMEncoding(in: data),
             bom == .utf32BigEndian || bom == .utf32LittleEndian,
@@ -101,6 +106,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         self.baseURL = baseURL ?? URL(string: feedURL)
     }
 
+    /// Parses the document as RSS or Atom; items past the 500th are ignored. A document that declares entities or
+    /// attribute lists, nests deeper than 64 elements, exceeds the feed size limit, is malformed, is not RSS or Atom,
+    /// or is cancelled yields no articles and sets `parseError`.
     func parse() -> [FeedArticle] {
         guard parseGuardedXML(), enrichParsedItems() else { return [] }
         normalizeArticleSources()
@@ -796,6 +804,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             .absoluteURL.absoluteString ?? value
     }
 
+    /// Turns an HTML fragment into plain text with regular expressions: block ends become paragraph breaks, tags are
+    /// dropped, entities decoded, whitespace collapsed and the result redacted by `ArticleContentRedactor`.
     static func stripHTMLSimple(_ html: String) -> String {
         var text = html.replacingOccurrences(
             of: "(?i)</(p|div|blockquote|h[1-6]|li|tr)>", with: "\n\n", options: .regularExpression
@@ -957,6 +967,7 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
         return stringEncoding(for: encName)
     }
 
+    /// The encoding a leading byte order mark names (UTF-32, UTF-16 or UTF-8); nil without one.
     static func detectBOMEncoding(in data: Data) -> String.Encoding? {
         if data.starts(with: [0x00, 0x00, 0xFE, 0xFF]) { return .utf32BigEndian }
         if data.starts(with: [0xFF, 0xFE, 0x00, 0x00]) { return .utf32LittleEndian }

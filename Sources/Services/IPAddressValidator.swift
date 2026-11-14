@@ -19,8 +19,11 @@ import Foundation
 /// SSRF (Server-Side Request Forgery), DNS rebinding, and private intranet probing.
 struct IPAddressValidator: Sendable {
 
+    /// The verdict on a host or address.
     enum ValidationResult: Equatable, Sendable {
+        /// Every resolved address is public; connections may use these.
         case allowed(ips: [String])
+        /// The name or an address is local, private or reserved; `reason` names the range.
         case blocked(reason: String)
         /// The resolver did not answer.
         case unresolvable(reason: String)
@@ -181,6 +184,8 @@ struct IPAddressValidator: Sendable {
 
     // MARK: - IPv4 Filtering
 
+    /// The reason an IPv4 address is not public (loopback, private, link-local, reserved and similar ranges); nil when
+    /// it is.
     static func isBlockedIPv4(_ inAddr: in_addr) -> String? {
         let ip = inAddr.s_addr.bigEndian
 

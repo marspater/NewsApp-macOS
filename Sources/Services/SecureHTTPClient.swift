@@ -19,12 +19,18 @@ import Network
 /// An image that did not load, named by the stage that refused it and what the host sent, so `log show` can tell a
 /// response that is not the image from bytes ImageIO or the PNG encoder rejects (#1010). It never carries the URL.
 struct ImageLoadFailure: Error, CustomStringConvertible {
+    /// Where the image failed: the request, ImageIO decoding, cropping, PNG encoding, the attachment size limit or
+    /// creating the notification attachment.
     enum Stage: String, Sendable { case fetch, decode, crop, encode, size, attach }
     let stage: Stage
+    /// The response's MIME type, when known.
     var contentType: String?
+    /// The size of the data that failed, when known.
     var bytes: Int?
+    /// The error behind the failure; only its domain and code are logged.
     var underlying: NSError?
 
+    /// A log line of the stage, content type, byte count and the underlying error's domain and code; never the URL.
     var description: String {
         let count = bytes.map(String.init) ?? "unknown"
         var text = "stage=\(stage.rawValue) type=\(contentType ?? "unknown") bytes=\(count)"
@@ -48,12 +54,18 @@ struct ImageLoadFailure: Error, CustomStringConvertible {
 /// Enforces strict scheme/port rules, DNS resolution validation, socket-level public-address enforcement,
 /// redirect validation with HTTPS downgrade protection, and progressive streaming response bounds.
 actor SecureHTTPClient {
+    /// The client every feed, page and image request uses, routed through `NetworkBoundaryProxy.shared`.
     static let shared = SecureHTTPClient()
 
+    /// The largest feed response accepted, in bytes.
     static let defaultFeedLimit: Int64 = 10 * 1024 * 1024  // 10 MB
+    /// The largest article page accepted, in bytes.
     static let defaultArticleLimit: Int64 = 5 * 1024 * 1024  // 5 MB
+    /// The largest image accepted, in bytes.
     static let defaultImageLimit: Int64 = 10 * 1024 * 1024  // 10 MB
+    /// The per-request timeout in seconds; a whole resource gets twice as long.
     static let defaultTimeout: TimeInterval = 15.0
+    /// Redirects a request may follow before it is refused.
     static let maxRedirects: Int = 5
 
     private var session: URLSession?
@@ -80,6 +92,7 @@ actor SecureHTTPClient {
         self.session = URLSession(configuration: configuration, delegate: coordinator, delegateQueue: nil)
     }
 
+    /// Creates a client over a test's gateway; `resolver` keeps the test's synchronous DNS answers for the preflight.
     internal init(gateway: NetworkBoundaryProxy, resolver: NetworkBoundaryProxy.Resolver? = nil) {
         self.delegateCoordinator = SecureSessionDelegateCoordinator()
         self.resolver = ProxyResolver(body: resolver)
@@ -115,6 +128,10 @@ actor SecureHTTPClient {
             options: FetchOptions(validators: validators, reportsBackpressure: true))
     }
 
+    /// Fetches an article page, at most `defaultArticleLimit` bytes, after the destination checks.
+    ///
+    /// - Throws: A `FeedError` for a refused destination, an HTTP error status or an oversized body, or the session's
+    ///   error.
     func fetchArticleHTML(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
         try await fetchData(
             from: url, maxBytes: Self.defaultArticleLimit, timeout: Self.defaultTimeout, allowHTTP: allowHTTP)
@@ -131,6 +148,10 @@ actor SecureHTTPClient {
     /// which was larger than the PNG for the palette image of #1010.
     static let imageAccept = "image/png,image/jpeg,image/gif,image/svg+xml,image/*;q=0.8,*/*;q=0.5"
 
+    /// Fetches an image, at most `defaultImageLimit` bytes, asking for baseline formats and allowing the HTTP cache.
+    /// Unless `allowHTTP` is set, an `http` address is upgraded to HTTPS first.
+    ///
+    /// - Throws: As `fetchArticleHTML(from:allowHTTP:)`.
     func fetchImage(from url: URL, allowHTTP: Bool = false) async throws -> (Data, HTTPURLResponse) {
         try await fetchData(
             from: allowHTTP ? url : Self.upgradedToHTTPS(url), maxBytes: Self.defaultImageLimit,
@@ -160,6 +181,10 @@ actor SecureHTTPClient {
         }
     }
 
+    /// Decodes image data into an oriented thumbnail whose longer side is at most `maxPixelSize`. Images over 16384
+    /// pixels on a side or 64 megapixels are refused before decoding.
+    ///
+    /// - Throws: `URLError(.cannotDecodeContentData)` when the data is not a decodable image within those bounds.
     nonisolated static func decodeReaderImage(_ data: Data, maxPixelSize: Int = 1600) throws -> CGImage {
         guard
             let source = CGImageSourceCreateWithData(
@@ -182,6 +207,7 @@ actor SecureHTTPClient {
         return image
     }
 
+    /// The only ports a request or redirect may use.
     static let allowedPorts: Set<Int> = [80, 443, 8080, 8443]
 
     /// Shared navigation/ingestion preflight. The DNS lookup is asynchronous, cancellable and bounded (#945).
@@ -234,6 +260,14 @@ actor SecureHTTPClient {
         var prefixOnly = false
     }
 
+    /// Fetches a URL through the gateway after `validateDestination(_:allowHTTP:)`, streaming the body and refusing it
+    /// once it passes `maxBytes` (with `options.prefixOnly`, reading stops there instead of failing). The status is
+    /// checked before the body is read. `allowHTTP` permits an `http` address at all; `options` carries the cache
+    /// policy, conditional validators, extra headers and whether 429 and 503 report backpressure.
+    ///
+    /// - Returns: The body and response; a conditional request answered 304 returns an empty body.
+    /// - Throws: A `FeedError` for a refused destination, `serverBusy` (when reporting backpressure), another error
+    ///   status or an oversized body; the session's error otherwise.
     func fetchData(
         from url: URL,
         maxBytes: Int64,
