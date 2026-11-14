@@ -18,15 +18,20 @@ import SwiftUI
 /// popover (W2 #716). The row is hidden until the entity index has an entity with coverage beyond these stories, never
 /// shown empty (DESIGN.md 8.4).
 struct EntityChipRow: View {
+    /// The stories whose entities the row shows.
     let articleIDs: [String]
+    /// The entity index of Mnemosyne · storage and search, which the row and the dossiers read.
     let source: EntitySource
+    /// Opens a story chosen in a dossier, by article id.
     let onSelectStory: (String) -> Void
     @State private var entities: [EntityRecord] = []
 
     /// What the row reads: the stories and the index's revision, so an indexing pass that reaches them after the reader
     /// opened makes the chips appear without reopening the story.
     struct Query: Hashable {
+        /// The stories the row reads.
         let articleIDs: [String]
+        /// The entity index's revision, which changes after each indexing pass.
         let revision: UInt64
     }
 
@@ -54,7 +59,9 @@ struct EntityChipRow: View {
 /// One entity as a pill. A single click opens its dossier (DESIGN.md 15).
 struct EntityChip: View {
     let entity: EntityRecord
+    /// The entity index the dossier popover reads.
     let source: EntitySource
+    /// Opens a story chosen in the dossier, by article id; the popover closes first.
     let onOpenStory: (String) -> Void
     @State private var isPresented = false
 
