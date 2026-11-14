@@ -20,15 +20,21 @@ import Foundation
 /// What one pair decision rested on, stored as JSON in `pair_assessments.features` (#551): the cosine, the pair model's
 /// probability when it was asked, the conflict and the shared-evidence counts. Numbers only, no text.
 struct EventPairFeatures: Codable, Equatable, Sendable {
+    /// The embedding cosine; nil when no embedding comparison was made.
     var cosine: Double?
+    /// The pair model's same-event probability; nil when it was not asked.
     var pairModel: Double?
+    /// The raw value of the `EventConflict` that vetoed the pair, if any.
     var conflict: String?
+    /// Keyword similarity of the two articles.
     var what: Double
+    /// Anchor overlap of the two articles.
     var entity: Double
     var sharedAnchors: Int
     var sharedSpecific: Int
     var sharedKeywords: Int
 
+    /// Copies the numbers of an assessment and the pair model's probability.
     init(_ pair: EventPairAssessment, probability: Double?) {
         cosine = pair.embeddingCosine
         pairModel = probability
@@ -40,6 +46,7 @@ struct EventPairFeatures: Codable, Equatable, Sendable {
         sharedKeywords = pair.sharedKeywords
     }
 
+    /// The features as JSON with sorted keys; nil when encoding fails.
     var json: String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -47,17 +54,25 @@ struct EventPairFeatures: Codable, Equatable, Sendable {
     }
 }
 
+/// What one clustering pass did.
 struct EventClusteringReport: Equatable, Sendable {
+    /// Articles the pass decided or repartitioned.
     var processed = 0
+    /// Articles that joined an existing event.
     var joined = 0
+    /// Events created.
     var created = 0
+    /// Articles split out of an event when a matcher upgrade repartitioned it.
     var detached = 0
+    /// Decisions or repartitions dropped because membership changed underneath them; the next batch decides again.
     var conflicts = 0
     /// Event fragments of one story joined by the merge pass.
     var merged = 0
     /// Rows left for a pass with energy because a model they needed did not run (#534).
     var deferred = 0
+    /// Ids of events whose membership or story links changed.
     var changedEvents: Set<String> = []
+    /// Where the pass spent its time.
     var stages = EventClusteringStages()
 }
 
@@ -75,9 +90,12 @@ struct EventClusteringStages: Equatable, Sendable {
     var candidateSearch = 0.0
     var eventReads = 0.0
     var matchCommits = 0.0
+    /// Pair model requests, not seconds.
     var pairModelCalls = 0
+    /// Articles embedded, not seconds.
     var embeddedRows = 0
 
+    /// Adds every field of `other`, for totals over several passes.
     mutating func add(_ other: EventClusteringStages) {
         total += other.total
         fragmentMerge += other.fragmentMerge
@@ -100,8 +118,14 @@ struct EventClusteringStages: Equatable, Sendable {
 /// merges active events that report one story. Decisions are the deterministic rules plus the pair model for
 /// borderline pairs. Matcher upgrades revalidate active memberships, never the archive.
 enum EventClusterer {
+    /// The most articles read for matching in one batch.
     static let batchSize = 100
     private static let maximumAttempts = 2
+    /// Runs one pass: matches up to `limit` pending articles in batches, merges fragments of one story, then refreshes
+    /// the story links when the pass changed anything or the links are stale or pending.
+    ///
+    /// Without `allowsEnergy` the rules decide alone and rows that needed a model are deferred to a later pass. Throws
+    /// database errors and `CancellationError`.
     static func run(
         in database: DatabaseEngine,
         candidatePolicy: EventCandidatePolicy = .standard,
@@ -1100,12 +1124,14 @@ enum EventClusterer {
     struct StoryComponents {
         private var parent: [String: String] = [:]
 
+        /// The root of `id`'s component; an id never joined is its own root.
         func find(_ id: String) -> String {
             var root = id
             while let next = parent[root], next != root { root = next }
             return root
         }
 
+        /// Puts `a` and `b` in one component, rooted at the smaller id.
         mutating func join(_ a: String, _ b: String) {
             let (left, right) = (find(a), find(b))
             parent[left] = parent[left] ?? left
@@ -1146,7 +1172,10 @@ enum EventClusterer {
 
 /// Model inputs `EventClusterer.run` uses instead of the shipped scorers and stored calibration; tests inject them.
 struct EventClusterScoring: Sendable {
+    /// Replaces the shipped pair model's same-event probability.
     var pairProbability: (@Sendable (String, String) async -> Double?)?
+    /// Replaces the same-event and related-act probabilities the story pass reads.
     var storyProbabilities: (@Sendable (String, String) async -> (same: Double, related: Double)?)?
+    /// Replaces the stored pair calibration.
     var calibrationRows: [PairCalibration.Row]?
 }

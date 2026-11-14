@@ -18,8 +18,11 @@ import Foundation
 
 /// How much a story matters to a general reader following the news, decided on device from its headline and summary.
 enum StoryImportance: Int, Sendable, Comparable {
+    /// A story most readers can skip.
     case minor = 0
+    /// A story worth a general reader's attention.
     case notable = 1
+    /// A story a general reader should not miss.
     case major = 2
 
     static func < (lhs: Self, rhs: Self) -> Bool { lhs.rawValue < rhs.rawValue }
@@ -29,37 +32,53 @@ enum StoryImportance: Int, Sendable, Comparable {
 actor StoryImagePriority {
     private var pending: [String] = []
     private var requested: Set<String> = []
+    /// Puts a story at the back of the priority queue, once, and marks it requested.
     func request(_ id: String) {
         requested.insert(id)
         if !pending.contains(id) { pending.append(id) }
     }
+    /// Removes and returns the oldest pending story.
     func take() -> String? { pending.isEmpty ? nil : pending.removeFirst() }
+    /// Puts a story back after an interrupted lookup, but only while it is still requested.
     func requeue(_ id: String) {
         if requested.contains(id), !pending.contains(id) { pending.append(id) }
     }
+    /// Cancels a request; the story is no longer pending or requested.
     func withdraw(_ id: String) {
         requested.remove(id)
         pending.removeAll { $0 == id }
     }
+    /// Whether the story is still requested.
     func isRequested(_ id: String) -> Bool { requested.contains(id) }
+    /// Whether any requested story waits to be taken.
     var hasPending: Bool { !pending.isEmpty }
 }
 
 /// Bounded publisher-image lookup. Nothing in the app rates importance; the opt-in live curation measurement in the
 /// test build does (#549).
 enum StoryCurator {
+    /// What one curation pass did.
     struct Report: Equatable, Sendable {
+        /// Stories expired by the pass; `run` itself expires none, so it reports 0.
         var expired = 0
+        /// Lead images found and saved.
         var imagesFound = 0
+        /// Pages read to an answer, with or without an image; an unreachable page does not count.
         var imagesChecked = 0
         /// Stories of `first` the budget ran out before: a later pass looks them up.
         var deferredIDs: Set<String> = []
+        /// True when the pass expired a story or recorded an image answer.
         var changed: Bool { expired > 0 || imagesChecked > 0 }
     }
 
     /// Publisher pages one lookup pass may request.
     static let imageBudget = 30
 
+    /// Looks up lead images for imageless active stories, at most `imageBudget` pages and one per event, `first` and
+    /// `priority` requests ahead of the rest.
+    ///
+    /// A found image or a page without one is recorded; an unreachable page is left for a later pass. Throws
+    /// `CancellationError` when cancelled, requeuing an interrupted priority request, and rethrows database errors.
     static func run(
         in database: DatabaseEngine,
         imageFinder: StoryImageFinder = .unavailable,
@@ -165,6 +184,7 @@ enum StoryCurator {
 
 /// Result of looking for a story's lead image on its publisher page.
 enum StoryImageLookup: Equatable, Sendable {
+    /// The page declares this image URL.
     case found(String)
     /// The page was read and declares no usable image.
     case none
@@ -174,9 +194,12 @@ enum StoryImageLookup: Equatable, Sendable {
 
 /// Finds the lead image a publisher declares for a story (`og:image`, `twitter:image`) when its feed carries none.
 struct StoryImageFinder: Sendable {
+    /// False for a finder that must not be asked, so a pass makes no lookups.
     var isAvailable = true
+    /// Looks up the lead image for a story's link.
     let find: @Sendable (_ link: String) async -> StoryImageLookup
 
+    /// A finder that makes no lookups.
     static let unavailable = StoryImageFinder(isAvailable: false) { _ in .unreachable }
     /// The article page through the protected client; http links are requested over https.
     static let publisherPages = publisherPages(using: .shared)
@@ -193,6 +216,10 @@ struct StoryImageFinder: Sendable {
         return components.url
     }
 
+    /// Reads the head of a story's page through `client` and takes its lead image with `leadImage(in:pageURL:)`.
+    ///
+    /// A host or port the client refuses and a 4xx answer other than 429 count as no image; other failures are
+    /// unreachable.
     static func publisherPages(using client: SecureHTTPClient) -> StoryImageFinder {
         StoryImageFinder { link in
             guard let url = pageURL(link) else { return .none }

@@ -22,11 +22,14 @@ import Foundation
 /// Cues are deliberately few and unambiguous: a headline no cue fits is `unknown`, and `unknown` never vetoes.
 /// The class is stored with the article's signals, so a cue edit bumps `EventFeatures.storageVersion`.
 enum ActClass: String, Codable, CaseIterable, Sendable {
+    /// Act classes: the headline's primary clause names one of these acts.
     case vote, protest, attack, agreement, personnel, ruling, sanction, disaster, crash
     /// Consequence classes report what an incident left behind rather than naming an act of their own.
     case casualties, rescue
+    /// No cue fits, or the headline names two acts; never conflicts with another class.
     case unknown
 
+    /// True for `casualties` and `rescue`, which report what an incident left behind.
     var isConsequence: Bool { self == .casualties || self == .rescue }
 
     /// Acts that leave no casualties or rescues of their own, so a consequence report is never coverage of them.
