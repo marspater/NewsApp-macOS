@@ -92,6 +92,11 @@ extension NewsTests {
                 "testPriorityImageLookupSurvivesCancellation",
                 { try await testPriorityImageLookupSurvivesCancellation() }
             ),
+            ("testImageLookupDatabaseFailureDoesNotSpin", { try await testImageLookupDatabaseFailureDoesNotSpin() }),
+            (
+                "testFirstIndividualBannerAfterGroupedWaitsForPhoto",
+                { await testFirstIndividualBannerAfterGroupedWaitsForPhoto() }
+            ),
             ("testArticleStoreErrorResilience", { await testArticleStoreErrorResilience() }),
             ("testSystemErrorHardeningAndResilience", { await testSystemErrorHardeningAndResilience() }),
             ("testAppContainerWiring", { await testAppContainerWiring() }),
@@ -3017,6 +3022,40 @@ extension NewsTests {
             "The successor waits and requests the banner story first")
         manager.stopBackgroundWork()
         await store.database.close()
+    }
+
+    static func testFirstIndividualBannerAfterGroupedWaitsForPhoto() async {
+        let starredFeed = "https://starred.invalid/feed"
+        let pending = (1...2).map { index in
+            FeedArticle(
+                storedID: "starred-\(index)", title: "Garden notes \(index)",
+                link: "https://starred.invalid/\(index)", guid: "starred-\(index)", description: "", pubDate: Date(),
+                source: "Starred")
+        }
+        let story = FeedArticle(
+            storedID: "after-group", title: "Explosion at a refinery in Houston, dozens killed; urgent evacuation",
+            link: "https://photo.invalid/after-group", guid: "after-group", description: "", pubDate: Date(),
+            source: "Publisher")
+        actor State {
+            var banners: [StoryBanner] = []
+            var requested: [String] = []
+            func post(_ banner: StoryBanner) { banners.append(banner) }
+            func request(_ id: String) { requested.append(id) }
+        }
+        let state = State()
+        let service = NotificationService(post: { await state.post($0) }, spacing: .zero)
+        var delivery = NotificationDelivery(mode: .full)
+        delivery.starredFeedURLs = [starredFeed]
+        delivery.starredPending = [starredFeed: pending]
+        delivery.prioritizeImage = { id in
+            await state.request(id)
+            return false
+        }
+        await service.triageAndNotify(newArticles: [story], delivery: delivery)
+        assertEqual(await state.banners.count, 2, "The grouped starred banner and the story's banner both post")
+        assertEqual(
+            await state.requested, [story.id],
+            "The first individual banner asks for its photo although a grouped banner posts before it")
     }
 
     static func testBannerImageWaitTimeoutAndCancellation() async {

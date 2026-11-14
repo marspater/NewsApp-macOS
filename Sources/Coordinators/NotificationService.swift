@@ -466,6 +466,8 @@ final class NotificationService: Sendable {
             let plan = Self.plan(new: await Self.scored(newArticles), pending: pending, delivery: delivery)
             guard !Task.isCancelled else { return }
             if !plan.queued.isEmpty { await delivery.queue(plan.queued) }
+            // Only the first individual banner waits for a photo; a grouped banner may come before it.
+            var awaitsPhoto = true
             for (index, banner) in plan.banners.enumerated() {
                 if index > 0 {
                     do {
@@ -479,7 +481,9 @@ final class NotificationService: Sendable {
                 var banner = banner
                 if let story = banner.article {
                     var curated = await delivery.curated(story)
-                    if index == 0, FeedArticle.attachmentImages(for: curated).isEmpty {
+                    let firstStory = awaitsPhoto
+                    awaitsPhoto = false
+                    if firstStory, FeedArticle.attachmentImages(for: curated).isEmpty {
                         guard await delivery.continues(), !Task.isCancelled else { return }
                         if await delivery.prioritizeImage(story.id) {
                             let clock = ContinuousClock()
