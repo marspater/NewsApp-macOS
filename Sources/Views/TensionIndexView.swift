@@ -24,6 +24,7 @@ extension Notification.Name {
 /// Settings has to reopen still shows the sheet once it appears.
 @MainActor
 enum NewsTensionRequest {
+    /// Whether a request waits for a main window to take it.
     private(set) static var isPending = false
 
     /// Marks the request pending and asks an open main window to show the sheet.

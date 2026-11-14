@@ -34,11 +34,11 @@ enum ReaderMode: Hashable {
     /// The publisher's page.
     case web
 
-    /// The key of View › Switch Between Story and Web, with `webShortcutModifiers` (⇧⌘R).
+    /// The key of Story › Switch Between Story and Web, with `webShortcutModifiers` (⇧⌘R).
     static let webShortcut: KeyEquivalent = "r"
-    /// The modifiers of View › Switch Between Story and Web.
+    /// The modifiers of Story › Switch Between Story and Web.
     static let webShortcutModifiers: EventModifiers = [.command, .shift]
-    /// The mode View › Switch Between Story and Web goes to: Story from Web, Web from anything else.
+    /// The mode Story › Switch Between Story and Web goes to: Story from Web, Web from anything else.
     var toggledPublicationMode: ReaderMode { self == .web ? .story : .web }
 
     /// W steps through the modes the toolbar offers, in its order: Overview (events only), Story, Web.
@@ -56,7 +56,7 @@ enum ReaderMode: Hashable {
 /// every render and keeps the window re-rendering. Equality reads what the commands read: the bound values and
 /// which actions exist.
 struct ReaderCommandActions: Equatable {
-    /// The reader's mode, which the View menu reads and sets.
+    /// The reader's mode, which the menu commands read and set.
     let mode: Binding<ReaderMode>
     /// The reader's text scale, which the text size commands change.
     let textScale: Binding<CGFloat>
@@ -120,7 +120,7 @@ struct ReaderCommandActionsKey: FocusedValueKey { typealias Value = ReaderComman
 struct SelectedStoryKey: FocusedValueKey { typealias Value = FeedArticle }
 
 extension FocusedValues {
-    /// The actions of the reader in front, read by the app's menu commands; nil when no reader shows a story.
+    /// The actions of the reader in front, read by the app's menu commands; nil when no reader is open.
     var readerActions: ReaderCommandActions? {
         get { self[ReaderCommandActionsKey.self] }
         set { self[ReaderCommandActionsKey.self] = newValue }

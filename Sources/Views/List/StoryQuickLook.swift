@@ -17,7 +17,7 @@ import Foundation
 import QuickLookUI
 
 extension Notification.Name {
-    /// Posted by File › Quick Look to preview the focused story.
+    /// Posted by Story › Quick Look to preview the focused story.
     static let quickLookCommand = Notification.Name("quickLookCommand")
     /// Posted by the Quick Look panel's Return key to open the focused story in the reader.
     static let openFocusedStoryCommand = Notification.Name("openFocusedStoryCommand")

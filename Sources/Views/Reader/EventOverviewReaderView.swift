@@ -461,7 +461,7 @@ struct EventOverviewReaderView: View {
         let isStated: Bool
     }
 
-    /// How a timeline item's date shows: the stated date or anchor with "Reported <date>" beside it, "Reported <date>"
+    /// How a timeline item's date shows: the stated date or anchor with `Reported <date>` beside it, `Reported <date>`
     /// alone for a publication date, or no date.
     nonisolated static func timelineDateDisplay(for item: OverviewTimelineItem) -> TimelineDateDisplay {
         let text = item.dateText.trimmingCharacters(in: .whitespacesAndNewlines)

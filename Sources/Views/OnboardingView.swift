@@ -30,7 +30,7 @@ struct OnboardingView: View {
     @State private var showsCatalog = false
     @Namespace private var indicator
 
-    /// Creates the flow at `step`; previews and captures start later steps.
+    /// Creates the flow at `step`, the welcome step by default.
     init(step: OnboardingStep = .welcome) {
         _step = State(initialValue: step)
     }

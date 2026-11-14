@@ -113,6 +113,7 @@ struct NoteDraft: Identifiable {
 
 /// What the reader paints over its blocks: the reader's highlights and the sentences a publisher update added.
 struct ReaderOverlay {
+    /// The character ranges of each block that notes highlight, by block index.
     private(set) var highlights: [Int: [Range<Int>]] = [:]
     /// The changes of a publisher update (V2 #712): tinted ranges, and retracted sentences the reader lists.
     let changes: SentenceDiff.Overlay

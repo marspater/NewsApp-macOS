@@ -43,6 +43,7 @@ final class LogWindowModel: ObservableObject {
     /// Whether this build has the Log window.
     nonisolated static var isAvailable: Bool { isAvailable(bundleIdentifier: Bundle.main.bundleIdentifier) }
 
+    /// The kept lines, oldest first, at most `maximumEntries`.
     @Published private(set) var entries: [Entry] = []
     /// The level the view shows; nil shows every level.
     @Published var level: String?

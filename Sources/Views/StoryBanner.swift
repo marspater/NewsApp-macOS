@@ -218,7 +218,7 @@ final class StoryBannerPresenter {
     private var photoTask: Task<Void, Never>?
     private let photoLoader: @MainActor @Sendable (URL?, CGFloat) async -> CGImage?
 
-    /// Creates a presenter; tests pass a photo loader that needs no network.
+    /// Creates a presenter; a test passes a photo loader of its own.
     init(
         photoLoader: @escaping @MainActor @Sendable (URL?, CGFloat) async -> CGImage? = { url, scale in
             await StoryBannerPresenter.photo(at: url, scale: scale)
@@ -489,8 +489,10 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
     /// Called with true when the pointer enters the view and false when it leaves.
     var hover: ((Bool) -> Void)?
 
+    /// Accepts the first click, so one click acts on the banner.
     override func acceptsFirstMouse(for _: NSEvent?) -> Bool { true }
 
+    /// Replaces the view's banner tracking area with one that reports the pointer whether or not News is active.
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas where area.owner === self && area.userInfo?["banner"] != nil {
