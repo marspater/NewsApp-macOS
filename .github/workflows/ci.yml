@@ -11,9 +11,11 @@ on:
   # so merged PRs stop holding macOS runners; every job skips on that run.
   # The group keys on the PR number: a merged PR's `closed` run has `github.ref` set to
   # main, so a ref-keyed group would cancel main's run instead of the PR's.
+  # Every base branch: a stacked pull request targets the branch below it, and main's required checks apply to the
+  # whole stack. With a base filter its checks would wait forever. Results belong to the head commit, so they still
+  # count after GitHub retargets the pull request to main.
   pull_request:
     types: [ opened, synchronize, reopened, ready_for_review, closed ]
-    branches: [ main ]
   workflow_dispatch:
 
 concurrency:
@@ -24,10 +26,11 @@ permissions:
   contents: read
 
 jobs:
-  # The two macOS jobs are required checks on main, so the workflow starts for every pull request and this job
-  # decides whether they have anything to test. A skipped job satisfies a required check; a workflow that never
-  # starts leaves it waiting. Same rule as the push filter above: Markdown, docs/ and LICENSE change nothing.
-  # This job is a required check too: if it fails, the macOS jobs are skipped, and only its own failure blocks the merge.
+  # `Changed paths` and `Build Verification (Apple Silicon)` are required checks on main (the test job is not), so the
+  # workflow starts for every pull request and this job decides whether the macOS jobs have anything to test. A
+  # skipped job satisfies a required check; a workflow that never starts leaves it waiting. Same rule as the push
+  # filter above: Markdown, docs/ and LICENSE change nothing. If this job fails, the macOS jobs are skipped, and
+  # only its own failure blocks the merge.
   changes:
     name: Changed paths
     if: github.event.action != 'closed'
