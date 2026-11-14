@@ -34,6 +34,7 @@ import Foundation
 /// `eventDate`: a resolved date may hold a placed year, so it goes only to `orderingDateMayHoldInferredYear`, which
 /// orders and filters (Briefing) and is never displayed.
 enum OverviewTimelineBuilder {
+    /// An overview's timeline rows and the citations they refer to; both empty when no timeline qualifies.
     struct Timeline: Sendable, Equatable {
         var items: [OverviewTimelineItem] = []
         var citations: [OverviewCitation] = []
@@ -41,8 +42,11 @@ enum OverviewTimelineBuilder {
 
     /// A calendar date exactly as precise as the source states it.
     struct StatedDate: Hashable, Sendable {
+        /// The year; nil when the source states none.
         let year: Int?
+        /// The month, 1 to 12.
         let month: Int
+        /// The day of the month; nil for a month-and-year date.
         let day: Int?
     }
 
@@ -51,22 +55,28 @@ enum OverviewTimelineBuilder {
     struct StatedSpan: Hashable, Sendable {
         /// In the order the source gives them; a range holds its start and its end.
         let dates: [StatedDate]
+        /// True for a range ("from 19 to 28 November"), false for a list ("on 3 and 5 November").
         let isRange: Bool
     }
 
+    /// A single stated date or a stated range or list.
     enum StatedExpression: Hashable, Sendable {
         case date(StatedDate)
         case span(StatedSpan)
     }
 
+    /// A stated expression and where it was found in a sentence.
     struct StatedExpressionMatch: Hashable, Sendable {
         let expression: StatedExpression
+        /// The matched characters: the date itself, or a combined phrase from its first date to its last.
         let range: NSRange
+        /// True when several date atoms combined into one range or list.
         let isCombined: Bool
     }
 
     /// A single dated sentence is not a timeline.
     static let minimumDistinctDates = 2
+    /// The most rows a timeline shows.
     static let maximumItems = 8
 
     private static let calendar: Calendar = {
@@ -124,6 +134,10 @@ enum OverviewTimelineBuilder {
         names.sorted { $0.count > $1.count }.joined(separator: "|")
     }
 
+    /// Builds the timeline from the facts' source sentences: one row per sentence that states one date, span or anchor,
+    /// corroborated rows first, at most `maximumItems`, shown in time order.
+    ///
+    /// Returns an empty timeline unless at least `minimumDistinctDates` rows have distinct, non-overlapping dates.
     static func build(
         facts: [PassageAnchoredFact],
         passages: [EvidencePassage],
@@ -304,8 +318,11 @@ enum OverviewTimelineBuilder {
     /// event happened: a time of day or relative anchor is placed at the article's publication time (a day earlier
     /// for "yesterday" and "last night"). A bare "scheduled" is no anchor.
     struct Anchor: Equatable, Sendable {
+        /// The anchor exactly as the source words it.
         let text: String
+        /// The provisional placement used for ordering only.
         let resolved: Date
+        /// True when the source states the anchor as a plan still ahead when reported.
         let isPlan: Bool
     }
 
@@ -681,6 +698,7 @@ enum OverviewTimelineBuilder {
         return resolved >= reported.end
     }
 
+    /// The date formatted for `locale` at the precision the source states, never adding a missing day or year.
     static func dateText(_ date: StatedDate, locale: Locale) -> String {
         let template: String
         switch (date.day != nil, date.year != nil) {

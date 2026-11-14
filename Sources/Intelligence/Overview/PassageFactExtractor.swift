@@ -23,10 +23,14 @@ import NaturalLanguage
 
 /// A raw fact candidate proposed by an extraction model or parser before deterministic validation.
 public struct RawFactCandidate: Sendable, Codable, Hashable {
+    /// The proposed fact sentence.
     public let statement: String
+    /// The passage the fact claims to come from.
     public let passageID: String
+    /// The words of the passage the fact rests on.
     public let quote: String
 
+    /// Creates an unvalidated candidate.
     public init(statement: String, passageID: String, quote: String) {
         self.statement = statement
         self.passageID = passageID
@@ -37,11 +41,16 @@ public struct RawFactCandidate: Sendable, Codable, Hashable {
 /// A validated, passage-anchored fact guaranteed to reference an existing passage and grounded quote.
 public struct PassageAnchoredFact: Sendable, Codable, Hashable, Identifiable {
     public let id: String
+    /// The fact sentence.
     public let statement: String
+    /// The passage the fact is anchored to.
     public let passageID: String
+    /// Words that appear in the passage, ignoring case and accents.
     public let quote: String
+    /// The article the passage belongs to.
     public let articleID: String
 
+    /// Creates a fact; the validator gives it the id `fact_<passage id>_<position>`.
     public init(
         id: String = UUID().uuidString,
         statement: String,
@@ -59,22 +68,31 @@ public struct PassageAnchoredFact: Sendable, Codable, Hashable, Identifiable {
 
 /// Specific reason why a candidate fact was rejected during deterministic validation.
 public enum FactExtractionRejectionReason: Sendable, Equatable {
+    /// The candidate names a passage that is not among the inputs.
     case missingPassageID(String)
+    /// The candidate's statement is empty after trimming.
     case emptyStatement
+    /// The candidate's quote is empty after trimming.
     case emptyQuote
+    /// The quote does not appear in the named passage, ignoring case and accents.
     case unanchoredQuote(quote: String, passageID: String)
 }
 
 /// Diagnostic outcome of validating candidate facts against stored evidence passages.
 public struct FactExtractionDiagnostic: Sendable {
+    /// Candidates validated.
     public let candidateCount: Int
+    /// Candidates that passed, as anchored facts.
     public let acceptedFacts: [PassageAnchoredFact]
+    /// Candidates that failed, each with its statement and the first reason.
     public let rejectedFacts: [(statement: String, reason: FactExtractionRejectionReason)]
 
+    /// True when every candidate passed.
     public var isAllAnchored: Bool {
         rejectedFacts.isEmpty && acceptedFacts.count == candidateCount
     }
 
+    /// Creates a diagnostic from validation counts and results.
     public init(
         candidateCount: Int,
         acceptedFacts: [PassageAnchoredFact],

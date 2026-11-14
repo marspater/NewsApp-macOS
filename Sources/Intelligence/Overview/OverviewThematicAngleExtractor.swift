@@ -18,7 +18,9 @@ import Foundation
 
 /// Result of deterministically validating an overview thematic angle against evidence passages and rules.
 struct OverviewThematicAngleValidationResult: Sendable, Equatable {
+    /// Whether the angle passed every rule.
     let isValid: Bool
+    /// Why the angle was rejected; nil when valid.
     let rejectionReason: String?
 
     init(isValid: Bool, rejectionReason: String? = nil) {

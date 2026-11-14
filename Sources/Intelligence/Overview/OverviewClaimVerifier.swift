@@ -19,21 +19,32 @@ import NaturalLanguage
 
 /// Specific failure reason for an overview claim verification check.
 public enum ClaimVerificationFailureReason: Sendable, Equatable {
+    /// The fact cites nothing, or cites an id the overview does not hold; an empty id means no citation.
     case missingCitation(citationID: String)
+    /// The cited passage is not stored, or its article or fingerprint no longer matches the citation.
     case missingPassage(passageID: String)
+    /// The citation's quote is empty or does not appear in the passage, ignoring case, accents and spacing.
     case unanchoredQuote(quote: String, passageID: String)
     case numericMismatch(claimNumber: String, passageID: String)
     case unitMismatch(claimUnit: String, passageID: String)
     case currencyMismatch(claimCurrency: String, passageID: String)
     case dateMismatch(claimDate: String, passageID: String)
     case negationFlipped(claimText: String, passageID: String)
+    /// The claim attributes a statement to someone the passage does not name.
     case attributionMissing(claimAttribution: String, passageID: String)
+    /// The claim is only a quotation, or quotes someone in the first person without naming them.
     case detachedQuotation(claimText: String, passageID: String)
+    /// The claim restates an attributed motive, battlefield result or closure without its speaker.
     case droppedAttribution(speaker: String, claimText: String, passageID: String)
+    /// The claim names a place the passage never mentions.
     case ungroundedCitation(missingToken: String, passageID: String)
+    /// The claim reports speech by a speaker the closest passage sentence does not name.
     case speakerMismatch(claimSpeaker: String, passageID: String)
+    /// A claim quotation holds a reporting clause that sits inside no passage quotation.
     case misquotedReport(quote: String, passageID: String)
+    /// The claim reports a legal or physical action the passage never reports.
     case actionMismatch(claimAction: String, passageID: String)
+    /// The claim copies eight or more words of a passage quotation without quotation marks or a speaker.
     case quotationAsFact(passageID: String)
     /// The passage hedges (alleged, could, if) and the claim states it as fact (#951).
     case qualifierDropped(claimText: String, passageID: String)
@@ -41,6 +52,7 @@ public enum ClaimVerificationFailureReason: Sendable, Equatable {
     case contestedFigure(claimText: String, passageID: String)
     /// A proper name the cited passage never mentions (#951).
     case unsupportedName(name: String, passageID: String)
+    /// The fact's text is empty.
     case emptyClaim
 }
 
@@ -48,9 +60,12 @@ public enum ClaimVerificationFailureReason: Sendable, Equatable {
 public struct ClaimVerificationResult: Sendable, Equatable {
     public let factID: String
     public let statement: String
+    /// True when the fact raised no failure.
     public let isValid: Bool
+    /// Every failure the fact raised, across all its citations.
     public let failureReasons: [ClaimVerificationFailureReason]
 
+    /// Creates a result for one fact.
     public init(factID: String, statement: String, isValid: Bool, failureReasons: [ClaimVerificationFailureReason] = [])
     {
         self.factID = factID
@@ -62,12 +77,15 @@ public struct ClaimVerificationResult: Sendable, Equatable {
 
 /// Comprehensive report of deterministic verification for an overview document.
 public struct OverviewVerificationReport: Sendable {
+    /// True when at least one fact was checked and every one passed.
     public let isFullyVerified: Bool
     public let claimResults: [ClaimVerificationResult]
     public let verifiedFacts: [OverviewFact]
     public let unverifiedFacts: [OverviewFact]
+    /// The failures of every claim, in claim order.
     public let allFailureReasons: [ClaimVerificationFailureReason]
 
+    /// Creates a report; `isFullyVerified` and `allFailureReasons` are derived from the arguments.
     public init(
         claimResults: [ClaimVerificationResult],
         verifiedFacts: [OverviewFact],
@@ -88,6 +106,8 @@ public struct OverviewClaimVerifier: Sendable {
 
     // MARK: - Core Verification
 
+    /// Checks every claim of the overview, its introduction included, against its cited passages and sorts the claims
+    /// into verified and unverified.
     static func verifyOverview(
         _ overview: EventOverviewDocument,
         passages: [EvidencePassage],
@@ -618,6 +638,7 @@ public struct OverviewClaimVerifier: Sendable {
     private static let datesYearRegex =
         (try? NSRegularExpression(pattern: #"\b(19\d\d|20\d\d)\b"#)) ?? NSRegularExpression()
 
+    /// Integers and decimals in the text, without the years from 1900 to 2100 that `extractDates(from:)` reads.
     static func extractNumbers(from text: String) -> [String] {
         let regex = numbersRegex
         let nsString = text as NSString
@@ -704,6 +725,7 @@ public struct OverviewClaimVerifier: Sendable {
         return lower.contains(unitLower)
     }
 
+    /// Four-digit years from 1900 to 2099 in the text.
     static func extractDates(from text: String) -> [String] {
         var results: [String] = []
         // Extract 4-digit years
@@ -716,6 +738,7 @@ public struct OverviewClaimVerifier: Sendable {
         return results
     }
 
+    /// Case- and accent-folded text with runs of whitespace collapsed to one space.
     static func normalizeText(_ text: String) -> String {
         return text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .components(separatedBy: .whitespacesAndNewlines)
@@ -730,10 +753,12 @@ public struct OverviewClaimVerifier: Sendable {
 
     // MARK: - Generated Text Fidelity (#951)
 
+    /// Forwards to `GeneratedTextFidelity.sentences(_:)`.
     static func sentences(_ text: String) -> [String] {
         GeneratedTextFidelity.sentences(text)
     }
 
+    /// Forwards to `GeneratedTextFidelity.fidelityViolations(_:source:sourceSentences:knownNames:)`.
     static func fidelityViolations(
         _ sentence: String, source: String, sourceSentences: [String], knownNames: Set<String>
     ) -> [GeneratedTextFidelity.Violation] {
@@ -741,31 +766,38 @@ public struct OverviewClaimVerifier: Sendable {
             sentence, source: source, sourceSentences: sourceSentences, knownNames: knownNames)
     }
 
+    /// Forwards to `GeneratedTextFidelity.digitized(_:)`.
     static func digitized(_ text: String) -> String {
         GeneratedTextFidelity.digitized(text)
     }
 
+    /// Forwards to `GeneratedTextFidelity.unsupportedFigure(statement:source:)`.
     static func unsupportedFigure(statement: String, source: String) -> String? {
         GeneratedTextFidelity.unsupportedFigure(statement: statement, source: source)
     }
 
+    /// Forwards to `GeneratedTextFidelity.unsupportedName(statement:source:knownNames:)`.
     static func unsupportedName(statement: String, source: String, knownNames: Set<String> = []) -> String? {
         GeneratedTextFidelity.unsupportedName(statement: statement, source: source, knownNames: knownNames)
     }
 
+    /// Forwards to `GeneratedTextFidelity.hedgeKinds(_:)`.
     static func hedgeKinds(_ text: String) -> Set<String> {
         GeneratedTextFidelity.hedgeKinds(text)
     }
 
+    /// Forwards to `GeneratedTextFidelity.dropsQualifier(statement:passageText:)`.
     static func dropsQualifier(statement: String, passageText: String) -> Bool {
         GeneratedTextFidelity.dropsQualifier(statement: statement, passageText: passageText)
     }
 
+    /// Forwards to `GeneratedTextFidelity.misattributesSpeaker(statement:sourceSentences:knownNames:)`.
     static func misattributesSpeaker(statement: String, sourceSentences: [String], knownNames: Set<String>) -> Bool {
         GeneratedTextFidelity.misattributesSpeaker(
             statement: statement, sourceSentences: sourceSentences, knownNames: knownNames)
     }
 
+    /// Forwards to `GeneratedTextFidelity.dropsContestedFigureSpeaker(statement:sourceSentences:)`.
     static func dropsContestedFigureSpeaker(statement: String, sourceSentences: [String]) -> Bool {
         GeneratedTextFidelity.dropsContestedFigureSpeaker(statement: statement, sourceSentences: sourceSentences)
     }

@@ -42,6 +42,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         case realEstate = "Real Estate"
         case defenseAndAerospace = "Defense & Aerospace"
 
+        /// Lowercased words and phrases that name the industry in a passage.
         var cues: [String] {
             switch self {
             case .energy:
@@ -184,6 +185,7 @@ struct OverviewIndustryImpactExtractor: Sendable {
         return dict
     }()
 
+    /// The Industry Impact entries and the citations they refer to; both empty when no implication qualifies.
     struct ExtractedIndustryImpact: Sendable {
         let items: [OverviewIndustryImpact]
         let citations: [OverviewCitation]

@@ -19,14 +19,18 @@ import NaturalLanguage
 
 /// Result of deterministically validating an overview perspective against evidence passages and rules.
 struct OverviewPerspectiveValidationResult: Sendable, Equatable {
+    /// The validator rule a rejected perspective failed, without any participant text.
     enum Rule: String, Sendable, Codable {
         case noCitation, unknownCitation, emptyQuote, shortParticipant, vagueParticipant, shortPosition, timePhrase,
             ungrounded
     }
 
+    /// Whether the perspective passed every rule.
     let isValid: Bool
+    /// Why the perspective was rejected, possibly quoting participant text; nil when valid.
     let rejectionReason: String?
 
+    /// Creates a result; a valid one carries no reason.
     init(isValid: Bool, rejectionReason: String? = nil) {
         self.isValid = isValid
         self.rejectionReason = rejectionReason
@@ -53,17 +57,25 @@ struct OverviewPerspectiveValidationResult: Sendable, Equatable {
 
 /// Counts why an event's perspectives section is absent or thin (#313). Holds no passage or speaker text.
 struct OverviewPerspectivesDiagnosis: Sendable, Equatable, Codable {
+    /// Passages read.
     var passages = 0
+    /// Passages no overview citation points to, which yield no candidate.
     var uncitedPassages = 0
+    /// Passages that yielded at least one attributed statement.
     var passagesWithCandidates = 0
     /// Passages without a candidate that still contain a quotation mark or a speech verb.
     var passagesWithUnmatchedSpeech = 0
     /// Passages using typographic quotation marks.
     var passagesWithTypographicQuotes = 0
+    /// Attributed statements found.
     var candidates = 0
+    /// Candidates dropped for an unattributed generality as speaker.
     var vagueCandidates = 0
+    /// Voices left after vague speakers were dropped and repeats and reprints collapsed.
     var voices = 0
+    /// Voices the validator rejected, by `OverviewPerspectiveValidationResult.Rule` raw value.
     var rejections: [String: Int] = [:]
+    /// Perspectives that passed validation.
     var perspectives = 0
 }
 
