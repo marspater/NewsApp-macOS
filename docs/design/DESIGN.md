@@ -90,13 +90,14 @@ Feature rules live beside this file. This file owns whatever applies to more tha
 | --- | --- | --- |
 | Leading (`.navigation`) | System sidebar toggle, queued-stories button; in Briefing, Back first | Back, Previous Story, Next Story |
 | Center (`.principal`) | Nothing | Mode picker (Overview, Story, Web) |
-| Trailing (`.primaryAction`) | View options group (group by event, list or grid), Refresh, New Briefing when in Briefing | Save and Share group (with Check for Updates while the overview shows), Reading options, Web back and forward while in Web mode |
+| Trailing (`.primaryAction`) | View options group (group by event, list or grid), Refresh, New Briefing when in Briefing | In Story mode an Annotations menu first (Highlight Selection ⌘Y, Add Note to Selection… ⇧⌘Y, Show or Hide Annotations ⌥⌘I); the Save, Export and Share group (with Check for Updates while the overview shows); Reading options; Web back and forward while in Web mode |
 
 - Search sits at the far trailing end in both states (section 7).
 - At most three visual groups per toolbar. Group by function with `ToolbarItemGroup` and `ToolbarSpacer(.fixed)` (macOS 26+). Non-interactive items (status text, progress) use `sharedBackgroundVisibility(.hidden)`.
 - Icon-only items use an SF Symbol without a border, a `Label` with a text title (for VoiceOver and the overflow menu) and a `.help` tooltip naming the action and its shortcut. Keep text-labeled items in their own group.
 - The prominent style is reserved for the single most likely action, when a view has one; the list and reader have none.
 - When the window narrows, items move into the system overflow menu. Mark items that must stay visible with `visibilityPriority(.high)` (macOS 26.1+); never build a custom overflow menu.
+- With search collapsed, the reader toolbar fits a 900-point window in every mode. Search expanded with a query (about 300 points) still pushes trailing items, Save among them, into the overflow menu. On macOS 27.0 that overflow, beside the annotations inspector attached inside the reader, made the window re-measure until AppKit aborted; the fix is tracked in #1328.
 - Every toolbar action also exists in the menu bar (section 15).
 - Prefer customizable toolbars (`toolbar(id:)`) for windows people keep open for long periods; system defaults stay sensible without customization.
 
