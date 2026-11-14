@@ -1,0 +1,1 @@
+- Ports the editorial atoms (EditorialNoveltyTests, EditorialMomentumTests, EditorialWireIdentityTests, EditorialRankingTests with its lead-arm smoke check, EditorialPersonalizationTests and EditorialIntelligenceTests: 22 tests) to the native Swift Testing target under the `.editorial` tag.
