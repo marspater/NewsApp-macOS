@@ -45,8 +45,26 @@ let nativeRepositoryRoot = URL(fileURLWithPath: #filePath).deletingLastPathCompo
     .deletingLastPathComponent().deletingLastPathComponent()
 
 /// Parent of every native suite: Swift Testing runs unrelated suites concurrently, and ported tests share static
-/// doubles such as `MockURLProtocol.requestHandler`, so all nested suites run one test at a time.
-@Suite(.serialized) enum NativeSuites {}
+/// doubles such as `MockURLProtocol.requestHandler`, so all nested suites run one test at a time. They run in the
+/// checkout, like the runner: xctest starts in another directory, and the app's `bundledModelResource` falls back to
+/// `Sources/Resources/CoreML`, which `SentenceEmbedder.shared` and `PairScorer.shared` resolve once per process.
+@Suite(.serialized, .repositoryWorkingDirectory) enum NativeSuites {}
+
+/// Runs a suite with the checkout as the working directory and restores the previous one afterwards.
+struct RepositoryWorkingDirectory: SuiteTrait, TestScoping {
+    func provideScope(
+        for test: Test, testCase: Test.Case?, performing function: @Sendable () async throws -> Void
+    ) async throws {
+        let previous = FileManager.default.currentDirectoryPath
+        FileManager.default.changeCurrentDirectoryPath(nativeRepositoryRoot.path)
+        defer { FileManager.default.changeCurrentDirectoryPath(previous) }
+        try await function()
+    }
+}
+
+extension Trait where Self == RepositoryWorkingDirectory {
+    static var repositoryWorkingDirectory: Self { Self() }
+}
 
 extension Tag {
     @Tag static var feedParsing: Self
@@ -58,6 +76,7 @@ extension Tag {
     @Tag static var networking: Self
     @Tag static var diagnostics: Self
     @Tag static var cancellation: Self
+    @Tag static var clustering: Self
     /// Every suite the Integration test plan runs: a plan's tag list selects only tests carrying all of its tags.
     @Tag static var integration: Self
 }
