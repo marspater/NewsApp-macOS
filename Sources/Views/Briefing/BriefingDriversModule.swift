@@ -20,6 +20,7 @@ struct BriefingDriversData: Equatable, Sendable {
     /// One story whose cited highlights the World Tension classifier gave a type.
     struct Event: Equatable, Sendable {
         let entry: FeedEntry
+        /// The event type the classifier gave the story's cited highlights.
         let type: TensionEventType
         /// Regions of the reporting publishers in the catalog; publishers without one are left out.
         var publisherRegions: Set<TensionMacroRegion> = []
@@ -42,11 +43,14 @@ struct BriefingDriversData: Equatable, Sendable {
             let names = TensionMacroRegion.briefingRegions.filter(canonical.contains).map(\.briefingTitle)
             return names.isEmpty ? nil : "Publishers in " + names.joined(separator: ", ")
         }
+        /// The coverage words for `publishers`, from `coverageText(publishers:)`.
         var coverageText: String { BriefingDriversData.coverageText(publishers: publishers) }
     }
 
+    /// The typed stories of the edition, before the board's filter.
     let events: [Event]
 
+    /// Coverage in words: "well covered" from five publishers, "thin coverage" from two, otherwise "one report".
     static func coverageText(publishers: Int) -> String {
         switch publishers {
         case 5...: return "well covered"
@@ -55,6 +59,7 @@ struct BriefingDriversData: Equatable, Sendable {
         }
     }
 
+    /// The event type's name in the module.
     static func title(_ type: TensionEventType) -> String {
         switch type {
         case .armedConflict: return "Armed conflict"
@@ -67,6 +72,7 @@ struct BriefingDriversData: Equatable, Sendable {
         }
     }
 
+    /// Whether any type has a story inside the filter.
     func hasRows(under filter: BriefingBoardFilter) -> Bool { !rows(for: filter).isEmpty }
 
     /// Types with a story inside the filter, most severe first.
@@ -85,6 +91,7 @@ struct BriefingDriversData: Equatable, Sendable {
         .sorted { $0.severity > $1.severity }
     }
 
+    /// The entry's publishers: the event's sources, or the single report's source.
     static func publishers(of entry: FeedEntry) -> [String] {
         if case .event(let summary, _, _) = entry { return summary.sources }
         return [entry.representative.source]
@@ -164,8 +171,12 @@ private enum Metrics {
     static let coverageWidth: CGFloat = 96
 }
 
+/// The "What drives World Tension" module: one bar per event type with a story inside the filter, its severity beside
+/// its coverage and publisher regions; draws nothing when no type has one. Eris · World Tension's event classifier
+/// assigns the types from the cited highlights of Clio · sourced overviews.
 struct BriefingDriversModuleView: View {
     let data: BriefingDriversData
+    /// The board's filter; only stories inside it count.
     let filter: BriefingBoardFilter
     let actions: BriefingActions
 

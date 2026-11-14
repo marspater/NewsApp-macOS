@@ -19,11 +19,15 @@ import SwiftUI
 /// sheet's headline table to it. Nothing is fetched: the coastlines are bundled. A pin marks the center of a named
 /// place and never where anything happened, so a country or a sea draws as a dashed circle and says so.
 struct GlobalHotspotMapView: View {
+    /// The regions with their cue index, from Eris · World Tension's hotspot analysis.
     let regions: [HotspotRegion]
+    /// The named places as pins, sized by coverage and tension.
     let clusterPins: [HotspotClusterPin]
+    /// Narrows the sheet's headline table to a chosen region; nil clears the choice.
     var onSelectRegion: (HotspotRegion?) -> Void = { _ in
         // The map filters nothing by itself; the sheet passes the handler that narrows its headline table.
     }
+    /// Narrows the sheet's headline table to a chosen place; nil clears the choice.
     var onSelectPin: (HotspotClusterPin?) -> Void = { _ in
         // The map filters nothing by itself; the sheet passes the handler that narrows its headline table.
     }
@@ -114,6 +118,7 @@ struct GlobalHotspotMapView: View {
         .background(AppColor.surface)
     }
 
+    /// The legend's words for a level with its index range: "Critical (70–100)".
     static func legendText(_ level: HotspotTensionLevel) -> String {
         switch level {
         case .elevated: return "\(level.displayName) (below 35)"

@@ -16,6 +16,7 @@ import SwiftUI
 
 /// What the Today page asks of the list that hosts it.
 struct TodayEditionActions {
+    /// Opens a story the reader chose.
     var open: (FeedEntry) -> Void
     /// A card scrolled into view, for the lane's image prefetch.
     var cardAppeared: (String) -> Void = { _ in
@@ -43,15 +44,21 @@ struct TodayEditionActions {
 /// The Latest as a grid of Compact cards or, in the list layout, the list's own cards. The hosting list owns the
 /// vertical scroll view, the masthead, keyboard focus and the update buffer.
 struct TodayEditionView<LatestListCard: View>: View {
+    /// The page built from the lane plan of Athena · editorial selection.
     let edition: TodayEdition
+    /// The id of the card that holds keyboard focus.
     var focusedID: String?
+    /// Ids of the reports already read.
     var readIDs: Set<String> = []
     /// The detail column's size, which sizes The Lead.
     var columnSize: CGSize
+    /// Shows The Latest as a grid of Compact cards; false uses `latestListCard`.
     var gridLayout = true
     /// A story or sheet is open: The Lead holds still.
     var isMotionPaused = false
+    /// Times The Lead's advance.
     var clock: any CarouselClock = ContinuousCarouselClock()
+    /// What the page's cards and rows report to the hosting list.
     let actions: TodayEditionActions
     /// The list layout's card for a story of The Latest.
     @ViewBuilder let latestListCard: (FeedEntry) -> LatestListCard
@@ -164,7 +171,9 @@ extension TodayEditionView where LatestListCard == EmptyView {
 
 /// A lane's name and its one-line description, with no count (docs/design/today.md, "Honesty").
 struct TodayLaneHeader<Trailing: View>: View {
+    /// The lane whose name and description the header shows.
     let lane: TodayLane
+    /// Controls at the header's trailing end, such as a lane's paging buttons.
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
@@ -185,6 +194,7 @@ struct TodayLaneHeader<Trailing: View>: View {
 }
 
 extension TodayLaneHeader where Trailing == EmptyView {
+    /// Creates a header without trailing controls.
     init(lane: TodayLane) {
         self.init(lane: lane) { EmptyView() }
     }
@@ -192,10 +202,15 @@ extension TodayLaneHeader where Trailing == EmptyView {
 
 /// One conditional lane: its header and a horizontal row of cards that pass under the floating sidebar.
 struct TodayLaneSection: View {
+    /// The lane and its stories.
     let lane: TodayEdition.Lane
+    /// Each story's card metadata, by story id.
     let metadata: [String: StoryCardMetadata]
+    /// The id of the card that holds keyboard focus; the row scrolls it into view.
     var focusedID: String?
+    /// The edition's list generation; when it changes, the row shows the focused card or returns to its leading edge.
     var generation: Int
+    /// What the row's cards and scrolling report to the hosting list.
     let actions: TodayEditionActions
 
     @Environment(\.effectiveReduceMotion) private var reduceMotion
@@ -378,10 +393,15 @@ private struct UnderSidebarRow: ViewModifier {
 
 /// One story of a lane as the lane's card. The whole card is one button that opens the story.
 struct TodayStoryCard: View {
+    /// The story and its lane assignment.
     let story: TodayStoryAssignment
+    /// The card's reading time, publisher count and other details.
     let metadata: StoryCardMetadata
+    /// The card's design, which also sets its width in the row.
     let variant: StoryCardVariant
+    /// Draws the card as selected.
     let isFocused: Bool
+    /// Opens the story and reports the card's appearance for image prefetch.
     let actions: TodayEditionActions
 
     var body: some View {

@@ -42,9 +42,14 @@ public struct ContinuousCarouselClock: CarouselClock {
 
 // MARK: - Briefing Cited Fact Model & Extractor
 
+/// The key fact a Briefing tile quotes for a story: the first highlight of its stored overview, cited to a publisher,
+/// or the first sentence of a summary when there is no highlight.
 public struct BriefingCitedFact: Sendable, Hashable {
+    /// The fact's text; empty when the story has neither a highlight nor a summary.
     public let text: String
+    /// Whether `text` is a cited overview highlight rather than a summary sentence.
     public let isCited: Bool
+    /// The publisher the highlight cites, or the report's source when the citation names none; nil when not cited.
     public let citationPublisher: String?
 
     public init(text: String, isCited: Bool, citationPublisher: String? = nil) {
@@ -54,6 +59,8 @@ public struct BriefingCitedFact: Sendable, Hashable {
     }
 }
 
+/// Picks the key fact a Briefing tile shows for a story from its stored event overview: the first cited highlight, else
+/// the first sentence of the overview summary or of the report's AI summary or description. Nothing is generated here.
 enum BriefingFactExtractor {
     /// Deterministically extracts the primary cited highlight fact or falls back to segmented summary/dek.
     static func extractFact(
@@ -134,9 +141,13 @@ enum BriefingFactExtractor {
 /// and, for the carousel, the best image across each event's reports. The list loads it once per edition; nothing is
 /// generated here or at render time.
 struct BriefingStoryDetails: Equatable, Sendable {
+    /// Each story's key fact, keyed by feed entry id.
     var facts: [String: BriefingCitedFact] = [:]
+    /// The carousel image of each hero event, keyed by feed entry id.
     var images: [String: URL] = [:]
 
+    /// Reads every entry's key fact and, for the entries in `heroIDs`, the best card image across the event's reports;
+    /// stops at the next entry once the task is cancelled.
     @MainActor
     static func load(for entries: [FeedEntry], heroIDs: Set<String>, store: ArticleStore) async -> Self {
         var details = Self()
@@ -413,27 +424,43 @@ struct BriefingTileState: Equatable, Sendable {
 
 /// Dynamic visual styling properties calculated for a story tile.
 struct BriefingTileAppearance {
+    /// The border color.
     let border: Color
+    /// The border width.
     let width: CGFloat
+    /// The shadow color.
     let shadow: Color
+    /// The shadow radius.
     let radius: CGFloat
+    /// The shadow's vertical offset.
     let y: CGFloat
 }
 
 /// Dense story card displaying a categorized headline, cited fact highlight, and source badge.
 struct BriefingTileView: View {
+    /// The story's representative report.
     let article: FeedArticle
+    /// The story's event, nil for a single report; its sources give the publisher count.
     let eventSummary: EventFeedSummary?
+    /// The key fact: a cited one is quoted with its publisher, otherwise its text or the report's summary shows.
     let citedFact: BriefingCitedFact?
+    /// Draws the focus border and shadow.
     let isSelected: Bool
+    /// Dims the headline and hides the unread dot.
     let isRead: Bool
+    /// Shows the bookmark glyph.
     let isSaved: Bool
+    /// Draws the accent border at the lead tile's width.
     let isLead: Bool
+    /// Shows the Developing tag.
     let isDeveloping: Bool
+    /// Opens the story; the tile's button action.
     let onOpen: () -> Void
+    /// Marks the story read or unread, from the tile's accessibility action.
     var onToggleRead: () -> Void = {
         // No-op unless the caller handles read state.
     }
+    /// Saves or unsaves the story, from the tile's accessibility action.
     var onToggleSave: () -> Void = {
         // No-op unless the caller handles saving.
     }
@@ -442,6 +469,7 @@ struct BriefingTileView: View {
     @Environment(\.effectiveReduceMotion) private var reduceMotion
     @State private var isHovered = false
 
+    /// Creates a tile; `state` sets the selected, read, saved, lead and developing flags.
     init(
         article: FeedArticle,
         eventSummary: EventFeedSummary?,
@@ -500,6 +528,8 @@ struct BriefingTileView: View {
         )
     }
 
+    /// The border width at rest: the lead stroke for the lead tile, otherwise a hairline, thicker with Increase
+    /// Contrast.
     static func restingWidth(isLead: Bool, contrast: ColorSchemeContrast) -> CGFloat {
         if isLead {
             return AppLayout.leadTileStroke

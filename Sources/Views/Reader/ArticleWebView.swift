@@ -15,19 +15,33 @@
 import SwiftUI
 import WebKit
 
+/// A history or reload request from the web toolbar, carried out once and then cleared.
 enum WebNavigationAction: Equatable {
+    /// Goes back in the page history, when there is a page to go back to.
     case goBack
+    /// Goes forward in the page history, when there is a page to go forward to.
     case goForward
+    /// Reloads the page, or requests the story again when the first load failed; a failure may then retry once more.
     case reload
 }
 
+/// The publisher's page in a web view with an ephemeral data store, JavaScript off and content rules applied, loaded
+/// only through the protected network gateway; every document request is validated first, and a link that opens a new
+/// window goes to the browser.
 struct ArticleWebView: NSViewRepresentable {
+    /// The publisher page to show; a change stops the current load and requests the new address.
     let url: URL
+    /// Allows plain `http` destinations, from the setting for `http` feeds.
     var allowHTTP: Bool
+    /// Set while the gateway starts or a page loads.
     @Binding var isLoading: Bool
+    /// Whether the page history can go back.
     @Binding var canGoBack: Bool
+    /// Whether the page history can go forward.
     @Binding var canGoForward: Bool
+    /// The toolbar's pending request; the view sets it back to nil once handled.
     @Binding var action: WebNavigationAction?
+    /// Why the page did not load, in words for the reader; nil while nothing failed.
     @Binding var loadError: String?
 
     init(
@@ -52,10 +66,13 @@ struct ArticleWebView: NSViewRepresentable {
         Coordinator(self)
     }
 
+    /// Whether the data store keeps nothing on disk, as the web view requires.
     static func isValidDataStore(_ dataStore: WKWebsiteDataStore) -> Bool {
         !dataStore.isPersistent
     }
 
+    /// A web view configuration with a non-persistent data store, JavaScript off and fraudulent-site warnings on; a
+    /// persistent store is a programming error and stops the app.
     static func makeConfiguration(dataStore: WKWebsiteDataStore = .nonPersistent()) -> WKWebViewConfiguration {
         guard isValidDataStore(dataStore) else {
             preconditionFailure("Article web view must use a non-persistent website data store for origin isolation")
@@ -127,14 +144,23 @@ struct ArticleWebView: NSViewRepresentable {
         coordinator.webView = nil
     }
 
+    /// The web view's navigation delegate: validates each document request and keeps the bindings in step with the
+    /// page.
     @MainActor
     class Coordinator: NSObject, WKNavigationDelegate {
+        /// The view whose bindings the coordinator updates; replaced on every update.
         var parent: ArticleWebView
+        /// The web view the coordinator serves; callbacks from any other are ignored.
         weak var webView: WKWebView?
+        /// The address last requested for the story.
         var currentRequestedURL: URL?
+        /// Changes when the address or the `http` setting changes, so validations started for the old request are
+        /// dropped.
         var requestGeneration = UUID()
         private var activeNavigation: WKNavigation?
+        /// Whether the gateway's proxy and content rules are in place, so the page may load.
         var gatewayReady = false
+        /// The running gateway preparation; a new one cancels it.
         var gatewayTask: Task<Void, Never>?
         private var configuredPort: UInt16?
         private var contentRulesConfigured = false
@@ -142,6 +168,8 @@ struct ArticleWebView: NSViewRepresentable {
         /// page or a reload the reader asks for, never on the retry itself, so a persistent failure cannot loop.
         var hasRetriedProvisionalFailure = false
 
+        /// Starts or reuses the protected network gateway, adds the content rules once and points the data store's
+        /// proxy at the gateway's port, then runs `onReady` or loads the story; a failure shows a load error.
         func prepareGateway(_ view: WKWebView, then onReady: (@MainActor () -> Void)? = nil) {
             gatewayTask?.cancel()
             parent.isLoading = true

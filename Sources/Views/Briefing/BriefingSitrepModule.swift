@@ -21,8 +21,11 @@ import SwiftUI
 /// since-last rows share it, so the lead story is the same everywhere. Selection reads stored ratings and never
 /// requests one.
 struct BriefingRanking: Equatable, Sendable {
+    /// What a story's ranking reads besides its publisher count.
     struct Signal: Equatable, Sendable {
+        /// Distinct original publishers plus one per copied wire agency, from `signal(reports:importance:)`.
         var originalCount: Int
+        /// The stored importance rating; nil when the story has none.
         var importance: StoryImportance?
     }
 
@@ -87,10 +90,14 @@ struct BriefingRanking: Equatable, Sendable {
 /// The edition's event threads in `BriefingRanking` order; executive sitrep, priority developments and source
 /// footprint share this ranking (#849).
 struct BriefingThread: Equatable, Sendable {
+    /// The thread's event.
     let summary: EventFeedSummary
+    /// The report that stands for the event.
     let representative: FeedArticle
+    /// Distinct publishers of the event.
     let publisherCount: Int
 
+    /// The event entries in `ranking` order; single reports are left out.
     static func ranked(_ entries: [FeedEntry], ranking: BriefingRanking = BriefingRanking()) -> [BriefingThread] {
         ranking.order(entries).compactMap { entry -> BriefingThread? in
             guard case .event(let summary, let representative, _) = entry else { return nil }
@@ -119,10 +126,15 @@ struct BriefingThread: Equatable, Sendable {
 
 /// Executive sitrep: three lines from the three top-ranked threads (#849).
 struct BriefingSitrepData: Equatable, Sendable {
+    /// One numbered line of the sitrep.
     struct Line: Equatable, Sendable, Identifiable {
+        /// The event id.
         let id: String
+        /// The short headline, cut at a word boundary within 48 characters and ended with an ellipsis when cut.
         let title: String
+        /// The line: generated from the cited highlights or taken from one, cached per input hash.
         let body: String
+        /// Distinct publishers of the thread, shown on its open button.
         let publisherCount: Int
         /// Written by the on-device model rather than taken from a highlight.
         let isGenerated: Bool
@@ -130,6 +142,7 @@ struct BriefingSitrepData: Equatable, Sendable {
         let summary: EventFeedSummary?
     }
 
+    /// Two or three lines, in ranking order.
     let lines: [Line]
 
     /// nil hides the module: it needs two threads with highlights.
@@ -188,9 +201,14 @@ struct BriefingSitrepData: Equatable, Sendable {
     }
 }
 
+/// The Executive sitrep module: one numbered line for each of the top-ranked threads, side by side when each fits its
+/// minimum width and stacked otherwise. Each line's button opens its event overview. The lines are Athena · editorial
+/// selection's sitrep, written by the on-device model or taken from Clio · sourced overviews' highlights; one note
+/// under the lines says when any of them is generated.
 struct BriefingSitrepModuleView: View {
     let data: BriefingSitrepData
     let filter: BriefingBoardFilter
+    /// Opens a line's event overview.
     let actions: BriefingActions
 
     private enum Metrics {

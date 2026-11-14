@@ -18,8 +18,11 @@ import SwiftUI
 /// The dossier of one entity as a popover: loads it from the entity index and lets the person follow a related entity
 /// and step back (W2 #716). Nothing leaves the Mac.
 struct EntityDossierPopover: View {
+    /// The entity the popover opens on.
     let entity: EntityRecord
+    /// The entity index of Mnemosyne · storage and search, which supplies the dossiers.
     let source: EntitySource
+    /// Opens a recent story by article id.
     let onOpenStory: (String) -> Void
     /// Entities followed from the related list; the last one is shown.
     @State private var trail: [EntityRecord] = []
@@ -59,14 +62,19 @@ struct EntityDossierPopover: View {
 /// An entity's 30-day coverage, top publishers, related entities and recent stories, all counted from the stories on
 /// this Mac (W2 #716).
 struct EntityDossierView: View {
+    /// The dossier from the entity index of Mnemosyne · storage and search.
     let dossier: EntityDossier
+    /// Shows the Back button, which steps back along the followed entities.
     var canGoBack = false
+    /// Steps back to the previously shown entity.
     var onBack: () -> Void = {
         // A dossier opened on its own has nothing to go back to; the popover passes its trail.
     }
+    /// Follows a related entity.
     var onSelectRelated: (EntityRecord) -> Void = { _ in
         // A dossier opened on its own follows no related entity; the popover passes its handler.
     }
+    /// Opens a recent story by article id.
     var onOpenStory: (String) -> Void = { _ in
         // A dossier opened on its own opens no story; the reader and the overview pass theirs.
     }
@@ -225,6 +233,7 @@ struct EntityDossierView: View {
             "\(Self.storiesText(dossier.storiesInWindow)); most on \(Self.dayText(busiest.day)) (\(busiest.storyCount))."
     }
 
+    /// "1 story" or "3 stories".
     static func storiesText(_ count: Int) -> String { "\(count) \(count == 1 ? "story" : "stories")" }
 
     /// "Nov 3": the UTC day the coverage is counted in, the day World Tension readings use (#781).

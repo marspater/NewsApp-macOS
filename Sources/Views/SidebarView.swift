@@ -22,15 +22,21 @@ import UniformTypeIdentifiers
 private struct AddFeedSubscriptionKey: FocusedValueKey { typealias Value = FocusedCommandAction }
 
 extension FocusedValues {
+    /// The sidebar's Add Feed action, read by File › Add Feed…; nil when no sidebar is in front.
     var addFeedSubscription: FocusedCommandAction? {
         get { self[AddFeedSubscriptionKey.self] }
         set { self[AddFeedSubscriptionKey.self] = newValue }
     }
 }
 
+/// The window's sidebar: Today, Unread and Briefing, the Library, the reader's sections and smart binders, and the
+/// World Tension reading at its foot. It also takes new subscriptions and OPML imports.
 struct SidebarView: View {
+    /// The selected destination, which the story list shows.
     @Binding var selectedTopic: String?
+    /// The masthead's status line, where the sidebar confirms a subscription.
     @Binding var mastheadNotice: MastheadNotice?
+    /// Opens the World Tension sheet from the reading at the sidebar's foot.
     var openTension: () -> Void = {
         // Default no-op action
     }

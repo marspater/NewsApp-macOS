@@ -67,11 +67,13 @@ struct PublisherHealthView: View {
 
 /// Everything inside the sheet, apart from loading its rows.
 struct PublisherHealthContent: View {
+    /// What the sheet shows: rows loading, a failed load, or the loaded rows.
     enum Phase: Equatable {
         case loading, failed
         case loaded([PublisherHealthRow])
     }
 
+    /// The load's state.
     let phase: Phase
 
     var body: some View {

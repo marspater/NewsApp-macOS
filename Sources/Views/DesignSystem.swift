@@ -20,6 +20,7 @@ import SwiftUI
 
 // MARK: - App Colors
 
+/// The app's color tokens, built on system colors so they follow the appearance and Increase Contrast.
 enum AppColor {
     // Semantic Surfaces & Backgrounds
     static let background = Color(NSColor.windowBackgroundColor)
@@ -34,10 +35,12 @@ enum AppColor {
     static let tertiaryText = Color(NSColor.tertiaryLabelColor)
 
     // System label colors (DESIGN.md 11): hierarchy without lowering primary-text opacity
+    /// Same as `secondaryText`; the default tint of a notice.
     static let secondaryLabel = Color(NSColor.secondaryLabelColor)
     static let quaternaryLabel = Color(NSColor.quaternaryLabelColor)
 
     // Semantic Accents & Status (90% Neutral, 7% Accent, 3% Intelligence)
+    /// The person's system accent color.
     static var accent: Color { Color.accentColor }
     /// A quiet identity mark in the Feed Catalog, not a selection or status color.
     static var publisherMonogramBackground: Color { accent.opacity(0.12) }
@@ -108,9 +111,11 @@ enum AppColor {
             if dark && !contrast { return NSColor(displayP3Red: 1, green: 0.97, blue: 0.72, alpha: 1) }
             return NSColor(displayP3Red: 1, green: contrast ? 0.85 : 0.92, blue: contrast ? 0.35 : 0.55, alpha: 1)
         })
+    /// The top of the World Tension scale, Boiling.
     static let critical = Color(NSColor.systemPurple)
 
     // The hotspot map of the World Tension sheet (W4 #718): three bands, a sea, land and graticule that stay quiet.
+    /// A hotspot band's color: green for Elevated, orange for Significant, red for Critical.
     static func hotspot(_ level: HotspotTensionLevel) -> Color {
         switch level {
         case .elevated: return success
@@ -125,6 +130,7 @@ enum AppColor {
     static func hotspotGlow(_ color: Color, selected: Bool, contrast: ColorSchemeContrast) -> Color {
         color.opacity((selected ? 0.45 : 0.25) + (contrast == .increased ? 0.2 : 0))
     }
+    /// A region's ring: nearly opaque when chosen or with Increase Contrast, at half strength otherwise.
     static func hotspotRing(_ color: Color, selected: Bool, contrast: ColorSchemeContrast) -> Color {
         color.opacity(selected || contrast == .increased ? 0.9 : 0.5)
     }
@@ -136,6 +142,7 @@ enum AppColor {
     /// The mild glyph's breathing halo.
     static var tensionHalo: Color { tension(.mild).opacity(0.4) }
 
+    /// A World Tension level's color, from green for Zen through yellow, orange and red to purple for Boiling.
     static func tension(_ level: TensionLevel) -> Color {
         switch level {
         case .zen: return success
@@ -152,7 +159,9 @@ enum AppColor {
 
     /// A hovered card's accent border (DESIGN.md 8.2).
     static let hoverBorderOpacity: Double = 0.40
+    /// The accent at `hoverBorderOpacity`.
     static var hoverBorder: Color { accent.opacity(hoverBorderOpacity) }
+    /// The fill of neutral tags and badges.
     static let badgeBackground = Color(NSColor.quaternaryLabelColor).opacity(0.12)
     static let unreadDot = Color.accentColor
     /// The original-reports count on The Lead and Coverage cards, and nothing else (DESIGN.md 11).
@@ -254,7 +263,6 @@ enum AppColor {
     /// The Briefing hero's scrim: the lead scrim at the foot, clear above 65 % of the height (DESIGN.md 8.4).
     static let leadScrimFade = LinearGradient(
         colors: [leadScrim, Color.clear], startPoint: .bottom, endPoint: UnitPoint(x: 0.5, y: 0.35))
-    /// The hero carousel's arrow backing and its inactive page dots, over the photo.
     /// The Lead's image fades into the page along its lower edge (docs/design/today.md): no panel behind the text.
     static let leadPageFade = LinearGradient(
         stops: [.init(color: background.opacity(0), location: 0.93), .init(color: background, location: 1)],
@@ -280,13 +288,17 @@ enum AppColor {
     /// on a dark page, on a wash of itself.
     static let leadStatus = Color(
         NSColor(name: "leadStatus") { _ in readableAccent(NSColor.controlAccentColor, dark: true, on: .black) })
+    /// The status pill's wash: `leadStatus` at 22 %.
     static var leadStatusFill: Color { leadStatus.opacity(0.22) }
+    /// The hero carousel's arrow backing over the photo, also behind The Lead's dots and arrows.
     static let carouselControl = Color.black.opacity(0.45)
+    /// The hero carousel's inactive page dots, over the photo.
     static let carouselInactiveDot = Color.white.opacity(0.4)
 }
 
 // MARK: - App Layout
 
+/// Fixed sizes of the app's windows, sheets, cards and marks, in points.
 enum AppLayout {
     static let settingsPaneWidth: CGFloat = 720
     static let settingsPaneHeight: CGFloat = 560
@@ -364,6 +376,7 @@ enum AppLayout {
     static let cardGap: CGFloat = 16.0
     /// Reader and event-overview column width at text scale 1 (DESIGN.md 9).
     static let readingMeasure: CGFloat = 720.0
+    /// The reading column's maximum width: `readingMeasure` times the text scale, growing no further past scale 1.3.
     static func readingColumnMaxWidth(for scale: CGFloat) -> CGFloat {
         readingMeasure * min(scale, 1.3)
     }
@@ -479,6 +492,7 @@ enum AppLayout {
 
 // MARK: - App Spacing
 
+/// The spacing scale in points (DESIGN.md 12), with micro steps for text clusters.
 enum AppSpacing {
     static let xxs: CGFloat = 4.0
     static let xs: CGFloat = 8.0
@@ -496,6 +510,7 @@ enum AppSpacing {
 
 // MARK: - App Corner Radius
 
+/// Corner radii in points (DESIGN.md 12).
 enum AppRadius {
     static let control: CGFloat = 6.0
     static let card: CGFloat = 12.0
@@ -510,6 +525,8 @@ enum AppRadius {
 
 // MARK: - App Typography
 
+/// The app's fonts: system text styles for chrome, the editorial serif for story headlines, and the faces of the
+/// reader's reading styles.
 enum AppTypography {
     static let sectionHeaderTracking: Double = 0.6
     static let eyebrowTracking: Double = 0.6
@@ -538,6 +555,7 @@ enum AppTypography {
     /// A cited fact in the publisher's voice: the editorial serif at callout size (Briefing, #848).
     static let quote = Font.system(.callout, design: .serif)
 
+    /// A story card's headline: 20 pt serif in the list, 15 pt system in the grid.
     static func cardHeadline(_ layout: StoryCardLayout) -> Font {
         switch layout {
         case .list: return .system(size: 20, weight: .semibold, design: .serif)
@@ -557,6 +575,7 @@ enum AppTypography {
     }
 
     // Reader Article Typography Themes
+    /// The reader's title face for a reading style at the text scale.
     static func titleFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
         switch theme {
         case .casper: return .system(size: 34 * scale, weight: .bold, design: .serif)
@@ -565,6 +584,7 @@ enum AppTypography {
         }
     }
 
+    /// The headline face of a reading style, not scaled.
     static func headlineFont(for theme: ArticleThemeType) -> Font {
         switch theme {
         case .casper: return .system(size: 16, weight: .bold, design: .serif)
@@ -573,6 +593,7 @@ enum AppTypography {
         }
     }
 
+    /// The lead paragraph's face for a reading style at the text scale.
     static func leadFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
         switch theme {
         case .casper: return .system(size: 20 * scale, weight: .regular, design: .serif)
@@ -590,6 +611,7 @@ enum AppTypography {
         }
     }
 
+    /// The body face: `bodySize(for:)` at the text scale, serif for Casper.
     static func bodyFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
         .system(size: bodySize(for: theme) * scale, weight: .regular, design: theme == .casper ? .serif : .default)
     }
@@ -609,12 +631,15 @@ enum AppTypography {
         (bodySize(for: theme) * (level <= 2 ? 1.35 : 1.1)).rounded()
     }
 
+    /// A publisher heading's face: `readerHeadingSize(level:theme:)` at the text scale in the style's display face,
+    /// bold through level 2 and semibold below.
     static func readerHeadingFont(level: Int, theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
         .system(
             size: readerHeadingSize(level: level, theme: theme) * scale, weight: level <= 2 ? .bold : .semibold,
             design: displayDesign(for: theme))
     }
 
+    /// The body face in italic, for quotes.
     static func readerQuoteFont(for theme: ArticleThemeType, scale: CGFloat = 1) -> Font {
         bodyFont(for: theme, scale: scale).italic()
     }
@@ -626,6 +651,7 @@ enum AppTypography {
 
     /// Raise and drop of `<sup>` and `<sub>` text in the reader, in points.
     static let superscriptOffset: CGFloat = 6
+    /// The drop of `<sub>` text, in points.
     static let subscriptOffset: CGFloat = 3
 
     /// A cited publisher passage, distinct from generated summaries.
@@ -638,6 +664,7 @@ enum AppTypography {
             design: role == .title ? .serif : .default)
     }
 
+    /// The point size of an overview text role at text scale 1.
     static func overviewSize(_ role: OverviewTextRole) -> CGFloat {
         switch role {
         case .title: return 30
@@ -666,6 +693,7 @@ enum AppTypography {
         .system(size: (bodySize(for: theme) * 0.85).rounded() * scale, design: .monospaced)
     }
 
+    /// The body's line spacing for a reading style, in points.
     static func bodyLineSpacing(for theme: ArticleThemeType) -> CGFloat {
         switch theme {
         case .casper: return 10.0
@@ -675,11 +703,13 @@ enum AppTypography {
     }
 }
 
+/// The text roles of the event overview's hierarchy; each has its own size and weight.
 enum OverviewTextRole: Sendable {
     case title, section, subheading, introduction, fact, body, bodyMedium
     case metadata, emphasis, annotation, eyebrow, caption, captionMedium, micro
 }
 
+/// Whether a story card sits in the list or the grid.
 enum StoryCardLayout: Sendable {
     case list
     case grid
@@ -687,11 +717,15 @@ enum StoryCardLayout: Sendable {
 
 // MARK: - App Shadows
 
+/// Shadow tokens (DESIGN.md 12).
 enum AppShadow {
     /// One shadow layer. SwiftUI's radius is half a design tool's blur.
     struct Layer {
+        /// The shadow's color.
         let color: Color
+        /// The shadow's SwiftUI radius.
         let radius: CGFloat
+        /// The shadow's vertical offset.
         let y: CGFloat
     }
 
@@ -727,23 +761,31 @@ enum AppShadow {
 
 // MARK: - App Motion
 
+/// Animation and motion timing tokens (DESIGN.md 13).
 enum AppMotion {
+    /// Hover feedback: a 0.12 s ease-out.
     static let hover = Animation.easeOut(duration: 0.12)
+    /// A state change: a 0.24 s smooth animation.
     static let state = Animation.smooth(duration: 0.24)
+    /// A navigation change: a 0.3 s smooth animation.
     static let navigation = Animation.smooth(duration: 0.3)
     /// A result the person's own action brings in, such as the test notification's outcome: a short spring that settles
     /// at once (DESIGN.md 13).
     static let spring = Animation.spring(duration: 0.45, bounce: 0.3)
-    /// The hotspot pins' pulse (DESIGN.md 13): one slow ring every two seconds, drawn at 20 frames a second, and
-    /// stopped under Reduce Motion, in an inactive window and while the app is not active.
     /// The Lead's unread dot breathes on a 2.6 s cycle (DESIGN.md 13); off under Reduce Motion.
     static let breathe = Animation.easeInOut(duration: 1.3).repeatForever(autoreverses: true)
+    /// The unread dot's opacity at the dim end of a breath.
     static let breatheDimmed: Double = 0.35
+    /// The hotspot pins' pulse (DESIGN.md 13): one slow ring every two seconds, drawn at 20 frames a second, and
+    /// stopped under Reduce Motion, in an inactive window and while the app is not active.
     static let pulsePeriod: TimeInterval = 2.0
+    /// The pulse's frame interval: 20 frames a second.
     static let pulseFrameInterval: TimeInterval = 1.0 / 20.0
 
     // Aliases for backward compatibility
+    /// Same as `hover`.
     static let quick = hover
+    /// Same as `state`.
     static let responsive = state
 }
 
@@ -786,7 +828,9 @@ struct UnreadDot: View {
 /// 22 % with Increase Contrast (DESIGN.md 11); the text is the tint mixed toward the primary text color.
 struct TagView: View {
     let title: String
+    /// A symbol before the title; nil shows none.
     var systemImage: String?
+    /// The tag's tint; the secondary text color makes a neutral tag.
     var tint: Color = AppColor.secondaryText
     var font: Font = AppTypography.eyebrow
     /// Replaces the mixed text color where the tag sits on a fixed surface, such as the lead caption's dark scrim.
@@ -832,8 +876,10 @@ struct TagView: View {
 /// with the text. `InlineChipText` builds the text and `InlineChipRenderer` draws the rounded fill, which an
 /// attributed string's own background cannot do (it is a square).
 enum InlineChip {
+    /// The chip's corner radius.
     static let cornerRadius: CGFloat = 4.0
 
+    /// The chip's fill: the quaternary label color, the tertiary one with Increase Contrast.
     static func fill(contrast: ColorSchemeContrast) -> Color {
         Color(contrast == .increased ? NSColor.tertiaryLabelColor : NSColor.quaternaryLabelColor)
     }
@@ -846,10 +892,13 @@ enum InlineChip {
 
 /// Marks the runs of one inline chip; runs with the same index on a line share one fill.
 struct InlineChipAttribute: TextAttribute {
+    /// Which chip of the text the run belongs to.
     let index: Int
 }
 
+/// Draws each line's text over one rounded fill per inline chip.
 struct InlineChipRenderer: TextRenderer {
+    /// The chips' fill color.
     let fill: Color
 
     func draw(layout: Text.Layout, in context: inout GraphicsContext) {
@@ -914,6 +963,7 @@ struct IntelligenceLabel: View {
 
 /// Consistent in-content notice, never a floating glass control.
 struct NoticeView<Content: View>: View {
+    /// The notice's tint, for its wash and its border.
     var tint: Color = AppColor.secondaryLabel
     @ViewBuilder let content: Content
     @Environment(\.effectiveContrast) private var contrast
@@ -954,6 +1004,7 @@ struct ContentPanel: ViewModifier {
 
 /// Reader and overview share both their measure and page insets.
 struct ReadingColumn: ViewModifier {
+    /// The reader's text scale, which widens the column up to scale 1.3.
     let textScale: CGFloat
     func body(content: Content) -> some View {
         content
@@ -970,6 +1021,7 @@ struct ReadingColumn: ViewModifier {
 /// macOS 15. The system adapts both to Reduce Transparency and Increase Contrast. The glass sits behind the content,
 /// not around it, so the photo and text also draw where no backdrop exists (offscreen renders).
 struct BannerSurface<S: Shape>: ViewModifier {
+    /// The shape the glass or material fills.
     let shape: S
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
@@ -984,6 +1036,7 @@ struct BannerSurface<S: Shape>: ViewModifier {
 /// and later, so white marks on it stay legible when the photo is bright or the window is inactive and the glass
 /// turns pale; the same dark backing with the regular material on macOS 15.
 struct PhotoControlSurface<S: Shape>: ViewModifier {
+    /// The shape the backing and glass fill.
     let shape: S
     func body(content: Content) -> some View {
         if #available(macOS 26, *) {
@@ -1001,8 +1054,9 @@ struct PhotoControlSurface<S: Shape>: ViewModifier {
 
 /// Floating controls over content (The Lead's dots and arrows): their glass shapes share one container on macOS 26
 /// and later, so neighbouring shapes blend instead of stacking (DESIGN.md 3.3). Each control takes its surface from
-/// `BannerSurface`.
+/// `PhotoControlSurface`.
 struct FloatingGlassGroup<Content: View>: View {
+    /// The gap between the controls, also the distance at which their glass blends.
     var spacing: CGFloat = AppSpacing.xs
     @ViewBuilder let content: Content
 
@@ -1028,16 +1082,21 @@ extension View {
 /// The list or grid choice of each list (Today, Unread, a section…), kept apart so one list's layout does not
 /// change another's (Mars, 11 November 2026). A list never chosen for follows the earlier single preference.
 enum ListLayoutPreference {
+    /// The user-defaults key of the stored choices.
     static let key = "articleGridLayoutBySection"
 
+    /// The stored choices by list name; empty when nothing valid is stored.
     static func choices(_ stored: String) -> [String: Bool] {
         (try? JSONDecoder().decode([String: Bool].self, from: Data(stored.utf8))) ?? [:]
     }
 
+    /// Whether the list shows a grid: its stored choice, else `fallback`.
     static func isGrid(_ section: String, stored: String, fallback: Bool) -> Bool {
         choices(stored)[section] ?? fallback
     }
 
+    /// The stored choices with this list's choice set, as JSON with sorted keys; the input unchanged when encoding
+    /// fails.
     static func setting(_ isGrid: Bool, for section: String, in stored: String) -> String {
         var all = choices(stored)
         all[section] = isGrid
@@ -1050,6 +1109,8 @@ enum ListLayoutPreference {
 /// A stateless focused command action: compares equal across renders so `.focusedSceneValue` does not trigger an
 /// infinite `App` -> `Window` re-evaluation loop when the window is key (#778).
 struct FocusedCommandAction: Equatable {
+    /// The command's work.
     let perform: () -> Void
+    /// Always equal, so the focused value never changes between renders.
     static func == (_: Self, _: Self) -> Bool { true }
 }

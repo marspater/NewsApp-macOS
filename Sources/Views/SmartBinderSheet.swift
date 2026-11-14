@@ -12,20 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Copyright 2026 NewsApp Contributors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import SwiftUI
 
 /// Modal sheet for creating and editing user-defined Smart Binders (DESIGN.md §4, §8.6).
@@ -55,6 +41,7 @@ struct SmartBinderSheet: View {
         "Sports", "Health & Wellness", "Food", "Travel", "Fashion",
     ]
 
+    /// Creates the sheet; with `binder`, its fields start from that binder and saving updates it.
     init(binder: SmartBinder? = nil) {
         self.binder = binder
         if let binder {
@@ -288,23 +275,32 @@ struct SmartBinderSheet: View {
         publishersText = binder.publishers.joined(separator: ", ")
     }
 
+    /// The sheet's fields as typed, from which `buildBinder(from:)` makes the binder.
     struct Draft {
+        /// The binder being edited; nil creates a new one.
         var existing: SmartBinder?
         var name: String = ""
         var icon: String = "folder"
         var categories: Set<String> = []
+        /// Keywords a story must contain, comma-separated.
         var includeKeywordsText: String = ""
+        /// Keywords that exclude a story, comma-separated.
         var excludeKeywordsText: String = ""
+        /// Publisher names, comma-separated.
         var publishersText: String = ""
+        /// Whether a story needs every include keyword rather than any one.
         var matchAllKeywords: Bool = false
     }
 
+    /// The comma-separated items, trimmed, without empty ones.
     static func parseCommaSeparated(_ text: String) -> [String] {
         text.components(separatedBy: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
     }
 
+    /// The binder the draft describes: the edited binder updated in place, or a new one, with the name trimmed, the
+    /// lists parsed and the categories sorted.
     static func buildBinder(from draft: Draft) -> SmartBinder {
         let includes = parseCommaSeparated(draft.includeKeywordsText)
         let excludes = parseCommaSeparated(draft.excludeKeywordsText)

@@ -18,7 +18,9 @@ import SwiftUI
 /// compared on this Mac and shown by `DualReaderView`. The sheet opens wide enough for two columns and falls back to
 /// the stacked layout when the window cannot hold them.
 struct DualReaderSheet: View {
+    /// One report per publisher, richest first; the two pickers choose from them.
     let reports: [PerspectiveReport]
+    /// The event the reports belong to, passed to the alignment as its cluster id.
     let eventID: String
     @Environment(\.dismiss) private var dismiss
     @State private var leftID: String

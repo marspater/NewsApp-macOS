@@ -20,10 +20,13 @@ struct BriefingIndustryData: Equatable, Sendable {
     /// One cited industry item from one story's overview.
     struct Mention: Equatable, Sendable {
         let entry: FeedEntry
+        /// What the overview item says the story means for the sector.
         let implication: String
+        /// The item's citations, local to the story's overview; every one resolves there.
         let citationIDs: [String]
     }
 
+    /// One sector and every cited item that names it.
     struct Sector: Equatable, Sendable {
         let industry: String
         /// In edition order.
@@ -34,10 +37,13 @@ struct BriefingIndustryData: Equatable, Sendable {
     struct Card: Equatable, Sendable, Identifiable {
         let industry: String
         let implication: String
+        /// Distinct stories inside the filter that name the sector.
         let storyCount: Int
+        /// Distinct cited passages across those stories.
         let passageCount: Int
         var id: String { industry }
 
+        /// "From 2 stories · 3 cited passages".
         var sourceText: String {
             "From \(storyCount) \(storyCount == 1 ? "story" : "stories") · \(passageCount) cited "
                 + (passageCount == 1 ? "passage" : "passages")
@@ -64,6 +70,7 @@ struct BriefingIndustryData: Equatable, Sendable {
         return Self(sectors: order.map { Sector(industry: $0, mentions: grouped[$0] ?? []) })
     }
 
+    /// Whether any sector has a story inside the filter.
     func hasRows(under filter: BriefingBoardFilter) -> Bool { !cards(for: filter).isEmpty }
 
     /// The cards for the filter: sectors with a story inside it, most stories first.
@@ -138,6 +145,8 @@ struct BriefingIndustryData: Equatable, Sendable {
 
 /// The edition's event overviews, fetched once per module load.
 enum BriefingOverviews {
+    /// The stored overview of each entry, by event id for an event and by article id for a single report, in edition
+    /// order; entries without one are left out, and the loop stops once the task is cancelled.
     @MainActor static func load(_ entries: [FeedEntry], store: ArticleStore) async -> [(
         FeedEntry, EventOverviewDocument
     )] {
@@ -158,8 +167,12 @@ private enum Metrics {
     static let columns = 2
 }
 
+/// The Industry impact module: a two-column grid of the sectors cited passages name inside the board's filter, each
+/// with its first implication and how many stories and passages back it; draws nothing when no sector has a story
+/// inside the filter. The sectors are the industry-impact items of Clio · sourced overviews.
 struct BriefingIndustryModuleView: View {
     let data: BriefingIndustryData
+    /// The board's filter; only stories inside it count.
     let filter: BriefingBoardFilter
     let actions: BriefingActions
 

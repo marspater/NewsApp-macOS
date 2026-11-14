@@ -18,29 +18,41 @@ import SwiftUI
 /// Since your last briefing: what changed since the previous edition (#849). Each edition saves a snapshot of its
 /// events; the next edition compares itself with the newest snapshot before it.
 struct BriefingSinceLastData: Equatable, Sendable {
+    /// What changed for an event since the previous edition; the raw value is the row's tag.
     enum Kind: String, Equatable, Sendable {
+        /// An event the previous edition did not have.
         case newEvent = "New event"
+        /// An event with more distinct publishers than before.
         case moreCoverage = "More coverage"
+        /// An event whose cited highlights now describe escalation.
         case escalation = "Escalation"
+        /// An event whose cited highlights now describe de-escalation.
         case easing = "Easing"
     }
 
+    /// One change row: its tag, the event's short headline and what changed.
     struct Row: Equatable, Sendable, Identifiable {
         var id: String { "\(kind.rawValue)|\(eventID)" }
         let eventID: String
         let kind: Kind
+        /// The event's short headline.
         let text: String
+        /// What changed, "+3 publishers since 11:40".
         let meta: String
     }
 
     /// An event of the current edition, with the headline its row shows.
     struct Current: Equatable, Sendable {
+        /// The event as this edition saves it.
         let snapshot: BriefingEditionSnapshotRow
+        /// The short headline, from `BriefingThread.shortTitle(_:limit:)`.
         let title: String
     }
 
+    /// The most rows the module shows.
     static let rowLimit = 5
 
+    /// At most `rowLimit` rows, new events first.
     let rows: [Row]
     /// How long ago the previous edition was, "6 h ago".
     let caption: String
@@ -142,6 +154,9 @@ struct BriefingSinceLastData: Equatable, Sendable {
     }
 }
 
+/// The Since your last briefing module: up to five tagged rows of what changed since the previous edition, with how
+/// long ago that edition was. Escalation and easing are Eris · World Tension's cues found in the highlights of Clio ·
+/// sourced overviews.
 struct BriefingSinceLastModuleView: View {
     let data: BriefingSinceLastData
     let filter: BriefingBoardFilter

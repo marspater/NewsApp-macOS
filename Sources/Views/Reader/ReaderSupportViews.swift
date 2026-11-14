@@ -18,6 +18,7 @@
 import AppKit
 import SwiftUI
 
+/// Whether the story view shows the extracted reader text or the publisher's page; the raw value is the mode's name.
 enum DetailViewMode: String, CaseIterable, Identifiable {
     case reader = "Reader"
     case web = "Web"
@@ -26,12 +27,18 @@ enum DetailViewMode: String, CaseIterable, Identifiable {
 
 /// The reader's toolbar modes: the event overview (events only), the extracted story, or the publisher's page.
 enum ReaderMode: Hashable {
+    /// The event overview, offered for events only.
     case overview
+    /// The extracted story text.
     case story
+    /// The publisher's page.
     case web
 
+    /// The key of Story › Switch Between Story and Web, with `webShortcutModifiers` (⇧⌘R).
     static let webShortcut: KeyEquivalent = "r"
+    /// The modifiers of Story › Switch Between Story and Web.
     static let webShortcutModifiers: EventModifiers = [.command, .shift]
+    /// The mode Story › Switch Between Story and Web goes to: Story from Web, Web from anything else.
     var toggledPublicationMode: ReaderMode { self == .web ? .story : .web }
 
     /// W steps through the modes the toolbar offers, in its order: Overview (events only), Story, Web.
@@ -49,18 +56,28 @@ enum ReaderMode: Hashable {
 /// every render and keeps the window re-rendering. Equality reads what the commands read: the bound values and
 /// which actions exist.
 struct ReaderCommandActions: Equatable {
+    /// The reader's mode, which the menu commands read and set.
     let mode: Binding<ReaderMode>
+    /// The reader's text scale, which the text size commands change.
     let textScale: Binding<CGFloat>
+    /// Opens Reading Options.
     let showReadingOptions: () -> Void
+    /// Whether the story has an event overview, so W includes Overview.
     let hasOverview: Bool
+    /// Leaves the reader for the list.
     let back: () -> Void
+    /// Reloads the reader's content; nil disables the command.
     let reload: (() -> Void)?
+    /// Copies the story's link.
     let copyLink: () -> Void
+    /// Goes back in the publisher page's history; nil disables the command.
     let webBack: (() -> Void)?
+    /// Goes forward in the publisher page's history; nil disables the command.
     let webForward: (() -> Void)?
     /// Check for Updates on the open overview (#992); nil while no overview shows or a check runs.
     var checkForUpdates: (() -> Void)? = nil
 
+    /// Compares the bound values and which actions exist, never the closures.
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.mode.wrappedValue == rhs.mode.wrappedValue && lhs.textScale.wrappedValue == rhs.textScale.wrappedValue
             && lhs.hasOverview == rhs.hasOverview && (lhs.reload == nil) == (rhs.reload == nil)
@@ -71,8 +88,11 @@ struct ReaderCommandActions: Equatable {
 
 /// The overview's Check for Updates status line (#992, DESIGN.md 17): what the check found and nothing more.
 extension FeedManager.StoryUpdateResult {
+    /// The status line while the check runs.
     static let checkingText = "Checking your feeds…"
 
+    /// What the check found: refresh is off with its reason, new reports that joined the story or none, with any feeds
+    /// that could not be checked.
     var statusText: String {
         switch self {
         case .refused(let reason):
@@ -94,23 +114,31 @@ extension FeedManager.StoryUpdateResult {
     }
 }
 
+/// The focused-value key of the reader in front.
 struct ReaderCommandActionsKey: FocusedValueKey { typealias Value = ReaderCommandActions }
+/// The focused-value key of the story selected in the list.
 struct SelectedStoryKey: FocusedValueKey { typealias Value = FeedArticle }
 
 extension FocusedValues {
+    /// The actions of the reader in front, read by the app's menu commands; nil when no reader is open.
     var readerActions: ReaderCommandActions? {
         get { self[ReaderCommandActionsKey.self] }
         set { self[ReaderCommandActionsKey.self] = newValue }
     }
+    /// The story selected in the list, for menu commands such as Save Story and Share Story.
     var selectedStory: FeedArticle? {
         get { self[SelectedStoryKey.self] }
         set { self[SelectedStoryKey.self] = newValue }
     }
 }
 
+/// What the reader's story view shows while its text loads and after.
 enum ArticleContentState: Equatable {
+    /// The publisher's text is being fetched and extracted.
     case loading
+    /// The extracted text is ready.
     case ready
+    /// The text could not be shown, with the reason the reader reads.
     case fallback(reason: String)
     /// The publisher shows the story only to subscribers (or refuses the reader outright); the feed teaser is shown
     /// as a preview with ways to read it on the publisher's site.
@@ -119,6 +147,7 @@ enum ArticleContentState: Equatable {
 
 /// Tags keep their natural width and wrap instead of disappearing in a horizontal scroller.
 struct ReaderTagLayout: Layout {
+    /// The gap between tags and between rows.
     let spacing: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
@@ -157,8 +186,11 @@ struct ReaderTagLayout: Layout {
 
 /// Whole-image fit plus a fixed ratio keeps known media stable before loading.
 struct ReaderFigureView: View {
+    /// The image block, with its caption and alt text.
     let block: ReaderBlock
+    /// The image's address.
     let url: URL
+    /// The reader's text scale, for the caption.
     var textScale: CGFloat = 1
     @Environment(\.effectiveContrast) private var contrast
 
@@ -270,7 +302,9 @@ func readerText(_ block: ReaderBlock, baseURL: URL? = nil) -> AttributedString {
 
 /// A publisher data table: the header row in semibold, hairlines between rows, scrolling sideways when wide.
 struct ReaderTableView: View {
+    /// The table block; its text holds rows on lines and cells split by tabs.
     let block: ReaderBlock
+    /// The font of the cells.
     let font: Font
 
     var body: some View {

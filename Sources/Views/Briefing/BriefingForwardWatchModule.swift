@@ -18,7 +18,9 @@ import SwiftUI
 /// Forward watch: scheduled, expected and conditional items stated in cited reporting, in the publisher's words
 /// (#851). The app schedules nothing and never infers a date (DESIGN.md 8.4).
 struct BriefingForwardWatchData: Equatable, Sendable {
+    /// One forward-watch line with the publishers that stated it.
     struct Row: Equatable, Sendable, Identifiable {
+        /// The extracted line: its kind, text, date words and first publisher.
         let item: ForwardWatchItem
         /// Distinct publishers across the edition whose cited facts produced the same line.
         let publishers: [String]
@@ -28,6 +30,8 @@ struct BriefingForwardWatchData: Equatable, Sendable {
         let entry: FeedEntry?
         var id: String { ForwardWatchExtractor.key(item.text) }
 
+        /// Who stated the line and when, in the publisher's date words: "Tuesday, as reported by 3 publishers" or
+        /// "stated by Harbor Times, cited once".
         var caption: String {
             let many = publishers.count > 1
             let who = publishers.first ?? item.publisher ?? "one publisher"
@@ -39,6 +43,7 @@ struct BriefingForwardWatchData: Equatable, Sendable {
         }
     }
 
+    /// At most `ForwardWatchExtractor.maximumItems` rows, scheduled items first.
     let rows: [Row]
 
     /// Whether any row survives the board's region filter; a row without a story always does.
@@ -75,6 +80,8 @@ struct BriefingForwardWatchData: Equatable, Sendable {
         return rows.isEmpty ? nil : Self(rows: Array(rows))
     }
 
+    /// Extracts forward-watch items from each entry's stored overview, dated against the report's publication time; nil
+    /// hides the module.
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
         var found: [Candidate] = []
         for entry in context.entries {
@@ -125,9 +132,14 @@ struct BriefingForwardWatchData: Equatable, Sendable {
     }
 }
 
+/// The Forward watch module: the scheduled, expected and conditional lines inside the board's filter, each opening the
+/// cited publisher page or, without one, its story. Athena · editorial selection extracts the lines from the highlights
+/// of Clio · sourced overviews.
 struct BriefingForwardWatchModuleView: View {
     let data: BriefingForwardWatchData
+    /// The board's filter; a row without a story always shows.
     let filter: BriefingBoardFilter
+    /// Opens a row's publisher page or story.
     let actions: BriefingActions
 
     private enum Metrics {

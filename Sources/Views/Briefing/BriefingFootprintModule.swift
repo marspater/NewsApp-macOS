@@ -17,17 +17,23 @@ import SwiftUI
 
 /// Source footprint: where the lead thread's publishers come from and how many carry wire copy (#849).
 struct BriefingFootprintData: Equatable, Sendable {
+    /// One bar of the footprint: a publisher group and how many distinct publishers it holds.
     struct Group: Equatable, Sendable, Identifiable {
         var id: String { label }
         let label: String
         let count: Int
     }
 
+    /// The groups, largest first.
     let groups: [Group]
+    /// Distinct publishers in the lead thread's event.
     let publisherCount: Int
+    /// Publishers with at least one report that is not wire copy.
     let originalCount: Int
+    /// Publishers whose every report is wire copy.
     let wireCopyCount: Int
 
+    /// The label of the group that collects wire agencies.
     static let wireAgencies = "Wire agencies"
 
     /// Groups distinct publishers: wire agencies, then catalog regions ("global" is International, a country goes by
@@ -46,6 +52,8 @@ struct BriefingFootprintData: Equatable, Sendable {
             publisherCount: texts.count, originalCount: texts.count - wireCopies, wireCopyCount: wireCopies)
     }
 
+    /// The group a publisher counts under: "Wire agencies" for a detected wire source, "International" for a global
+    /// catalog feed, the continent of a catalog feed's country, or "Other" outside the catalog.
     static func group(of publisher: String) -> String {
         if OverviewPerspectivesExtractor.detectWireSource(in: "", articleSource: publisher) != nil {
             return wireAgencies
@@ -80,6 +88,9 @@ struct BriefingFootprintData: Equatable, Sendable {
     }
 }
 
+/// The Source footprint module: one bar per publisher group of the lead thread, scaled to its publisher count, and a
+/// footer on original reporting against wire copy. Wire agencies are found by the wire detection of Clio · sourced
+/// overviews.
 struct BriefingFootprintModuleView: View {
     let data: BriefingFootprintData
     let filter: BriefingBoardFilter

@@ -37,6 +37,7 @@ struct BriefingActions {
     var onToggleRead: (FeedArticle) -> Void = { _ in
         // Captures have no read state to change.
     }
+    /// Saves or unsaves the story, from a tile's accessibility action.
     var onToggleSave: (FeedArticle) -> Void = { _ in
         // Captures have no library to save to.
     }
@@ -49,6 +50,8 @@ struct BriefingActions {
         if let safe = WebLink.url(url.absoluteString) { NSWorkspace.shared.open(safe) }
     }
 
+    /// Creates the actions; opening an event summary from Priority developments or the sitrep does nothing unless
+    /// `onOpenEvent` is given.
     init(
         onOpenEntry: @escaping (FeedEntry) -> Void,
         onStartNewBriefing: @escaping () -> Void,
@@ -104,19 +107,27 @@ extension FeedEntry {
 /// masthead inside the list's own scroll view and takes plain values; the list loads them. Only the World Tension tile
 /// reads the window's model.
 struct BriefingView: View {
+    /// The edition's stories, in edition order.
     let entries: [FeedEntry]
+    /// The finite edition; nil hides the completion banner.
     let briefing: FiniteBriefing?
     /// Every module's data, read from the library by the list.
     var data = BriefingBoardData()
+    /// Which modules show and in which order, from Customize Briefing.
     var layout = BriefingLayout.standard
+    /// Ids of the reports already read.
     var readIDs: Set<String> = []
+    /// Ids of the reports in Saved Stories.
     var savedIDs: Set<String> = []
     /// The story the list's keyboard focus is on, ringed like a focused card.
     var focusedID: String?
     /// A story or a sheet is open over the board, so the carousel holds still.
     var isMotionPaused = false
+    /// When the next edition is selected, for the completion banner.
     var nextEdition = Date()
+    /// Times the hero carousel's advance; previews pass a clock that holds it still.
     let clock: any CarouselClock
+    /// What the board's stories, events, links and region filter do.
     let actions: BriefingActions
     /// Whether the World Tension tile is enabled (#1209).
     var isWorldTensionEnabled = true
@@ -193,6 +204,7 @@ struct BriefingView: View {
         return titles.map { BriefingSection(title: $0, entries: grouped[$0] ?? []) }
     }
 
+    /// The section title for stories without a category.
     static let otherSection = "More Stories"
 
     /// The modules the board shows, in pillar and layout order: visible in the layout and with data.

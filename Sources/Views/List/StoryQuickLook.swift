@@ -17,18 +17,22 @@ import Foundation
 import QuickLookUI
 
 extension Notification.Name {
+    /// Posted by Story › Quick Look to preview the focused story.
     static let quickLookCommand = Notification.Name("quickLookCommand")
+    /// Posted by the Quick Look panel's Return key to open the focused story in the reader.
     static let openFocusedStoryCommand = Notification.Name("openFocusedStoryCommand")
 }
 
 /// Renders a one-page PDF preview from local text and the decoded image cache; it never fetches (#707).
 @MainActor
 enum StoryQuickLookRenderer {
+    /// The text and image one preview page shows.
     struct RenderData {
         let title: String
         let publisher: String
         let dateText: String
         let excerpt: String
+        /// The decoded card image, when it is already in the cache.
         var image: CGImage? = nil
     }
 
@@ -36,6 +40,8 @@ enum StoryQuickLookRenderer {
     private static let margin = AppSpacing.xl
     private static var contentWidth: CGFloat { pageSize.width - margin * 2 }
 
+    /// The preview's text: up to four paragraphs of the reader document without the headline, else the cleaned
+    /// description, else the cleaned full content; empty when none has text.
     static func makeExcerpt(for article: FeedArticle) -> String {
         if let blocks = article.readerDocument?.blocks, !blocks.isEmpty {
             let paragraphs = blocks.compactMap { block -> String? in
@@ -60,6 +66,7 @@ enum StoryQuickLookRenderer {
         return ""
     }
 
+    /// The preview's text and the first already-decoded image of the card or the feed; nothing is fetched.
     static func renderData(for article: FeedArticle) -> RenderData {
         // The card's image first, then the feed's own, whichever is already decoded.
         let imageURLs = [FeedArticle.bestCardImage(in: [article]), article.imageUrl.flatMap { URL(string: $0) }]
@@ -72,6 +79,8 @@ enum StoryQuickLookRenderer {
         )
     }
 
+    /// Writes a one-page PDF of the preview to `fileURL` in the light or dark appearance; false when the file cannot be
+    /// created.
     static func renderPDF(data: RenderData, to fileURL: URL, isDark: Bool = false) -> Bool {
         var mediaBox = CGRect(origin: .zero, size: pageSize)
         guard let consumer = CGDataConsumer(url: fileURL as CFURL),
@@ -176,6 +185,7 @@ enum StoryQuickLookRenderer {
     }
 }
 
+/// The preview file and title the Quick Look panel shows.
 final class StoryQuickLookPreviewItem: NSObject, QLPreviewItem, Sendable {
     let previewItemURL: URL?
     let previewItemTitle: String?

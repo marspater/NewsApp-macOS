@@ -17,6 +17,7 @@ import SwiftUI
 
 /// Regions: story count per region, selecting one filters the board (#850). The region tiles share this data.
 struct BriefingRegionsData: Equatable, Sendable {
+    /// One region and its stories.
     struct Row: Equatable, Sendable, Identifiable {
         let region: TensionMacroRegion
         /// The region's stories, most publishers first (edition order breaks ties).
@@ -26,6 +27,7 @@ struct BriefingRegionsData: Equatable, Sendable {
         /// ponytail: the level is read from the story count alone (one band per 16 points), so the row says
         /// "stories"; use the tension reading's per-region classification once it records regions.
         var level: TensionLevel { TensionLevel(index: Double(entries.count * 16)) }
+        /// "Warm · 3 stories": the level from `level` and the story count.
         var countText: String { "\(level.rawValue) · \(entries.count) \(entries.count == 1 ? "story" : "stories")" }
     }
 
@@ -44,6 +46,7 @@ struct BriefingRegionsData: Equatable, Sendable {
     let regionsByEntry: [String: Set<TensionMacroRegion>]
     /// Cited facts for the tiles, by entry ID.
     let facts: [String: BriefingCitedFact]
+    /// The load time, which decides whether a tile's story is still developing.
     let now: Date
 
     /// The entry's regions: its reports' countries when known, else the countries its headline names.
@@ -338,9 +341,14 @@ private enum Metrics {
     static let maxSupplementalPerRegion = 6
 }
 
+/// The Regions module: one row per region with its level dot, top headline and story count. Selecting a row filters the
+/// board to that region; selecting it again clears the filter. A story's regions come from the places Metis ·
+/// structured clues found in its reports.
 struct BriefingRegionsModuleView: View {
     let data: BriefingRegionsData
+    /// The board's filter; its region marks the selected row.
     let filter: BriefingBoardFilter
+    /// Sets or clears the board's region filter.
     let actions: BriefingActions
 
     var body: some View {
@@ -398,10 +406,15 @@ struct BriefingRegionsModuleView: View {
 
 /// The region tiles under the selected region's name, or under each of the busiest regions when none is selected.
 struct BriefingRegionTilesModuleView: View {
+    /// The regions and their stories, facts and load time.
     let data: BriefingRegionsData
+    /// The board's filter; with a region set, only that region's tiles show.
     let filter: BriefingBoardFilter
+    /// Opens a tile's story or toggles its read or saved state.
     let actions: BriefingActions
+    /// Ids of the reports already read.
     var readIDs: Set<String> = []
+    /// Ids of the reports in Saved Stories.
     var savedIDs: Set<String> = []
 
     /// Tile accessibility actions and read/saved styling must reflect the list's current state (#1311).

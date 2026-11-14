@@ -16,12 +16,15 @@ import SwiftUI
 
 /// Trailing inspector with the highlights and notes of the story in the reader (V1 #711).
 struct AnnotationsInspectorView: View {
+    /// The story's highlights and notes, shown in reading order.
     let notes: [UserNote]
     /// Notes whose quoted words are no longer in the story's text.
     let lostIDs: Set<String>
+    /// Shows a note's passage in the story; not offered for a note whose quote is lost.
     var onReveal: (UserNote) -> Void
     /// Saves an edited note; the editor stays open until this returns true.
     var onSave: (UserNote) async -> Bool
+    /// Deletes a note by id; a note with text asks for confirmation first.
     var onDelete: (String) -> Void
 
     @State private var editingID: String?

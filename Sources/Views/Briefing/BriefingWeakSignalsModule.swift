@@ -18,30 +18,40 @@ import SwiftUI
 /// Weak signals: low-coverage stories that also carry a major rating, a link to a big thread, rising momentum or a
 /// named industry impact (#851). Low coverage alone never qualifies.
 struct BriefingWeakSignalsData: Equatable, Sendable {
+    /// One qualifying low-coverage story with its reason pills.
     struct Row: Equatable, Sendable, Identifiable {
         let entry: FeedEntry
+        /// The representative report's headline.
         let headline: String
         /// "2 publishers · 5 h".
         let caption: String
+        /// The reason pills from `reasons(_:)`; never empty.
         let reasons: [String]
         var id: String { entry.id }
     }
 
     /// What the loader found about one low-coverage story.
     struct Evidence: Equatable, Sendable {
+        /// The story carries a stored major importance rating.
         var isMajor = false
         /// Headline of a related thread with big coverage in this edition.
         var linkedThread: String?
+        /// More of the event's reports in the last six hours than in the six before.
         var momentumRising = false
+        /// The sector of the first cited industry-impact item; nil when none is cited.
         var sector: String?
     }
 
+    /// Every qualifying row in edition order; the view shows the first `maximumRows` inside the filter.
     let rows: [Row]
 
+    /// The most publishers a story may have to count as low coverage.
     static let lowCoverageLimit = 2
+    /// The fewest publishers a thread needs to count as big.
     static let bigThreadPublishers = 5
     /// The view shows at most this many rows that pass the region filter; the data keeps every qualifying row.
     static let maximumRows = 5
+    /// The module's footer, which states the qualifying rule.
     static let footer =
         "Low coverage alone never qualifies: a story needs a major rating, a link to a big thread, rising momentum, or a cited industry impact."
 
@@ -77,6 +87,7 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
     /// Whether any row survives the board's region filter.
     func hasRows(under filter: BriefingBoardFilter) -> Bool { rows.contains { filter.includes($0.entry) } }
 
+    /// Whether the entry has low enough coverage to be checked.
     static func isCandidate(_ entry: FeedEntry) -> Bool { entry.publisherCount <= lowCoverageLimit }
 
     /// Rows for the qualifying candidates in edition order; nil when none qualifies.
@@ -91,6 +102,8 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
         return rows.isEmpty ? nil : Self(rows: rows)
     }
 
+    /// Gathers each candidate's stored rating, momentum, related big thread and cited sector, then keeps the stories
+    /// with at least one reason; nil hides the module.
     @MainActor static func load(_ context: BriefingLoadContext, store: ArticleStore) async -> Self? {
         let candidates = context.entries.filter(isCandidate)
         guard !candidates.isEmpty else { return nil }
@@ -152,9 +165,14 @@ struct BriefingWeakSignalsData: Equatable, Sendable {
     }
 }
 
+/// The Weak signals module: up to five low-coverage stories inside the board's filter, each with its reason pills and
+/// opening its story, above a footer that states the rule. The reasons read Athena · editorial selection's stored
+/// ratings and the cited industry impact of Clio · sourced overviews.
 struct BriefingWeakSignalsModuleView: View {
     let data: BriefingWeakSignalsData
+    /// The board's filter; only stories inside it show.
     let filter: BriefingBoardFilter
+    /// Opens a row's story.
     let actions: BriefingActions
 
     var body: some View {

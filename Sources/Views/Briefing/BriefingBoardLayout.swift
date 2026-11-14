@@ -27,10 +27,15 @@ struct BriefingSection: Identifiable, Equatable {
 /// The edition's stories as dense tiles, grouped by topic under section titles (DESIGN.md 8.4).
 struct BriefingTileGridView: View {
     let sections: [BriefingSection]
+    /// Each story's key fact, keyed by feed entry id.
     var facts: [String: BriefingCitedFact] = [:]
+    /// Ids of the reports already read; a read tile dims its headline and drops the unread dot.
     var readIDs: Set<String> = []
+    /// Ids of the reports in Saved Stories.
     var savedIDs: Set<String> = []
+    /// The id of the report whose tile draws the focus ring.
     var focusedID: String?
+    /// What a tile does when it is opened or its read or saved state is toggled.
     let actions: BriefingActions
 
     var body: some View {
@@ -86,7 +91,9 @@ struct BriefingTileGridView: View {
 struct BriefingCompletionBanner: View {
     let briefing: FiniteBriefing
     let readIDs: Set<String>
+    /// When the next edition is selected.
     let nextEdition: Date
+    /// Leaves Briefing for the Today page.
     let onBackToToday: () -> Void
 
     var body: some View {
@@ -118,8 +125,11 @@ struct BriefingCompletionBanner: View {
 /// Two views side by side, the leading one taking `leadingFraction` of the width, both as tall as the taller; below
 /// `minimumWidth` they stack. The canvas's flex rows (carousel 2 : column 1, Weak signals 1 : Forward watch 1).
 struct BriefingSplitLayout: Layout {
+    /// The leading view's share of the width left after the spacing.
     var leadingFraction: CGFloat
+    /// The narrowest width at which the two views sit side by side.
     var minimumWidth: CGFloat
+    /// The gap between the views, beside or above each other.
     var spacing: CGFloat = AppLayout.cardGap
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
@@ -166,15 +176,20 @@ struct BriefingSplitLayout: Layout {
 
 // MARK: - Situational Awareness Layout
 
+/// The slot a module takes in `BriefingSituationalLayout`.
 enum BriefingSituationalRole: Int, LayoutValueKey {
+    /// The hero carousel at the top of the leading column; the default.
     case hero = 0
+    /// The trailing column: World Tension and Since your last briefing.
     case trailing = 1
+    /// The Executive sitrep, under the hero carousel.
     case sitrep = 2
 
     static let defaultValue: BriefingSituationalRole = .hero
 }
 
 extension View {
+    /// Places the view in the slot of a `BriefingSituationalLayout` that `role` names.
     func briefingSituationalRole(_ role: BriefingSituationalRole) -> some View {
         layoutValue(key: BriefingSituationalRole.self, value: role)
     }
@@ -193,8 +208,11 @@ struct BriefingSituationalLayout: Layout {
     /// Below this the trailing card (World Tension score row: 140 pt chart, spacing, score and level) no longer fits.
     static let defaultMinimumWidth: CGFloat = 1000
 
+    /// The leading column's share of the width left after the spacing.
     var leadingFraction: CGFloat = 2.0 / 3.0
+    /// The narrowest width with two columns.
     var minimumWidth: CGFloat = defaultMinimumWidth
+    /// The gap between modules and between the columns.
     var spacing: CGFloat = AppLayout.cardGap
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
@@ -215,6 +233,7 @@ struct BriefingSituationalLayout: Layout {
         }
     }
 
+    /// The frame of each module; nil for a module that is absent.
     public struct ModuleFrames: Equatable {
         public var hero: CGRect?
         public var trailing: CGRect?
@@ -227,6 +246,9 @@ struct BriefingSituationalLayout: Layout {
         }
     }
 
+    /// Lays out modules of the given heights. Two columns when `width` reaches `minimumWidth`, the trailing module is
+    /// present and so is the hero or the sitrep; otherwise one column of hero, trailing and sitrep. An absent module (a
+    /// nil height) gets no frame and leaves no gap.
     static func computeFrames(
         width: CGFloat,
         heroHeight: CGFloat?,
@@ -278,6 +300,8 @@ struct BriefingSituationalLayout: Layout {
         return ModuleFrames(hero: heroFrame, trailing: trailingFrame, sitrep: sitrepFrame)
     }
 
+    /// Each subview's frame by its `BriefingSituationalRole`, with heights measured at the column widths; a subview
+    /// whose role a later subview repeats gets a zero frame.
     func frames(width: CGFloat, subviews: Subviews) -> [CGRect] {
         var heroIndex: Int?
         var trailingIndex: Int?

@@ -18,6 +18,7 @@ import Foundation
 /// inside a lane, up and down between lanes, J and K through the page in reading order, and where focus lands when
 /// the edition changes under it. Pure, so the rules are tested without a window.
 struct TodayFocusMap: Equatable, Sendable {
+    /// One lane's cards in page order.
     struct Lane: Equatable, Sendable {
         let lane: TodayLane
         let ids: [String]
@@ -25,11 +26,13 @@ struct TodayFocusMap: Equatable, Sendable {
         var columns = 0
     }
 
+    /// An arrow key's direction.
     enum Direction: Sendable { case left, right, up, down }
 
     /// The lanes that hold cards, in page order.
     let lanes: [Lane]
 
+    /// Creates the map, leaving out lanes without cards.
     init(lanes: [Lane]) {
         self.lanes = lanes.filter { !$0.ids.isEmpty }
     }
@@ -37,6 +40,7 @@ struct TodayFocusMap: Equatable, Sendable {
     /// Every card in reading order: through each row, then the next lane.
     var readingOrder: [String] { lanes.flatMap(\.ids) }
 
+    /// The lane index and card index of a card; nil when the card is not on the page or `id` is nil.
     func position(of id: String?) -> (lane: Int, index: Int)? {
         guard let id else { return nil }
         for (laneIndex, lane) in lanes.enumerated() {
@@ -45,6 +49,7 @@ struct TodayFocusMap: Equatable, Sendable {
         return nil
     }
 
+    /// The lane that holds a card; nil when no lane does.
     func lane(of id: String?) -> TodayLane? {
         position(of: id).map { lanes[$0.lane].lane }
     }

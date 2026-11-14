@@ -18,8 +18,11 @@ import SwiftUI
 /// report says too is a button that scrolls the other column to its match. The comparison is by meaning, computed on
 /// this Mac, and says what each report has; it never says which publisher is right or biased.
 struct DualReaderView: View {
+    /// The alignment of Clio · sourced overviews: the passage pairs, their contrast types and the counts per type.
     let session: DualReaderSession
+    /// The left report's passages; the pairs' `leftPassageIndex` values point into them.
     let leftPassages: [String]
+    /// The right report's passages; the pairs' `rightPassageIndex` values point into them.
     let rightPassages: [String]
 
     /// The pair whose passages are highlighted in both columns.
@@ -82,6 +85,7 @@ struct DualReaderView: View {
             : "Compared by meaning on this Mac"
     }
 
+    /// The summary tag's words for a contrast type: "3 both report", "2 reported differently", "1 only in one report".
     static func summaryText(_ type: PerspectiveContrastType, count: Int) -> String {
         switch type {
         case .consensus: return "\(count) both report"

@@ -30,22 +30,29 @@ import SwiftUI
 /// Sections without enough data are absent.
 @MainActor
 struct EventOverviewReaderView: View {
+    /// The stored overview of Clio · sourced overviews: summary, highlights, perspectives, timeline and citations.
     let overview: EventOverviewDocument
+    /// The event's reports, listed under Sources and matched to citations.
     let memberArticles: [FeedArticle]
+    /// The reader's text size; the reading column widens with it up to scale 1.3.
     let textScale: CGFloat
     /// The reading style the body text follows; harnesses keep the default.
     let theme: ArticleThemeType
     /// Check for Updates' result under the header metadata (#992); nil shows no line.
     let updateStatus: String?
+    /// Opens a report chosen under Sources.
     let onSelectArticle: (FeedArticle) -> Void
+    /// Opens a cited source, with the member report it matches when there is one.
     let onSelectCitation: (OverviewCitation, FeedArticle?) -> Void
     /// Earlier events of the same developing story; merged into this one only when the reader says so.
     let relatedEvents: [RelatedStoryEvent]
+    /// Opens an earlier event's overview.
     let onSelectRelatedEvent: (RelatedStoryEvent) -> Void
     /// "Same Event": the reader says a related event reports this one (#524); nil hides the action.
     let onCombineRelatedEvent: ((RelatedStoryEvent) -> Void)?
     /// The entity index behind the "In this story" chips (W2 #716); nil, as in harnesses, shows none.
     let entitySource: EntitySource?
+    /// Opens a story chosen in an entity dossier, by article id.
     let onOpenEntityStory: (String) -> Void
 
     init(
@@ -91,6 +98,7 @@ struct EventOverviewReaderView: View {
     @State private var showsComparison = false
 
     // MARK: - Layout Metrics & Bounds
+    /// The page's leading and trailing inset.
     nonisolated static let horizontalPageInset = AppLayout.pageInset
 
     /// Returns the reading measure in points for the text scale, capping width growth at scale 1.3.
@@ -453,6 +461,8 @@ struct EventOverviewReaderView: View {
         let isStated: Bool
     }
 
+    /// How a timeline item's date shows: the stated date or anchor with `Reported <date>` beside it, `Reported <date>`
+    /// alone for a publication date, or no date.
     nonisolated static func timelineDateDisplay(for item: OverviewTimelineItem) -> TimelineDateDisplay {
         let text = item.dateText.trimmingCharacters(in: .whitespacesAndNewlines)
         let publicationText = item.publicationDate?.formatted(date: .abbreviated, time: .omitted)
@@ -991,6 +1001,7 @@ struct EventOverviewReaderView: View {
         }
     }
 
+    /// The URL scheme of citation links, `news-citation://<index>`.
     nonisolated static let citationScheme = "news-citation"
 
     /// The sentence followed by its source numbers as accent superscripts linking to `news-citation://<index>`.
@@ -1545,6 +1556,7 @@ struct EventOverviewReaderView: View {
 
 // MARK: - Timeline Diamond Shape
 
+/// A diamond joining the midpoints of its rectangle's edges, the timeline's marker for a plan.
 struct DiamondShape: Shape {
     /// Returns a closed diamond joining the midpoints of the supplied rectangle's edges.
     func path(in rect: CGRect) -> Path {
